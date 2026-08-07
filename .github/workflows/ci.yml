@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: TypeScript Check
+        run: npx tsc -b
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Unit Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: maghzaccount_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install chromium --with-deps
+
+      - name: Setup .env.local
+        run: |
+          cat > .env.local << EOF
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=maghzaccount_test
+          DB_USER=test
+          DB_PASSWORD=test
+          EOF
+
+      - name: Run Migrations
+        run: |
+          for f in drizzle/*.sql; do
+            PGPASSWORD=test psql -h localhost -U test -d maghzaccount_test -f "$f"
+          done
+
+      - name: Seed Demo Data
+        run: DEMO_ADMIN_PASSWORD=admin1234 node electron/seedDemoData.js
+
+      - name: Run E2E Tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

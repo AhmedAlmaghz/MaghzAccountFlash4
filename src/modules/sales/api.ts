@@ -1,0 +1,1159 @@
+import { z } from 'zod';
+import { getDbAdapter } from '@/core/database/adapters';
+import { mapRows, toDateString } from '@/core/utils/mapPgRow';
+import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator';
+import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createCustomerSchema, createInvoiceSchema, createQuotationSchema, createSalesReturnSchema } from '@/core/utils/validation';
+import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
+import { YER_CODE } from '@/core/utils/currencyConverter';
+import { getNextDocumentNumber } from '@/core/api';
+import { postSalesInvoice, postSalesReturn } from '@/core/utils/journalEntryGenerator';
+import { salesService } from './services';
+import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging } from './types';
+
+export const salesApi = {
+  // ─── Customers ────────────────────────────────────────────────────────────
+  async getCustomers(companyId: string): Promise<{ success: boolean; data?: Customer[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        'SELECT * FROM customers WHERE company_id = $1 ORDER BY name',
+        [companyId]
+      );
+      if (result.success) return { success: true, data: mapRows<Customer>(result.rows) };
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getCustomersPaginated(
+    companyId: string,
+    page: number,
+    pageSize: number,
+    filters?: { search?: string; isActive?: boolean }
+  ): Promise<PaginatedQueryResult<Customer>> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const adapter = await getDbAdapter();
+
+      const conditions: string[] = ['c.company_id = $1'];
+      const params: unknown[] = [companyId];
+      if (filters?.isActive !== undefined) {
+        params.push(filters.isActive);
+        conditions.push(`c.is_active = $${params.length}`);
+      }
+      if (filters?.search) {
+        params.push(`%${filters.search}%`);
+        conditions.push(`(c.name ILIKE $${params.length} OR c.phone ILIKE $${params.length} OR c.code ILIKE $${params.length})`);
+      }
+      const where = conditions.join(' AND ');
+
+      const countResult = await adapter.query(
+        `SELECT COUNT(*)::int AS total FROM customers c WHERE ${where}`,
+        params
+      );
+      const total = Number(countResult.rows?.[0]?.total || 0);
+
+      params.push(ps);
+      params.push(offset);
+      const limitIdx = params.length - 1;
+      const offsetIdx = params.length;
+
+      const dataResult = await adapter.query(
+        `SELECT c.* FROM customers c WHERE ${where} ORDER BY c.name ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        params
+      );
+      if (!dataResult.success) return { success: false, error: dataResult.error };
+
+      const items = mapRows<Customer>(dataResult.rows || []);
+      return { success: true, data: paginatedResult(items, total, p, ps) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getCustomerById(id: string, companyId: string): Promise<{ success: boolean; data?: Customer; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query('SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1', [id, companyId]);
+      if (result.success && result.rows?.[0]) return { success: true, data: mapRows<Customer>([result.rows[0]])[0] };
+      return { success: false, error: result.error || 'Not found' };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createCustomer(data: Omit<Customer, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const validation = validateInput(createCustomerSchema, data);
+      if (!validation.success) return { success: false, error: validation.error };
+      const adapter = await getDbAdapter();
+      
+      // توليد رقم تلقائي إذا لم يتم تمريره
+      let customerData = data;
+      if (!data.code) {
+        const seq = await getNextDocumentNumber(data.companyId, 'customer');
+        if (seq.success && seq.number) {
+          customerData = { ...data, code: seq.number };
+        }
+      }
+      
+      const result = await adapter.query(
+        `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, credit_limit, balance, is_active, created_by, updated_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::uuid) RETURNING id`,
+        [customerData.companyId, customerData.code, customerData.name, customerData.phone, customerData.email, customerData.address, customerData.taxNumber, customerData.creditLimit, customerData.balance, customerData.isActive, safeUserId(_userId), safeUserId(_userId)]
+      );
+      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id };
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateCustomer(id: string, companyId: string, data: Partial<Omit<Customer, 'id' | 'companyId'>>, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (data.name !== undefined) { fields.push(`name = $${idx++}`); values.push(data.name); }
+      if (data.phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(data.phone); }
+      if (data.email !== undefined) { fields.push(`email = $${idx++}`); values.push(data.email); }
+      if (data.address !== undefined) { fields.push(`address = $${idx++}`); values.push(data.address); }
+      if (data.taxNumber !== undefined) { fields.push(`tax_number = $${idx++}`); values.push(data.taxNumber); }
+      if (data.creditLimit !== undefined) { fields.push(`credit_limit = $${idx++}`); values.push(data.creditLimit); }
+      if (data.balance !== undefined) { fields.push(`balance = $${idx++}`); values.push(data.balance); }
+      if (data.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(data.isActive); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(safeUserId(_userId));
+      fields.push(`updated_at = NOW()`);
+      values.push(id);
+      values.push(companyId);
+      const result = await adapter.query(`UPDATE customers SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values);
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deleteCustomer(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query('DELETE FROM customers WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+      if (!result.success) {
+        const msg = result.error || '';
+        if (msg.includes('foreign key') || msg.includes('violates')) {
+          return { success: false, error: 'Cannot delete customer with existing invoices, quotations, or returns. Deactivate instead.' };
+        }
+        return { success: false, error: result.error };
+      }
+      return { success: true };
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes('foreign key') || msg.includes('violates')) {
+        return { success: false, error: 'Cannot delete customer with existing invoices, quotations, or returns. Deactivate instead.' };
+      }
+      return { success: false, error: msg };
+    }
+  },
+
+  async getCustomerStatement(customerId: string, companyId?: string): Promise<{ success: boolean; data?: CustomerStatementRow[]; error?: string }> {
+    try {
+      const idValidation = validateInput(z.object({ customerId: uuidSchema, companyId: companyIdSchema.optional() }), { customerId, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `WITH entries AS (
+          SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number,
+                 total_amount as debit, 0::numeric as credit, notes,
+                 date as sort_date, 1 as sort_type
+          FROM sales_invoices
+          WHERE customer_id = $1::uuid ${companyId ? 'AND company_id = $2::uuid' : ''} AND status <> 'cancelled'
+          UNION ALL
+          SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number,
+                 0::numeric as debit, amount as credit, notes,
+                 date as sort_date, 2 as sort_type
+          FROM receipt_vouchers
+          WHERE customer_id = $1::uuid ${companyId ? 'AND company_id = $2::uuid' : ''} AND status = 'posted'
+        )
+        SELECT date, document_type, document_number, debit, credit,
+               SUM(debit - credit) OVER (ORDER BY sort_date, sort_type, document_number) as balance,
+               notes
+        FROM entries
+        ORDER BY sort_date, sort_type, document_number`,
+        companyId ? [customerId, companyId] : [customerId]
+      );
+      if (result.success) return { success: true, data: mapRows<CustomerStatementRow>(result.rows) };
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getCustomerArAging(companyId: string): Promise<{ success: boolean; data?: CustomerArAging[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date
+        FROM customers c
+        JOIN sales_invoices i ON i.customer_id = c.id
+        WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0`,
+        [companyId]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      const rows = result.rows as Array<Record<string, unknown>>;
+      const map = new Map<string, CustomerArAging>();
+      const now = new Date();
+      for (const r of rows) {
+        const cid = String(r.customer_id);
+        const cname = String(r.customer_name);
+        const due = Number(r.due_amount) || 0;
+        const date = new Date(String(r.aging_date));
+        const days = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+        const period = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '>90';
+        if (!map.has(cid)) {
+          map.set(cid, { customerId: cid, customerName: cname, totalDue: 0, buckets: [
+            { period: '0-30', amount: 0, count: 0 },
+            { period: '31-60', amount: 0, count: 0 },
+            { period: '61-90', amount: 0, count: 0 },
+            { period: '>90', amount: 0, count: 0 },
+          ] });
+        }
+        const entry = map.get(cid)!;
+        entry.totalDue += due;
+        const b = entry.buckets.find(x => x.period === period);
+        if (b) { b.amount += due; b.count += 1; }
+      }
+      return { success: true, data: Array.from(map.values()) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // ─── Sales Invoices ───────────────────────────────────────────────────────
+  async getInvoices(companyId: string): Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active
+        FROM sales_invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.company_id = $1
+        ORDER BY i.date DESC`,
+        [companyId]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      const invoices = (result.rows || []).map((row: Record<string, unknown>) => mapInvoiceRow(row));
+      return { success: true, data: invoices };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getOutstandingInvoicesForCustomer(companyId: string, customerId: string): Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }> {
+    try {
+      if (!companyId) {
+        return { success: false, error: 'companyId is required' };
+      }
+      if (!customerId) {
+        return { success: false, error: 'customerId is required' };
+      }
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const cuValidation = validateInput(uuidSchema, customerId);
+      if (!cuValidation.success) return { success: false, error: cuValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `SELECT i.*, c.name as customer_name
+         FROM sales_invoices i
+         LEFT JOIN customers c ON i.customer_id = c.id
+         WHERE i.company_id = $1::uuid
+           AND i.customer_id = $2::uuid
+           AND i.status IN ('posted', 'partially_paid')
+           AND (i.total_amount - COALESCE(i.paid_amount, 0)) > 0
+         ORDER BY i.date ASC`,
+        [companyId, customerId]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      const items = (result.rows || []).map((row: Record<string, unknown>) => mapInvoiceRow(row));
+      return { success: true, data: items };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getPostedInvoicesWithLines(companyId: string): Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const headersRes = await adapter.query(
+        `SELECT i.*, c.name as customer_name
+         FROM sales_invoices i
+         LEFT JOIN customers c ON i.customer_id = c.id
+         WHERE i.company_id = $1 AND i.status IN ('posted', 'partially_paid', 'paid')
+         ORDER BY i.date DESC`,
+        [companyId]
+      );
+      if (!headersRes.success) return { success: false, error: headersRes.error };
+      const linesRes = await adapter.query(
+        `SELECT l.*, p.name_ar as product_name
+         FROM sales_invoice_lines l
+         LEFT JOIN products p ON l.product_id = p.id
+         JOIN sales_invoices i ON l.invoice_id = i.id
+         WHERE i.company_id = $1`,
+        [companyId]
+      );
+      const linesByInvoice = new Map<string, SalesInvoiceLine[]>();
+      for (const row of (linesRes.rows || []) as Record<string, unknown>[]) {
+        const invId = String(row.invoice_id);
+        const line = mapInvoiceLineRow(row);
+        const list = linesByInvoice.get(invId) || [];
+        list.push(line);
+        linesByInvoice.set(invId, list);
+      }
+      const invoices = (headersRes.rows || []).map((row: Record<string, unknown>) => {
+        const inv = mapInvoiceRow(row);
+        inv.lines = linesByInvoice.get(inv.id) || [];
+        return inv;
+      });
+      return { success: true, data: invoices };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getInvoicesPaginated(
+    companyId: string,
+    page: number,
+    pageSize: number,
+    filters?: { status?: string; customerId?: string; createdBy?: string }
+  ): Promise<PaginatedQueryResult<SalesInvoice>> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const adapter = await getDbAdapter();
+
+      const conditions: string[] = ['i.company_id = $1'];
+      const params: unknown[] = [companyId];
+      if (filters?.status) {
+        params.push(filters.status);
+        conditions.push(`i.status = $${params.length}`);
+      }
+      if (filters?.customerId) {
+        params.push(filters.customerId);
+        conditions.push(`i.customer_id = $${params.length}`);
+      }
+      if (filters?.createdBy) {
+        params.push(filters.createdBy);
+        conditions.push(`(i.created_by = $${params.length} OR i.created_by IS NULL)`);
+      }
+      const where = conditions.join(' AND ');
+
+      const countResult = await adapter.query(
+        `SELECT COUNT(*)::int AS total FROM sales_invoices i WHERE ${where}`,
+        params
+      );
+      const total = Number(countResult.rows?.[0]?.total || 0);
+
+      params.push(ps);
+      params.push(offset);
+      const limitIdx = params.length - 1;
+      const offsetIdx = params.length;
+
+      const dataResult = await adapter.query(
+        `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active
+         FROM sales_invoices i
+         LEFT JOIN customers c ON i.customer_id = c.id
+         WHERE ${where}
+         ORDER BY i.date DESC
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        params
+      );
+      if (!dataResult.success) return { success: false, error: dataResult.error };
+
+      const items = (dataResult.rows || []).map((row: Record<string, unknown>) => mapInvoiceRow(row));
+      return { success: true, data: paginatedResult(items, total, p, ps) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getInvoiceById(id: string, companyId: string): Promise<{ success: boolean; data?: SalesInvoice; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const invResult = await adapter.query(
+        `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active
+        FROM sales_invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.id = $1 AND i.company_id = $2 LIMIT 1`, [id, companyId]
+      );
+      if (!invResult.success || !invResult.rows?.[0]) return { success: false, error: invResult.error || 'Not found' };
+      const invoice = mapInvoiceRow(invResult.rows[0]);
+      const linesResult = await adapter.query(
+        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit
+         FROM sales_invoice_lines l
+         LEFT JOIN products p ON l.product_id = p.id
+         WHERE l.invoice_id = $1`, [id]
+      );
+      invoice.lines = (linesResult.rows || []).map((r: Record<string, unknown>) => mapInvoiceLineRow(r));
+      return { success: true, data: invoice };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createInvoice(data: Omit<SalesInvoice, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const validation = validateInput(createInvoiceSchema, data);
+      if (!validation.success) return { success: false, error: validation.error };
+      if ((data.paidAmount ?? 0) > data.totalAmount) {
+        return { success: false, error: 'Paid amount cannot exceed total amount.' };
+      }
+      if (data.exchangeRate !== undefined && data.exchangeRate <= 0) {
+        return { success: false, error: 'Exchange rate must be positive.' };
+      }
+      
+      // Convert to service DTO format
+      const lines = (data.lines || []).map(line => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        discount: line.discountPercent || 0,
+        vatRate: line.vatPercent || 0,
+      }));
+      
+      const result = await salesService.createInvoice({
+        customerId: data.customerId,
+        date: data.date,
+        dueDate: data.dueDate,
+        currencyCode: data.currencyCode || YER_CODE,
+        exchangeRate: data.exchangeRate || 1,
+        lines,
+        notes: data.notes,
+        paymentType: (data.paymentType as 'cash' | 'credit' | 'partial') || 'credit',
+        paidAmount: data.paidAmount || 0,
+      });
+      
+      return result;
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateInvoice(id: string, companyId: string, data: Partial<Omit<SalesInvoice, 'id' | 'companyId' | 'lines'>> & { lines?: SalesInvoiceLine[] }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const check = await adapter.query(
+        'SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Invoice not found' };
+      }
+      const inv = check.rows[0] as Record<string, unknown>;
+      const status = String(inv.status);
+      const paidAmount = Number(inv.paid_amount) || 0;
+      if (status !== 'draft' && data.lines !== undefined) {
+        return { success: false, error: 'Cannot modify lines of posted invoice. Cancel it first.' };
+      }
+      if (status !== 'draft' && data.paidAmount !== undefined && data.paidAmount < paidAmount) {
+        return { success: false, error: 'Cannot reduce paid amount below current payments.' };
+      }
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (data.customerId !== undefined) { fields.push(`customer_id = $${idx++}`); values.push(data.customerId); }
+      if (data.date !== undefined) { fields.push(`date = $${idx++}`); values.push(data.date); }
+      if (data.dueDate !== undefined) { fields.push(`due_date = $${idx++}`); values.push(data.dueDate); }
+      if (data.subtotal !== undefined) { fields.push(`subtotal = $${idx++}`); values.push(data.subtotal); }
+      if (data.discountAmount !== undefined) { fields.push(`discount_amount = $${idx++}`); values.push(data.discountAmount); }
+      if (data.vatAmount !== undefined) { fields.push(`vat_amount = $${idx++}`); values.push(data.vatAmount); }
+      if (data.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}`); values.push(data.totalAmount); }
+      if (data.paidAmount !== undefined) { fields.push(`paid_amount = $${idx++}`); values.push(data.paidAmount); }
+      if (data.currencyCode !== undefined) { fields.push(`currency_code = $${idx++}`); values.push(data.currencyCode); }
+      if (data.exchangeRate !== undefined) { fields.push(`exchange_rate = $${idx++}`); values.push(data.exchangeRate); }
+      if (data.baseCurrencyAmount !== undefined) { fields.push(`base_currency_amount = $${idx++}`); values.push(data.baseCurrencyAmount); }
+      if (data.baseCurrencyPaid !== undefined) { fields.push(`base_currency_paid = $${idx++}`); values.push(data.baseCurrencyPaid); }
+      if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
+      if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
+      if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
+      if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
+      if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(safeUserId(_userId));
+      fields.push(`updated_at = NOW()`);
+      if (fields.length > 0) {
+        values.push(id);
+        values.push(companyId);
+        await adapter.query(`UPDATE sales_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values);
+      }
+      if (data.lines) {
+        await adapter.query('DELETE FROM sales_invoice_lines WHERE invoice_id = $1 AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1)', [id, companyId]);
+        const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
+          const off = i * 10;
+          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10})`;
+        }).join(', ');
+        const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => {
+          const lineCurrencyCode = line.currencyCode || data.currencyCode || YER_CODE;
+          const lineExchangeRate = line.exchangeRate ?? data.exchangeRate ?? 1;
+          const lineBaseTotal = line.baseCurrencyLineTotal ?? (line.lineTotal * lineExchangeRate);
+          return [id, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.vatPercent, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal];
+        });
+        await adapter.query(
+          `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total) VALUES ${lineValues}`,
+          lineParams
+        );
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deleteInvoice(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const check = await adapter.query(
+        'SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Invoice not found' };
+      }
+      const inv = check.rows[0] as Record<string, unknown>;
+      if (inv.status !== 'draft') {
+        return { success: false, error: 'Cannot delete posted invoice. Cancel it first.' };
+      }
+      if (Number(inv.paid_amount) > 0) {
+        return { success: false, error: 'Cannot delete invoice with payments. Refund the payment first.' };
+      }
+      const result = await adapter.query('DELETE FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async postInvoice(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const check = await adapter.query(
+        'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+        [id, companyId, 'draft']
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Invoice not found or not in draft status' };
+      }
+      const inv = check.rows[0] as Record<string, unknown>;
+      const customerId = String(inv.customer_id);
+      const totalAmount = Number(inv.total_amount) || 0;
+      const paidAmount = Number(inv.paid_amount) || 0;
+      const outstanding = totalAmount - paidAmount;
+      // Verify the userId exists in the users table. A stale localStorage
+      // session may reference a user that no longer exists (e.g., after a
+      // db:reset) — passing it here would violate the FK constraint
+      // `sales_invoices_updated_by_fkey`.
+      const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
+      const result = await adapter.query(
+        `UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+        [id, companyId, safeUserIdValue]
+      );
+      if (!result.success) {
+        return { success: result.success, error: result.error };
+      }
+      if (outstanding !== 0) {
+        await adapter.query(
+          `UPDATE customers SET balance = balance + $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          [outstanding, customerId, companyId, safeUserIdValue]
+        );
+      }
+      try {
+        await postSalesInvoice(companyId, {
+          invoiceNumber: String(inv.invoice_number || ''),
+          date: String(inv.date || new Date().toISOString().split('T')[0]),
+          customerId: customerId,
+          subtotal: Number(inv.subtotal) || 0,
+          vatAmount: Number(inv.vat_amount) || 0,
+          totalAmount: totalAmount,
+        });
+      } catch (jeErr) {
+        void jeErr;
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // ─── Quotations ───────────────────────────────────────────────────────────
+  async getQuotations(companyId: string): Promise<{ success: boolean; data?: Quotation[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `SELECT q.*, c.name as customer_name FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.company_id = $1 ORDER BY q.date DESC`,
+        [companyId]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      const rows = (result.rows || []).map((r: Record<string, unknown>) => mapQuotationRow(r));
+      return { success: true, data: rows };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getQuotationsPaginated(
+    companyId: string,
+    page: number,
+    pageSize: number,
+    filters?: { status?: string; customerId?: string }
+  ): Promise<PaginatedQueryResult<Quotation>> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const adapter = await getDbAdapter();
+
+      const conditions: string[] = ['q.company_id = $1'];
+      const params: unknown[] = [companyId];
+      if (filters?.status) {
+        params.push(filters.status);
+        conditions.push(`q.status = $${params.length}`);
+      }
+      if (filters?.customerId) {
+        params.push(filters.customerId);
+        conditions.push(`q.customer_id = $${params.length}`);
+      }
+      const where = conditions.join(' AND ');
+
+      const countResult = await adapter.query(
+        `SELECT COUNT(*)::int AS total FROM quotations q WHERE ${where}`,
+        params
+      );
+      const total = Number(countResult.rows?.[0]?.total || 0);
+
+      params.push(ps);
+      params.push(offset);
+      const limitIdx = params.length - 1;
+      const offsetIdx = params.length;
+
+      const dataResult = await adapter.query(
+        `SELECT q.*, c.name as customer_name
+         FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id
+         WHERE ${where}
+         ORDER BY q.date DESC
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        params
+      );
+      if (!dataResult.success) return { success: false, error: dataResult.error };
+
+      const items = (dataResult.rows || []).map((r: Record<string, unknown>) => mapQuotationRow(r));
+      return { success: true, data: paginatedResult(items, total, p, ps) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getQuotationById(id: string, companyId: string): Promise<{ success: boolean; data?: Quotation; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const res = await adapter.query(`SELECT q.*, c.name as customer_name FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.id = $1 AND q.company_id = $2 LIMIT 1`, [id, companyId]);
+      if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
+      const q = mapQuotationRow(res.rows[0]);
+      const linesRes = await adapter.query(`SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM quotation_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.quotation_id = $1`, [id]);
+      q.lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapQuotationLineRow(r));
+      return { success: true, data: q };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createQuotation(data: Omit<Quotation, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const validation = validateInput(createQuotationSchema, data);
+      if (!validation.success) return { success: false, error: validation.error };
+      const adapter = await getDbAdapter();
+      const quotationId = crypto.randomUUID();
+      const params: unknown[] = [quotationId, data.companyId, data.quotationNumber, data.customerId, data.date, data.expiryDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.bankAccountId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
+      let sql = `WITH quo AS (INSERT INTO quotations (id,company_id,quotation_number,customer_id,date,expiry_date,total_amount,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::varchar,$9,$10::uuid,$11::uuid,$12,$13::uuid,$14::uuid) RETURNING id)`;
+      if (data.lines?.length) {
+        const lineValues: string[] = [];
+        for (const line of data.lines) {
+          const off = params.length;
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric)`);
+          params.push(quotationId, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.lineTotal);
+        }
+        sql += `,lines_ins AS (INSERT INTO quotation_lines (quotation_id,product_id,quantity,unit_price,discount_percent,line_total) SELECT v.quotation_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.line_total FROM quo JOIN (VALUES ${lineValues.join(',')}) v(quotation_id,product_id,quantity,unit_price,discount_percent,line_total) ON true)`;
+      }
+      sql += ' SELECT id FROM quo';
+      const result = await adapter.query(sql, params);
+      if (result.success && result.rows?.[0]) {
+        return { success: true, id: result.rows[0].id as string };
+      }
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateQuotation(id: string, companyId: string, data: Partial<Omit<Quotation, 'id' | 'companyId' | 'lines'>> & { lines?: QuotationLine[] }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (data.customerId !== undefined) { fields.push(`customer_id = $${idx++}::uuid`); values.push(data.customerId); }
+      if (data.date !== undefined) { fields.push(`date = $${idx++}::date`); values.push(data.date); }
+      if (data.expiryDate !== undefined) { fields.push(`expiry_date = $${idx++}::date`); values.push(data.expiryDate); }
+      if (data.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}::numeric`); values.push(data.totalAmount); }
+      if (data.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(data.status); }
+      if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
+      if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
+      if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
+      if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(safeUserId(_userId));
+      fields.push(`updated_at = NOW()`);
+      if (fields.length > 0) { values.push(id); values.push(companyId); await adapter.query(`UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values); }
+      if (data.lines) {
+        await adapter.query('DELETE FROM quotation_lines WHERE quotation_id = $1::uuid AND $2::uuid = (SELECT company_id FROM quotations WHERE id = $1)', [id, companyId]);
+        const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
+          const off = i * 6;
+          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6})`;
+        }).join(', ');
+        const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => [id, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.lineTotal]);
+        await adapter.query(`INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total) VALUES ${lineValues}`, lineParams);
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deleteQuotation(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const check = await adapter.query(
+        'SELECT status FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Quotation not found' };
+      }
+      const status = String((check.rows[0] as Record<string, unknown>).status);
+      if (status === 'converted' || status === 'accepted') {
+        return { success: false, error: `Cannot delete ${status} quotation` };
+      }
+      const result = await adapter.query('DELETE FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async convertQuotationToInvoice(id: string, companyId: string, invoiceData: Omit<SalesInvoice, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const createRes = await this.createInvoice(invoiceData, _userId);
+      if (createRes.success) {
+        const adapter = await getDbAdapter();
+        await adapter.query(`UPDATE quotations SET status = 'converted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [id, companyId, safeUserId(_userId)]);
+      }
+      return createRes;
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // ─── Sales Returns ────────────────────────────────────────────────────────
+  async getReturns(companyId: string): Promise<{ success: boolean; data?: SalesReturn[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id WHERE r.company_id = $1 ORDER BY r.date DESC`,
+        [companyId]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      const rows = (result.rows || []).map((r: Record<string, unknown>) => mapReturnRow(r));
+      return { success: true, data: rows };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getReturnsPaginated(
+    companyId: string,
+    page: number,
+    pageSize: number,
+    filters?: { status?: string; customerId?: string }
+  ): Promise<PaginatedQueryResult<SalesReturn>> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const adapter = await getDbAdapter();
+
+      const conditions: string[] = ['r.company_id = $1'];
+      const params: unknown[] = [companyId];
+      if (filters?.status) {
+        params.push(filters.status);
+        conditions.push(`r.status = $${params.length}`);
+      }
+      if (filters?.customerId) {
+        params.push(filters.customerId);
+        conditions.push(`r.customer_id = $${params.length}`);
+      }
+      const where = conditions.join(' AND ');
+
+      const countResult = await adapter.query(
+        `SELECT COUNT(*)::int AS total FROM sales_returns r WHERE ${where}`,
+        params
+      );
+      const total = Number(countResult.rows?.[0]?.total || 0);
+
+      params.push(ps);
+      params.push(offset);
+      const limitIdx = params.length - 1;
+      const offsetIdx = params.length;
+
+      const dataResult = await adapter.query(
+        `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref
+         FROM sales_returns r
+         LEFT JOIN customers c ON r.customer_id = c.id
+         LEFT JOIN sales_invoices i ON r.invoice_id = i.id
+         WHERE ${where}
+         ORDER BY r.date DESC
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        params
+      );
+      if (!dataResult.success) return { success: false, error: dataResult.error };
+
+      const items = (dataResult.rows || []).map((r: Record<string, unknown>) => mapReturnRow(r));
+      return { success: true, data: paginatedResult(items, total, p, ps) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async getReturnById(id: string, companyId: string): Promise<{ success: boolean; data?: SalesReturn; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const res = await adapter.query(
+        `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id WHERE r.id = $1 AND r.company_id = $2 LIMIT 1`, [id, companyId]
+      );
+      if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
+      const ret = mapReturnRow(res.rows[0]);
+      const linesRes = await adapter.query(`SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM sales_return_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.return_id = $1`, [id]);
+      ret.lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapReturnLineRow(r));
+      return { success: true, data: ret };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createReturn(data: Omit<SalesReturn, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const validation = validateInput(createSalesReturnSchema, data);
+      if (!validation.success) return { success: false, error: validation.error };
+      const adapter = await getDbAdapter();
+      const returnId = crypto.randomUUID();
+      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId, data.customerId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.reason, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.bankAccountId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
+      let sql = `WITH ret AS (INSERT INTO sales_returns (id,company_id,return_number,invoice_id,customer_id,date,subtotal,vat_amount,total_amount,reason,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7,$8,$9,$10,$11,$12,$13::uuid,$14::uuid,$15,$16::uuid,$17::uuid) RETURNING id)`;
+      if (data.lines?.length) {
+        const lineValues: string[] = [];
+        for (const line of data.lines) {
+          const off = params.length;
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric)`);
+          params.push(returnId, line.productId, line.quantity, line.unitPrice, line.lineTotal);
+        }
+        sql += `,lines_ins AS (INSERT INTO sales_return_lines (return_id,product_id,quantity,unit_price,line_total) SELECT v.return_id,v.product_id,v.quantity,v.unit_price,v.line_total FROM ret JOIN (VALUES ${lineValues.join(',')}) v(return_id,product_id,quantity,unit_price,line_total) ON true)`;
+      }
+      sql += ' SELECT id FROM ret';
+      const result = await adapter.query(sql, params);
+      if (result.success && result.rows?.[0]) {
+        return { success: true, id: result.rows[0].id as string };
+      }
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateReturn(id: string, companyId: string, data: Partial<Omit<SalesReturn, 'id' | 'companyId' | 'lines'>> & { lines?: SalesReturnLine[] }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (data.invoiceId !== undefined) { fields.push(`invoice_id = $${idx++}`); values.push(data.invoiceId); }
+      if (data.customerId !== undefined) { fields.push(`customer_id = $${idx++}`); values.push(data.customerId); }
+      if (data.date !== undefined) { fields.push(`date = $${idx++}`); values.push(data.date); }
+      if (data.subtotal !== undefined) { fields.push(`subtotal = $${idx++}`); values.push(data.subtotal); }
+      if (data.vatAmount !== undefined) { fields.push(`vat_amount = $${idx++}`); values.push(data.vatAmount); }
+      if (data.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}`); values.push(data.totalAmount); }
+      if (data.reason !== undefined) { fields.push(`reason = $${idx++}`); values.push(data.reason); }
+      if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
+      if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
+      if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
+      if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
+      if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(safeUserId(_userId));
+      fields.push(`updated_at = NOW()`);
+      if (fields.length > 0) { values.push(id); values.push(companyId); await adapter.query(`UPDATE sales_returns SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values); }
+      if (data.lines) {
+        await adapter.query('DELETE FROM sales_return_lines WHERE return_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_returns WHERE id = $1)', [id, companyId]);
+        const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
+          const off = i * 5;
+          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5})`;
+        }).join(', ');
+        const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => [id, line.productId, line.quantity, line.unitPrice, line.lineTotal]);
+        await adapter.query(`INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total) VALUES ${lineValues}`, lineParams);
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deleteReturn(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const check = await adapter.query(
+        'SELECT status FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Return not found' };
+      }
+      const status = String((check.rows[0] as Record<string, unknown>).status);
+      if (status !== 'draft') {
+        return { success: false, error: 'Cannot delete posted return. Cancel it first.' };
+      }
+      const result = await adapter.query('DELETE FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async postReturn(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const check = await adapter.query(
+        'SELECT sr.customer_id, sr.total_amount, sr.return_number, sr.date, c.name as customer_name FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND sr.status = $3',
+        [id, companyId, 'draft']
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Return not found or not in draft status' };
+      }
+      const ret = check.rows[0] as Record<string, unknown>;
+      const customerId = String(ret.customer_id);
+      const totalAmount = Number(ret.total_amount) || 0;
+      const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
+      const result = await adapter.query(
+        `UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+        [id, companyId, safeUserIdValue]
+      );
+      if (!result.success) {
+        return { success: result.success, error: result.error };
+      }
+      if (totalAmount !== 0) {
+        await adapter.query(
+          `UPDATE customers SET balance = balance - $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          [totalAmount, customerId, companyId, safeUserIdValue]
+        );
+      }
+      try {
+        await postSalesReturn(companyId, {
+          id: id,
+          returnNumber: String(ret.return_number || ''),
+          date: String(ret.date || new Date().toISOString().split('T')[0]),
+          customer: String(ret.customer_name || ''),
+          amount: totalAmount,
+        });
+      } catch (jeErr) {
+        void jeErr;
+      }
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+};
+
+// ─── Row Mappers ────────────────────────────────────────────────────────────
+function mapInvoiceRow(row: Record<string, unknown>): SalesInvoice {
+  return {
+    id: String(row.id),
+    companyId: String(row.company_id),
+    invoiceNumber: String(row.invoice_number),
+    customerId: String(row.customer_id),
+    customer: row.customer_name ? {
+      id: String(row.customer_id),
+      companyId: String(row.company_id),
+      name: String(row.customer_name),
+      phone: row.customer_phone ? String(row.customer_phone) : undefined,
+      email: row.customer_email ? String(row.customer_email) : undefined,
+      address: row.customer_address ? String(row.customer_address) : undefined,
+      taxNumber: row.customer_tax_number ? String(row.customer_tax_number) : undefined,
+      balance: Number(row.customer_balance) || 0,
+      isActive: row.customer_is_active === true || row.customer_is_active === 'true',
+    } : undefined,
+    date: toDateString(row.date) ?? '',
+    dueDate: row.due_date ? toDateString(row.due_date) ?? undefined : undefined,
+    subtotal: Number(row.subtotal) || 0,
+    discountAmount: Number(row.discount_amount) || 0,
+    vatAmount: Number(row.vat_amount) || 0,
+    totalAmount: Number(row.total_amount) || 0,
+    paidAmount: Number(row.paid_amount) || 0,
+    currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,
+    exchangeRate: row.exchange_rate !== undefined ? Number(row.exchange_rate) : 1,
+    baseCurrencyAmount: row.base_currency_amount !== undefined ? Number(row.base_currency_amount) : 0,
+    baseCurrencyPaid: row.base_currency_paid !== undefined ? Number(row.base_currency_paid) : 0,
+    paymentType: String(row.payment_type || 'credit'),
+    cashBoxId: row.cash_box_id ? String(row.cash_box_id) : undefined,
+    bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
+    status: String(row.status) as SalesInvoice['status'],
+    notes: row.notes ? String(row.notes) : undefined,
+    lines: [],
+  };
+}
+
+function mapInvoiceLineRow(row: Record<string, unknown>): SalesInvoiceLine {
+  return {
+    id: row.id ? String(row.id) : undefined,
+    invoiceId: row.invoice_id ? String(row.invoice_id) : undefined,
+    productId: String(row.product_id),
+    productName: row.product_name ? String(row.product_name) : undefined,
+    productCode: row.product_code ? String(row.product_code) : undefined,
+    barcode: row.barcode ? String(row.barcode) : undefined,
+    sku: row.sku ? String(row.sku) : undefined,
+    unit: row.unit ? String(row.unit) : undefined,
+    quantity: Number(row.quantity) || 0,
+    unitPrice: Number(row.unit_price) || 0,
+    discountPercent: Number(row.discount_percent) || 0,
+    vatPercent: Number(row.vat_percent) || 0,
+    lineTotal: Number(row.line_total) || 0,
+    currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,
+    exchangeRate: row.exchange_rate !== undefined ? Number(row.exchange_rate) : 1,
+    baseCurrencyLineTotal: row.base_currency_line_total !== undefined ? Number(row.base_currency_line_total) : 0,
+  };
+}
+
+function mapQuotationRow(row: Record<string, unknown>): Quotation {
+  return {
+    id: String(row.id),
+    companyId: String(row.company_id),
+    quotationNumber: String(row.quotation_number),
+    customerId: String(row.customer_id),
+    customer: row.customer_name ? { id: String(row.customer_id), companyId: String(row.company_id), name: String(row.customer_name), balance: 0, isActive: true } : undefined,
+    date: toDateString(row.date) ?? '',
+    expiryDate: row.expiry_date ? toDateString(row.expiry_date) ?? undefined : undefined,
+    totalAmount: Number(row.total_amount) || 0,
+    paymentType: String(row.payment_type || 'credit'),
+    cashBoxId: row.cash_box_id ? String(row.cash_box_id) : undefined,
+    bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
+    status: String(row.status) as Quotation['status'],
+    notes: row.notes ? String(row.notes) : undefined,
+    lines: [],
+  };
+}
+
+function mapQuotationLineRow(row: Record<string, unknown>): QuotationLine {
+  return {
+    id: row.id ? String(row.id) : undefined,
+    quotationId: row.quotation_id ? String(row.quotation_id) : undefined,
+    productId: String(row.product_id),
+    productName: row.product_name ? String(row.product_name) : undefined,
+    productCode: row.product_code ? String(row.product_code) : undefined,
+    barcode: row.barcode ? String(row.barcode) : undefined,
+    sku: row.sku ? String(row.sku) : undefined,
+    unit: row.unit ? String(row.unit) : undefined,
+    quantity: Number(row.quantity) || 0,
+    unitPrice: Number(row.unit_price) || 0,
+    discountPercent: Number(row.discount_percent) || 0,
+    lineTotal: Number(row.line_total) || 0,
+  };
+}
+
+function mapReturnRow(row: Record<string, unknown>): SalesReturn {
+  return {
+    id: String(row.id),
+    companyId: String(row.company_id),
+    returnNumber: String(row.return_number),
+    invoiceId: String(row.invoice_id),
+    invoice: row.invoice_number_ref ? { id: String(row.invoice_id), companyId: String(row.company_id), invoiceNumber: String(row.invoice_number_ref), customerId: '', date: '', subtotal: 0, discountAmount: 0, vatAmount: 0, totalAmount: 0, paidAmount: 0, status: 'posted', lines: [] } : undefined,
+    customerId: String(row.customer_id),
+    customer: row.customer_name ? { id: String(row.customer_id), companyId: String(row.company_id), name: String(row.customer_name), balance: 0, isActive: true } : undefined,
+    date: toDateString(row.date) ?? '',
+    subtotal: Number(row.subtotal) || 0,
+    vatAmount: Number(row.vat_amount) || 0,
+    totalAmount: Number(row.total_amount) || 0,
+    reason: String(row.reason),
+    paymentType: String(row.payment_type || 'credit'),
+    cashBoxId: row.cash_box_id ? String(row.cash_box_id) : undefined,
+    bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
+    status: String(row.status) as SalesReturn['status'],
+    notes: row.notes ? String(row.notes) : undefined,
+    lines: [],
+  };
+}
+
+function mapReturnLineRow(row: Record<string, unknown>): SalesReturnLine {
+  return {
+    id: row.id ? String(row.id) : undefined,
+    returnId: row.return_id ? String(row.return_id) : undefined,
+    productId: String(row.product_id),
+    productName: row.product_name ? String(row.product_name) : undefined,
+    productCode: row.product_code ? String(row.product_code) : undefined,
+    barcode: row.barcode ? String(row.barcode) : undefined,
+    sku: row.sku ? String(row.sku) : undefined,
+    unit: row.unit ? String(row.unit) : undefined,
+    quantity: Number(row.quantity) || 0,
+    unitPrice: Number(row.unit_price) || 0,
+    lineTotal: Number(row.line_total) || 0,
+  };
+}

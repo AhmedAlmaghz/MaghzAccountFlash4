@@ -1,0 +1,273 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('@/core/store', () => ({
+  useAppStore: {
+    getState: vi.fn(() => ({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    })),
+  },
+}));
+
+import { useAppStore } from '@/core/store';
+import { DEFAULT_LOCALE, formatNumber, formatCurrencyValue, formatDateValue, formatDateTime } from './locale';
+
+const mockUseAppStore = useAppStore as unknown as { getState: ReturnType<typeof vi.fn> };
+
+beforeEach(() => {
+  mockUseAppStore.getState.mockReturnValue({
+    activeCompany: {
+      id: 'c-1',
+      decimalPlaces: 2,
+      dateFormat: 'yyyy-MM-dd',
+      calendar: 'gregorian',
+      currency: 'YER',
+    },
+  });
+});
+
+describe('locale utility', () => {
+  it('exports DEFAULT_LOCALE as ar-YE', () => {
+    expect(DEFAULT_LOCALE).toBe('ar-YE');
+  });
+
+  it('formatNumber uses default locale', () => {
+    const result = formatNumber(1234.5);
+    expect(result).toMatch(/[\d,.]*/);
+    expect(result).not.toBe('-');
+  });
+
+  it('formatNumber respects decimalPlaces from settings', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 4,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatNumber(1234.56789);
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/٬/g, ',')
+      .replace(/٫/g, '.');
+    expect(normalized).toBe('1,234.5679');
+  });
+
+  it('formatNumber returns - for NaN', () => {
+    expect(formatNumber('not a number')).toBe('-');
+    expect(formatNumber(NaN)).toBe('-');
+  });
+
+  it('formatCurrencyValue includes currency symbol', () => {
+    const result = formatCurrencyValue(1000, 'YER');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/٬/g, ',')
+      .replace(/٫/g, '.');
+    expect(normalized).toMatch(/1,000|YER|ر.ي/);
+  });
+
+  it('formatCurrencyValue uses default currency from settings', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'SAR',
+      },
+    });
+    const result = formatCurrencyValue(500);
+    expect(result).toMatch(/SAR|ر.س|500/);
+  });
+
+  it('formatDateValue returns formatted date', () => {
+    const result = formatDateValue('2026-01-15T10:30:00Z');
+    expect(result).toMatch(/2026|٢٠٢٦/);
+    expect(result).toMatch(/01|٠١/);
+  });
+
+  it('formatDateValue uses Hijri calendar when set', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'hijri',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateValue('2024-06-15T10:30:00Z');
+    expect(result).toMatch(/1445|١٤٤٥|1446|١٤٤٦/);
+  });
+
+  it('formatDateTime includes time component', () => {
+    const result = formatDateTime('2026-01-15T10:30:00Z');
+    expect(result).toMatch(/01:30|٠١:٣٠|13:30|١:٣٠/);
+  });
+
+  it('formatDateTime uses Hijri when set', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'hijri',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateTime('2024-06-15T10:30:00Z');
+    expect(result).toMatch(/1445|١٤٤٥|1446|١٤٤٦/);
+  });
+
+  it('all functions accept custom locale override', () => {
+    const en = formatNumber(1234.5, 'en-US');
+    const normalized = en.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/٬/g, ',')
+      .replace(/٫/g, '.');
+    expect(normalized).toBe('1,234.50');
+  });
+
+  it('returns - when no active company and invalid input', () => {
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: null });
+    expect(formatNumber('not a number')).toBe('-');
+    expect(formatDateValue('not a date')).toBe('-');
+  });
+
+  it('formatDateValue respects dd/MM/yyyy dateFormat pattern', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'dd/MM/yyyy',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateValue('2026-01-15T10:30:00Z');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toBe('15/01/2026');
+  });
+
+  it('formatDateValue respects yyyy/MM/dd dateFormat pattern', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy/MM/dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateValue('2026-01-15T10:30:00Z');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toBe('2026/01/15');
+  });
+
+  it('formatDateValue respects dd-MM-yyyy dateFormat pattern', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'dd-MM-yyyy',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateValue('2026-01-15T10:30:00Z');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toBe('15-01-2026');
+  });
+
+  it('formatDateValue respects yyyy-MM-dd dateFormat pattern', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateValue('2026-01-15T10:30:00Z');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toBe('2026-01-15');
+  });
+
+  it('formatDateValue handles Date object input', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateValue(new Date('2026-01-15T10:30:00Z'));
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toBe('2026-01-15');
+  });
+
+  it('formatDateTime respects dd/MM/yyyy dateFormat pattern', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'dd/MM/yyyy',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateTime('2026-01-15T10:30:00Z');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toMatch(/^15\/01\/2026 \d{2}:\d{2}$/);
+  });
+
+  it('formatDateTime respects yyyy-MM-dd dateFormat pattern with time', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    const result = formatDateTime('2026-01-15T10:30:00Z');
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    expect(normalized).toMatch(/^2026-01-15 \d{2}:\d{2}$/);
+  });
+
+  it('formatDateValue returns - for invalid Date', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    expect(formatDateValue('invalid-date')).toBe('-');
+    expect(formatDateValue(new Date('invalid'))).toBe('-');
+  });
+
+  it('formatDateTime returns - for invalid Date', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: {
+        id: 'c-1',
+        decimalPlaces: 2,
+        dateFormat: 'yyyy-MM-dd',
+        calendar: 'gregorian',
+        currency: 'YER',
+      },
+    });
+    expect(formatDateTime('invalid-date')).toBe('-');
+  });
+});
