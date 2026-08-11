@@ -10,6 +10,7 @@ import { initAuth } from './modules/auth/store';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button, ErrorBoundary } from './core/ui/components';
 import { useTranslation } from './core/i18n/useTranslation';
+import { Analytics } from '@vercel/analytics/react';
 
 // Set RTL and Arabic as default
 document.documentElement.dir = 'rtl';
@@ -117,6 +118,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <App />
+      <Analytics />
     </ErrorBoundary>
   </StrictMode>,
 );
