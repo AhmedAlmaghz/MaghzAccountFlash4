@@ -225,38 +225,38 @@ const ACCOUNTS: Array<{
   code: string; name_ar: string; name_en: string; type: string; nature: string;
   is_group: boolean; parent_code: string | null; balance?: number;
 }> = [
-  { code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: null },
-  { code: '11', name_ar: 'الأصول المتداولة', name_en: 'Current Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
-  { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Banks', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
-  { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 5000000 },
-  { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 12000000 },
-  { code: '112', name_ar: 'المدينون', name_en: 'Receivables', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
-  { code: '11201', name_ar: 'المدينون التجاريون', name_en: 'Trade Customers', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
-  { code: '113', name_ar: 'المخزون', name_en: 'Inventory', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
-  { code: '11301', name_ar: 'بضاعة أول المدة', name_en: 'Opening Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
-  { code: '2', name_ar: 'الالتزامات', name_en: 'Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: null },
-  { code: '21', name_ar: 'الالتزامات المتداولة', name_en: 'Current Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: '2' },
-  { code: '211', name_ar: 'الدائنون', name_en: 'Payables', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
-  { code: '21101', name_ar: 'الدائنون التجاريون', name_en: 'Trade Suppliers', type: 'liability', nature: 'credit', is_group: false, parent_code: '211' },
-  { code: '213', name_ar: 'الضرائب', name_en: 'Taxes', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
-  { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
-  { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
-  { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
-  { code: '31101', name_ar: 'رأس المال المدفوع', name_en: 'Paid-in Capital', type: 'equity', nature: 'credit', is_group: false, parent_code: '311', balance: 20000000 },
-  { code: '4', name_ar: 'الإيرادات', name_en: 'Revenues', type: 'revenue', nature: 'credit', is_group: true, parent_code: null },
-  { code: '41', name_ar: 'إيرادات المبيعات', name_en: 'Sales Revenue', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
-  { code: '411', name_ar: 'المبيعات', name_en: 'Sales', type: 'revenue', nature: 'credit', is_group: true, parent_code: '41' },
-  { code: '41101', name_ar: 'مبيعات المنتجات', name_en: 'Product Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
-  { code: '41102', name_ar: 'مبيعات الخدمات', name_en: 'Services Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
-  { code: '41103', name_ar: 'مردودات المبيعات', name_en: 'Sales Returns', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
-  { code: '5', name_ar: 'المصروفات', name_en: 'Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: null },
-  { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
-  { code: '511', name_ar: 'تكلفة البضاعة', name_en: 'COGS', type: 'expense', nature: 'debit', is_group: true, parent_code: '51' },
-  { code: '51101', name_ar: 'تكلفة بضاعة مباعة', name_en: 'Cost of Goods Sold', type: 'expense', nature: 'debit', is_group: false, parent_code: '511' },
-  { code: '52', name_ar: 'مصاريف تشغيلية', name_en: 'Operating Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
-  { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
-  { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
-];
+    { code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: null },
+    { code: '11', name_ar: 'الأصول المتداولة', name_en: 'Current Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
+    { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Banks', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
+    { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 5000000 },
+    { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 12000000 },
+    { code: '112', name_ar: 'المدينون', name_en: 'Receivables', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
+    { code: '11201', name_ar: 'المدينون التجاريون', name_en: 'Trade Customers', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
+    { code: '113', name_ar: 'المخزون', name_en: 'Inventory', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
+    { code: '11301', name_ar: 'بضاعة أول المدة', name_en: 'Opening Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
+    { code: '2', name_ar: 'الالتزامات', name_en: 'Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: null },
+    { code: '21', name_ar: 'الالتزامات المتداولة', name_en: 'Current Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: '2' },
+    { code: '211', name_ar: 'الدائنون', name_en: 'Payables', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
+    { code: '21101', name_ar: 'الدائنون التجاريون', name_en: 'Trade Suppliers', type: 'liability', nature: 'credit', is_group: false, parent_code: '211' },
+    { code: '213', name_ar: 'الضرائب', name_en: 'Taxes', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
+    { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
+    { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
+    { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
+    { code: '31101', name_ar: 'رأس المال المدفوع', name_en: 'Paid-in Capital', type: 'equity', nature: 'credit', is_group: false, parent_code: '311', balance: 20000000 },
+    { code: '4', name_ar: 'الإيرادات', name_en: 'Revenues', type: 'revenue', nature: 'credit', is_group: true, parent_code: null },
+    { code: '41', name_ar: 'إيرادات المبيعات', name_en: 'Sales Revenue', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
+    { code: '411', name_ar: 'المبيعات', name_en: 'Sales', type: 'revenue', nature: 'credit', is_group: true, parent_code: '41' },
+    { code: '41101', name_ar: 'مبيعات المنتجات', name_en: 'Product Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
+    { code: '41102', name_ar: 'مبيعات الخدمات', name_en: 'Services Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
+    { code: '41103', name_ar: 'مردودات المبيعات', name_en: 'Sales Returns', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
+    { code: '5', name_ar: 'المصروفات', name_en: 'Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: null },
+    { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
+    { code: '511', name_ar: 'تكلفة البضاعة', name_en: 'COGS', type: 'expense', nature: 'debit', is_group: true, parent_code: '51' },
+    { code: '51101', name_ar: 'تكلفة بضاعة مباعة', name_en: 'Cost of Goods Sold', type: 'expense', nature: 'debit', is_group: false, parent_code: '511' },
+    { code: '52', name_ar: 'مصاريف تشغيلية', name_en: 'Operating Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
+    { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+    { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+  ];
 
 const PRODUCT_TYPES: Array<{
   code: string; name_ar: string; name_en: string;
@@ -265,12 +265,12 @@ const PRODUCT_TYPES: Array<{
   has_stock_tracking: boolean; has_bom: boolean;
   sales: string | null; cogs: string | null; inv: string | null;
 }> = [
-  { code: 'TRADE', name_ar: 'بضاعة تجارية', name_en: 'Trade Goods', appears_in_sales: true, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: false, has_stock_tracking: true, has_bom: false, sales: '41101', cogs: '51101', inv: '11301' },
-  { code: 'SRV', name_ar: 'خدمات', name_en: 'Services', appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: false, appears_in_manufacturing: false, has_stock_tracking: false, has_bom: false, sales: '41102', cogs: null, inv: null },
-  { code: 'RAW', name_ar: 'مواد خام', name_en: 'Raw Materials', appears_in_sales: false, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: true, sales: null, cogs: '51101', inv: '11301' },
-  { code: 'FG', name_ar: 'منتج نهائي', name_en: 'Finished Goods', appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: true, sales: '41101', cogs: '51101', inv: '11301' },
-  { code: 'CON', name_ar: 'مواد استهلاكية', name_en: 'Consumables', appears_in_sales: true, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: false, has_stock_tracking: true, has_bom: false, sales: null, cogs: null, inv: '11301' },
-];
+    { code: 'TRADE', name_ar: 'بضاعة تجارية', name_en: 'Trade Goods', appears_in_sales: true, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: false, has_stock_tracking: true, has_bom: false, sales: '41101', cogs: '51101', inv: '11301' },
+    { code: 'SRV', name_ar: 'خدمات', name_en: 'Services', appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: false, appears_in_manufacturing: false, has_stock_tracking: false, has_bom: false, sales: '41102', cogs: null, inv: null },
+    { code: 'RAW', name_ar: 'مواد خام', name_en: 'Raw Materials', appears_in_sales: false, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: true, sales: null, cogs: '51101', inv: '11301' },
+    { code: 'FG', name_ar: 'منتج نهائي', name_en: 'Finished Goods', appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: true, sales: '41101', cogs: '51101', inv: '11301' },
+    { code: 'CON', name_ar: 'مواد استهلاكية', name_en: 'Consumables', appears_in_sales: true, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: false, has_stock_tracking: true, has_bom: false, sales: null, cogs: null, inv: '11301' },
+  ];
 
 const UNITS: Array<{ code: string; name_ar: string; name_en: string; conv: number }> = [
   { code: 'UNT', name_ar: 'وحدة', name_en: 'Unit', conv: 1 },
@@ -326,12 +326,12 @@ const PAYROLL_COMPONENTS: Array<{
   code: string; name_ar: string; name_en: string; type: string; method: string; amount: number;
   gross: boolean; tax: boolean; ins: boolean;
 }> = [
-  { code: 'BAS', name_ar: 'الراتب الأساسي', name_en: 'Basic Salary', type: 'earning', method: 'fixed', amount: 0, gross: true, tax: true, ins: false },
-  { code: 'HOU', name_ar: 'بدل الساعات الإضافية', name_en: 'Overtime Allowance', type: 'earning', method: 'fixed', amount: 150000, gross: true, tax: false, ins: false },
-  { code: 'TRN', name_ar: 'بدل المواصلات', name_en: 'Transport Allowance', type: 'earning', method: 'fixed', amount: 50000, gross: true, tax: false, ins: false },
-  { code: 'TAX', name_ar: 'ضريبة الدخل', name_en: 'Income Tax', type: 'tax', method: 'formula', amount: 0, gross: false, tax: true, ins: false },
-  { code: 'INS', name_ar: 'التأمينات الاجتماعية', name_en: 'Social Insurance', type: 'deduction', method: 'percentage', amount: 9, gross: false, tax: false, ins: true },
-];
+    { code: 'BAS', name_ar: 'الراتب الأساسي', name_en: 'Basic Salary', type: 'earning', method: 'fixed', amount: 0, gross: true, tax: true, ins: false },
+    { code: 'HOU', name_ar: 'بدل الساعات الإضافية', name_en: 'Overtime Allowance', type: 'earning', method: 'fixed', amount: 150000, gross: true, tax: false, ins: false },
+    { code: 'TRN', name_ar: 'بدل المواصلات', name_en: 'Transport Allowance', type: 'earning', method: 'fixed', amount: 50000, gross: true, tax: false, ins: false },
+    { code: 'TAX', name_ar: 'ضريبة الدخل', name_en: 'Income Tax', type: 'tax', method: 'formula', amount: 0, gross: false, tax: true, ins: false },
+    { code: 'INS', name_ar: 'التأمينات الاجتماعية', name_en: 'Social Insurance', type: 'deduction', method: 'percentage', amount: 9, gross: false, tax: false, ins: true },
+  ];
 
 const BANKS: Array<{ name: string; bank_name: string; account_number: string; iban: string; balance: number; account_code: string }> = [
   { name: 'حساب البنك اليمني الدولي', bank_name: 'البنك اليمني الدولي', account_number: '1234567890', iban: 'YE12345678901234', balance: 5800000, account_code: '11102' },
@@ -347,22 +347,22 @@ const PRODUCTS: Array<{
   code: string; name_ar: string; name_en: string; barcode: string; sku: string;
   unit: string; cost: number; price: number; type: string;
 }> = [
-  { code: 'PRD-001', name_ar: 'أرز بسمتي فاخر', name_en: 'Premium Basmati Rice', barcode: '6223000123456', sku: 'RICE-BAS-5KG', unit: 'كيس', cost: 2800, price: 3200, type: 'TRADE' },
-  { code: 'PRD-002', name_ar: 'زيت نباتي 3 لتر', name_en: 'Vegetable Oil 3L', barcode: '6223000123457', sku: 'OIL-VEG-3L', unit: 'علبة', cost: 4200, price: 4800, type: 'TRADE' },
-  { code: 'PRD-003', name_ar: 'سكر أبيض 50 كغ', name_en: 'White Sugar 50kg', barcode: '6223000123458', sku: 'SUG-WHT-50KG', unit: 'كيس', cost: 15000, price: 16500, type: 'TRADE' },
-  { code: 'PRD-004', name_ar: 'دقيق فاخر 50 كغ', name_en: 'Premium Flour 50kg', barcode: '6223000123459', sku: 'FLR-PRM-50KG', unit: 'كيس', cost: 9500, price: 10500, type: 'TRADE' },
-  { code: 'PRD-005', name_ar: 'معجون طماطم 400غ', name_en: 'Tomato Paste 400g', barcode: '6223000123460', sku: 'TOM-PST-400G', unit: 'علبة', cost: 380, price: 450, type: 'TRADE' },
-  { code: 'PRD-006', name_ar: 'شاي ليبتون 200غ', name_en: 'Lipton Tea 200g', barcode: '6223000123461', sku: 'TEA-LIP-200G', unit: 'علبة', cost: 1200, price: 1400, type: 'TRADE' },
-  { code: 'PRD-007', name_ar: 'حليب مجفف 2.5 كغ', name_en: 'Milk Powder 2.5kg', barcode: '6223000123462', sku: 'MLK-PWD-2.5K', unit: 'علبة', cost: 8500, price: 9500, type: 'TRADE' },
-  { code: 'PRD-008', name_ar: 'تونة معلبة 185غ', name_en: 'Canned Tuna 185g', barcode: '6223000123463', sku: 'TUN-CAN-185G', unit: 'علبة', cost: 650, price: 750, type: 'TRADE' },
-  { code: 'PRD-009', name_ar: 'صابون لوكس 125غ', name_en: 'Lux Soap 125g', barcode: '6223000123464', sku: 'SOAP-LUX-125G', unit: 'قطعة', cost: 280, price: 330, type: 'CON' },
-  { code: 'PRD-010', name_ar: 'شامبو هيد آند شولدرز 400مل', name_en: 'Head & Shoulders 400ml', barcode: '6223000123465', sku: 'SHP-HNS-400M', unit: 'علبة', cost: 1800, price: 2100, type: 'CON' },
-  { code: 'PRD-011', name_ar: 'معجون أسنان كولجيت 100مل', name_en: 'Colgate Toothpaste 100ml', barcode: '6223000123466', sku: 'PAS-COL-100M', unit: 'علبة', cost: 420, price: 500, type: 'CON' },
-  { code: 'PRD-012', name_ar: 'منظف جليكسون 1 لتر', name_en: 'Gleason Cleaner 1L', barcode: '6223000123467', sku: 'CLN-GLX-1L', unit: 'علبة', cost: 1100, price: 1300, type: 'CON' },
-  { code: 'PRD-013', name_ar: 'مناديل فاين 200 منديل', name_en: 'Fine Tissues 200', barcode: '6223000123468', sku: 'TIS-FIN-200', unit: 'علبة', cost: 350, price: 420, type: 'CON' },
-  { code: 'PRD-014', name_ar: 'قهوة العربية 250غ', name_en: 'Arabian Coffee 250g', barcode: '6223000123469', sku: 'COF-ARA-250G', unit: 'علبة', cost: 2200, price: 2600, type: 'TRADE' },
-  { code: 'PRD-015', name_ar: 'بسكويت أوريو 154غ', name_en: 'Oreo Biscuits 154g', barcode: '6223000123470', sku: 'BIS-ORE-154G', unit: 'علبة', cost: 550, price: 650, type: 'TRADE' },
-];
+    { code: 'PRD-001', name_ar: 'أرز بسمتي فاخر', name_en: 'Premium Basmati Rice', barcode: '6223000123456', sku: 'RICE-BAS-5KG', unit: 'كيس', cost: 2800, price: 3200, type: 'TRADE' },
+    { code: 'PRD-002', name_ar: 'زيت نباتي 3 لتر', name_en: 'Vegetable Oil 3L', barcode: '6223000123457', sku: 'OIL-VEG-3L', unit: 'علبة', cost: 4200, price: 4800, type: 'TRADE' },
+    { code: 'PRD-003', name_ar: 'سكر أبيض 50 كغ', name_en: 'White Sugar 50kg', barcode: '6223000123458', sku: 'SUG-WHT-50KG', unit: 'كيس', cost: 15000, price: 16500, type: 'TRADE' },
+    { code: 'PRD-004', name_ar: 'دقيق فاخر 50 كغ', name_en: 'Premium Flour 50kg', barcode: '6223000123459', sku: 'FLR-PRM-50KG', unit: 'كيس', cost: 9500, price: 10500, type: 'TRADE' },
+    { code: 'PRD-005', name_ar: 'معجون طماطم 400غ', name_en: 'Tomato Paste 400g', barcode: '6223000123460', sku: 'TOM-PST-400G', unit: 'علبة', cost: 380, price: 450, type: 'TRADE' },
+    { code: 'PRD-006', name_ar: 'شاي ليبتون 200غ', name_en: 'Lipton Tea 200g', barcode: '6223000123461', sku: 'TEA-LIP-200G', unit: 'علبة', cost: 1200, price: 1400, type: 'TRADE' },
+    { code: 'PRD-007', name_ar: 'حليب مجفف 2.5 كغ', name_en: 'Milk Powder 2.5kg', barcode: '6223000123462', sku: 'MLK-PWD-2.5K', unit: 'علبة', cost: 8500, price: 9500, type: 'TRADE' },
+    { code: 'PRD-008', name_ar: 'تونة معلبة 185غ', name_en: 'Canned Tuna 185g', barcode: '6223000123463', sku: 'TUN-CAN-185G', unit: 'علبة', cost: 650, price: 750, type: 'TRADE' },
+    { code: 'PRD-009', name_ar: 'صابون لوكس 125غ', name_en: 'Lux Soap 125g', barcode: '6223000123464', sku: 'SOAP-LUX-125G', unit: 'قطعة', cost: 280, price: 330, type: 'CON' },
+    { code: 'PRD-010', name_ar: 'شامبو هيد آند شولدرز 400مل', name_en: 'Head & Shoulders 400ml', barcode: '6223000123465', sku: 'SHP-HNS-400M', unit: 'علبة', cost: 1800, price: 2100, type: 'CON' },
+    { code: 'PRD-011', name_ar: 'معجون أسنان كولجيت 100مل', name_en: 'Colgate Toothpaste 100ml', barcode: '6223000123466', sku: 'PAS-COL-100M', unit: 'علبة', cost: 420, price: 500, type: 'CON' },
+    { code: 'PRD-012', name_ar: 'منظف جليكسون 1 لتر', name_en: 'Gleason Cleaner 1L', barcode: '6223000123467', sku: 'CLN-GLX-1L', unit: 'علبة', cost: 1100, price: 1300, type: 'CON' },
+    { code: 'PRD-013', name_ar: 'مناديل فاين 200 منديل', name_en: 'Fine Tissues 200', barcode: '6223000123468', sku: 'TIS-FIN-200', unit: 'علبة', cost: 350, price: 420, type: 'CON' },
+    { code: 'PRD-014', name_ar: 'قهوة العربية 250غ', name_en: 'Arabian Coffee 250g', barcode: '6223000123469', sku: 'COF-ARA-250G', unit: 'علبة', cost: 2200, price: 2600, type: 'TRADE' },
+    { code: 'PRD-015', name_ar: 'بسكويت أوريو 154غ', name_en: 'Oreo Biscuits 154g', barcode: '6223000123470', sku: 'BIS-ORE-154G', unit: 'علبة', cost: 550, price: 650, type: 'TRADE' },
+  ];
 
 const WAREHOUSES: Array<{ code: string; name: string }> = [
   { code: 'WH-MAIN', name: 'المستودع الرئيسي - صنعاء' },
@@ -398,27 +398,27 @@ const EMPLOYEES: Array<{
   number: string; name: string; phone: string; email: string;
   dept: string; position: string; grade: string; hire_date: string; salary: number;
 }> = [
-  { number: 'EMP-001', name: 'أحمد علي عبدالله', phone: '+967111222333', email: 'ahmed@demo.ye', dept: 'الإدارة', position: 'مدير عام', grade: 'A', hire_date: '2020-01-15', salary: 450000 },
-  { number: 'EMP-002', name: 'خالد سعيد الحسني', phone: '+967222333444', email: 'khaled@demo.ye', dept: 'المبيعات', position: 'مدير مبيعات', grade: 'A', hire_date: '2020-03-10', salary: 350000 },
-  { number: 'EMP-003', name: 'محمد صالح القاضي', phone: '+967333444555', email: 'mohammed@demo.ye', dept: 'المخازن', position: 'مدير مخازن', grade: 'B', hire_date: '2021-02-01', salary: 280000 },
-  { number: 'EMP-004', name: 'فاطمة عبدالرحمن', phone: '+967444555666', email: 'fatima@demo.ye', dept: 'المحاسبة', position: 'رئيسة محاسبين', grade: 'A', hire_date: '2020-06-20', salary: 320000 },
-  { number: 'EMP-005', name: 'عبدالله يحيى المخلافي', phone: '+967555666777', email: 'abdullah@demo.ye', dept: 'المبيعات', position: 'مندوب مبيعات', grade: 'C', hire_date: '2022-01-10', salary: 180000 },
-  { number: 'EMP-006', name: 'سميرة علي الأحمدي', phone: '+967666777888', email: 'samira@demo.ye', dept: 'المحاسبة', position: 'محاسبة', grade: 'C', hire_date: '2022-04-15', salary: 170000 },
-  { number: 'EMP-007', name: 'ياسر محمود الكبسي', phone: '+967777888999', email: 'yaser@demo.ye', dept: 'المخازن', position: 'أمين مخزن', grade: 'C', hire_date: '2023-01-05', salary: 150000 },
-  { number: 'EMP-008', name: 'هند صالح البركاني', phone: '+967888999000', email: 'hind@demo.ye', dept: 'الإدارة', position: 'سكرتيرة', grade: 'C', hire_date: '2023-03-12', salary: 140000 },
-];
+    { number: 'EMP-001', name: 'أحمد علي عبدالله', phone: '+967111222333', email: 'ahmed@demo.ye', dept: 'الإدارة', position: 'مدير عام', grade: 'A', hire_date: '2020-01-15', salary: 450000 },
+    { number: 'EMP-002', name: 'خالد سعيد الحسني', phone: '+967222333444', email: 'khaled@demo.ye', dept: 'المبيعات', position: 'مدير مبيعات', grade: 'A', hire_date: '2020-03-10', salary: 350000 },
+    { number: 'EMP-003', name: 'محمد صالح القاضي', phone: '+967333444555', email: 'mohammed@demo.ye', dept: 'المخازن', position: 'مدير مخازن', grade: 'B', hire_date: '2021-02-01', salary: 280000 },
+    { number: 'EMP-004', name: 'فاطمة عبدالرحمن', phone: '+967444555666', email: 'fatima@demo.ye', dept: 'المحاسبة', position: 'رئيسة محاسبين', grade: 'A', hire_date: '2020-06-20', salary: 320000 },
+    { number: 'EMP-005', name: 'عبدالله يحيى المخلافي', phone: '+967555666777', email: 'abdullah@demo.ye', dept: 'المبيعات', position: 'مندوب مبيعات', grade: 'C', hire_date: '2022-01-10', salary: 180000 },
+    { number: 'EMP-006', name: 'سميرة علي الأحمدي', phone: '+967666777888', email: 'samira@demo.ye', dept: 'المحاسبة', position: 'محاسبة', grade: 'C', hire_date: '2022-04-15', salary: 170000 },
+    { number: 'EMP-007', name: 'ياسر محمود الكبسي', phone: '+967777888999', email: 'yaser@demo.ye', dept: 'المخازن', position: 'أمين مخزن', grade: 'C', hire_date: '2023-01-05', salary: 150000 },
+    { number: 'EMP-008', name: 'هند صالح البركاني', phone: '+967888999000', email: 'hind@demo.ye', dept: 'الإدارة', position: 'سكرتيرة', grade: 'C', hire_date: '2023-03-12', salary: 140000 },
+  ];
 
 const LEADS: Array<{
   name: string; phone: string; email: string; company: string;
   source: string; status: string; value: number; notes: string;
 }> = [
-  { name: 'محمد عبدالله السقاف', phone: '+967111000111', email: 'm.saqaf@example.com', company: 'شركة السقاف التجارية', source: 'معرض', status: 'new', value: 500000, notes: 'عميل محتمل من معرض صنعاء' },
-  { name: 'سمير علي الحميري', phone: '+967222000222', email: 's.alhamiri@example.com', company: 'مؤسسة الحميري', source: 'موقع إلكتروني', status: 'contacted', value: 350000, notes: 'تواصل عبر الموقع' },
-  { name: 'ليلى محمود الأصبحي', phone: '+967333000333', email: 'l.ashbah@example.com', company: 'شركة الأصبحي', source: 'توصية', status: 'qualified', value: 800000, notes: 'موصى به من عميل حالي' },
-  { name: 'عمر فاروق بامطرف', phone: '+967444000444', email: 'o.bamtraf@example.com', company: 'مؤسسة بامطرف', source: 'إعلان', status: 'new', value: 200000, notes: 'استجابة لإعلان فيسبوك' },
-  { name: 'نادية صالح الكحلاني', phone: '+967555000555', email: 'n.kahlan@example.com', company: 'شركة الكحلاني', source: 'معرض', status: 'contacted', value: 600000, notes: 'مهتمة بمنتجات التنظيف' },
-  { name: 'هشام أحمد الجندي', phone: '+967666000666', email: 'h.aljundi@example.com', company: 'مؤسسة الجندي', source: 'اتصال وارد', status: 'qualified', value: 450000, notes: 'طلب عرض أسعار' },
-];
+    { name: 'محمد عبدالله السقاف', phone: '+967111000111', email: 'm.saqaf@example.com', company: 'شركة السقاف التجارية', source: 'معرض', status: 'new', value: 500000, notes: 'عميل محتمل من معرض صنعاء' },
+    { name: 'سمير علي الحميري', phone: '+967222000222', email: 's.alhamiri@example.com', company: 'مؤسسة الحميري', source: 'موقع إلكتروني', status: 'contacted', value: 350000, notes: 'تواصل عبر الموقع' },
+    { name: 'ليلى محمود الأصبحي', phone: '+967333000333', email: 'l.ashbah@example.com', company: 'شركة الأصبحي', source: 'توصية', status: 'qualified', value: 800000, notes: 'موصى به من عميل حالي' },
+    { name: 'عمر فاروق بامطرف', phone: '+967444000444', email: 'o.bamtraf@example.com', company: 'مؤسسة بامطرف', source: 'إعلان', status: 'new', value: 200000, notes: 'استجابة لإعلان فيسبوك' },
+    { name: 'نادية صالح الكحلاني', phone: '+967555000555', email: 'n.kahlan@example.com', company: 'شركة الكحلاني', source: 'معرض', status: 'contacted', value: 600000, notes: 'مهتمة بمنتجات التنظيف' },
+    { name: 'هشام أحمد الجندي', phone: '+967666000666', email: 'h.aljundi@example.com', company: 'مؤسسة الجندي', source: 'اتصال وارد', status: 'qualified', value: 450000, notes: 'طلب عرض أسعار' },
+  ];
 
 const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: number; pad: number }> = [
   { type: 'sales_invoice', prefix: 'INV-', start: 1, current: 6, pad: 6 },
@@ -445,6 +445,7 @@ const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: n
 const STOCK_QTYS = [500, 300, 200, 350, 1000, 600, 150, 800, 1200, 250, 900, 400, 700, 180, 500];
 
 async function ensureRow(
+  this: DbAdapter,
   sql: string,
   params: unknown[],
   fallbackSql: string,
@@ -463,19 +464,8 @@ async function ensureRow(
   return null;
 }
 
-async function lookupIdByCode(table: string, companyId: string, code: string): Promise<string | null> {
-  const res = await this.query(
-    `SELECT id FROM ${table} WHERE company_id = $1::uuid AND code = $2::text LIMIT 1`,
-    [companyId, code]
-  );
-  if (res.success && res.rows && res.rows.length > 0) {
-    const id = (res.rows[0] as { id?: unknown }).id;
-    return id !== undefined && id !== null ? String(id) : null;
-  }
-  return null;
-}
-
 async function seedCompanyAndAdmin(
+  this: DbAdapter,
   adminPassword: string
 ): Promise<{ companyId: string; adminId: string }> {
   const fiscalYearStart = `${new Date().getFullYear()}-01-01`;
@@ -505,7 +495,7 @@ async function seedCompanyAndAdmin(
   return { companyId, adminId };
 }
 
-async function seedChartOfAccounts(companyId: string): Promise<Map<string, string>> {
+async function seedChartOfAccounts(this: DbAdapter, companyId: string): Promise<Map<string, string>> {
   const codeToId = new Map<string, string>();
   for (const acc of ACCOUNTS) {
     const parentId = acc.parent_code ? codeToId.get(acc.parent_code) || null : null;
@@ -524,7 +514,7 @@ async function seedChartOfAccounts(companyId: string): Promise<Map<string, strin
   return codeToId;
 }
 
-async function seedProductTypes(companyId: string, adminId: string, codeToId: Map<string, string>): Promise<Map<string, string>> {
+async function seedProductTypes(this: DbAdapter, companyId: string, adminId: string, codeToId: Map<string, string>): Promise<Map<string, string>> {
   const typeCodeToId = new Map<string, string>();
   for (const pt of PRODUCT_TYPES) {
     const salesId = pt.sales ? codeToId.get(pt.sales) || null : null;
@@ -545,7 +535,7 @@ async function seedProductTypes(companyId: string, adminId: string, codeToId: Ma
   return typeCodeToId;
 }
 
-async function seedUnits(companyId: string): Promise<void> {
+async function seedUnits(this: DbAdapter, companyId: string): Promise<void> {
   for (const u of UNITS) {
     await ensureRow.call(
       this,
@@ -560,7 +550,7 @@ async function seedUnits(companyId: string): Promise<void> {
   }
 }
 
-async function seedCostCenters(companyId: string): Promise<void> {
+async function seedCostCenters(this: DbAdapter, companyId: string): Promise<void> {
   for (const cc of COST_CENTERS) {
     await ensureRow.call(
       this,
@@ -575,7 +565,7 @@ async function seedCostCenters(companyId: string): Promise<void> {
   }
 }
 
-async function seedBanks(companyId: string, codeToId: Map<string, string>): Promise<void> {
+async function seedBanks(this: DbAdapter, companyId: string, codeToId: Map<string, string>): Promise<void> {
   for (const b of BANKS) {
     const accountId = codeToId.get(b.account_code) || null;
     await ensureRow.call(
@@ -591,7 +581,7 @@ async function seedBanks(companyId: string, codeToId: Map<string, string>): Prom
   }
 }
 
-async function seedCashBoxes(companyId: string, adminId: string, codeToId: Map<string, string>): Promise<void> {
+async function seedCashBoxes(this: DbAdapter, companyId: string, adminId: string, codeToId: Map<string, string>): Promise<void> {
   for (const cb of CASH_BOXES) {
     const accountId = codeToId.get(cb.account_code) || null;
     await ensureRow.call(
@@ -607,7 +597,7 @@ async function seedCashBoxes(companyId: string, adminId: string, codeToId: Map<s
   }
 }
 
-async function seedDefaultAccounts(companyId: string, codeToId: Map<string, string>): Promise<void> {
+async function seedDefaultAccounts(this: DbAdapter, companyId: string, codeToId: Map<string, string>): Promise<void> {
   for (const da of DEFAULT_ACCOUNTS) {
     const accountId = codeToId.get(da.account_code);
     if (!accountId) continue;
@@ -624,7 +614,7 @@ async function seedDefaultAccounts(companyId: string, codeToId: Map<string, stri
   }
 }
 
-async function seedCurrencies(companyId: string, adminId: string): Promise<void> {
+async function seedCurrencies(this: DbAdapter, companyId: string, adminId: string): Promise<void> {
   for (const c of CURRENCIES) {
     await ensureRow.call(
       this,
@@ -639,7 +629,7 @@ async function seedCurrencies(companyId: string, adminId: string): Promise<void>
   }
 }
 
-async function seedVatSettings(companyId: string): Promise<void> {
+async function seedVatSettings(this: DbAdapter, companyId: string): Promise<void> {
   await ensureRow.call(
     this,
     `INSERT INTO vat_settings (company_id, vat_rate, vat_number, is_inclusive, is_active)
@@ -652,7 +642,7 @@ async function seedVatSettings(companyId: string): Promise<void> {
   );
 }
 
-async function seedDocumentSequences(companyId: string): Promise<void> {
+async function seedDocumentSequences(this: DbAdapter, companyId: string): Promise<void> {
   for (const s of SEQUENCES) {
     await ensureRow.call(
       this,
@@ -667,7 +657,7 @@ async function seedDocumentSequences(companyId: string): Promise<void> {
   }
 }
 
-async function seedBranches(companyId: string, adminId: string): Promise<void> {
+async function seedBranches(this: DbAdapter, companyId: string, adminId: string): Promise<void> {
   for (const b of BRANCHES) {
     await ensureRow.call(
       this,
@@ -682,7 +672,7 @@ async function seedBranches(companyId: string, adminId: string): Promise<void> {
   }
 }
 
-async function seedCustomers(companyId: string): Promise<void> {
+async function seedCustomers(this: DbAdapter, companyId: string): Promise<void> {
   for (const c of CUSTOMERS) {
     await ensureRow.call(
       this,
@@ -697,7 +687,7 @@ async function seedCustomers(companyId: string): Promise<void> {
   }
 }
 
-async function seedSuppliers(companyId: string): Promise<void> {
+async function seedSuppliers(this: DbAdapter, companyId: string): Promise<void> {
   for (const s of SUPPLIERS) {
     await ensureRow.call(
       this,
@@ -712,7 +702,7 @@ async function seedSuppliers(companyId: string): Promise<void> {
   }
 }
 
-async function seedProductCategories(companyId: string): Promise<Map<string, string>> {
+async function seedProductCategories(this: DbAdapter, companyId: string): Promise<Map<string, string>> {
   const catIdByName = new Map<string, string>();
   for (const name of PRODUCT_CATEGORIES) {
     const id = await ensureRow.call(
@@ -731,6 +721,7 @@ async function seedProductCategories(companyId: string): Promise<Map<string, str
 }
 
 async function seedProducts(
+  this: DbAdapter,
   companyId: string,
   adminId: string,
   typeCodeToId: Map<string, string>,
@@ -765,7 +756,7 @@ async function seedProducts(
   return productIdByCode;
 }
 
-async function seedWarehouses(companyId: string): Promise<Map<string, string>> {
+async function seedWarehouses(this: DbAdapter, companyId: string): Promise<Map<string, string>> {
   const whIdByCode = new Map<string, string>();
   for (const w of WAREHOUSES) {
     const id = await ensureRow.call(
@@ -784,6 +775,7 @@ async function seedWarehouses(companyId: string): Promise<Map<string, string>> {
 }
 
 async function seedStock(
+  this: DbAdapter,
   companyId: string,
   adminId: string,
   productIdByCode: Map<string, string>,
@@ -820,7 +812,7 @@ async function seedStock(
   }
 }
 
-async function seedDepartments(companyId: string): Promise<Map<string, string>> {
+async function seedDepartments(this: DbAdapter, companyId: string): Promise<Map<string, string>> {
   const deptIdByName = new Map<string, string>();
   for (const name of DEPARTMENTS) {
     const id = await ensureRow.call(
@@ -839,6 +831,7 @@ async function seedDepartments(companyId: string): Promise<Map<string, string>> 
 }
 
 async function seedEmployees(
+  this: DbAdapter,
   companyId: string,
   adminId: string,
   deptIdByName: Map<string, string>
@@ -861,7 +854,7 @@ async function seedEmployees(
   return empIdByNumber;
 }
 
-async function seedPayrollComponents(companyId: string): Promise<void> {
+async function seedPayrollComponents(this: DbAdapter, companyId: string): Promise<void> {
   for (const pc of PAYROLL_COMPONENTS) {
     await ensureRow.call(
       this,
@@ -876,7 +869,7 @@ async function seedPayrollComponents(companyId: string): Promise<void> {
   }
 }
 
-async function seedLeads(companyId: string, adminId: string): Promise<Map<string, string>> {
+async function seedLeads(this: DbAdapter, companyId: string, adminId: string): Promise<Map<string, string>> {
   const leadIdByPhone = new Map<string, string>();
   for (const lead of LEADS) {
     const id = await ensureRow.call(
@@ -1104,25 +1097,25 @@ export const pgliteAdapter: DbAdapter = {
   },
 
   async createContact(data: any) {
-          if (data.type === 'supplier') {
-            const result = await this.query(
-              `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance)
+    if (data.type === 'supplier') {
+      const result = await this.query(
+        `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-              [data.companyId, data.code ?? null, data.name, data.phone ?? null, data.email ?? null, data.address ?? null, data.taxNumber ?? null, data.balance || 0],
-            );
-            return result.success && result.rows?.length && (result.rows[0] as { id?: unknown }).id
-              ? { success: true, id: String((result.rows[0] as { id: unknown }).id) }
-              : { success: false, error: result.error };
-          }
-          const result = await this.query(
-            `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, balance)
+        [data.companyId, data.code ?? null, data.name, data.phone ?? null, data.email ?? null, data.address ?? null, data.taxNumber ?? null, data.balance || 0],
+      );
+      return result.success && result.rows?.length && (result.rows[0] as { id?: unknown }).id
+        ? { success: true, id: String((result.rows[0] as { id: unknown }).id) }
+        : { success: false, error: result.error };
+    }
+    const result = await this.query(
+      `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, balance)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-            [data.companyId, data.code ?? null, data.name, data.phone ?? null, data.email ?? null, data.address ?? null, data.taxNumber ?? null, data.balance || 0],
-          );
-          return result.success && result.rows?.length && (result.rows[0] as { id?: unknown }).id
-            ? { success: true, id: String((result.rows[0] as { id: unknown }).id) }
-            : { success: false, error: result.error };
-        },
+      [data.companyId, data.code ?? null, data.name, data.phone ?? null, data.email ?? null, data.address ?? null, data.taxNumber ?? null, data.balance || 0],
+    );
+    return result.success && result.rows?.length && (result.rows[0] as { id?: unknown }).id
+      ? { success: true, id: String((result.rows[0] as { id: unknown }).id) }
+      : { success: false, error: result.error };
+  },
 
   // Onboarding / Seeding — PGlite is local, no external config needed
   async updateConfig(_config: { host?: string; port?: number | string; database?: string; user?: string; password?: string }) {
@@ -1204,7 +1197,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async seedDefault(adminPassword?: string) {
+  async seedDefault(this: DbAdapter, adminPassword?: string) {
     try {
       // Ensure migrations are applied
       await runPgliteMigrations();
@@ -1215,10 +1208,10 @@ export const pgliteAdapter: DbAdapter = {
       const passwordHash = await hashPassword(finalPassword);
 
       // Create company + admin user
-      const { companyId, adminId } = await seedCompanyAndAdmin(passwordHash);
+      const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
 
       // Seed chart of accounts (required for any accounting operation)
-      await seedChartOfAccounts(companyId);
+      await seedChartOfAccounts.call(this, companyId);
 
       return {
         success: true,
@@ -1231,7 +1224,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async seedDemo(adminPassword?: string) {
+  async seedDemo(this: DbAdapter, adminPassword?: string) {
     try {
       // Ensure migrations are applied
       await runPgliteMigrations();
@@ -1242,32 +1235,32 @@ export const pgliteAdapter: DbAdapter = {
       const passwordHash = await hashPassword(finalPassword);
 
       // Create company + admin user
-      const { companyId, adminId } = await seedCompanyAndAdmin(passwordHash);
+      const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
 
       // Seed chart of accounts (required for any accounting operation)
-      const codeToId = await seedChartOfAccounts(companyId);
+      const codeToId = await seedChartOfAccounts.call(this, companyId);
 
       // Seed master data in dependency order
-      await seedCurrencies(companyId, adminId);
-      await seedVatSettings(companyId);
-      await seedDocumentSequences(companyId);
-      await seedBranches(companyId, adminId);
-      const typeCodeToId = await seedProductTypes(companyId, adminId, codeToId);
-      await seedUnits(companyId);
-      await seedCostCenters(companyId);
-      await seedBanks(companyId, codeToId);
-      await seedCashBoxes(companyId, adminId, codeToId);
-      await seedDefaultAccounts(companyId, codeToId);
-      await seedCustomers(companyId);
-      await seedSuppliers(companyId);
-      const catIdByName = await seedProductCategories(companyId);
-      const productIdByCode = await seedProducts(companyId, adminId, typeCodeToId, catIdByName);
-      const whIdByCode = await seedWarehouses(companyId);
-      await seedStock(companyId, adminId, productIdByCode, whIdByCode);
-      const deptIdByName = await seedDepartments(companyId);
-      await seedEmployees(companyId, adminId, deptIdByName);
-      await seedPayrollComponents(companyId);
-      await seedLeads(companyId, adminId);
+      await seedCurrencies.call(this, companyId, adminId);
+      await seedVatSettings.call(this, companyId);
+      await seedDocumentSequences.call(this, companyId);
+      await seedBranches.call(this, companyId, adminId);
+      const typeCodeToId = await seedProductTypes.call(this, companyId, adminId, codeToId);
+      await seedUnits.call(this, companyId);
+      await seedCostCenters.call(this, companyId);
+      await seedBanks.call(this, companyId, codeToId);
+      await seedCashBoxes.call(this, companyId, adminId, codeToId);
+      await seedDefaultAccounts.call(this, companyId, codeToId);
+      await seedCustomers.call(this, companyId);
+      await seedSuppliers.call(this, companyId);
+      const catIdByName = await seedProductCategories.call(this, companyId);
+      const productIdByCode = await seedProducts.call(this, companyId, adminId, typeCodeToId, catIdByName);
+      const whIdByCode = await seedWarehouses.call(this, companyId);
+      await seedStock.call(this, companyId, adminId, productIdByCode, whIdByCode);
+      const deptIdByName = await seedDepartments.call(this, companyId);
+      await seedEmployees.call(this, companyId, adminId, deptIdByName);
+      await seedPayrollComponents.call(this, companyId);
+      await seedLeads.call(this, companyId, adminId);
 
       return {
         success: true,
