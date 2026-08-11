@@ -76,6 +76,7 @@
     "@electric-sql/pglite": "^0.5.4",
     "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-table": "^8.21.3",
+    "@vercel/analytics": "^2.0.1",
     "autoprefixer": "^10.5.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
