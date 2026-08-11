@@ -694,11 +694,9 @@ export async function seedInitialData(adminPassword) {
       VALUES ($1, '11102', 'ط­ط³ط§ط¨ ط¨ظ†ظƒ ط§ظ„ظƒط±ظٹظ…ظٹ', 'Yemen International Bank', $2, 'asset', 'debit', FALSE, 12000000);
     `, [companyId, cashGroupId]);
 
-    // Liabilities
-    await client.query(`
-      INSERT INTO accounts (company_id, code, name_ar, name_en, type, nature, is_group)
-      VALUES ($1, '2', 'ط§ظ„ط§ظ„طھط²ط§ظ…ط§طھ', 'Liabilities', 'liability', 'credit', TRUE);
-    `, [companyId]);
+    // Liabilities — created below with RETURNING id (used as parent for 21101/21301).
+    // The earlier duplicate insert at this position was removed: it conflicted with the
+    // unique constraint accounts_company_id_code_unique and aborted the seed.
 
     // Equity
     const equityRes = await client.query(`

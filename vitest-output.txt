@@ -1,0 +1,172 @@
+npm notice run MaghzAccountPro@0.1.0 npx
+npm notice run vitest run
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90me:/MaghzAccountApp/MaghzAccountFlash35[39m
+
+ [31m❯[39m src/core/services/logger.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/engine/chatEngine.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m drizzle/migrations.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/app/layout.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m electron/seedDemoData.test.js [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/hooks/useAsyncData.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/hooks/useDebouncedValue.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/hooks/usePaginatedList.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/hooks/useSettings.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/i18n/i18n.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/services/context.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/services/errors.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/services/stateMachine.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/store/onboardingStore.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/store/store.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/store/toastStore.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/aging.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/auditLogger.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/currencyBreakdown.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/currencyConverter.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/export.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/html.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/index.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/journalEntryGenerator.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/locale.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/mapPgRow.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/normalizeArabic.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/pagination-edge-cases.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/pagination.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/productTypeFilter.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/printDocument.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/useFormatters.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/userIdValidator.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/useOwnerFilter.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/validation-currency-extended.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/utils/validation-currency.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/accounting/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/auth/store.ownership.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/auth/store.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/crm/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/hr/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/purchases/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/manufacturing/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/sales/api.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/ActionButtons.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/Card.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/DataTablePro.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/ErrorBoundary.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/Pagination.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/PageLoader.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/StatusBadge.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/Table.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/PermissionGate.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/Toast.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/accounting/hooks/useAccounting.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/components/MessageBubble.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/engine/streamingReconstructor.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/components/RichText.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/engine/stripImitationToolBlocks.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/engine/toolExecutor.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/skills/registry.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/engine/systemPrompt.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/suggestions/suggestionEngine.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/tools/registry.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/ai/tools/searchTools.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/auth/components/RolesPage.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/modules/auth/hooks/usePermission.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/command/CommandPalette.test.tsx [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/command/paletteItems.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m src/core/ui/components/command/paletteSearch.test.ts [2m([22m[2m0 test[22m[2m)[22m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 71 [49m[22m[31m⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m drizzle/migrations.test.ts[2m [ drizzle/migrations.test.ts ][22m
+[41m[1m FAIL [22m[49m electron/seedDemoData.test.js[2m [ electron/seedDemoData.test.js ][22m
+[41m[1m FAIL [22m[49m src/app/layout.test.tsx[2m [ src/app/layout.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/api.test.ts[2m [ src/core/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/hooks/useAsyncData.test.ts[2m [ src/core/hooks/useAsyncData.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/hooks/useDebouncedValue.test.ts[2m [ src/core/hooks/useDebouncedValue.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/hooks/usePaginatedList.test.ts[2m [ src/core/hooks/usePaginatedList.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/hooks/useSettings.test.ts[2m [ src/core/hooks/useSettings.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/i18n/i18n.test.ts[2m [ src/core/i18n/i18n.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/services/context.test.ts[2m [ src/core/services/context.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/services/errors.test.ts[2m [ src/core/services/errors.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/services/logger.test.ts[2m [ src/core/services/logger.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/services/stateMachine.test.ts[2m [ src/core/services/stateMachine.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/store/onboardingStore.test.ts[2m [ src/core/store/onboardingStore.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/store/store.test.ts[2m [ src/core/store/store.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/store/toastStore.test.ts[2m [ src/core/store/toastStore.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/aging.test.ts[2m [ src/core/utils/aging.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/auditLogger.test.ts[2m [ src/core/utils/auditLogger.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/currencyBreakdown.test.ts[2m [ src/core/utils/currencyBreakdown.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/currencyConverter.test.ts[2m [ src/core/utils/currencyConverter.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/export.test.ts[2m [ src/core/utils/export.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/html.test.ts[2m [ src/core/utils/html.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/index.test.ts[2m [ src/core/utils/index.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/journalEntryGenerator.test.ts[2m [ src/core/utils/journalEntryGenerator.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/locale.test.ts[2m [ src/core/utils/locale.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/mapPgRow.test.ts[2m [ src/core/utils/mapPgRow.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/normalizeArabic.test.ts[2m [ src/core/utils/normalizeArabic.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/pagination-edge-cases.test.ts[2m [ src/core/utils/pagination-edge-cases.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/pagination.test.ts[2m [ src/core/utils/pagination.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/printDocument.test.ts[2m [ src/core/utils/printDocument.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/productTypeFilter.test.ts[2m [ src/core/utils/productTypeFilter.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/useFormatters.test.ts[2m [ src/core/utils/useFormatters.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/useOwnerFilter.test.ts[2m [ src/core/utils/useOwnerFilter.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/userIdValidator.test.ts[2m [ src/core/utils/userIdValidator.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/validation-currency-extended.test.ts[2m [ src/core/utils/validation-currency-extended.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/utils/validation-currency.test.ts[2m [ src/core/utils/validation-currency.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/accounting/api.test.ts[2m [ src/modules/accounting/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/auth/store.ownership.test.ts[2m [ src/modules/auth/store.ownership.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m [ src/modules/auth/store.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/crm/api.test.ts[2m [ src/modules/crm/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/hr/api.test.ts[2m [ src/modules/hr/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/manufacturing/api.test.ts[2m [ src/modules/manufacturing/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/purchases/api.test.ts[2m [ src/modules/purchases/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/sales/api.test.ts[2m [ src/modules/sales/api.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/ActionButtons.test.tsx[2m [ src/core/ui/components/ActionButtons.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/Card.test.tsx[2m [ src/core/ui/components/Card.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/DataTablePro.test.tsx[2m [ src/core/ui/components/DataTablePro.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/ErrorBoundary.test.tsx[2m [ src/core/ui/components/ErrorBoundary.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/PageLoader.test.tsx[2m [ src/core/ui/components/PageLoader.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/Pagination.test.tsx[2m [ src/core/ui/components/Pagination.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/PermissionGate.test.tsx[2m [ src/core/ui/components/PermissionGate.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/StatusBadge.test.tsx[2m [ src/core/ui/components/StatusBadge.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/Table.test.tsx[2m [ src/core/ui/components/Table.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/Toast.test.tsx[2m [ src/core/ui/components/Toast.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/modules/accounting/hooks/useAccounting.test.ts[2m [ src/modules/accounting/hooks/useAccounting.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/components/MessageBubble.test.tsx[2m [ src/modules/ai/components/MessageBubble.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/components/RichText.test.tsx[2m [ src/modules/ai/components/RichText.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/engine/chatEngine.test.ts[2m [ src/modules/ai/engine/chatEngine.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/engine/streamingReconstructor.test.ts[2m [ src/modules/ai/engine/streamingReconstructor.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/engine/stripImitationToolBlocks.test.ts[2m [ src/modules/ai/engine/stripImitationToolBlocks.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/engine/systemPrompt.test.ts[2m [ src/modules/ai/engine/systemPrompt.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/engine/toolExecutor.test.ts[2m [ src/modules/ai/engine/toolExecutor.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/skills/registry.test.ts[2m [ src/modules/ai/skills/registry.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/suggestions/suggestionEngine.test.ts[2m [ src/modules/ai/suggestions/suggestionEngine.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/tools/registry.test.ts[2m [ src/modules/ai/tools/registry.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/ai/tools/searchTools.test.ts[2m [ src/modules/ai/tools/searchTools.test.ts ][22m
+[41m[1m FAIL [22m[49m src/modules/auth/components/RolesPage.test.tsx[2m [ src/modules/auth/components/RolesPage.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/modules/auth/hooks/usePermission.test.tsx[2m [ src/modules/auth/hooks/usePermission.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/command/CommandPalette.test.tsx[2m [ src/core/ui/components/command/CommandPalette.test.tsx ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/command/paletteItems.test.ts[2m [ src/core/ui/components/command/paletteItems.test.ts ][22m
+[41m[1m FAIL [22m[49m src/core/ui/components/command/paletteSearch.test.ts[2m [ src/core/ui/components/command/paletteSearch.test.ts ][22m
+[31m[1mError[22m: Vitest failed to find the current suite. One of the following is possible:
+- "vitest" is imported directly without running "vitest" command
+- "vitest" is imported inside "globalSetup" (to fix this, use "setupFiles" instead, because "globalSetup" runs in a different context)
+- "vitest" is imported inside Vite / Vitest config file
+- Otherwise, it might be a Vitest bug. Please report it to https://github.com/vitest-dev/vitest/issues
+[39m
+[36m [2m❯[22m src/test/setup.ts:[2m6:1[22m[39m
+    [90m  4|[39m
+    [90m  5|[39m [90m// Clean up after each test[39m
+    [90m  6|[39m [34mafterEach[39m(() [33m=>[39m {
+    [90m   |[39m [31m^[39m
+    [90m  7|[39m   [34mcleanup[39m()[33m;[39m
+    [90m  8|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/71]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m71 failed[39m[22m[90m (71)[39m
+[2m      Tests [22m [2mno tests[22m
+[2m   Start at [22m 20:49:12
+[2m   Duration [22m 160.32s[2m (transform 131ms, setup 0ms, import 0ms, tests 0ms, environment 307.33s)[22m
+
