@@ -340,4 +340,33 @@ export const electronPgAdapter: DbAdapter = {
       ? { success: true, id: String(result.rows[0].id) }
       : { success: false, error: result.error };
   },
+
+  // Onboarding / Seeding — delegate to Electron preload bridge
+  async updateConfig(config) {
+    if (typeof window !== 'undefined' && window.electronDB?.updateConfig) {
+      return await window.electronDB.updateConfig(config);
+    }
+    return { success: false, error: 'electronDB not available' };
+  },
+
+  async clearAll(payload) {
+    if (typeof window !== 'undefined' && window.electronDB?.clearAll) {
+      return await window.electronDB.clearAll(payload);
+    }
+    return { success: false, error: 'electronDB not available' };
+  },
+
+  async seedDefault(adminPassword) {
+    if (typeof window !== 'undefined' && window.electronDB?.seedDefault) {
+      return await window.electronDB.seedDefault(adminPassword);
+    }
+    return { success: false, error: 'electronDB not available' };
+  },
+
+  async seedDemo(adminPassword) {
+    if (typeof window !== 'undefined' && window.electronDB?.seedDemo) {
+      return await window.electronDB.seedDemo(adminPassword);
+    }
+    return { success: false, error: 'electronDB not available' };
+  },
 };

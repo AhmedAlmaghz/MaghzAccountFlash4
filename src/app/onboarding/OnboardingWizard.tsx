@@ -23,6 +23,7 @@ import { useOnboardingStore } from '@/core/store/onboardingStore';
 import { useAppStore } from '@/core/store';
 import { Button, Input, Card } from '@/core/ui/components';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import { getDbAdapter } from '@/core/database/adapters';
 
 const getSteps = (t: (key: string) => string) => [
   { id: 0, title: t('onboarding.welcome'), description: t('onboarding.welcomeDesc') },
@@ -54,15 +55,19 @@ export const OnboardingWizard: React.FC = () => {
         fiscalYearStart: companyConfig.fiscalYearStart || undefined,
       });
 
-      // Update Electron PG config
-      if (typeof window !== 'undefined' && window.electronDB?.updateConfig) {
-        await window.electronDB.updateConfig({
+      // Persist DB config via the active adapter (works in both web and Electron modes)
+      try {
+        const adapter = await getDbAdapter();
+        await adapter.updateConfig({
           host: dbConfig.host,
           port: dbConfig.port,
           database: dbConfig.database,
           user: dbConfig.user,
           password: dbConfig.password,
         });
+      } catch (configErr) {
+        // Non-fatal: PGlite has no external config; Electron adapter may not be wired in dev
+        console.warn('updateConfig skipped:', configErr);
       }
 
       setCompleted(true);

@@ -32,5 +32,11 @@ export interface DbAdapter {
   // Contacts (Customers/Suppliers)
   getContacts(companyId: string, type?: string): Promise<{ success: boolean; data?: any[]; error?: string }>;
   createContact(data: any): Promise<{ success: boolean; id?: string; error?: string }>;
+
+  // Onboarding / Seeding (must be implemented by ALL adapters — not Electron-specific)
+  updateConfig(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
+  clearAll(payload?: { confirm?: boolean; username?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
+  seedDefault(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
+  seedDemo(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
