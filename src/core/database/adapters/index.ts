@@ -44,6 +44,11 @@ let adapterMode: DbMode | null = null;
 export async function getDbAdapter(): Promise<DbAdapter> {
   const mode = getDbMode();
 
+  // E2E always uses the HTTP bridge — PGlite would create an empty
+  // in-browser database with no seeded data (the e2e Vite config sets
+  // VITE_E2E=1).
+  const isE2E = (import.meta as { env?: { VITE_E2E?: string } }).env?.VITE_E2E === '1';
+
   // Reuse existing working adapter if mode hasn't changed
   if (adapter && adapterMode === mode) {
     try {
@@ -54,7 +59,7 @@ export async function getDbAdapter(): Promise<DbAdapter> {
   }
 
   // 1. PGlite (PostgreSQL WASM) — local, no server required
-  if (mode === 'pglite') {
+  if (mode === 'pglite' && !isE2E) {
     try {
       const { pgliteAdapter, runPgliteMigrations } = await import('./pgliteAdapter');
       const migrationResult = await runPgliteMigrations();

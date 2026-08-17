@@ -17,6 +17,7 @@ export interface DbAdapter {
 
   // Company
   getCompany(): Promise<{ success: boolean; data?: any; error?: string }>;
+  updateCompany(data: any, updatedBy?: string | null): Promise<{ success: boolean; error?: string }>;
 
   // Accounts
   getAccounts(companyId: string): Promise<{ success: boolean; data?: any[]; error?: string }>;

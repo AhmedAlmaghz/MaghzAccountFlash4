@@ -111,38 +111,6 @@ export class TransactionManager extends BaseService {
   }
 
   /**
-   * Execute operation within a savepoint
-   * Allows partial rollback within a transaction
-   */
-  async executeWithSavepoint<T>(
-    savepointName: string,
-    operation: () => Promise<T>
-  ): Promise<T> {
-    const adapter = await this.getDb();
-    
-    try {
-      // Create savepoint
-      await adapter.query(`SAVEPOINT ${savepointName}`);
-      
-      // Execute operation
-      const result = await operation();
-      
-      // Release savepoint
-      await adapter.query(`RELEASE SAVEPOINT ${savepointName}`);
-      
-      return result;
-    } catch (error) {
-      // Rollback to savepoint
-      try {
-        await adapter.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-      } catch (rollbackError) {
-        console.error(`Failed to rollback to savepoint ${savepointName}:`, rollbackError);
-      }
-      throw error;
-    }
-  }
-
-  /**
    * Validate transaction consistency
    */
   async validateTransactionConsistency(

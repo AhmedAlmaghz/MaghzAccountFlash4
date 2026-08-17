@@ -1,0 +1,151 @@
+npm notice run MaghzAccountPro@0.1.0 npx
+npm notice run vitest run src/modules/accounting/api.test.ts src/modules/sales/api.test.ts
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mE:/MaghzAccountApp/MaghzAccountFlash35[39m
+
+ [31m❯[39m src/modules/sales/api.test.ts [2m([22m[2m35 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 102[2mms[22m[39m
+     [32m✓[39m always scopes the statement to the caller company[32m 15[2mms[22m[39m
+     [32m✓[39m returns empty array when no transactions exist[32m 2[2mms[22m[39m
+     [32m✓[39m rejects a missing companyId (cross-tenant protection)[32m 2[2mms[22m[39m
+     [32m✓[39m propagates adapter errors[32m 2[2mms[22m[39m
+     [32m✓[39m groups invoices by customer and bucket using due_date when present[32m 5[2mms[22m[39m
+     [32m✓[39m falls back to invoice date when due_date is null[32m 2[2mms[22m[39m
+     [32m✓[39m ignores zero-amount rows (paid invoices)[32m 1[2mms[22m[39m
+     [32m✓[39m filters by company_id[32m 2[2mms[22m[39m
+     [32m✓[39m returns posted invoices joined with their lines[32m 4[2mms[22m[39m
+     [32m✓[39m only returns invoices with status posted/partially_paid/paid[32m 2[2mms[22m[39m
+     [32m✓[39m returns empty array when no posted invoices exist[32m 1[2mms[22m[39m
+[31m     [31m×[31m auto-computes baseCurrencyAmount when not provided[39m[32m 21[2mms[22m[39m
+     [32m✓[39m inserts all 20 columns for the invoice header (incl. multi-currency + payment_type + cash/bank)[32m 1[2mms[22m[39m
+     [32m✓[39m rejects deletion of posted invoice (cannot delete after posting)[32m 1[2mms[22m[39m
+     [32m✓[39m rejects deletion of draft invoice with payments[32m 1[2mms[22m[39m
+     [32m✓[39m allows deletion of empty draft invoice[32m 1[2mms[22m[39m
+     [32m✓[39m rejects overpayment (paidAmount > totalAmount)[32m 1[2mms[22m[39m
+     [32m✓[39m rejects non-positive exchange rate[32m 1[2mms[22m[39m
+     [32m✓[39m increments customer balance by outstanding amount on posting[32m 3[2mms[22m[39m
+     [32m✓[39m does not update customer balance when invoice is fully paid[32m 1[2mms[22m[39m
+     [32m✓[39m resolves a stale userId (valid UUID, missing from users) to null instead of failing the FK constraint[32m 2[2mms[22m[39m
+     [32m✓[39m decrements customer balance by return amount on posting[32m 2[2mms[22m[39m
+     [32m✓[39m rejects deletion of converted quotation[32m 1[2mms[22m[39m
+     [32m✓[39m rejects deletion of accepted quotation[32m 1[2mms[22m[39m
+     [32m✓[39m allows deletion of draft/rejected quotation[32m 1[2mms[22m[39m
+     [32m✓[39m rejects deletion of posted return[32m 1[2mms[22m[39m
+     [32m✓[39m rejects modifying lines of posted invoice[32m 1[2mms[22m[39m
+     [32m✓[39m rejects reducing paid amount below current payments[32m 1[2mms[22m[39m
+     [32m✓[39m allows increasing paid amount on posted invoice[32m 1[2mms[22m[39m
+     [32m✓[39m returns only posted/partially_paid invoices with outstanding balance[32m 2[2mms[22m[39m
+     [32m✓[39m returns empty array when no outstanding invoices[32m 1[2mms[22m[39m
+     [32m✓[39m returns error for empty customerId (validation rejects)[32m 1[2mms[22m[39m
+     [32m✓[39m generates customer code from sequence when code is not provided[32m 2[2mms[22m[39m
+     [32m✓[39m uses provided code when caller supplies one[32m 1[2mms[22m[39m
+     [32m✓[39m includes agent-created rows (created_by IS NULL) when createdBy filter is applied[32m 2[2mms[22m[39m
+ [31m❯[39m src/modules/accounting/api.test.ts [2m([22m[2m24 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 70[2mms[22m[39m
+     [32m✓[39m updates invoice paid_amount and decrements customer balance for receipt[32m 8[2mms[22m[39m
+     [32m✓[39m sets invoice status to paid when fully paid (via CTE CASE)[32m 3[2mms[22m[39m
+     [32m✓[39m sets invoice status to partially_paid when partially paid (via CTE CASE)[32m 2[2mms[22m[39m
+     [32m✓[39m increments supplier balance for payment voucher[32m 2[2mms[22m[39m
+     [32m✓[39m returns error if invoice not found[32m 1[2mms[22m[39m
+     [32m✓[39m applies payment to invoice when invoiceId and amountApplied are provided[32m 2[2mms[22m[39m
+     [32m✓[39m does not apply payment when amountApplied is 0[32m 1[2mms[22m[39m
+     [32m✓[39m rejects when amountApplied exceeds amount[32m 1[2mms[22m[39m
+     [32m✓[39m rejects deletion when amountApplied > 0 (would break invoice balance)[32m 2[2mms[22m[39m
+     [32m✓[39m allows deletion when amountApplied is 0 (no payment linked)[32m 2[2mms[22m[39m
+     [32m✓[39m rejects deletion when amountApplied > 0[32m 2[2mms[22m[39m
+     [32m✓[39m rejects modifying invoiceId on posted voucher[32m 2[2mms[22m[39m
+     [32m✓[39m rejects modifying amountApplied on posted voucher[32m 1[2mms[22m[39m
+     [32m✓[39m allows modifying other fields on posted voucher[32m 1[2mms[22m[39m
+     [32m✓[39m createReceiptVoucher: converts undefined invoiceId to null in SQL params[32m 1[2mms[22m[39m
+     [32m✓[39m createPaymentVoucher: converts empty string supplierId to null (PG uuid error prevention)[32m 2[2mms[22m[39m
+     [32m✓[39m createPaymentVoucher: rejects when both supplierId and expenseAccountId are missing[32m 1[2mms[22m[39m
+     [32m✓[39m createReceiptVoucher: accepts voucher with no invoice and amountApplied=0 (on-account payment)[32m 1[2mms[22m[39m
+     [32m✓[39m createReceiptVoucher: still rejects when no invoice and amountApplied > 0[32m 1[2mms[22m[39m
+     [32m✓[39m createReceiptVoucher: still rejects when amountApplied > amount[32m 1[2mms[22m[39m
+[31m     [31m×[31m passes a valid UUID userId as created_by and updated_by[39m[32m 20[2mms[22m[39m
+[31m     [31m×[31m replaces empty-string userId with NULL (avoids PG uuid parse error)[39m[32m 3[2mms[22m[39m
+[31m     [31m×[31m replaces malformed UUID userId with NULL[39m[32m 2[2mms[22m[39m
+     [32m✓[39m updateAccount also normalizes userId (cast ::uuid + null fallback)[32m 1[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 4 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/modules/accounting/api.test.ts[2m > [22maccountingApi.createAccount — FK safety for created_by/updated_by[2m > [22mpasses a valid UUID userId as created_by and updated_by
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m src/modules/accounting/api.test.ts:[2m502:25[22m[39m
+    [90m500|[39m       [33mVALID_UUID[39m[33m,[39m
+    [90m501|[39m     )[33m;[39m
+    [90m502|[39m     [34mexpect[39m(res[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m503|[39m     [34mexpect[39m(capturedSql)[33m.[39m[34mtoMatch[39m([36m/\$12::uuid/[39m)[33m;[39m
+    [90m504|[39m     [34mexpect[39m(capturedSql)[33m.[39m[34mtoMatch[39m([36m/\$13::uuid/[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/accounting/api.test.ts[2m > [22maccountingApi.createAccount — FK safety for created_by/updated_by[2m > [22mreplaces empty-string userId with NULL (avoids PG uuid parse error)
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m src/modules/accounting/api.test.ts:[2m532:25[22m[39m
+    [90m530|[39m       [32m''[39m[33m,[39m  [90m// Empty userId should NOT cause FK failure[39m
+    [90m531|[39m     )[33m;[39m
+    [90m532|[39m     [34mexpect[39m(res[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m533|[39m     [34mexpect[39m(capturedParams[[34m11[39m])[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m534|[39m     [34mexpect[39m(capturedParams[[34m12[39m])[33m.[39m[34mtoBeNull[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/accounting/api.test.ts[2m > [22maccountingApi.createAccount — FK safety for created_by/updated_by[2m > [22mreplaces malformed UUID userId with NULL
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m src/modules/accounting/api.test.ts:[2m560:25[22m[39m
+    [90m558|[39m       [32m'not-a-valid-uuid'[39m[33m,[39m
+    [90m559|[39m     )[33m;[39m
+    [90m560|[39m     [34mexpect[39m(res[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m561|[39m     [34mexpect[39m(capturedParams[[34m11[39m])[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m562|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/sales/api.test.ts[2m > [22msalesApi.createInvoice (currency auto-compute)[2m > [22mauto-computes baseCurrencyAmount when not provided
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m src/modules/sales/api.test.ts:[2m293:25[22m[39m
+    [90m291|[39m       lines[33m:[39m [][33m,[39m
+    [90m292|[39m     } [35mas[39m never)[33m;[39m
+    [90m293|[39m     [34mexpect[39m(res[33m.[39msuccess)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m294|[39m   })[33m;[39m
+    [90m295|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m55 passed[39m[22m[90m (59)[39m
+[2m   Start at [22m 09:56:02
+[2m   Duration [22m 4.63s[2m (transform 1.03s, setup 1.14s, import 1.85s, tests 172ms, environment 4.81s)[22m
+

@@ -2261,7 +2261,62 @@ npx drizzle-kit migrate
 - **`reports.noPermission` i18n key**: مفتاح موحد لكل التقارير. الـ icon + message مناسبين لكل module
 - **i18n balance automatic enforcement**: `Object.keys(ar.reports).length === Object.keys(en.reports).length` يضمن التطابق. أي drift = fail test
 
-### المرحلة 36: إصلاحات حرجة إضافية لوحدة المبيعات + جدول audit_logs
+### المرحلة 50: المرحلة 2 — إغلاق سطح الهجوم المتبقي (Sessions + Rate-limit + SQL Whitelist + Route RBAC)
+- **الهدف**: سد الفجوات الأمنية التي حددتها المرحلة 1 بعد إصلاح الثغرات الحرجة
+- **تصليب الجلسات** (`electron/dbHandler.js`):
+  - إضافة `SESSION_MAX_LIFETIME_MS = 8 ساعات` — الجلسة لا تعيش للأبد حتى مع الـ sliding TTL المتجدد (سرقة token لا تعطي وصولاً لانهائياً)
+  - `sweepExpiredSessions()` + `ensureSessionSweeper()`: interval كل 60 ثانية يمسح الجلسات منتهية الصلاحية (يمنع تسرب tokens من crash)
+  - `revokeUserSessions(userId)`: إبطال فوري لكل جلسات المستخدم عند:
+    - تغيير كلمة المرور (`reset-password`)
+    - تعطيل المستخدم (`update-user` مع `isActive === false`)
+    - حذف المستخدم (`delete-user`)
+- **Rate-limit على login** (`electron/dbHandler.js`):
+  - `checkLoginAttempt` / `recordFailedLogin` / `clearLoginAttempts`: حماية من brute-force
+  - مفتاح مزدوج: `wc:{webContentsId}` + `u:{username}` — المهاجم لا يهرب بتدوير النوافذ
+  - الحد: 5 محاولات/60 ثانية، ثم lockout 5 دقائق (`LOGIN_LOCKOUT_MS`)
+  - مسح العداد عند نجاح الدخول (`clearLoginAttempts`)
+- **تعدد username بين الشركات** (`electron/dbHandler.js`):
+  - login الآن: `SELECT ... WHERE username = $1` (بدون `LIMIT 1`)، ثم `result.rows.find(r => r.is_active && verifyPassword(...))` — يقبل أول حساب نشط تطابق كلمة مروره (بدلاً من اختيار تعسفي لـ tenant)
+  - `clearLoginAttempts` بعد نجاح الدخول
+- **إعادة بناء SQL whitelist** (`electron/dbHandler.js` — `SQL_MODULE_TABLE_RULES` + `extractTableNames`):
+  - استبدال `SQL_MODULE_PERMISSIONS` (substring matching قديم) بـ `SQL_MODULE_TABLE_RULES` (جدول دقيق لكل جدول business)
+  - `extractTableNames(sql)`: استخراج أسماء الجداول الفعلي من SQL عبر regex على `FROM/JOIN/INTO/UPDATE` + استبعاد CTE aliases (`WITH x AS (`)
+  - **قاعدة حاسمة**: أي SQL لا يطرق جدول business معروف → `throw 'SQL operation not permitted'` (defense-in-depth)
+  - **pg_ / information_schema** مرفوضة دائماً كـ renderer target
+  - نظام صلاحيات دلالي:
+    - **READ**: `module.view` أو `module.own` (حتى roles المقيدة بـ own records مثل sales_rep تحل JOINed display names)
+    - **WRITE**: `module.create` أو `module.edit` أو `module.post` (posting invoice يلمس accounting tables لكنه flow مبيعات)
+    - **readAny / writeAny**: جداول مرجعية cross-module (currencies, units, banks, cash_boxes, vat_settings, default_accounts, document_sequences) — القراءة مسموحة للجميع، الكتابة تحتاج أي `create` permission من أي module
+    - `audit_logs` — `writeAny: true` (كل business flow يكتب audit، القراءة تبقى admin فقط)
+    - `document_sequences` — `writePermissions` list (أي module.create يسمح بالتحديث)
+  - `FORBIDDEN_STATEMENT_PATTERN`: anchored `^\s*(set|show|begin|...)\b` — إصلاح bug قديم كان `\bset\b` يمنع كل `UPDATE ... SET`
+- **Route-level RBAC** (`src/app/router.tsx`):
+  - `PermissionRoute`: مكوّن guard يستخدم `useCanAccessModule(module)` أو explicit `permission`
+  - كل modules الـ 11 (accounting, inventory, sales, purchases, manufacturing, hr, crm, reports, settings, ai) مربوطة بـ `<Route element={<PermissionRoute module="..." />}>`
+  - `/users`, `/roles`, `/audit-logs` مربوطة بـ `permission="settings.view"`
+  - إخفاء menu item ليس حماية — الـ URL مباشر الوصول. الـ guard يعيد التوجيه إلى `/`
+- **النتيجة النهائية**:
+  - `npx tsc -b --force`: **0 errors** ✓
+  - `npm run build`: **built in 9.38s** ✓
+  - `npx vitest run`: **1052/1073 passed** (21 فشلا مسبقاً، 0 جديدة) ✓
+  - `node --check electron/dbHandler.js`: ✓
+- **إصلاحات جانبية**:
+  - `PermissionRoute`: استدعاء `useCanAccessModule(module ?? 'core')` بدون conditional (React rules)
+  - استيراد `useAuthStore` محذوف من منتصف الملف (كان قبل `Route` definition)
+- **قواعد ذهبية مضافة (Phase 50)**:
+  - **absolute lifetime للـ sessions**: `SESSION_MAX_LIFETIME_MS = 8h` — sliding TTL وحده يسمح لـ stolen token بالبقاء للأبد. **القاعدة**: `absoluteExpiresAt` في كل جلسة، والـ sweeper يمسح
+  - **revokeUserSessions على password/deactivate/delete**: لا تعتمد على client logout. كل تغيير في بيانات المستخدم يجب أن يقطع الوصول فوراً
+  - **rate-limit مزدوج المفتاح**: `wc:{senderId}` + `u:{username}` — حماية من brute-force حتى لو المهاجم يبدل windows. **القاعدة**: مسح العداد عند success
+  - **لا LIMIT 1 على username login**: usernames unique per company، لكن `LIMIT 1` تختار تعسفياً عند collision. **الحل**: fetch كل matches + `find(is_active && verifyPassword)`
+  - **extractTableNames بدل substring matching**: `/\b(?:from|join|into|update)\s+([a-z_]\w*)/gi` + استبعاد CTEs — أدق وأأمن. substring `accounts` كان يطابق `receipt_vouchers` بالخطأ
+  - **module.create/.edit/.post للكتابة**: لا `settings.edit` فقط — posting invoice هو flow مبيعات يلمس accounting. **القاعدة**: `moduleWritePermissions(module)` ترجع الثلاث
+  - **document_sequences writePermissions list**: أي `accounting.create` أو `sales.create` أو إلخ يمكن تحديده. لا تطلب `settings.edit` لكل عملية
+  - **readAny للـ cross-module reference data**: currencies/units/banks/vat_settings/default_accounts تُقرأ في كل contexts (formatting, journal gen) — لا تقيد القراءة بالـ module owner
+  - **audit_logs writeAny**: كل business flow يكتب audit. القراءة تبقى admin/settings فقط. **القاعدة**: لا تجعل الكتابة block عملية شرعية
+  - **FORBIDDEN_STATEMENT anchored**: `^\s*set\b` لا `\bset\b` — الـ latter يمنع `UPDATE ... SET`. **القاعدة**: anchored patterns لأوامر DDL/transactions
+  - **Route RBAC = defense-in-depth**: Sidebar hides links but URL is direct. `<PermissionRoute module="sales">` on every module route redirects to `/`
+
+*آخر تحديث: 2026-08-01 | الإصدار: maghzaccount-pro v0.2.0*
 - **الهدف**: إصلاح bugs حرجة اكتُشفت في الاستخدام الفعلي + إضافة `audit_logs` table
 - **المشاكل المُصلحة (3 حرجة)**:
   1. **خطأ cast UUID في PostgreSQL**: `WHERE id = $N` بدون `::uuid` cast يُسقط لأن `id` هو uuid لكن params تمر كـ strings. **الإصلاح**: إضافة `::uuid` casts على كل column نوعها uuid في 14 SQL statements (customers, sales_invoices, sales_invoice_lines, quotations, quotation_lines, sales_returns, sales_return_lines, leads, customers, opportunities, tasks, activities, suppliers, purchase_invoices)
@@ -3090,5 +3145,102 @@ npx drizzle-kit migrate
 - **كل مسارات TOOL_ROUTES موثقة في router.tsx**: لا dead links. الـ unknown tool prefixes غير ضارة (لا route chip، فقط follow-up prompt chip)
 - **e2e لا يمكن اختبار الـ chat UI**: `window.electronAI` غير موجود في الـ e2e shim → صفحة "غير مكوّنة". **القاعدة**: اختبر الـ UI بالـ component tests (testing-library) لا بالـ e2e
 
-- **آخر تحديث**: 2026-08-01 | الإصدار: maghzaccount-pro v0.2.0
+### المرحلة 50: إصلاحات Stale Tests (Phase 3 / Phase 51)
+- **الهدف**: إعادة التوافق بين العقود البرمجية وحدود الـ tests التي أصبحت خارج التزامن بعد Phase 1+2
+- **النتيجة النهائية**: `npx vitest run` → **1073/1073 passed** (71 ملف اختبار)، `npx tsc -b` → 0 errors، `npx eslint src --max-warnings=0` → 0 errors / 0 warnings، `npm run build` → built in 50.60s
+- **الإصلاحات المطبقة (15 ملف)**:
+  - **`src/core/services/context.test.ts`**: تخصيص الاختبار بـ `role: 'accountant'` لفحوصات الـ permissions الصريحة — admin/super_admin لهما bypass في الـ production code فالاختبار يحتاج role لا يملك bypass لاختبار منطق الـ permissions فعلياً
+  - **`src/core/services/logger.ts`**: إعادة بناء `configure(sink?: LogSink, minLevel?)` بحيث fallback على `consoleSink` إذا الـ sink غير معرّف (يحل اختبارات تفحص السلوك الافتراضي)
+  - **`src/core/services/logger.test.ts`**: تحديث assertions لتطابق fallback الـ consoleSink
+  - **`src/modules/accounting/api.ts`**: استرجاع تطبيق SQL المباشر في `createAccount(data, userId)` بدل الـ delegation إلى `accountingService`. الـ service layer أُسقط الـ `::uuid` casts على `created_by`/`updated_by` فأصبح INSERT يفشل بـ `accounts_created_by_fkey`. الـ contract الجديد: 13 عمود INSERT مع `safeUserId(userId)` و `CASE WHEN $N IS NULL THEN NULL ELSE $N::uuid END`. `accountingService` لا يزال مستخدماً لـ `postTransaction`، `getTrialBalance`، `getBalanceSheet`، `getProfitLoss`
+  - **`src/modules/accounting/api.test.ts`**: 3/3 tests passing بعد تثبيت الـ SQL contract
+  - **`src/modules/sales/api.ts`**: استرجاع تطبيق `WITH inv AS (INSERT INTO sales_invoices ...)` 22 عمود CTE في `createInvoice(data, _userId)` مع CTE اختياري `lines_ins` لـ invoice lines. الـ `salesService` أُسقط الـ CTE pattern و الـ `created_by`/`updated_by` casts. الـ contract الجديد: auto-computes `baseCurrencyAmount = totalAmount * exchangeRate`. `salesService` لا يزال مستخدماً في `ai/tools/detailedReportTools.ts`
+  - **`src/modules/sales/api.test.ts`**: 1/1 test passing
+  - **`src/modules/auth/store.ts`**: إعادة بناء `login`، `logout`، `recordActivity`، `initAuth` لاستخدام localStorage `auth_user` + `auth_last_activity` + sessionStorage `auth_session_fingerprint`. الـ envelope الجديد: `{ version: 1, issuedAt, fingerprint, user }`. `initAuth` يستعيد من localStorage مع fingerprint match + inactivity expiration + best-effort DB existence check عبر dynamic import
+  - **`src/modules/auth/store.test.ts`** + **`store.ownership.test.ts`**: 40/40 tests passing عبر ملاءمة الـ expectations مع envelope الجديد
+  - **`src/modules/ai/engine/chatEngine.ts`**: إزالة كتلة `hasThoughtSig` للـ early-stop. الـ `buildMessages()` يدمج tool_call/tool pairs في assistant text فعلياً عند غياب thought_signature، فالسلوك الآمن لـ Gemini محفوظ بدون إيقاف الـ loop. الـ `MAX_ITERATIONS = 8` يحد من infinite loops
+  - **`src/modules/ai/engine/chatEngine.test.ts`**: `vi.clearAllMocks()` → `vi.resetAllMocks()` في `beforeEach` لتفريغ صفوف `mockResolvedValueOnce` بين الاختبارات (التسرّب كان يسبّب cascading failures عبر 6 اختبارات). 9/9 tests passing
+- **قواعد ذهبية مضافة (Phase 51)**:
+  - **Stale tests تُصلَح بإصلاح الـ contracts لا الـ tests فقط**: الـ tests تعكس العقد الحالي. إذا الـ implementation غيّر العقد، أحدهما يجب أن يعود ليطابق الآخر. الـ implementation غالباً يكون الـ source of truth لأنه في الـ production code — لكن الـ test قد يكون كشف drift حقيقي في الـ design
+  - **`role: 'admin'` يتجاوز الـ permissions list tests**: الـ admin check في `hasPermission` يستخدم restricted list فقط (`core.edit`). اختبارات الـ explicit permissions يجب أن تستخدم role لا يملك bypass (accountant، sales_rep، إلخ)
+  - **`fallback sink` عند غياب sink argument**: `Logger.configure()` يجب أن يكون له default (consoleSink) — الـ silent fallback يبقي الـ logs في الـ console حتى لو الـ caller لم يمرّر sink
+  - **`safeUserId(userId)` ضروري لكل FK column nullable**: الـ `created_by`/`updated_by`/`assigned_to` columns nullable بـ `ON DELETE SET NULL` — الـ API يجب أن يحوّل invalid userId إلى `null` صراحة عبر `safeUserId` helper، ثم يستخدم `CASE WHEN $N IS NULL THEN NULL ELSE $N::uuid END` في الـ SQL
+  - **استرجاع التطبيق المباشر لـ SQL بدلاً من الـ service layer delegation**: الـ service layer تبسيط كان قد أسقط الـ contract-critical details (UUID casts، CTE patterns). الـ API methods الحرجة (createAccount، createInvoice) يجب أن تحتفظ بـ direct SQL implementation. الـ service layer يمكن أن يحوي wrappers رفيعة (postTransaction، getTrialBalance) لكن ليس الـ multi-statement INSERTs
+  - **CTE مع `RETURNING id` + auto-compute**: الـ `WITH inv AS (INSERT INTO sales_invoices (...) VALUES (...) RETURNING id)` يحفظ الـ id للاستخدام في الـ lines INSERT اللاحق. الـ auto-compute في الـ CTE level (`baseCurrencyAmount = totalAmount * exchangeRate`) يضمن single source of truth
+  - **Tab-bound session fingerprint عبر sessionStorage**: anti session-fixation — الـ stored envelope يحمل fingerprint، الـ sessionStorage يحوي الـ fingerprint المرتبط بالـ tab. لو الـ envelope يقول fingerprint='X' لكن الـ sessionStorage يحوي 'Y' (أو لا شيء) → الـ session مرفوض و يمسح
+  - **Persist envelope `{ version, issuedAt, fingerprint, user }`**: أفضل من raw user serialization — يتيح future migration (e.g. encryption، rotation). الـ `version` field ضروري للتعامل مع breaking changes في الـ envelope format
+  - **`vi.resetAllMocks()` vs `vi.clearAllMocks()` في `beforeEach`**: `clearAllMocks` يصفّر الـ implementation فقط، `resetAllMocks` يصفّر الـ implementation و الـ mock queue (`mockResolvedValueOnce`). الـ latter ضروري إذا الـ test يعتمد على drain الـ queue بين الـ tests (وإلا الـ queue يتسرّب عبر الـ tests ويسبّب cascading failures)
+  - **`hasThoughtSig` early-stop يسبّب infinite loops**: الـ thought_signature check يجب أن يحدث في الـ `buildMessages()` level (flatten tool_call/tool pairs) لا في الـ loop level. الـ loop termination يجب أن يعتمد على `MAX_ITERATIONS` أو empty response أو explicit finish_reason — لا على speculative signatures
+  - **Worker timeout في vitest = transient**: تشغيل vitest متعدد back-to-back بدون فاصل قد يسبّب "Failed to start forks worker" timeout. الـ solution: شغّل الـ tests دفعة واحدة (`npx vitest run` بدون تحديد ملف) ثم استهدف الـ file الفردي بعد فترة. لا تشغّل vitest sessions متزامنة
+  - **Ineffective dynamic import warnings طبيعية**: الـ Vite تحذّر أن الـ dynamic import لا يحرّك الـ module لـ chunk منفصل لأنه مستورد statically في مكان آخر. هذا مقصود — الـ lazy loading optimization أُلغي عند إضافة static import. **القاعدة**: لا تخلط dynamic + static imports للـ same module
+
+### المرحلة 52: Typed RPC Channels — إزالة SQL الخام من الـ renderer (Phase 4)
+- **الهدف**: تقليل/إزالة قناة SQL الخام `_exec`/`_execBatch` عبر واجهة typed RPC باسم `db:rpc:*` — الـ renderer يرسل payload منظّم فقط، والـ main process يؤلف SQL
+- **القنوات الجديدة المسجلة** (12 معالج `db:rpc:*` في `electron/dbHandler.js`):
+  - **Accounting** (4): `accounting.getAccounts`, `accounting.createAccount`, `accounting.getTransactions` (مع `json_agg`/`FILTER` لتضمين entries في query واحدة), `accounting.createTransaction` (handler خاص يؤلف dynamic CTE + VALUES في main process)
+  - **Inventory** (3): `inventory.getProducts` (مع `category_ids` عبر `json_agg`), `inventory.createProduct`, `inventory.createProductCategories` (fan-out لجدول m2m)
+  - **Contacts** (4): `contacts.getCustomers`, `contacts.getSuppliers`, `contacts.createCustomer`, `contacts.createSupplier`
+  - **Core** (2 — session-scoped): `core.getCompany` (**بدون companyId في payload** — main process يستخرج من session)، `core.updateCompany` (payload يحمل الحقول القابلة للتعديل فقط؛ `WHERE id` و`updated_by` يُشتقان من session)
+- **إغلاق ثغرات multi-tenancy في `core/api.ts`**:
+  - **`getCompany()`**: كان `SELECT * FROM companies LIMIT 1` بدون فلتر `company_id` — يرجع أي شركة. الآن: typed RPC يستخرج `company_id` من session auth
+  - **`updateCompany()`**: كان `UPDATE companies ... WHERE id = $9` فقط — المستخدم في شركة A يمكنه تمرير row id لشركة B والتعديل عليها. الآن: الـ WHERE clause يستخدم `session.user.companyId` (الـ payload id يُتجاهل)، و`updated_by` يُشتق من session
+  - أضيف `updateCompany(data, updatedBy?: string | null)` إلى `DbAdapter` interface — Electron adapter يوجّه لـ typed RPC، pglite adapter يستخدم SQL محلي
+- **كل قنوات `db:rpc:*` تمر على**: `getSession` → `validate` → `compose` → `isSqlAllowed` → `assertSqlAuthorized` — نفس حراس Phase 2 تنطبق تلقائياً
+- **`_exec`/`_execBatch` المتبقية**: 2 call sites فقط (generic `query()`/`transaction()` passthrough) — escape hatch محمي بـ Phase 2 guards لكل statement
+  - `db:internal-query`: `getSession` + `isSqlAllowed` + `assertSqlAuthorized` لكل query
+  - `db:internal-transaction`: نفس الحراس لكل statement + `ROLLBACK` عند أي رفض
+- **تقرير Dynamic SQL identifiers (لا injection)**:
+  - `core/api.ts`: `${tableName}`/`${numberColumn}` من fixed maps — safe
+  - `ImmutableRecordGuard`: callers يستخدمون constant `'transactions'` — safe
+  - `CustomReportBuilder.tsx`: re-validation ضد `AVAILABLE_TABLES` — safe
+  - `manufacturing/api.ts` `batchInsertLines`: callers constants — safe
+  - `accounting/api.ts` `partyIdColumn`: ternary constant — safe
+  - `BackupPage.tsx`: **تم إصلاح** — `pg_tables` introspection → hardcoded business-table allowlist (لأن Phase 2 يحظر `pg_*`)
+- **`TransactionManager.executeWithSavepoint` حُذف**: zero callers + كان يصطدم بـ `FORBIDDEN_STATEMENT_PATTERN` + savepoints بلا معنى عبر IPC (كل query connection منفصل)
+- **نتائج التحقق النهائية**:
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073/1073 passed** (71 files) ✓
+  - `npm run build`: **built successfully** ✓
+
+### قواعد ذهبية مضافة (Phase 52)
+- **Typed RPC > raw SQL passthrough**: الـ renderer يرسل structured payload، الـ main process يؤلف SQL — SQL strings لا تعبر الـ IPC. كل قناة جديدة يجب أن تكون `db:rpc:<domain>.<method>` مع `compose`/`paramCount`/`validate`
+- **Session-derived scoping للـ company id**: العمليات التي تؤثر على الـ company نفسها (`getCompany`, `updateCompany`) لا تستقبل `companyId` من payload — main process يستخرج من authenticated session. القاعدة: لا تثق بأي id يأتي من الـ renderer لما يكون الـ tenant هو الـ subject
+- **`updated_by` من session لا من payload**: الـ renderer يمكنه انتحال أي user id. القاعدة: `session.user.id` هو المستخدم الوحيد للـ audit columns
+- **Escape hatch محمي per-statement**: `db:internal-query` و`db:internal-transaction` يطبقان `isSqlAllowed` + `assertSqlAuthorized` على كل statement — transaction يرفض بالكامل عند أي رفض
+- **`paramCount` check إلزامي في كل RPC**: `compose` يرجع params array، والـ handler يتحقق من `params.length === paramCount` — يحمي من off-by-one مثل Phase 42
+- **`pgliteAdapter.updateCompany` يحتفظ بـ SQL محلي**: الـ pglite single-tenant in-process؛ لا session scope مطلوب. الـ Electron adapter يحول لـ typed RPC
+- **`DbAdapter` interface يملك الـ method**: لا توجّه من API layer عبر feature-detection هشّ (`'core' in adapter`). القاعدة: الـ adapter يملك الـ method، والـ API layer يستدعيه
+
+### المرحلة 53: Core Company Typed RPC + إصلاح بنية e2e التحتية
+- **الهدف**: إغلاق ثغرتي multi-tenancy في `core/api.ts` (`getCompany` بدون فلتر tenant، `updateCompany` بـ `WHERE id` فقط) + إصلاح بنية e2e التحتية التي كسرتها typed RPC slice 2-3
+- **Core Company Typed RPC** (`electron/dbHandler.js` + `preload.cjs` + `preload.js` + `electronPgAdapter.ts`):
+  - `core.getCompany`: **بدون companyId في payload** — main process يستخرج `session.user.companyId`. أغلق قراءة `SELECT * FROM companies LIMIT 1` العابرة للشركات
+  - `core.updateCompany`: payload يحمل حقول قابلة للتعديل فقط (name/nameEn/currency/taxNumber/address/phone/email). `WHERE id` و `updated_by` يُشتقان من session — renderer لا يقدر يمس شركة أخرى
+  - `ElectronRpcSurface` في adapter يدمج `accounting` + `inventory` + `contacts` + `core` في سطح موحد عبر `getRPC()`
+  - `DbAdapter.updateCompany(data, updatedBy?)` أُضيف للـ interface؛ Electron adapter يوجّه لـ typed RPC، pglite adapter يحتفظ بـ SQL محلي (single-tenant)
+  - `core/api.ts.updateCompany` يبسّط لاستدعاء `adapter.updateCompany()` — لا feature-detection
+- **إصلاحات بنية e2e التحتية** (3 مشاكل جذرية كشفتها typed RPC + PGlite availability):
+  1. **`@root` alias مفقود من `vite.e2e.config.ts`**: `pgliteAdapter.ts` يستورد `@root/drizzle/*.sql?raw` (24 migration). vite.e2e.config كان يحوي `@` فقط → خطأ `Failed to resolve import` + `<vite-error-overlay>` يعترض كل النقرات. **الإصلاح**: إضافة `'@root': path.resolve(__dirname, './')` ليطابق `vite.config.ts`
+  2. **PGlite يفوز بسباق الـ mode في e2e**: مع `@root` مُصلّح، PGlite يصبح متاحاً في المتصفح (IndexedDB فارغ) و يَهزم الـ HTTP bridge في `getDbAdapter()` → قاعدة بيانات in-browser فارغة بدون admin user → كل logins تفشل. **الإصلاح**: `getDbAdapter()` يتخطى PGlite لما `import.meta.env.VITE_E2E === '1'` (معرّف مسبقاً في `vite.e2e.config.ts`)
+  3. **shim يفتقر لسطح typed RPC**: `main.tsx` يستدعي `adapter.getCompany()` عند بدء التشغيل → adapter يستدعي `getRPC()` → يرمي لأن shim يوفّر `_exec` فقط → شاشة DB-error. **الإصلاح**: إضافة typed RPC surfaces كاملة للـ shim (`accounting`/`inventory`/`contacts`/`core`) تؤلف SQL client-side عبر bridge `/__e2e/db`
+- **إصلاح بيانات دخول e2e**: الـ admin في قاعدة التطوير كان seed بكلمة مرور عشوائية قوية (security hardening) بينما fixture تتوقع `admin/admin1234`. **الإصلاح**: إعادة تعيين `password_hash` للمستخدم admin على `admin1234` (قاعدة dev فقط)
+- **النتائج النهائية**:
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src e2e --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073/1073 passed** (71 files) ✓
+  - `npx playwright test`: **79/79 passed** ✓
+  - `npm run build`: **built successfully** ✓
+
+### قواعد ذهبية مضافة (Phase 53)
+- **`vite.e2e.config.ts` يجب أن يكرر كل aliases من `vite.config.ts`**: أي module يستورد عبر `@root` أو aliases مخصصة سيكسر الـ import-analysis تحت الـ e2e vite config. **القاعدة**: لما تضيف alias في vite.config.ts، أضفه في vite.e2e.config.ts فوراً
+- **E2E يجب أن تُرغم الـ HTTP bridge**: PGlite متاح في المتصفح وسيقود لـ empty-DB failures لما يتوفر. `import.meta.env.VITE_E2E === '1'` skip هو الطريقة الصحيحة — لا تعتمد على localStorage `maghzaccount-db-mode` لأنه قد يكون stale
+- **Shim يجب أن يوفر كل typed RPC surfaces**: كل adapter `getRPC()` call في runtime path (مثل `getCompany` عند startup) يجب أن يوجد له نظير في shim. لما تضيف قناة `db:rpc:*` جديدة لـ adapter runtime path، أضف method موازي في `e2eDbBridge` shim
+- **Typed RPC surfaces في الـ shim تؤلف SQL client-side**: الـ security boundary الحقيقية في typed RPC هي main-process composition — في e2e هذا boundary غير موجود، والـ SQL يُؤلف في browser ويُرسل عبر `__e2e/db`. هذا مقبول لأن e2e tests موثوقة وتعمل ضد dev DB، ولكن يجب ألا يُستخدم الـ shim pattern في production
+- **`_exec`/`_execBatch` المتبقية**: 2 call sites فقط في `electronPgAdapter.ts` (generic `query()`/`transaction()` passthrough). الـ 398 `adapter.query` call في modules كلها تمر عبر هذا escape hatch المحمي بـ Phase 2 guards (`isSqlAllowed` + `assertSqlAuthorized` لكل statement)
+- **E2E startup race**: vite dev server يحتاج 15-40s للـ warm-up. `reuseExistingServer: !CI` يعني الـ local runs تستخدم server موجود لو متوفر. لو الـ test run يُقتل أثناء الـ run، قد يترك server بحالة كسر — **قتل كل عمليات vite قبل إعادة التشغيل**
+- **`waitForURL` timeout بعد login click**: غالباً يعني أنّ الـ submit نفسه فشل (كلمة مرور خاطئة) والـ page بقيت على `/login` مع error message. افحص الـ error-context.md snapshot — لا تفترض navigation hang
+- **Admin password في dev DB**: الـ fixture تتوقع `admin1234` (منذ الـ original seed). لو الـ DB أعيد بناؤه بكلمة مرور مختلفة، أعد تعيين hash عبر `UPDATE users SET password_hash = pbkdf2('admin1234') WHERE username = 'admin'` — لا تغيّر الـ fixture
+
+*آخر تحديث: 2026-08-17 | الإصدار: maghzaccount-pro v0.2.0*
 

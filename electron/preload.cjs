@@ -45,26 +45,56 @@ contextBridge.exposeInMainWorld('electronDB', {
   // These methods are used by the adapter layer which implements business logic
   _exec: (sql, params = []) => ipcRenderer.invoke('db:internal-query', { sql, params, sessionToken }),
   _execBatch: (queries) => ipcRenderer.invoke('db:internal-transaction', { queries, sessionToken }),
+
+  // ── Typed RPC surface (Phase 4) ─────────────────────────────────────
+  // Preferred over `_exec`. The renderer sends structured payloads — the
+  // main process composes and authorizes the SQL. Each method is bound
+  // to a fixed SQL statement and reuses the same auth/RBAC surface.
+  accounting: {
+    getAccounts: (payload) => ipcRenderer.invoke('db:rpc:accounting.getAccounts', { ...payload, sessionToken }),
+    createAccount: (payload) => ipcRenderer.invoke('db:rpc:accounting.createAccount', { ...payload, sessionToken }),
+    getTransactions: (payload) => ipcRenderer.invoke('db:rpc:accounting.getTransactions', { ...payload, sessionToken }),
+    createTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.createTransaction', { ...payload, sessionToken }),
+  },
+  inventory: {
+    getProducts: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProducts', { ...payload, sessionToken }),
+    createProduct: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProduct', { ...payload, sessionToken }),
+    createProductCategories: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProductCategories', { ...payload, sessionToken }),
+  },
+  contacts: {
+    getCustomers: (payload) => ipcRenderer.invoke('db:rpc:contacts.getCustomers', { ...payload, sessionToken }),
+    getSuppliers: (payload) => ipcRenderer.invoke('db:rpc:contacts.getSuppliers', { ...payload, sessionToken }),
+    createCustomer: (payload) => ipcRenderer.invoke('db:rpc:contacts.createCustomer', { ...payload, sessionToken }),
+    createSupplier: (payload) => ipcRenderer.invoke('db:rpc:contacts.createSupplier', { ...payload, sessionToken }),
+  },
+  // Session-derived company scoping (Phase 4 slice 3). The renderer sends
+  // no company id — the main process uses the authenticated session.
+  core: {
+    getCompany: (payload = {}) => ipcRenderer.invoke('db:rpc:core.getCompany', { ...payload, sessionToken }),
+    updateCompany: (payload) => ipcRenderer.invoke('db:rpc:core.updateCompany', { ...payload, sessionToken }),
+  },
 });
 
 // ─── AI Harness (LLM proxy — API key stays in main process) ─────────────────
+// Every AI channel is authenticated server-side; the session token proves the
+// caller's identity so the main process can derive companyId/userId itself.
 contextBridge.exposeInMainWorld('electronAI', {
-  getConfig: (companyId) => ipcRenderer.invoke('ai:get-config', { companyId }),
-  saveConfig: (payload) => ipcRenderer.invoke('ai:save-config', payload),
-  testConnection: (payload) => ipcRenderer.invoke('ai:test-connection', payload),
-  complete: (payload) => ipcRenderer.invoke('ai:complete', payload),
+  getConfig: () => ipcRenderer.invoke('ai:get-config', { sessionToken }),
+  saveConfig: (payload) => ipcRenderer.invoke('ai:save-config', { ...payload, sessionToken }),
+  testConnection: (payload) => ipcRenderer.invoke('ai:test-connection', { ...payload, sessionToken }),
+  complete: (payload) => ipcRenderer.invoke('ai:complete', { ...payload, sessionToken }),
   // Push-based streaming — start the stream, then listen for chunks and done events
-  startStream: (payload) => ipcRenderer.send('ai:start-stream', payload),
+  startStream: (payload) => ipcRenderer.send('ai:start-stream', { ...payload, sessionToken }),
   onStreamChunk: (callback) => ipcRenderer.on('ai:stream-chunk', (_event, chunk) => callback(chunk)),
   onStreamDone: (callback) => ipcRenderer.on('ai:stream-done', (_event, result) => callback(result)),
   removeStreamListeners: () => {
     ipcRenderer.removeAllListeners('ai:stream-chunk');
     ipcRenderer.removeAllListeners('ai:stream-done');
   },
-  listSessions: (payload) => ipcRenderer.invoke('ai:list-sessions', payload),
-  getSessionMessages: (payload) => ipcRenderer.invoke('ai:get-session-messages', payload),
-  saveSession: (payload) => ipcRenderer.invoke('ai:save-session', payload),
-  deleteSession: (payload) => ipcRenderer.invoke('ai:delete-session', payload),
+  listSessions: () => ipcRenderer.invoke('ai:list-sessions', { sessionToken }),
+  getSessionMessages: (payload) => ipcRenderer.invoke('ai:get-session-messages', { ...payload, sessionToken }),
+  saveSession: (payload) => ipcRenderer.invoke('ai:save-session', { ...payload, sessionToken }),
+  deleteSession: (payload) => ipcRenderer.invoke('ai:delete-session', { ...payload, sessionToken }),
 });
 
 // ─── App Environment Info ─────────────────────────────────────────────────────

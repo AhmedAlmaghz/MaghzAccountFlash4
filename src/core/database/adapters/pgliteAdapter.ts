@@ -942,6 +942,14 @@ export const pgliteAdapter: DbAdapter = {
     return { success: false, error: 'No company found' };
   },
 
+  async updateCompany(data: any, updatedBy?: string) {
+    if (!data?.id) return { success: false, error: 'Company id required' };
+    return this.query(
+      `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7, updated_by = $8, updated_at = NOW() WHERE id = $9`,
+      [data.name, data.nameEn, data.currency, data.taxNumber, data.address, data.phone, data.email, updatedBy || null, data.id]
+    );
+  },
+
   async getAccounts(companyId: string) {
     const result = await this.query('SELECT * FROM accounts WHERE company_id = $1 ORDER BY code', [companyId]);
     return { success: result.success, data: result.rows, error: result.error };

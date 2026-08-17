@@ -12,6 +12,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Keep in sync with vite.config.ts — pgliteAdapter statically imports
+      // the drizzle SQL migrations via @root/*.sql?raw.
+      '@root': path.resolve(__dirname, './'),
     },
   },
   define: {

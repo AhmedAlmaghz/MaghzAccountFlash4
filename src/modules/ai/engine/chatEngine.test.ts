@@ -16,7 +16,6 @@ vi.mock('../tools/registry', () => ({
   getVisibleTools: vi.fn(() => []),
   toLlmTools: vi.fn(() => []),
 }));
-
 vi.mock('../tools/index', () => ({
   ensureToolsRegistered: mocks.ensureToolsRegistered,
 }));
@@ -56,7 +55,7 @@ function tool(dangerLevel: 'read' | 'write'): ToolDefinition {
 
 describe('ChatEngine', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     useAuthStore.getState().logout();
     useAuthStore.getState().login(user);
     useAppStore.setState({

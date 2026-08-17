@@ -1,0 +1,13 @@
+npm notice run MaghzAccountPro@0.1.0 npx
+npm notice run vitest run src/modules/accounting
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mE:/MaghzAccountApp/MaghzAccountFlash35[39m
+
+ [32m✓[39m src/modules/accounting/hooks/useAccounting.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 330[2mms[22m[39m
+ [32m✓[39m src/modules/accounting/api.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 37[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m35 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m 19:32:03
+[2m   Duration [22m 6.51s[2m (transform 876ms, setup 2.17s, import 1.32s, tests 367ms, environment 7.33s)[22m
+

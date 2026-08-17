@@ -1,0 +1,2 @@
+npm notice run MaghzAccountPro@0.1.0 npx
+npm notice run tsc -b --force

@@ -90,7 +90,10 @@ describe('context', () => {
     });
 
     it('returns false when permission is not in list', () => {
-      expect(hasPermission(ctx, 'sales.delete')).toBe(false);
+      // Use a non-privileged role so the explicit permission list is what
+      // decides (admin bypasses the list by design, mirroring the store).
+      const listOnlyCtx: ServiceContext = { ...ctx, role: 'accountant' };
+      expect(hasPermission(listOnlyCtx, 'sales.delete')).toBe(false);
     });
   });
 
@@ -98,7 +101,7 @@ describe('context', () => {
     const ctx: ServiceContext = {
       companyId: 'company-abc',
       userId: 'user-123',
-      role: 'admin',
+      role: 'accountant',
       permissions: ['sales.view'],
     };
 

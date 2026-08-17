@@ -1,0 +1,517 @@
+npm notice run MaghzAccountPro@0.2.0 npx
+npm notice run vitest run
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mE:/MaghzAccountApp/MaghzAccountFlash35[39m
+
+ [32m✓[39m src/core/ui/components/DataTablePro.test.tsx [2m([22m[2m16 tests[22m[2m)[22m[33m 1483[2mms[22m[39m
+     [33m[2m✓[22m[39m changes page size [33m 546[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/Pagination.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[33m 1336[2mms[22m[39m
+     [33m[2m✓[22m[39m disables previous buttons on first page [33m 526[2mms[22m[39m
+ [32m✓[39m drizzle/migrations.test.ts [2m([22m[2m117 tests[22m[2m)[22m[33m 3047[2mms[22m[39m
+     [33m[2m✓[22m[39m Drizzle schema exports all 63 tables [33m 2466[2mms[22m[39m
+[90mstderr[2m | src/core/ui/components/Toast.test.tsx[2m > [22m[2mToastContainer[2m > [22m[2mremoves toast when close button is clicked
+[22m[39mAn update to ToastContainer inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/core/ui/components/Toast.test.tsx[2m > [22m[2mToastContainer[2m > [22m[2mauto-removes toast after duration
+[22m[39mAn update to ToastContainer inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ToastItem inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/core/ui/components/Toast.test.tsx [2m([22m[2m10 tests[22m[2m)[22m[33m 1052[2mms[22m[39m
+     [33m[2m✓[22m[39m renders a single toast [33m 667[2mms[22m[39m
+[90mstderr[2m | src/modules/auth/components/RolesPage.test.tsx
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0009_performance_indexes_phase2.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+
+ [32m✓[39m src/modules/auth/components/RolesPage.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 1140[2mms[22m[39m
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2msends user text and stores the final assistant response
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mdoes NOT duplicate a streamed final text answer (placeholder is the bubble)
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mexecutes read tools immediately then continues to a final answer
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mpauses a write tool for confirmation and resumes after approval
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0004_performance_indexes.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0004_performance_indexes.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0004_performance_indexes.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0004_performance_indexes.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mrecords a rejected write call without executing it
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mshows provider errors as assistant error messages
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mreset clears messages and starts a new system history
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0003_warehouse_transfer_columns.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0003_warehouse_transfer_columns.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mreset clears messages and starts a new system history
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0002_bom_schema_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mpreserves thought_signature (Gemini extras) on round-trip to LLM history
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0001_multi_currency.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0001_multi_currency.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0001_multi_currency.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0001_multi_currency.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mdoes NOT spread name/arguments from tc.function over the top-level values
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0007_opportunity_stage_default.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0007_opportunity_stage_default.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+[90mstderr[2m | src/modules/ai/engine/chatEngine.test.ts[2m > [22m[2mChatEngine[2m > [22m[2mdoes NOT spread name/arguments from tc.function over the top-level values
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0000_unified_schema.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+ [32m✓[39m src/modules/ai/engine/chatEngine.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 1730[2mms[22m[39m
+     [33m[2m✓[22m[39m executes read tools immediately then continues to a final answer [33m 567[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/Table.test.tsx [2m([22m[2m13 tests[22m[2m)[22m[33m 1598[2mms[22m[39m
+     [33m[2m✓[22m[39m renders with column alignment [33m 463[2mms[22m[39m
+     [33m[2m✓[22m[39m renders Date objects as locale strings [33m 468[2mms[22m[39m
+ [32m✓[39m src/modules/ai/components/MessageBubble.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 785[2mms[22m[39m
+     [33m[2m✓[22m[39m calls onSuggestion with the clicked suggestion [33m 461[2mms[22m[39m
+ [32m✓[39m src/modules/ai/components/RichText.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 832[2mms[22m[39m
+     [33m[2m✓[22m[39m renders headings with the correct tag [33m 439[2mms[22m[39m
+ [32m✓[39m src/core/hooks/usePaginatedList.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 722[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/Card.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[33m 606[2mms[22m[39m
+     [33m[2m✓[22m[39m renders as h3 [33m 371[2mms[22m[39m
+ [32m✓[39m src/core/hooks/useAsyncData.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 605[2mms[22m[39m
+ [32m✓[39m src/modules/accounting/hooks/useAccounting.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 331[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/ActionButtons.test.tsx [2m([22m[2m12 tests[22m[2m)[22m[33m 485[2mms[22m[39m
+[90mstderr[2m | src/modules/auth/hooks/usePermission.test.tsx
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+
+ [32m✓[39m src/modules/auth/hooks/usePermission.test.tsx [2m([22m[2m27 tests[22m[2m)[22m[33m 443[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/ErrorBoundary.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 293[2mms[22m[39m
+ [32m✓[39m src/core/utils/useFormatters.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 368[2mms[22m[39m
+[90mstderr[2m | src/core/ui/components/PermissionGate.test.tsx[2m > [22m[2mPermissionGate[2m > [22m[2mpermissions list with requireAll=true
+[22m[39mAn update to PermissionGate inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/core/ui/components/PermissionGate.test.tsx
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:114:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+
+ [32m✓[39m src/core/ui/components/PermissionGate.test.tsx [2m([22m[2m12 tests[22m[2m)[22m[32m 257[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/StatusBadge.test.tsx [2m([22m[2m25 tests[22m[2m)[22m[32m 267[2mms[22m[39m
+ [32m✓[39m src/core/hooks/useSettings.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 200[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/PageLoader.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 145[2mms[22m[39m
+ [32m✓[39m src/core/utils/export.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 235[2mms[22m[39m
+ [32m✓[39m src/core/utils/currencyConverter.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 146[2mms[22m[39m
+ [32m✓[39m src/core/utils/useOwnerFilter.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 110[2mms[22m[39m
+ [32m✓[39m src/core/utils/locale.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 131[2mms[22m[39m
+ [32m✓[39m src/core/utils/index.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 114[2mms[22m[39m
+[90mstderr[2m | src/modules/auth/store.test.ts[2m > [22m[2mAuth Store[2m > [22m[2minitAuth[2m > [22m[2mrestores auth from localStorage
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+
+ [32m✓[39m src/modules/auth/store.test.ts [2m([22m[2m29 tests[22m[2m)[22m[32m 115[2mms[22m[39m
+ [32m✓[39m src/core/utils/printDocument.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 104[2mms[22m[39m
+ [32m✓[39m src/modules/sales/api.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 96[2mms[22m[39m
+ [32m✓[39m src/core/hooks/useDebouncedValue.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 80[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/command/paletteItems.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 81[2mms[22m[39m
+ [32m✓[39m src/core/utils/html.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 97[2mms[22m[39m
+ [32m✓[39m src/modules/manufacturing/api.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 67[2mms[22m[39m
+ [32m✓[39m src/core/store/toastStore.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 55[2mms[22m[39m
+ [32m✓[39m src/core/api.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 63[2mms[22m[39m
+ [32m✓[39m src/modules/accounting/api.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 58[2mms[22m[39m
+ [32m✓[39m src/core/utils/normalizeArabic.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 119[2mms[22m[39m
+ [32m✓[39m src/modules/crm/api.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+ [32m✓[39m src/core/utils/journalEntryGenerator.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 103[2mms[22m[39m
+ [32m✓[39m src/core/utils/auditLogger.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+ [32m✓[39m src/core/utils/validation-currency.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m src/core/ui/components/command/paletteSearch.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m src/modules/hr/api.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 90[2mms[22m[39m
+ [32m✓[39m src/modules/ai/engine/toolExecutor.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 110[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+[90mstderr[2m | src/core/services/errors.test.ts[2m > [22m[2merrors[2m > [22m[2mwrap[2m > [22m[2mwraps a rejected async operation
+[22m[39m[service] testContext failed: boom
+
+ [32m✓[39m src/core/services/errors.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 93[2mms[22m[39m
+ [32m✓[39m src/modules/ai/engine/systemPrompt.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 301[2mms[22m[39m
+ [32m✓[39m src/core/store/store.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 102[2mms[22m[39m
+ [32m✓[39m src/modules/ai/tools/registry.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 84[2mms[22m[39m
+ [32m✓[39m src/core/utils/aging.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m✓[39m src/core/utils/userIdValidator.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts [2m([22m[2m38 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m src/modules/ai/tools/searchTools.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 183[2mms[22m[39m
+ [32m✓[39m src/core/utils/validation-currency-extended.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 266[2mms[22m[39m
+ [32m✓[39m src/modules/ai/skills/registry.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m src/modules/auth/store.ownership.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m src/core/utils/productTypeFilter.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 49[2mms[22m[39m
+ [32m✓[39m src/modules/ai/suggestions/suggestionEngine.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m src/core/utils/pagination-edge-cases.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m src/core/utils/currencyBreakdown.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m src/modules/ai/engine/streamingReconstructor.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m src/modules/purchases/api.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m src/core/i18n/i18n.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m src/modules/ai/engine/stripImitationToolBlocks.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m src/core/utils/pagination.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m src/core/utils/mapPgRow.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 60[2mms[22m[39m
+ [32m✓[39m src/core/store/onboardingStore.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Errors [49m[22m[31m⎯⎯⎯⎯⎯⎯[39m
+[31m[1m
+Vitest caught 3 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Error [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[31m[1mError[22m: [vitest-pool]: Failed to start forks worker for test files E:/MaghzAccountApp/MaghzAccountFlash35/src/core/ui/components/command/CommandPalette.test.tsx.[39m
+[90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:94[22m[39m
+[90m [2m❯[22m Pool.schedule node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:5[22m[39m
+
+[31m[1mCaused by: Error[22m: [vitest-pool-runner]: Timeout waiting for worker to respond[39m
+[90m [2m❯[22m Timeout.<anonymous> node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3041:58[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m605:17[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m541:7[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Error [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[31m[1mError[22m: [vitest-pool]: Failed to start forks worker for test files E:/MaghzAccountApp/MaghzAccountFlash35/src/app/layout.test.tsx.[39m
+[90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:94[22m[39m
+[90m [2m❯[22m runNextTicks node:internal/process/task_queues:[2m65:5[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m567:9[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m541:7[22m[39m
+[90m [2m❯[22m Pool.schedule node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:5[22m[39m
+
+[31m[1mCaused by: Error[22m: [vitest-pool-runner]: Timeout waiting for worker to respond[39m
+[90m [2m❯[22m Timeout.<anonymous> node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3041:58[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m605:17[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m541:7[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Error [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[31m[1mError[22m: [vitest-pool]: Failed to start forks worker for test files E:/MaghzAccountApp/MaghzAccountFlash35/electron/seedDemoData.test.js.[39m
+[90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:94[22m[39m
+[90m [2m❯[22m Pool.schedule node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:5[22m[39m
+
+[31m[1mCaused by: Error[22m: [vitest-pool-runner]: Timeout waiting for worker to respond[39m
+[90m [2m❯[22m Timeout.<anonymous> node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3041:58[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m605:17[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m541:7[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
+
+
+[2m Test Files [22m [1m[32m68 passed[39m[22m[90m (68)[39m
+[2m      Tests [22m [1m[32m1034 passed[39m[22m[90m (1034)[39m
+[2m     Errors [22m [1m[31m3 errors[39m[22m
+[2m   Start at [22m 07:41:39
+[2m   Duration [22m 252.60s[2m (transform 13.54s, setup 91.18s, import 24.62s, tests 21.53s, environment 357.49s)[22m
+

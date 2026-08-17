@@ -424,7 +424,7 @@ export const reportTools: ToolDefinition[] = [
       if (!customerId) return { error: 'معرف العميل مطلوب' };
 
       const [stmtRes, agingRes] = await Promise.all([
-        salesApi.getCustomerStatement(customerId),
+        salesApi.getCustomerStatement(customerId, ctx.companyId),
         salesApi.getCustomerArAging(ctx.companyId),
       ]);
 

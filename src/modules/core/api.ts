@@ -11,13 +11,12 @@ export const coreApi = {
   },
 
   async updateCompany(data: Partial<Company>, _userId?: string): Promise<{ success: boolean; error?: string }> {
-    const adapter = await getDbAdapter();
     if (!data.id) return { success: false, error: 'معرف الشركة مطلوب' };
-    const result = await adapter.query(
-      `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7, updated_by = $8, updated_at = NOW() WHERE id = $9`,
-      [data.name, data.nameEn, data.currency, data.taxNumber, data.address, data.phone, data.email, safeUserId(_userId), data.id]
-    );
-    return result;
+    const adapter = await getDbAdapter();
+    // Phase 4 slice 3: the adapter owns scoping. The Electron adapter maps
+    // this to a session-scoped typed RPC (server derives companyId +
+    // updatedBy), closing the cross-tenant `WHERE id = $N`-only gap.
+    return adapter.updateCompany(data, safeUserId(_userId));
   },
 
   // ─── Currencies ────────────────────────────────────────────────────────────

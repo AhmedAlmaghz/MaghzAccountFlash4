@@ -1,0 +1,158 @@
+npm notice run MaghzAccountPro@0.1.0 npx
+npm notice run vitest run src/core/services --reporter=verbose
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mE:/MaghzAccountApp/MaghzAccountFlash35[39m
+
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mdebug[2m > [22memits a debug entry with message and context[32m 14[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22minfo[2m > [22memits an info entry[32m 2[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mwarn[2m > [22memits a warn entry[32m 3[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22merror[2m > [22memits an error entry[32m 2[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mminLevel filtering[2m > [22mdoes not emit debug when minLevel is warn[32m 2[2mms[22m[39m
+ [31m×[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mconsoleSink[2m > [22mroutes to console.error for error level[32m 10[2mms[22m[39m
+[31m   → this.sink is not a function[39m
+ [31m×[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mconsoleSink[2m > [22mroutes to console.warn for warn level[32m 6[2mms[22m[39m
+[31m   → this.sink is not a function[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mlogError[2m > [22mlogs an Error object with stack[32m 2[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mlogError[2m > [22mlogs a non-Error value as string[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mlogError[2m > [22mlogs a non-Error value with extra data[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows draft → posted for invoices[32m 6[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows draft → cancelled for invoices[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows posted → paid for invoices[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows posted → partially_paid for invoices[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows partially_paid → paid for invoices[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mblocks posted → draft (immutable)[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mblocks paid → draft (immutable)[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mblocks paid → partially_paid (no un-paying)[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows draft → posted for returns[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows posted → cancelled for returns[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mblocks posted → draft for returns[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows draft → sent for quotations[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows accepted → converted for quotations[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mblocks converted → draft for quotations[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows draft → confirmed for orders[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows confirmed → invoiced for orders[32m 2[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows planned → in_progress for work orders[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mallows in_progress → completed for work orders[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mblocks completed → in_progress for work orders[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22mcanTransition[2m > [22mreturns false for unknown family[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertTransition[2m > [22mreturns null for allowed transition[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertTransition[2m > [22mreturns error for disallowed transition[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for posted[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for paid[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for partially_paid[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for converted[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for invoiced[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for completed[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns true for accepted[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns false for draft[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns false for cancelled[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22misPostedStatus[2m > [22mreturns false for sent[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertMutable[2m > [22mreturns null for draft status[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertMutable[2m > [22mreturns null for sent status[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertMutable[2m > [22mreturns error for posted status (edit)[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertMutable[2m > [22mreturns error for paid status (delete)[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertMutable[2m > [22mreturns error for cancelled status[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/stateMachine.test.ts[2m > [22mstateMachine[2m > [22massertMutable[2m > [22mreturns error for converted status[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mgetContextFromStore[2m > [22mreturns context from store when user is authenticated[32m 9[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mgetContextFromStore[2m > [22mreturns null when no user[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mrequireContext[2m > [22mreturns context when user exists[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mrequireContext[2m > [22mthrows when no user[32m 3[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns true for super_admin[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns true for admin on non-restricted permission[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns false for admin on restricted permission[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns true when permissions include wildcard[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns true when permission is in list[32m 1[2mms[22m[39m
+ [31m×[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns false when permission is not in list[32m 21[2mms[22m[39m
+[31m   → expected true to be false // Object.is equality[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22massertPermission[2m > [22mreturns null when permission is granted[32m 1[2mms[22m[39m
+ [31m×[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22massertPermission[2m > [22mreturns PERMISSION_DENIED result when permission is denied[32m 2[2mms[22m[39m
+[31m   → expected null not to be null[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22massertCompanyMatch[2m > [22mreturns true when companyId matches[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/context.test.ts[2m > [22mcontext[2m > [22massertCompanyMatch[2m > [22mreturns false when companyId does not match[32m 1[2mms[22m[39m
+[90mstderr[2m | src/core/services/errors.test.ts[2m > [22m[2merrors[2m > [22m[2mwrap[2m > [22m[2mwraps a rejected async operation
+[22m[39m[service] testContext failed: boom
+
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mok[2m > [22mreturns a success result with data[32m 3[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mfail[2m > [22mreturns a failure result with error message[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mfail[2m > [22mincludes error code when provided[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mnotFound[2m > [22mreturns NOT_FOUND result with entity name[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mpermissionDenied[2m > [22mreturns PERMISSION_DENIED result[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mpermissionDenied[2m > [22muses default action when omitted[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22minvalidState[2m > [22mreturns INVALID_STATE result[32m 2[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mpreconditionFailed[2m > [22mreturns PRECONDITION_FAILED result[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mconflict[2m > [22mreturns CONFLICT result[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mwrap[2m > [22mwraps a successful async operation[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mwrap[2m > [22mwraps a rejected async operation[32m 2[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mwrap[2m > [22mpreserves ServiceError code[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22mwrap[2m > [22mwraps non-Error rejections[32m 0[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22massert[2m > [22mdoes not throw when condition is truthy[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22massert[2m > [22mthrows ServiceError when condition is falsy[32m 1[2mms[22m[39m
+ [32m✓[39m src/core/services/errors.test.ts[2m > [22merrors[2m > [22massert[2m > [22mthrows ServiceError with PRECONDITION_FAILED code[32m 1[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 4 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/core/services/context.test.ts[2m > [22mcontext[2m > [22mhasPermission[2m > [22mreturns false when permission is not in list
+[31m[1mAssertionError[22m: expected true to be false // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- false[39m
+[31m+ true[39m
+
+[36m [2m❯[22m src/core/services/context.test.ts:[2m93:50[22m[39m
+    [90m 91|[39m
+    [90m 92|[39m     [34mit[39m([32m'returns false when permission is not in list'[39m[33m,[39m () [33m=>[39m {
+    [90m 93|[39m       [34mexpect[39m([34mhasPermission[39m(ctx[33m,[39m [32m'sales.delete'[39m))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m   |[39m                                                  [31m^[39m
+    [90m 94|[39m     })[33m;[39m
+    [90m 95|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/core/services/context.test.ts[2m > [22mcontext[2m > [22massertPermission[2m > [22mreturns PERMISSION_DENIED result when permission is denied
+[31m[1mAssertionError[22m: expected null not to be null[39m
+[36m [2m❯[22m src/core/services/context.test.ts:[2m111:26[22m[39m
+    [90m109|[39m     it('returns PERMISSION_DENIED result when permission is denied', (…
+    [90m110|[39m       [35mconst[39m result [33m=[39m [34massertPermission[39m(ctx[33m,[39m [32m'sales.delete'[39m)[33m;[39m
+    [90m111|[39m       [34mexpect[39m(result)[33m.[39mnot[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   |[39m                          [31m^[39m
+    [90m112|[39m       [35mif[39m (result [33m&&[39m [33m![39mresult[33m.[39msuccess) {
+    [90m113|[39m         [34mexpect[39m(result[33m.[39mcode)[33m.[39m[34mtoBe[39m([32m'PERMISSION_DENIED'[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mconsoleSink[2m > [22mroutes to console.error for error level
+[31m[1mTypeError[22m: this.sink is not a function[39m
+[36m [2m❯[22m Logger.emit src/core/services/logger.ts:[2m63:10[22m[39m
+    [90m 61|[39m   private emit(level: LogLevel, message: string, context?: string, dat…
+    [90m 62|[39m     [35mif[39m ([33m![39m[35mthis[39m[33m.[39m[34mshouldLog[39m(level)) [35mreturn[39m[33m;[39m
+    [90m 63|[39m     this.sink({ level, message, context, data, timestamp: new Date().t…
+    [90m   |[39m          [31m^[39m
+    [90m 64|[39m   }
+    [90m 65|[39m
+[90m [2m❯[22m Logger.error src/core/services/logger.ts:[2m79:10[22m[39m
+[90m [2m❯[22m src/core/services/logger.test.ts:[2m89:14[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/core/services/logger.test.ts[2m > [22mlogger[2m > [22mconsoleSink[2m > [22mroutes to console.warn for warn level
+[31m[1mTypeError[22m: this.sink is not a function[39m
+[36m [2m❯[22m Logger.emit src/core/services/logger.ts:[2m63:10[22m[39m
+    [90m 61|[39m   private emit(level: LogLevel, message: string, context?: string, dat…
+    [90m 62|[39m     [35mif[39m ([33m![39m[35mthis[39m[33m.[39m[34mshouldLog[39m(level)) [35mreturn[39m[33m;[39m
+    [90m 63|[39m     this.sink({ level, message, context, data, timestamp: new Date().t…
+    [90m   |[39m          [31m^[39m
+    [90m 64|[39m   }
+    [90m 65|[39m
+[90m [2m❯[22m Logger.warn src/core/services/logger.ts:[2m75:10[22m[39m
+[90m [2m❯[22m src/core/services/logger.test.ts:[2m95:14[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m2 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[31m4 failed[39m[22m[2m | [22m[1m[32m74 passed[39m[22m[90m (78)[39m
+[2m   Start at [22m 09:52:28
+[2m   Duration [22m 7.65s[2m (transform 663ms, setup 2.22s, import 846ms, tests 162ms, environment 11.42s)[22m
+

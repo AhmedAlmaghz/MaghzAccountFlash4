@@ -29,6 +29,26 @@ let pool = null;
 let querySeq = 0;
 const sessions = new Map();
 const SESSION_TTL_MS = 30 * 60 * 1000;
+// Sliding TTL alone would keep a stolen session alive forever as long as it
+// stays active. Cap the absolute lifetime (8h) and sweep expired entries so a
+// crashed renderer cannot leak tokens indefinitely.
+const SESSION_MAX_LIFETIME_MS = 8 * 60 * 60 * 1000;
+const SESSION_SWEEP_INTERVAL_MS = 60 * 1000;
+let sessionSweepTimer = null;
+
+function sweepExpiredSessions() {
+  const now = Date.now();
+  for (const [token, session] of sessions) {
+    if (session.expiresAt <= now || session.absoluteExpiresAt <= now) sessions.delete(token);
+  }
+}
+
+function ensureSessionSweeper() {
+  if (sessionSweepTimer) return sessionSweepTimer;
+  sessionSweepTimer = setInterval(sweepExpiredSessions, SESSION_SWEEP_INTERVAL_MS);
+  if (typeof sessionSweepTimer.unref === 'function') sessionSweepTimer.unref();
+  return sessionSweepTimer;
+}
 
 function verifyPasswordNode(password, storedHash) {
   const parts = typeof storedHash === 'string' ? storedHash.split(':') : [];
@@ -50,12 +70,15 @@ function validateNewPassword(password) {
 
 function createSession(webContentsId, user, permissions) {
   const token = randomBytes(32).toString('base64url');
+  const now = Date.now();
   sessions.set(token, {
     webContentsId,
     user,
     permissions,
-    expiresAt: Date.now() + SESSION_TTL_MS,
+    expiresAt: now + SESSION_TTL_MS,
+    absoluteExpiresAt: now + SESSION_MAX_LIFETIME_MS,
   });
+  ensureSessionSweeper();
   return token;
 }
 
@@ -63,12 +86,25 @@ function getSession(webContentsId, token) {
   const session = token
     ? sessions.get(token)
     : [...sessions.values()].find((candidate) => candidate.webContentsId === webContentsId);
-  if (!session || session.webContentsId !== webContentsId || session.expiresAt <= Date.now()) {
+  if (
+    !session ||
+    session.webContentsId !== webContentsId ||
+    session.expiresAt <= Date.now() ||
+    session.absoluteExpiresAt <= Date.now()
+  ) {
     if (token) sessions.delete(token);
     return null;
   }
   session.expiresAt = Date.now() + SESSION_TTL_MS;
   return session;
+}
+
+// Invalidate every session belonging to a user (password change / deactivation /
+// deletion must cut off all existing access immediately).
+function revokeUserSessions(userId) {
+  for (const [token, session] of sessions) {
+    if (session.user.id === userId) sessions.delete(token);
+  }
 }
 
 // Mirrors src/modules/auth/store.ts FALLBACK_PERMISSIONS so role-based users
@@ -121,6 +157,14 @@ function sessionPublicData(session) {
   return { user: session.user, permissions: session.permissions };
 }
 
+// Privileged roles may never be created, granted, or reset by a plain admin —
+// only super_admins manage them. Prevents settings.edit holders from
+// escalating themselves or others to admin.
+function canManageRole(session, role) {
+  if (!role || !isAdminRole(role)) return true;
+  return session.user.role === 'super_admin';
+}
+
 function deleteSession(session) {
   for (const [token, candidate] of sessions) {
     if (candidate === session) {
@@ -130,10 +174,26 @@ function deleteSession(session) {
   }
 }
 
+// Shared session gate for cross-process handlers (AI harness). Validates the
+// token against the sender's webContents and optionally enforces a permission.
+// Returns { ok: true, session } or { ok: false, error }.
+export function authenticateIpcSession(event, sessionToken, { permission } = {}) {
+  const session = getSession(event.sender.id, sessionToken);
+  if (!session) return { ok: false, error: 'Login required' };
+  if (permission && !hasPermission(session, permission)) {
+    return { ok: false, error: 'Permission denied' };
+  }
+  return { ok: true, session };
+}
+
 // ─── Destructive / onboarding channel guards ─────────────────────────────────
-// These channels reconfigure the DB connection or wipe/seed data. They must only
-// be reachable during first-run bootstrap (no company exists yet) or by an
-// authenticated admin. `confirm` + admin password re-entry is required for the
+// These channels reconfigure the DB connection or wipe/seed data. DENY BY
+// DEFAULT — they are only reachable by:
+//   1. an authenticated admin session, or
+//   2. during first-run bootstrap (no company exists yet — an unreachable DB
+//      cannot hold company data, so a failing pool counts as bootstrap too), or
+//   3. development mode.
+// `confirm` + admin password re-entry is additionally required for the
 // destructive "clear all" path.
 
 function isDevMode() {
@@ -145,29 +205,51 @@ async function hasAnyCompany() {
   return res.rows.length > 0;
 }
 
-function isAdminSession(session) {
-  return !!session && (session.user.role === 'super_admin' || session.user.role === 'admin');
+function isAdminRole(role) {
+  return role === 'admin' || role === 'super_admin';
 }
 
-// If a session exists it must be an admin; otherwise the request is only
-// allowed during bootstrap (no companies) or in development mode.
-async function assertOnboardingAllowed(event, sessionToken, { requireNoCompany = false } = {}) {
+function isAdminSession(session) {
+  return !!session && isAdminRole(session.user.role);
+}
+
+// Deny-by-default gate: once a company exists, only an authenticated admin
+// (or dev mode) may invoke onboarding channels. Previously this function
+// returned silently when `requireNoCompany` was false, letting unauthenticated
+// renderer code reconfigure the DB pool or seed data.
+async function assertOnboardingAllowed(event, sessionToken) {
   const session = getSession(event.sender.id, sessionToken);
   if (isAdminSession(session)) return session;
   if (isDevMode()) return session || null;
-  if (requireNoCompany && await hasAnyCompany()) {
+  let companyExists = false;
+  try {
+    companyExists = await hasAnyCompany();
+  } catch {
+    // Pool broken / DB unreachable — cannot contain company data. The
+    // onboarding channels exist precisely to (re)establish this connection.
+    companyExists = false;
+  }
+  if (companyExists) {
     throw new Error('Not allowed after initial setup');
   }
   return session || null;
 }
 
-async function verifyAdminPassword(username, password) {
+async function verifyAdminPassword(username, password, companyId) {
   if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
     return { ok: false, error: 'Invalid admin credentials' };
   }
+  // usernames are unique only per company — scope the lookup to the caller's
+  // company so a same-named admin from another tenant can never authorize.
+  const params = [username.trim()];
+  let scope = '';
+  if (companyId) {
+    scope = ' AND company_id = $2';
+    params.push(companyId);
+  }
   const res = await pool.query(
-    `SELECT id, password_hash, role FROM users WHERE username = $1 AND is_active = TRUE LIMIT 1`,
-    [username.trim()]
+    `SELECT id, password_hash, role FROM users WHERE username = $1${scope} AND is_active = TRUE LIMIT 1`,
+    params
   );
   const row = res.rows[0];
   if (!row || (row.role !== 'admin' && row.role !== 'super_admin') || !verifyPasswordNode(password, row.password_hash)) {
@@ -185,28 +267,147 @@ function writeSecurityAudit(entry) {
   }
 }
 
-const SQL_MODULE_PERMISSIONS = [
-  { tables: ['users', 'roles', 'audit_logs', 'settings', 'companies', 'branches', 'currencies'], permission: 'settings.view' },
-  { tables: ['accounts', 'transactions', 'journal_entries', 'cost_centers'], permission: 'accounting.view' },
-  { tables: ['products', 'warehouses', 'stock', 'inventory'], permission: 'inventory.view' },
-  { tables: ['sales_', 'customers', 'quotations'], permission: 'sales.view' },
-  { tables: ['purchase_', 'suppliers'], permission: 'purchases.view' },
-  { tables: ['employees', 'payroll', 'departments', 'attendance', 'leaves'], permission: 'hr.view' },
-  { tables: ['leads', 'opportunities', 'activities', 'tasks'], permission: 'crm.view' },
-  { tables: ['bom', 'work_orders', 'production'], permission: 'manufacturing.view' },
+// ─── Login rate limiting ─────────────────────────────────────────────────────
+// Brute-force protection keyed by sender (webContents) AND by username. The
+// username bucket is what matters across app restarts within a session — an
+// attacker cannot escape it by rotating windows.
+const LOGIN_LIMIT_PER_WINDOW = 5;
+const LOGIN_WINDOW_MS = 60 * 1000;
+const LOGIN_LOCKOUT_MS = 5 * 60 * 1000;
+const loginAttempts = new Map();
+
+function checkLoginAttempt(key) {
+  const now = Date.now();
+  const bucket = loginAttempts.get(key);
+  if (!bucket || now >= bucket.resetAt) return { allowed: true, remaining: LOGIN_LIMIT_PER_WINDOW };
+  if (bucket.count >= LOGIN_LIMIT_PER_WINDOW) {
+    return { allowed: false, retryAfterMs: bucket.resetAt - now };
+  }
+  return { allowed: true, remaining: LOGIN_LIMIT_PER_WINDOW - bucket.count };
+}
+
+function recordFailedLogin(key) {
+  const now = Date.now();
+  const bucket = loginAttempts.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS + (bucket ? LOGIN_LOCKOUT_MS : 0) });
+    return;
+  }
+  bucket.count += 1;
+  if (bucket.count >= LOGIN_LIMIT_PER_WINDOW) {
+    // Threshold reached: extend the window into a lockout.
+    bucket.resetAt = now + LOGIN_LOCKOUT_MS;
+  }
+}
+
+function clearLoginAttempts(usernameKey, senderKey) {
+  loginAttempts.delete(usernameKey);
+  loginAttempts.delete(senderKey);
+}
+
+function loginAttemptDenied(event, username) {
+  const senderKey = `wc:${event.sender.id}`;
+  const usernameKey = `u:${String(username || '').trim().toLowerCase()}`;
+  const senderCheck = checkLoginAttempt(senderKey);
+  if (!senderCheck.allowed) return senderCheck;
+  const userCheck = checkLoginAttempt(usernameKey);
+  if (!userCheck.allowed) return userCheck;
+  recordFailedLogin(senderKey);
+  recordFailedLogin(usernameKey);
+  return null;
+}
+
+// Whitelist mapping EVERY business table (exact names) to its owning module.
+// Tables are extracted from the SQL text itself (FROM/JOIN/INSERT INTO/UPDATE
+// targets; CTE aliases are excluded), so renaming or joining a table always
+// resolves to an explicit rule. A table with no rule can never be reached
+// through the renderer SQL channel.
+//
+// Semantics:
+// - READ:  requires module.view — or module.own, so roles scoped to their own
+//   records (e.g. sales_rep) can still run list pages and resolve JOINed
+//   display names.
+// - WRITE: accepts any of module.create/.edit/.post (posting an invoice is a
+//   sales flow even though it touches accounting tables too).
+// - readAny/writeAny: cross-module reference & configuration data used by
+//   every business flow (currency formatting, journal generation, voucher
+//   forms, user JOINs). audit_logs stays append-only from business flows.
+const SQL_MODULE_TABLE_RULES = [
+  { module: 'settings', tables: ['roles'] },
+  { module: 'settings', tables: ['audit_logs'], writeAny: true },
+  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'banks', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true },
+  // Document numbering is consumed by every create flow (invoices, products,
+  // employees, work orders, ...) — writers only need to hold ANY create right.
+  {
+    module: 'settings',
+    tables: ['document_sequences'],
+    readAny: true,
+    writePermissions: [
+      'settings.edit', 'accounting.create', 'sales.create', 'purchases.create',
+      'inventory.create', 'hr.create', 'manufacturing.create', 'crm.create',
+    ],
+  },
+  { module: 'accounting', tables: ['accounts', 'transactions', 'journal_entries', 'cost_centers', 'receipt_vouchers', 'payment_vouchers'] },
+  { module: 'inventory', tables: ['products', 'product_types', 'product_categories', 'product_product_categories', 'warehouses', 'stock', 'stock_movements', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'] },
+  { module: 'sales', tables: ['sales_invoices', 'sales_invoice_lines', 'sales_returns', 'sales_return_lines', 'quotations', 'quotation_lines', 'customers'] },
+  { module: 'purchases', tables: ['purchase_invoices', 'purchase_invoice_lines', 'purchase_orders', 'purchase_order_lines', 'purchase_returns', 'purchase_return_lines', 'suppliers'] },
+  { module: 'hr', tables: ['employees', 'payroll_runs', 'payroll_lines', 'payroll_components', 'departments', 'attendance', 'leaves', 'end_of_service'] },
+  { module: 'crm', tables: ['leads', 'opportunities', 'tasks', 'activities', 'crm_activities', 'calls'] },
+  { module: 'manufacturing', tables: ['boms', 'bom_lines', 'work_orders', 'work_order_consumptions'] },
+  { module: 'ai', tables: ['ai_chat_sessions', 'ai_chat_messages'] },
 ];
+
+const TABLE_TARGET_PATTERN = /\b(?:from|join|into|update)\s+([a-z_][a-z0-9_]*)/gi;
+const CTE_NAME_PATTERN = /\b(?:with|,)\s+([a-z_][a-z0-9_]*)\s+as\s*\(/gi;
+const SQL_NON_TABLE_TOKENS = new Set(['select', 'values', 'lateral', 'only', 'where', 'returning']);
+// Statement-level commands. Anchored at statement start so `UPDATE ... SET`
+// (legitimate everywhere) is not confused with the PG `SET` configuration
+// command — the previous unanchored /\bset\b/ silently blocked every UPDATE.
+const FORBIDDEN_STATEMENT_PATTERN = /^\s*(set|show|begin|commit|rollback|copy|listen|notify|vacuum|analyze|explain|prepare|execute|deallocate)\b/i;
+
+function extractTableNames(sql) {
+  const normalized = String(sql || '').toLowerCase();
+  const ctes = new Set();
+  for (const m of normalized.matchAll(CTE_NAME_PATTERN)) ctes.add(m[1]);
+  const names = new Set();
+  for (const m of normalized.matchAll(TABLE_TARGET_PATTERN)) {
+    const name = m[1];
+    if (ctes.has(name) || SQL_NON_TABLE_TOKENS.has(name)) continue;
+    names.add(name);
+  }
+  return names;
+}
+
+function moduleWritePermissions(module) {
+  return [`${module}.create`, `${module}.edit`, `${module}.post`];
+}
 
 function assertSqlAuthorized(session, sql, params) {
   const normalized = String(sql || '').toLowerCase();
   if (!normalized.trim() || /;|--|\/\*|\*\//.test(normalized)) throw new Error('SQL operation not permitted');
-  if (/\b(set|show|begin|commit|rollback|copy|listen|notify|vacuum|analyze|explain|prepare|execute|deallocate)\b/.test(normalized)) {
+  if (FORBIDDEN_STATEMENT_PATTERN.test(normalized)) {
     throw new Error('SQL operation not permitted');
   }
   const write = /\b(insert|update|delete)\b/.test(normalized);
-  for (const rule of SQL_MODULE_PERMISSIONS) {
-    if (rule.tables.some((table) => normalized.includes(table))) {
-      const permission = write ? rule.permission.replace('.view', '.edit') : rule.permission;
-      if (!hasPermission(session, permission)) throw new Error('Permission denied');
+  const tables = extractTableNames(normalized);
+  // SQL that touches no known business table at all is refused outright.
+  if (tables.size === 0) throw new Error('SQL operation not permitted');
+  for (const name of tables) {
+    // System catalogs can never be a renderer target.
+    if (name.startsWith('pg_') || name.startsWith('information_schema')) throw new Error('SQL operation not permitted');
+    const rule = SQL_MODULE_TABLE_RULES.find((r) => r.tables.includes(name));
+    if (!rule) throw new Error('SQL operation not permitted');
+    if (write) {
+      if (rule.writeAny) continue;
+      const required = rule.writePermissions || moduleWritePermissions(rule.module);
+      if (!required.some((p) => hasPermission(session, p))) throw new Error('Permission denied');
+    } else if (!rule.readAny) {
+      if (
+        !hasPermission(session, `${rule.module}.view`) &&
+        !hasPermission(session, `${rule.module}.own`)
+      ) {
+        throw new Error('Permission denied');
+      }
     }
   }
   // Every tenant-scoped request must be tied to the authenticated company.
@@ -359,6 +560,314 @@ export function registerDatabaseHandlers() {
     }
   });
 
+  // ── Typed RPC handlers ─────────────────────────────────────────────
+  // Each `db:rpc:<name>` channel maps to a fixed SQL statement and a fixed
+  // parameter count. The renderer sends a structured `payload` (typed by
+  // TypeScript) and the main process composes the SQL — so SQL strings
+  // never travel the wire. All existing module/table authorization,
+  // cross-company checks, and SQL-pattern guards apply automatically.
+  const registerRpc = (name, { compose, paramCount, validate }) => {
+    ipcMain.handle(`db:rpc:${name}`, async (event, payload = {}) => {
+      const session = getSession(event.sender.id, payload.sessionToken);
+      if (!session) return { success: false, error: 'Authentication required' };
+      try {
+        if (validate) validate(payload, session);
+        const { sql, params } = compose(payload, session);
+        if (!Array.isArray(params) || params.length !== paramCount) {
+          return { success: false, error: `Expected ${paramCount} parameter(s), got ${Array.isArray(params) ? params.length : 'non-array'}` };
+        }
+        if (!isSqlAllowed(sql)) return { success: false, error: 'SQL operation not permitted' };
+        assertSqlAuthorized(session, sql, params);
+        const result = await execQuery(pool, sql, params);
+        return { success: true, rows: result.rows, rowCount: result.rowCount };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    });
+  };
+
+  // accounting.getAccounts
+  registerRpc('accounting.getAccounts', {
+    paramCount: 1,
+    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
+    compose: (p) => ({
+      sql: 'SELECT * FROM accounts WHERE company_id = $1 ORDER BY code',
+      params: [p.companyId],
+    }),
+  });
+
+  // accounting.createAccount
+  registerRpc('accounting.createAccount', {
+    paramCount: 9,
+    validate: (p) => {
+      if (!p.companyId) throw new Error('companyId required');
+      if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
+    },
+    compose: (p) => ({
+      sql: `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      params: [
+        p.companyId,
+        String(p.code || ''),
+        String(p.nameAr || ''),
+        String(p.nameEn || ''),
+        p.parentId ?? null,
+        String(p.type || 'asset'),
+        String(p.nature || 'debit'),
+        p.isGroup ? true : false,
+        Number(p.balance || 0),
+      ],
+    }),
+  });
+
+  // accounting.getTransactions — uses json_agg so the renderer no longer
+  // needs a second round-trip to fetch journal entries.
+  registerRpc('accounting.getTransactions', {
+    paramCount: 1,
+    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
+    compose: (p) => ({
+      sql: `SELECT t.*, COALESCE(json_agg(json_build_object(
+              'id', je.id, 'transaction_id', je.transaction_id,
+              'account_id', je.account_id, 'debit', je.debit, 'credit', je.credit,
+              'memo', je.memo, 'account_name', a.name_ar, 'account_code', a.code)
+              ORDER BY je.id) FILTER (WHERE je.id IS NOT NULL), '[]'::json) AS entries
+            FROM transactions t
+            LEFT JOIN journal_entries je ON je.transaction_id = t.id
+            LEFT JOIN accounts a ON a.id = je.account_id
+            WHERE t.company_id = $1
+            GROUP BY t.id
+            ORDER BY t.date DESC`,
+      params: [p.companyId],
+    }),
+  });
+
+  // accounting.createTransaction — composes the dynamic CTE + VALUES in
+  // the main process so the renderer only sends structured data. The
+  // paramCount varies with entry count, so this method opts out of the
+  // static check via a special validator that returns the final params.
+  ipcMain.handle('db:rpc:accounting.createTransaction', async (event, payload = {}) => {
+    const session = getSession(event.sender.id, payload.sessionToken);
+    if (!session) return { success: false, error: 'Authentication required' };
+    try {
+      const data = payload.data || {};
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      if (entries.length === 0) return { success: false, error: 'No journal entries provided' };
+      if (!data.companyId || !data.date) return { success: false, error: 'companyId and date required' };
+
+      // Build CTE + VALUES in the main process — typed, parameterized.
+      const params = [
+        data.companyId, data.date, data.reference ?? null, data.description ?? null,
+        Number(data.totalAmount || 0), data.status || 'posted',
+      ];
+      const entryValues = [];
+      let i = 7;
+      for (const entry of entries) {
+        entryValues.push(`((SELECT id FROM new_tx), $${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4})`);
+        params.push(entry.accountId, Number(entry.debit || 0), Number(entry.credit || 0), entry.memo ?? null, data.companyId);
+        i += 5;
+      }
+      const sql = `
+        WITH new_tx AS (
+          INSERT INTO transactions (company_id, date, reference, description, total_amount, status)
+          VALUES ($1, $2::timestamptz, $3, $4, $5, $6)
+          RETURNING id
+        )
+        INSERT INTO journal_entries (transaction_id, account_id, debit, credit, memo, company_id)
+        VALUES ${entryValues.join(', ')}
+        RETURNING transaction_id
+      `;
+
+      if (!isSqlAllowed(sql)) return { success: false, error: 'SQL operation not permitted' };
+      assertSqlAuthorized(session, sql, params);
+      const result = await execQuery(pool, sql, params);
+      return { success: true, rows: result.rows, rowCount: result.rowCount };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── inventory + contacts (Phase 4 slice 2) ─────────────────────────
+
+  // inventory.getProducts — embeds category_ids via json_agg so the
+  // renderer doesn't need a second round-trip.
+  registerRpc('inventory.getProducts', {
+    paramCount: 1,
+    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
+    compose: (p) => ({
+      sql: `SELECT p.*, COALESCE(
+              (SELECT json_agg(ppc.category_id)
+               FROM product_product_categories ppc
+               WHERE ppc.product_id = p.id), '[]'::json
+            ) AS category_ids
+            FROM products p
+            WHERE p.company_id = $1
+            ORDER BY p.name_ar`,
+      params: [p.companyId],
+    }),
+  });
+
+  // inventory.createProduct — single INSERT, returns id. Multi-table
+  // fan-out (product_product_categories rows) is handled by the caller
+  // since it's truly dynamic and needs `ON CONFLICT DO NOTHING`.
+  registerRpc('inventory.createProduct', {
+    paramCount: 14,
+    validate: (p) => {
+      if (!p.companyId) throw new Error('companyId required');
+      if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
+    },
+    compose: (p) => ({
+      sql: `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+      params: [
+        p.companyId,
+        String(p.code || ''),
+        String(p.nameAr || ''),
+        String(p.nameEn || ''),
+        p.barcode ?? null,
+        p.sku ?? null,
+        p.unit ?? null,
+        p.categoryId ?? null,
+        p.productTypeId ?? null,
+        Number(p.costPrice || 0),
+        Number(p.salePrice || 0),
+        p.isActive === false ? false : true,
+        p.createdBy ?? null,
+        p.updatedBy ?? null,
+      ],
+    }),
+  });
+
+  // inventory.createProductCategories — fan-out handler for the m2m
+  // join rows after `inventory.createProduct` returns an id.
+  ipcMain.handle('db:rpc:inventory.createProductCategories', async (event, payload = {}) => {
+    const session = getSession(event.sender.id, payload.sessionToken);
+    if (!session) return { success: false, error: 'Authentication required' };
+    try {
+      const productId = String(payload.productId || '');
+      const categoryIds = Array.isArray(payload.categoryIds) ? payload.categoryIds.map(String) : [];
+      if (!productId) return { success: false, error: 'productId required' };
+      if (categoryIds.length === 0) return { success: true, rows: [], rowCount: 0 };
+      const placeholders = categoryIds.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
+      const params = categoryIds.flatMap((cid) => [productId, cid]);
+      const sql = `INSERT INTO product_product_categories (product_id, category_id) VALUES ${placeholders} ON CONFLICT DO NOTHING`;
+      if (!isSqlAllowed(sql)) return { success: false, error: 'SQL operation not permitted' };
+      assertSqlAuthorized(session, sql, params);
+      const result = await execQuery(pool, sql, params);
+      return { success: true, rows: result.rows, rowCount: result.rowCount };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // contacts.getCustomers
+  registerRpc('contacts.getCustomers', {
+    paramCount: 1,
+    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
+    compose: (p) => ({
+      sql: `SELECT id, company_id, 'customer' AS type, name, phone, email, address,
+            tax_number, balance, is_active, created_at, updated_at
+            FROM customers WHERE company_id = $1 ORDER BY name`,
+      params: [p.companyId],
+    }),
+  });
+
+  // contacts.getSuppliers
+  registerRpc('contacts.getSuppliers', {
+    paramCount: 1,
+    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
+    compose: (p) => ({
+      sql: `SELECT id, company_id, 'supplier' AS type, name, phone, email, address,
+            tax_number, balance, is_active, created_at, updated_at
+            FROM suppliers WHERE company_id = $1 ORDER BY name`,
+      params: [p.companyId],
+    }),
+  });
+
+  // contacts.createCustomer
+  registerRpc('contacts.createCustomer', {
+    paramCount: 8,
+    validate: (p) => {
+      if (!p.companyId) throw new Error('companyId required');
+      if (!p.name) throw new Error('name required');
+    },
+    compose: (p) => ({
+      sql: `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, balance)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      params: [
+        p.companyId,
+        p.code ?? null,
+        String(p.name || ''),
+        p.phone ?? null,
+        p.email ?? null,
+        p.address ?? null,
+        p.taxNumber ?? null,
+        Number(p.balance || 0),
+      ],
+    }),
+  });
+
+  // contacts.createSupplier
+  registerRpc('contacts.createSupplier', {
+    paramCount: 8,
+    validate: (p) => {
+      if (!p.companyId) throw new Error('companyId required');
+      if (!p.name) throw new Error('name required');
+    },
+    compose: (p) => ({
+      sql: `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      params: [
+        p.companyId,
+        p.code ?? null,
+        String(p.name || ''),
+        p.phone ?? null,
+        p.email ?? null,
+        p.address ?? null,
+        p.taxNumber ?? null,
+        Number(p.balance || 0),
+      ],
+    }),
+  });
+
+  // ── core company (Phase 4 slice 3) ─────────────────────────────────
+  // Both handlers derive the company id from the authenticated session,
+  // not from the renderer payload — closing the cross-tenant read/update
+  // gap of the legacy `SELECT * FROM companies LIMIT 1` / `WHERE id = $1`
+  // statements. The renderer can never reference another company's row.
+
+  // core.getCompany — zero-param; id comes from the session.
+  registerRpc('core.getCompany', {
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM companies WHERE id = $1',
+      params: [session.user.companyId],
+    }),
+  });
+
+  // core.updateCompany — payload carries only mutable profile fields;
+  // the WHERE clause uses the session company id (payload.id is ignored)
+  // and `updated_by` is derived from the session (renderer value ignored).
+  registerRpc('core.updateCompany', {
+    paramCount: 9,
+    validate: (p) => {
+      if (!p.name) throw new Error('name required');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7, updated_by = $8, updated_at = NOW() WHERE id = $9::uuid`,
+      params: [
+        String(p.name || ''),
+        p.nameEn ?? null,
+        p.currency ?? null,
+        p.taxNumber ?? null,
+        p.address ?? null,
+        p.phone ?? null,
+        p.email ?? null,
+        session.user.id,
+        session.user.companyId,
+      ],
+    }),
+  });
+
   console.log('[DB] PostgreSQL IPC handlers registered.');
 }
 
@@ -368,13 +877,24 @@ export function registerAuthHandlers() {
       if (typeof username !== 'string' || typeof password !== 'string' || username.length > 100 || password.length > 1024) {
         return { success: false, error: 'Invalid credentials' };
       }
+      // Brute-force protection: 5 attempts/window, then a 5-minute lockout —
+      // enforced per sender AND per username.
+      const denied = loginAttemptDenied(event, username);
+      if (denied) {
+        const minutes = Math.ceil(denied.retryAfterMs / 60000);
+        writeSecurityAudit({ action: 'auth:login-rate-limited', user: username, ip: 'ipc' });
+        return { success: false, error: `محاولات كثيرة — حاول مجددا بعد ${minutes} دقيقة` };
+      }
+      // usernames are unique per company only — collect every matching account
+      // and accept the first active one whose password verifies (LIMIT 1 used
+      // to pick an arbitrary tenant on collisions).
       const result = await pool.query(
         `SELECT id, company_id, username, email, full_name, phone, role, branch_id, is_active, password_hash
-           FROM users WHERE username = $1 LIMIT 1`,
+           FROM users WHERE username = $1`,
         [username.trim()]
       );
-      const row = result.rows[0];
-      if (!row || !row.is_active || !verifyPasswordNode(password, row.password_hash)) {
+      const row = result.rows.find((r) => r.is_active && verifyPasswordNode(password, r.password_hash));
+      if (!row) {
         return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
       }
       let permissions = [];
@@ -402,6 +922,7 @@ export function registerAuthHandlers() {
       };
       await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1 AND company_id = $2', [row.id, row.company_id]);
       const sessionToken = createSession(event.sender.id, user, permissions);
+      clearLoginAttempts(`u:${username.trim().toLowerCase()}`, `wc:${event.sender.id}`);
       return { success: true, sessionToken, ...sessionPublicData(getSession(event.sender.id, sessionToken)) };
     } catch (err) {
       console.error('[Auth] Login failed:', err.message);
@@ -439,6 +960,9 @@ export function registerAuthHandlers() {
     try {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
+      if (!canManageRole(session, data?.role)) {
+        return { success: false, error: 'Only super_admin can create admin accounts' };
+      }
       if (!data || typeof data.username !== 'string' || !/^[\p{L}\p{N}_.-]{3,100}$/u.test(data.username) || !validateNewPassword(data.password)) {
         return { success: false, error: 'Invalid user data or password' };
       }
@@ -459,13 +983,31 @@ export function registerAuthHandlers() {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
       if (id === session.user.id && data?.isActive === false) return { success: false, error: 'Cannot deactivate current user' };
+      // Role changes: never allow granting a privileged role unless the caller
+      // is super_admin; never allow demoting/removing the privileged role of an
+      // existing admin unless the caller is super_admin.
+      if (data?.role !== undefined && !canManageRole(session, data.role)) {
+        return { success: false, error: 'Only super_admin can grant the admin role' };
+      }
+      if (data?.role !== undefined) {
+        const target = await pool.query('SELECT role FROM users WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+        if (target.rows.length === 0) return { success: false, error: 'User not found' };
+        if (!canManageRole(session, target.rows[0].role)) {
+          return { success: false, error: 'Only super_admin can modify admin accounts' };
+        }
+      }
       const result = await pool.query(
         `UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, role = $5,
          branch_id = $6::uuid, is_active = $7, updated_at = NOW() WHERE id = $8::uuid AND company_id = $9 RETURNING id`,
         [data?.username, data?.email || null, data?.fullName || null, data?.phone || null, data?.role,
           data?.branchId || null, data?.isActive !== false, id, session.user.companyId]
       );
-      return result.rows.length ? { success: true } : { success: false, error: 'User not found' };
+      if (result.rows.length) {
+        // Deactivating a user must cut off their live sessions immediately.
+        if (data?.isActive === false) revokeUserSessions(id);
+        return { success: true };
+      }
+      return { success: false, error: 'User not found' };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -476,11 +1018,23 @@ export function registerAuthHandlers() {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
       if (!validateNewPassword(password)) return { success: false, error: 'Password does not meet policy' };
+      // Admins may not reset the password of a privileged account (incl. their
+      // own takeover protection) unless they are super_admin.
+      const target = await pool.query('SELECT role FROM users WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+      if (target.rows.length === 0) return { success: false, error: 'User not found' };
+      if (!canManageRole(session, target.rows[0].role)) {
+        return { success: false, error: 'Only super_admin can reset admin passwords' };
+      }
       const result = await pool.query(
         'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3 RETURNING id',
         [hashPasswordNode(password), id, session.user.companyId]
       );
-      return result.rows.length ? { success: true } : { success: false, error: 'User not found' };
+      if (result.rows.length) {
+        // A password reset must immediately cut off all sessions of that user.
+        revokeUserSessions(id);
+        return { success: true };
+      }
+      return { success: false, error: 'User not found' };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -491,8 +1045,17 @@ export function registerAuthHandlers() {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
       if (id === session.user.id) return { success: false, error: 'Cannot delete current user' };
+      const target = await pool.query('SELECT role FROM users WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+      if (target.rows.length === 0) return { success: false, error: 'User not found' };
+      if (!canManageRole(session, target.rows[0].role)) {
+        return { success: false, error: 'Only super_admin can delete admin accounts' };
+      }
       const result = await pool.query('DELETE FROM users WHERE id = $1::uuid AND company_id = $2 RETURNING id', [id, session.user.companyId]);
-      return result.rows.length ? { success: true } : { success: false, error: 'User not found' };
+      if (result.rows.length) {
+        revokeUserSessions(id);
+        return { success: true };
+      }
+      return { success: false, error: 'User not found' };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1097,30 +1660,26 @@ export function registerOnboardingHandlers() {
   });
 
   // Clear all data (factory reset) — requires confirmation + admin re-auth
-  ipcMain.handle('db:clear-all', async (event, { confirm, username, password, sessionToken } = {}) => {
+  ipcMain.handle('db:clear-all', async (event, { confirm, password, sessionToken } = {}) => {
     try {
-      const session = await assertOnboardingAllowed(event, sessionToken, { requireNoCompany: false });
+      const session = await assertOnboardingAllowed(event, sessionToken);
 
       if (confirm !== true) {
         return { success: false, error: 'Confirmation required for destructive operation' };
       }
-
-      // Re-authentication: the caller must prove admin credentials before wiping.
-      const existing = await hasAnyCompany();
-      if (existing) {
-        if (isAdminSession(session)) {
-          // Re-enter the current admin's password to authorize the wipe.
-          const auth = await verifyAdminPassword(session.user.username, password);
-          if (!auth.ok) return { success: false, error: 'Admin password required to clear all data' };
-        } else {
-          const auth = await verifyAdminPassword(username, password);
-          if (!auth.ok) return { success: false, error: auth.error };
-        }
+      if (!isAdminSession(session)) {
+        return { success: false, error: 'Admin session required to clear all data' };
       }
+
+      // Re-authentication: re-enter the current admin's password to authorize
+      // the wipe. Scoped to the session's company to avoid username collisions
+      // across companies.
+      const auth = await verifyAdminPassword(session.user.username, password, session.user.companyId);
+      if (!auth.ok) return { success: false, error: 'Admin password required to clear all data' };
 
       writeSecurityAudit({
         action: 'db:clear-all',
-        user: (session?.user?.username || username || 'bootstrap'),
+        user: session.user.username,
         ip: 'ipc',
       });
 

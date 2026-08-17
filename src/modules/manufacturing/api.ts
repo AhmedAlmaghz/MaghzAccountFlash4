@@ -361,6 +361,7 @@ export const manufacturingApi = {
 
   async updateConsumption(consumptionId: string, data: { actualQuantity?: number; actualUnitCost?: number }, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
+      if (!companyId) return { success: false, error: 'companyId is required' };
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -368,12 +369,8 @@ export const manufacturingApi = {
       if (data.actualQuantity !== undefined) { fields.push(`actual_quantity = $${idx++}`); values.push(data.actualQuantity); }
       if (data.actualUnitCost !== undefined) { fields.push(`actual_unit_cost = $${idx++}`); values.push(data.actualUnitCost); }
       if (fields.length === 0) return { success: true };
-      values.push(consumptionId);
-      let sql = `UPDATE work_order_consumptions SET ${fields.join(', ')} WHERE id = $${idx}`;
-      if (companyId) {
-        sql += ` AND work_order_id IN (SELECT id FROM work_orders WHERE company_id = $${idx + 1})`;
-        values.push(companyId);
-      }
+      values.push(consumptionId, companyId);
+      const sql = `UPDATE work_order_consumptions SET ${fields.join(', ')} WHERE id = $${idx} AND work_order_id IN (SELECT id FROM work_orders WHERE company_id = $${idx + 1})`;
       const result = await adapter.query(sql, values);
       return { success: result.success, error: result.error };
     } catch (e) {

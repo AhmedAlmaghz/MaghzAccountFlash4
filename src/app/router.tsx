@@ -1,8 +1,11 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, HashRouter, Routes, Route, useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, useNavigate, useLocation, Outlet, Navigate } from 'react-router-dom';
 import { isElectron } from '@/core/database/adapters';
 import { PageLoader } from '@/core/ui/components/PageLoader';
 import { AppLayout } from './layout';
+import { useAuthStore } from '@/modules/auth/store';
+import { useCanAccessModule } from '@/modules/auth/hooks/usePermission';
+import type { Permission } from '@/modules/auth/types';
 
 // Lazy load modules for better performance
 const DashboardPage = React.lazy(() => import('@/modules/reports/dashboards/MainDashboard'));
@@ -133,7 +136,25 @@ const ProtectedRoute = () => {
   return <Outlet />;
 };
 
-import { useAuthStore } from '@/modules/auth/store';
+type Module = 'core' | 'accounting' | 'inventory' | 'sales' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings' | 'ai';
+
+// Route-level RBAC guard. Hiding a menu item is not protection — the URL is
+// still reachable directly. Each module's pages are wrapped so a user without
+// module access lands back on the dashboard. Mirrors the sidebar logic:
+// `module` = view/own/create access; an explicit `permission` covers one-offs.
+const PermissionRoute: React.FC<{ module?: Module; permission?: Permission }> = ({ module, permission }) => {
+  const user = useAuthStore((s) => s.user);
+  useAuthStore((s) => s.permissions);
+  const moduleAccess = useCanAccessModule(module ?? 'core');
+
+  if (user) {
+    const allowed = module !== undefined
+      ? moduleAccess
+      : permission ? useAuthStore.getState().hasPermission(permission) : true;
+    if (!allowed) return <Navigate to="/" replace />;
+  }
+  return <Outlet />;
+};
 
 const Router = isElectron() ? HashRouter : BrowserRouter;
 
@@ -149,110 +170,133 @@ export const AppRouter: React.FC = () => {
           {/* App layout route — renders Outlet inside AppLayout shell */}
           <Route element={<AppLayout />}>
             <Route path="/" element={withSuspense(DashboardPage)} />
-            
+
             {/* Accounting with nested routes */}
-            <Route path="/accounting" element={withSuspense(AccountingPage)}>
-              <Route path="chart" element={withSuspense(ChartOfAccounts)} />
-              <Route path="journal" element={withSuspense(JournalEntriesPage)} />
-              <Route path="trial" element={withSuspense(TrialBalancePage)} />
-              <Route path="balance" element={withSuspense(BalanceSheetPage)} />
-              <Route path="profit" element={withSuspense(ProfitLossPage)} />
-              <Route path="cashflow" element={withSuspense(CashFlowPage)} />
-              <Route path="receipt-vouchers" element={withSuspense(ReceiptVouchersPage)} />
-              <Route path="payment-vouchers" element={withSuspense(PaymentVouchersPage)} />
-              <Route path="ledger" element={withSuspense(AccountLedgerPage)} />
+            <Route element={<PermissionRoute module="accounting" />}>
+              <Route path="/accounting" element={withSuspense(AccountingPage)}>
+                <Route path="chart" element={withSuspense(ChartOfAccounts)} />
+                <Route path="journal" element={withSuspense(JournalEntriesPage)} />
+                <Route path="trial" element={withSuspense(TrialBalancePage)} />
+                <Route path="balance" element={withSuspense(BalanceSheetPage)} />
+                <Route path="profit" element={withSuspense(ProfitLossPage)} />
+                <Route path="cashflow" element={withSuspense(CashFlowPage)} />
+                <Route path="receipt-vouchers" element={withSuspense(ReceiptVouchersPage)} />
+                <Route path="payment-vouchers" element={withSuspense(PaymentVouchersPage)} />
+                <Route path="ledger" element={withSuspense(AccountLedgerPage)} />
+              </Route>
             </Route>
-            
+
             {/* Inventory with nested routes */}
-            <Route path="/inventory" element={withSuspense(InventoryPage)}>
-              <Route path="products" element={withSuspense(ProductsPage)} />
-              <Route path="warehouses" element={withSuspense(WarehousesPage)} />
-              <Route path="stock" element={withSuspense(StockPage)} />
-              <Route path="transactions" element={withSuspense(InventoryTransactionsPage)} />
-              <Route path="adjustments" element={withSuspense(StockAdjustmentPage)} />
+            <Route element={<PermissionRoute module="inventory" />}>
+              <Route path="/inventory" element={withSuspense(InventoryPage)}>
+                <Route path="products" element={withSuspense(ProductsPage)} />
+                <Route path="warehouses" element={withSuspense(WarehousesPage)} />
+                <Route path="stock" element={withSuspense(StockPage)} />
+                <Route path="transactions" element={withSuspense(InventoryTransactionsPage)} />
+                <Route path="adjustments" element={withSuspense(StockAdjustmentPage)} />
+              </Route>
             </Route>
 
             {/* Sales with nested routes */}
-            <Route path="/sales" element={withSuspense(SalesPage)}>
-              <Route path="invoices" element={withSuspense(InvoicesPage)} />
-              <Route path="customers" element={withSuspense(CustomersPage)} />
-              <Route path="quotations" element={withSuspense(QuotationsPage)} />
-              <Route path="returns" element={withSuspense(SalesReturnsPage)} />
+            <Route element={<PermissionRoute module="sales" />}>
+              <Route path="/sales" element={withSuspense(SalesPage)}>
+                <Route path="invoices" element={withSuspense(InvoicesPage)} />
+                <Route path="customers" element={withSuspense(CustomersPage)} />
+                <Route path="quotations" element={withSuspense(QuotationsPage)} />
+                <Route path="returns" element={withSuspense(SalesReturnsPage)} />
+              </Route>
             </Route>
 
             {/* Purchases with nested routes */}
-            <Route path="/purchases" element={withSuspense(PurchasesPage)}>
-              <Route path="invoices" element={withSuspense(PurchaseInvoicesPage)} />
-              <Route path="orders" element={withSuspense(PurchaseOrdersPage)} />
-              <Route path="suppliers" element={withSuspense(SuppliersPage)} />
-              <Route path="returns" element={withSuspense(PurchaseReturnsPage)} />
+            <Route element={<PermissionRoute module="purchases" />}>
+              <Route path="/purchases" element={withSuspense(PurchasesPage)}>
+                <Route path="invoices" element={withSuspense(PurchaseInvoicesPage)} />
+                <Route path="orders" element={withSuspense(PurchaseOrdersPage)} />
+                <Route path="suppliers" element={withSuspense(SuppliersPage)} />
+                <Route path="returns" element={withSuspense(PurchaseReturnsPage)} />
+              </Route>
             </Route>
-            
+
             {/* Manufacturing with nested routes */}
-            <Route path="/manufacturing" element={withSuspense(ManufacturingPage)}>
-              <Route path="work-orders" element={withSuspense(WorkOrdersPage)} />
-              <Route path="bom" element={withSuspense(BomPage)} />
-              <Route path="cost-report" element={withSuspense(ProductionCostReport)} />
-              <Route path="variance-report" element={withSuspense(VarianceAnalysisReport)} />
+            <Route element={<PermissionRoute module="manufacturing" />}>
+              <Route path="/manufacturing" element={withSuspense(ManufacturingPage)}>
+                <Route path="work-orders" element={withSuspense(WorkOrdersPage)} />
+                <Route path="bom" element={withSuspense(BomPage)} />
+                <Route path="cost-report" element={withSuspense(ProductionCostReport)} />
+                <Route path="variance-report" element={withSuspense(VarianceAnalysisReport)} />
+              </Route>
             </Route>
-            
+
             {/* HR with nested routes */}
-            <Route path="/hr" element={withSuspense(HrPage)}>
-              <Route path="employees" element={withSuspense(EmployeesPage)} />
-              <Route path="attendance" element={withSuspense(AttendancePage)} />
-              <Route path="payroll" element={withSuspense(PayrollPage)} />
-              <Route path="leaves" element={withSuspense(LeavesPage)} />
-              <Route path="end-of-service" element={withSuspense(EndOfServicePage)} />
+            <Route element={<PermissionRoute module="hr" />}>
+              <Route path="/hr" element={withSuspense(HrPage)}>
+                <Route path="employees" element={withSuspense(EmployeesPage)} />
+                <Route path="attendance" element={withSuspense(AttendancePage)} />
+                <Route path="payroll" element={withSuspense(PayrollPage)} />
+                <Route path="leaves" element={withSuspense(LeavesPage)} />
+                <Route path="end-of-service" element={withSuspense(EndOfServicePage)} />
+              </Route>
             </Route>
-            
+
             {/* CRM with nested routes */}
-            <Route path="/crm" element={withSuspense(CrmPage)}>
-              <Route path="leads" element={withSuspense(LeadsPage)} />
-              <Route path="opportunities" element={withSuspense(OpportunitiesPage)} />
-              <Route path="tasks" element={withSuspense(TasksPage)} />
-              <Route path="activities" element={withSuspense(ActivitiesPage)} />
+            <Route element={<PermissionRoute module="crm" />}>
+              <Route path="/crm" element={withSuspense(CrmPage)}>
+                <Route path="leads" element={withSuspense(LeadsPage)} />
+                <Route path="opportunities" element={withSuspense(OpportunitiesPage)} />
+                <Route path="tasks" element={withSuspense(TasksPage)} />
+                <Route path="activities" element={withSuspense(ActivitiesPage)} />
+              </Route>
             </Route>
-            
+
             {/* Reports hub & analytical reports */}
-            <Route path="/reports" element={withSuspense(ReportsPage)} />
-            <Route path="/reports/sales-analysis" element={withSuspense(SalesAnalysisReport)} />
-            <Route path="/reports/inventory-analysis" element={withSuspense(InventoryAnalysisReport)} />
-            <Route path="/reports/low-stock-alert" element={withSuspense(LowStockAlertReport)} />
-            <Route path="/reports/stock-movement" element={withSuspense(StockMovementReport)} />
-            <Route path="/reports/stock-valuation" element={withSuspense(StockValuationReport)} />
-            <Route path="/reports/customer-statement" element={withSuspense(CustomerStatementReport)} />
-            <Route path="/reports/supplier-statement" element={withSuspense(SupplierStatementReport)} />
-            <Route path="/reports/profit-analysis" element={withSuspense(ProfitAnalysisReport)} />
-            <Route path="/reports/custom-builder" element={withSuspense(CustomReportBuilder)} />
-            <Route path="/reports/lead-conversion" element={withSuspense(LeadConversionReport)} />
-            <Route path="/reports/opportunity-pipeline" element={withSuspense(OpportunityPipelineReport)} />
-            <Route path="/users" element={withSuspense(UsersPage)} />
-            <Route path="/roles" element={withSuspense(RolesPage)} />
-            <Route path="/audit-logs" element={withSuspense(AuditLogPage)} />
-            
+            <Route element={<PermissionRoute module="reports" />}>
+              <Route path="/reports" element={withSuspense(ReportsPage)} />
+              <Route path="/reports/sales-analysis" element={withSuspense(SalesAnalysisReport)} />
+              <Route path="/reports/inventory-analysis" element={withSuspense(InventoryAnalysisReport)} />
+              <Route path="/reports/low-stock-alert" element={withSuspense(LowStockAlertReport)} />
+              <Route path="/reports/stock-movement" element={withSuspense(StockMovementReport)} />
+              <Route path="/reports/stock-valuation" element={withSuspense(StockValuationReport)} />
+              <Route path="/reports/customer-statement" element={withSuspense(CustomerStatementReport)} />
+              <Route path="/reports/supplier-statement" element={withSuspense(SupplierStatementReport)} />
+              <Route path="/reports/profit-analysis" element={withSuspense(ProfitAnalysisReport)} />
+              <Route path="/reports/custom-builder" element={withSuspense(CustomReportBuilder)} />
+              <Route path="/reports/lead-conversion" element={withSuspense(LeadConversionReport)} />
+              <Route path="/reports/opportunity-pipeline" element={withSuspense(OpportunityPipelineReport)} />
+            </Route>
+
+            <Route element={<PermissionRoute permission="settings.view" />}>
+              <Route path="/users" element={withSuspense(UsersPage)} />
+              <Route path="/roles" element={withSuspense(RolesPage)} />
+              <Route path="/audit-logs" element={withSuspense(AuditLogPage)} />
+            </Route>
+
             {/* Settings with nested routes */}
-            <Route path="/settings" element={withSuspense(SettingsLayout)}>
-              <Route path="company" element={withSuspense(CompanySetup)} />
-              <Route path="currencies" element={withSuspense(CurrenciesPage)} />
-              <Route path="vat" element={withSuspense(VatSettingsPage)} />
-              <Route path="branches" element={withSuspense(BranchesPage)} />
-              <Route path="backup" element={withSuspense(BackupPage)} />
-              <Route path="document-sequences" element={withSuspense(DocumentSequencesPage)} />
-              <Route path="product-types" element={withSuspense(ProductTypesPage)} />
-              <Route path="product-categories" element={withSuspense(ProductCategoriesPage)} />
-              <Route path="default-accounts" element={withSuspense(DefaultAccountsPage)} />
-              <Route path="units" element={withSuspense(UnitsPage)} />
-              <Route path="cash-boxes" element={withSuspense(CashBoxesPage)} />
-              <Route path="banks" element={withSuspense(BanksPage)} />
-              <Route path="cost-centers" element={withSuspense(CostCentersPage)} />
-              <Route path="database" element={withSuspense(DatabaseSettingsPage)} />
-              <Route path="users" element={withSuspense(UsersSettingsPage)} />
-              <Route path="reset" element={withSuspense(ResetOnboardingPage)} />
-              <Route path="ai" element={withSuspense(AiSettingsPage)} />
+            <Route element={<PermissionRoute module="settings" />}>
+              <Route path="/settings" element={withSuspense(SettingsLayout)}>
+                <Route path="company" element={withSuspense(CompanySetup)} />
+                <Route path="currencies" element={withSuspense(CurrenciesPage)} />
+                <Route path="vat" element={withSuspense(VatSettingsPage)} />
+                <Route path="branches" element={withSuspense(BranchesPage)} />
+                <Route path="backup" element={withSuspense(BackupPage)} />
+                <Route path="document-sequences" element={withSuspense(DocumentSequencesPage)} />
+                <Route path="product-types" element={withSuspense(ProductTypesPage)} />
+                <Route path="product-categories" element={withSuspense(ProductCategoriesPage)} />
+                <Route path="default-accounts" element={withSuspense(DefaultAccountsPage)} />
+                <Route path="units" element={withSuspense(UnitsPage)} />
+                <Route path="cash-boxes" element={withSuspense(CashBoxesPage)} />
+                <Route path="banks" element={withSuspense(BanksPage)} />
+                <Route path="cost-centers" element={withSuspense(CostCentersPage)} />
+                <Route path="database" element={withSuspense(DatabaseSettingsPage)} />
+                <Route path="users" element={withSuspense(UsersSettingsPage)} />
+                <Route path="reset" element={withSuspense(ResetOnboardingPage)} />
+                <Route path="ai" element={withSuspense(AiSettingsPage)} />
+              </Route>
             </Route>
 
             {/* AI Chat */}
-            <Route path="/ai" element={withSuspense(AiChatPage)} />
+            <Route element={<PermissionRoute module="ai" />}>
+              <Route path="/ai" element={withSuspense(AiChatPage)} />
+            </Route>
           </Route>
         </Route>
       </Routes>

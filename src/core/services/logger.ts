@@ -48,8 +48,8 @@ class Logger {
     this.minLevel = minLevel;
   }
 
-  configure(sink: LogSink, minLevel?: LogLevel): void {
-    this.sink = sink;
+  configure(sink?: LogSink, minLevel?: LogLevel): void {
+    this.sink = sink ?? consoleSink;
     if (minLevel) this.minLevel = minLevel;
   }
 

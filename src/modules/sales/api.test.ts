@@ -60,7 +60,7 @@ describe('salesApi.getCustomerStatement', () => {
     vi.clearAllMocks();
   });
 
-  it('returns union of invoices and posted receipt vouchers', async () => {
+  it('always scopes the statement to the caller company', async () => {
     const adapter = makeMockAdapter(async (_sql, params) => {
       if (params[0] === CUSTOMER_ID) {
         return {
@@ -75,30 +75,42 @@ describe('salesApi.getCustomerStatement', () => {
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-    const res = await salesApi.getCustomerStatement(CUSTOMER_ID);
+    const res = await salesApi.getCustomerStatement(CUSTOMER_ID, COMPANY_ID);
     expect(res.success).toBe(true);
     expect(res.data).toHaveLength(2);
     expect(adapter.query).toHaveBeenCalledTimes(1);
-    const [sql] = adapter.query.mock.calls[0];
+    const [sql, params] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/FROM sales_invoices/);
     expect(sql).toMatch(/FROM receipt_vouchers/);
     expect(sql).toMatch(/voucher_number as document_number/);
+    // both UNION branches must filter by the caller's company
+    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(2);
+    expect(params).toEqual([CUSTOMER_ID, COMPANY_ID]);
   });
 
   it('returns empty array when no transactions exist', async () => {
     const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-    const res = await salesApi.getCustomerStatement(CUSTOMER_ID);
+    const res = await salesApi.getCustomerStatement(CUSTOMER_ID, COMPANY_ID);
     expect(res.success).toBe(true);
     expect(res.data).toEqual([]);
+  });
+
+  it('rejects a missing companyId (cross-tenant protection)', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.getCustomerStatement(CUSTOMER_ID, '');
+    expect(res.success).toBe(false);
+    expect(adapter.query).not.toHaveBeenCalled();
   });
 
   it('propagates adapter errors', async () => {
     const adapter = makeMockAdapter(async () => ({ success: false, error: 'db down' }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-    const res = await salesApi.getCustomerStatement(CUSTOMER_ID);
+    const res = await salesApi.getCustomerStatement(CUSTOMER_ID, COMPANY_ID);
     expect(res.success).toBe(false);
     expect(res.error).toBe('db down');
   });

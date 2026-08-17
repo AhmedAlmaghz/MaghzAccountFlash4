@@ -7,6 +7,34 @@ export interface ElectronDB extends PreloadDB {
   seedDefault?(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   seedDemo?(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   reset?(): Promise<{ success: boolean; error?: string }>;
+
+  // Typed RPC surface (Phase 4) — preferred over `_exec` for new code.
+  // Each method sends a structured payload to a fixed SQL statement in
+  // the main process; the renderer never composes SQL.
+  accounting?: {
+    getAccounts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createAccount(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; parentId?: string | null; type?: string; nature?: string; isGroup?: boolean; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getTransactions(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createTransaction(payload: { data: { companyId: string; date: string; reference?: string; description?: string; totalAmount: number; status?: string; entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> } }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  inventory?: {
+    getProducts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createProduct(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; barcode?: string | null; sku?: string | null; unit?: string | null; categoryId?: string | null; productTypeId?: string | null; costPrice?: number; salePrice?: number; isActive?: boolean; createdBy?: string | null; updatedBy?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createProductCategories(payload: { productId: string; categoryIds: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  contacts?: {
+    getCustomers(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getSuppliers(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createCustomer(payload: { companyId: string; code?: string | null; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createSupplier(payload: { companyId: string; code?: string | null; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  // Session-derived company scoping (Phase 4 slice 3). No company id in
+  // payload; the main process uses the authenticated session. The renderer
+  // can never reference another company's row.
+  core?: {
+    getCompany(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateCompany(payload: { name: string; nameEn?: string | null; currency?: string | null; taxNumber?: string | null; address?: string | null; phone?: string | null; email?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
 }
 
 interface PreloadDB {
@@ -61,6 +89,35 @@ declare global {
 function getDB(): PreloadDB {
   if (typeof window !== 'undefined' && window.electronDB) {
     return window.electronDB;
+  }
+  throw new Error('electronDB not available');
+}
+
+// Typed RPC bridge — preferred path for new code. The renderer sends a
+// structured payload and the main process composes the SQL. Each method
+// returns the same normalized envelope as `_exec` so callers can use the
+// existing `normalizeResult` helper.
+type ElectronRpcSurface = NonNullable<Required<ElectronDB>['accounting']>
+  & NonNullable<Required<ElectronDB>['inventory']>
+  & NonNullable<Required<ElectronDB>['contacts']>
+  & NonNullable<Required<ElectronDB>['core']>;
+
+function getRPC(): ElectronRpcSurface {
+  if (typeof window !== 'undefined' && window.electronDB) {
+    const db = window.electronDB;
+    const acc = db.accounting;
+    const inv = db.inventory;
+    const ctc = db.contacts;
+    const core = db.core;
+    if (!acc || !inv || !ctc || !core) {
+      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/core)');
+    }
+    return {
+      ...acc,
+      ...inv,
+      ...ctc,
+      ...core,
+    } as ElectronRpcSurface;
   }
   throw new Error('electronDB not available');
 }
@@ -139,7 +196,10 @@ export const electronPgAdapter: DbAdapter = {
   },
 
   async getCompany() {
-    const raw = await getDB()._exec('SELECT * FROM companies LIMIT 1');
+    // Typed RPC (Phase 4 slice 3) — the main process derives the company id
+    // from the authenticated session, closing the cross-tenant read of the
+    // legacy `SELECT * FROM companies LIMIT 1`.
+    const raw = await getRPC().getCompany({});
     const result = normalizeResult(raw);
     if (result.success && result.rows && result.rows.length > 0) {
       return { success: true, data: result.rows[0] };
@@ -147,20 +207,42 @@ export const electronPgAdapter: DbAdapter = {
     return { success: false, error: 'No company found' };
   },
 
+  async updateCompany(data) {
+    // Typed RPC (Phase 4 slice 3) — the main process scopes the UPDATE to
+    // the authenticated session's company and derives `updated_by` from
+    // the session. The renderer cannot touch another company's row.
+    if (!data?.name) return { success: false, error: 'name required' };
+    const result = await getRPC().updateCompany({
+      name: data.name,
+      nameEn: data.nameEn,
+      currency: data.currency,
+      taxNumber: data.taxNumber,
+      address: data.address,
+      phone: data.phone,
+      email: data.email,
+    });
+    return result.success ? { success: true } : { success: false, error: result.error };
+  },
+
   async getAccounts(companyId) {
-    const result = await getDB()._exec(
-      'SELECT * FROM accounts WHERE company_id = $1 ORDER BY code',
-      [companyId],
-    );
+    // Typed RPC (Phase 4): renderer sends { companyId }, main process
+    // composes the SQL and runs the auth/RBAC checks.
+    const result = await getRPC().getAccounts({ companyId });
     return { success: result.success, data: result.rows, error: result.error };
   },
 
   async createAccount(data) {
-    const result = await getDB()._exec(
-      `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [data.companyId, data.code, data.nameAr, data.nameEn, data.parentId, data.type, data.nature, data.isGroup, data.balance || 0],
-    );
+    const result = await getRPC().createAccount({
+      companyId: data.companyId,
+      code: data.code,
+      nameAr: data.nameAr,
+      nameEn: data.nameEn,
+      parentId: data.parentId,
+      type: data.type,
+      nature: data.nature,
+      isGroup: data.isGroup,
+      balance: data.balance,
+    });
     if (result.success && result.rows?.length && result.rows[0]) {
       return { success: true, id: String(result.rows[0].id) };
     }
@@ -168,89 +250,47 @@ export const electronPgAdapter: DbAdapter = {
   },
 
   async getTransactions(companyId) {
-    // Fetch transactions and entries separately to avoid json_agg issues
-    const txResult = await getDB()._exec(
-      `SELECT * FROM transactions WHERE company_id = $1 ORDER BY date DESC`,
-      [companyId],
-    );
-    if (!txResult.success) return { success: false, error: txResult.error };
-    
-    const transactions = (normalizeResult<Record<string, unknown>>(txResult).rows || []) as Record<string, unknown>[];
-    if (transactions.length === 0) {
-      return { success: true, data: [] };
-    }
+    // Typed RPC returns transactions with entries already embedded via
+    // json_agg, so the renderer no longer needs a second round-trip.
+    const result = await getRPC().getTransactions({ companyId });
+    if (!result.success) return { success: false, error: result.error };
+    const transactions = (normalizeResult<Record<string, unknown>>(result).rows || []) as Record<string, unknown>[];
+    if (transactions.length === 0) return { success: true, data: [] };
 
-    const txIds = transactions.map((t) => String(t.id));
-    const entriesResult = await getDB()._exec(
-      `SELECT je.*, a.name_ar as account_name, a.code as account_code 
-       FROM journal_entries je 
-       LEFT JOIN accounts a ON je.account_id = a.id 
-       WHERE je.transaction_id = ANY($1)`,
-      [txIds],
-    );
-    
-    const allEntries = (normalizeResult(entriesResult).rows || []) as Record<string, unknown>[];
-    const entriesByTx = new Map<string, Record<string, unknown>[]>();
-    for (const entry of allEntries) {
-      const txId = String(entry.transaction_id || entry.transactionId);
-      if (!entriesByTx.has(txId)) entriesByTx.set(txId, []);
-      entriesByTx.get(txId)!.push(entry);
-    }
-    
     for (const tx of transactions) {
-      const txId = String(tx.id);
-      const txEntries = entriesByTx.get(txId) || [];
-      tx.entries = txEntries.map((row: Record<string, unknown>) => ({
+      const rawEntries = Array.isArray(tx.entries) ? (tx.entries as Record<string, unknown>[]) : [];
+      tx.entries = rawEntries.map((row) => ({
         id: row.id,
         transactionId: row.transaction_id || row.transactionId,
         accountId: row.account_id || row.accountId,
-        account: row.account_name ? { 
-          id: row.account_id || row.accountId, 
-          nameAr: row.account_name || row.accountName, 
-          code: row.account_code || row.accountCode 
+        account: row.account_name ? {
+          id: row.account_id || row.accountId,
+          nameAr: row.account_name || row.accountName,
+          code: row.account_code || row.accountCode,
         } : undefined,
         debit: Number(row.debit) || 0,
         credit: Number(row.credit) || 0,
         memo: row.memo,
       }));
     }
-    
+
     return { success: true, data: transactions };
   },
 
   async createTransaction(data) {
-    const entries = data.entries || [];
-    if (entries.length === 0) {
-      return { success: false, error: 'No journal entries provided' };
-    }
-
-    // Build VALUES for journal entries
-    const entryValues: string[] = [];
-    const params: unknown[] = [
-      data.companyId, data.date, data.reference, data.description,
-      data.totalAmount, data.status || 'posted',
-    ];
-    let paramIdx = 7;
-
-    for (const entry of entries) {
-      entryValues.push(`((SELECT id FROM new_tx), $${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4})`);
-      params.push(entry.accountId, entry.debit, entry.credit, entry.memo, data.companyId);
-      paramIdx += 5;
-    }
-
-    const sql = `
-      WITH new_tx AS (
-        INSERT INTO transactions (company_id, date, reference, description, total_amount, status)
-        VALUES ($1, $2::timestamptz, $3, $4, $5, $6)
-        RETURNING id
-      )
-      INSERT INTO journal_entries (transaction_id, account_id, debit, credit, memo, company_id)
-      VALUES ${entryValues.join(', ')}
-      RETURNING transaction_id
-    `;
-
-    const result = await getDB()._exec(sql, params);
-
+    // Typed RPC composes the CTE + VALUES in the main process so the
+    // renderer only sends structured data.
+    const result = await getRPC().createTransaction({
+      data: {
+        companyId: data.companyId,
+        date: data.date,
+        reference: data.reference,
+        description: data.description,
+        totalAmount: data.totalAmount,
+        status: data.status,
+        entries: data.entries || [],
+      },
+    });
     if (result.success && result.rows?.[0]) {
       return { success: true, id: String((result.rows[0] as { transaction_id: unknown }).transaction_id) };
     }
@@ -258,17 +298,10 @@ export const electronPgAdapter: DbAdapter = {
   },
 
   async getProducts(companyId) {
-    const result = await getDB()._exec(
-      `SELECT p.*, COALESCE(
-        (SELECT json_agg(ppc.category_id)
-         FROM product_product_categories ppc
-         WHERE ppc.product_id = p.id), '[]'::json
-      ) AS category_ids
-      FROM products p
-      WHERE p.company_id = $1
-      ORDER BY p.name_ar`,
-      [companyId],
-    );
+    // Typed RPC (Phase 4 slice 2): main process composes the SQL with
+    // json_agg for category_ids so the renderer doesn't need a second
+    // round-trip to fetch the m2m mapping.
+    const result = await getRPC().getProducts({ companyId });
     if (!result.success) {
       return { success: false, error: result.error };
     }
@@ -280,20 +313,30 @@ export const electronPgAdapter: DbAdapter = {
   },
 
   async createProduct(data) {
-    const result = await getDB()._exec(
-      `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-      [data.companyId, data.code, data.nameAr, data.nameEn, data.barcode, data.sku, data.unit, data.categoryId ?? null, data.productTypeId ?? null, data.costPrice, data.salePrice, data.isActive ?? true, data.createdBy ?? null, data.updatedBy ?? null],
-    );
+    const result = await getRPC().createProduct({
+      companyId: data.companyId,
+      code: data.code,
+      nameAr: data.nameAr,
+      nameEn: data.nameEn,
+      barcode: data.barcode,
+      sku: data.sku,
+      unit: data.unit,
+      categoryId: data.categoryId,
+      productTypeId: data.productTypeId,
+      costPrice: data.costPrice,
+      salePrice: data.salePrice,
+      isActive: data.isActive,
+      createdBy: data.createdBy,
+      updatedBy: data.updatedBy,
+    });
     if (result.success && result.rows?.length && result.rows[0]) {
       const productId = String(result.rows[0].id);
+      // Fan out the m2m category rows via a second typed channel.
       if (Array.isArray(data.categoryIds) && data.categoryIds.length > 0) {
-        const catValues = data.categoryIds.map((_: string, i: number) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
-        const catParams = data.categoryIds.flatMap((cid: string) => [productId, cid]);
-        await getDB()._exec(
-          `INSERT INTO product_product_categories (product_id, category_id) VALUES ${catValues} ON CONFLICT DO NOTHING`,
-          catParams,
-        );
+        await getRPC().createProductCategories({
+          productId,
+          categoryIds: data.categoryIds,
+        });
       }
       return { success: true, id: productId };
     }
@@ -301,41 +344,38 @@ export const electronPgAdapter: DbAdapter = {
   },
 
   async getContacts(companyId, type) {
-    // customers and suppliers are separate tables in the Drizzle schema.
-    // The legacy `contacts` table does not exist; we route to the correct table.
-    const params: unknown[] = [companyId];
-    let finalSql: string;
-    if (!type || type === 'customer') {
-      finalSql = `SELECT id, company_id, 'customer' AS type, name, phone, email, address,
-                  tax_number, balance, is_active, created_at, updated_at
-                  FROM customers WHERE company_id = $1 ORDER BY name`;
-    } else {
-      finalSql = `SELECT id, company_id, 'supplier' AS type, name, phone, email, address,
-                  tax_number, balance, is_active, created_at, updated_at
-                  FROM suppliers WHERE company_id = $1 ORDER BY name`;
-    }
-    const result = await getDB()._exec(finalSql, params);
+    // customers and suppliers live in separate tables — the renderer
+    // chooses which typed channel to call based on `type`.
+    const rpc = getRPC();
+    const result = (!type || type === 'customer')
+      ? await rpc.getCustomers({ companyId })
+      : await rpc.getSuppliers({ companyId });
     return { success: result.success, data: result.rows, error: result.error };
   },
 
   async createContact(data) {
-    // Route to the correct table based on type
-    if (data.type === 'supplier') {
-      const result = await getDB()._exec(
-      `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [data.companyId, data.code ?? null, data.name, data.phone ?? null, data.email ?? null, data.address ?? null, data.taxNumber ?? null, data.balance || 0],
-      );
-      return result.success && result.rows?.length && result.rows[0]
-        ? { success: true, id: String(result.rows[0].id) }
-        : { success: false, error: result.error };
-    }
-    // default to customer
-    const result = await getDB()._exec(
-      `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, balance)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [data.companyId, data.code ?? null, data.name, data.phone ?? null, data.email ?? null, data.address ?? null, data.taxNumber ?? null, data.balance || 0],
-    );
+    const rpc = getRPC();
+    const result = data.type === 'supplier'
+      ? await rpc.createSupplier({
+          companyId: data.companyId,
+          code: data.code,
+          name: data.name,
+          phone: data.phone,
+          email: data.email,
+          address: data.address,
+          taxNumber: data.taxNumber,
+          balance: data.balance,
+        })
+      : await rpc.createCustomer({
+          companyId: data.companyId,
+          code: data.code,
+          name: data.name,
+          phone: data.phone,
+          email: data.email,
+          address: data.address,
+          taxNumber: data.taxNumber,
+          balance: data.balance,
+        });
     return result.success && result.rows?.length && result.rows[0]
       ? { success: true, id: String(result.rows[0].id) }
       : { success: false, error: result.error };

@@ -1,0 +1,389 @@
+npm notice run MaghzAccountPro@0.1.0 npx
+npm notice run vitest run src/app/layout.test.tsx src/modules/auth
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90mE:/MaghzAccountApp/MaghzAccountFlash35[39m
+
+ [31m❯[39m src/modules/auth/store.ownership.test.ts [2m([22m[2m11 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 107[2mms[22m[39m
+     [32m✓[39m shouldFilterByOwner returns false when no user[32m 14[2mms[22m[39m
+     [32m✓[39m admin role bypasses owner filter[32m 1[2mms[22m[39m
+     [32m✓[39m super_admin role bypasses owner filter[32m 1[2mms[22m[39m
+     [32m✓[39m user with view permission only -> no owner filter[32m 1[2mms[22m[39m
+     [32m✓[39m user with only .own permission -> owner filter enabled[32m 1[2mms[22m[39m
+     [32m✓[39m user with .own permission for one module only filters that module[32m 1[2mms[22m[39m
+     [32m✓[39m user with both .view and .own -> view wins (no filter)[32m 5[2mms[22m[39m
+     [32m✓[39m hasPermission correctly checks granted permission[32m 6[2mms[22m[39m
+     [32m✓[39m login sets user and permissions[32m 4[2mms[22m[39m
+     [32m✓[39m logout clears user and localStorage[32m 2[2mms[22m[39m
+[31m     [31m×[31m recordActivity updates lastActivityAt[39m[32m 60[2mms[22m[39m
+ [31m❯[39m src/modules/auth/store.test.ts [2m([22m[2m29 tests[22m[2m | [22m[31m6 failed[39m[2m)[22m[32m 238[2mms[22m[39m
+[31m       [31m×[31m sets user and authentication state[39m[32m 49[2mms[22m[39m
+       [32m✓[39m clears user and auth state[32m 6[2mms[22m[39m
+       [32m✓[39m returns false when not authenticated[32m 1[2mms[22m[39m
+       [32m✓[39m super_admin has all permissions[32m 11[2mms[22m[39m
+       [32m✓[39m admin has most permissions except restricted[32m 1[2mms[22m[39m
+       [32m✓[39m accountant has accounting permissions[32m 1[2mms[22m[39m
+       [32m✓[39m sales_rep has sales and crm permissions[32m 1[2mms[22m[39m
+       [32m✓[39m viewer has read-only permissions[32m 2[2mms[22m[39m
+       [32m✓[39m returns true for matching role[32m 11[2mms[22m[39m
+       [32m✓[39m returns false for non-matching role[32m 2[2mms[22m[39m
+[31m       [31m×[31m restores auth from localStorage[39m[32m 16[2mms[22m[39m
+       [32m✓[39m handles invalid stored data[32m 49[2mms[22m[39m
+[31m       [31m×[31m rejects persisted auth when session fingerprint is missing[39m[32m 3[2mms[22m[39m
+[31m       [31m×[31m clears expired session from localStorage[39m[32m 8[2mms[22m[39m
+       [32m✓[39m sets loading to false when no stored user[32m 2[2mms[22m[39m
+[31m       [31m×[31m clears stale user from localStorage when DB user no longer exists[39m[32m 4[2mms[22m[39m
+       [32m✓[39m returns false when no activity recorded[32m 1[2mms[22m[39m
+       [32m✓[39m returns true when activity is recent[32m 0[2mms[22m[39m
+       [32m✓[39m returns false and logs out when session expired[32m 1[2mms[22m[39m
+       [32m✓[39m updates lastActivityAt timestamp[32m 1[2mms[22m[39m
+[31m       [31m×[31m saves activity to localStorage[39m[32m 7[2mms[22m[39m
+       [32m✓[39m returns true when user has module permission[32m 3[2mms[22m[39m
+       [32m✓[39m returns false when user lacks permission[32m 0[2mms[22m[39m
+       [32m✓[39m returns false when not authenticated[32m 0[2mms[22m[39m
+       [32m✓[39m returns false for super_admin[32m 0[2mms[22m[39m
+       [32m✓[39m returns false for admin[32m 0[2mms[22m[39m
+       [32m✓[39m returns false when user has full view permission[32m 0[2mms[22m[39m
+       [32m✓[39m returns true when user has only own permission[32m 0[2mms[22m[39m
+       [32m✓[39m returns false when user has no permissions for module[32m 0[2mms[22m[39m
+[90mstderr[2m | src/modules/auth/hooks/usePermission.test.tsx
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0015_payment_allocation.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+
+ [32m✓[39m src/modules/auth/hooks/usePermission.test.tsx [2m([22m[2m27 tests[22m[2m)[22m[33m 720[2mms[22m[39m
+ [32m✓[39m src/app/layout.test.tsx [2m([22m[2m15 tests[22m[2m)[22m[33m 4596[2mms[22m[39m
+     [33m[2m✓[22m[39m renders sidebar with logo [33m 575[2mms[22m[39m
+     [33m[2m✓[22m[39m toggles sidebar on button click [33m 1109[2mms[22m[39m
+     [33m[2m✓[22m[39m renders sidebar and header [33m 786[2mms[22m[39m
+     [33m[2m✓[22m[39m renders outlet content [33m 500[2mms[22m[39m
+     [33m[2m✓[22m[39m tracks user activity when authenticated [33m 471[2mms[22m[39m
+[90mstderr[2m | src/modules/auth/components/RolesPage.test.tsx
+[22m[39m[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+[DB Adapter] PGlite unavailable, falling back to PostgreSQL: Failed to resolve import "@root/drizzle/0010_schema_drift_fix.sql?raw" from "src/core/database/adapters/pgliteAdapter.ts". Does the file exist?
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+Audit log failed: Error: قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.
+    at getDbAdapter (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/database/adapters/index.ts:109:9)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at AuditLogger.log (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:43:23)
+    at AuditLogger.logLogin (E:/MaghzAccountApp/MaghzAccountFlash35/src/core/audit/auditLogger.ts:155:5)
+
+ [32m✓[39m src/modules/auth/components/RolesPage.test.tsx [2m([22m[2m9 tests[22m[2m)[22m[33m 1893[2mms[22m[39m
+     [33m[2m✓[22m[39m redirects to home when user lacks settings.roles [33m 303[2mms[22m[39m
+     [33m[2m✓[22m[39m opens edit modal with isSystem read-only state [33m 334[2mms[22m[39m
+     [33m[2m✓[22m[39m opens new role modal when clone button is clicked [33m 516[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 7 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.ownership.test.ts[2m > [22mAuth session management[2m > [22mrecordActivity updates lastActivityAt
+[31m[1mAssertionError[22m: expected null not to be null[39m
+[36m [2m❯[22m src/modules/auth/store.ownership.test.ts:[2m112:60[22m[39m
+    [90m110|[39m     useAuthStore[33m.[39m[34mgetState[39m()[33m.[39m[34mrecordActivity[39m()[33m;[39m
+    [90m111|[39m     [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39mlastActivityAt)[33m.[39mnot[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m112|[39m     [34mexpect[39m(localStorage[33m.[39m[34mgetItem[39m([32m'auth_last_activity'[39m))[33m.[39mnot[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   |[39m                                                            [31m^[39m
+    [90m113|[39m   })[33m;[39m
+    [90m114|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m > [22mAuth Store[2m > [22mlogin[2m > [22msets user and authentication state
+[31m[1mAssertionError[22m: expected null to be truthy[39m
+
+[32m- Expected:[39m
+true
+
+[31m+ Received:[39m
+null
+
+[36m [2m❯[22m src/modules/auth/store.test.ts:[2m19:49[22m[39m
+    [90m 17|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39misAuthenticated)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 18|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39muser)[33m.[39m[34mtoEqual[39m(user)[33m;[39m
+    [90m 19|[39m       [34mexpect[39m(localStorage[33m.[39m[34mgetItem[39m([32m'auth_user'[39m))[33m.[39m[34mtoBeTruthy[39m()[33m;[39m
+    [90m   |[39m                                                 [31m^[39m
+    [90m 20|[39m     })[33m;[39m
+    [90m 21|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m > [22mAuth Store[2m > [22minitAuth[2m > [22mrestores auth from localStorage
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m src/modules/auth/store.test.ts:[2m97:55[22m[39m
+    [90m 95|[39m
+    [90m 96|[39m       [35mawait[39m [34minitAuth[39m()[33m;[39m
+    [90m 97|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39misAuthenticated)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m   |[39m                                                       [31m^[39m
+    [90m 98|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39muser[33m?.[39musername)[33m.[39m[34mtoBe[39m([32m'admin'[39m)[33m;[39m
+    [90m 99|[39m     })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m > [22mAuth Store[2m > [22minitAuth[2m > [22mrejects persisted auth when session fingerprint is missing
+[31m[1mAssertionError[22m: expected '{"version":1,"issuedAt":1786861943242…' to be null[39m
+
+[32m- Expected:[39m
+null
+
+[31m+ Received:[39m
+"{\"version\":1,\"issuedAt\":1786861943242,\"fingerprint\":\"tab-fingerprint\",\"user\":{\"id\":\"1\",\"username\":\"admin\",\"email\":\"a@b.com\",\"role\":\"admin\",\"isActive\":true}}"
+
+[36m [2m❯[22m src/modules/auth/store.test.ts:[2m115:49[22m[39m
+    [90m113|[39m       [35mawait[39m [34minitAuth[39m()[33m;[39m
+    [90m114|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39misAuthenticated)[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m115|[39m       [34mexpect[39m(localStorage[33m.[39m[34mgetItem[39m([32m'auth_user'[39m))[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   |[39m                                                 [31m^[39m
+    [90m116|[39m     })[33m;[39m
+    [90m117|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m > [22mAuth Store[2m > [22minitAuth[2m > [22mclears expired session from localStorage
+[31m[1mAssertionError[22m: expected '{"id":"1","username":"admin","email":…' to be null[39m
+
+[32m- Expected:[39m
+null
+
+[31m+ Received:[39m
+"{\"id\":\"1\",\"username\":\"admin\",\"email\":\"a@b.com\",\"role\":\"admin\",\"isActive\":true}"
+
+[36m [2m❯[22m src/modules/auth/store.test.ts:[2m126:49[22m[39m
+    [90m124|[39m       [35mawait[39m [34minitAuth[39m()[33m;[39m
+    [90m125|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39misAuthenticated)[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m126|[39m       [34mexpect[39m(localStorage[33m.[39m[34mgetItem[39m([32m'auth_user'[39m))[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   |[39m                                                 [31m^[39m
+    [90m127|[39m       [34mexpect[39m(localStorage[33m.[39m[34mgetItem[39m([32m'auth_last_activity'[39m))[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m128|[39m     })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m > [22mAuth Store[2m > [22minitAuth[2m > [22mclears stale user from localStorage when DB user no longer exists
+[31m[1mAssertionError[22m: expected '{"id":"3776241e-a274-434b-9dc5-6e6798…' to be null[39m
+
+[32m- Expected:[39m
+null
+
+[31m+ Received:[39m
+"{\"id\":\"3776241e-a274-434b-9dc5-6e6798531eca\",\"username\":\"old\",\"email\":\"o@b.com\",\"role\":\"admin\",\"isActive\":true}"
+
+[36m [2m❯[22m src/modules/auth/store.test.ts:[2m156:49[22m[39m
+    [90m154|[39m       [35mawait[39m [34minitAuth[39m()[33m;[39m
+    [90m155|[39m       [34mexpect[39m(useAuthStore[33m.[39m[34mgetState[39m()[33m.[39misAuthenticated)[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m156|[39m       [34mexpect[39m(localStorage[33m.[39m[34mgetItem[39m([32m'auth_user'[39m))[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   |[39m                                                 [31m^[39m
+    [90m157|[39m       vi[33m.[39m[34mrestoreAllMocks[39m()[33m;[39m
+    [90m158|[39m       [35mvoid[39m validUuid[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/modules/auth/store.test.ts[2m > [22mAuth Store[2m > [22mrecordActivity[2m > [22msaves activity to localStorage
+[31m[1mAssertionError[22m: expected null to be truthy[39m
+
+[32m- Expected:[39m
+true
+
+[31m+ Received:[39m
+null
+
+[36m [2m❯[22m src/modules/auth/store.test.ts:[2m210:22[22m[39m
+    [90m208|[39m
+    [90m209|[39m       [35mconst[39m stored [33m=[39m localStorage[33m.[39m[34mgetItem[39m([32m'auth_last_activity'[39m)[33m;[39m
+    [90m210|[39m       [34mexpect[39m(stored)[33m.[39m[34mtoBeTruthy[39m()[33m;[39m
+    [90m   |[39m                      [31m^[39m
+    [90m211|[39m       expect(Number(stored)).toBe(useAuthStore.getState().lastActivity…
+    [90m212|[39m     })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (5)[39m
+[2m      Tests [22m [1m[31m7 failed[39m[22m[2m | [22m[1m[32m84 passed[39m[22m[90m (91)[39m
+[2m   Start at [22m 09:31:17
+[2m   Duration [22m 80.46s[2m (transform 10.16s, setup 24.98s, import 14.28s, tests 7.55s, environment 177.21s)[22m
+

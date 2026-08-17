@@ -148,10 +148,10 @@ export const readTools: ToolDefinition[] = [
       },
       required: ['customerId'],
     },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const customerId = String(args.customerId || '');
       if (!customerId) return { error: 'customerId مطلوب' };
-      const res = await salesApi.getCustomerStatement(customerId);
+      const res = await salesApi.getCustomerStatement(customerId, ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الكشف' };
       const rows = res.data;
       return {
@@ -529,10 +529,10 @@ export const readTools: ToolDefinition[] = [
       },
       required: ['customerId'],
     },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const customerId = String(args.customerId || '');
       if (!customerId) return { error: 'customerId مطلوب' };
-      const res = await salesApi.getCustomerStatement(customerId);
+      const res = await salesApi.getCustomerStatement(customerId, ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الكشف' };
       const rows = res.data;
       return {

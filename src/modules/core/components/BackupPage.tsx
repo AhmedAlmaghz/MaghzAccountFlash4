@@ -46,17 +46,33 @@ export const BackupPage: React.FC = () => {
     setMessage(t('settings.backup.creatingBackup'));
     try {
       const adapter = await getDbAdapter();
-      const tables = await adapter.query<{ tablename: string }>(
-        `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
-      );
+      // Business tables that carry `company_id` — the renderer never
+      // queries pg_catalog (the SQL guard rejects pg_/information_schema
+      // targets), and the list is a hardcoded constant mirroring the
+      // Phase-2 table rules, so there is no dynamic-identifier surface.
+      // Line-detail tables (*_lines, *_consumptions, payroll_lines) and
+      // `companies` have no company_id column and are backed up separately.
+      const backupTables = [
+        'users', 'roles', 'settings', 'branches', 'currencies', 'vat_settings',
+        'accounts', 'transactions', 'journal_entries', 'cash_boxes', 'banks',
+        'cost_centers', 'default_accounts', 'document_sequences',
+        'products', 'product_types', 'product_categories', 'warehouses',
+        'stock', 'stock_movements', 'stock_adjustments', 'warehouse_transfers',
+        'sales_invoices', 'sales_returns', 'quotations', 'customers',
+        'receipt_vouchers', 'payment_vouchers',
+        'purchase_invoices', 'purchase_orders', 'purchase_returns', 'suppliers',
+        'boms', 'work_orders', 'employees', 'payroll_runs', 'departments',
+        'attendance', 'leaves', 'end_of_service', 'leads', 'opportunities',
+        'tasks', 'activities',
+      ];
       const records: Record<string, unknown> = {};
-      for (const row of tables.success && tables.rows ? tables.rows : []) {
+      for (const table of backupTables) {
         const data = await adapter.query(
-          `SELECT * FROM ${row.tablename} WHERE company_id = $1 LIMIT 1000`,
+          `SELECT * FROM ${table} WHERE company_id = $1 LIMIT 1000`,
           [activeCompany.id]
         );
         if (data.success && data.rows) {
-          records[row.tablename] = data.rows;
+          records[table] = data.rows;
         }
       }
       const backup = {

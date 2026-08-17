@@ -56,24 +56,41 @@ export const accountingApi = {
     }
   },
 
-  async createAccount(data: Omit<Account, 'id'>, _userId: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createAccount(data: Omit<Account, 'id'>, userId: string): Promise<{ success: boolean; id?: string; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      
-      // Convert to service DTO format
-      const result = await accountingService.createAccount({
-        code: data.code,
-        nameAr: data.nameAr,
-        nameEn: data.nameEn || '',
-        parentId: data.parentId || null,
-        type: data.type,
-        nature: data.nature,
-        isGroup: data.isGroup,
-        balance: data.balance || 0,
-      });
-      
-      return result;
+      const adapter = await getDbAdapter();
+      // Never pass an unvalidated / stale userId straight into a uuid-typed FK
+      // column. `safeUserId` returns null for empty strings, whitespace and
+      // non-UUID values so the FK sees NULL (column is nullable, ON DELETE SET
+      // NULL) instead of raising "invalid input syntax for type uuid".
+      const userIdOrNull = safeUserId(userId);
+      const accountId = crypto.randomUUID();
+      const result = await adapter.query(
+        `INSERT INTO accounts (id, company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance, is_active, created_by, updated_by)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, CASE WHEN $6 IS NULL THEN NULL ELSE $6::uuid END, $7, $8, $9, $10, $11, CASE WHEN $12 IS NULL THEN NULL ELSE $12::uuid END, CASE WHEN $13 IS NULL THEN NULL ELSE $13::uuid END)
+         RETURNING id`,
+        [
+          accountId,
+          data.companyId,
+          data.code,
+          data.nameAr,
+          data.nameEn || null,
+          data.parentId || null,
+          data.type,
+          data.nature,
+          data.isGroup,
+          data.balance ?? 0,
+          data.isActive ?? true,
+          userIdOrNull,
+          userIdOrNull,
+        ]
+      );
+      if (result.success) {
+        return { success: true, id: result.rows?.[0]?.id as string | undefined };
+      }
+      return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }

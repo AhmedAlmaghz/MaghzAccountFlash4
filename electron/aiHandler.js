@@ -1,5 +1,5 @@
 import { ipcMain, safeStorage } from 'electron';
-import { getPool } from './dbHandler.js';
+import { getPool, authenticateIpcSession } from './dbHandler.js';
 
 /**
  * AI Harness — LLM proxy (Electron main process).
@@ -440,10 +440,17 @@ async function persistSession({ companyId, userId, sessionId, title, messages })
 
 // ─── IPC registration ───────────────────────────────────────────────────────
 
+// Every AI channel requires an authenticated session. Identity (companyId /
+// userId) is ALWAYS derived from the session — never trusted from the payload —
+// so one user can never read or tamper with another user's chats or keys.
+
 export function registerAiHandlers() {
-  // Get current AI configuration for a company (key masked).
-  ipcMain.handle('ai:get-config', async (_event, { companyId } = {}) => {
+  // Get current AI configuration for the caller's company (key masked).
+  ipcMain.handle('ai:get-config', async (event, { sessionToken } = {}) => {
     try {
+      const auth = authenticateIpcSession(event, sessionToken, { permission: 'settings.view' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
       const settings = await readAiSettings(companyId);
       const envKey = process.env.AI_API_KEY || null;
       const storedKey = settings[KEY_SETTING] ? decryptApiKey(settings[KEY_SETTING]) : null;
@@ -465,11 +472,13 @@ export function registerAiHandlers() {
     }
   });
 
-  // Save AI configuration. apiKey is optional — omitted means "keep current".
-  ipcMain.handle('ai:save-config', async (_event, payload = {}) => {
+  // Save AI configuration (admin-only). apiKey optional — omitted means keep.
+  ipcMain.handle('ai:save-config', async (event, payload = {}) => {
     try {
-      const { companyId, provider, baseUrl, model, apiKey, enabled } = payload;
-      if (!companyId) return { success: false, error: 'companyId is required' };
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'settings.edit' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const { provider, baseUrl, model, apiKey, enabled } = payload;
 
       if (provider !== undefined) await upsertAiSetting(companyId, PROVIDER_SETTING, String(provider));
       if (baseUrl !== undefined) await upsertAiSetting(companyId, BASE_URL_SETTING, normalizeBaseUrl(String(baseUrl || DEFAULT_BASE_URL)));
@@ -492,11 +501,14 @@ export function registerAiHandlers() {
   });
 
   // Test connectivity with the configured (or provided) credentials.
-  ipcMain.handle('ai:test-connection', async (_event, payload = {}) => {
+  ipcMain.handle('ai:test-connection', async (event, payload = {}) => {
     try {
-      const { companyId, baseUrl, model, apiKey } = payload;
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'settings.edit' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const { baseUrl, model, apiKey } = payload;
       const key = apiKey || (await resolveApiKey(companyId));
-      if (!key) return { success: false, error: 'لا يوجد مفتاح API — أدخل المفتاح أولاً' };
+      if (!key) return { success: false, error: 'لا يوجد مفتاح API — أدخل المفتاح أولاّ' };
 
       const settings = await readAiSettings(companyId);
       const result = await callChatCompletion({
@@ -515,10 +527,12 @@ export function registerAiHandlers() {
   });
 
   // Main completion endpoint used by the chat engine.
-  ipcMain.handle('ai:complete', async (_event, payload = {}) => {
+  ipcMain.handle('ai:complete', async (event, payload = {}) => {
     try {
-      const { companyId, messages, tools, temperature, maxTokens } = payload;
-      if (!companyId) return { success: false, error: 'companyId is required' };
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const { messages, tools, temperature, maxTokens } = payload;
       if (!isValidMessages(messages)) return { success: false, error: 'messages must be a non-empty array' };
       if (Array.isArray(tools) && tools.length > 50) return { success: false, error: 'too many tools' };
       if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)) return { success: false, error: 'invalid temperature' };
@@ -552,11 +566,13 @@ export function registerAiHandlers() {
   // event.sender.send so the renderer can update the UI in real-time.
   ipcMain.on('ai:start-stream', async (event, payload = {}) => {
     try {
-      const { companyId, messages, tools, temperature, maxTokens } = payload;
-      if (!companyId) {
-        event.sender.send('ai:stream-done', { success: false, error: 'companyId is required' });
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) {
+        event.sender.send('ai:stream-done', auth);
         return;
       }
+      const companyId = auth.session.user.companyId;
+      const { messages, tools, temperature, maxTokens } = payload;
       if (!isValidMessages(messages)) {
         event.sender.send('ai:stream-done', { success: false, error: 'messages must be a non-empty array' });
         return;
@@ -606,9 +622,12 @@ export function registerAiHandlers() {
   });
 
   // List chat sessions for the current user (newest first).
-  ipcMain.handle('ai:list-sessions', async (_event, { companyId, userId } = {}) => {
+  ipcMain.handle('ai:list-sessions', async (event, { sessionToken } = {}) => {
     try {
-      if (!companyId || !userId) return { success: false, error: 'companyId and userId are required' };
+      const auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
       const result = await pool.query(
@@ -634,18 +653,23 @@ export function registerAiHandlers() {
     }
   });
 
-  // Load all messages of a session (ordered by sort_order).
-  ipcMain.handle('ai:get-session-messages', async (_event, { companyId, sessionId } = {}) => {
+  // Load all messages of one of the caller's own sessions.
+  ipcMain.handle('ai:get-session-messages', async (event, { sessionToken, sessionId } = {}) => {
     try {
-      if (!companyId || !sessionId) return { success: false, error: 'companyId and sessionId are required' };
+      const auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      if (!sessionId) return { success: false, error: 'sessionId is required' };
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
       const result = await pool.query(
-        `SELECT id, role, kind, content, tool_call, sort_order, created_at
-           FROM ai_chat_messages
-          WHERE session_id = $1::uuid AND company_id = $2::uuid
-          ORDER BY sort_order ASC`,
-        [sessionId, companyId]
+        `SELECT m.id, m.role, m.kind, m.content, m.tool_call, m.sort_order, m.created_at
+           FROM ai_chat_messages m
+           JOIN ai_chat_sessions s ON s.id = m.session_id
+          WHERE m.session_id = $1::uuid AND m.company_id = $2::uuid AND s.user_id = $3::uuid
+          ORDER BY m.sort_order ASC`,
+        [sessionId, companyId, userId]
       );
       return {
         success: true,
@@ -664,10 +688,13 @@ export function registerAiHandlers() {
   });
 
   // Save (create or replace) a chat session with its messages.
-  ipcMain.handle('ai:save-session', async (_event, payload = {}) => {
+  ipcMain.handle('ai:save-session', async (event, payload = {}) => {
     try {
-      const { companyId, userId, sessionId, title, messages } = payload;
-      if (!companyId || !userId) return { success: false, error: 'companyId and userId are required' };
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { sessionId, title, messages } = payload;
       if (!isValidChatMessages(messages)) return { success: false, error: 'messages must be a valid chat array' };
       const safeTitle = typeof title === 'string' ? title.slice(0, 200) : null;
       const sid = await persistSession({ companyId, userId, sessionId, title: safeTitle, messages });
@@ -677,10 +704,14 @@ export function registerAiHandlers() {
     }
   });
 
-  // Delete a session (messages cascade).
-  ipcMain.handle('ai:delete-session', async (_event, { companyId, userId, sessionId } = {}) => {
+  // Delete one of the caller's own sessions (messages cascade).
+  ipcMain.handle('ai:delete-session', async (event, { sessionToken, sessionId } = {}) => {
     try {
-      if (!companyId || !sessionId) return { success: false, error: 'companyId and sessionId are required' };
+      const auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      if (!sessionId) return { success: false, error: 'sessionId is required' };
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
       await pool.query(

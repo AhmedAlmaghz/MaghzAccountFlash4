@@ -254,7 +254,7 @@ export function useCustomerStatement(customerId: string, companyId?: string) {
   const [isLoading, setIsLoading] = useState(false);
 
   const load = useCallback(async () => {
-    if (!customerId) return;
+    if (!customerId || !companyId) return;
     setIsLoading(true);
     const result = await salesApi.getCustomerStatement(customerId, companyId);
     if (result.success && result.data) setRows(result.data);

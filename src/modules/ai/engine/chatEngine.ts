@@ -708,32 +708,12 @@ class ChatEngine {
         return;
       }
 
-      // If only read tools ran, loop continues (LLM may respond with more text)
-
-      // ── Check thought_signature ────────────────────────────────────
-      // If the provider did NOT emit a thought_signature, we cannot send
-      // tool_calls back in the next turn (Gemini rejects with 400).  Stop
-      // the loop and show a synthetic summary instead of calling the LLM
-      // again.  This also prevents infinite tool-call loops.
-      const hasThoughtSig = data.toolCalls.some(
-        (tc) => tc.function && typeof tc.function === 'object' && 'thought_signature' in tc.function,
-      );
-      if (!hasThoughtSig && this.history.filter((m) => m.role === 'tool').length > 0) {
-        const toolResults = this.history
-          .filter((m) => m.role === 'tool')
-          .map((m) => String(m.content ?? ''))
-          .join('\n\n');
-        // Tool results are already displayed as formatted cards; never dump
-        // raw JSON as an assistant text message (confusing + encourages the
-        // model to imitate the raw-result format in later turns).
-        void toolResults;
-        this.store().addMessage({
-          role: 'assistant',
-          kind: 'text',
-          content: '✅ تم تنفيذ الأدوات بنجاح. راجع البطاقات أعلاه لعرض النتائج.',
-        });
-        return;
-      }
+      // If only read tools ran, loop continues (LLM may respond with more text).
+      // When the provider did not emit a thought_signature, buildMessages()
+      // flattens the tool_call/tool-result pairs into assistant text turns so
+      // providers that require thought_signature on every tool_call (Gemini)
+      // don't reject the follow-up request. MAX_ITERATIONS guards against
+      // infinite tool-call loops.
     }
 
     // Safety: max iterations reached

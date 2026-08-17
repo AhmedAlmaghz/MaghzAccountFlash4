@@ -7,7 +7,6 @@ import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/cor
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { getNextDocumentNumber } from '@/core/api';
 import { postSalesInvoice, postSalesReturn } from '@/core/utils/journalEntryGenerator';
-import { salesService } from './services';
 import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging } from './types';
 
 export const salesApi = {
@@ -167,9 +166,10 @@ export const salesApi = {
     }
   },
 
-  async getCustomerStatement(customerId: string, companyId?: string): Promise<{ success: boolean; data?: CustomerStatementRow[]; error?: string }> {
+  async getCustomerStatement(customerId: string, companyId: string): Promise<{ success: boolean; data?: CustomerStatementRow[]; error?: string }> {
     try {
-      const idValidation = validateInput(z.object({ customerId: uuidSchema, companyId: companyIdSchema.optional() }), { customerId, companyId });
+      if (!companyId) return { success: false, error: 'companyId is required' };
+      const idValidation = validateInput(z.object({ customerId: uuidSchema, companyId: companyIdSchema }), { customerId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const result = await adapter.query(
@@ -178,20 +178,20 @@ export const salesApi = {
                  total_amount as debit, 0::numeric as credit, notes,
                  date as sort_date, 1 as sort_type
           FROM sales_invoices
-          WHERE customer_id = $1::uuid ${companyId ? 'AND company_id = $2::uuid' : ''} AND status <> 'cancelled'
+          WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled'
           UNION ALL
           SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number,
                  0::numeric as debit, amount as credit, notes,
                  date as sort_date, 2 as sort_type
           FROM receipt_vouchers
-          WHERE customer_id = $1::uuid ${companyId ? 'AND company_id = $2::uuid' : ''} AND status = 'posted'
+          WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
         )
         SELECT date, document_type, document_number, debit, credit,
                SUM(debit - credit) OVER (ORDER BY sort_date, sort_type, document_number) as balance,
                notes
         FROM entries
         ORDER BY sort_date, sort_type, document_number`,
-        companyId ? [customerId, companyId] : [customerId]
+        [customerId, companyId]
       );
       if (result.success) return { success: true, data: mapRows<CustomerStatementRow>(result.rows) };
       return { success: false, error: result.error };
@@ -430,29 +430,55 @@ export const salesApi = {
       if (data.exchangeRate !== undefined && data.exchangeRate <= 0) {
         return { success: false, error: 'Exchange rate must be positive.' };
       }
-      
-      // Convert to service DTO format
-      const lines = (data.lines || []).map(line => ({
-        productId: line.productId,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        discount: line.discountPercent || 0,
-        vatRate: line.vatPercent || 0,
-      }));
-      
-      const result = await salesService.createInvoice({
-        customerId: data.customerId,
-        date: data.date,
-        dueDate: data.dueDate,
-        currencyCode: data.currencyCode || YER_CODE,
-        exchangeRate: data.exchangeRate || 1,
-        lines,
-        notes: data.notes,
-        paymentType: (data.paymentType as 'cash' | 'credit' | 'partial') || 'credit',
-        paidAmount: data.paidAmount || 0,
-      });
-      
-      return result;
+      const adapter = await getDbAdapter();
+      const invoiceId = crypto.randomUUID();
+      const invoiceCurrency = data.currencyCode || YER_CODE;
+      const invoiceRate = data.exchangeRate ?? 1;
+      const baseCurrencyAmount = data.baseCurrencyAmount ?? (data.totalAmount * invoiceRate);
+      const baseCurrencyPaid = data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * invoiceRate);
+      const params: unknown[] = [
+        invoiceId,
+        data.companyId,
+        data.invoiceNumber,
+        data.customerId,
+        data.date,
+        data.dueDate || null,
+        data.subtotal,
+        data.discountAmount,
+        data.vatAmount,
+        data.totalAmount,
+        data.paidAmount,
+        invoiceCurrency,
+        invoiceRate,
+        baseCurrencyAmount,
+        baseCurrencyPaid,
+        data.status,
+        data.paymentType || 'credit',
+        data.cashBoxId || null,
+        data.bankAccountId || null,
+        data.notes,
+        safeUserId(_userId),
+        safeUserId(_userId),
+      ];
+      let sql = `WITH inv AS (INSERT INTO sales_invoices (id,company_id,invoice_number,customer_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::numeric,$9::numeric,$10::numeric,$11::numeric,$12::varchar,$13::numeric,$14::numeric,$15::numeric,$16::varchar,$17,$18::uuid,$19::uuid,$20,$21::uuid,$22::uuid) RETURNING id)`;
+      if (data.lines?.length) {
+        const lineValues: string[] = [];
+        for (const line of data.lines) {
+          const off = params.length;
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::numeric,$${off + 8}::varchar,$${off + 9}::numeric,$${off + 10}::numeric)`);
+          const lineCurrencyCode = line.currencyCode || invoiceCurrency;
+          const lineExchangeRate = line.exchangeRate ?? invoiceRate;
+          const lineBaseTotal = line.baseCurrencyLineTotal ?? (line.lineTotal * lineExchangeRate);
+          params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.vatPercent, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal);
+        }
+        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total) ON true)`;
+      }
+      sql += ' SELECT id FROM inv';
+      const result = await adapter.query(sql, params);
+      if (result.success && result.rows?.[0]) {
+        return { success: true, id: result.rows[0].id as string };
+      }
+      return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }
