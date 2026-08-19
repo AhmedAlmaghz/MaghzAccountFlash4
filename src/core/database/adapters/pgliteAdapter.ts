@@ -466,7 +466,7 @@ async function ensureRow(
 
 async function seedCompanyAndAdmin(
   this: DbAdapter,
-  adminPassword: string
+  passwordHash: string
 ): Promise<{ companyId: string; adminId: string }> {
   const fiscalYearStart = `${new Date().getFullYear()}-01-01`;
   const companyRes = await this.query(
@@ -480,7 +480,6 @@ async function seedCompanyAndAdmin(
   }
   const companyId = String((companyRes.rows[0] as { id: unknown }).id);
 
-  const passwordHash = await hashPassword(adminPassword);
   const adminRes = await this.query(
     `INSERT INTO users (company_id, username, email, full_name, password_hash, role, is_active)
      VALUES ($1::uuid, 'admin', 'admin@demo.ye', 'مدير النظام', $2, 'admin', TRUE)

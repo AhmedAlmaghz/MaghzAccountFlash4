@@ -133,12 +133,9 @@ export const authApi = {
         );
         if (!result.success) return { success: false, error: result.error || 'حدث خطأ أثناء تسجيل الدخول' };
         const rows = (result.rows || []) as Array<Record<string, unknown>>;
-        console.log('[auth-login-debug] rows:', rows.map(r => ({ id: r.id, username: r.username, is_active: r.is_active, hash: String(r.password_hash) })));
         let row: Record<string, unknown> | undefined;
         for (const candidate of rows) {
-          const ok = candidate.is_active && await verifyPassword(credentials.password, candidate.password_hash as string | null);
-          console.log('[auth-login-debug] verify:', ok, 'for', candidate.username, 'pwLen', credentials.password.length);
-          if (ok) {
+          if (candidate.is_active && await verifyPassword(credentials.password, candidate.password_hash as string | null)) {
             row = candidate;
             break;
           }

@@ -14,13 +14,19 @@ page.on('response', (r) => {
 });
 
 try {
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.evaluate(async () => {
     localStorage.clear();
     const dbs = await indexedDB.databases?.() || [];
-    for (const db of dbs) if (db.name) indexedDB.deleteDatabase(db.name);
+    const deletes = dbs.filter(d => d.name).map(d => new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(d.name);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    }));
+    await Promise.all(deletes);
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
 
   await page.getByRole('button', { name: /ابدأ/i }).first().waitFor({ timeout: 20000 });
   await page.getByRole('button', { name: /ابدأ/i }).first().click();
@@ -80,6 +86,7 @@ try {
   }
 
   // Warm reload should be fast (IndexedDB persisted)
+  await page.waitForTimeout(3000);
   const bodyText = await page.locator('body').innerText().catch(() => '');
   console.log('DASHBOARD HEAD:', bodyText.slice(0, 200).replace(/\n+/g, ' | '));
   const wasmErrs = logs.filter(l => l.includes('WebAssembly') || l.includes('CSP') || l.includes('fonts.googleapis'));
