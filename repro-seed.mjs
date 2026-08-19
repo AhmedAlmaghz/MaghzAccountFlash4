@@ -85,8 +85,11 @@ try {
     process.exit(4);
   }
 
-  // Warm reload should be fast (IndexedDB persisted)
+  // Measure dashboard data load (after login)
+  const dashStart = Date.now();
+  await page.getByText(/لوحة التحكم/i).first().waitFor({ timeout: timeoutMs });
   await page.waitForTimeout(3000);
+  console.log(`DASHBOARD DATA LOAD after ${Date.now() - dashStart}ms`);
   const bodyText = await page.locator('body').innerText().catch(() => '');
   console.log('DASHBOARD HEAD:', bodyText.slice(0, 200).replace(/\n+/g, ' | '));
   const wasmErrs = logs.filter(l => l.includes('WebAssembly') || l.includes('CSP') || l.includes('fonts.googleapis'));

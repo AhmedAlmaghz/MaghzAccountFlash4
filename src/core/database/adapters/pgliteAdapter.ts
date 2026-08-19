@@ -148,8 +148,19 @@ const MIGRATIONS: { name: string; sql: string }[] = [
 /**
  * Run all pending migrations. Tracks applied migrations in a
  * `__pglite_migrations` table so it is idempotent across reloads.
+ * The result is cached so subsequent calls are no-ops (avoids 24
+ * SELECT checks on every query — a major PGlite performance win).
  */
-export async function runPgliteMigrations(): Promise<{ success: boolean; error?: string }> {
+let migrationsPromise: Promise<{ success: boolean; error?: string }> | null = null;
+
+export function runPgliteMigrations(): Promise<{ success: boolean; error?: string }> {
+  if (!migrationsPromise) {
+    migrationsPromise = runPgliteMigrationsInternal();
+  }
+  return migrationsPromise;
+}
+
+async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?: string }> {
   try {
     const db = await getInstance();
     // Create migration tracking table if needed
