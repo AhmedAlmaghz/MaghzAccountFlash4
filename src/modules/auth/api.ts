@@ -47,6 +47,40 @@ async function hashPassword(password: string): Promise<string> {
   return `pbkdf2:${PBKDF2_ITERATIONS}:${salt}:${hashHex}`;
 }
 
+async function verifyPassword(password: string, storedHash: string | null | undefined): Promise<boolean> {
+  const parts = typeof storedHash === 'string' ? storedHash.split(':') : [];
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
+  const iterations = Number(parts[1]);
+  const salt = parts[2];
+  const expected = parts[3];
+  if (!Number.isInteger(iterations) || iterations < 100000 || !/^[a-f0-9]+$/i.test(salt) || !/^[a-f0-9]+$/i.test(expected)) return false;
+  try {
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(password),
+      'PBKDF2',
+      false,
+      ['deriveBits']
+    );
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode(salt),
+        iterations,
+        hash: 'SHA-256',
+      },
+      keyMaterial,
+      expected.length / 2 * 8
+    );
+    const hashArray = Array.from(new Uint8Array(derivedBits));
+    const actualHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return actualHex === expected;
+  } catch {
+    return false;
+  }
+}
+
 function mapRowToRole(row: Record<string, unknown>): Role {
   return {
     ...row,
@@ -89,7 +123,73 @@ function safeJsonParse(value: string): Record<string, unknown> | undefined {
 export const authApi = {
   async login(credentials: LoginCredentials): Promise<{ success: boolean; user?: User; permissions?: Permission[]; error?: string }> {
     try {
-      if (!window.electronAuth) return { success: false, error: 'خدمة المصادقة غير متاحة' };
+      if (!window.electronAuth) {
+        // Browser/PGlite fallback — verify against the users table directly.
+        const adapter = await getDbAdapter();
+        const result = await adapter.query(
+          `SELECT id, company_id, username, email, full_name, phone, role, branch_id, is_active, password_hash
+             FROM users WHERE username = $1`,
+          [credentials.username.trim()]
+        );
+        if (!result.success) return { success: false, error: result.error || 'حدث خطأ أثناء تسجيل الدخول' };
+        const rows = (result.rows || []) as Array<Record<string, unknown>>;
+        console.log('[auth-login-debug] rows:', rows.map(r => ({ id: r.id, username: r.username, is_active: r.is_active, hash: String(r.password_hash) })));
+        let row: Record<string, unknown> | undefined;
+        for (const candidate of rows) {
+          const ok = candidate.is_active && await verifyPassword(credentials.password, candidate.password_hash as string | null);
+          console.log('[auth-login-debug] verify:', ok, 'for', candidate.username, 'pwLen', credentials.password.length);
+          if (ok) {
+            row = candidate;
+            break;
+          }
+        }
+        if (!row) return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+
+        let permissions: Permission[] = [];
+        let roleId: string | undefined;
+        const roleName = row.role ? String(row.role) : undefined;
+        if (roleName) {
+          const rolesResult = await adapter.query(
+            'SELECT id, permissions FROM roles WHERE name = $1 AND company_id = $2',
+            [roleName, String(row.company_id)]
+          );
+          if (rolesResult.success && rolesResult.rows?.[0]) {
+            const roleRow = rolesResult.rows[0] as Record<string, unknown>;
+            roleId = roleRow.id ? String(roleRow.id) : undefined;
+            const raw = roleRow.permissions as unknown;
+            if (Array.isArray(raw)) permissions = raw as Permission[];
+            else if (typeof raw === 'string') {
+              try { permissions = JSON.parse(raw) as Permission[]; } catch { permissions = []; }
+            }
+          }
+        }
+
+        const user: User = {
+          id: String(row.id),
+          companyId: String(row.company_id),
+          username: String(row.username),
+          email: row.email ? String(row.email) : undefined,
+          fullName: row.full_name ? String(row.full_name) : undefined,
+          phone: row.phone ? String(row.phone) : undefined,
+          role: (roleName || 'viewer') as User['role'],
+          roleId,
+          branchId: row.branch_id ? String(row.branch_id) : null,
+          isActive: Boolean(row.is_active),
+        };
+
+        if (row.id && row.company_id) {
+          await adapter.query(
+            'UPDATE users SET last_login_at = NOW() WHERE id = $1 AND company_id = $2',
+            [String(row.id), String(row.company_id)]
+          );
+        }
+
+        if (credentials.rememberMe) {
+          localStorage.setItem('auth_remember', credentials.username);
+        }
+
+        return { success: true, user, permissions };
+      }
       const result = await window.electronAuth.login({
         username: credentials.username,
         password: credentials.password,
