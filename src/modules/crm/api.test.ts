@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
+  isElectronPg: vi.fn(() => false),
 }));
 
 vi.mock('@/core/utils/validation', () => {

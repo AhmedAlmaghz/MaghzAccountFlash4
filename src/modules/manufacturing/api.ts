@@ -1,10 +1,111 @@
 import { z } from 'zod';
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createBomSchema, createWorkOrderSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import type { BOM, BOMLine, WorkOrder, WorkOrderLine } from './types';
 
 const workOrderStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'cancelled']);
+
+// Typed RPC bridge for Manufacturing (Phase 4 slice 8). In Electron the
+// renderer sends a structured payload and the main process derives
+// `company_id` + audit `user_id` from the authenticated session. The
+// fallback path (PGlite / e2e) still uses `adapter.query` with explicit
+// `company_id = $N` filters.
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokeMfgRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
+  const mfg = (typeof window !== 'undefined' && window.electronDB?.manufacturing) as
+    | Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined>
+    | undefined;
+  const fn = mfg?.[method];
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    // `call(mfg, ...)` preserves the surface object as `this` so the e2e
+    // shim handlers (which call `this._cid()`) resolve the company id.
+    return await fn.call(mfg, payload);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function mapBomRow(r: Record<string, unknown>, withLinesCount = false): BOM {
+  const bom: BOM = {
+    id: String(r.id),
+    companyId: String(r.company_id),
+    productId: String(r.product_id),
+    productName: r.product_name ? String(r.product_name) : undefined,
+    version: String(r.version),
+    isActive: r.is_active === true || r.is_active === 'true',
+    totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
+    notes: r.notes ? String(r.notes) : undefined,
+    createdBy: r.created_by ? String(r.created_by) : undefined,
+    updatedBy: r.updated_by ? String(r.updated_by) : undefined,
+    updatedAt: r.updated_at ? String(r.updated_at) : undefined,
+  };
+  if (withLinesCount) bom.linesCount = r.lines_count != null ? Number(r.lines_count) : 0;
+  return bom;
+}
+
+function mapBomLineRow(r: Record<string, unknown>): BOMLine {
+  return {
+    id: String(r.id),
+    bomId: String(r.bom_id),
+    materialId: String(r.material_id),
+    materialName: r.material_name ? String(r.material_name) : undefined,
+    quantity: Number(r.quantity) || 0,
+    unitCost: r.unit_cost != null && r.unit_cost !== '' ? Number(r.unit_cost) : undefined,
+    totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
+  };
+}
+
+function mapWorkOrderRow(r: Record<string, unknown>): WorkOrder {
+  return {
+    id: String(r.id),
+    companyId: String(r.company_id),
+    orderNumber: String(r.order_number),
+    productId: String(r.product_id),
+    productName: r.product_name ? String(r.product_name) : undefined,
+    bomId: r.bom_id ? String(r.bom_id) : undefined,
+    quantity: Number(r.quantity) || 0,
+    producedQuantity: r.produced_quantity != null && r.produced_quantity !== '' ? Number(r.produced_quantity) : undefined,
+    status: String(r.status) as WorkOrder['status'],
+    plannedStartDate: r.planned_start_date ? String(r.planned_start_date) : undefined,
+    plannedEndDate: r.planned_end_date ? String(r.planned_end_date) : undefined,
+    actualStartDate: r.actual_start_date ? String(r.actual_start_date) : undefined,
+    actualEndDate: r.actual_end_date ? String(r.actual_end_date) : undefined,
+    totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
+    notes: r.notes ? String(r.notes) : undefined,
+    createdBy: r.created_by ? String(r.created_by) : undefined,
+    updatedBy: r.updated_by ? String(r.updated_by) : undefined,
+    updatedAt: r.updated_at ? String(r.updated_at) : undefined,
+  };
+}
+
+function mapWorkOrderLineRow(r: Record<string, unknown>): WorkOrderLine {
+  return {
+    id: String(r.id),
+    workOrderId: String(r.work_order_id),
+    materialId: String(r.material_id),
+    materialName: r.material_name ? String(r.material_name) : undefined,
+    plannedQuantity: Number(r.planned_quantity) || 0,
+    actualQuantity: r.actual_quantity != null && r.actual_quantity !== '' ? Number(r.actual_quantity) : undefined,
+    unitCost: Number(r.unit_cost) || 0,
+    actualUnitCost: r.actual_unit_cost != null && r.actual_unit_cost !== '' ? Number(r.actual_unit_cost) : undefined,
+  };
+}
+
+function parseJsonLines(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value as Record<string, unknown>[];
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 export const manufacturingApi = {
   // ─── BOM ──────────────────────────────────────────────────────────────────
@@ -12,31 +113,27 @@ export const manufacturingApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (ownedByUserId) {
+        const uidValidation = validateInput(uuidSchema, ownedByUserId);
+        if (!uidValidation.success) return { success: false, error: uidValidation.error };
+      }
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getBoms', { ownedByUserId: ownedByUserId || null });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r) => mapBomRow(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       let sql = `SELECT b.*, p.name_ar as product_name FROM boms b LEFT JOIN products p ON b.product_id = p.id WHERE b.company_id = $1`;
       const params: unknown[] = [companyId];
       if (ownedByUserId) {
-        const uidValidation = validateInput(uuidSchema, ownedByUserId);
-        if (!uidValidation.success) return { success: false, error: uidValidation.error };
         sql += ' AND (b.created_by = $2 OR b.created_by IS NULL)';
         params.push(ownedByUserId);
       }
       sql += ' ORDER BY b.version DESC';
       const result = await adapter.query(sql, params);
       if (result.success) {
-        const rows = (result.rows || []).map((r: Record<string, unknown>) => ({
-          id: String(r.id),
-          companyId: String(r.company_id),
-          productId: String(r.product_id),
-          productName: r.product_name ? String(r.product_name) : undefined,
-          version: String(r.version),
-          isActive: r.is_active === true || r.is_active === 'true',
-          totalCost: r.total_cost ? Number(r.total_cost) : undefined,
-          notes: r.notes ? String(r.notes) : undefined,
-          createdBy: r.created_by ? String(r.created_by) : undefined,
-          updatedBy: r.updated_by ? String(r.updated_by) : undefined,
-          updatedAt: r.updated_at ? String(r.updated_at) : undefined,
-        }));
+        const rows = (result.rows || []).map((r: Record<string, unknown>) => mapBomRow(r));
         return { success: true, data: rows };
       }
       return { success: false, error: result.error };
@@ -49,32 +146,21 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getBomById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Not found' };
+        const bom = mapBomRow(row);
+        const lines = parseJsonLines(row.lines).map(mapBomLineRow);
+        return { success: true, data: { bom, lines } };
+      }
       const adapter = await getDbAdapter();
       const bomRes = await adapter.query('SELECT * FROM boms WHERE id = $1 AND company_id = $2 LIMIT 1', [id, companyId]);
       if (!bomRes.success || !bomRes.rows?.[0]) return { success: false, error: bomRes.error || 'Not found' };
-      const row = bomRes.rows[0];
-      const bom: BOM = {
-        id: String(row.id),
-        companyId: String(row.company_id),
-        productId: String(row.product_id),
-        version: String(row.version),
-        isActive: row.is_active === true || row.is_active === 'true',
-        totalCost: row.total_cost ? Number(row.total_cost) : undefined,
-        notes: row.notes ? String(row.notes) : undefined,
-        createdBy: row.created_by ? String(row.created_by) : undefined,
-        updatedBy: row.updated_by ? String(row.updated_by) : undefined,
-        updatedAt: row.updated_at ? String(row.updated_at) : undefined,
-      };
+      const bom = mapBomRow(bomRes.rows[0] as Record<string, unknown>);
       const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM bom_lines l LEFT JOIN products p ON l.material_id = p.id WHERE l.bom_id = $1', [id]);
-      const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => ({
-        id: String(r.id),
-        bomId: String(r.bom_id),
-        materialId: String(r.material_id),
-        materialName: r.material_name ? String(r.material_name) : undefined,
-        quantity: Number(r.quantity) || 0,
-        unitCost: r.unit_cost ? Number(r.unit_cost) : undefined,
-        totalCost: r.total_cost ? Number(r.total_cost) : undefined,
-      }));
+      const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapBomLineRow(r));
       return { success: true, data: { bom, lines } };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -85,6 +171,19 @@ export const manufacturingApi = {
     try {
       const validation = validateInput(createBomSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('createBom', {
+          productId: data.productId,
+          version: data.version,
+          isActive: data.isActive,
+          totalCost: data.totalCost,
+          notes: data.notes,
+          lines: (data.lines || []).map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const first = result.rows?.[0];
+        return first?.id ? { success: true, id: String(first.id) } : { success: false, error: 'Insert failed' };
+      }
       const adapter = await getDbAdapter();
       const tx = await adapter.transaction([
         { sql: `INSERT INTO boms (company_id, product_id, version, is_active, total_cost, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, params: [data.companyId, data.productId, data.version, data.isActive, data.totalCost, data.notes, _userId ?? null] },
@@ -106,6 +205,20 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('updateBom', {
+          data: {
+            id,
+            productId: data.productId ?? undefined,
+            version: data.version ?? undefined,
+            isActive: data.isActive ?? undefined,
+            totalCost: data.totalCost ?? undefined,
+            notes: data.notes ?? undefined,
+            lines: data.lines === undefined ? undefined : data.lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
+          },
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -137,6 +250,10 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('deleteBom', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       await adapter.query('DELETE FROM bom_lines WHERE bom_id = $1 AND $2 = (SELECT company_id FROM boms WHERE id = $1)', [id, companyId]);
       const result = await adapter.query('DELETE FROM boms WHERE id = $1 AND company_id = $2', [id, companyId]);
@@ -151,12 +268,20 @@ export const manufacturingApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (ownedByUserId) {
+        const uidValidation = validateInput(uuidSchema, ownedByUserId);
+        if (!uidValidation.success) return { success: false, error: uidValidation.error };
+      }
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getWorkOrders', { ownedByUserId: ownedByUserId || null });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r) => mapWorkOrderRow(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       let sql = `SELECT w.*, p.name_ar as product_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id WHERE w.company_id = $1`;
       const params: unknown[] = [companyId];
       if (ownedByUserId) {
-        const uidValidation = validateInput(uuidSchema, ownedByUserId);
-        if (!uidValidation.success) return { success: false, error: uidValidation.error };
         sql += ' AND (w.created_by = $2 OR w.created_by IS NULL)';
         params.push(ownedByUserId);
       }
@@ -176,23 +301,22 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getWorkOrderById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Not found' };
+        const workOrder = mapWorkOrderRow(row);
+        const lines = parseJsonLines(row.lines).map(mapWorkOrderLineRow);
+        return { success: true, data: { workOrder, lines } };
+      }
       const adapter = await getDbAdapter();
       const sql = 'SELECT w.*, p.name_ar as product_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id WHERE w.id = $1 AND w.company_id = $2 LIMIT 1';
-      const params = [id, companyId];
-      const res = await adapter.query(sql, params);
+      const res = await adapter.query(sql, [id, companyId]);
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
-      const workOrder = mapWorkOrderRow(res.rows[0]);
+      const workOrder = mapWorkOrderRow(res.rows[0] as Record<string, unknown>);
       const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM work_order_consumptions l LEFT JOIN products p ON l.material_id = p.id WHERE l.work_order_id = $1', [id]);
-      const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => ({
-        id: String(r.id),
-        workOrderId: String(r.work_order_id),
-        materialId: String(r.material_id),
-        materialName: r.material_name ? String(r.material_name) : undefined,
-        plannedQuantity: Number(r.planned_quantity) || 0,
-        actualQuantity: r.actual_quantity ? Number(r.actual_quantity) : undefined,
-        unitCost: Number(r.unit_cost) || 0,
-        actualUnitCost: r.actual_unit_cost ? Number(r.actual_unit_cost) : undefined,
-      }));
+      const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapWorkOrderLineRow(r));
       return { success: true, data: { workOrder, lines } };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -203,6 +327,23 @@ export const manufacturingApi = {
     try {
       const validation = validateInput(createWorkOrderSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('createWorkOrder', {
+          orderNumber: data.orderNumber,
+          productId: data.productId,
+          bomId: data.bomId ?? null,
+          quantity: data.quantity,
+          status: data.status || 'planned',
+          plannedStartDate: data.plannedStartDate ?? null,
+          plannedEndDate: data.plannedEndDate ?? null,
+          totalCost: data.totalCost ?? null,
+          notes: data.notes ?? null,
+          lines: (data.lines || []).map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost })),
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const first = result.rows?.[0];
+        return first?.id ? { success: true, id: String(first.id) } : { success: false, error: 'Insert failed' };
+      }
       const adapter = await getDbAdapter();
       const tx = await adapter.transaction([
         { sql: `INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, params: [data.companyId, data.orderNumber, data.productId, data.bomId, data.quantity, data.status, data.plannedStartDate, data.plannedEndDate, data.totalCost, data.notes, _userId ?? null] },
@@ -224,6 +365,33 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('updateWorkOrder', {
+          data: {
+            id,
+            orderNumber: data.orderNumber ?? undefined,
+            productId: data.productId ?? undefined,
+            bomId: data.bomId ?? undefined,
+            quantity: data.quantity ?? undefined,
+            producedQuantity: data.producedQuantity ?? undefined,
+            status: data.status ?? undefined,
+            plannedStartDate: data.plannedStartDate ?? undefined,
+            plannedEndDate: data.plannedEndDate ?? undefined,
+            actualStartDate: data.actualStartDate ?? undefined,
+            actualEndDate: data.actualEndDate ?? undefined,
+            totalCost: data.totalCost ?? undefined,
+            notes: data.notes ?? undefined,
+            lines: data.lines === undefined ? undefined : data.lines.map((l) => ({
+              materialId: l.materialId,
+              plannedQuantity: l.plannedQuantity,
+              actualQuantity: l.actualQuantity,
+              unitCost: l.unitCost,
+              actualUnitCost: l.actualUnitCost,
+            })),
+          },
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -262,6 +430,10 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('deleteWorkOrder', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       await adapter.query('DELETE FROM work_order_consumptions WHERE work_order_id = $1 AND $2 = (SELECT company_id FROM work_orders WHERE id = $1)', [id, companyId]);
       const result = await adapter.query('DELETE FROM work_orders WHERE id = $1 AND company_id = $2', [id, companyId]);
@@ -271,6 +443,9 @@ export const manufacturingApi = {
     }
   },
 
+  // In Electron this runs as ONE atomic CTE in the main process: stock
+  // movements + status change for 'completed', or a plain status update
+  // otherwise. The fallback (PGlite / e2e) keeps the legacy multi-query flow.
   async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
@@ -280,6 +455,14 @@ export const manufacturingApi = {
       if (_userId) {
         const uidValidation = validateInput(uuidSchema, _userId);
         if (!uidValidation.success) return { success: false, error: uidValidation.error };
+      }
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('updateWorkOrderStatus', {
+          id,
+          status,
+          producedQuantity: producedQuantity ?? null,
+        });
+        return { success: result.success, error: result.error };
       }
       const adapter = await getDbAdapter();
 
@@ -344,6 +527,10 @@ export const manufacturingApi = {
 
   async batchUpdateConsumptions(consumptions: { id: string; actualQuantity: number; actualUnitCost: number; unitCost: number }[], companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('batchUpdateConsumptions', { consumptions });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const queries: { sql: string; params: unknown[] }[] = [];
       for (const c of consumptions) {
@@ -362,6 +549,14 @@ export const manufacturingApi = {
   async updateConsumption(consumptionId: string, data: { actualQuantity?: number; actualUnitCost?: number }, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
       if (!companyId) return { success: false, error: 'companyId is required' };
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('updateConsumption', {
+          id: consumptionId,
+          actualQuantity: data.actualQuantity,
+          actualUnitCost: data.actualUnitCost,
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -382,15 +577,27 @@ export const manufacturingApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const adapter = await getDbAdapter();
-      const result = await adapter.query(
-        `SELECT COUNT(*)::int AS total,
+      const sql = `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE status = 'in_progress' OR status = 'planned')::int AS active,
                 COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
                 COALESCE(SUM(total_cost) FILTER (WHERE status = 'completed'), 0) AS total_cost
-           FROM work_orders WHERE company_id = $1`,
-        [companyId],
-      );
+           FROM work_orders WHERE company_id = $1`;
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getManufacturingKpis');
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        return {
+          success: true,
+          data: {
+            totalWorkOrders: Number(row?.total || 0),
+            activeOrders: Number(row?.active || 0),
+            completedOrders: Number(row?.completed || 0),
+            totalProductionCost: Number(row?.total_cost || 0),
+          },
+        };
+      }
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(sql, [companyId]);
       const row = result.rows?.[0];
       return {
         success: true,
@@ -417,6 +624,19 @@ export const manufacturingApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getBomsPaginated', {
+          page: p,
+          pageSize: ps,
+          search: filters?.search || null,
+          isActive: filters?.isActive,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const items = rows.map((r) => mapBomRow(r, true));
+        const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['b.company_id = $1'];
@@ -445,20 +665,7 @@ export const manufacturingApi = {
            FROM boms b LEFT JOIN products p ON b.product_id = p.id WHERE ${where} ORDER BY b.version DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
       );
-      const rows = (dataResult.rows || []).map((r: Record<string, unknown>) => ({
-        id: String(r.id),
-        companyId: String(r.company_id),
-        productId: String(r.product_id),
-        productName: r.product_name ? String(r.product_name) : undefined,
-        version: String(r.version),
-        isActive: r.is_active === true || r.is_active === 'true',
-        totalCost: r.total_cost ? Number(r.total_cost) : undefined,
-        notes: r.notes ? String(r.notes) : undefined,
-        createdBy: r.created_by ? String(r.created_by) : undefined,
-        updatedBy: r.updated_by ? String(r.updated_by) : undefined,
-        updatedAt: r.updated_at ? String(r.updated_at) : undefined,
-        linesCount: r.lines_count ? Number(r.lines_count) : 0,
-      }));
+      const rows = (dataResult.rows || []).map((r: Record<string, unknown>) => mapBomRow(r, true));
       return { success: true, data: paginatedResult(rows, total, p, ps) };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -475,6 +682,18 @@ export const manufacturingApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeMfgRpc('getWorkOrdersPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const items = rows.map((r) => mapWorkOrderRow(r));
+        const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['w.company_id = $1'];
@@ -504,29 +723,6 @@ export const manufacturingApi = {
     }
   },
 };
-
-function mapWorkOrderRow(r: Record<string, unknown>): WorkOrder {
-  return {
-    id: String(r.id),
-    companyId: String(r.company_id),
-    orderNumber: String(r.order_number),
-    productId: String(r.product_id),
-    productName: r.product_name ? String(r.product_name) : undefined,
-    bomId: r.bom_id ? String(r.bom_id) : undefined,
-    quantity: Number(r.quantity) || 0,
-    producedQuantity: r.produced_quantity ? Number(r.produced_quantity) : undefined,
-    status: String(r.status) as WorkOrder['status'],
-    plannedStartDate: r.planned_start_date ? String(r.planned_start_date) : undefined,
-    plannedEndDate: r.planned_end_date ? String(r.planned_end_date) : undefined,
-    actualStartDate: r.actual_start_date ? String(r.actual_start_date) : undefined,
-    actualEndDate: r.actual_end_date ? String(r.actual_end_date) : undefined,
-    totalCost: r.total_cost ? Number(r.total_cost) : undefined,
-    notes: r.notes ? String(r.notes) : undefined,
-    createdBy: r.created_by ? String(r.created_by) : undefined,
-    updatedBy: r.updated_by ? String(r.updated_by) : undefined,
-    updatedAt: r.updated_at ? String(r.updated_at) : undefined,
-  };
-}
 
 async function batchInsertLines(adapter: Awaited<ReturnType<typeof getDbAdapter>>, table: string, columns: string[], rows: unknown[][]): Promise<void> {
   if (rows.length === 0) return;

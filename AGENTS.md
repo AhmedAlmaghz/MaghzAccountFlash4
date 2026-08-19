@@ -3242,5 +3242,197 @@ npx drizzle-kit migrate
 - **`waitForURL` timeout بعد login click**: غالباً يعني أنّ الـ submit نفسه فشل (كلمة مرور خاطئة) والـ page بقيت على `/login` مع error message. افحص الـ error-context.md snapshot — لا تفترض navigation hang
 - **Admin password في dev DB**: الـ fixture تتوقع `admin1234` (منذ الـ original seed). لو الـ DB أعيد بناؤه بكلمة مرور مختلفة، أعد تعيين hash عبر `UPDATE users SET password_hash = pbkdf2('admin1234') WHERE username = 'admin'` — لا تغيّر الـ fixture
 
-*آخر تحديث: 2026-08-17 | الإصدار: maghzaccount-pro v0.2.0*
+### المرحلة 54: توسعة Typo RPC — slice 5 (auth audit) + slice 6 (core settings)
+- **الهدف**: إكمال توسعة typed RPC لتغطية الـ 291 call sites المتبقية. slice 5 فحص auth، slice 6 حوّل core settings الـ 10 call sites.
+- **Slice 5 — auth audit (no-op)**:
+  - `auth/api.ts` يحوي 11 `adapter.query` call sites لكن جميعها لها `if (window.electronAuth) return window.electronAuth.X()` fallback path يستخدم IPC channel محمية بـ `sessionToken` guard في `dbHandler.js`
+  - الـ `adapter.query` factorial لا يُستخدم إلا في pglite (single-tenant في الـ browser، اختبارات)
+  - **النتيجة**: لا حاجة لـ typed RPC في auth — IPC `auth:*` channels (12 handler) بالفال RBAC-guarded. الـ auditCells المتبقية تتطلب IPC `list-users` / `create-user` / `update-user` / `delete-user` / `list-roles` / `create-role` / `update-role` / `delete-role` / `audit-logs`
+- **Slice 6 — core settings typed RPC (10 handlers)**:
+  - **10 مسارات RPC جديدة** في `dbHandler.js`: `core.getCurrencies` / `core.createCurrency` / `core.updateCurrency` / `core.getVatSettings` / `core.updateVatSettings` / `core.getBranches` / `core.createBranch` / `core.updateBranch` / `core.getSettings` / `core.setSetting`
+  - **Session-derived scoping**: كل handlers تستخلص `company_id` و audit `user_id` من authenticated session — renderer payload لا يحوي companyId. هذا يُغلق cross-tenant gap: لا يمكن للـ renderer قتل/تعديل صف من شركة أخرى عبر تمرير companyId خاطئ
+  - **`preload.cjs` + `preload.js`**: أضيفت 10 methods لـ `core` surface في قنât الإيقاع
+  - **`electronPgAdapter.ts`**: الـ `ElectronDB.core` interface توسع ليشمل الـ 10 methods الجديدة
+  - **`core/api.ts`**: كل methods تستخدم `invokeCoreRpc()` helper (Phase 4 slice 6) الذي يستدعي `window.electronDB.core.X(payload)` في Electron، يرجع `adapter.query` fallback لـ pglite/e2e. الـ fallback يحوي `AND company_id = $N` filter صريح
+  - **`e2e/vite-e2e-plugin.ts`**: shim توسَّع ليشمل 10 core methods الجديدة. في e2e، يَستخلص companyId من `SELECT id FROM companies LIMIT 1` (single-company dev DB)
+- **النتيجة النهائية**:
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src e2e --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073/1073 passed** (71 files) ✓
+  - `npx playwright test`: **78/79 passed** (1 flaky: `12-reports.customer statement` — أمر cold-start timing، retry نجح)
+  - `npm run build`: **built in 34s** ✓
+  - **20 typed RPC channels** total الآن (10 سابقة + 10 جديدة في slice 6)
+
+### قواعد ذهبية مضافة (Phase 54)
+- **auth IPC لا يحق typed RPC conversion**: الـ `window.electronAuth.X` methods هي IPC channels محمية بـ `sessionToken` guard في `dbHandler.js`. الـ `adapter.query` fallback فقط لـ pglite (single-tenant browser). **القاعدة**: لا حوّل IPC channels إلى typed RPC — حوّل فقط الـ adapter.query/transaction calls
+- **session-derived scoping لـ cross-tenant tables**: كل جدول يحوي `company_id` FK ويُستخدم في settings/context (currencies, vat_settings, branches, settings) يجب أن يستخدم session companyId في typed RPC — لا يثق بـ renderer
+- **`invokeCoreRpc(method, payload)` helper**: pattern موحَّد لـ RPC calls في `core/api.ts`. يبحث عن method على `window.electronDB.core[method]`، يلفّ payload، يطبّق result، يستخرج `id` من أول row. fallback آمن لو method غير متاح
+- **isElectronPg() check في API layer**: `if (isElectronPg()) { return await invokeCoreRpc(...); } else { return await adapter.query(...); }` — يعطي Electron typed RPC path و pglite/e2e الـ fallback. الـ fallback ما زال يحوي `AND company_id = $N` filter صريح
+- **E2E shim يتطلب كل typed RPC surfaces**: لما تضيف typed RPC method جديدة، يجب إضافتها على shim في `vite-e2e-plugin.ts` أيضاً — وإلا الـ RPC call في e2e يرجع `{ success: false, error: 'RPC unavailable' }`
+- **Shim companyId derivation في e2e**: `const c = await post('SELECT id FROM companies LIMIT 1', []); const cid = c.rows?.[0]?.id` — e2e dev DB شركة واحدة فقط، pattern مقبول للـ e2e testing لكن **لا تُستخدم في production**
+
+### المرحلة 55: توسعة Typed RPC — slice 7 (CRM كامل، 29 call sites)
+- **الهدف**: تحويل `crm/api.ts` (29 `adapter.query` call sites) إلى typed RPC عبر قنوات `db:rpc:crm.*`
+- **`electron/dbHandler.js` — 22 CRM handlers جديدة**:
+  - Leads: `crm.getLeads` / `crm.getLeadsPaginated` / `crm.getLeadById` / `crm.createLead` / `crm.updateLead` / `crm.deleteLead`
+  - Conversion: `crm.convertLeadToCustomer` — أعيدت كتابتها كـ **CTE atomic واحدة** (lead_check → new_customer → updated_lead) بدل `transaction: true` غير المدعوم في RPC. توليد `customer_code` داخل SQL عبر `COALESCE($3, 'CUST-' || LPAD(MAX(...)+1))`
+  - Opportunities: `crm.getOpportunities` / `crm.getOpportunitiesPaginated` / `crm.createOpportunity` / `crm.updateOpportunity` / `crm.deleteOpportunity`
+  - Tasks: `crm.getTasks` / `crm.getTasksPaginated` / `crm.createTask` / `crm.updateTask` / `crm.deleteTask`
+  - Activities: `crm.getActivities` / `crm.getActivitiesPaginated` / `crm.createActivity` / `crm.updateActivity` / `crm.deleteActivity`
+  - **Session-derived scoping**: كل handlers تستخرج `company_id` و `created_by`/`updated_by` من `session.user` — payload لا يحوي companyId
+- **`paramCount: null` — dynamic parameter count**:
+  - `registerRpc` مدُّعم الآن بـ `paramCount: null` للـ SQL الديناميكي (partial UPDATE SET clauses + variable filters مثل `core.getSettings` مع/بدون category)
+  - الـ SQL يُؤلف بالكامل في main process من scalar values فقط — لا SQL-on-the-wire guarantee محفوظ
+  - الـ 4 dynamic UPDATE handlers (`crm.updateLead/updateOpportunity/updateTask/updateActivity`) + `core.getSettings` تستخدم `null`
+- ** إصلاحات off-by-one في paramCount**:
+  - `crm.createOpportunity`: 12 → **11**
+  - `crm.createTask`: 12 → **11**
+  - `crm.createActivity`: 12 → **11**
+  - `crm.createLead`: 12 (صحيح)
+  - `core.getSettings`: 2 → **null** (1 أو 2 حسب category filter)
+- **`preload.cjs` + `preload.js`**: `crm` surface كامل بـ 22 methods (`getLeads`...`deleteActivity`)
+- **`electronPgAdapter.ts`**: `ElectronDB.crm` interface + `ElectronRpcSurface` + `getRPC()` يشملان `crm`
+- **`crm/api.ts` — rewrite كامل**:
+  - `invokeCrmRpc(method, payload)`: يستدعي `window.electronDB.crm[method]` — **يستخدم `fn.call(crm, payload)` لحفظ `this`**
+  - كل method: `if (isElectronPg()) { RPC } else { adapter.query fallback }` — الـ fallback يحوي `WHERE company_id = $N` صريح
+  - Pagination results تستخدم `COUNT(*) OVER() AS total_count` window function في SQL بدل count query منفصل
+  - `convertLeadToCustomer` في Electron: `getLeadById` أولاً ثم CTE atomic واحدة
+- **`e2e/vite-e2e-plugin.ts` — shim توسع بـ 22 CRM methods**:
+  - `_cid()` helper يستخرج companyId من `SELECT id FROM companies LIMIT 1`
+  - كل handlers تستخدم `this._cid()` — تتطلب حفظ `this` من caller
+  - **SQL escaping في template literal**: `\'` داخل backtick string يعطي `\\'` في الـ template (escape غير ضروري). الحل: `\\'` في الـ source ليُنشأ `\'` في الـ generated code
+- **`crm/api.test.ts` — mock update**:
+  - `isElectronPg: vi.fn(() => false)` أضيف لـ `@/core/database/adapters` mock (الـ API يستورد `isElectronPg` الآن)
+  - `convertLeadToCustomer`: `getLeadById` مستدعى فقط داخل `if (isElectronPg())` branch — الـ test mock يرجع `select_lead` مرة واحدة
+- **النتيجة النهائية**:
+  - `node --check electron/dbHandler.js`: **0** ✓ (syntax valid)
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src e2e --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073/1073 passed** (71 files) ✓
+  - `npx playwright test`: **79/79 passed** ✓
+  - `npm run build`: **built in 26s** ✓
+  - **42 typed RPC channels** total الآن (12 accounting/inventory/contacts + 10 core + 20 crm)
+
+### قواعد ذهبية مضافة (Phase 55)
+- **`paramCount: null` لـ dynamic UPDATE SET clauses**: لما الـ عدد الفعلي للـ parameters يختلف حسب الـ payload (partial updates، optional filters)، استخدم `paramCount: null`. الـ dispatcher يتحقق فقط من `Array.isArray(params)`. الـ SQL ما زال يُؤلف بالكامل في main process
+- **لا تثق بـ paramCount المكتوب — احسب من params array**: 3 handlers (createOpportunity/createTask/createActivity) كُتبت `paramCount: 12` بينما الـ params يحوي 11. القاعدة: راجع `compose().params.length` يدوياً أو اكتب test
+- **`this` binding في RPC helper**: `invokeCrmRpc` يستخدم `fn.call(crm, payload)` بدل `fn(payload)` — الـ `crm` object يُمرر كـ `this` لأن shim methods تستخدم `this._cid()`. بدون `.call(crm)`، `this` = `undefined` → `this._cid()` يرمي → empty lists → e2e failures
+- **`convertLeadToCustomer` كـ CTE atomic**: `lead_check` (SELECT) → `new_customer` (INSERT) → `updated_lead` (UPDATE) → `SELECT id FROM new_customer`. 3 statements في CTE واحدة = atomic، لا `transaction: true` مطلوب
+- **`COUNT(*) OVER() AS total_count` بدل count query منفصل**: في `getLeadsPaginated`، SQL يرجع `total_count` على كل row. الـ API يقرأه من أول row. أسرع من 2 queries منفصلة
+- **`crm` table rules في `SQL_MODULE_TABLE_RULES`**: `{ module: 'crm', tables: ['leads', 'opportunities', 'tasks', 'activities', 'crm_activities', 'calls'] }` — الـ authorization layer يتحقق من الـ permissions تلقائياً
+- **Escape chars في template literal**: داخل backtick string، `\'` يُعتبر escape غير ضروري في ESLint. الـ solution: `\\'` في الـ source file ليُنشأ `\'` في الـ generated JS code
+
+### المرحلة 56: Typed RPC — slice 8 (Manufacturing كامل، 32 call sites)
+- **الهدف**: تحويل `manufacturing/api.ts` (32 `adapter.query`/`adapter.transaction` call sites) إلى typed RPC عبر قنوات `db:rpc:manufacturing.*`
+- **`electron/dbHandler.js` — 16 Manufacturing handlers جديدة**:
+  - BOMs: `manufacturing.getBoms` / `.getBomsPaginated` / `.getBomById` / `.createBom` / `.updateBom` / `.deleteBom`
+  - Work Orders: `manufacturing.getWorkOrders` / `.getWorkOrdersPaginated` / `.getWorkOrderById` / `.createWorkOrder` / `.updateWorkOrder` / `.deleteWorkOrder`
+  - Status & consumptions: `manufacturing.updateWorkOrderStatus` / `.batchUpdateConsumptions` / `.updateConsumption` / `.getManufacturingKpis`
+  - **Session-derived scoping**: كل handlers تستخرج `company_id` و `created_by`/`updated_by` من `session.user` — payload لا يحوي companyId
+- **تصميم CTE للـ writes متعددة الجداول**:
+  - `createBom`: CTE `bom` INSERT → CTE `lines` INSERT (VALUES join) → `SELECT id FROM bom` — atomic، لا transaction
+  - `createWorkOrder`: CTE `wo` INSERT → CTE `cons` INSERT → `SELECT id FROM wo`
+  - `updateWorkOrderStatus` status='completed': CTE واحدة تجمع `wo_data` (COALESCE للـ produced_qty مع `NULLIF(produced_quantity,0)` لمعالجة zero-as-falsy) + `warehouse` (أول warehouse للشركة) + `move_out` (stock movement 'out' لكل consumption) + `move_in` (stock movement 'in' للـ produced) + UPDATE النهائي — واحدة atomic بدل 6 queries منفصلة
+  - `reference` column للـ stock movement: `wd.id::text` (تحويل UUID إلى string) — لا تمرر `$2::text` لأن `$2` مستخدم كـ `::uuid` في مواضع أخرى (PG يحظر إعادة استنتاج type لنفس الـ param)
+- **`updateBom` و `updateWorkOrder` = explicit transactions (ipcMain.handle مخصص)**: لا `registerRpc` لأنهما يحتاجان multi-statement atomicity (header UPDATE + lines DELETE/INSERT). الـ pattern:
+  - `payload.data` يحوي `id` + كل الـ editable fields + `lines` (optional array)
+  - `BEGIN` → header `UPDATE ... SET` (dynamic fields + `updated_by = session.user.id` + `updated_at = NOW()`) → `DELETE FROM <lines> WHERE <parent> = $1 AND EXISTS (...company...)` → `INSERT INTO <lines> VALUES ...` → `COMMIT` / `ROLLBACK`
+  - كل statement يمر عبر `assertSqlAuthorized(session, sql, params)` قبل التنفيذ
+  - `paramCount` غير مطبق — handler مخصص، ليس `registerRpc`
+- **`getBomById` و `getWorkOrderById` يدمجان الـ lines عبر `json_agg`**: query واحدة بدل round-trip ثاني. الـ API يستخرج `row.lines` عبر `parseJsonLines()`
+- **`deleteBom` و `deleteWorkOrder`**: statement واحدة فقط — `bom_lines`/`work_order_consumptions` لديها FK `ON DELETE CASCADE`، لا حاجة لـ DELETE منفصل للـ lines
+- **`batchUpdateConsumptions`**: UPDATE واحدة مع `FROM (VALUES ...) v(id, actual_quantity, actual_unit_cost)` join بدل N queries في loop — أسرع + atomic
+- **Table rules جديدة في `SQL_MODULE_TABLE_RULES`** (cross-module writes):
+  - `warehouses` و `stock_movements` أُزيلتا من الـ inventory rule العامة، وأضيفتا كـ rules منفصلة بـ `writePermissions` تشمل `manufacturing.create/edit/post` (إضافة إلى `inventory.create/edit/post`)
+  - `warehouses` لها `readAny: true` (reference data) — كل modules تحتاجها للقراءة في flows مثل journal generation و currency formatting
+  - **السبب**: `assertSqlAuthorized` يطبق write gate على كل tables المذكورة في أي statement يحوي write verb. الـ CTE في `updateWorkOrderStatus` تكتب `stock_movements` وتقرأ `warehouses`، وكلاهما يجب أن يسمحا بالـ manufacturing writers
+  - **القاعدة**: إذا rule عامة تحوي جدولاً يحتاج cross-module write، افصله إلى rule منفصلة بـ `writePermissions` موسعة وإلا سيفشل الـ authorization
+- **`produced_quantity = 0` edge case**: الـ code القديم كان يستخدم `Number(wo.produced_quantity) || Number(wo.quantity)` — يعامل 0 كـ falsy ويستبدله بـ `quantity`. الـ CTE يستخدم `COALESCE($1::numeric, NULLIF(produced_quantity, 0), quantity)` لنفس السلوك
+- **`preload.cjs` + `preload.js`**: `manufacturing` surface كامل بـ 16 methods
+- **`electronPgAdapter.ts`**: `ElectronDB.manufacturing` interface + توسيع `ElectronRpcSurface` و `getRPC()` ليشمل `manufacturing`
+- **`manufacturing/api.ts` — rewrite كامل**:
+  - `invokeMfgRpc(method, payload)`: يستدعي `window.electronDB.manufacturing[method]` — يستخدم `fn.call(mfg, payload)` لحفظ `this`
+  - كل method: `if (isElectronPg()) { RPC } else { adapter.query fallback }` — الـ fallback يحوي `WHERE company_id = $N` صريح
+  - `getBomById`/`getWorkOrderById` في RPC: `parseJsonLines(row.lines)` من json_agg. في fallback: query ثانية للـ lines
+  - Pagination: `COUNT(*) OVER() AS total_count` يُقرأ من أول row في RPC path
+  - `updateWorkOrderStatus` في Electron: RPC واحدة. في fallback: الـ multi-query flow القديم (PGlite)
+  - الـ row mappers (`mapBomRow`, `mapBomLineRow`, `mapWorkOrderRow`, `mapWorkOrderLineRow`) مشتركة بين RPC و fallback
+- **`e2e/vite-e2e-plugin.ts` — shim توسع بـ 16 Manufacturing methods**:
+  - `_cid()` helper (يعيد استخدام الـ pattern من CRM)
+  - `updateBom`/`updateWorkOrder` في shim: multi-statement sequential (لا transactions في e2e bridge — مقبول؛ `_execBatch` لا يدعمها والـ e2e tests موثوقة)
+  - SQL literals مع single quotes داخل double-quoted JS strings (تجنب escaping issues): `post("SELECT ... WHERE status='planned' ..." )` 
+- **`manufacturing/api.test.ts` — mock update**:
+  - إضافة `isElectronPg: vi.fn(() => false)` إلى mock الخاص بـ `@/core/database/adapters` — يوجه كل الـ tests إلى fallback `adapter.query` path
+- **النتيجة النهائية**:
+  - `node --check electron/dbHandler.js`: ✓
+  - `node --check electron/preload.cjs` + `preload.js`: ✓
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src e2e --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073/1073 passed** (71 files) ✓
+  - `npx playwright test`: **79/79 passed** ✓
+  - `npm run build`: **built in 15.27s** ✓
+  - **58 typed RPC channels** total الآن (accounting 4 + inventory 3 + contacts 4 + createTransaction + core 12 + crm 22 + manufacturing 16)
+
+### قواعد ذهبية مضافة (Phase 56)
+- **CTE واحدة للـ writes متعددة الجداول بدل explicit transaction**: `createBom`/`createWorkOrder` تستخدم CTE chain (parent INSERT → lines INSERT → SELECT) — atomic + query واحدة. استخدم explicit transaction فقط عندما تحتاج statements لا يمكن دمجها في CTE واحدة (مثل dynamic UPDATE + DELETE + INSERT في `updateBom`)
+- **`paramCount: null` للـ CTEs ذات الـ VALUES الديناميكية**: عدد الـ params يعتمد على عدد الـ lines في الـ payload. الـ SQL ما زال يُمَوَّه بالكامل في main process
+- **`$N::type` cast فريد لكل param**: PG يحظر إعادة استنتاج type لنفس الـ `$N` بمقارنات مختلفة (`$2::uuid` في WHERE و `$2::text` في SELECT). **الحل**: استخدم column من CTE (`wd.id::text`) بدل إعادة cast الـ param
+- **`NULLIF(x, 0)` لمعالجة zero-as-falsy**: الـ JS pattern `Number(x) || fallback` يعامل 0 كـ falsy. المكافئ في SQL: `COALESCE($1::numeric, NULLIF(produced_quantity, 0), quantity)`
+- **FK CASCADE يلغي الحاجة لـ DELETE منفصل للـ lines**: `bom_lines.bom_id` و `work_order_consumptions.work_order_id` لديها `ON DELETE CASCADE` — deleteBom/deleteWorkOrder يحتاجان statement واحدة فقط. **القاعدة**: تحقق من FK constraints قبل كتابة multi-statement deletes
+- **`UPDATE ... FROM (VALUES ...) v(...)` للـ batch updates**: بدل N queries في loop، UPDATE واحدة مع VALUES join. الـ CTE يجب أن تحوي `WHERE v.id = woc.id AND woc.work_order_id IN (SELECT id FROM work_orders WHERE company_id = $N)` للـ tenant scoping
+- **`json_agg ... FILTER (WHERE x IS NOT NULL)` للـ lines embedding**: يدمج child rows كـ JSON array في الـ parent row — query واحدة بدل round-trip. `parseJsonLines()` يتعامل مع string/JSON.parse/array
+- **Cross-module write authorization = rule منفصلة بـ `writePermissions`**: إذا table من module A يُكتب من flow في module B (مثل `stock_movements` يُكتب من manufacturing completion)، يجب إضافة rule منفصلة بـ `writePermissions` تشمل permissions من كلا module. وإلا `assertSqlAuthorized` سيرفض
+- **`readAny: true` للـ reference data التي تُقرأ cross-module**: `warehouses` تُقرأ من manufacturing flows (إيجاد أول warehouse). الـ read gate يتطلب `module.view` أو `module.own` — `readAny` يتجاوز هذا
+- **Transaction handlers المخصصة = `ipcMain.handle` + `assertSqlAuthorized` لكل statement**: `updateBom`/`updateWorkOrder` لا يمكن أن يكونا `registerRpc` (statement واحدة). استخدم `pool.connect()` + `BEGIN`/`COMMIT`/`ROLLBACK` مع `assertSqlAuthorized` لكل statement قبل التنفيذ
+- **`fn.call(mfg, payload)` في RPC helper**: يحفظ surface object كـ `this` لأن e2e shim methods تستدعي `this._cid()`. بدون `.call()`، `this` = undefined في strict mode
+- **`payload.data` wrapper للـ transaction RPCs**: `updateBom` و `updateWorkOrder` يستقبلان `{ data: { id, ...fields, lines } }` بدل flat payload — يميز بوضوح عن الـ single-statement RPCs. الـ handler يقرأ `payload.data || {}`
+- **`$N::uuid` cast في كل UUID param**: حتى في fallback path، `WHERE id = $1::uuid` يضمن type correctness. الـ RPC path يستخدمها بشكل موحد
+- **E2E shim updateBom = sequential posts بدون transaction**: e2e bridge لا يدعم transactions. مقبول لأن e2e tests موثوقة و single-user. الـ production path (Electron) يستخدم real transaction
+- **`NULL` لـ `created_by`/`updated_by` في e2e shim**: الـ shim لا session user. استخدم `NULL` (الـ columns nullable بـ `ON DELETE SET NULL`). الـ Electron path يستخدم `session.user.id`
+
+### المرحلة 57: Typed RPC — slice 9 (HR كامل، 23 call sites) + إصلاح shim syntax bug
+- **الهدف**: تحويل `hr/api.ts` إلى typed RPC عبر قنوات `db:rpc:hr.*` + إصلاح syntax error في e2e shim كسر كل الـ e2e tests
+- **`electron/dbHandler.js` — 22 HR handlers جديدة**:
+  - Employees: `hr.getEmployees` / `.getEmployeesPaginated` / `.getEmployeeById` / `.createEmployee` / `.updateEmployee` / `.deleteEmployee`
+  - Attendance: `hr.getAttendance` / `.saveAttendance`
+  - Payroll: `hr.getPayrollRuns` / `.getPayrollRunsPaginated` / `.createPayrollRun` / `.postPayrollRun`
+  - Leaves: `hr.getLeaves` / `.getLeavesPaginated` / `.createLeave` / `.updateLeaveStatus` / `.deleteLeave`
+  - End of Service: `hr.getEndOfServices` / `.getEndOfServicesPaginated` / `.createEndOfService` / `.updateEndOfServiceStatus` / `.deleteEndOfService`
+  - KPIs: `hr.getHrKpis`
+  - **Session-derived scoping**: كل handlers تستخلص `company_id` و `created_by`/`updated_by` من `session.user` — payload لا يحوي companyId
+  - `paramCount: null` للـ dynamic UPDATE SET clauses (updateEmployee/updateLeaveStatus/updateEndOfServiceStatus)
+- **`preload.cjs` + `preload.js`**: `hr` surface كامل بـ 22 methods
+- **`electronPgAdapter.ts`**: `ElectronDB.hr` interface + توسيع `ElectronRpcSurface` و `getRPC()` ليشمل `hr`
+- **`hr/api.ts` — rewrite كامل**:
+  - `invokeHrRpc(method, payload)`: يستدعي `window.electronDB.hr[method]` — يستخدم `fn.call(hr, payload)` لحفظ `this`
+  - كل method: `if (isElectronPg()) { RPC } else { adapter.query fallback }` — الـ fallback يحوي `WHERE company_id = $N` صريح
+  - الـ row mappers مشتركة بين RPC و fallback
+- **`hr/api.test.ts` — mock update**: إضافة `isElectronPg: vi.fn(() => false)` إلى mock الخاص بـ `@/core/database/adapters`
+- **`e2e/vite-e2e-plugin.ts` — shim توسع بـ 22 HR methods**:
+  - `_cid()` helper (يعيد استخدام الـ pattern من CRM/Manufacturing)
+  - كل handlers تستخدم `this._cid()` — تتطلب حفظ `this` من caller
+- **Bug حرج — shim syntax error (missing comma)**: عند إدراج سطح `hr:{...}` قبل `core:{...}`، الـ edit ابتلع الـ comma الفاصل فأنتج `}}hr:{` بدل `}},hr:{`. النتيجة: الـ IIFE كاملاً يفشل في parse → `window.electronDB` غير معرّف → التطبيق لا يستطيع تهيئة DB → **كل الـ e2e tests تفشل**. التشخيص: فحص transitions بين الـ surfaces (`},` قبل كل surface key) كشف `}}hr:{` بدون comma. **الإصلاح**: `}}hr:{` → `}},hr:{`
+- **طريقة التحقق الصحيحة للـ shim (مهم)**: استخراج النص الخام من template literal وتمريره لـ `node --check` **غير صالح** لأن:
+  - الـ template متعدد الأسطر (~500 سطر) داخل backticks
+  - يحوي `\\'` escapes التي تُنتج `\'` في الـ runtime (صحيحة داخل single-quoted JS strings)
+  - الـ template نفسه يحوي IIFE wrapper (لا يجب لفه مرة أخرى)
+  - **الطريقة الصحيحة**: استخراج عبر regex، تقييمه كـ template literal حقيقي (`eval('`' + raw + '`')`)، ثم فحص بـ `new Function(code)` → `PARSE_OK`
+- **النتيجة النهائية**:
+  - `node --check electron/dbHandler.js` + `preload.cjs` + `preload.js`: ✓
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src e2e --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073/1073 passed** (71 files) ✓
+  - `npx playwright test`: **79/79 passed** (14.3m) ✓
+  - `npm run build`: **built successfully** ✓
+  - **80 typed RPC channels** total الآن (accounting 5 + inventory 3 + contacts 4 + core 12 + crm 22 + manufacturing 16 + hr 22)
+
+### قواعد ذهبية مضافة (Phase 57)
+- **إدراج سطح جديد في template literal قد يبتلع الـ separator**: أي edit يُدخل `hr:{...}` بين `manufacturing:{...}` و `core:{...}` يجب أن يحافظ على الـ comma: `}},hr:{...},core:{...}`. **القاعدة**: بعد أي إدراج لسطح جديد في shim، افحص الـ chars قبل كل surface key — يجب أن تنتهي بـ `,` (الـ surfaces object members)
+- **فشل shim = فشل كل e2e (لا شاشة بيضاء)**: syntax error في الـ shim يعني `window.electronDB` غير معرّف → `getDbAdapter()` يفشل → شاشة DB-error في كل صفحة. **القاعدة**: أي e2e failure شامل (كل الـ 79) يستلزم أولاً فحص الـ shim syntax
+- **`node --check` على raw template text = invalid methodology**: الـ template literal escapes (`\\'` → `\'`) و multi-line structure لا تُعالج في النص الخام. **القاعدة**: قيّم الـ template كـ template literal أولاً (`eval` أو `new Function` مع backtick)، ثم افحص الـ result — لا تفحص الـ raw source
+- **الـ template يحتوي IIFE خاص به**: لا تلتف حوله IIFE إضافي في أي أداة تحقق — يبدأ `(function(){if(window.electronDB)return;` وينتهي `})();`. الـ wrapper يمنع إعادة الحقن عند HMR
+- **شطب كامل لـ HR من `adapter.query` في Electron path**: كل الـ 23 call sites في hr/api.ts تذهب عبر `db:rpc:hr.*` في Electron. الـ fallback (pglite/tests) يحتفظ بـ SQL محلي مع `AND company_id = $N` صريح
+- **نفس الـ golden rules من Phases 54-56 تنطبق**: session-derived scoping، `fn.call(surface, payload)`، `_cid()` في shim، `isElectronPg()` branch، mapper sharing
+
+*آخر تحديث: 2026-08-19 | الإصدار: maghzaccount-pro v0.2.0*
 

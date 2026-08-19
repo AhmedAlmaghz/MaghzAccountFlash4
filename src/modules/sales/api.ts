@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
 import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createCustomerSchema, createInvoiceSchema, createQuotationSchema, createSalesReturnSchema } from '@/core/utils/validation';
@@ -9,12 +9,84 @@ import { getNextDocumentNumber } from '@/core/api';
 import { postSalesInvoice, postSalesReturn } from '@/core/utils/journalEntryGenerator';
 import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging } from './types';
 
+// Typed RPC bridge for Sales (Phase 4 slice 10). In Electron the renderer
+// sends a structured payload and the main process derives `company_id` +
+// audit `user_id` from the authenticated session — the renderer can never
+// touch another company's rows. The fallback path (PGlite / e2e) still
+// uses `adapter.query` with explicit `company_id = $N` filters.
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokeSalesRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
+  const sales = (typeof window !== 'undefined' && window.electronDB?.sales) as
+    | Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined>
+    | undefined;
+  const fn = sales?.[method];
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    // `call(sales, ...)` preserves the surface object as `this` so the e2e
+    // shim handlers (which call `this._cid()`) resolve the company id.
+    return await fn.call(sales, payload);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function firstId(rows?: Record<string, unknown>[]): string | undefined {
+  const first = rows && rows.length > 0 ? rows[0] : undefined;
+  return first && 'id' in first && first.id != null ? String(first.id) : undefined;
+}
+
+function parseJsonLines(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value as Record<string, unknown>[];
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function buildArAging(rows: Record<string, unknown>[]): CustomerArAging[] {
+  const map = new Map<string, CustomerArAging>();
+  const now = new Date();
+  for (const r of rows) {
+    const cid = String(r.customer_id);
+    const cname = String(r.customer_name);
+    const due = Number(r.due_amount) || 0;
+    const date = new Date(String(r.aging_date));
+    const days = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+    const period = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '>90';
+    if (!map.has(cid)) {
+      map.set(cid, { customerId: cid, customerName: cname, totalDue: 0, buckets: [
+        { period: '0-30', amount: 0, count: 0 },
+        { period: '31-60', amount: 0, count: 0 },
+        { period: '61-90', amount: 0, count: 0 },
+        { period: '>90', amount: 0, count: 0 },
+      ] });
+    }
+    const entry = map.get(cid)!;
+    entry.totalDue += due;
+    const b = entry.buckets.find(x => x.period === period);
+    if (b) { b.amount += due; b.count += 1; }
+  }
+  return Array.from(map.values());
+}
+
 export const salesApi = {
   // ─── Customers ────────────────────────────────────────────────────────────
   async getCustomers(companyId: string): Promise<{ success: boolean; data?: Customer[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getCustomers');
+        return result.success
+          ? { success: true, data: mapRows<Customer>(result.rows || []) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         'SELECT * FROM customers WHERE company_id = $1 ORDER BY name',
@@ -37,6 +109,18 @@ export const salesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getCustomersPaginated', {
+          page: p,
+          pageSize: ps,
+          search: filters?.search,
+          isActive: filters?.isActive,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count) || 0;
+        return { success: true, data: paginatedResult(mapRows<Customer>(rows), total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['c.company_id = $1'];
@@ -79,6 +163,12 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getCustomerById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        return { success: true, data: mapRows<Customer>(result.rows)[0] };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1', [id, companyId]);
       if (result.success && result.rows?.[0]) return { success: true, data: mapRows<Customer>([result.rows[0]])[0] };
@@ -92,8 +182,7 @@ export const salesApi = {
     try {
       const validation = validateInput(createCustomerSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
-      const adapter = await getDbAdapter();
-      
+
       // توليد رقم تلقائي إذا لم يتم تمريره
       let customerData = data;
       if (!data.code) {
@@ -102,6 +191,14 @@ export const salesApi = {
           customerData = { ...data, code: seq.number };
         }
       }
+
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('createCustomer', { ...customerData });
+        return result.success
+          ? { success: true, id: firstId(result.rows) }
+          : { success: false, error: result.error };
+      }
+      const adapter = await getDbAdapter();
       
       const result = await adapter.query(
         `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, credit_limit, balance, is_active, created_by, updated_by)
@@ -119,6 +216,10 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('updateCustomer', { id, ...data });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -147,6 +248,15 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('deleteCustomer', { id });
+        if (result.success) return { success: true };
+        const msg = result.error || '';
+        if (msg.includes('foreign key') || msg.includes('violates')) {
+          return { success: false, error: 'Cannot delete customer with existing invoices, quotations, or returns. Deactivate instead.' };
+        }
+        return { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM customers WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
       if (!result.success) {
@@ -171,6 +281,12 @@ export const salesApi = {
       if (!companyId) return { success: false, error: 'companyId is required' };
       const idValidation = validateInput(z.object({ customerId: uuidSchema, companyId: companyIdSchema }), { customerId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getCustomerStatement', { customerId });
+        return result.success
+          ? { success: true, data: mapRows<CustomerStatementRow>(result.rows || []) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `WITH entries AS (
@@ -204,6 +320,11 @@ export const salesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getCustomerArAging');
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: buildArAging(result.rows || []) };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date
@@ -213,30 +334,7 @@ export const salesApi = {
         [companyId]
       );
       if (!result.success) return { success: false, error: result.error };
-      const rows = result.rows as Array<Record<string, unknown>>;
-      const map = new Map<string, CustomerArAging>();
-      const now = new Date();
-      for (const r of rows) {
-        const cid = String(r.customer_id);
-        const cname = String(r.customer_name);
-        const due = Number(r.due_amount) || 0;
-        const date = new Date(String(r.aging_date));
-        const days = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-        const period = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '>90';
-        if (!map.has(cid)) {
-          map.set(cid, { customerId: cid, customerName: cname, totalDue: 0, buckets: [
-            { period: '0-30', amount: 0, count: 0 },
-            { period: '31-60', amount: 0, count: 0 },
-            { period: '61-90', amount: 0, count: 0 },
-            { period: '>90', amount: 0, count: 0 },
-          ] });
-        }
-        const entry = map.get(cid)!;
-        entry.totalDue += due;
-        const b = entry.buckets.find(x => x.period === period);
-        if (b) { b.amount += due; b.count += 1; }
-      }
-      return { success: true, data: Array.from(map.values()) };
+      return { success: true, data: buildArAging((result.rows || []) as Array<Record<string, unknown>>) };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -247,6 +345,12 @@ export const salesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getInvoices');
+        return result.success
+          ? { success: true, data: (result.rows || []).map((row: Record<string, unknown>) => mapInvoiceRow(row)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active
@@ -276,6 +380,12 @@ export const salesApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const cuValidation = validateInput(uuidSchema, customerId);
       if (!cuValidation.success) return { success: false, error: cuValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getOutstandingInvoicesForCustomer', { customerId });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((row: Record<string, unknown>) => mapInvoiceRow(row)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT i.*, c.name as customer_name
@@ -300,6 +410,16 @@ export const salesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getPostedInvoicesWithLines');
+        if (!result.success) return { success: false, error: result.error };
+        const invoices = (result.rows || []).map((row: Record<string, unknown>) => {
+          const inv = mapInvoiceRow(row);
+          inv.lines = parseJsonLines(row.lines).map((r) => mapInvoiceLineRow(r));
+          return inv;
+        });
+        return { success: true, data: invoices };
+      }
       const adapter = await getDbAdapter();
       const headersRes = await adapter.query(
         `SELECT i.*, c.name as customer_name
@@ -347,6 +467,20 @@ export const salesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getInvoicesPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status,
+          customerId: filters?.customerId,
+          createdBy: filters?.createdBy,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count) || 0;
+        const items = rows.map((row: Record<string, unknown>) => mapInvoiceRow(row));
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['i.company_id = $1'];
@@ -398,6 +532,15 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getInvoiceById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        const row = result.rows[0];
+        const invoice = mapInvoiceRow(row);
+        invoice.lines = parseJsonLines(row.lines).map((r) => mapInvoiceLineRow(r));
+        return { success: true, data: invoice };
+      }
       const adapter = await getDbAdapter();
       const invResult = await adapter.query(
         `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active
@@ -430,10 +573,22 @@ export const salesApi = {
       if (data.exchangeRate !== undefined && data.exchangeRate <= 0) {
         return { success: false, error: 'Exchange rate must be positive.' };
       }
-      const adapter = await getDbAdapter();
-      const invoiceId = crypto.randomUUID();
       const invoiceCurrency = data.currencyCode || YER_CODE;
       const invoiceRate = data.exchangeRate ?? 1;
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('createInvoice', {
+          ...data,
+          currencyCode: invoiceCurrency,
+          exchangeRate: invoiceRate,
+          baseCurrencyAmount: data.baseCurrencyAmount ?? (data.totalAmount * invoiceRate),
+          baseCurrencyPaid: data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * invoiceRate),
+        });
+        return result.success
+          ? { success: true, id: firstId(result.rows) }
+          : { success: false, error: result.error };
+      }
+      const adapter = await getDbAdapter();
+      const invoiceId = crypto.randomUUID();
       const baseCurrencyAmount = data.baseCurrencyAmount ?? (data.totalAmount * invoiceRate);
       const baseCurrencyPaid = data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * invoiceRate);
       const params: unknown[] = [
@@ -488,6 +643,10 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('updateInvoice', { data: { id, ...data } });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -560,6 +719,19 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('deleteInvoice', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Invoice not found' };
+        if (String(row.status) !== 'draft') {
+          return { success: false, error: 'Cannot delete posted invoice. Cancel it first.' };
+        }
+        if (Number(row.paid_amount) > 0) {
+          return { success: false, error: 'Cannot delete invoice with payments. Refund the payment first.' };
+        }
+        return { success: true };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -586,6 +758,25 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('postInvoice', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Invoice not found or not in draft status' };
+        const inv = result.rows[0];
+        try {
+          await postSalesInvoice(companyId, {
+            invoiceNumber: String(inv.invoice_number || ''),
+            date: String(inv.date || new Date().toISOString().split('T')[0]),
+            customerId: String(inv.customer_id),
+            subtotal: Number(inv.subtotal) || 0,
+            vatAmount: Number(inv.vat_amount) || 0,
+            totalAmount: Number(inv.total_amount) || 0,
+          });
+        } catch (jeErr) {
+          void jeErr;
+        }
+        return { success: true };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
@@ -640,6 +831,12 @@ export const salesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getQuotations');
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapQuotationRow(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT q.*, c.name as customer_name FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.company_id = $1 ORDER BY q.date DESC`,
@@ -663,6 +860,19 @@ export const salesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getQuotationsPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status,
+          customerId: filters?.customerId,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count) || 0;
+        const items = rows.map((r: Record<string, unknown>) => mapQuotationRow(r));
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['q.company_id = $1'];
@@ -709,6 +919,15 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getQuotationById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        const row = result.rows[0];
+        const q = mapQuotationRow(row);
+        q.lines = parseJsonLines(row.lines).map((r) => mapQuotationLineRow(r));
+        return { success: true, data: q };
+      }
       const adapter = await getDbAdapter();
       const res = await adapter.query(`SELECT q.*, c.name as customer_name FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.id = $1 AND q.company_id = $2 LIMIT 1`, [id, companyId]);
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
@@ -725,6 +944,12 @@ export const salesApi = {
     try {
       const validation = validateInput(createQuotationSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('createQuotation', { ...data });
+        return result.success
+          ? { success: true, id: firstId(result.rows) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const quotationId = crypto.randomUUID();
       const params: unknown[] = [quotationId, data.companyId, data.quotationNumber, data.customerId, data.date, data.expiryDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.bankAccountId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
@@ -753,6 +978,10 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('updateQuotation', { data: { id, ...data } });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -789,6 +1018,17 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('deleteQuotation', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Quotation not found' };
+        const status = String(row.status);
+        if (status === 'converted' || status === 'accepted') {
+          return { success: false, error: `Cannot delete ${status} quotation` };
+        }
+        return { success: true };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT status FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -814,8 +1054,12 @@ export const salesApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const createRes = await this.createInvoice(invoiceData, _userId);
       if (createRes.success) {
-        const adapter = await getDbAdapter();
-        await adapter.query(`UPDATE quotations SET status = 'converted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [id, companyId, safeUserId(_userId)]);
+        if (isElectronPg()) {
+          await invokeSalesRpc('updateQuotation', { data: { id, status: 'converted' } });
+        } else {
+          const adapter = await getDbAdapter();
+          await adapter.query(`UPDATE quotations SET status = 'converted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [id, companyId, safeUserId(_userId)]);
+        }
       }
       return createRes;
     } catch (e) {
@@ -828,6 +1072,12 @@ export const salesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getReturns');
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapReturnRow(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id WHERE r.company_id = $1 ORDER BY r.date DESC`,
@@ -851,6 +1101,19 @@ export const salesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getReturnsPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status,
+          customerId: filters?.customerId,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count) || 0;
+        const items = rows.map((r: Record<string, unknown>) => mapReturnRow(r));
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['r.company_id = $1'];
@@ -899,6 +1162,15 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('getReturnById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        const row = result.rows[0];
+        const ret = mapReturnRow(row);
+        ret.lines = parseJsonLines(row.lines).map((r) => mapReturnLineRow(r));
+        return { success: true, data: ret };
+      }
       const adapter = await getDbAdapter();
       const res = await adapter.query(
         `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id WHERE r.id = $1 AND r.company_id = $2 LIMIT 1`, [id, companyId]
@@ -917,6 +1189,12 @@ export const salesApi = {
     try {
       const validation = validateInput(createSalesReturnSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('createReturn', { ...data });
+        return result.success
+          ? { success: true, id: firstId(result.rows) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const returnId = crypto.randomUUID();
       const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId, data.customerId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.reason, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.bankAccountId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
@@ -945,6 +1223,10 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('updateReturn', { data: { id, ...data } });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -984,6 +1266,16 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('deleteReturn', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Return not found' };
+        if (String(row.status) !== 'draft') {
+          return { success: false, error: 'Cannot delete posted return. Cancel it first.' };
+        }
+        return { success: true };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT status FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -1007,6 +1299,24 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeSalesRpc('postReturn', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Return not found or not in draft status' };
+        const ret = result.rows[0];
+        try {
+          await postSalesReturn(companyId, {
+            id: id,
+            returnNumber: String(ret.return_number || ''),
+            date: String(ret.date || new Date().toISOString().split('T')[0]),
+            customer: String(ret.customer_name || ''),
+            amount: Number(ret.total_amount) || 0,
+          });
+        } catch (jeErr) {
+          void jeErr;
+        }
+        return { success: true };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT sr.customer_id, sr.total_amount, sr.return_number, sr.date, c.name as customer_name FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND sr.status = $3',

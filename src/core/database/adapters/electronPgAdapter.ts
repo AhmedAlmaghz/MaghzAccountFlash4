@@ -28,12 +28,138 @@ export interface ElectronDB extends PreloadDB {
     createCustomer(payload: { companyId: string; code?: string | null; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createSupplier(payload: { companyId: string; code?: string | null; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
+  // Phase 4 slice 7 — CRM typed RPC. Session-derived companyId + audit
+  // userId from the authenticated session. The renderer payload carries
+  // only the editable fields + filter values.
+  crm?: {
+    getLeads(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getLeadsPaginated(payload: { page: number; pageSize: number; status?: string | null; assignedTo?: string | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getLeadById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createLead(payload: { name: string; phone?: string | null; email?: string | null; company?: string | null; source?: string | null; status?: string; rating?: string; estimatedValue?: number | null; assignedTo?: string | null; notes?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateLead(payload: { id: string; name?: string; phone?: string | null; email?: string | null; company?: string | null; source?: string | null; status?: string; rating?: string; estimatedValue?: number | null; assignedTo?: string | null; notes?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteLead(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    convertLeadToCustomer(payload: { id: string; name: string; phone?: string | null; email?: string | null; customerCode?: string | null; address?: string | null; taxNumber?: string | null; creditLimit?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOpportunities(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOpportunitiesPaginated(payload: { page: number; pageSize: number; stage?: string | null; assignedTo?: string | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createOpportunity(payload: { name: string; leadId?: string | null; customerId?: string | null; value: number; stage?: string; probability?: number | null; expectedCloseDate?: string | null; assignedTo?: string | null; notes?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateOpportunity(payload: { id: string; name?: string; value?: number; stage?: string; probability?: number | null; expectedCloseDate?: string | null; leadId?: string | null; customerId?: string | null; assignedTo?: string | null; notes?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteOpportunity(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getTasks(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getTasksPaginated(payload: { page: number; pageSize: number; status?: string | null; priority?: string | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createTask(payload: { title: string; description?: string | null; dueDate?: string | null; priority?: string; status?: string; opportunityId?: string | null; leadId?: string | null; customerId?: string | null; assignedTo?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateTask(payload: { id: string; title?: string; description?: string | null; dueDate?: string | null; priority?: string; status?: string; opportunityId?: string | null; leadId?: string | null; customerId?: string | null; assignedTo?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteTask(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getActivities(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getActivitiesPaginated(payload: { page: number; pageSize: number; type?: string | null; assignedTo?: string | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createActivity(payload: { type: string; subject: string; description?: string | null; activityDate: string; durationMinutes?: number | null; leadId?: string | null; opportunityId?: string | null; customerId?: string | null; assignedTo?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateActivity(payload: { id: string; type?: string; subject?: string; description?: string | null; activityDate?: string | null; durationMinutes?: number | null; leadId?: string | null; opportunityId?: string | null; customerId?: string | null; assignedTo?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteActivity(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  // Phase 4 slice 8 — Manufacturing typed RPC. Session-derived companyId +
+  // audit userId; the renderer payload carries only editable fields + filters.
+  // updateBom / updateWorkOrder run as transactions in the main process and
+  // take their payload wrapped as { data }.
+  manufacturing?: {
+    getBoms(payload?: { ownedByUserId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getBomsPaginated(payload: { page: number; pageSize: number; search?: string | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getBomById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createBom(payload: { productId: string; version: string; isActive?: boolean; totalCost?: number | null; notes?: string | null; lines?: { materialId: string; quantity: number; unitCost?: number | null }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateBom(payload: { data: { id: string; productId?: string | null; version?: string; isActive?: boolean; totalCost?: number | null; notes?: string | null; lines?: { materialId?: string | null; quantity?: number | null; unitCost?: number | null }[] } }): Promise<{ success: boolean; error?: string }>;
+    deleteBom(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getWorkOrders(payload?: { ownedByUserId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getWorkOrdersPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getWorkOrderById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createWorkOrder(payload: { orderNumber: string; productId: string; bomId?: string | null; quantity: number; status?: string; plannedStartDate?: string | null; plannedEndDate?: string | null; totalCost?: number | null; notes?: string | null; lines?: { materialId: string; plannedQuantity: number; unitCost?: number | null }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateWorkOrder(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
+    deleteWorkOrder(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateWorkOrderStatus(payload: { id: string; status: string; producedQuantity?: number | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    batchUpdateConsumptions(payload: { consumptions: { id: string; actualQuantity: number; actualUnitCost: number; unitCost?: number }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateConsumption(payload: { id: string; actualQuantity?: number; actualUnitCost?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getManufacturingKpis(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  // Phase 4 slice 9 — HR typed RPC. Session-derived companyId + audit
+  // userId; the renderer payload carries only editable fields + filters.
+  // `saveAttendance` is a transaction handler (no UNIQUE(employee_id, date)
+  // on attendance, so fetch-then-upsert runs inside the main process).
+  hr?: {
+    getEmployees(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getEmployeesPaginated(payload: { page: number; pageSize: number; isActive?: boolean | null; departmentId?: string | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getEmployeeById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createEmployee(payload: { employeeNumber: string; fullName: string; nationalId?: string | null; phone?: string | null; email?: string | null; address?: string | null; departmentId?: string | null; position?: string | null; grade?: string | null; hireDate: string; terminationDate?: string | null; baseSalary?: number; isActive?: boolean; photoUrl?: string | null; attachments?: string[] | string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateEmployee(payload: { id: string; employeeNumber?: string; fullName?: string; nationalId?: string | null; phone?: string | null; email?: string | null; address?: string | null; departmentId?: string | null; position?: string | null; grade?: string | null; hireDate?: string | null; terminationDate?: string | null; baseSalary?: number; isActive?: boolean; photoUrl?: string | null; attachments?: string[] | string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteEmployee(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getAttendance(payload: { month: number; year: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    saveAttendance(payload: { data: { records: Array<{ employeeId: string; date: string; checkIn?: string | null; checkOut?: string | null; overtimeHours?: number | null; status?: string; notes?: string | null }> } }): Promise<{ success: boolean; error?: string }>;
+    getPayrollRuns(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getPayrollRunsPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createPayrollRun(payload: { month: number; year: number; totalAmount?: number; status?: string; runNumber?: string | null; lines?: Array<{ employeeId: string; baseSalary?: number; allowances?: number; deductions?: number; overtime?: number; netSalary?: number }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    postPayrollRun(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getLeaves(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getLeavesPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createLeave(payload: { employeeId: string; leaveType?: string; startDate: string; endDate: string; days?: number; status?: string; reason?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateLeaveStatus(payload: { id: string; status: string; approvedBy?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteLeave(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getEndOfServices(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getEndOfServicesPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createEndOfService(payload: { employeeId: string; terminationDate: string; serviceYears?: number; lastSalary?: number; eosAmount?: number; reason?: string; status?: string; notes?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateEndOfServiceStatus(payload: { id: string; status: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteEndOfService(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getHrKpis(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  // Phase 4 slice 10 — Sales typed RPC. Session-derived companyId + audit
+  // userId; updateInvoice / updateQuotation / updateReturn run as
+  // transactions in the main process and take { data } payloads.
+  sales?: {
+    getCustomers(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getCustomersPaginated(payload: { page: number; pageSize: number; isActive?: boolean | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getCustomerById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createCustomer(payload: { code: string; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; creditLimit?: number; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateCustomer(payload: { id: string; code?: string; name?: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; creditLimit?: number; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteCustomer(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getCustomerStatement(payload: { customerId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getCustomerArAging(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getInvoices(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOutstandingInvoicesForCustomer(payload: { customerId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getPostedInvoicesWithLines(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getInvoicesPaginated(payload: { page: number; pageSize: number; status?: string | null; customerId?: string | null; createdBy?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getInvoiceById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createInvoice(payload: { invoiceNumber: string; customerId: string; date?: string | null; dueDate?: string | null; subtotal?: number; discountAmount?: number; vatAmount?: number; totalAmount: number; paidAmount?: number; currencyCode?: string; exchangeRate?: number; baseCurrencyAmount?: number; baseCurrencyPaid?: number; status?: string; paymentType?: string; cashBoxId?: string | null; bankAccountId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; discountPercent?: number; vatPercent?: number; lineTotal?: number; currencyCode?: string | null; exchangeRate?: number | null; baseCurrencyLineTotal?: number | null }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateInvoice(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
+    deleteInvoice(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    postInvoice(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getQuotations(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getQuotationsPaginated(payload: { page: number; pageSize: number; status?: string | null; customerId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getQuotationById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createQuotation(payload: { quotationNumber: string; customerId: string; date?: string | null; expiryDate?: string | null; totalAmount: number; status?: string; paymentType?: string; cashBoxId?: string | null; bankAccountId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; discountPercent?: number; lineTotal?: number }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateQuotation(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
+    deleteQuotation(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReturns(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReturnsPaginated(payload: { page: number; pageSize: number; status?: string | null; customerId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReturnById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createReturn(payload: { returnNumber: string; customerId: string; invoiceId?: string | null; date?: string | null; subtotal?: number; vatAmount?: number; totalAmount: number; reason?: string | null; status?: string; paymentType?: string; cashBoxId?: string | null; bankAccountId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; lineTotal?: number }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateReturn(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
+    deleteReturn(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    postReturn(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
   // Session-derived company scoping (Phase 4 slice 3). No company id in
   // payload; the main process uses the authenticated session. The renderer
   // can never reference another company's row.
   core?: {
     getCompany(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateCompany(payload: { name: string; nameEn?: string | null; currency?: string | null; taxNumber?: string | null; address?: string | null; phone?: string | null; email?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // Phase 4 slice 6 — settings typed RPC. All handlers derive company_id
+    // and audit user_id from the session; the renderer payload carries only
+    // the editable fields.
+    getCurrencies(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createCurrency(payload: { code: string; name: string; symbol?: string | null; exchangeRate?: number; isDefault?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateCurrency(payload: { id: string; code?: string | null; name?: string | null; symbol?: string | null; exchangeRate?: number | null; isDefault?: boolean | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getVatSettings(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateVatSettings(payload: { id: string; vatRate?: number | null; vatNumber?: string | null; isInclusive?: boolean | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getBranches(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createBranch(payload: { name: string; code?: string | null; address?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateBranch(payload: { id: string; name?: string | null; code?: string | null; address?: string | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getSettings(payload?: { category?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    setSetting(payload: { key: string; value?: string | null; category?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
 }
 
@@ -100,6 +226,10 @@ function getDB(): PreloadDB {
 type ElectronRpcSurface = NonNullable<Required<ElectronDB>['accounting']>
   & NonNullable<Required<ElectronDB>['inventory']>
   & NonNullable<Required<ElectronDB>['contacts']>
+  & NonNullable<Required<ElectronDB>['crm']>
+  & NonNullable<Required<ElectronDB>['manufacturing']>
+  & NonNullable<Required<ElectronDB>['hr']>
+  & NonNullable<Required<ElectronDB>['sales']>
   & NonNullable<Required<ElectronDB>['core']>;
 
 function getRPC(): ElectronRpcSurface {
@@ -108,14 +238,22 @@ function getRPC(): ElectronRpcSurface {
     const acc = db.accounting;
     const inv = db.inventory;
     const ctc = db.contacts;
+    const crm = db.crm;
+    const mfg = db.manufacturing;
+    const hr = db.hr;
+    const sales = db.sales;
     const core = db.core;
-    if (!acc || !inv || !ctc || !core) {
-      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/core)');
+    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !core) {
+      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/core)');
     }
     return {
       ...acc,
       ...inv,
       ...ctc,
+      ...crm,
+      ...mfg,
+      ...hr,
+      ...sales,
       ...core,
     } as ElectronRpcSurface;
   }

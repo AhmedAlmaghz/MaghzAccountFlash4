@@ -1,9 +1,46 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, createEmployeeSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { getNextDocumentNumber } from '@/core/api';
 import type { Employee, AttendanceRecord, PayrollRun, PayrollLine, Leave, EndOfService } from './types';
+
+// Typed RPC bridge for HR (Phase 4 slice 9). In Electron the renderer sends a
+// structured payload and the main process derives `company_id` + audit
+// `user_id` from the authenticated session. The fallback path (PGlite / e2e)
+// still uses `adapter.query` with explicit `company_id = $N` filters.
+// NOTE: the live schema has no `updated_at` column on attendance / leaves /
+// payroll_runs — both paths omit it there (employees / end_of_service do have
+// it, so those keep `updated_at = NOW()`).
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokeHrRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
+  const hr = (typeof window !== 'undefined' && window.electronDB?.hr) as
+    | Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined>
+    | undefined;
+  const fn = hr?.[method];
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    // `call(hr, ...)` preserves the surface object as `this` so the e2e
+    // shim handlers (which call `this._cid()`) resolve the company id.
+    return await fn.call(hr, payload);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function parseJsonLines(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value as Record<string, unknown>[];
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 export const hrApi = {
   // ─── Employees ────────────────────────────────────────────────────────────
@@ -11,6 +48,11 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getEmployees');
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapEmployeeRow(r)) };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT e.*, d.name as department_name FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE e.company_id = $1 ORDER BY e.full_name`,
@@ -35,8 +77,23 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const { page: p, pageSize: ps } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getEmployeesPaginated', {
+          page: p,
+          pageSize: ps,
+          isActive: filters?.isActive ?? null,
+          departmentId: filters?.departmentId ?? null,
+          search: filters?.search ?? null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const items = rows.map((r: Record<string, unknown>) => mapEmployeeRow(r));
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
+      const { offset } = clampPageArgs(page, pageSize);
 
       const conditions: string[] = ['e.company_id = $1'];
       const params: unknown[] = [companyId];
@@ -86,6 +143,11 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getEmployeeById', { id });
+        if (result.success && result.rows?.[0]) return { success: true, data: mapEmployeeRow(result.rows[0]) };
+        return { success: false, error: result.error || 'Not found' };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('SELECT e.*, d.name as department_name FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE e.id = $1 AND e.company_id = $2 LIMIT 1', [id, companyId]);
       if (result.success && result.rows?.[0]) return { success: true, data: mapEmployeeRow(result.rows[0]) };
@@ -99,8 +161,7 @@ export const hrApi = {
     try {
       const validation = validateInput(createEmployeeSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
-      const adapter = await getDbAdapter();
-      
+
       // توليد رقم موظف تلقائي إذا لم يتم تمريره
       let employeeData = data;
       if (!data.employeeNumber) {
@@ -109,7 +170,30 @@ export const hrApi = {
           employeeData = { ...data, employeeNumber: seq.number };
         }
       }
-      
+
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('createEmployee', {
+          employeeNumber: employeeData.employeeNumber,
+          fullName: employeeData.fullName,
+          nationalId: employeeData.nationalId ?? null,
+          phone: employeeData.phone ?? null,
+          email: employeeData.email ?? null,
+          address: employeeData.address ?? null,
+          departmentId: employeeData.departmentId ?? null,
+          position: employeeData.position ?? null,
+          grade: employeeData.grade ?? null,
+          hireDate: employeeData.hireDate,
+          terminationDate: employeeData.terminationDate ?? null,
+          baseSalary: employeeData.baseSalary ?? 0,
+          isActive: employeeData.isActive ?? true,
+          photoUrl: employeeData.photoUrl ?? null,
+          attachments: employeeData.attachments ?? null,
+        });
+        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        return { success: false, error: result.error };
+      }
+
+      const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO employees (company_id, employee_number, full_name, national_id, phone, email, address, department_id, position, grade, hire_date, termination_date, base_salary, is_active, photo_url, attachments, created_by, updated_by)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
@@ -126,6 +210,14 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('updateEmployee', {
+          id,
+          ...data,
+          ...(data.attachments !== undefined ? { attachments: data.attachments } : {}),
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -161,6 +253,10 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('deleteEmployee', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM employees WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -174,6 +270,11 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getAttendance', { month, year });
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapAttendanceRow(r)) };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT a.*, e.full_name as employee_name FROM attendance a JOIN employees e ON a.employee_id = e.id WHERE a.company_id = $1 AND EXTRACT(MONTH FROM a.date) = $2 AND EXTRACT(YEAR FROM a.date) = $3 ORDER BY a.date DESC`,
@@ -194,6 +295,22 @@ export const hrApi = {
       if (records.length === 0) return { success: true };
       const cidValidation = validateInput(companyIdSchema, records[0].companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('saveAttendance', {
+          data: {
+            records: records.map((r) => ({
+              employeeId: r.employeeId,
+              date: r.date,
+              checkIn: r.checkIn ?? null,
+              checkOut: r.checkOut ?? null,
+              overtimeHours: r.overtimeHours ?? null,
+              status: r.status,
+              notes: r.notes ?? null,
+            })),
+          },
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       // Pre-fetch existing attendance records in one query
       const placeholders = records.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(',');
@@ -206,13 +323,13 @@ export const hrApi = {
       for (const row of (existingRes.rows || [])) {
         existingMap.set(`${row.employee_id}:${row.date}`, row.id);
       }
-      // Build upsert queries
+      // Build upsert queries — attendance has no updated_at column
       const queries: { sql: string; params: unknown[] }[] = [];
       for (const rec of records) {
         const key = `${rec.employeeId}:${rec.date}`;
         const existingId = existingMap.get(key);
         if (existingId) {
-          queries.push({ sql: 'UPDATE attendance SET check_in = $1, check_out = $2, overtime_hours = $3, status = $4, notes = $5, updated_by = $8, updated_at = NOW() WHERE id = $6 AND company_id = $7', params: [rec.checkIn, rec.checkOut, rec.overtimeHours, rec.status, rec.notes, existingId, rec.companyId, safeUserId(_userId)] });
+          queries.push({ sql: 'UPDATE attendance SET check_in = $1, check_out = $2, overtime_hours = $3, status = $4, notes = $5, updated_by = $8 WHERE id = $6 AND company_id = $7', params: [rec.checkIn, rec.checkOut, rec.overtimeHours, rec.status, rec.notes, existingId, rec.companyId, safeUserId(_userId)] });
         } else {
           queries.push({ sql: 'INSERT INTO attendance (company_id, employee_id, date, check_in, check_out, overtime_hours, status, notes, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', params: [rec.companyId, rec.employeeId, rec.date, rec.checkIn, rec.checkOut, rec.overtimeHours, rec.status, rec.notes, safeUserId(_userId), safeUserId(_userId)] });
         }
@@ -229,6 +346,16 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getPayrollRuns');
+        if (!result.success) return { success: false, error: result.error };
+        const runs = (result.rows || []).map((r: Record<string, unknown>) => {
+          const run = mapPayrollRunRow(r);
+          run.lines = parseJsonLines(r.lines).map(mapPayrollLineRow);
+          return run;
+        });
+        return { success: true, data: runs };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('SELECT * FROM payroll_runs WHERE company_id = $1 ORDER BY year DESC, month DESC', [companyId]);
       if (!result.success) return { success: false, error: result.error };
@@ -264,8 +391,25 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const { page: p, pageSize: ps } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getPayrollRunsPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status ?? null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const runs = rows.map((r: Record<string, unknown>) => {
+          const run = mapPayrollRunRow(r);
+          run.lines = parseJsonLines(r.lines).map(mapPayrollLineRow);
+          return run;
+        });
+        return { success: true, data: paginatedResult(runs, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
+      const { offset } = clampPageArgs(page, pageSize);
 
       const conditions: string[] = ['pr.company_id = $1'];
       const params: unknown[] = [companyId];
@@ -317,7 +461,6 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const adapter = await getDbAdapter();
 
       let runData = data;
       if (!data.runNumber) {
@@ -327,11 +470,32 @@ export const hrApi = {
         }
       }
 
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('createPayrollRun', {
+          month: runData.month,
+          year: runData.year,
+          totalAmount: runData.totalAmount ?? 0,
+          status: runData.status,
+          runNumber: runData.runNumber ?? null,
+          lines: (runData.lines || []).map((line) => ({
+            employeeId: line.employeeId,
+            baseSalary: line.baseSalary ?? 0,
+            allowances: line.allowances ?? 0,
+            deductions: line.deductions ?? 0,
+            overtime: line.overtime ?? 0,
+            netSalary: line.netSalary ?? 0,
+          })),
+        });
+        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        return { success: false, error: result.error };
+      }
+
+      const adapter = await getDbAdapter();
       const tx = await adapter.transaction([
         { sql: `INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, params: [runData.companyId, runData.month, runData.year, runData.totalAmount, runData.status, runData.runNumber || null, safeUserId(_userId), safeUserId(_userId)] },
       ]);
-      if (tx.success && tx.results?.[0]?.[0]) {
-        const runId = tx.results[0][0].id as string;
+      if (tx.success && tx.results?.[0]?.rows?.[0]) {
+        const runId = tx.results[0].rows[0].id as string;
         if (data.lines.length > 0) {
           const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
             const off = i * 7;
@@ -355,8 +519,13 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('postPayrollRun', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
-      const result = await adapter.query("UPDATE payroll_runs SET status = 'posted', updated_by = $3, updated_at = NOW() WHERE id = $1 AND company_id = $2", [id, companyId, safeUserId(_userId)]);
+      // payroll_runs has no updated_at column
+      const result = await adapter.query("UPDATE payroll_runs SET status = 'posted', updated_by = $3 WHERE id = $1 AND company_id = $2", [id, companyId, safeUserId(_userId)]);
       return { success: result.success, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -368,6 +537,11 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getLeaves');
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapLeaveRow(r)) };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT l.*, e.full_name as employee_name FROM leaves l JOIN employees e ON l.employee_id = e.id WHERE l.company_id = $1 ORDER BY l.created_at DESC`,
@@ -392,8 +566,21 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const { page: p, pageSize: ps } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getLeavesPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status ?? null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const items = rows.map((r: Record<string, unknown>) => mapLeaveRow(r));
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
+      const { offset } = clampPageArgs(page, pageSize);
 
       const conditions: string[] = ['l.company_id = $1'];
       const params: unknown[] = [companyId];
@@ -431,6 +618,19 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('createLeave', {
+          employeeId: data.employeeId,
+          leaveType: data.leaveType,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          days: data.days ?? 0,
+          status: data.status,
+          reason: data.reason ?? null,
+        });
+        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        return { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO leaves (company_id, employee_id, type, start_date, end_date, days, status, reason, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
@@ -447,9 +647,18 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('updateLeaveStatus', {
+          id,
+          status,
+          approvedBy: approvedBy || null,
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
+      // leaves has no updated_at column
       const result = await adapter.query(
-        'UPDATE leaves SET status = $1, approved_by = $2, approved_at = $3, updated_by = $6, updated_at = NOW() WHERE id = $4 AND company_id = $5',
+        'UPDATE leaves SET status = $1, approved_by = $2, approved_at = $3, updated_by = $6 WHERE id = $4 AND company_id = $5',
         [status, approvedBy || null, status === 'approved' ? new Date().toISOString() : null, id, companyId, safeUserId(_userId)]
       );
       return { success: result.success, error: result.error };
@@ -462,6 +671,10 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('deleteLeave', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM leaves WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -475,6 +688,11 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getEndOfServices');
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapEosRow(r)) };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT e.*, emp.full_name as employee_name FROM end_of_service e JOIN employees emp ON e.employee_id = emp.id WHERE e.company_id = $1 ORDER BY e.created_at DESC`,
@@ -499,8 +717,21 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const { page: p, pageSize: ps } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getEndOfServicesPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status ?? null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const items = rows.map((r: Record<string, unknown>) => mapEosRow(r));
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
+      const { offset } = clampPageArgs(page, pageSize);
 
       const conditions: string[] = ['e.company_id = $1'];
       const params: unknown[] = [companyId];
@@ -538,6 +769,20 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('createEndOfService', {
+          employeeId: data.employeeId,
+          terminationDate: data.terminationDate,
+          serviceYears: data.serviceYears ?? 0,
+          lastSalary: data.lastSalary ?? 0,
+          eosAmount: data.eosAmount ?? 0,
+          reason: data.reason,
+          status: data.status,
+          notes: data.notes ?? null,
+        });
+        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        return { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO end_of_service (company_id, employee_id, termination_date, service_years, last_salary, eos_amount, reason, status, notes, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
@@ -554,6 +799,10 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('updateEndOfServiceStatus', { id, status });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('UPDATE end_of_service SET status = $1, updated_by = $4, updated_at = NOW() WHERE id = $2 AND company_id = $3', [status, id, companyId, safeUserId(_userId)]);
       return { success: result.success, error: result.error };
@@ -566,6 +815,10 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('deleteEndOfService', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM end_of_service WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -588,6 +841,20 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getHrKpis');
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0] || {};
+        return {
+          success: true,
+          data: {
+            totalEmployees: Number(row.total_employees || 0),
+            activeEmployees: Number(row.active_employees || 0),
+            pendingLeaves: Number(row.pending_leaves || 0),
+            totalPayrollAmount: Number(row.total_payroll || 0),
+          },
+        };
+      }
       const adapter = await getDbAdapter();
       const [empResult, activeResult, leavesResult, payrollResult] = await Promise.all([
         adapter.query<{ cnt: string | number }>(
@@ -684,7 +951,7 @@ function mapPayrollLineRow(r: Record<string, unknown>): PayrollLine {
     id: String(r.id),
     payrollRunId: String(r.payroll_run_id),
     employeeId: String(r.employee_id),
-    employeeName: String(r.employee_name),
+    employeeName: r.employee_name ? String(r.employee_name) : '',
     baseSalary: Number(r.base_salary) || 0,
     allowances: Number(r.allowances) || 0,
     deductions: Number(r.deductions) || 0,

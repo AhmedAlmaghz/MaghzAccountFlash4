@@ -1,4 +1,4 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import {
   validateInput,
   idCompanySchema,
@@ -12,20 +12,34 @@ import {
   createActivitySchema,
   updateActivitySchema,
 } from '@/core/utils/validation';
-import { safeUserId } from '@/core/utils/userIdValidator';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import type { Lead, Opportunity, Task, Activity } from './types';
 
-async function nextCustomerCode(companyId: string): Promise<string> {
-  const adapter = await getDbAdapter();
-  const result = await adapter.query<{ next_code: number }>(
-    `SELECT COALESCE(MAX(CAST(SUBSTRING(code FROM '^CUST-([0-9]+)$') AS integer)), 0) + 1 AS next_code
-       FROM customers
-      WHERE company_id = $1 AND code ~ '^CUST-[0-9]+$'`,
-    [companyId]
-  );
-  const nextCode = Number(result.rows?.[0]?.next_code || 1);
-  return `CUST-${String(nextCode).padStart(4, '0')}`;
+// Typed RPC bridge for CRM (Phase 4 slice 7). In Electron the renderer sends
+// a structured payload and the main process derives `company_id` + audit
+// `user_id` from the authenticated session — the renderer can never touch
+// another company's rows. The fallback path (PGlite / e2e) still uses
+// `adapter.query` with explicit `company_id = $N` filters.
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokeCrmRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
+  const crm = (typeof window !== 'undefined' && window.electronDB?.crm) as
+    | Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined>
+    | undefined;
+  const fn = crm?.[method];
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    // `call(crm, ...)` preserves the surface object as `this` so the e2e
+    // shim handlers (which call `this._cid()`) resolve the company id.
+    return await fn.call(crm, payload);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function firstId(rows?: Record<string, unknown>[]): string | undefined {
+  const first = rows && rows.length > 0 ? rows[0] : undefined;
+  return first && 'id' in first && first.id != null ? String(first.id) : undefined;
 }
 
 export const crmApi = {
@@ -34,6 +48,12 @@ export const crmApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getLeads');
+        return result.success
+          ? { success: true, data: (result.rows || []).map(mapLeadRow) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query<Record<string, unknown>>(
         `SELECT l.*, u.full_name as assigned_name FROM leads l LEFT JOIN users u ON l.assigned_to = u.id WHERE l.company_id = $1 ORDER BY l.created_at DESC`,
@@ -59,6 +79,21 @@ export const crmApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getLeadsPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status || null,
+          assignedTo: filters?.assignedTo || null,
+          search: filters?.search || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const items = (result.rows || []).map((r) => mapLeadRow(r));
+        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
+          ? Number((result.rows || [])[0].total_count)
+          : 0;
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['l.company_id = $1'];
@@ -83,10 +118,9 @@ export const crmApi = {
       );
       const total = Number(countResult.rows?.[0]?.total || 0);
 
-      params.push(ps);
-      params.push(offset);
-      const limitIdx = params.length - 1;
-      const offsetIdx = params.length;
+      const dataParams = [...params, ps, offset];
+      const limitIdx = dataParams.length - 1;
+      const offsetIdx = dataParams.length;
 
       const dataResult = await adapter.query(
         `SELECT l.*, u.full_name as assigned_name
@@ -94,7 +128,7 @@ export const crmApi = {
          WHERE ${where}
          ORDER BY l.created_at DESC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-        params
+        dataParams
       );
       if (!dataResult.success) return { success: false, error: dataResult.error };
 
@@ -109,6 +143,11 @@ export const crmApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getLeadById', { id });
+        if (result.success && result.rows?.length) return { success: true, data: mapLeadRow(result.rows[0]) };
+        return { success: false, error: result.error || 'Not found' };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query<Record<string, unknown>>('SELECT * FROM leads WHERE id = $1 AND company_id = $2 LIMIT 1', [id, companyId]);
       if (result.success && result.rows?.[0]) return { success: true, data: mapLeadRow(result.rows[0]) };
@@ -122,6 +161,23 @@ export const crmApi = {
     try {
       const validation = validateInput(createLeadSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('createLead', {
+          name: data.name,
+          phone: data.phone || null,
+          email: data.email || null,
+          company: data.company || null,
+          source: data.source || null,
+          status: data.status,
+          rating: data.rating,
+          estimatedValue: data.estimatedValue ?? null,
+          assignedTo: data.assignedTo || null,
+          notes: data.notes || null,
+        });
+        if (result.success) return { success: true, id: firstId(result.rows) };
+        return { success: false, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const result = await adapter.query<{ id: string }>(
         `INSERT INTO leads (company_id, name, phone, email, company, source, status, rating, estimated_value, assigned_to, notes, created_at, created_by, updated_by) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10::uuid,$11,$12,$13::uuid,$14::uuid) RETURNING id`,
@@ -140,6 +196,15 @@ export const crmApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const dataValidation = validateInput(updateLeadSchema, data);
       if (!dataValidation.success) return { success: false, error: dataValidation.error };
+      if (isElectronPg()) {
+        const payload: Record<string, unknown> = { id };
+        for (const key of ['name', 'phone', 'email', 'company', 'source', 'status', 'rating', 'estimatedValue', 'assignedTo', 'notes'] as const) {
+          if (data[key] !== undefined) payload[key] = data[key];
+        }
+        const result = await invokeCrmRpc('updateLead', payload);
+        return { success: result.success, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -173,6 +238,10 @@ export const crmApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('deleteLead', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM leads WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -185,16 +254,41 @@ export const crmApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const leadInfo = await this.getLeadById(id, companyId);
+        if (!leadInfo.success || !leadInfo.data) return { success: false, error: leadInfo.error || 'Lead not found' };
+        const lead = leadInfo.data;
+        const result = await invokeCrmRpc('convertLeadToCustomer', {
+          id,
+          name: lead.name,
+          phone: lead.phone || null,
+          email: lead.email || null,
+          customerCode: typeof customerData.code === 'string' && customerData.code.trim() ? customerData.code.trim() : null,
+          address: (customerData.address as string) || null,
+          taxNumber: (customerData.taxNumber as string) || null,
+          creditLimit: (customerData.creditLimit as number) || 0,
+        });
+        if (result.success) return { success: true, id: firstId(result.rows) };
+        return { success: false, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const leadRes = await adapter.query<Record<string, unknown>>('SELECT * FROM leads WHERE id = $1 AND company_id = $2 LIMIT 1', [id, companyId]);
       if (!leadRes.success || !leadRes.rows?.[0]) return { success: false, error: 'Lead not found' };
-      const lead = leadRes.rows[0];
+      const leadRow = leadRes.rows[0];
+      const nextCodeResult = await adapter.query<{ next_code: number }>(
+        `SELECT COALESCE(MAX(CAST(SUBSTRING(code FROM '^CUST-([0-9]+)$') AS integer)), 0) + 1 AS next_code
+           FROM customers
+          WHERE company_id = $1 AND code ~ '^CUST-[0-9]+$'`,
+        [companyId]
+      );
+      const nextCode = Number(nextCodeResult.rows?.[0]?.next_code || 1);
       const customerCode = typeof customerData.code === 'string' && customerData.code.trim()
         ? customerData.code.trim()
-        : await nextCustomerCode(companyId);
+        : `CUST-${String(nextCode).padStart(4, '0')}`;
       const custResult = await adapter.query(
         `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, credit_limit, balance, is_active, created_by, updated_by) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::uuid,$12::uuid) RETURNING id`,
-        [lead.company_id, customerCode, lead.name, lead.phone, lead.email, customerData.address || null, customerData.taxNumber || null, customerData.creditLimit || 0, 0, true, safeUserId(_userId), safeUserId(_userId)]
+        [leadRow.company_id, customerCode, leadRow.name, leadRow.phone, leadRow.email, customerData.address || null, customerData.taxNumber || null, customerData.creditLimit || 0, 0, true, safeUserId(_userId), safeUserId(_userId)]
       );
       if (custResult.success && custResult.rows?.[0]) {
         await adapter.query("UPDATE leads SET status = 'converted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1 AND company_id = $2", [id, companyId, safeUserId(_userId)]);
@@ -211,6 +305,12 @@ export const crmApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getOpportunities');
+        return result.success
+          ? { success: true, data: (result.rows || []).map(mapOpportunityRow) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT o.*, u.full_name as assigned_name FROM opportunities o LEFT JOIN users u ON o.assigned_to = u.id WHERE o.company_id = $1 ORDER BY o.created_at DESC`,
@@ -236,6 +336,21 @@ export const crmApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getOpportunitiesPaginated', {
+          page: p,
+          pageSize: ps,
+          stage: filters?.stage || null,
+          assignedTo: filters?.assignedTo || null,
+          search: filters?.search || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const items = (result.rows || []).map(mapOpportunityRow);
+        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
+          ? Number((result.rows || [])[0].total_count)
+          : 0;
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['o.company_id = $1'];
@@ -260,10 +375,9 @@ export const crmApi = {
       );
       const total = Number(countResult.rows?.[0]?.total || 0);
 
-      params.push(ps);
-      params.push(offset);
-      const limitIdx = params.length - 1;
-      const offsetIdx = params.length;
+      const dataParams = [...params, ps, offset];
+      const limitIdx = dataParams.length - 1;
+      const offsetIdx = dataParams.length;
 
       const dataResult = await adapter.query(
         `SELECT o.*, u.full_name as assigned_name
@@ -271,7 +385,7 @@ export const crmApi = {
          WHERE ${where}
          ORDER BY o.created_at DESC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-        params
+        dataParams
       );
       if (!dataResult.success) return { success: false, error: dataResult.error };
 
@@ -286,6 +400,22 @@ export const crmApi = {
     try {
       const validation = validateInput(createOpportunitySchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('createOpportunity', {
+          name: data.name,
+          leadId: data.leadId || null,
+          customerId: data.customerId || null,
+          value: data.value,
+          stage: data.stage,
+          probability: data.probability ?? null,
+          expectedCloseDate: data.expectedCloseDate || null,
+          assignedTo: data.assignedTo || null,
+          notes: data.notes || null,
+        });
+        if (result.success) return { success: true, id: firstId(result.rows) };
+        return { success: false, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO opportunities (company_id, lead_id, customer_id, name, value, stage, probability, expected_close_date, assigned_to, notes, created_at, created_by, updated_by) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12::uuid,$13::uuid) RETURNING id`,
@@ -304,6 +434,15 @@ export const crmApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const dataValidation = validateInput(updateOpportunitySchema, data);
       if (!dataValidation.success) return { success: false, error: dataValidation.error };
+      if (isElectronPg()) {
+        const payload: Record<string, unknown> = { id };
+        for (const key of ['name', 'value', 'stage', 'probability', 'expectedCloseDate', 'leadId', 'customerId', 'assignedTo', 'notes'] as const) {
+          if (data[key] !== undefined) payload[key] = data[key];
+        }
+        const result = await invokeCrmRpc('updateOpportunity', payload);
+        return { success: result.success, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -336,6 +475,10 @@ export const crmApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('deleteOpportunity', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM opportunities WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -349,6 +492,12 @@ export const crmApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getTasks');
+        return result.success
+          ? { success: true, data: (result.rows || []).map(mapTaskRow) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT t.*, u.full_name as assigned_name FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id WHERE t.company_id = $1 ORDER BY t.due_date ASC`,
@@ -368,6 +517,22 @@ export const crmApi = {
     try {
       const validation = validateInput(createTaskSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('createTask', {
+          title: data.title,
+          description: data.description || null,
+          dueDate: data.dueDate || null,
+          priority: data.priority,
+          status: data.status,
+          opportunityId: data.opportunityId || null,
+          leadId: data.leadId || null,
+          customerId: data.customerId || null,
+          assignedTo: data.assignedTo || null,
+        });
+        if (result.success) return { success: true, id: firstId(result.rows) };
+        return { success: false, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO tasks (company_id, opportunity_id, lead_id, customer_id, title, description, due_date, priority, status, assigned_to, created_at, created_by, updated_by) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7::date,$8,$9,$10::uuid,$11,$12::uuid,$13::uuid) RETURNING id`,
@@ -386,6 +551,15 @@ export const crmApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const dataValidation = validateInput(updateTaskSchema, data);
       if (!dataValidation.success) return { success: false, error: dataValidation.error };
+      if (isElectronPg()) {
+        const payload: Record<string, unknown> = { id };
+        for (const key of ['title', 'description', 'dueDate', 'priority', 'status', 'opportunityId', 'leadId', 'customerId', 'assignedTo'] as const) {
+          if (data[key] !== undefined) payload[key] = data[key];
+        }
+        const result = await invokeCrmRpc('updateTask', payload);
+        return { success: result.success, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -418,6 +592,10 @@ export const crmApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('deleteTask', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM tasks WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -436,6 +614,21 @@ export const crmApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getTasksPaginated', {
+          page: p,
+          pageSize: ps,
+          status: filters?.status || null,
+          priority: filters?.priority || null,
+          search: filters?.search || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const items = (result.rows || []).map(mapTaskRow);
+        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
+          ? Number((result.rows || [])[0].total_count)
+          : 0;
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['t.company_id = $1'];
@@ -460,10 +653,9 @@ export const crmApi = {
       );
       const total = Number(countResult.rows?.[0]?.total || 0);
 
-      params.push(ps);
-      params.push(offset);
-      const limitIdx = params.length - 1;
-      const offsetIdx = params.length;
+      const dataParams = [...params, ps, offset];
+      const limitIdx = dataParams.length - 1;
+      const offsetIdx = dataParams.length;
 
       const dataResult = await adapter.query(
         `SELECT t.*, u.full_name as assigned_name
@@ -471,7 +663,7 @@ export const crmApi = {
          WHERE ${where}
          ORDER BY t.due_date ASC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-        params
+        dataParams
       );
       if (!dataResult.success) return { success: false, error: dataResult.error };
 
@@ -487,6 +679,12 @@ export const crmApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getActivities');
+        return result.success
+          ? { success: true, data: (result.rows || []).map(mapActivityRow) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT a.*, u.full_name as assigned_name FROM activities a LEFT JOIN users u ON a.assigned_to = u.id WHERE a.company_id = $1 ORDER BY a.activity_date DESC`,
@@ -506,6 +704,22 @@ export const crmApi = {
     try {
       const validation = validateInput(createActivitySchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('createActivity', {
+          type: data.type,
+          subject: data.subject,
+          description: data.description || null,
+          activityDate: data.activityDate,
+          durationMinutes: data.durationMinutes ?? null,
+          leadId: data.leadId || null,
+          opportunityId: data.opportunityId || null,
+          customerId: data.customerId || null,
+          assignedTo: data.assignedTo || null,
+        });
+        if (result.success) return { success: true, id: firstId(result.rows) };
+        return { success: false, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO activities (company_id, lead_id, opportunity_id, customer_id, type, subject, description, activity_date, duration_minutes, assigned_to, created_at, created_by, updated_by) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8::date,$9,$10::uuid,$11,$12::uuid,$13::uuid) RETURNING id`,
@@ -524,6 +738,15 @@ export const crmApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const dataValidation = validateInput(updateActivitySchema, data);
       if (!dataValidation.success) return { success: false, error: dataValidation.error };
+      if (isElectronPg()) {
+        const payload: Record<string, unknown> = { id };
+        for (const key of ['type', 'subject', 'description', 'activityDate', 'durationMinutes', 'leadId', 'opportunityId', 'customerId', 'assignedTo'] as const) {
+          if (data[key] !== undefined) payload[key] = data[key];
+        }
+        const result = await invokeCrmRpc('updateActivity', payload);
+        return { success: result.success, error: result.error };
+      }
+      const { safeUserId } = await import('@/core/utils/userIdValidator');
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -556,6 +779,10 @@ export const crmApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('deleteActivity', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM activities WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
@@ -574,6 +801,20 @@ export const crmApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokeCrmRpc('getActivitiesPaginated', {
+          page: p,
+          pageSize: ps,
+          type: filters?.type || null,
+          assignedTo: filters?.assignedTo || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const items = (result.rows || []).map(mapActivityRow);
+        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
+          ? Number((result.rows || [])[0].total_count)
+          : 0;
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['a.company_id = $1'];
@@ -594,10 +835,9 @@ export const crmApi = {
       );
       const total = Number(countResult.rows?.[0]?.total || 0);
 
-      params.push(ps);
-      params.push(offset);
-      const limitIdx = params.length - 1;
-      const offsetIdx = params.length;
+      const dataParams = [...params, ps, offset];
+      const limitIdx = dataParams.length - 1;
+      const offsetIdx = dataParams.length;
 
       const dataResult = await adapter.query(
         `SELECT a.*, u.full_name as assigned_name
@@ -605,7 +845,7 @@ export const crmApi = {
          WHERE ${where}
          ORDER BY a.activity_date DESC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-        params
+        dataParams
       );
       if (!dataResult.success) return { success: false, error: dataResult.error };
 
