@@ -7,9 +7,10 @@ import { useAppStore } from './core/store';
 import { useOnboardingStore } from './core/store/onboardingStore';
 import { getDbAdapter } from './core/database/adapters';
 import { initAuth } from './modules/auth/store';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, HardDrive, RefreshCw } from 'lucide-react';
 import { Button, ErrorBoundary } from './core/ui/components';
 import { useTranslation } from './core/i18n/useTranslation';
+import { setDbMode } from './core/database/adapters';
 
 // Set RTL and Arabic as default
 document.documentElement.dir = 'rtl';
@@ -34,9 +35,21 @@ function DbErrorScreen({ onRetry }: { onRetry: () => void }) {
             {t('common.dbErrorDesc')}
           </p>
         </div>
-        <Button variant="primary" leftIcon={<RefreshCw size={16} />} onClick={onRetry}>
-          {t('common.retry')}
-        </Button>
+        <div className="flex flex-col gap-3 items-center">
+          <Button variant="primary" leftIcon={<RefreshCw size={16} />} onClick={onRetry}>
+            {t('common.retry')}
+          </Button>
+          <Button
+            variant="secondary"
+            leftIcon={<HardDrive size={16} />}
+            onClick={() => {
+              setDbMode('pglite');
+              window.location.reload();
+            }}
+          >
+            {t('common.usePglite')}
+          </Button>
+        </div>
       </div>
     </div>
   );
