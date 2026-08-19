@@ -153,21 +153,19 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
     setIsResetting(true);
     setResetError('');
     try {
-      if (typeof window !== 'undefined' && window.electronDB?.clearAll) {
-        const result = await window.electronDB.clearAll({
-          confirm: true,
-          username: resetUsername.trim() || undefined,
-          password: resetPassword,
-        });
-        if (!result.success) {
-          throw new Error(result.error || t('onboarding.clearDataError'));
-        }
-        resetOnboarding();
-        setIsResetting(false);
-        setShowResetConfirm(false);
-        return;
+      const adapter = await getDbAdapter();
+      const result = await adapter.clearAll({
+        confirm: true,
+        username: resetUsername.trim() || undefined,
+        password: resetPassword,
+      });
+      if (!result.success) {
+        throw new Error(result.error || t('onboarding.clearDataError'));
       }
-      throw new Error(t('onboarding.pgNotAvailable'));
+      resetOnboarding();
+      setIsResetting(false);
+      setShowResetConfirm(false);
+      return;
     } catch (err) {
       setResetError(err instanceof Error ? err.message : t('onboarding.clearDataError'));
       setIsResetting(false);
@@ -568,36 +566,32 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
     setProcessing(true, seedOption === 'default' ? t('onboarding.seedingDefault') : t('onboarding.seedingDemo'));
 
     try {
-      if (typeof window !== 'undefined' && window.electronDB) {
-        const electronDB = window.electronDB;
+      const adapter = await getDbAdapter();
 
-        if (seedOption === 'default') {
-          if (!electronDB.seedDefault) {
-            throw new Error('seedDefault ' + t('onboarding.seedFailed'));
-          }
-          const result = await electronDB.seedDefault(adminPassword);
-          if (result.success) {
-            setSeedStatus('success');
-            setSeedMessage(t('onboarding.defaultSeeded'));
-            if (result.adminPassword) setGeneratedPassword(result.adminPassword);
-          } else {
-            throw new Error(result.error || t('onboarding.seedFailed'));
-          }
-        } else if (seedOption === 'demo') {
-          if (!electronDB.seedDemo) {
-            throw new Error('seedDemo ' + t('onboarding.seedFailed'));
-          }
-          const result = await electronDB.seedDemo(adminPassword);
-          if (result.success) {
-            setSeedStatus('success');
-            setSeedMessage(t('onboarding.demoSeeded'));
-            if (result.adminPassword) setGeneratedPassword(result.adminPassword);
-          } else {
-            throw new Error(result.error || t('onboarding.seedFailed'));
-          }
+      if (seedOption === 'default') {
+        if (!adapter.seedDefault) {
+          throw new Error('seedDefault ' + t('onboarding.seedFailed'));
         }
-      } else {
-        throw new Error(t('onboarding.pgNotAvailable'));
+        const result = await adapter.seedDefault(adminPassword);
+        if (result.success) {
+          setSeedStatus('success');
+          setSeedMessage(t('onboarding.defaultSeeded'));
+          if (result.adminPassword) setGeneratedPassword(result.adminPassword);
+        } else {
+          throw new Error(result.error || t('onboarding.seedFailed'));
+        }
+      } else if (seedOption === 'demo') {
+        if (!adapter.seedDemo) {
+          throw new Error('seedDemo ' + t('onboarding.seedFailed'));
+        }
+        const result = await adapter.seedDemo(adminPassword);
+        if (result.success) {
+          setSeedStatus('success');
+          setSeedMessage(t('onboarding.demoSeeded'));
+          if (result.adminPassword) setGeneratedPassword(result.adminPassword);
+        } else {
+          throw new Error(result.error || t('onboarding.seedFailed'));
+        }
       }
 
       setProcessing(false);
