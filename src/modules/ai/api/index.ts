@@ -65,24 +65,46 @@ declare global {
 
 const NOT_AVAILABLE = 'AI bridge is not available (desktop app required)';
 
+let browserBridgePromise: Promise<typeof import('./browserBridge').browserAiBridge> | null = null;
+
+function loadBrowserBridge() {
+  if (!browserBridgePromise) {
+    browserBridgePromise = import('./browserBridge').then((m) => m.browserAiBridge);
+  }
+  return browserBridgePromise;
+}
+
 function bridge(): ElectronAI | null {
   if (typeof window !== 'undefined' && window.electronAI) return window.electronAI;
   return null;
 }
 
-export const aiApi = {
+/**
+ * Returns the browser-side bridge when running in pure web/PGlite mode
+ * (no Electron main process). The browser bridge implements the same
+ * surface using the local PGlite DB + direct fetch to the LLM provider.
+ */
+async function getEffectiveBridge(): Promise<ElectronAI | null> {
+  const b = bridge();
+  if (b) return b;
+  try {
+    return (await loadBrowserBridge()) as unknown as ElectronAI;
+  } catch {
+    return null;
+  }
+}export const aiApi = {
   isAvailable(): boolean {
     return bridge() !== null;
   },
 
   async getConfig(companyId: string): Promise<IpcResult<AiPublicConfig>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.getConfig(companyId);
   },
 
   async saveConfig(payload: AiSaveConfigPayload): Promise<IpcResult<void>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.saveConfig(payload);
   },
@@ -93,7 +115,7 @@ export const aiApi = {
     model?: string;
     apiKey?: string;
   }): Promise<IpcResult<{ model: string }>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.testConnection(payload);
   },
@@ -105,7 +127,7 @@ export const aiApi = {
     temperature?: number;
     maxTokens?: number;
   }): Promise<IpcResult<LlmCompletionData>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.complete(payload);
   },
@@ -128,41 +150,29 @@ export const aiApi = {
     temperature?: number;
     maxTokens?: number;
   }): AsyncGenerator<LlmStreamChunk, { success: boolean; error?: string }, void> {
-    const b = bridge();
-    if (!b) throw new Error('AI bridge is not available');
-
+    let b: ElectronAI | null = null;
     let done = false;
     let doneResult: { success: boolean; error?: string } = { success: false, error: 'stream ended unexpectedly' };
     const queue: LlmStreamChunk[] = [];
     let resolveNext: ((value: LlmStreamChunk | { __done__: true; result: { success: boolean; error?: string } }) => void) | null = null;
-
-    b.onStreamChunk((chunk) => {
-      if (resolveNext) {
-        const r = resolveNext;
-        resolveNext = null;
-        r(chunk);
-      } else {
-        queue.push(chunk);
-      }
-    });
-
-    b.onStreamDone((result) => {
-      done = true;
-      doneResult = result;
-      if (resolveNext) {
-        const r = resolveNext;
-        resolveNext = null;
-        r({ __done__: true, result });
-      }
-    });
-
-    b.startStream(payload);
 
     const generator: AsyncGenerator<LlmStreamChunk, { success: boolean; error?: string }, void> = {
       [Symbol.asyncIterator]() {
         return this;
       },
       async next() {
+        // Lazily resolve the bridge on first pull (allows async init).
+        if (!b) {
+          b = await getEffectiveBridge();
+          if (!b) {
+            return { value: { success: false, error: NOT_AVAILABLE }, done: true } as {
+              value: { success: boolean; error?: string };
+              done: true;
+            };
+          }
+          b.startStream(payload);
+        }
+
         while (true) {
           if (queue.length > 0) {
             const chunk = queue.shift()!;
@@ -183,40 +193,64 @@ export const aiApi = {
         }
       },
       async return() {
-        b.removeStreamListeners();
+        if (b) b.removeStreamListeners();
         resolveNext = null;
         return { value: { success: false, error: 'stream cancelled' }, done: true };
       },
       async throw(err) {
-        b.removeStreamListeners();
+        if (b) b.removeStreamListeners();
         resolveNext = null;
         return { value: { success: false, error: String(err) }, done: true };
       },
     };
 
+    // Register listeners immediately so no chunks are missed while the
+    // bridge resolves asynchronously.
+    void getEffectiveBridge().then((resolved) => {
+      if (!resolved) return;
+      resolved.onStreamChunk((chunk) => {
+        if (resolveNext) {
+          const r = resolveNext;
+          resolveNext = null;
+          r(chunk);
+        } else {
+          queue.push(chunk);
+        }
+      });
+      resolved.onStreamDone((result) => {
+        done = true;
+        doneResult = result;
+        if (resolveNext) {
+          const r = resolveNext;
+          resolveNext = null;
+          r({ __done__: true, result });
+        }
+      });
+    });
+
     return generator;
   },
 
   async listSessions(companyId: string, userId: string): Promise<IpcResult<AiChatSessionSummary[]>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.listSessions({ companyId, userId });
   },
 
   async getSessionMessages(companyId: string, sessionId: string): Promise<IpcResult<ChatMessage[]>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.getSessionMessages({ companyId, sessionId });
   },
 
   async saveSession(payload: AiSaveSessionPayload): Promise<IpcResult<{ sessionId: string }>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.saveSession(payload);
   },
 
   async deleteSession(companyId: string, userId: string, sessionId: string): Promise<IpcResult<void>> {
-    const b = bridge();
+    const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.deleteSession({ companyId, userId, sessionId });
   },
