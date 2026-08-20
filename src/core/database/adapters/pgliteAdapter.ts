@@ -452,6 +452,70 @@ const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: n
   { type: 'employee', prefix: 'EMP-', start: 1, current: 15, pad: 4 },
 ];
 
+// System roles seeded for every company. Permission lists mirror
+// FALLBACK_PERMISSIONS in src/modules/auth/store.ts (and electron/dbHandler.js)
+// so role-based users get the same access in PGlite as in the desktop app.
+// The role names must match users.role values used at login.
+const SYSTEM_ROLES: Array<{ name: string; name_ar: string; description: string; permissions: string[] }> = [
+  {
+    name: 'admin',
+    name_ar: 'مدير النظام',
+    description: 'صلاحيات كاملة على جميع الوحدات',
+    permissions: ['*'],
+  },
+  {
+    name: 'manager',
+    name_ar: 'مدير',
+    description: 'إدارة العمليات اليومية دون إعدادات النظام',
+    permissions: [
+      'core.view', 'accounting.view', 'accounting.create', 'accounting.edit', 'accounting.post',
+      'inventory.view', 'inventory.create', 'inventory.edit',
+      'sales.view', 'sales.create', 'sales.edit', 'sales.post',
+      'purchases.view', 'purchases.create', 'purchases.edit',
+      'manufacturing.view', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post',
+      'reports.view', 'reports.export',
+      'settings.view',
+      'ai.use',
+    ],
+  },
+  {
+    name: 'accountant',
+    name_ar: 'محاسب',
+    description: 'العمليات المحاسبية والمالية والتقارير',
+    permissions: [
+      'core.view',
+      'accounting.view', 'accounting.create', 'accounting.edit', 'accounting.post',
+      'inventory.view',
+      'sales.view', 'sales.create', 'sales.edit',
+      'purchases.view', 'purchases.create', 'purchases.edit',
+      'manufacturing.view',
+      'reports.view', 'reports.export',
+      'ai.use',
+    ],
+  },
+  {
+    name: 'sales_rep',
+    name_ar: 'مندوب مبيعات',
+    description: 'المبيعات وخدمة العملاء — سجلاته الخاصة فقط',
+    permissions: [
+      'sales.own', 'sales.create', 'sales.edit',
+      'inventory.own',
+      'crm.own', 'crm.create', 'crm.edit',
+      'reports.view',
+      'ai.use',
+    ],
+  },
+  {
+    name: 'viewer',
+    name_ar: 'مطلع',
+    description: 'عرض فقط دون تعديل أو إنشاء',
+    permissions: [
+      'core.view', 'accounting.view', 'inventory.view', 'sales.view',
+      'purchases.view', 'manufacturing.view', 'reports.view',
+    ],
+  },
+];
+
 const STOCK_QTYS = [500, 300, 200, 350, 1000, 600, 150, 800, 1200, 250, 900, 400, 700, 180, 500];
 
 async function ensureRow(
@@ -679,6 +743,42 @@ async function seedBranches(this: DbAdapter, companyId: string, adminId: string)
       [companyId, b.code]
     );
   }
+}
+
+async function seedRoles(this: DbAdapter, companyId: string): Promise<void> {
+  for (const role of SYSTEM_ROLES) {
+    await ensureRow.call(
+      this,
+      `INSERT INTO roles (company_id, name, description, permissions, is_system)
+       SELECT $1::uuid, $2::text, $3::text, $4::text, TRUE
+       WHERE NOT EXISTS (SELECT 1 FROM roles WHERE company_id = $1::uuid AND name = $2::text)
+       RETURNING id`,
+      [companyId, role.name, `${role.name_ar} — ${role.description}`, JSON.stringify(role.permissions)],
+      `SELECT id FROM roles WHERE company_id = $1::uuid AND name = $2::text LIMIT 1`,
+      [companyId, role.name]
+    );
+  }
+}
+
+// Default accountant user — same password as the seeded admin so the operator
+// gets a working non-admin login out of the box (no extra credential to show).
+async function seedAccountantUser(
+  this: DbAdapter,
+  companyId: string,
+  passwordHash: string
+): Promise<string> {
+  const id = await ensureRow.call(
+    this,
+    `INSERT INTO users (company_id, username, email, full_name, password_hash, role, is_active)
+     SELECT $1::uuid, 'accountant', 'accountant@demo.ye', 'محاسب الشركة', $2::text, 'accountant', TRUE
+     WHERE NOT EXISTS (SELECT 1 FROM users WHERE company_id = $1::uuid AND username = 'accountant')
+     RETURNING id`,
+    [companyId, passwordHash],
+    `SELECT id FROM users WHERE company_id = $1::uuid AND username = 'accountant' LIMIT 1`,
+    [companyId]
+  );
+  if (!id) throw new Error('Failed to create accountant user');
+  return id;
 }
 
 async function seedCustomers(this: DbAdapter, companyId: string): Promise<void> {
@@ -1203,6 +1303,7 @@ export const pgliteAdapter: DbAdapter = {
         'document_sequences',
         'branches',
         'users',
+        'roles',
         'companies',
       ];
       for (const table of tables) {
@@ -1227,8 +1328,25 @@ export const pgliteAdapter: DbAdapter = {
       // Create company + admin user
       const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
 
-      // Seed chart of accounts (required for any accounting operation)
-      await seedChartOfAccounts.call(this, companyId);
+      // Seed the full default-settings set (chart of accounts, numbering,
+      // currencies, VAT, branches, units, cost centers, banks, cash box,
+      // default accounts, product types, product categories, roles + a
+      // default accountant user) so the company is usable out of the box —
+      // matching the desktop seed behaviour.
+      const codeToId = await seedChartOfAccounts.call(this, companyId);
+      await seedCurrencies.call(this, companyId, adminId);
+      await seedVatSettings.call(this, companyId);
+      await seedDocumentSequences.call(this, companyId);
+      await seedBranches.call(this, companyId, adminId);
+      await seedProductTypes.call(this, companyId, adminId, codeToId);
+      await seedUnits.call(this, companyId);
+      await seedCostCenters.call(this, companyId);
+      await seedBanks.call(this, companyId, codeToId);
+      await seedCashBoxes.call(this, companyId, adminId, codeToId);
+      await seedDefaultAccounts.call(this, companyId, codeToId);
+      await seedProductCategories.call(this, companyId);
+      await seedRoles.call(this, companyId);
+      await seedAccountantUser.call(this, companyId, passwordHash);
 
       return {
         success: true,
@@ -1256,6 +1374,10 @@ export const pgliteAdapter: DbAdapter = {
 
       // Seed chart of accounts (required for any accounting operation)
       const codeToId = await seedChartOfAccounts.call(this, companyId);
+
+      // System roles + default accountant user
+      await seedRoles.call(this, companyId);
+      await seedAccountantUser.call(this, companyId, passwordHash);
 
       // Seed master data in dependency order
       await seedCurrencies.call(this, companyId, adminId);
