@@ -1,3 +1,0 @@
-npm notice run MaghzAccountPro@0.1.0 npx
-npm notice run tsc -b --force
-src/modules/auth/store.ts(50,10): error TS6133: 'ensureSessionFingerprint' is declared but its value is never read.
