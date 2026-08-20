@@ -238,8 +238,9 @@ const ACCOUNTS: Array<{
     { code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: null },
     { code: '11', name_ar: 'الأصول المتداولة', name_en: 'Current Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
     { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Banks', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
-    { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 5000000 },
-    { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 12000000 },
+    { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
+    { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
+    { code: '11103', name_ar: 'محفظة جيب', name_en: 'Jibe Wallet', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
     { code: '112', name_ar: 'المدينون', name_en: 'Receivables', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
     { code: '11201', name_ar: 'المدينون التجاريون', name_en: 'Trade Customers', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
     { code: '113', name_ar: 'المخزون', name_en: 'Inventory', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
@@ -252,7 +253,7 @@ const ACCOUNTS: Array<{
     { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
     { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
     { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
-    { code: '31101', name_ar: 'رأس المال المدفوع', name_en: 'Paid-in Capital', type: 'equity', nature: 'credit', is_group: false, parent_code: '311', balance: 20000000 },
+    { code: '31101', name_ar: 'رأس المال المدفوع', name_en: 'Paid-in Capital', type: 'equity', nature: 'credit', is_group: false, parent_code: '311', balance: 0 },
     { code: '4', name_ar: 'الإيرادات', name_en: 'Revenues', type: 'revenue', nature: 'credit', is_group: true, parent_code: null },
     { code: '41', name_ar: 'إيرادات المبيعات', name_en: 'Sales Revenue', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
     { code: '411', name_ar: 'المبيعات', name_en: 'Sales', type: 'revenue', nature: 'credit', is_group: true, parent_code: '41' },
@@ -266,6 +267,7 @@ const ACCOUNTS: Array<{
     { code: '52', name_ar: 'مصاريف تشغيلية', name_en: 'Operating Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
     { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+    { code: '52301', name_ar: 'مصروفات متنوعة ونثريات', name_en: 'Miscellaneous Expenses', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   ];
 
 const PRODUCT_TYPES: Array<{
@@ -288,12 +290,13 @@ const UNITS: Array<{ code: string; name_ar: string; name_en: string; conv: numbe
   { code: 'KG', name_ar: 'كيلوغرام', name_en: 'Kilogram', conv: 1 },
   { code: 'LTR', name_ar: 'لتر', name_en: 'Liter', conv: 1 },
   { code: 'MTR', name_ar: 'متر', name_en: 'Meter', conv: 1 },
-  { code: 'PC', name_ar: 'قطعة', name_en: 'Piece', conv: 1 },
+  { code: 'PC', name_ar: 'حبة', name_en: 'Piece', conv: 1 },
   { code: 'PK', name_ar: 'علبة', name_en: 'Pack', conv: 1 },
-  { code: 'CAN', name_ar: 'علبة معدنية', name_en: 'Can', conv: 1 },
-  { code: 'DZ', name_ar: 'دستة', name_en: 'Dozen', conv: 1 },
-  { code: 'BKT', name_ar: 'دلو', name_en: 'Bucket', conv: 1 },
-  { code: 'BLK', name_ar: 'طوبة', name_en: 'Block', conv: 1 },
+  { code: 'CAN', name_ar: 'تنكة', name_en: 'Can', conv: 1 },
+  { code: 'DZ', name_ar: 'درزن', name_en: 'Dozen', conv: 1 },
+  { code: 'BKT', name_ar: 'سطل', name_en: 'Bucket', conv: 1 },
+  { code: 'BLK', name_ar: 'قالب', name_en: 'Block', conv: 1 },
+  { code: 'SHD', name_ar: 'شدة', name_en: 'Shadah', conv: 1 },
 ];
 
 const CURRENCIES: Array<{ code: string; name: string; symbol: string; rate: number; is_default: boolean }> = [
@@ -305,6 +308,7 @@ const CURRENCIES: Array<{ code: string; name: string; symbol: string; rate: numb
 const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boolean; description: string }> = [
   { key: 'default_cash', account_code: '11101', required: true, description: 'الصندوق الرئيسي' },
   { key: 'default_bank', account_code: '11102', required: false, description: 'البنك الرئيسي' },
+  { key: 'default_bank', account_code: '11103', required: false, description: 'محفظة جيب' },
   { key: 'default_sales', account_code: '41101', required: true, description: 'إيرادات المبيعات' },
   { key: 'default_cogs', account_code: '51101', required: true, description: 'تكلفة البضاعة المباعة' },
   { key: 'default_inventory', account_code: '11301', required: true, description: 'حساب المخزون' },
@@ -348,7 +352,7 @@ const BANKS: Array<{ name: string; bank_name: string; account_number: string; ib
 ];
 
 const CASH_BOXES: Array<{ name: string; code: string; balance: number; account_code: string; responsible_role: string }> = [
-  { name: 'الصندوق الرئيسي', code: 'CB-MAIN', balance: 5000000, account_code: '11101', responsible_role: 'admin' },
+  { name: 'الصندوق الرئيسي', code: 'CB-MAIN', balance: 0, account_code: '11101', responsible_role: 'admin' },
 ];
 
 const PRODUCT_CATEGORIES: string[] = ['المواد الغذائية', 'مواد التنظيف', 'العناية الشخصية'];
@@ -431,25 +435,25 @@ const LEADS: Array<{
   ];
 
 const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: number; pad: number }> = [
-  { type: 'sales_invoice', prefix: 'INV-', start: 1, current: 6, pad: 6 },
-  { type: 'sales_return', prefix: 'SRT-', start: 1, current: 4, pad: 4 },
-  { type: 'quotation', prefix: 'QOT-', start: 1, current: 2, pad: 4 },
-  { type: 'purchase_order', prefix: 'PO-', start: 1, current: 6, pad: 6 },
-  { type: 'purchase_invoice', prefix: 'PINV-', start: 1, current: 4, pad: 4 },
-  { type: 'purchase_return', prefix: 'PRT-', start: 1, current: 2, pad: 4 },
+  { type: 'sales_invoice', prefix: 'INV-', start: 1, current: 0, pad: 6 },
+  { type: 'sales_return', prefix: 'SRT-', start: 1, current: 0, pad: 4 },
+  { type: 'quotation', prefix: 'QOT-', start: 1, current: 0, pad: 4 },
+  { type: 'purchase_order', prefix: 'PO-', start: 1, current: 0, pad: 6 },
+  { type: 'purchase_invoice', prefix: 'PINV-', start: 1, current: 0, pad: 4 },
+  { type: 'purchase_return', prefix: 'PRT-', start: 1, current: 0, pad: 4 },
   { type: 'journal_voucher', prefix: 'JV-', start: 1, current: 0, pad: 7 },
-  { type: 'receipt_voucher', prefix: 'RV-', start: 1, current: 3, pad: 6 },
-  { type: 'payment_voucher', prefix: 'PV-', start: 1, current: 3, pad: 6 },
+  { type: 'receipt_voucher', prefix: 'RV-', start: 1, current: 0, pad: 6 },
+  { type: 'payment_voucher', prefix: 'PV-', start: 1, current: 0, pad: 6 },
   { type: 'work_order', prefix: 'WO-', start: 1, current: 0, pad: 4 },
-  { type: 'bom', prefix: 'BOM-', start: 1, current: 0, pad: 4 },
+  { type: 'bom', prefix: 'BOM-', start: 1, current: 0, pad: 0 },
   { type: 'payroll_run', prefix: 'PAY-', start: 1, current: 0, pad: 6 },
-  { type: 'product', prefix: 'PRD-', start: 1, current: 15, pad: 7 },
-  { type: 'warehouse', prefix: 'WH-', start: 1, current: 1, pad: 3 },
+  { type: 'product', prefix: 'PRD-', start: 1, current: 15, pad: 0 },
+  { type: 'warehouse', prefix: 'WH-', start: 1, current: 1, pad: 0 },
   { type: 'stock_adjustment', prefix: 'ADJ-', start: 1, current: 0, pad: 6 },
   { type: 'inventory_transfer', prefix: 'TRF-', start: 1, current: 0, pad: 6 },
-  { type: 'customer', prefix: 'CUS-', start: 1, current: 5, pad: 5 },
-  { type: 'supplier', prefix: 'SUP-', start: 1, current: 5, pad: 4 },
-  { type: 'employee', prefix: 'EMP-', start: 1, current: 15, pad: 4 },
+  { type: 'customer', prefix: 'CUS-', start: 1, current: 0, pad: 5 },
+  { type: 'supplier', prefix: 'SUP-', start: 1, current: 0, pad: 4 },
+  { type: 'employee', prefix: 'EMP-', start: 1, current: 0, pad: 4 },
 ];
 
 // System roles seeded for every company. Permission lists mirror
