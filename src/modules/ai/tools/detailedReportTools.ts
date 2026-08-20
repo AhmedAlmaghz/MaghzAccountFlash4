@@ -1,6 +1,14 @@
 import type { ToolDefinition } from '../types';
 import { getDbAdapter } from '@/core/database/adapters';
-import { salesService } from '@/modules/sales/services';
+import { guardSqlQuery } from '../security/sqlGuard';
+import { salesApi } from '@/modules/sales/api';
+
+async function guardedQuery(sql: string, params: unknown[]) {
+  const check = guardSqlQuery(sql);
+  if (!check.ok) return { success: false, error: check.error, rows: [] };
+  const adapter = await getDbAdapter();
+  return adapter.query(check.sql, params);
+}
 
 function num(v: unknown): number { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function dateRange(from?: string, to?: string): { from: string; to: string } {
@@ -36,7 +44,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['i.company_id=$1::uuid', 'i.date BETWEEN $2 AND $3', "i.status!='cancelled'"];
@@ -57,8 +64,8 @@ export const detailedReportTools: ToolDefinition[] = [
       p.push(limit);
 
       const [det, agg] = await Promise.all([
-        adapter.query(`SELECT i.invoice_number,i.date,i.due_date,i.total_amount,i.paid_amount,i.status,i.currency_code,c.name AS customer_name,u.full_name AS created_by_name,(i.total_amount-COALESCE(i.paid_amount,0)) AS outstanding,${paymentLabel()} FROM sales_invoices i LEFT JOIN customers c ON i.customer_id=c.id LEFT JOIN users u ON i.created_by=u.id WHERE ${w} ORDER BY i.date ${sDir} LIMIT $${p.length}`, p),
-        adapter.query(`SELECT COALESCE(SUM(i.total_amount),0) AS t,COALESCE(SUM(i.paid_amount),0) AS pd,COUNT(*)::int AS c,COALESCE(SUM(i.total_amount-COALESCE(i.paid_amount,0)),0) AS o,COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)>=i.total_amount)::int AS cc,COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)=0)::int AS cr,COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)>0 AND COALESCE(i.paid_amount,0)<i.total_amount)::int AS pp FROM sales_invoices i WHERE ${w}`, p.slice(0, -1)),
+        guardedQuery(`SELECT i.invoice_number,i.date,i.due_date,i.total_amount,i.paid_amount,i.status,i.currency_code,c.name AS customer_name,u.full_name AS created_by_name,(i.total_amount-COALESCE(i.paid_amount,0)) AS outstanding,${paymentLabel()} FROM sales_invoices i LEFT JOIN customers c ON i.customer_id=c.id LEFT JOIN users u ON i.created_by=u.id WHERE ${w} ORDER BY i.date ${sDir} LIMIT $${p.length}`, p),
+        guardedQuery(`SELECT COALESCE(SUM(i.total_amount),0) AS t,COALESCE(SUM(i.paid_amount),0) AS pd,COUNT(*)::int AS c,COALESCE(SUM(i.total_amount-COALESCE(i.paid_amount,0)),0) AS o,COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)>=i.total_amount)::int AS cc,COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)=0)::int AS cr,COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)>0 AND COALESCE(i.paid_amount,0)<i.total_amount)::int AS pp FROM sales_invoices i WHERE ${w}`, p.slice(0, -1)),
       ]);
 
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
@@ -92,25 +99,22 @@ export const detailedReportTools: ToolDefinition[] = [
         limit: { type: 'number' },
       },
     },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
-      // Use service layer instead of direct API for better business logic enforcement
-      const res = await salesService.getInvoicesPaginated(1, limit, {
+      const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, limit, {
         status: typeof args.status === 'string' ? args.status : undefined,
         customerId: typeof args.customerId === 'string' ? args.customerId : undefined,
       });
-      if (!res.success) return { error: 'فشل جلب عروض الأسعار' };
-      const filtered = res.data.items.filter((q: Record<string, unknown>) =>
-        String(q.date) >= from && String(q.date) <= to
-      );
-      const totalVal = filtered.reduce((s: number, q: Record<string, unknown>) => s + (num(q.total_amount) || 0), 0);
+      if (!res.success || !res.data) return { error: 'فشل جلب عروض الأسعار' };
+      const filtered = res.data.items.filter((q) => q.date >= from && q.date <= to);
+      const totalVal = filtered.reduce((s, q) => s + (num(q.totalAmount) || 0), 0);
       return {
         period: { from, to }, totalDatabase: res.data.total, filteredCount: filtered.length,
         totalValue: Math.round(totalVal * 100) / 100,
-        quotations: filtered.map((q: Record<string, unknown>) => ({
-          number: String(q.invoice_number), customer: String(q.customer_name || ''),
-          date: String(q.date), expiryDate: String(q.due_date || ''), total: num(q.total_amount), status: String(q.status),
+        quotations: filtered.map((q) => ({
+          number: String(q.invoiceNumber), customer: String(q.customer?.name || ''),
+          date: String(q.date), expiryDate: String(q.dueDate || ''), total: num(q.totalAmount), status: String(q.status),
         })),
       };
     },
@@ -130,7 +134,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['sr.company_id=$1::uuid', 'sr.date BETWEEN $2 AND $3'];
@@ -141,8 +144,8 @@ export const detailedReportTools: ToolDefinition[] = [
       p.push(limit);
 
       const [det, agg] = await Promise.all([
-        adapter.query(`SELECT sr.return_number,sr.date,sr.total_amount,sr.status,sr.reason,c.name AS customer_name,u.full_name AS created_by_name,si.invoice_number AS orig FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id=c.id LEFT JOIN users u ON sr.created_by=u.id LEFT JOIN sales_invoices si ON sr.invoice_id=si.id WHERE ${w} ORDER BY sr.date ${sDir} LIMIT $${p.length}`, p),
-        adapter.query(`SELECT COALESCE(SUM(sr.total_amount),0) AS total,COUNT(*)::int AS cnt FROM sales_returns sr WHERE ${w}`, p.slice(0, -1)),
+        guardedQuery(`SELECT sr.return_number,sr.date,sr.total_amount,sr.status,sr.reason,c.name AS customer_name,u.full_name AS created_by_name,si.invoice_number AS orig FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id=c.id LEFT JOIN users u ON sr.created_by=u.id LEFT JOIN sales_invoices si ON sr.invoice_id=si.id WHERE ${w} ORDER BY sr.date ${sDir} LIMIT $${p.length}`, p),
+        guardedQuery(`SELECT COALESCE(SUM(sr.total_amount),0) AS total,COUNT(*)::int AS cnt FROM sales_returns sr WHERE ${w}`, p.slice(0, -1)),
       ]);
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
         returnNumber: r.return_number, customer: r.customer_name,
@@ -174,7 +177,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
       const sf = ((args.sortField || 'revenue') === 'revenue') ? 'total_revenue' : (args.sortField === 'quantity') ? 'total_quantity' : 'invoice_count';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
@@ -184,7 +186,7 @@ export const detailedReportTools: ToolDefinition[] = [
       let prodCond = '';
       if (typeof args.productId === 'string' && args.productId) { params.push(args.productId); prodCond = `AND sil.product_id=$${params.length}::uuid`; }
       params.push(limit);
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT p.name_ar AS pname,p.code AS pcode,COALESCE(SUM(sil.quantity),0) AS qty,COALESCE(SUM(sil.line_total),0) AS rev,COUNT(DISTINCT i.customer_id)::int AS ccnt,COUNT(DISTINCT i.id)::int AS icnt FROM sales_invoice_lines sil JOIN sales_invoices i ON sil.invoice_id=i.id JOIN products p ON sil.product_id=p.id WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${custCond} ${prodCond} GROUP BY p.id,p.name_ar,p.code ORDER BY ${sf} ${sDir} LIMIT $${params.length}`, params);
       if (!res.success) return { error: res.error || 'فشل' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
@@ -215,11 +217,10 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const limit = Math.min(Math.max(num(args.limit) || 20, 5), 50);
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT u.id, u.full_name,
                COUNT(i.id)::int AS icnt, COALESCE(SUM(i.total_amount),0) AS rev,
                COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)>=i.total_amount)::int AS cash_cnt,
@@ -265,7 +266,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['pi.company_id=$1::uuid', 'pi.date BETWEEN $2 AND $3', "pi.status!='cancelled'"];
@@ -285,8 +285,8 @@ export const detailedReportTools: ToolDefinition[] = [
       p.push(limit);
 
       const [det, agg] = await Promise.all([
-        adapter.query(`SELECT pi.invoice_number,pi.date,pi.due_date,pi.total_amount,pi.paid_amount,pi.status,pi.currency_code,s.name AS supplier_name,u.full_name AS created_by_name,(pi.total_amount-COALESCE(pi.paid_amount,0)) AS outstanding,${paymentLabel()} FROM purchase_invoices pi LEFT JOIN suppliers s ON pi.supplier_id=s.id LEFT JOIN users u ON pi.created_by=u.id WHERE ${w} ORDER BY pi.date ${sDir} LIMIT $${p.length}`, p),
-        adapter.query(`SELECT COALESCE(SUM(pi.total_amount),0) AS t,COALESCE(SUM(pi.paid_amount),0) AS pd,COUNT(*)::int AS c,COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)>=pi.total_amount)::int AS cc,COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)=0)::int AS cr FROM purchase_invoices pi WHERE ${w}`, p.slice(0, -1)),
+        guardedQuery(`SELECT pi.invoice_number,pi.date,pi.due_date,pi.total_amount,pi.paid_amount,pi.status,pi.currency_code,s.name AS supplier_name,u.full_name AS created_by_name,(pi.total_amount-COALESCE(pi.paid_amount,0)) AS outstanding,${paymentLabel()} FROM purchase_invoices pi LEFT JOIN suppliers s ON pi.supplier_id=s.id LEFT JOIN users u ON pi.created_by=u.id WHERE ${w} ORDER BY pi.date ${sDir} LIMIT $${p.length}`, p),
+        guardedQuery(`SELECT COALESCE(SUM(pi.total_amount),0) AS t,COALESCE(SUM(pi.paid_amount),0) AS pd,COUNT(*)::int AS c,COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)>=pi.total_amount)::int AS cc,COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)=0)::int AS cr FROM purchase_invoices pi WHERE ${w}`, p.slice(0, -1)),
       ]);
 
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
@@ -324,7 +324,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['po.company_id=$1::uuid', 'po.date BETWEEN $2 AND $3'];
@@ -335,7 +334,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const w = cnd.join(' AND ');
       p.push(limit);
 
-      const det = await adapter.query(
+      const det = await guardedQuery(
         `SELECT po.order_number,po.date,po.expected_date,po.total_amount,po.status,s.name AS supplier_name,u.full_name AS created_by_name FROM purchase_orders po LEFT JOIN suppliers s ON po.supplier_id=s.id LEFT JOIN users u ON po.created_by=u.id WHERE ${w} ORDER BY po.date ${sDir} LIMIT $${p.length}`, p);
       if (!det.success) return { error: det.error || 'فشل جلب أوامر الشراء' };
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
@@ -362,7 +361,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['pr.company_id=$1::uuid', 'pr.date BETWEEN $2 AND $3'];
@@ -373,8 +371,8 @@ export const detailedReportTools: ToolDefinition[] = [
       p.push(limit);
 
       const [det, agg] = await Promise.all([
-        adapter.query(`SELECT pr.return_number,pr.date,pr.total_amount,pr.status,pr.reason,s.name AS supplier_name,u.full_name AS created_by_name,pi.invoice_number AS orig FROM purchase_returns pr LEFT JOIN suppliers s ON pr.supplier_id=s.id LEFT JOIN users u ON pr.created_by=u.id LEFT JOIN purchase_invoices pi ON pr.invoice_id=pi.id WHERE ${w} ORDER BY pr.date ${sDir} LIMIT $${p.length}`, p),
-        adapter.query(`SELECT COALESCE(SUM(pr.total_amount),0) AS total,COUNT(*)::int AS cnt FROM purchase_returns pr WHERE ${w}`, p.slice(0, -1)),
+        guardedQuery(`SELECT pr.return_number,pr.date,pr.total_amount,pr.status,pr.reason,s.name AS supplier_name,u.full_name AS created_by_name,pi.invoice_number AS orig FROM purchase_returns pr LEFT JOIN suppliers s ON pr.supplier_id=s.id LEFT JOIN users u ON pr.created_by=u.id LEFT JOIN purchase_invoices pi ON pr.invoice_id=pi.id WHERE ${w} ORDER BY pr.date ${sDir} LIMIT $${p.length}`, p),
+        guardedQuery(`SELECT COALESCE(SUM(pr.total_amount),0) AS total,COUNT(*)::int AS cnt FROM purchase_returns pr WHERE ${w}`, p.slice(0, -1)),
       ]);
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
         returnNumber: r.return_number, supplier: r.supplier_name,
@@ -406,7 +404,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
       const sf = ((args.sortField || 'value') === 'value') ? 'total_value' : (args.sortField === 'quantity') ? 'total_quantity' : 'invoice_count';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
@@ -416,7 +413,7 @@ export const detailedReportTools: ToolDefinition[] = [
       let prodCond = '';
       if (typeof args.productId === 'string' && args.productId) { params.push(args.productId); prodCond = `AND pil.product_id=$${params.length}::uuid`; }
       params.push(limit);
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT p.name_ar AS pname,p.code AS pcode,COALESCE(SUM(pil.quantity),0) AS qty,COALESCE(SUM(pil.line_total),0) AS val,COUNT(DISTINCT i.supplier_id)::int AS scnt,COUNT(DISTINCT i.id)::int AS icnt FROM purchase_invoice_lines pil JOIN purchase_invoices i ON pil.invoice_id=i.id JOIN products p ON pil.product_id=p.id WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${suppCond} ${prodCond} GROUP BY p.id,p.name_ar,p.code ORDER BY ${sf} ${sDir} LIMIT $${params.length}`, params);
       if (!res.success) return { error: res.error || 'فشل' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
@@ -447,10 +444,9 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const limit = Math.min(Math.max(num(args.limit) || 20, 5), 50);
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT u.id, u.full_name,
                COUNT(pi.id)::int AS icnt, COALESCE(SUM(pi.total_amount),0) AS val,
                COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)>=pi.total_amount)::int AS cash_cnt,
@@ -495,7 +491,6 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['sm.company_id=$1::uuid', 'DATE(sm.created_at) BETWEEN $2 AND $3'];
@@ -507,7 +502,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const w = cnd.join(' AND ');
       p.push(limit);
 
-      const det = await adapter.query(
+      const det = await guardedQuery(
         `SELECT sm.id,sm.type,sm.quantity,sm.created_at,p.name_ar AS product_name,p.code AS product_code,w.name AS warehouse_name,u.full_name AS created_by_name,sm.reference FROM stock_movements sm LEFT JOIN products p ON sm.product_id=p.id LEFT JOIN warehouses w ON sm.warehouse_id=w.id LEFT JOIN users u ON sm.created_by=u.id WHERE ${w} ORDER BY sm.created_at ${sDir} LIMIT $${p.length}`, p);
       if (!det.success) return { error: det.error || 'فشل جلب حركات المخزون' };
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
@@ -535,7 +530,6 @@ export const detailedReportTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sf = ((args.sortField || 'quantity') === 'value') ? 'stock_value' : (args.sortField === 'sku') ? 'p.code' : 's.quantity';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
@@ -549,7 +543,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const w = cnd.join(' AND ');
       p.push(limit);
 
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT p.name_ar AS pname,p.code,p.sku,p.cost_price,p.sale_price,p.is_active,s.quantity,w.name AS wname,(s.quantity * COALESCE(p.cost_price,0)) AS stock_value,(s.quantity <= 0 OR p.is_active = false) AS is_dormant FROM stock s LEFT JOIN products p ON s.product_id=p.id LEFT JOIN warehouses w ON s.warehouse_id=w.id WHERE ${w} ORDER BY ${sf} ${sDir} LIMIT $${p.length}`, p);
       if (!res.success) return { error: res.error || 'فشل' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
@@ -580,11 +574,10 @@ export const detailedReportTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
-      const adapter = await getDbAdapter();
       const sf = ((args.sortField || 'value') === 'quantity') ? 'total_quantity' : (args.sortField === 'count') ? 'product_count' : 'total_value';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT w.id,w.name AS wname,COUNT(DISTINCT s.product_id)::int AS _n,COALESCE(SUM(s.quantity),0) AS qty,COALESCE(SUM(s.quantity * COALESCE(p.cost_price,0)),0) AS val FROM stock s JOIN warehouses w ON s.warehouse_id=w.id LEFT JOIN products p ON s.product_id=p.id WHERE s.company_id=$1::uuid GROUP BY w.id,w.name ORDER BY ${sf} ${sDir} LIMIT $2`, [ctx.companyId, limit]);
       if (!res.success) return { error: res.error || 'فشل' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
@@ -613,10 +606,9 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT sm.created_at,sm.type,sm.quantity,p.name_ar AS product_name,p.code AS pcode,w.name AS warehouse_name,
             CASE WHEN sm.type='out' AND si.id IS NOT NULL THEN c.name
                  WHEN sm.type='in'  AND pi.id IS NOT NULL THEN s.name
@@ -655,14 +647,13 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['sm.company_id=$1::uuid', 'sm.product_id=$2::uuid', 'DATE(sm.created_at) BETWEEN $3 AND $4'];
       const p: unknown[] = [ctx.companyId, args.productId, from, to];
       p.push(limit);
       const w = cnd.join(' AND ');
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT sm.created_at,sm.type,sm.quantity,sm.reference,p.name_ar AS product_name,p.code AS pcode,w.name AS warehouse_name,
             CASE WHEN sm.type='out' AND si.id IS NOT NULL THEN c.name
                  WHEN sm.type='in'  AND pi.id IS NOT NULL THEN s.name
@@ -701,8 +692,7 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT TO_CHAR(i.date, 'YYYY-MM') AS month,
            COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0) >= i.total_amount)::int AS cash_cnt,
            COALESCE(SUM(i.total_amount) FILTER(WHERE COALESCE(i.paid_amount,0) >= i.total_amount),0) AS cash_rev,
@@ -745,8 +735,7 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
-      const adapter = await getDbAdapter();
-      const res = await adapter.query(
+      const res = await guardedQuery(
         `SELECT TO_CHAR(pi.date, 'YYYY-MM') AS month,
            COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0) >= pi.total_amount)::int AS cash_cnt,
            COALESCE(SUM(pi.total_amount) FILTER(WHERE COALESCE(pi.paid_amount,0) >= pi.total_amount),0) AS cash_val,

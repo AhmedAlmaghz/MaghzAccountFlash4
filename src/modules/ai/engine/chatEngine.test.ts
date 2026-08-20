@@ -20,6 +20,10 @@ vi.mock('../tools/index', () => ({
   ensureToolsRegistered: mocks.ensureToolsRegistered,
 }));
 
+vi.mock('../entityResolver', () => ({
+  resolveEntitiesInText: vi.fn(async () => ({ all: [], highConfidence: [], corrections: [] })),
+}));
+
 vi.mock('./toolExecutor', () => ({
   executeToolCall: mocks.executeToolCall,
   resolveTool: mocks.resolveTool,

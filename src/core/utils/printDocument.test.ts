@@ -37,6 +37,37 @@ describe('printDocument', () => {
     openSpy.mockRestore();
   });
 
+  it('escapes HTML from party name to prevent XSS', () => {
+    const mockWrite = vi.fn();
+    const mockWindow = {
+      document: { open: vi.fn(), write: mockWrite, close: vi.fn() },
+    };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(mockWindow as unknown as Window);
+
+    printDocument({
+      type: 'sales-invoice',
+      docNumber: 'INV-002',
+      date: '2024-06-01',
+      partyName: '<img src=x onerror=alert(1)>',
+      partyLabel: '<script>alert</script>',
+      lines: [{ description: '<img src=x onerror=alert(1)>', quantity: 1, unitPrice: 50, total: 50 }],
+      subtotal: 50,
+      vatAmount: 0,
+      totalAmount: 50,
+      companyName: '<svg onload=alert(1)>',
+    });
+
+    const html = mockWrite.mock.calls[0][0] as string;
+    expect(html).not.toContain('<img src=x onerror');
+    expect(html).not.toContain('<script>alert');
+    expect(html).not.toContain('<svg onload');
+    expect(html).toContain('&lt;img');
+    expect(html).toContain('&lt;script&gt;alert');
+    expect(html).toContain('&lt;svg onload');
+
+    openSpy.mockRestore();
+  });
+
   it('shows alert when popup blocked', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});

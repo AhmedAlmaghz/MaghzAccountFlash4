@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { getDbAdapter } from '@/core/database/adapters';
+import { guardSqlQuery } from '../security/sqlGuard';
 import { accountingApi } from '@/modules/accounting/api';
 import { accountingService } from '@/modules/accounting/services';
 import { salesApi } from '@/modules/sales/api';
@@ -27,10 +28,20 @@ function dateRange(from?: string, to?: string): { from: string; to: string } {
   };
 }
 
+// Run every SQL statement through the allow-list guard before hitting the DB.
+// Returns an object with `success/error`, plus `rows` on success, so it can
+// drop in place of the existing `res = guardedQuery(...)` pattern.
+async function guardedQuery(sql: string, params: unknown[]) {
+  const check = guardSqlQuery(sql);
+  if (!check.ok) return { success: false, error: check.error, rows: [] };
+  const adapter = await getDbAdapter();
+  return adapter.query(check.sql, params);
+}
+
 // ─── Helper: aggregate invoice/line data for revenue/analysis ──────────────
 async function fetchInvoiceAnalysis(companyId: string, from: string, to: string) {
-  const adapter = await getDbAdapter();
-  const res = await adapter.query(`
+  
+  const res = await guardedQuery(`
     SELECT
       i.id, i.invoice_number, i.date, i.total_amount, i.paid_amount, i.status,
       i.currency_code, i.exchange_rate, i.base_currency_amount,
@@ -275,7 +286,7 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.startDate as string | undefined, args.endDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
       const status = typeof args.status === 'string' && args.status ? args.status : undefined;
 
       let sql = `
@@ -289,7 +300,7 @@ export const reportTools: ToolDefinition[] = [
       if (status) { params.push(status); sql += ` AND t.status = $${params.length}`; }
       sql += ' ORDER BY t.date ASC, t.created_at ASC LIMIT 200';
 
-      const res = await adapter.query(sql, params);
+      const res = await guardedQuery(sql, params);
       if (!res.success) return { error: res.error || 'فشل جلب سجل القيود' };
       const rows = res.rows || [];
 
@@ -298,7 +309,7 @@ export const reportTools: ToolDefinition[] = [
       let entries: Record<string, unknown>[] = [];
       if (txIds.length > 0) {
         const placeholders = txIds.map((_, i) => `$${i + 1}::uuid`).join(',');
-        const eRes = await adapter.query(
+        const eRes = await guardedQuery(
           `SELECT je.transaction_id, a.code AS account_code, a.name_ar AS account_name,
                   je.debit, je.credit
            FROM journal_entries je
@@ -352,13 +363,13 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.startDate as string | undefined, args.endDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
       const [salesRes, purchasesRes, receiptsRes, paymentsRes] = await Promise.all([
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
       ]);
 
       const salesIn = num(salesRes.rows?.[0]?.total || 0);
@@ -479,16 +490,16 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.startDate as string | undefined, args.endDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
       // Sales VAT
-      const salesRes = await adapter.query(`
+      const salesRes = await guardedQuery(`
         SELECT COALESCE(SUM(subtotal), 0) AS taxable, COALESCE(SUM(vat_amount), 0) AS vat
         FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'
       `, [ctx.companyId, from, to]);
 
       // Purchases VAT
-      const purchasesRes = await adapter.query(`
+      const purchasesRes = await guardedQuery(`
         SELECT COALESCE(SUM(subtotal), 0) AS taxable, COALESCE(SUM(vat_amount), 0) AS vat
         FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'
       `, [ctx.companyId, from, to]);
@@ -562,9 +573,9 @@ export const reportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
       const topN = Math.min(Math.max(num(args.limit) || 10, 1), 50);
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT c.name, c.code, c.phone,
                COUNT(i.id)::int AS invoice_count,
                COALESCE(SUM(i.total_amount), 0) AS total_revenue,
@@ -608,9 +619,9 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT
           i.id, i.invoice_number, i.date, i.total_amount, i.paid_amount, i.status,
           i.currency_code, i.base_currency_amount,
@@ -747,9 +758,9 @@ export const reportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
       const topN = Math.min(Math.max(num(args.limit) || 10, 1), 50);
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT s.name, s.code, s.phone,
                COUNT(i.id)::int AS invoice_count,
                COALESCE(SUM(i.total_amount), 0) AS total_purchases,
@@ -787,9 +798,9 @@ export const reportTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT
           p.id, p.name_ar, p.code, p.sku, p.cost_price, p.sale_price,
           p.unit, p.barcode,
@@ -836,9 +847,9 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT sm.id, sm.type, sm.quantity, sm.created_at,
                p.name_ar AS product_name, p.code AS product_code,
                w.name AS warehouse_name
@@ -890,10 +901,10 @@ export const reportTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
-      const adapter = await getDbAdapter();
+      
       const criticalOnly = args.criticalOnly === true;
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT p.name_ar, p.code, p.sku, p.sale_price, p.cost_price,
                s.quantity, s.min_stock_alert, w.name AS warehouse_name
         FROM stock s
@@ -949,8 +960,8 @@ export const reportTools: ToolDefinition[] = [
       if (!productId) return { error: 'معرف المنتج مطلوب' };
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
 
-      const adapter = await getDbAdapter();
-      const res = await adapter.query(`
+      
+      const res = await guardedQuery(`
         SELECT sm.type, sm.quantity, sm.created_at,
                w.name AS warehouse_name,
                p.name_ar AS product_name, p.code AS product_code
@@ -994,12 +1005,12 @@ export const reportTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
-      const adapter = await getDbAdapter();
+      
 
       const [kpiRes, warehouseRes, prodRes, catRes] = await Promise.all([
         inventoryApi.getInventoryKpis(ctx.companyId),
-        adapter.query(`SELECT COUNT(*)::int AS count FROM warehouses WHERE company_id = $1::uuid`, [ctx.companyId]),
-        adapter.query(`
+        guardedQuery(`SELECT COUNT(*)::int AS count FROM warehouses WHERE company_id = $1::uuid`, [ctx.companyId]),
+        guardedQuery(`
           SELECT p.name_ar, p.code, p.sale_price, p.cost_price,
                  COALESCE(s.quantity, 0) AS qty,
                  COALESCE(s.quantity, 0) * COALESCE(p.cost_price, 0) AS value
@@ -1008,7 +1019,7 @@ export const reportTools: ToolDefinition[] = [
           WHERE p.company_id = $1::uuid
           ORDER BY value DESC LIMIT 20
         `, [ctx.companyId]),
-        adapter.query(`
+        guardedQuery(`
           SELECT pc.name AS category,
                  COUNT(ppc.product_id)::int AS product_count
           FROM product_categories pc
@@ -1053,11 +1064,11 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
       const [kpiRes, costsRes] = await Promise.all([
         manufacturingApi.getManufacturingKpis(ctx.companyId),
-        adapter.query(`
+        guardedQuery(`
           SELECT wo.id, wo.order_number, wo.status, wo.planned_qty, wo.produced_qty, wo.total_cost,
                  p.name_ar AS product_name, wo.created_at
           FROM work_orders wo
@@ -1102,9 +1113,9 @@ export const reportTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT wo.id, wo.order_number, wo.planned_qty, wo.produced_qty, wo.total_cost,
                p.name_ar AS product_name,
                COALESCE(wc.actual_qty, 0) AS actual_qty,
@@ -1238,9 +1249,9 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT l.status, COUNT(*)::int AS count, COALESCE(SUM(l.days_count), 0) AS total_days
         FROM leaves l
         WHERE l.company_id = $1::uuid AND l.created_at::date BETWEEN $2 AND $3
@@ -1316,9 +1327,9 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string | undefined, args.toDate as string | undefined);
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT l.status, l.source, COUNT(*)::int AS count
         FROM leads l
         WHERE l.company_id = $1::uuid AND l.created_at::date BETWEEN $2 AND $3
@@ -1363,9 +1374,9 @@ export const reportTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
-      const adapter = await getDbAdapter();
+      
 
-      const res = await adapter.query(`
+      const res = await guardedQuery(`
         SELECT o.stage, o.probability, o.value,
                c.name AS customer_name,
                u.full_name AS assigned_name
@@ -1417,12 +1428,12 @@ export const reportTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
-      const adapter = await getDbAdapter();
+      
 
       const [leadsRes, oppsRes, invoicesRes] = await Promise.all([
-        adapter.query(`SELECT status, COUNT(*)::int AS count FROM leads WHERE company_id = $1::uuid GROUP BY status`, [ctx.companyId]),
-        adapter.query(`SELECT stage, COUNT(*)::int AS count, COALESCE(SUM(value), 0) AS total_value FROM opportunities WHERE company_id = $1::uuid GROUP BY stage`, [ctx.companyId]),
-        adapter.query(`SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0) AS total_revenue FROM sales_invoices WHERE company_id = $1::uuid AND status = 'posted'`, [ctx.companyId]),
+        guardedQuery(`SELECT status, COUNT(*)::int AS count FROM leads WHERE company_id = $1::uuid GROUP BY status`, [ctx.companyId]),
+        guardedQuery(`SELECT stage, COUNT(*)::int AS count, COALESCE(SUM(value), 0) AS total_value FROM opportunities WHERE company_id = $1::uuid GROUP BY stage`, [ctx.companyId]),
+        guardedQuery(`SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0) AS total_revenue FROM sales_invoices WHERE company_id = $1::uuid AND status = 'posted'`, [ctx.companyId]),
       ]);
 
       const totalLeads = (leadsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.count), 0);
@@ -1468,7 +1479,7 @@ export const reportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const period = typeof args.period === 'string' ? args.period : 'month';
       const comparePrevious = args.comparePrevious === true;
-      const adapter = await getDbAdapter();
+      
       const now = new Date();
       const today = now.toISOString().split('T')[0];
 
@@ -1507,16 +1518,16 @@ export const reportTools: ToolDefinition[] = [
 
       // Current period queries
       const [salesRes, purchasesRes, receiptsRes, paymentsRes, productRes, customerRes, supplierRes, hrKpiRes, manufacturingRes, lowStockRes] = await Promise.all([
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue, COUNT(*)::int AS count FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
-        adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
-        adapter.query(`SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1::uuid`, [ctx.companyId]),
-        adapter.query(`SELECT COUNT(*)::int AS count FROM customers WHERE company_id = $1::uuid`, [ctx.companyId]),
-        adapter.query(`SELECT COUNT(*)::int AS count FROM suppliers WHERE company_id = $1::uuid`, [ctx.companyId]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue, COUNT(*)::int AS count FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1::uuid`, [ctx.companyId]),
+        guardedQuery(`SELECT COUNT(*)::int AS count FROM customers WHERE company_id = $1::uuid`, [ctx.companyId]),
+        guardedQuery(`SELECT COUNT(*)::int AS count FROM suppliers WHERE company_id = $1::uuid`, [ctx.companyId]),
         hrApi.getHrKpis(ctx.companyId),
         manufacturingApi.getManufacturingKpis(ctx.companyId),
-        adapter.query(`SELECT COUNT(*)::int AS count FROM stock WHERE company_id = $1::uuid AND quantity <= min_stock_alert`, [ctx.companyId]),
+        guardedQuery(`SELECT COUNT(*)::int AS count FROM stock WHERE company_id = $1::uuid AND quantity <= min_stock_alert`, [ctx.companyId]),
       ]);
 
       const revenue = num(salesRes.rows?.[0]?.revenue || 0);
@@ -1531,8 +1542,8 @@ export const reportTools: ToolDefinition[] = [
       let prevExpenses = 0;
       if (comparePrevious) {
         const [prevSalesRes, prevPurchRes] = await Promise.all([
-          adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
-          adapter.query(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
+          guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
+          guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
         ]);
         prevRevenue = num(prevSalesRes.rows?.[0]?.revenue || 0);
         prevExpenses = num(prevPurchRes.rows?.[0]?.amount || 0);

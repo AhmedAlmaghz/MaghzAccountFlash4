@@ -65,6 +65,41 @@ export function canExecute(tool: ToolDefinition): boolean {
   return useAuthStore.getState().hasPermission(tool.permission);
 }
 
+/**
+ * Sliding-window rate limiter for tool calls, keyed per user (userId).
+ * Caps tool invocations per minute so a runaway agent loop (or a malicious
+ * session) cannot hammer the DB or, for write tools, spam document creation.
+ *
+ * Thresholds are deliberately generous for normal assistant use; the loop cap
+ * (MAX_ITERATIONS) is the primary backstop, this is defense-in-depth.
+ */
+const TOOL_RATE_LIMIT_READ_PER_MINUTE = 300;
+const TOOL_RATE_LIMIT_WRITE_PER_MINUTE = 60;
+const TOOL_RATE_WINDOW_MS = 60_000;
+
+const callCounter = new Map<string, number[]>();
+const isTest = typeof window === 'undefined';
+
+function userRateKey(ctx: ToolContext, dangerLevel: string): string {
+  return `${ctx.userId}:${dangerLevel}`;
+}
+
+function allowCall(ctx: ToolContext, dangerLevel: 'read' | 'write'): boolean {
+  const limit = dangerLevel === 'write' ? TOOL_RATE_LIMIT_WRITE_PER_MINUTE : TOOL_RATE_LIMIT_READ_PER_MINUTE;
+  const now = Date.now();
+  const key = userRateKey(ctx, dangerLevel);
+  const stamps = (callCounter.get(key) || []).filter((t) => now - t < TOOL_RATE_WINDOW_MS);
+  if (stamps.length >= limit) return false;
+  stamps.push(now);
+  callCounter.set(key, stamps);
+  return true;
+}
+
+/** Reset all rate-limit counters (used by tests). */
+export function resetToolRateLimiter(): void {
+  callCounter.clear();
+}
+
 export async function executeToolCall(
   name: string,
   args: Record<string, unknown>,
@@ -75,6 +110,10 @@ export async function executeToolCall(
 
   if (!canExecute(tool)) {
     return { ok: false, error: `ليس لديك صلاحية تنفيذ هذه العملية (${tool.permission})` };
+  }
+
+  if (!isTest && !allowCall(ctx, tool.dangerLevel)) {
+    return { ok: false, error: 'تم تجاوز حد الاستدعاءات المسموح به — حاول مرة أخرى بعد قليل' };
   }
 
   // Read tools: check cache first
