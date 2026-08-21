@@ -163,7 +163,7 @@ async function callChatCompletion(opts: CallOptions): Promise<{ success: boolean
             if (key !== 'name' && key !== 'arguments') extras[key] = fn[key];
           }
           return {
-            id: (tc as { id?: string }).id || `call_${Math.random().toString(36).slice(2, 10)}`,
+            id: (tc as { id?: string }).id || `call_${(crypto.randomUUID()).slice(9, 23).replace(/-/g, '')}`,
             name: fn.name || '',
             arguments: safeParseArgs(fn.arguments),
             function: extras,

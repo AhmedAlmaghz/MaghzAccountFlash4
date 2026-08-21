@@ -289,7 +289,9 @@ export class ErrorHandler {
     }[category];
 
     const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const random = (typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID().slice(0, 4)
+      : Math.random().toString(36).substring(2, 6)).toUpperCase();
 
     return `${prefix}-${timestamp}-${random}`;
   }

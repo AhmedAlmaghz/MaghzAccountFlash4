@@ -11,7 +11,7 @@ export default defineConfig({
     port: parseInt(process.env.DB_PORT || '5432'),
     database: process.env.DB_NAME || 'MaghzAccountF35',
     user: process.env.DB_USER || 'maghz',
-    password: process.env.DB_PASSWORD || 'Zaamla2026',
+    password: process.env.DB_PASSWORD || '',
     ssl: false,
   },
 });
