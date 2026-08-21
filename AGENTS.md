@@ -3434,5 +3434,57 @@ npx drizzle-kit migrate
 - **شطب كامل لـ HR من `adapter.query` في Electron path**: كل الـ 23 call sites في hr/api.ts تذهب عبر `db:rpc:hr.*` في Electron. الـ fallback (pglite/tests) يحتفظ بـ SQL محلي مع `AND company_id = $N` صريح
 - **نفس الـ golden rules من Phases 54-56 تنطبق**: session-derived scoping، `fn.call(surface, payload)`، `_cid()` في shim، `isElectronPg()` branch، mapper sharing
 
-*آخر تحديث: 2026-08-19 | الإصدار: maghzaccount-pro v0.2.0*
+*آخر تحديث: 2026-08-21 | الإصدار: maghzaccount-pro v0.2.0*
+
+### المرحلة 11 (DevPlan0830): Sales — إرفاق ملفات على الفواتير
+- **الهدف**: إضافة JSONB `attachments` إلى `sales_invoices` لرفع ملفات (اسم + نوع + حجم + data URL) على كل فاتورة
+- **Migration جديد `0024_invoice_attachments.sql`** (4 سطر):
+  - `ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS attachments jsonb DEFAULT '[]'::jsonb`
+  - `CREATE INDEX IF NOT EXISTS idx_sales_invoices_attachments ON sales_invoices ((attachments IS NOT NULL))`
+  - `_journal.json` idx=24
+- **Drizzle schema** (`src/core/database/schema/sales.ts`):
+  - `jsonb` أُضيف إلى imports من `drizzle-orm/pg-core`
+  - `salesInvoices.attachments: jsonb('attachments').default([]).notNull()`
+- **Type جديد `InvoiceAttachment`** (`src/modules/sales/types.ts`):
+  ```ts
+  interface InvoiceAttachment {
+    id: string;
+    name: string;
+    contentType: string;
+    size: number;
+    dataUrl: string;
+  }
+  ```
+  - `SalesInvoice.attachments?: InvoiceAttachment[]`
+- **API** (`src/modules/sales/api.ts`):
+  - `createInvoice`: `JSON.stringify(data.attachments ?? [])` كـ param `$23::jsonb` (مضاف بعد `updated_by` لتفادي كسر 22 index tests)
+  - `updateInvoice`: dynamic SET clause يدعم `attachments = $N::jsonb`
+  - `mapInvoiceRow`: `attachments: parseJsonAttachments(row.attachments)` (helper جديد يتعامل مع array / string / null)
+  - `_exec`/`_execBatch` تنقل التغيير تلقائياً (لا حاجة لـ typed RPC جديد — الـ column JSONB مشتركة)
+- **UI** (`src/modules/sales/components/InvoicesPage.tsx`):
+  - State: `attachments: InvoiceAttachment[]`
+  - `handleAttachmentChange` FileReader → dataURL، max 2MB (يعرض toast `attachmentTooLarge`)
+  - `removeAttachment(id)` يحذف من القائمة
+  - UI block بعد grid notes/totals: زر `<label>` مع `<input type="file">` و `<Paperclip>` icon
+  - قائمة attachments مع download links (anchor `download={att.name}`) + زر حذف
+  - Detail modal: قائمة attachments قابلة للتحميل تُعرض قبل أزرار close/print
+- **i18n متوازن** (AR + EN): `sales.invoice.attachments` / `addAttachment` / `attachmentTooLarge`
+- **اختبارات**:
+  - `drizzle/migrations.test.ts`: count 24 → 25 + entry[24] = `0024_invoice_attachments`
+  - `Drizzle schema exports all 63 tables` (was 62)
+  - `src/core/i18n/i18n.test.ts`: balance ✓ (6/6)
+  - `src/modules/sales/api.test.ts`: 35/35 ✓ (لا regressions — option A أبقى params 22 فيصبح 23)
+- **النتيجة**: `tsc -b` 0 errors، `npm run build` ✓ built in 20s، `npm run db:check` ✓ no drift
+- **Commit**: `9d684d2` — `feat(sales): attachments on invoices (Phase 11)`
+
+### قواعد ذهبية مضافة (Phase 11)
+- **Option A (append-at-end) لتجنب off-by-one في tests**: أضف العمود الجديد بعد `updated_by` (col 23) بدل إعادة ترقيم كل الـ 22 indexes — يحافظ على ثبات params indices في الـ existing tests
+- **`JSON.stringify(arr) + $N::jsonb` للكتابة**: pg driver يحوّل الـ string إلى jsonb تلقائياً عبر الـ cast — لا حاجة لتحويل التطبيق
+- **`parseJsonAttachments` يتعامل مع array / string / null**: node-pg أحياناً يرجع jsonb كـ string وأحياناً كـ parsed object — helper مع type guard (`v is InvoiceAttachment`)
+- **File size limit = 2MB**: متّفق مع HR module photo upload — يحمي من DB bloat (data URL base64 = ~33% overhead)
+- **`<label>` wrapper حول `<input type="file">`**: UX أفضل من زر file picker منفصل — يندمج مع الـ label
+- **`download={att.name}` على anchor**: يحمّل الملف باسمه الأصلي بدل عرض الـ data URL في المتصفح
+- **Schema drift protection**: `Drizzle schema exports all 63 tables` (was 62) — الـ migration test يفحص تطابق الـ schema مع الـ Drizzle exports
+
+*آخر تحديث: 2026-08-21 | الإصدار: maghzaccount-pro v0.2.0*
 
