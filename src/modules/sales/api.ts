@@ -795,30 +795,39 @@ export const salesApi = {
       // db:reset) — passing it here would violate the FK constraint
       // `sales_invoices_updated_by_fkey`.
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
-      const result = await adapter.query(
-        `UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-        [id, companyId, safeUserIdValue]
-      );
-      if (!result.success) {
-        return { success: result.success, error: result.error };
+
+      // Create the accounting journal entry BEFORE touching the invoice status
+      // or customer balance. If it fails here, we abort cleanly — no partial
+      // state is ever persisted.
+      const journalResult = await postSalesInvoice(companyId, {
+        invoiceNumber: String(inv.invoice_number || ''),
+        date: String(inv.date || new Date().toISOString().split('T')[0]),
+        customerId: customerId,
+        subtotal: Number(inv.subtotal) || 0,
+        vatAmount: Number(inv.vat_amount) || 0,
+        totalAmount: totalAmount,
+      });
+      if (!journalResult.success) {
+        return { success: false, error: journalResult.error || 'فشل إنشاء القيد المحاسبي' };
       }
+
+      // Atomically flip the invoice status and update the customer balance so a
+      // failure of either leaves no half-posted invoice.
+      const txQueries: { sql: string; params: unknown[] }[] = [
+        {
+          sql: `UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+          params: [id, companyId, safeUserIdValue],
+        },
+      ];
       if (outstanding !== 0) {
-        await adapter.query(
-          `UPDATE customers SET balance = balance + $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
-          [outstanding, customerId, companyId, safeUserIdValue]
-        );
-      }
-      try {
-        await postSalesInvoice(companyId, {
-          invoiceNumber: String(inv.invoice_number || ''),
-          date: String(inv.date || new Date().toISOString().split('T')[0]),
-          customerId: customerId,
-          subtotal: Number(inv.subtotal) || 0,
-          vatAmount: Number(inv.vat_amount) || 0,
-          totalAmount: totalAmount,
+        txQueries.push({
+          sql: `UPDATE customers SET balance = balance + $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [outstanding, customerId, companyId, safeUserIdValue],
         });
-      } catch (jeErr) {
-        void jeErr;
+      }
+      const txResult = await adapter.transaction(txQueries);
+      if (!txResult.success) {
+        return { success: false, error: txResult.error };
       }
       return { success: true };
     } catch (e) {
@@ -1329,29 +1338,35 @@ export const salesApi = {
       const customerId = String(ret.customer_id);
       const totalAmount = Number(ret.total_amount) || 0;
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
-      const result = await adapter.query(
-        `UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-        [id, companyId, safeUserIdValue]
-      );
-      if (!result.success) {
-        return { success: result.success, error: result.error };
+
+      // Journal first (abort cleanly on failure), then atomically flip status
+      // and update the customer balance in a single transaction.
+      const salesReturnResult = await postSalesReturn(companyId, {
+        id: id,
+        returnNumber: String(ret.return_number || ''),
+        date: String(ret.date || new Date().toISOString().split('T')[0]),
+        customer: String(ret.customer_name || ''),
+        amount: totalAmount,
+      });
+      if (!salesReturnResult.success) {
+        return { success: false, error: salesReturnResult.error || 'فشل إنشاء القيد المحاسبي' };
       }
+
+      const txQueries: { sql: string; params: unknown[] }[] = [
+        {
+          sql: `UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+          params: [id, companyId, safeUserIdValue],
+        },
+      ];
       if (totalAmount !== 0) {
-        await adapter.query(
-          `UPDATE customers SET balance = balance - $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
-          [totalAmount, customerId, companyId, safeUserIdValue]
-        );
-      }
-      try {
-        await postSalesReturn(companyId, {
-          id: id,
-          returnNumber: String(ret.return_number || ''),
-          date: String(ret.date || new Date().toISOString().split('T')[0]),
-          customer: String(ret.customer_name || ''),
-          amount: totalAmount,
+        txQueries.push({
+          sql: `UPDATE customers SET balance = balance - $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [totalAmount, customerId, companyId, safeUserIdValue],
         });
-      } catch (jeErr) {
-        void jeErr;
+      }
+      const txResult = await adapter.transaction(txQueries);
+      if (!txResult.success) {
+        return { success: false, error: txResult.error };
       }
       return { success: true };
     } catch (e) {

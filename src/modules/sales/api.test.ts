@@ -44,12 +44,27 @@ vi.mock('@/core/utils/pagination', () => ({
   })),
 }));
 
+vi.mock('@/core/utils/journalEntryGenerator', () => ({
+  postSalesInvoice: vi.fn(async () => ({ success: true })),
+  postSalesReturn: vi.fn(async () => ({ success: true })),
+}));
+
 import { salesApi } from './api';
 import { getDbAdapter } from '@/core/database/adapters';
 import { clearUserIdCache } from '@/core/utils/userIdValidator';
 
 function makeMockAdapter(queryImpl: (sql: string, params: unknown[]) => Promise<{ success: boolean; rows?: unknown[]; error?: string }>) {
-  return { query: vi.fn(queryImpl) };
+  return {
+    query: vi.fn(queryImpl),
+    // The transaction mock runs each query through queryImpl so tests see the
+    // same behavior (the actual PGlite transaction wraps each in BEGIN/COMMIT).
+    transaction: vi.fn(async (queries: { sql: string; params?: unknown[] }[]) => {
+      for (const q of queries) {
+        await queryImpl(q.sql, (q.params || []) as unknown[]);
+      }
+      return { success: true, results: [] };
+    }),
+  };
 }
 
 const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
