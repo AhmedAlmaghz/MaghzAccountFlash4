@@ -14,14 +14,16 @@ const AUTH_FINGERPRINT_KEY = 'auth_session_fingerprint';
  * versioned envelope `{ version, issuedAt, fingerprint, user }` (which
  * carries a tab-bound fingerprint) or a plain serialized user.
  */
-function readStoredAuth(): { user: User | null; wrapped: boolean; fingerprint?: string } {
+function readStoredAuth(): { user: User | null; wrapped: boolean; fingerprint?: string; permissions?: Permission[] } {
   try {
     const raw = localStorage.getItem(AUTH_USER_KEY);
     if (!raw) return { user: null, wrapped: false };
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (parsed && typeof parsed === 'object' && typeof parsed.version === 'number') {
       const user = (parsed.user ?? null) as User | null;
-      return { user, wrapped: true, fingerprint: typeof parsed.fingerprint === 'string' ? parsed.fingerprint : undefined };
+      const rawPerms = parsed.permissions;
+      const permissions = Array.isArray(rawPerms) ? (rawPerms as Permission[]) : undefined;
+      return { user, wrapped: true, fingerprint: typeof parsed.fingerprint === 'string' ? parsed.fingerprint : undefined, permissions };
     }
     if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string') {
       return { user: parsed as unknown as User, wrapped: false };
@@ -32,11 +34,11 @@ function readStoredAuth(): { user: User | null; wrapped: boolean; fingerprint?: 
   }
 }
 
-function persistAuth(user: User): void {
+function persistAuth(user: User, permissions: Permission[] = []): void {
   try {
     const fp = getSessionFingerprint() ?? generateFingerprint();
     setSessionFingerprint(fp);
-    const envelope = { version: 1, issuedAt: Date.now(), fingerprint: fp, user };
+    const envelope = { version: 2, issuedAt: Date.now(), fingerprint: fp, user, permissions };
     localStorage.setItem(AUTH_USER_KEY, JSON.stringify(envelope));
     localStorage.setItem(AUTH_ACTIVITY_KEY, String(Date.now()));
   } catch { /* storage unavailable */ }
@@ -136,7 +138,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login: (user, permissions = []) => {
     set({ user, isAuthenticated: true, isLoading: false, permissions, lastActivityAt: Date.now() });
-    persistAuth(user);
+    persistAuth(user, permissions);
     void AuditLogger.logLogin();
   },
 
@@ -287,11 +289,23 @@ export async function initAuth(): Promise<void> {
       }
     } catch { /* storage unavailable */ }
 
+    // Restore permissions. In Electron the trusted server session is the
+    // source of truth — re-fetch it to pick up the freshest permissions
+    // (including any role/permission changes made in another window). In
+    // PGlite/web, fall back to the permissions snapshot persisted at login.
+    let permissions: Permission[] = stored.permissions ?? [];
+    try {
+      const session = await window.electronAuth?.getSession();
+      if (session && session.success && Array.isArray(session.permissions)) {
+        permissions = session.permissions as Permission[];
+      }
+    } catch { /* non-Electron or unavailable — keep persisted snapshot */ }
+
     useAuthStore.setState({
       user: persistedUser,
       isAuthenticated: true,
       isLoading: false,
-      permissions: [],
+      permissions,
       lastActivityAt: lastActivityAt ?? Date.now(),
     });
   } catch {

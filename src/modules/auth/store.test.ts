@@ -90,12 +90,20 @@ describe('Auth Store', () => {
 
   describe('initAuth', () => {
     it('restores auth from localStorage', async () => {
-      const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
-      localStorage.setItem('auth_user', JSON.stringify(user));
+      const user: User = { id: '27ab12b2-a7f1-4465-ad47-db2ed461b731', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
+      localStorage.setItem('auth_user', JSON.stringify({ version: 2, issuedAt: Date.now(), fingerprint: 'tab-fingerprint', user }));
+      sessionStorage.setItem('auth_session_fingerprint', 'tab-fingerprint');
+
+      const adapters = await import('@/core/database/adapters');
+      vi.spyOn(adapters, 'getDbAdapter').mockResolvedValue({
+        ping: async () => ({ success: true }),
+        query: async () => ({ success: true, rows: [{ '?column?': 1 }] }),
+      } as never);
 
       await initAuth();
       expect(useAuthStore.getState().isAuthenticated).toBe(true);
       expect(useAuthStore.getState().user?.username).toBe('admin');
+      vi.restoreAllMocks();
     });
 
     it('handles invalid stored data', async () => {
