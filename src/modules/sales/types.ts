@@ -14,6 +14,13 @@ export interface Customer {
   updatedBy?: string;
 }
 
+export interface InvoiceAttachment {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  dataUrl: string;
+}
 export interface CustomerStatementRow {
   date: string;
   documentType: string;
@@ -46,6 +53,7 @@ export interface SalesInvoice {
   bankAccountId?: string;
   status: 'draft' | 'posted' | 'paid' | 'partially_paid' | 'cancelled';
   notes?: string;
+  attachments?: InvoiceAttachment[];
   lines: SalesInvoiceLine[];
   createdBy?: string;
   updatedBy?: string;

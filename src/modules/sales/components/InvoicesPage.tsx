@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { FileText, Plus, CheckSquare, Trash2, Printer, Download } from 'lucide-react';
+import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -25,7 +25,7 @@ import { postSalesInvoice } from '@/core/utils/journalEntryGenerator';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
-import type { SalesInvoice, SalesInvoiceLine } from '../types';
+import type { SalesInvoice, SalesInvoiceLine, InvoiceAttachment } from '../types';
 import type { Product } from '@/modules/inventory/types';
 
 interface InvoiceLineForm {
@@ -92,12 +92,14 @@ export const InvoicesPage: React.FC = () => {
   const [currencyCode, setCurrencyCode] = useState<string>(defaultCurrency?.code || YER_CODE);
   const [exchangeRate, setExchangeRate] = useState<number>(1);
   const [lines, setLines] = useState<InvoiceLineForm[]>([defaultLine()]);
+  const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
 
   const resetForm = useCallback(() => {
     setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', bankAccountId: '', notes: '' });
     setCurrencyCode(defaultCurrency?.code || YER_CODE);
     setExchangeRate(1);
     setLines([defaultLine()]);
+    setAttachments([]);
     setEditingId(null);
   }, [defaultLine, defaultCurrency?.code, defaultCashBoxId]);
 
@@ -146,6 +148,7 @@ export const InvoicesPage: React.FC = () => {
       discountPercent: l.discountPercent,
       vatPercent: l.vatPercent,
     })));
+    setAttachments(invoice.attachments ?? []);
     setFormOpen(true);
   }, []);
 
@@ -230,8 +233,37 @@ export const InvoicesPage: React.FC = () => {
       bankAccountId: header.paymentType === 'cash' ? (header.bankAccountId || undefined) : undefined,
       status: 'draft',
       notes: header.notes,
+      attachments,
       lines: mappedLines,
     };
+  };
+
+  const handleAttachmentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      addToast('error', t('sales.invoice.attachmentTooLarge') || t('common.error'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      const attachment: InvoiceAttachment = {
+        id: crypto.randomUUID(),
+        name: file.name,
+        contentType: file.type || 'application/octet-stream',
+        size: file.size,
+        dataUrl,
+      };
+      setAttachments(prev => [...prev, attachment]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
   };
 
   const handleSave = async () => {
@@ -715,9 +747,34 @@ export const InvoicesPage: React.FC = () => {
               <div className="flex justify-between text-lg font-bold text-primary-600 dark:text-primary-400 pt-1 border-t border-slate-200 dark:border-slate-700">
                 <span>{t('sales.total')}</span>
                 <span>{formatCurrency(calculations.totalAmount)}</span>
-              </div>
-            </div>
-          </div>
+             </div>
+           </div>
+         </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">{t('sales.invoice.attachments')}</label>
+              <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 dark:border-slate-600 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                <Paperclip size={14} />
+                <span>{t('sales.invoice.addAttachment')}</span>
+                <input type="file" className="hidden" onChange={handleAttachmentChange} />
+             </label>
+           </div>
+            {attachments.length > 0 && (
+              <ul className="space-y-1">
+                {attachments.map(att => (
+                  <li key={att.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-md text-sm">
+                    <a href={att.dataUrl} download={att.name} className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:underline truncate">
+                      <FileText size={14} />
+                      <span className="truncate">{att.name}</span>
+                      <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
+                   </a>
+                    <Button size="sm" variant="ghost" onClick={() => removeAttachment(att.id)} leftIcon={<X size={14} className="text-rose-500" />} aria-label={t('delete')} />
+                 </li>
+                ))}
+             </ul>
+            )}
+         </div>
 
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
             <Button variant="secondary" onClick={() => { setFormOpen(false); resetForm(); }}>{t('cancel')}</Button>
@@ -793,6 +850,22 @@ export const InvoicesPage: React.FC = () => {
                 )}
               </div>
             </div>
+            {viewing.attachments && viewing.attachments.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{t('sales.invoice.attachments')}</p>
+                <ul className="space-y-1">
+                  {viewing.attachments.map(att => (
+                    <li key={att.id} className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-md text-sm">
+                      <FileText size={14} className="text-slate-500" />
+                      <a href={att.dataUrl} download={att.name} className="flex-1 text-primary-600 dark:text-primary-400 hover:underline truncate">
+                        {att.name}
+                       </a>
+                      <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
+                     </li>
+                  ))}
+                 </ul>
+               </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setDetailOpen(false)}>{t('close')}</Button>
               <Button variant="primary" onClick={() => { handlePrint(viewing); }} leftIcon={<Printer size={16} />}>{t('print')}</Button>

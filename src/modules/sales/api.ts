@@ -7,7 +7,7 @@ import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/cor
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { getNextDocumentNumber } from '@/core/api';
 import { postSalesInvoice, postSalesReturn } from '@/core/utils/journalEntryGenerator';
-import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging } from './types';
+import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging, InvoiceAttachment } from './types';
 
 // Typed RPC bridge for Sales (Phase 4 slice 10). In Electron the renderer
 // sends a structured payload and the main process derives `company_id` +
@@ -42,6 +42,23 @@ function parseJsonLines(value: unknown): Record<string, unknown>[] {
     try {
       const parsed: unknown = JSON.parse(value);
       return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function parseJsonAttachments(value: unknown): InvoiceAttachment[] {
+  if (Array.isArray(value)) {
+    return value.filter((v): v is InvoiceAttachment => !!v && typeof v === 'object');
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed)
+        ? (parsed.filter((v): v is InvoiceAttachment => !!v && typeof v === 'object') as InvoiceAttachment[])
+        : [];
     } catch {
       return [];
     }
@@ -614,8 +631,9 @@ export const salesApi = {
         data.notes,
         safeUserId(_userId),
         safeUserId(_userId),
+        JSON.stringify(data.attachments ?? []),
       ];
-      let sql = `WITH inv AS (INSERT INTO sales_invoices (id,company_id,invoice_number,customer_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::numeric,$9::numeric,$10::numeric,$11::numeric,$12::varchar,$13::numeric,$14::numeric,$15::numeric,$16::varchar,$17,$18::uuid,$19::uuid,$20,$21::uuid,$22::uuid) RETURNING id)`;
+      let sql = `WITH inv AS (INSERT INTO sales_invoices (id,company_id,invoice_number,customer_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by,attachments) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::numeric,$9::numeric,$10::numeric,$11::numeric,$12::varchar,$13::numeric,$14::numeric,$15::numeric,$16::varchar,$17,$18::uuid,$19::uuid,$20,$21::uuid,$22::uuid,$23::jsonb) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -684,6 +702,7 @@ export const salesApi = {
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
       if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
+      if (data.attachments !== undefined) { fields.push(`attachments = $${idx++}::jsonb`); values.push(JSON.stringify(data.attachments ?? [])); }
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
@@ -1409,6 +1428,7 @@ function mapInvoiceRow(row: Record<string, unknown>): SalesInvoice {
     bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
     status: String(row.status) as SalesInvoice['status'],
     notes: row.notes ? String(row.notes) : undefined,
+    attachments: parseJsonAttachments(row.attachments),
     lines: [],
   };
 }

@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, jsonb } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 import { products } from './inventory';
 
@@ -41,6 +41,7 @@ export const salesInvoices = pgTable('sales_invoices', {
   status: varchar('status', { length: 20 }).default('draft'),
   paymentType: varchar('payment_type', { length: 10 }).notNull().default('credit'),
   notes: text('notes'),
+  attachments: jsonb('attachments').default([]).notNull(),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

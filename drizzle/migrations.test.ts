@@ -441,9 +441,9 @@ describe('Migration 0009: Performance indexes phase 2', () => {
     expect(mig9).toMatch(/pg_constraint WHERE conname/i);
   });
 
-  it('_journal.json has 24 entries (0000-0023)', () => {
+  it('_journal.json has 25 entries (0000-0024)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    expect(journal.entries.length).toBe(24);
+    expect(journal.entries.length).toBe(25);
     expect(journal.entries[11].tag).toBe('0011_manufacturing_schema_fix');
     expect(journal.entries[12].tag).toBe('0012_purchase_invoice_lines_percents');
     expect(journal.entries[13].tag).toBe('0013_hr_schema_drift_fix');
@@ -457,6 +457,7 @@ describe('Migration 0009: Performance indexes phase 2', () => {
     expect(journal.entries[21].tag).toBe('0021_user_tracking_columns');
     expect(journal.entries[22].tag).toBe('0022_audit_and_document_sequences_fix');
     expect(journal.entries[23].tag).toBe('0023_activities_user_tracking_columns');
+    expect(journal.entries[24].tag).toBe('0024_invoice_attachments');
   });
 });
 

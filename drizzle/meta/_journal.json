@@ -169,6 +169,13 @@
       "when": 1804000000000,
       "tag": "0023_activities_user_tracking_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1804200000000,
+      "tag": "0024_invoice_attachments",
+      "breakpoints": true
     }
   ]
 }

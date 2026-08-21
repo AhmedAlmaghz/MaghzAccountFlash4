@@ -953,7 +953,10 @@
       "created": "Invoice created successfully",
       "updated": "Invoice updated successfully",
       "deleted": "Invoice deleted",
-      "posted": "Invoice posted successfully"
+      "posted": "Invoice posted successfully",
+      "attachments": "Attachments",
+      "addAttachment": "Add Attachment",
+      "attachmentTooLarge": "Attachment size exceeds 2 MB"
     },
     "quotation": {
       "new": "New Quotation",
