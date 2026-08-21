@@ -51,7 +51,7 @@
     "electron:build:local": "set CSC_IDENTITY_AUTO_DISCOVERY=false && npm run build && npx electron-builder --win dir --config.directories.output=release-local",
     "db:reset": "node electron/resetDatabase.js",
     "db:reset:force": "node electron/resetDatabase.js --yes --force",
-    "db:check": "node scripts/db-check.mjs",
+    "db:check": "drizzle-kit check --config drizzle.config.ts",
     "preflight": "npm run lint && npx tsc -b && npm run test",
     "e2e:reset": "node electron/resetDatabase.js --yes --force --admin-password admin1234"
   },
