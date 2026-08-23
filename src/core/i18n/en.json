@@ -1137,7 +1137,8 @@
       "created": "Purchase invoice created successfully",
       "updated": "Purchase invoice updated successfully",
       "deleted": "Purchase invoice deleted",
-      "posted": "Purchase invoice posted successfully"
+      "posted": "Purchase invoice posted successfully",
+      "outstanding": "Outstanding to Suppliers"
     },
     "order": {
       "new": "New Purchase Order",
@@ -1167,7 +1168,9 @@
       "created": "Purchase order created successfully",
       "updated": "Purchase order updated successfully",
       "deleted": "Purchase order deleted",
-      "converted": "Order converted to invoice successfully"
+      "converted": "Order converted to invoice successfully",
+      "totalOrders": "Total Orders",
+      "pending": "Pending Supply"
     },
     "return": {
       "new": "New Purchase Return",
