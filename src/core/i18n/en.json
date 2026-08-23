@@ -980,7 +980,11 @@
       "created": "Quotation created successfully",
       "updated": "Quotation updated successfully",
       "deleted": "Quotation deleted",
-      "converted": "Quotation converted to invoice successfully"
+      "converted": "Quotation converted to invoice successfully",
+      "total": "Total Quotations",
+      "accepted": "Accepted",
+      "drafts": "Drafts",
+      "convertedCount": "Converted"
     },
     "return": {
       "new": "New Sales Return",
@@ -1010,6 +1014,12 @@
       "updated": "Sales return updated successfully",
       "deleted": "Sales return deleted",
       "posted": "Sales return posted successfully"
+    },
+    "filter": {
+      "all": "All",
+      "clearFilters": "Clear filters",
+      "noResults": "No results found",
+      "noResultsDesc": "Try changing your search or filters"
     }
   },
   "purchases": {

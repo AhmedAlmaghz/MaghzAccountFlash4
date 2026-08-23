@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Tag, Plus, FileText, CheckSquare, Trash2, Printer, ArrowRightLeft } from 'lucide-react';
+import { Tag, Plus, FileText, CheckSquare, Trash2, Printer, ArrowRightLeft, Search, X, Layers, Sparkles, Download } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -19,7 +19,7 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
 import { printDocument } from '@/core/utils/printDocument';
-import { exportToExcel } from '@/core/utils/exportEngine';
+import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useToastStore } from '@/core/store/toastStore';
 import type { Quotation } from '../types';
@@ -46,6 +46,8 @@ export const QuotationsPage: React.FC = () => {
   const activeCompany = useAppStore(state => state.activeCompany);
   const currentUser = useAuthStore(state => state.user);
   const { showToggle: showOwnerToggle, isOwnOnly, toggleOwnOnly } = useOwnerFilter([], 'sales');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
   const {
     quotations,
     total,
@@ -58,7 +60,14 @@ export const QuotationsPage: React.FC = () => {
     update,
     remove,
     convertToInvoice,
-  } = useQuotationsPaginated(activeCompany?.id || '');
+  } = useQuotationsPaginated(activeCompany?.id || '', useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]));
+
+  const filteredQuotations = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return quotations;
+    return quotations.filter((qt) => (qt.quotationNumber?.toLowerCase() || '').includes(q) || (qt.customer?.name?.toLowerCase() || '').includes(q));
+  }, [quotations, search]);
+  const hasFilters = !!(search || statusFilter);
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
   const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
@@ -320,22 +329,69 @@ export const QuotationsPage: React.FC = () => {
     exportToExcel(quotations.map(q => ({ quotationNumber: q.quotationNumber, customerName: q.customer?.name || q.customerId, date: q.date, expiryDate: q.expiryDate || '-', totalAmount: q.totalAmount, status: STATUS_FLOW[q.status] || q.status })), cols, `quotations_${new Date().toISOString().split('T')[0]}`);
   };
 
+  const handleExportPdf = () => {
+    const exportColumns = [
+      { key: 'quotationNumber', header: t('sales.quotation.number') },
+      { key: 'customerName', header: t('sales.customer.title') },
+      { key: 'date', header: t('sales.date') },
+      { key: 'expiryDate', header: t('sales.quotation.expiry') },
+      { key: 'totalAmount', header: t('sales.total') },
+      { key: 'status', header: t('sales.status.label') },
+    ];
+    exportToPDF(filteredQuotations.map(q => ({ quotationNumber: q.quotationNumber, customerName: q.customer?.name || q.customerId, date: q.date, expiryDate: q.expiryDate || '-', totalAmount: formatCurrency(q.totalAmount), status: STATUS_FLOW[q.status] || q.status })), exportColumns, `quotations_${new Date().toISOString().split('T')[0]}`, {
+      title: t('sales.quotations'),
+      rtl: true,
+    });
+  };
+
+  const kpis = useMemo(() => {
+    const accepted = quotations.filter(q => q.status === 'accepted').length;
+    const draft = quotations.filter(q => q.status === 'draft').length;
+    const converted = quotations.filter(q => q.status === 'converted').length;
+    const totalValue = quotations.reduce((s, q) => s + Number(q.totalAmount || 0), 0);
+    return { accepted, draft, converted, totalValue };
+  }, [quotations]);
+
   const tableColumns = [
-    { key: 'quotationNumber', header: t('sales.quotation.number'), width: '120px' },
-    { key: 'customerName', header: t('sales.customer.title'), render: (row: Quotation) => row.customer?.name || row.customerId },
-    { key: 'date', header: t('sales.date'), width: '110px' },
-    { key: 'expiryDate', header: t('sales.quotation.expiry'), width: '110px', render: (row: Quotation) => row.expiryDate ? formatDate(row.expiryDate) : '-' },
-    { key: 'totalAmount', header: t('sales.total'), align: 'right' as const, render: (row: Quotation) => formatCurrency(row.totalAmount) },
-    { key: 'paymentType', header: t('sales.quotation.paymentType'), render: (row: Quotation) => (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-        row.paymentType === 'cash'
-          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-      }`}>
-        {row.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit')}
-      </span>
-    ) },
-    { key: 'status', header: t('sales.status.label'), render: (row: Quotation) => <StatusBadge status={row.status} /> },
+    {
+      key: 'quotationNumber',
+      header: t('sales.quotation.number'),
+      width: '135px',
+      render: (row: Quotation) => (
+        <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
+          <Tag size={12} className="text-primary-500" />
+          {row.quotationNumber}
+       </span>
+      ),
+    },
+    {
+      key: 'customerName',
+      header: t('sales.customer.title'),
+      render: (row: Quotation) => (
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+            {(row.customer?.name || row.customerId || '?').charAt(0).toUpperCase()}
+         </div>
+          <span className="font-medium truncate">{row.customer?.name || row.customerId.slice(0, 8)}</span>
+       </div>
+      ),
+    },
+    { key: 'date', header: t('sales.date'), width: '110px', render: (row: Quotation) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span> },
+    { key: 'expiryDate', header: t('sales.quotation.expiry'), width: '110px', render: (row: Quotation) => row.expiryDate ? <span className="font-mono text-xs tabular-nums">{formatDate(row.expiryDate)}</span> : <span className="text-slate-400">—</span> },
+    { key: 'totalAmount', header: t('sales.total'), align: 'right' as const, render: (row: Quotation) => <span className="font-bold tabular-nums">{formatCurrency(row.totalAmount)}</span> },
+    {
+      key: 'paymentType',
+      header: t('sales.quotation.paymentType'),
+      width: '95px',
+      render: (row: Quotation) => (
+        <span
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border ${row.paymentType === 'cash' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'}`}
+        >
+          {row.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit')}
+       </span>
+      ),
+    },
+    { key: 'status', header: t('sales.status.label'), width: '110px', render: (row: Quotation) => <StatusBadge status={row.status} /> },
     { key: 'actions', header: t('sales.actions'), width: '220px', render: (row: Quotation) => (
       <div className="flex items-center gap-1">
         <ActionButtons
@@ -365,40 +421,130 @@ export const QuotationsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Tag size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('sales.quotations')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('sales.quotationsSubtitle')}</p>
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-700 via-violet-600 to-fuchsia-600 shadow-xl shadow-violet-900/10 dark:shadow-violet-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-violet-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('sales.quotations')}
+            </span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium tracking-wide text-violet-100/60">{activeCompany?.name || ''}</span>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
-          <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')}>
-            <FileText size={16} className="text-emerald-600" />
-          </Button>
-          <Can action="create" module="sales">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('sales.quotation.create')}</Button>
-          </Can>
+          <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sales.quotations')}</h2>
+          <p className="text-violet-100/80 text-base max-w-lg">{t('sales.quotationsSubtitle')}</p>
         </div>
       </div>
 
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('sales.quotation.total'), value: quotations.length, icon: Sparkles, color: 'from-violet-600 to-violet-700', bg: 'bg-gradient-to-br from-violet-50 to-violet-100 dark:from-violet-900/10 dark:to-violet-800/5' },
+          { label: t('sales.quotation.accepted'), value: kpis.accepted, icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('sales.quotation.convertedCount'), value: kpis.converted, icon: ArrowRightLeft, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('sales.quotation.drafts'), value: kpis.draft, icon: FileText, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`flex items-start gap-3 p-4 ${k.bg} dark:text-white`}>
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700">
+                <k.icon size={20} className="text-slate-700 dark:text-slate-200" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight">{k.label}</p>
+                <p className="text-2xl font-extrabold tabular-nums leading-tight mt-1">{k.value}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-violet-500/30">
+        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+          <div className="relative flex-1 min-w-0">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={t('search')}
+              className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-colors placeholder:text-slate-400"
+              aria-label={t('search')}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="Clear"><X size={14} /></button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-slate-500 font-medium">{t('sales.status.label')}:</span>
+            {[
+              { value: '', label: t('sales.filter.all') },
+              { value: 'draft', label: t('sales.status.draft') },
+              { value: 'sent', label: t('sales.status.sent') },
+              { value: 'accepted', label: t('sales.status.accepted') },
+              { value: 'rejected', label: t('sales.status.rejected') },
+              { value: 'converted', label: t('sales.status.converted') },
+            ].map((opt) => (
+              <button
+                key={opt.value || 'all'}
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === opt.value ? 'bg-violet-600 text-white border-violet-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-violet-300'}`}
+              >{opt.label}</button>
+            ))}
+          </div>
+          <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
+          <Can action="create" module="sales">
+            <Button size="sm" variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>{t('sales.quotation.create')}</Button>
+          </Can>
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            <Button size="sm" variant="secondary" onClick={handleExportExcel} leftIcon={<Download size={15} className="text-emerald-600" />}>Excel</Button>
+            <Button size="sm" variant="secondary" onClick={handleExportPdf} leftIcon={<Printer size={15} />}>PDF</Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Filter result count */}
+      {hasFilters && (
+        <div className="text-xs text-slate-500 flex items-center gap-2 px-1">
+          <span>{filteredQuotations.length} من {quotations.length}</span>
+          {search ? <span>• &ldquo;{search}&rdquo;</span> : null}
+          {statusFilter ? <span>• {t('sales.status.' + statusFilter)}</span> : null}
+          <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-violet-600 hover:underline font-medium ml-2">{t('sales.filter.clearFilters')}</button>
+        </div>
+      )}
+
       <Card>
+        <div className="flex items-center justify-between py-1 px-1">
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{t('sales.quotations')}</h3>
+          <span className="text-[11px] uppercase tracking-widest text-slate-400 font-medium">{quotations.length}</span>
+        </div>
         {isLoading ? (
           <div className="space-y-3 p-4">
             {[1,2,3,4,5].map(i => <div key={i} className="h-10 bg-slate-100 dark:bg-slate-800 rounded-lg animate-pulse" />)}
           </div>
         ) : quotations.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title={t('sales.quotation.emptyTitle')}
-            description={t('sales.quotation.emptyDesc')}
-            action={<Can action="create" module="sales"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('sales.quotation.create')}</Button></Can>}
-          />
+          <div className="py-8">
+            <EmptyState
+              icon="inbox"
+              title={t('sales.quotation.emptyTitle')}
+              description={t('sales.quotation.emptyDesc')}
+              action={<Can action="create" module="sales"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('sales.quotation.create')}</Button></Can>}
+            />
+          </div>
+        ) : filteredQuotations.length === 0 ? (
+          <div className="py-10">
+            <EmptyState
+              icon="search"
+              title={t('sales.filter.noResults')}
+              description={t('sales.filter.noResultsDesc')}
+              action={<Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter(''); }}>{t('sales.filter.clearFilters')}</Button>}
+            />
+          </div>
         ) : (
           <>
-            <Table<Quotation> data={quotations} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
+            <Table<Quotation> data={filteredQuotations} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
             <Pagination
               page={page}
               pageSize={pageSize}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, Package, BookOpen } from 'lucide-react';
+import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, Package, BookOpen, Search, X, Wallet, Layers, Sparkles, Download } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -13,10 +13,9 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useSettings } from '@/core/utils/useSettings';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
-import { YER_CODE } from '@/core/utils/currencyConverter';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { printDocument } from '@/core/utils/printDocument';
-import { exportToExcel } from '@/core/utils/exportEngine';
+import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { postSalesReturn } from '@/core/utils/journalEntryGenerator';
 import { logAudit } from '@/core/utils/auditLogger';
 import { salesApi } from '../api';
@@ -38,6 +37,8 @@ export const SalesReturnsPage: React.FC = () => {
   const activeCompany = useAppStore(state => state.activeCompany);
   const currentUser = useAuthStore(state => state.user);
   const { showToggle: showOwnerToggle, isOwnOnly, toggleOwnOnly } = useOwnerFilter([], 'sales');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
   const {
     returns,
     total,
@@ -50,11 +51,18 @@ export const SalesReturnsPage: React.FC = () => {
     update,
     remove,
     post,
-  } = useReturnsPaginated(activeCompany?.id || '');
+  } = useReturnsPaginated(activeCompany?.id || '', useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]));
+
+  const filteredReturns = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return returns;
+    return returns.filter((r) => (r.returnNumber?.toLowerCase() || '').includes(q) || (r.customer?.name?.toLowerCase() || '').includes(q) || (r.invoice?.invoiceNumber?.toLowerCase() || '').includes(q));
+  }, [returns, search]);
+  const hasFilters = !!(search || statusFilter);
   const { invoices } = usePostedInvoicesWithLines(activeCompany?.id || '');
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
-  const { formatCurrency } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
 
   const [formOpen, setFormOpen] = useState(false);
@@ -295,25 +303,63 @@ export const SalesReturnsPage: React.FC = () => {
     exportToExcel(returns.map(r => ({ returnNumber: r.returnNumber, invoiceNumber: r.invoice?.invoiceNumber || r.invoiceId, customerName: r.customer?.name || r.customerId, date: r.date, totalAmount: r.totalAmount, status: r.status })), cols, `sales_returns_${new Date().toISOString().split('T')[0]}`);
   };
 
+  const handleExportPdf = () => {
+    const exportColumns = [
+      { key: 'returnNumber', header: t('sales.return.number') },
+      { key: 'customerName', header: t('sales.customer.title') },
+      { key: 'date', header: t('sales.date') },
+      { key: 'totalAmount', header: t('sales.total') },
+      { key: 'status', header: t('sales.status.label') },
+    ];
+    exportToPDF(filteredReturns.map(r => ({ returnNumber: r.returnNumber, customerName: r.customer?.name || r.customerId, date: r.date, totalAmount: formatCurrency(r.totalAmount), status: r.status })), exportColumns, `sales_returns_${new Date().toISOString().split('T')[0]}`, {
+      title: t('sales.returns'),
+      rtl: true,
+    });
+  };
+
   const tableColumns = [
-    { key: 'returnNumber', header: t('sales.return.number'), width: '130px' },
+    {
+      key: 'returnNumber',
+      header: t('sales.return.number'),
+      width: '135px',
+      render: (row: SalesReturn) => (
+        <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
+          <Undo2 size={12} className="text-rose-500" />
+          {row.returnNumber}
+        </span>
+      ),
+    },
     { key: 'invoiceNumber', header: t('sales.return.originalInvoice'), width: '140px', render: (row: SalesReturn) => (
-      <span className="flex items-center gap-1 text-blue-600"><FileText size={14} /> {row.invoice?.invoiceNumber || row.invoiceId}</span>
+      <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-mono text-xs"><FileText size={13} /> {row.invoice?.invoiceNumber || row.invoiceId.slice(0, 8)}</span>
     )},
-    { key: 'customerName', header: t('sales.customer.title'), render: (row: SalesReturn) => row.customer?.name || row.customerId },
-    { key: 'date', header: t('sales.date'), width: '110px' },
-    { key: 'reason', header: t('sales.return.reason') },
-    { key: 'totalAmount', header: t('sales.total'), align: 'right' as const, render: (row: SalesReturn) => formatCurrency(row.totalAmount) },
-    { key: 'paymentType', header: t('sales.return.paymentType'), render: (row: SalesReturn) => (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-        row.paymentType === 'cash'
-          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-      }`}>
-        {row.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit')}
-      </span>
-    ) },
-    { key: 'status', header: t('sales.status.label'), render: (row: SalesReturn) => <StatusBadge status={row.status} /> },
+    {
+      key: 'customerName',
+      header: t('sales.customer.title'),
+      render: (row: SalesReturn) => (
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-rose-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+            {(row.customer?.name || row.customerId || '?').charAt(0).toUpperCase()}
+          </div>
+          <span className="font-medium truncate">{row.customer?.name || row.customerId.slice(0, 8)}</span>
+        </div>
+      ),
+    },
+    { key: 'date', header: t('sales.date'), width: '110px', render: (row: SalesReturn) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span> },
+    { key: 'reason', header: t('sales.return.reason'), render: (row: SalesReturn) => <span className="text-sm text-slate-600 dark:text-slate-300 truncate max-w-[180px] inline-block">{row.reason}</span> },
+    { key: 'totalAmount', header: t('sales.total'), align: 'right' as const, render: (row: SalesReturn) => <span className="font-bold tabular-nums text-rose-700 dark:text-rose-300">{formatCurrency(row.totalAmount)}</span> },
+    {
+      key: 'paymentType',
+      header: t('sales.return.paymentType'),
+      width: '95px',
+      render: (row: SalesReturn) => (
+        <span
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border ${row.paymentType === 'cash' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'}`}
+        >
+          {row.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit')}
+        </span>
+      ),
+    },
+    { key: 'status', header: t('sales.status.label'), width: '110px', render: (row: SalesReturn) => <StatusBadge status={row.status} /> },
     { key: 'actions', header: t('sales.actions'), width: '200px', render: (row: SalesReturn) => (
       <div className="flex items-center gap-1">
         <ActionButtons
@@ -355,53 +401,129 @@ export const SalesReturnsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Undo2 size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('sales.returns')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('sales.returnsSubtitle')}</p>
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-700 via-rose-600 to-orange-600 shadow-xl shadow-rose-900/10 dark:shadow-rose-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-rose-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('sales.returns')}
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sales.returns')}</h2>
+              <p className="text-rose-100/80 text-base max-w-lg">{t('sales.returnsSubtitle')}</p>
+            </div>
+            <Can action="create" module="sales">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setFormOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('sales.return.create')}</Button>
+            </Can>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('sales.return.total'), value: String(total), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+          { label: t('sales.return.postedTotal'), value: formatCurrency(stats.total), icon: Wallet, color: 'from-orange-600 to-orange-700', bg: 'bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/10 dark:to-orange-800/5' },
+          { label: t('sales.return.drafts'), value: String(stats.draftCount), icon: FileText, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('sales.status.posted'), value: String(stats.postedCount), icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-rose-500/30">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <div className="relative flex-1 min-w-0">
+            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={t('search')}
+              className="w-full pr-9 pl-9 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-colors placeholder:text-slate-400"
+              aria-label={t('search')}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><X size={14} /></button>
+            )}
+            {!search && <span className="absolute left-3 top-1/2 -translate-y-1/2"><Sparkles size={14} className="text-slate-300" /></span>}
+          </div>
           <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
-          <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')}>
-            <FileText size={16} className="text-emerald-600" />
-          </Button>
-          <Can action="create" module="sales">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setFormOpen(true); }}>{t('sales.return.create')}</Button>
-          </Can>
+          <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')}><Download size={16} className="text-emerald-600" /></Button>
+          <Button size="sm" variant="ghost" onClick={handleExportPdf} title="PDF"><Printer size={16} className="text-rose-600" /></Button>
         </div>
-      </div>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-medium">{t('sales.status.label')}:</span>
+          {[
+            { value: '', label: t('sales.filter.all') },
+            { value: 'draft', label: t('sales.status.draft') },
+            { value: 'posted', label: t('sales.status.posted') },
+            { value: 'cancelled', label: t('sales.status.cancelled') },
+          ].map((opt) => (
+            <button
+              key={opt.value || 'all'}
+              onClick={() => setStatusFilter(opt.value)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === opt.value ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-300'}`}
+            >{opt.label}</button>
+          ))}
+        </div>
+        {hasFilters && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+            <span>{filteredReturns.length} من {returns.length} {search ? `• "${search}"` : ''} {statusFilter ? `• ${t('sales.status.' + statusFilter)}` : ''}</span>
+            <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-rose-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
+          </div>
+        )}
+      </Card>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card><div className="p-4"><p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.return.total')}</p><p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{total}</p></div></Card>
-        <Card><div className="p-4"><p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.return.postedTotal')}</p><p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{formatCurrency(stats.total)} <span className="text-sm font-normal text-slate-500">{activeCompany?.currency || YER_CODE}</span></p></div></Card>
-        <Card><div className="p-4"><p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.return.drafts')}</p><p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.draftCount}</p></div></Card>
-      </div>
-
-      <Card>
+      <Card noPadding>
         {returnsLoading ? (
           <div className="space-y-3 p-4">
-            {[1,2,3,4,5].map(i => <div key={i} className="h-10 bg-slate-100 dark:bg-slate-800 rounded-lg animate-pulse" />)}
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
           </div>
         ) : returns.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title={t('sales.return.emptyTitle')}
-            description={t('sales.return.emptyDesc')}
-            action={<Can action="create" module="sales"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setFormOpen(true); }}>{t('sales.return.create')}</Button></Can>}
-          />
+          <div className="py-8">
+            <EmptyState
+              icon="inbox"
+              title={t('sales.return.emptyTitle')}
+              description={t('sales.return.emptyDesc')}
+              action={<Can action="create" module="sales"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setFormOpen(true); }}>{t('sales.return.create')}</Button></Can>}
+            />
+          </div>
+        ) : filteredReturns.length === 0 ? (
+          <div className="py-10">
+            <EmptyState
+              icon="search"
+              title={t('sales.filter.noResults')}
+              description={t('sales.filter.noResultsDesc')}
+              action={<Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter(''); }}>{t('sales.filter.clearFilters')}</Button>}
+            />
+          </div>
         ) : (
           <>
-            <Table<SalesReturn> data={returns} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={returnsLoading} />
-            <Pagination
-              page={page}
-              pageSize={pageSize}
-              total={total}
-              onPageChange={goToPage}
-              onPageSizeChange={changePageSize}
-            />
+            <Table<SalesReturn> data={filteredReturns} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={returnsLoading} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
           </>
         )}
       </Card>

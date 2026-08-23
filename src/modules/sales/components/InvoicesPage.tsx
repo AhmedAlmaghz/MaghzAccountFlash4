@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X } from 'lucide-react';
+import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Search, Wallet, TrendingUp, Layers } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -50,6 +50,8 @@ export const InvoicesPage: React.FC = () => {
   const activeCompany = useAppStore(state => state.activeCompany);
   const currentUser = useAuthStore(state => state.user);
   const { showToggle: showOwnerToggle, isOwnOnly, toggleOwnOnly } = useOwnerFilter([], 'sales');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
   const {
     invoices,
     total,
@@ -64,7 +66,8 @@ export const InvoicesPage: React.FC = () => {
     post,
   } = useInvoicesPaginated(activeCompany?.id || '', useMemo(() => ({
     createdBy: isOwnOnly ? currentUser?.id : undefined,
-  }), [isOwnOnly, currentUser?.id]));
+    status: statusFilter || undefined,
+  }), [isOwnOnly, currentUser?.id, statusFilter]));
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
@@ -461,31 +464,58 @@ export const InvoicesPage: React.FC = () => {
   };
 
   const tableColumns = [
-    { key: 'invoiceNumber', header: t('sales.invoiceNumber'), width: '130px' },
-    { key: 'customerName', header: t('sales.customer.title'), render: (row: SalesInvoice) => row.customer?.name || row.customerId },
-    { key: 'date', header: t('sales.date'), width: '110px', render: (row: SalesInvoice) => formatDate(row.date) },
-    { key: 'dueDate', header: t('sales.dueDate'), width: '110px', render: (row: SalesInvoice) => row.dueDate ? formatDate(row.dueDate) : '-' },
-    { key: 'subtotal', header: t('sales.subtotal'), align: 'right' as const, render: (row: SalesInvoice) => formatCurrency(row.subtotal) },
-    { key: 'vatAmount', header: t('sales.vat'), align: 'right' as const, render: (row: SalesInvoice) => formatCurrency(row.vatAmount) },
-    { key: 'totalAmount', header: t('sales.total'), align: 'right' as const, render: (row: SalesInvoice) => (
-      <span>
-        {formatCurrency(row.totalAmount)}
-        {row.currencyCode && row.currencyCode !== currencySymbol && (
-          <span className="text-xs text-slate-500 mr-1">({row.currencyCode})</span>
-        )}
-      </span>
-    ) },
-    { key: 'paidAmount', header: t('sales.paid'), align: 'right' as const, render: (row: SalesInvoice) => formatCurrency(row.paidAmount) },
-    { key: 'paymentType', header: t('sales.invoice.paymentType'), render: (row: SalesInvoice) => (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-        row.paymentType === 'cash'
-          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-      }`}>
-        {row.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit')}
-      </span>
-    ) },
-    { key: 'status', header: t('sales.status.label'), render: (row: SalesInvoice) => <StatusBadge status={row.status} /> },
+    {
+      key: 'invoiceNumber',
+      header: t('sales.invoiceNumber'),
+      width: '135px',
+      render: (row: SalesInvoice) => (
+        <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+          {row.invoiceNumber}
+        </span>
+      ),
+    },
+    {
+      key: 'customerName',
+      header: t('sales.customer.title'),
+      render: (row: SalesInvoice) => (
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+            {(row.customer?.name || row.customerId || '?').charAt(0).toUpperCase()}
+          </div>
+          <span className="font-medium truncate">{row.customer?.name || row.customerId.slice(0, 8)}</span>
+        </div>
+      ),
+    },
+    { key: 'date', header: t('sales.date'), width: '110px', render: (row: SalesInvoice) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span> },
+    { key: 'dueDate', header: t('sales.dueDate'), width: '110px', render: (row: SalesInvoice) => row.dueDate ? <span className="font-mono text-xs tabular-nums">{formatDate(row.dueDate)}</span> : <span className="text-slate-400">—</span> },
+    { key: 'subtotal', header: t('sales.subtotal'), align: 'right' as const, render: (row: SalesInvoice) => <span className="tabular-nums text-sm">{formatCurrency(row.subtotal)}</span> },
+    { key: 'vatAmount', header: t('sales.vat'), align: 'right' as const, render: (row: SalesInvoice) => <span className="tabular-nums text-sm text-slate-600">{formatCurrency(row.vatAmount)}</span> },
+    {
+      key: 'totalAmount',
+      header: t('sales.total'),
+      align: 'right' as const,
+      render: (row: SalesInvoice) => (
+        <div className="text-end">
+          <p className="font-bold tabular-nums">{formatCurrency(row.totalAmount)}</p>
+          {row.currencyCode && row.currencyCode !== currencySymbol && <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border text-slate-600">{row.currencyCode}</span>}
+        </div>
+      ),
+    },
+    { key: 'paidAmount', header: t('sales.paid'), align: 'right' as const, render: (row: SalesInvoice) => <span className="tabular-nums text-sm text-emerald-700 dark:text-emerald-300">{formatCurrency(row.paidAmount)}</span> },
+    {
+      key: 'paymentType',
+      header: t('sales.invoice.paymentType'),
+      width: '95px',
+      render: (row: SalesInvoice) => (
+        <span
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border ${row.paymentType === 'cash' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'}`}
+        >
+          {row.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit')}
+        </span>
+      ),
+    },
+    { key: 'status', header: t('sales.status.label'), width: '110px', render: (row: SalesInvoice) => <StatusBadge status={row.status} /> },
     { key: 'createdBy', header: t('common.createdBy'), width: '110px', render: (row: SalesInvoice) => (
       <span className="text-xs text-slate-600 dark:text-slate-400">{getUserName(row.createdBy)}</span>
     ) },
@@ -531,86 +561,167 @@ export const InvoicesPage: React.FC = () => {
     return { total, paid, draftCount, postedCount };
   }, [invoices]);
 
+  const filteredInvoices = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return invoices;
+    return invoices.filter((inv) => (inv.invoiceNumber?.toLowerCase() || '').includes(q) || (inv.customer?.name?.toLowerCase() || '').includes(q) || inv.customerId.toLowerCase().includes(q));
+  }, [invoices, search]);
+
+  const hasFilters = !!(search || statusFilter);
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <FileText size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('sales.invoices')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('sales.invoicesSubtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
+              <FileText size={22} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('sales.invoices')}</h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.invoicesSubtitle')}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
+            <Can action="create" module="sales">
+              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">
+                {t('sales.invoice.create')}
+              </Button>
+            </Can>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
-          <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')}>
-            <Download size={16} className="text-emerald-600" />
-          </Button>
-          <Button size="sm" variant="ghost" onClick={handleExportPDF} title={t('reports.exportPdf')}>
-            <Printer size={16} className="text-rose-600" />
-          </Button>
-          <Can action="create" module="sales">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-              {t('sales.invoice.create')}
-            </Button>
-          </Can>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.invoice.totalInvoices')}</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
+              <p className="text-xs text-slate-500">{stats.postedCount} مرحل • {stats.draftCount} مسودة</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
+              <FileText size={18} className="text-primary-600" />
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.total')}</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{formatCurrency(stats.total)}</p>
+              <p className="text-xs text-slate-500">{currencySymbol} • إجمالي</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+              <Wallet size={18} className="text-slate-600" />
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.paid')}</p>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(stats.paid)}</p>
+              <p className="text-xs text-slate-500">{currencySymbol} • محصل</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+              <TrendingUp size={18} className="text-emerald-600" />
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.invoice.drafts')}</p>
+              <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{stats.draftCount}</p>
+              <p className="text-xs text-slate-500">بانتظار الترحيل</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
+              <Layers size={18} className="text-amber-600" />
+            </div>
+          </Card>
         </div>
+
+        <Card className="p-3 sm:p-4">
+          <div className="flex flex-col xl:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('search')}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+                {[
+                  { v: '', l: t('sales.filter.all') },
+                  { v: 'draft', l: t('sales.status.draft') },
+                  { v: 'posted', l: t('sales.status.posted') },
+                  { v: 'paid', l: t('sales.status.paid') },
+                  { v: 'cancelled', l: t('sales.status.cancelled') },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => setStatusFilter(o.v)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${statusFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
+                <Download size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleExportPDF} className="gap-1.5">
+                <Printer size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
+              </Button>
+            </div>
+          </div>
+          {hasFilters && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+              <span>{filteredInvoices.length} من {invoices.length} • {search ? `"${search}"` : ''} {statusFilter ? `• ${t('sales.status.' + statusFilter)}` : ''}</span>
+              <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
+            </div>
+          )}
+        </Card>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <div className="p-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.invoice.totalInvoices')}</p>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{total}</p>
-          </div>
-        </Card>
-        <Card>
-          <div className="p-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.total')}</p>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{formatCurrency(stats.total)} <span className="text-sm font-normal text-slate-500">{currencySymbol}</span></p>
-          </div>
-        </Card>
-        <Card>
-          <div className="p-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.paid')}</p>
-            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(stats.paid)} <span className="text-sm font-normal text-slate-500">{currencySymbol}</span></p>
-          </div>
-        </Card>
-        <Card>
-          <div className="p-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.invoice.drafts')}</p>
-            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.draftCount}</p>
-          </div>
-        </Card>
-      </div>
-
-      {/* Table */}
-      <Card>
+      <Card noPadding>
         {isLoading ? (
-          <div className="p-8 text-center text-slate-500 dark:text-slate-400">{t('loading')}</div>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
         ) : invoices.length === 0 ? (
-          <EmptyState
-            icon="file"
-            title={t('sales.invoice.emptyTitle')}
-            description={t('sales.invoice.emptyDescription')}
-            action={
-              <Can action="create" module="sales">
-                <Button onClick={openCreate} leftIcon={<Plus size={16} />}>{t('sales.invoice.create')}</Button>
-              </Can>
-            }
-          />
+          <div className="py-8">
+            <EmptyState
+              icon="file"
+              title={t('sales.invoice.emptyTitle')}
+              description={t('sales.invoice.emptyDescription')}
+              action={
+                <Can action="create" module="sales">
+                  <Button onClick={openCreate} leftIcon={<Plus size={16} />}>{t('sales.invoice.create')}</Button>
+                </Can>
+              }
+            />
+          </div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="py-10">
+            <EmptyState
+              icon="search"
+              title={t('sales.filter.noResults')}
+              description={t('sales.filter.noResultsDesc')}
+              action={<Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter(''); }}>{t('sales.filter.clearFilters')}</Button>}
+            />
+          </div>
         ) : (
           <>
-            <Table<SalesInvoice> data={invoices} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
-            <Pagination
-              page={page}
-              pageSize={pageSize}
-              total={total}
-              onPageChange={goToPage}
-              onPageSizeChange={changePageSize}
-            />
+            <Table<SalesInvoice> data={filteredInvoices} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
           </>
         )}
       </Card>
