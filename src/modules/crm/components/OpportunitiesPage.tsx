@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { CheckSquare, Plus, TrendingUp, BarChart3, MoveHorizontal, Search } from 'lucide-react';
+import { Plus, TrendingUp, MoveHorizontal, Search, Layers, Handshake, Trash2 } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -159,66 +159,105 @@ export const OpportunitiesPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <CheckSquare size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('crm.opportunitiesPage.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('crm.opportunitiesPage.description')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-fuchsia-700 via-fuchsia-600 to-purple-600 shadow-xl shadow-fuchsia-900/10 dark:shadow-fuchsia-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-fuchsia-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('crm.opportunitiesPage.title')}
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('crm.opportunitiesPage.title')}</h2>
+              <p className="text-fuchsia-100/80 text-base max-w-lg">{t('crm.opportunitiesPage.description')}</p>
+            </div>
+            <Can action="create" module="crm"><Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('crm.opportunity.new')}</Button></Can>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {[
+          { label: t('crm.opportunity.displayed'), value: String(opportunities.length), icon: Layers, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('crm.opportunity.totalValue'), value: formatCurrency(totalValue), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('crm.opportunity.weightedValue'), value: formatCurrency(Math.round(weightedValue)), icon: TrendingUp, color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-gradient-to-br from-fuchsia-50 to-fuchsia-100 dark:from-fuchsia-900/10 dark:to-fuchsia-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-fuchsia-500/30">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1 shrink-0">
             <button onClick={() => setViewMode('kanban')} className={`px-3 py-1 rounded-md text-sm ${viewMode === 'kanban' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-slate-500'}`}>{t('crm.viewMode.kanban')}</button>
             <button onClick={() => setViewMode('list')} className={`px-3 py-1 rounded-md text-sm ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-slate-500'}`}>{t('crm.viewMode.list')}</button>
             <button onClick={() => setViewMode('funnel')} className={`px-3 py-1 rounded-md text-sm ${viewMode === 'funnel' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'text-slate-500'}`}>{t('crm.viewMode.funnel')}</button>
           </div>
-          <Can action="create" module="crm"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('crm.opportunity.new')}</Button></Can>
-        </div>
-      </div>
-
-      <Card>
-        <div className="p-4 flex items-center gap-4 border-b border-slate-200 dark:border-slate-700 flex-wrap">
-          <div className="flex items-center gap-2 flex-1 min-w-[220px]">
-            <Search size={16} className="text-slate-400" />
-            <Input
+          <div className="relative flex-1 min-w-0 max-w-md">
+            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
               placeholder={t('crm.opportunitiesPage.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-sm"
               aria-label={t('crm.opportunitiesPage.search')}
+              className="w-full pr-9 pl-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors"
             />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-600 dark:text-slate-300">{t('crm.opportunity.stageFilter')}:</label>
-            <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} className="px-2 py-1 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" aria-label={t('crm.opportunity.stageFilter')}>
-              <option value="">{t('settings.common.all')}</option>
-              {STAGES.map((s) => (<option key={s} value={s}>{t(STAGE_KEYS[s])}</option>))}
-            </select>
-          </div>
-          <span className="text-xs text-slate-500">{t('crm.total')}: {total}</span>
+          <span className="text-xs text-slate-500 font-medium tabular-nums mr-auto">{total}</span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
-          <div className="card flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white"><TrendingUp size={20} /></div>
-            <div><p className="text-2xl font-bold">{opportunities.length}</p><p className="text-sm text-slate-500">{t('crm.opportunity.displayed')}</p></div>
-          </div>
-          <div className="card flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center text-white"><CheckSquare size={20} /></div>
-            <div><p className="text-2xl font-bold">{formatCurrency(totalValue)}</p><p className="text-sm text-slate-500">{t('crm.opportunity.totalValue')}</p></div>
-          </div>
-          <div className="card flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-500 rounded-lg flex items-center justify-center text-white"><BarChart3 size={20} /></div>
-            <div><p className="text-2xl font-bold">{formatCurrency(Math.round(weightedValue))}</p><p className="text-sm text-slate-500">{t('crm.opportunity.weightedValue')}</p></div>
-          </div>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-medium">{t('crm.opportunity.stageFilter')}:</span>
+          <button
+            onClick={() => setStageFilter('')}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${stageFilter === '' ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-fuchsia-300'}`}
+          >{t('settings.common.all')}</button>
+          {STAGES.map((s) => (
+            <button
+              key={s}
+              onClick={() => setStageFilter(s)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${stageFilter === s ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-fuchsia-300'}`}
+            >{t(STAGE_KEYS[s])}</button>
+          ))}
         </div>
       </Card>
 
       {isLoading ? (
-        <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
+        <Card noPadding>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        </Card>
       ) : opportunities.length === 0 ? (
-        <EmptyState icon="inbox" title={t('crm.opportunity.empty')} description={t('crm.opportunity.emptyDescription')} action={<Can action="create" module="crm"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('crm.opportunity.new')}</Button></Can>} />
+        <Card noPadding>
+          <div className="py-8">
+            <EmptyState icon="inbox" title={t('crm.opportunity.empty')} description={t('crm.opportunity.emptyDescription')} action={<Can action="create" module="crm"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('crm.opportunity.new')}</Button></Can>} />
+          </div>
+        </Card>
       ) : viewMode === 'kanban' ? (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {STAGES.map((stage) => (
@@ -249,7 +288,7 @@ export const OpportunitiesPage: React.FC = () => {
                       <span className="text-xs text-slate-400">{opp.expectedCloseDate || '—'}</span>
                       <div className="flex items-center gap-1">
                         <Button variant="ghost" size="sm" className="text-amber-600 p-1" onClick={() => openEdit(opp)} title={t('settings.common.edit')} aria-label={t('settings.common.edit')}><MoveHorizontal size={12} /></Button>
-                        <Button variant="ghost" size="sm" className="text-rose-600 p-1" onClick={() => setConfirmDelete(opp.id)} title={t('settings.common.delete')} aria-label={t('settings.common.delete')}><CheckSquare size={12} /></Button>
+                        <Button variant="ghost" size="sm" className="text-rose-600 p-1" onClick={() => setConfirmDelete(opp.id)} title={t('settings.common.delete')} aria-label={t('settings.common.delete')}><Trash2 size={12} /></Button>
                       </div>
                     </div>
                   </div>

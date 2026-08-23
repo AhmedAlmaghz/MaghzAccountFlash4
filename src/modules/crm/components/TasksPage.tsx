@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { CheckSquare, Plus, User, AlertTriangle, Search, Calendar, FileText } from 'lucide-react';
+import { Plus, User, AlertTriangle, Search, Calendar, FileText, Layers, Clock3, CheckCircle2 } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -215,100 +215,154 @@ export const TasksPage: React.FC = () => {
     },
   ];
 
+  const kpis = useMemo(() => ({
+    pending: tasks.filter((tk) => tk.status === 'pending').length,
+    completed: tasks.filter((tk) => tk.status === 'completed').length,
+    overdue: tasks.filter((tk) => isOverdue(tk)).length,
+  }), [tasks]);
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <CheckSquare size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('crm.tasksPage.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('crm.tasksPage.description')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-700 via-sky-600 to-cyan-600 shadow-xl shadow-sky-900/10 dark:shadow-sky-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-sky-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('crm.tasksPage.title')}
+            </span>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
-            <FileText size={16} className="text-emerald-600" />
-          </Button>
-          <Can action="create" module="crm">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-              {t('crm.task.new')}
-            </Button>
-          </Can>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('crm.tasksPage.title')}</h2>
+              <p className="text-sky-100/80 text-base max-w-lg">{t('crm.tasksPage.description')}</p>
+            </div>
+            <Can action="create" module="crm">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('crm.task.new')}</Button>
+            </Can>
+          </div>
         </div>
       </div>
 
-      <Card>
-        <div className="p-4 flex items-center gap-4 border-b border-slate-200 dark:border-slate-700 flex-wrap">
-          <div className="flex items-center gap-2 flex-1 min-w-[220px]">
-            <Search size={16} className="text-slate-400" />
-            <Input
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('crm.total'), value: String(total), icon: Layers, color: 'from-sky-600 to-sky-700', bg: 'bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-900/10 dark:to-sky-800/5' },
+          { label: t('crm.tasksPage.filter.pending'), value: String(kpis.pending), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('crm.tasksPage.filter.completed'), value: String(kpis.completed), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('crm.task.overdue'), value: String(kpis.overdue), icon: AlertTriangle, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-sky-500/30">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <div className="relative flex-1 min-w-0 max-w-md">
+            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
               placeholder={t('crm.tasksPage.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-sm"
               aria-label={t('crm.tasksPage.search')}
+              className="w-full pr-9 pl-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-colors"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
+            <FileText size={16} className="text-emerald-600" />
+          </Button>
+          <span className="text-xs text-slate-500 font-medium tabular-nums mr-auto">{total}</span>
+        </div>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-medium">{t('crm.task.priority')}:</span>
+          {[
+            { v: '', l: t('settings.common.all') },
+            { v: 'high', l: t('crm.priority.high') },
+            { v: 'medium', l: t('crm.priority.medium') },
+            { v: 'low', l: t('crm.priority.low') },
+          ].map((o) => (
+            <button
+              key={o.v || 'all'}
+              onClick={() => setPriorityFilter(o.v)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${priorityFilter === o.v ? 'bg-sky-600 text-white border-sky-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-sky-300'}`}
+            >{o.l}</button>
+          ))}
+          <span className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1" />
+          {[
+            { v: '', l: t('settings.common.all') },
+            { v: 'pending', l: t('crm.tasksPage.filter.pending') },
+            { v: 'completed', l: t('crm.tasksPage.filter.completed') },
+            { v: 'cancelled', l: t('crm.tasksPage.filter.cancelled') },
+          ].map((o) => (
+            <button
+              key={'s-' + (o.v || 'all')}
+              onClick={() => setStatusFilter(o.v)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-sky-300'}`}
+            >{o.l}</button>
+          ))}
+        </div>
+      </Card>
+
+      <Card noPadding>
+        {isLoading ? (
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="py-8">
+            <EmptyState
+              icon="inbox"
+              title={t('crm.task.empty')}
+              description={t('crm.task.emptyDescription')}
+              action={
+                <Can action="create" module="crm">
+                  <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
+                    {t('crm.task.new')}
+                  </Button>
+                </Can>
+              }
             />
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-600 dark:text-slate-300">{t('crm.task.priority')}:</label>
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-              className="px-2 py-1 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600"
-              aria-label={t('crm.task.priority')}
-            >
-              <option value="">{t('settings.common.all')}</option>
-              <option value="high">{t('crm.priority.high')}</option>
-              <option value="medium">{t('crm.priority.medium')}</option>
-              <option value="low">{t('crm.priority.low')}</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-600 dark:text-slate-300">{t('crm.task.title')}:</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2 py-1 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600"
-              aria-label={t('crm.task.title')}
-            >
-              <option value="">{t('settings.common.all')}</option>
-              <option value="pending">{t('crm.tasksPage.filter.pending')}</option>
-              <option value="completed">{t('crm.tasksPage.filter.completed')}</option>
-              <option value="cancelled">{t('crm.tasksPage.filter.cancelled')}</option>
-            </select>
-          </div>
-          <span className="text-xs text-slate-500">{t('crm.total')}: {total}</span>
-        </div>
-        {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
-        ) : tasks.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title={t('crm.task.empty')}
-            description={t('crm.task.emptyDescription')}
-            action={
-              <Can action="create" module="crm">
-                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-                  {t('crm.task.new')}
-                </Button>
-              </Can>
-            }
-          />
         ) : (
-          <Table<Task>
-            data={tasks}
-            columns={columns}
-            keyExtractor={(row) => row.id}
-            emptyMessage={t('crm.task.empty')}
-          />
+          <>
+            <Table<Task>
+              data={tasks}
+              columns={columns}
+              keyExtractor={(row) => row.id}
+              emptyMessage={t('crm.task.empty')}
+            />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={goToPage}
+                onPageSizeChange={changePageSize}
+              />
+            </div>
+          </>
         )}
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPageChange={goToPage}
-          onPageSizeChange={changePageSize}
-        />
       </Card>
 
       <Modal

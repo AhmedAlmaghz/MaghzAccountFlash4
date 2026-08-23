@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Target, Plus, UserCheck, Search } from 'lucide-react';
+import { Plus, UserCheck, Search, Layers, Flame, ThumbsUp, Handshake } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -161,23 +161,30 @@ export const LeadsPage: React.FC = () => {
   };
 
   const ratingColor = (rating: Lead['rating']) => {
-    if (rating === 'hot') return 'bg-rose-100 text-rose-700';
-    if (rating === 'warm') return 'bg-amber-100 text-amber-700';
-    return 'bg-blue-100 text-blue-700';
+    if (rating === 'hot') return 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-800';
+    if (rating === 'warm') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800';
+    return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800';
   };
 
   const columns = [
-    { key: 'name', header: t('crm.lead.name') },
+    { key: 'name', header: t('crm.lead.name'), render: (row: Lead) => (
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-fuchsia-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+          {(row.name || '?').charAt(0).toUpperCase()}
+        </div>
+        <span className="font-medium truncate">{row.name}</span>
+      </div>
+    )},
     { key: 'company', header: t('crm.lead.company') },
-    { key: 'phone', header: t('crm.lead.phone') },
+    { key: 'phone', header: t('crm.lead.phone'), render: (row: Lead) => <span className="font-mono text-xs tabular-nums">{row.phone || '—'}</span> },
     {
       key: 'rating',
       header: t('crm.lead.rating'),
       render: (row: Lead) => (
-        <span className={`px-2 py-0.5 rounded-full text-xs ${ratingColor(row.rating)}`}>{t(`crm.rating.${row.rating}`)}</span>
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ratingColor(row.rating)}`}>{t(`crm.rating.${row.rating}`)}</span>
       ),
     },
-    { key: 'value', header: t('crm.lead.estimatedValue'), align: 'right' as const, render: (row: Lead) => formatCurrency(row.estimatedValue || 0) },
+    { key: 'value', header: t('crm.lead.estimatedValue'), align: 'right' as const, render: (row: Lead) => <span className="tabular-nums font-medium">{formatCurrency(row.estimatedValue || 0)}</span> },
     { key: 'status', header: t('crm.lead.status'), render: (row: Lead) => <StatusBadge status={row.status} /> },
     {
       key: 'actions',
@@ -214,83 +221,140 @@ export const LeadsPage: React.FC = () => {
     },
   ];
 
+  const kpis = useMemo(() => ({
+    newCount: leads.filter((l) => l.status === 'new').length,
+    qualified: leads.filter((l) => l.status === 'qualified').length,
+    converted: leads.filter((l) => l.status === 'converted').length,
+  }), [leads]);
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Target size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('crm.leadsPage.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('crm.leadsPage.description')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-700 via-rose-600 to-fuchsia-600 shadow-xl shadow-rose-900/10 dark:shadow-rose-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-rose-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('crm.leadsPage.title')}
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('crm.leadsPage.title')}</h2>
+              <p className="text-rose-100/80 text-base max-w-lg">{t('crm.leadsPage.description')}</p>
+            </div>
+            <Can action="create" module="crm">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('crm.lead.new')}</Button>
+            </Can>
           </div>
         </div>
-        <Can action="create" module="crm">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-            {t('crm.lead.new')}
-          </Button>
-        </Can>
       </div>
 
-      <Card>
-        <div className="p-4 flex items-center gap-4 border-b border-slate-200 dark:border-slate-700 flex-wrap">
-          <div className="flex items-center gap-2 flex-1 min-w-[220px]">
-            <Search size={16} className="text-slate-400" />
-            <Input
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('crm.leadsPage.total'), value: String(total), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+          { label: t('crm.status.new'), value: String(kpis.newCount), icon: Flame, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('crm.status.qualified'), value: String(kpis.qualified), icon: ThumbsUp, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('crm.status.converted'), value: String(kpis.converted), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-rose-500/30">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <div className="relative flex-1 min-w-0 max-w-md">
+            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
               placeholder={t('crm.leadsPage.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-sm"
               aria-label={t('crm.leadsPage.searchLabel')}
+              className="w-full pr-9 pl-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-colors"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
+            )}
+          </div>
+          <span className="text-xs text-slate-500 font-medium tabular-nums mr-auto">{total}</span>
+        </div>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-medium">{t('crm.lead.statusFilter')}:</span>
+          {[
+            { v: '', l: t('settings.common.all') },
+            { v: 'new', l: t('crm.status.new') },
+            { v: 'contacted', l: t('crm.status.contacted') },
+            { v: 'qualified', l: t('crm.status.qualified') },
+            { v: 'converted', l: t('crm.status.converted') },
+            { v: 'lost', l: t('crm.status.lost') },
+          ].map((o) => (
+            <button
+              key={o.v || 'all'}
+              onClick={() => setStatusFilter(o.v)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-300'}`}
+            >{o.l}</button>
+          ))}
+        </div>
+      </Card>
+
+      <Card noPadding>
+        {isLoading ? (
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : leads.length === 0 ? (
+          <div className="py-8">
+            <EmptyState
+              icon="inbox"
+              title={t('crm.lead.empty')}
+              description={t('crm.lead.emptyDescription')}
+              action={
+                <Can action="create" module="crm">
+                  <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
+                    {t('crm.lead.new')}
+                  </Button>
+                </Can>
+              }
             />
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-600 dark:text-slate-300">{t('crm.lead.statusFilter')}:</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2 py-1 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600"
-              aria-label={t('crm.lead.statusFilter')}
-            >
-              <option value="">{t('settings.common.all')}</option>
-              <option value="new">{t('crm.status.new')}</option>
-              <option value="contacted">{t('crm.status.contacted')}</option>
-              <option value="qualified">{t('crm.status.qualified')}</option>
-              <option value="converted">{t('crm.status.converted')}</option>
-              <option value="lost">{t('crm.status.lost')}</option>
-            </select>
-          </div>
-          <span className="text-xs text-slate-500">{t('crm.leadsPage.total')}: {total}</span>
-        </div>
-        {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
-        ) : leads.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title={t('crm.lead.empty')}
-            description={t('crm.lead.emptyDescription')}
-            action={
-              <Can action="create" module="crm">
-                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-                  {t('crm.lead.new')}
-                </Button>
-              </Can>
-            }
-          />
         ) : (
-          <Table<Lead>
-            data={leads}
-            columns={columns}
-            keyExtractor={(row) => row.id}
-            emptyMessage={t('crm.lead.empty')}
-          />
+          <>
+            <Table<Lead>
+              data={leads}
+              columns={columns}
+              keyExtractor={(row) => row.id}
+              emptyMessage={t('crm.lead.empty')}
+            />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={goToPage}
+                onPageSizeChange={changePageSize}
+              />
+            </div>
+          </>
         )}
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPageChange={goToPage}
-          onPageSizeChange={changePageSize}
-        />
       </Card>
 
       {/* Create/Edit Modal */}
