@@ -1395,7 +1395,8 @@
       "updated": "Payroll updated successfully",
       "invalidMonth": "Month must be between 1 and 12",
       "invalidYear": "Year must be between 2000 and 2100",
-      "noEmployees": "No employees to create payroll"
+      "noEmployees": "No employees to create payroll",
+      "postedShort": "Posted"
     },
     "leaves": {
       "title": "Leaves",
@@ -1489,7 +1490,8 @@
       "searchPlaceholder": "Search by name, employee number, or email...",
       "requiredFields": "Please fill in required fields",
       "photoTooLarge": "Image too large (max 2MB)",
-      "uploadPhoto": "Upload Photo"
+      "uploadPhoto": "Upload Photo",
+      "payrollMass": "Payroll Mass"
     },
     "attendancePage": {
       "title": "Attendance",
@@ -1571,7 +1573,8 @@
       "reportError": "Failed to export report",
       "requiredFields": "Please select employee and termination date",
       "invalidDates": "Termination date must be after hire date",
-      "invalidServiceYears": "Cannot calculate service years (hire date not set)"
+      "invalidServiceYears": "Cannot calculate service years (hire date not set)",
+      "totalAmount": "Total Entitlements"
     }
   },
   "crm": {

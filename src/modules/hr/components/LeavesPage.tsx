@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Plus, CheckCircle, XCircle, Download, Printer } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, Download, Printer, Layers, Clock3 } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -176,39 +176,89 @@ export const LeavesPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Calendar size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('hr.leaves.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('hr.leaves.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-600 shadow-xl shadow-blue-900/10 dark:shadow-blue-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-blue-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('hr.leaves.title')}
+            </span>
           </div>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('hr.leaves.title')}</h2>
+              <p className="text-blue-100/80 text-base max-w-lg">{t('hr.leaves.subtitle')}</p>
+            </div>
+            <Can action="create" module="hr">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.leaves.request')}</Button>
+            </Can>
+          </div>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="form-control w-auto"
-          title={t('hr.leaves.status')}
-        >
-          <option value="">{t('settings.common.all')}</option>
-          <option value="pending">{t('hr.leaves.pending')}</option>
-          <option value="approved">{t('hr.leaves.approved')}</option>
-          <option value="rejected">{t('hr.leaves.rejected')}</option>
-        </select>
-        <Button variant="secondary" size="sm" leftIcon={<Download size={16} />} onClick={handleExportExcel}>Excel</Button>
-        <Button variant="secondary" size="sm" leftIcon={<Download size={16} />} onClick={handleExportPDF}>PDF</Button>
-        <Button variant="secondary" size="sm" leftIcon={<Printer size={16} />} onClick={handlePrint}>{t('settings.common.print')}</Button>
-        <Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)}>{t('hr.leaves.request')}</Button></Can>
-      </div>
-    </div>
 
-      <Card>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('hr.leaves.totalCount'), value: String(total), icon: Layers, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('hr.leaves.pending'), value: String(leaves.filter((l) => l.status === 'pending').length), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('hr.leaves.approved'), value: String(leaves.filter((l) => l.status === 'approved').length), icon: CheckCircle, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('hr.leaves.rejected'), value: String(leaves.filter((l) => l.status === 'rejected').length), icon: XCircle, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-blue-500/30">
+        <span className="text-xs text-slate-500 font-medium">{t('hr.leaves.status')}:</span>
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          {[
+            { v: '', l: t('settings.common.all') },
+            { v: 'pending', l: t('hr.leaves.pending') },
+            { v: 'approved', l: t('hr.leaves.approved') },
+            { v: 'rejected', l: t('hr.leaves.rejected') },
+          ].map((o) => (
+            <button
+              key={o.v || 'all'}
+              onClick={() => setStatusFilter(o.v)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-300'}`}
+            >{o.l}</button>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Button variant="ghost" onClick={handleExportExcel} title="Excel"><Download size={16} className="text-emerald-600" /></Button>
+          <Button variant="ghost" onClick={handleExportPDF} title="PDF"><Download size={16} className="text-rose-600" /></Button>
+          <Button variant="ghost" onClick={handlePrint} title={t('settings.common.print')}><Printer size={16} className="text-slate-600" /></Button>
+        </div>
+      </Card>
+
+      <Card noPadding>
         {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
         ) : leaves.length === 0 ? (
-          <EmptyState icon="inbox" title={t('hr.leaves.emptyTitle')} description={t('hr.leaves.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)}>{t('hr.leaves.request')}</Button></Can>} />
+          <div className="py-8">
+            <EmptyState icon="inbox" title={t('hr.leaves.emptyTitle')} description={t('hr.leaves.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)}>{t('hr.leaves.request')}</Button></Can>} />
+          </div>
         ) : (
           <>
             <Table<Leave>
@@ -217,7 +267,9 @@ export const LeavesPage: React.FC = () => {
               keyExtractor={(row) => row.id}
               emptyMessage={t('hr.leaves.emptyMessage')}
             />
-            <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
           </>
         )}
       </Card>

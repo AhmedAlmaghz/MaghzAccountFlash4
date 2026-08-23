@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LogOut, Plus, Printer, Calculator, Download } from 'lucide-react';
+import { LogOut, Plus, Printer, Calculator, Download, Layers, CheckCircle2, Wallet } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
@@ -177,37 +177,91 @@ export const EndOfServicePage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <LogOut size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('hr.eos.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('hr.eos.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-orange-700 via-orange-600 to-amber-600 shadow-xl shadow-orange-900/10 dark:shadow-orange-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-orange-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('hr.eos.title')}
+            </span>
           </div>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('hr.eos.title')}</h2>
+              <p className="text-orange-100/80 text-base max-w-lg">{t('hr.eos.subtitle')}</p>
+            </div>
+            <Can action="create" module="hr">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.eos.newCalculation')}</Button>
+            </Can>
+          </div>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="form-control w-auto"
-          title={t('hr.eos.status')}
-        >
-          <option value="">{t('settings.common.all')}</option>
-          <option value="draft">{t('hr.eos.draft')}</option>
-          <option value="approved">{t('hr.eos.approved')}</option>
-        </select>
-        <Button variant="secondary" size="sm" leftIcon={<Download size={16} />} onClick={handleExportExcel}>Excel</Button>
-        <Button variant="secondary" size="sm" leftIcon={<Download size={16} />} onClick={handleExportPDF}>PDF</Button>
-        <Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)}>{t('hr.eos.newCalculation')}</Button></Can>
-      </div>
-    </div>
 
-      <Card>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('settings.common.all'), value: String(total), icon: Layers, color: 'from-orange-600 to-orange-700', bg: 'bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/10 dark:to-orange-800/5' },
+          { label: t('hr.eos.draft'), value: String(items.filter((i) => i.status === 'draft').length), icon: Calculator, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
+          { label: t('hr.eos.approved'), value: String(items.filter((i) => i.status === 'approved').length), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('hr.eos.totalAmount') || 'إجمالي المستحقات', value: formatCurrency(items.reduce((s, i) => s + Number(i.eosAmount || 0), 0)), icon: Wallet, color: 'from-violet-600 to-violet-700', bg: 'bg-gradient-to-br from-violet-50 to-violet-100 dark:from-violet-900/10 dark:to-violet-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-lg md:text-xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-orange-500/30">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <div>
+            <span className="text-xs text-slate-500 font-medium">{t('hr.eos.status')}:</span>
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              {[
+                { v: '', l: t('settings.common.all') },
+                { v: 'draft', l: t('hr.eos.draft') },
+                { v: 'approved', l: t('hr.eos.approved') },
+              ].map((o) => (
+                <button
+                  key={o.v || 'all'}
+                  onClick={() => setStatusFilter(o.v)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-orange-600 text-white border-orange-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-orange-300'}`}
+                >{o.l}</button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mr-auto">
+            <Button variant="ghost" onClick={handleExportExcel} title="Excel"><Download size={16} className="text-emerald-600" /></Button>
+            <Button variant="ghost" onClick={handleExportPDF} title="PDF"><Download size={16} className="text-rose-600" /></Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card noPadding>
         {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
         ) : items.length === 0 ? (
-          <EmptyState icon="file" title={t('hr.eos.emptyTitle')} description={t('hr.eos.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)}>{t('hr.eos.newCalculation')}</Button></Can>} />
+          <div className="py-8">
+            <EmptyState icon="file" title={t('hr.eos.emptyTitle')} description={t('hr.eos.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)}>{t('hr.eos.newCalculation')}</Button></Can>} />
+          </div>
         ) : (
           <>
             <Table<EndOfService>
@@ -216,7 +270,9 @@ export const EndOfServicePage: React.FC = () => {
               keyExtractor={(row) => row.id}
               emptyMessage={t('hr.eos.emptyMessage')}
             />
-            <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
           </>
         )}
       </Card>

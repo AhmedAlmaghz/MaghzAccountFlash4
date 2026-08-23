@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { UserCheck, Plus, CalendarDays, CheckSquare, Download, Printer } from 'lucide-react';
+import { UserCheck, Plus, CalendarDays, CheckSquare, Download, Printer, Layers, Clock } from 'lucide-react';
 import { Card, Button, Input, Table, Modal, Can } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { exportToPDF, exportToExcel } from '@/core/utils/exportEngine';
@@ -161,35 +161,76 @@ export const AttendancePage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <UserCheck size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('hr.attendancePage.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('hr.attendancePage.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-600 shadow-xl shadow-emerald-900/10 dark:shadow-emerald-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-emerald-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('hr.attendancePage.title')}
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('hr.attendancePage.title')}</h2>
+              <p className="text-emerald-100/80 text-base max-w-lg">{t('hr.attendancePage.subtitle')}</p>
+            </div>
+            <Can action="create" module="hr">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openModal} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.attendancePage.title')}</Button>
+            </Can>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-40" />
-          <Button variant="secondary" leftIcon={<Download size={16} />} onClick={handleExportExcel}>{t('settings.common.export')}</Button>
-          <Button variant="secondary" leftIcon={<Printer size={16} />} onClick={handleExportPDF}>{t('settings.common.print')}</Button>
-          <Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openModal}>{t('hr.attendancePage.title')}</Button></Can>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('hr.attendancePage.present'), value: String(presentCount), icon: UserCheck, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('hr.attendancePage.absent'), value: String(absentCount), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+          { label: t('hr.attendancePage.late'), value: String(lateCount), icon: Clock, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('hr.attendancePage.totalHours'), value: String(Math.round(totalHours)), icon: CalendarDays, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-emerald-500/30">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-44" aria-label={t('hr.attendancePage.table.date')} />
+          <div className="flex items-center gap-2 mr-auto">
+            <Button variant="ghost" onClick={handleExportExcel} title={t('settings.common.export')}><Download size={16} className="text-emerald-600" /></Button>
+            <Button variant="ghost" onClick={handleExportPDF} title={t('settings.common.print')}><Printer size={16} className="text-rose-600" /></Button>
+          </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label={t('hr.attendancePage.present')} value={String(presentCount)} color="bg-emerald-500" />
-        <StatCard label={t('hr.attendancePage.absent')} value={String(absentCount)} color="bg-rose-500" />
-        <StatCard label={t('hr.attendancePage.late')} value={String(lateCount)} color="bg-amber-500" />
-        <StatCard label={t('hr.attendancePage.totalHours')} value={String(Math.round(totalHours))} color="bg-blue-500" />
-      </div>
-
-      <Card>
+      <Card noPadding>
         {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
         ) : filteredRecords.length === 0 ? (
-          <EmptyState icon="file" title={t('hr.attendancePage.emptyTitle')} description={t('hr.attendancePage.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openModal}>{t('hr.attendancePage.title')}</Button></Can>} />
+          <div className="py-8">
+            <EmptyState icon="file" title={t('hr.attendancePage.emptyTitle')} description={t('hr.attendancePage.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openModal}>{t('hr.attendancePage.title')}</Button></Can>} />
+          </div>
         ) : (
           <Table<AttendanceRecord>
             data={filteredRecords}
@@ -247,20 +288,6 @@ export const AttendancePage: React.FC = () => {
     </div>
   );
 };
-
-function StatCard({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="card flex items-center gap-4">
-      <div className={`w-12 h-12 ${color} rounded-lg flex items-center justify-center text-white`}>
-        <CalendarDays size={24} />
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{value}</p>
-        <p className="text-sm text-slate-500">{label}</p>
-      </div>
-    </div>
-  );
-}
 
 const statusLabel = (status: string, t: (key: string) => string) => {
   const labels: Record<string, string> = { present: t('hr.attendancePage.status.present'), absent: t('hr.attendancePage.status.absent'), late: t('hr.attendancePage.status.late'), on_leave: t('hr.attendancePage.status.onLeave') };
