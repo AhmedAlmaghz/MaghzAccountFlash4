@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Banknote, Plus, CheckSquare, Users } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Banknote, Plus, CheckSquare, Users, Hash, Search, X, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { Card, Button, Modal, Input, Table, Badge } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
@@ -18,19 +18,33 @@ import { useCurrencyDisplay } from '@/core/utils/useCurrencyDisplay';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { useUserMap } from '@/core/utils/useUserMap';
+import { EmptyState } from '@/core/ui/components/EmptyState';
+import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { ReceiptVoucher } from '../types';
 import { useToastStore } from '@/core/store/toastStore';
+
+type FormErrors = Partial<Record<'customerId' | 'amount' | 'date' | 'voucherNumber', string>>;
 
 export const ReceiptVouchersPage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
-  const activeCompany = useAppStore(state => state.activeCompany);
+  const activeCompany = useAppStore((state) => state.activeCompany);
+  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const voucherFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
-  const { vouchers, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useReceiptVouchersPaginated(activeCompany?.id || '', voucherFilters);
+  const [methodFilter, setMethodFilter] = useState<string>('');
+  const voucherFilters = useMemo(
+    () => ({
+      status: statusFilter || undefined,
+      search: search || undefined,
+      paymentMethod: methodFilter || undefined,
+    }),
+    [statusFilter, search, methodFilter],
+  );
+  const { vouchers, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } =
+    useReceiptVouchersPaginated(activeCompany?.id || '', voucherFilters);
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
-  const { formatCurrency } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const { currencies, defaultCurrency } = useCurrencyDisplay();
   const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
@@ -40,41 +54,62 @@ export const ReceiptVouchersPage: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<Partial<ReceiptVoucher> & { amountApplied?: number; baseCurrencyApplied?: number; invoiceId?: string }>({ paymentMethod: 'cash', status: 'draft', date: new Date().toISOString().split('T')[0] });
-  const { invoices: outstandingInvoices, isLoading: invoicesLoading } = useOutstandingInvoicesForCustomer(activeCompany?.id || '', form.customerId || '');
+  const [form, setForm] = useState<
+    Partial<ReceiptVoucher> & { amountApplied?: number; baseCurrencyApplied?: number; invoiceId?: string }
+  >({ paymentMethod: 'cash', status: 'draft', date: new Date().toISOString().split('T')[0] });
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const { invoices: outstandingInvoices, isLoading: invoicesLoading } = useOutstandingInvoicesForCustomer(
+    activeCompany?.id || '',
+    form.customerId || '',
+  );
   const [confirmDelete, setConfirmDelete] = useState<ReceiptVoucher | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handlePrint = (voucher: ReceiptVoucher) => {
-    printDocument({
-      type: 'receipt-voucher',
-      docNumber: voucher.voucherNumber,
-      date: voucher.date,
-      partyName: voucher.customerName,
-      partyLabel: t('accounting.customer'),
-      lines: [{
-        description: t('accounting.receiptVouchers'),
-        productName: voucher.customerName,
-        quantity: 1,
-        unitPrice: voucher.amount,
-        total: voucher.amount,
-      }],
-      subtotal: voucher.amount,
-      vatAmount: 0,
-      totalAmount: voucher.amount,
-      notes: voucher.notes,
-      companyName: activeCompany?.name,
-      companyTaxNumber: activeCompany?.taxNumber,
-      companyAddress: activeCompany?.address,
-      companyPhone: activeCompany?.phone,
-      companyEmail: activeCompany?.email,
-      currency: currencySymbol,
-      paymentMethod: voucher.paymentMethod === 'cash' ? 'نقداً' : voucher.paymentMethod === 'bank' ? 'تحويل بنكي' : 'شيك',
-      checkNumber: voucher.checkNumber,
-      checkDate: voucher.checkDate,
-      createdBy: voucher.createdBy,
-    });
-  };
+  const validateForm = useCallback((): boolean => {
+    const e: FormErrors = {};
+    if (!form.customerId) e.customerId = t('validation.required') || 'مطلوب';
+    if (!form.amount || Number(form.amount) <= 0) e.amount = t('accounting.enterAmount') || 'مبلغ غير صحيح';
+    if (!form.date) e.date = t('validation.required') || 'مطلوب';
+    if (form.invoiceId && Number(form.amountApplied || 0) > Number(form.amount || 0)) e.amount = 'المبلغ المطبق لا يمكن أن يتجاوز مبلغ السند';
+    setFormErrors(e);
+    return Object.keys(e).length === 0;
+  }, [form, t]);
+
+  const handlePrint = useCallback(
+    (voucher: ReceiptVoucher) => {
+      printDocument({
+        type: 'receipt-voucher',
+        docNumber: voucher.voucherNumber,
+        date: voucher.date,
+        partyName: voucher.customerName,
+        partyLabel: t('accounting.customer'),
+        lines: [
+          {
+            description: t('accounting.receiptVouchers'),
+            productName: voucher.customerName,
+            quantity: 1,
+            unitPrice: voucher.amount,
+            total: voucher.amount,
+          },
+        ],
+        subtotal: voucher.amount,
+        vatAmount: 0,
+        totalAmount: voucher.amount,
+        notes: voucher.notes,
+        companyName: activeCompany?.name,
+        companyTaxNumber: activeCompany?.taxNumber,
+        companyAddress: activeCompany?.address,
+        companyPhone: activeCompany?.phone,
+        companyEmail: activeCompany?.email,
+        currency: voucher.currencyCode || currencySymbol,
+        paymentMethod: voucher.paymentMethod === 'cash' ? 'نقداً' : voucher.paymentMethod === 'bank' ? 'تحويل بنكي' : 'شيك',
+        checkNumber: voucher.checkNumber,
+        checkDate: voucher.checkDate,
+        createdBy: voucher.createdBy ? getUserName(voucher.createdBy) : undefined,
+      });
+    },
+    [t, activeCompany, currencySymbol, getUserName],
+  );
 
   const handlePost = async (voucher: ReceiptVoucher) => {
     if (!activeCompany?.id) return;
@@ -97,16 +132,11 @@ export const ReceiptVouchersPage: React.FC = () => {
 
   const handleSave = async () => {
     if (!activeCompany?.id) return;
-    if (!form.customerId) {
-      addToast('error', t('accounting.selectCustomer'));
-      return;
-    }
-    if (!form.amount || Number(form.amount) <= 0) {
-      addToast('error', t('accounting.enterAmount'));
+    if (!validateForm()) {
+      addToast('error', t('validation.required') || 'يرجى تصحيح الحقول');
       return;
     }
     setIsSaving(true);
-    
     let voucherNumber = form.voucherNumber || '';
     if (!isEditMode || !editingId) {
       const seq = await getNextNumber('receipt_voucher', activeCompany.id);
@@ -122,15 +152,15 @@ export const ReceiptVouchersPage: React.FC = () => {
       companyId: activeCompany.id,
       voucherNumber,
       date: form.date || new Date().toISOString().split('T')[0],
-      customerId: form.customerId,
+      customerId: form.customerId!,
       customerName: form.customerName || '',
       invoiceId: form.invoiceId || undefined,
       amount: Number(form.amount) || 0,
-      amountApplied: form.invoiceId ? (Number(form.amountApplied) || Number(form.amount) || 0) : 0,
+      amountApplied: form.invoiceId ? Number(form.amountApplied) || Number(form.amount) || 0 : 0,
       currencyCode: form.currencyCode || YER_CODE,
       exchangeRate: form.exchangeRate ?? 1,
       baseCurrencyAmount: (Number(form.amount) || 0) * (form.exchangeRate ?? 1),
-      baseCurrencyApplied: form.invoiceId ? ((Number(form.amountApplied) || Number(form.amount) || 0) * (form.exchangeRate ?? 1)) : 0,
+      baseCurrencyApplied: form.invoiceId ? (Number(form.amountApplied) || Number(form.amount) || 0) * (form.exchangeRate ?? 1) : 0,
       paymentMethod: form.paymentMethod || 'cash',
       bankAccountId: form.bankAccountId || undefined,
       cashBoxId: form.cashBoxId || undefined,
@@ -141,12 +171,9 @@ export const ReceiptVouchersPage: React.FC = () => {
     };
 
     let result;
-    if (isEditMode && editingId) {
-      result = await update(editingId, payload);
-    } else {
-      result = await create(payload);
-    }
-    
+    if (isEditMode && editingId) result = await update(editingId, payload);
+    else result = await create(payload);
+
     setIsSaving(false);
     if (result?.success) {
       addToast('success', t(isEditMode ? 'accounting.receiptVoucher.updated' : 'accounting.receiptVoucher.created'));
@@ -159,11 +186,11 @@ export const ReceiptVouchersPage: React.FC = () => {
 
   const handleCurrencyChange = (code: string | null) => {
     if (!code) {
-      setForm(prev => ({ ...prev, currencyCode: YER_CODE, exchangeRate: 1 }));
+      setForm((prev) => ({ ...prev, currencyCode: YER_CODE, exchangeRate: 1 }));
       return;
     }
     const c = currencies.find((x) => x.code === code);
-    setForm(prev => ({ ...prev, currencyCode: code, exchangeRate: c ? c.exchangeRate : 1 }));
+    setForm((prev) => ({ ...prev, currencyCode: code, exchangeRate: c ? c.exchangeRate : 1 }));
   };
 
   const resetForm = () => {
@@ -176,245 +203,560 @@ export const ReceiptVouchersPage: React.FC = () => {
       cashBoxId: defaultCashBoxId || undefined,
       bankAccountId: undefined,
     });
+    setFormErrors({});
     setIsEditMode(false);
     setEditingId(null);
   };
 
   const handleEdit = (voucher: ReceiptVoucher) => {
+    if (voucher.status === 'posted') {
+      addToast('error', 'لا يمكن تعديل سند مرحّل');
+      return;
+    }
     setForm({ ...voucher });
     setEditingId(voucher.id);
     setIsEditMode(true);
+    setFormErrors({});
     setIsOpen(true);
   };
 
-  const totalCash = vouchers.filter(v => v.status === 'posted' && v.paymentMethod === 'cash').reduce((s, v) => s + v.amount, 0);
-  const totalBank = vouchers.filter(v => v.status === 'posted' && v.paymentMethod === 'bank').reduce((s, v) => s + v.amount, 0);
+  const handleExportExcel = useCallback(() => {
+    const cols = [
+      { key: 'voucherNumber', header: t('accounting.voucherNumber'), width: 16 },
+      { key: 'date', header: t('accounting.date'), width: 14 },
+      { key: 'customerName', header: t('accounting.customer'), width: 24 },
+      { key: 'amount', header: t('accounting.amount'), width: 14 },
+      { key: 'paymentMethod', header: t('accounting.paymentMethod'), width: 14 },
+      { key: 'status', header: t('accounting.status'), width: 12 },
+    ];
+    exportToExcel(
+      vouchers.map((v) => ({
+        voucherNumber: v.voucherNumber,
+        date: v.date,
+        customerName: v.customerName,
+        amount: v.amount,
+        paymentMethod: v.paymentMethod === 'cash' ? t('accounting.cash') : v.paymentMethod === 'bank' ? t('accounting.bank') : t('accounting.check'),
+        status: v.status === 'posted' ? t('accounting.posted') : v.status === 'draft' ? t('accounting.draft') : t('accounting.cancelled'),
+      })),
+      cols,
+      `receipt_vouchers_${new Date().toISOString().split('T')[0]}`,
+    );
+  }, [vouchers, t]);
 
-  const columns = [
-    { key: 'voucherNumber', header: t('accounting.voucherNumber') },
-    { key: 'date', header: t('accounting.date') },
-    { key: 'customerName', header: t('accounting.customer'), render: (row: ReceiptVoucher) => (
-      <span className="flex items-center gap-1"><Users size={14} /> {row.customerName}</span>
-    )},
-    { key: 'amount', header: t('accounting.amount'), align: 'right' as const, render: (row: ReceiptVoucher) => formatCurrency(row.amount) },
-    { key: 'paymentMethod', header: t('accounting.paymentMethod'), render: (row: ReceiptVoucher) => (
-      <Badge className={
-        row.paymentMethod === 'cash' ? 'bg-emerald-100 text-emerald-700' :
-        row.paymentMethod === 'bank' ? 'bg-blue-100 text-blue-700' :
-        'bg-amber-100 text-amber-700'
-      }>
-        {row.paymentMethod === 'cash' ? t('accounting.cash') : row.paymentMethod === 'bank' ? t('accounting.bank') : t('accounting.check')}
-      </Badge>
-    )},
-    { key: 'status', header: t('sales.status.label'), render: (row: ReceiptVoucher) => (
-      <StatusBadge status={row.status} size="sm" />
-    )},
-    { key: 'createdBy', header: t('accounting.createdBy'), width: '110px', render: (row: ReceiptVoucher) => (
-      <span className="text-xs text-slate-600 dark:text-slate-400">{getUserName(row.createdBy)}</span>
-    ) },
-    { key: 'actions', header: t('edit'), render: (row: ReceiptVoucher) => (
-      <div className="flex items-center gap-2">
-        <ActionButtons
-          size="sm"
-          onView={() => {}}
-          onEdit={() => handleEdit(row)}
-          onDelete={() => setConfirmDelete(row)}
-          onPreview={() => handlePrint(row)}
-          onPrint={() => handlePrint(row)}
-          showView={false}
-          showPreview
-          showPrint
-          showExport={false}
-          disabledEdit={row.status === 'posted'}
-          disabledDelete={row.status === 'posted'}
-        />
-        {row.status === 'draft' && (
-          <Button
-            size="sm"
-            variant="secondary"
-            leftIcon={<CheckSquare size={14} />}
-            onClick={() => handlePost(row)}
-            disabled={postingId === row.id}
+  const handleExportPdf = useCallback(() => {
+    const cols = [
+      { key: 'voucherNumber', header: t('accounting.voucherNumber') },
+      { key: 'customerName', header: t('accounting.customer') },
+      { key: 'amount', header: t('accounting.amount') },
+      { key: 'status', header: t('accounting.status') },
+    ];
+    exportToPDF(
+      vouchers.map((v) => ({
+        voucherNumber: v.voucherNumber,
+        customerName: v.customerName,
+        amount: formatCurrency(v.amount),
+        status: v.status,
+      })),
+      cols,
+      `receipt_vouchers_${new Date().toISOString().split('T')[0]}`,
+      { title: t('accounting.receiptVouchers'), rtl: true, companyName: activeCompany?.name },
+    );
+  }, [vouchers, t, formatCurrency, activeCompany?.name]);
+
+  const totalCash = useMemo(() => vouchers.filter((v) => v.status === 'posted' && v.paymentMethod === 'cash').reduce((s, v) => s + v.amount, 0), [vouchers]);
+  const totalBank = useMemo(() => vouchers.filter((v) => v.status === 'posted' && v.paymentMethod === 'bank').reduce((s, v) => s + v.amount, 0), [vouchers]);
+  const draftCount = useMemo(() => vouchers.filter((v) => v.status === 'draft').length, [vouchers]);
+  const hasActiveFilter = search.trim().length > 0 || statusFilter || methodFilter;
+
+  const columns = useMemo(
+    () => [
+      {
+        key: 'voucherNumber',
+        header: t('accounting.voucherNumber'),
+        width: '145px',
+        render: (row: ReceiptVoucher) => (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+              <Hash size={11} className="text-slate-400" />
+              {row.voucherNumber}
+            </span>
+            {row.invoiceId && <span title={t('accounting.invoiceLinked')}><Paperclip size={12} className="text-primary-500" /></span>}
+          </div>
+        ),
+      },
+      {
+        key: 'date',
+        header: t('accounting.date'),
+        width: '120px',
+        render: (row: ReceiptVoucher) => <span className="tabular-nums text-xs text-slate-700 dark:text-slate-300">{row.date ? formatDate(row.date) : '-'}</span>,
+      },
+      {
+        key: 'customerName',
+        header: t('accounting.customer'),
+        render: (row: ReceiptVoucher) => (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+              {row.customerName?.charAt(0) || '?'}
+            </div>
+            <span className="font-medium text-slate-900 dark:text-slate-100 truncate">{row.customerName}</span>
+          </div>
+        ),
+      },
+      {
+        key: 'amount',
+        header: t('accounting.amount'),
+        align: 'right' as const,
+        render: (row: ReceiptVoucher) => (
+          <div className="text-end">
+            <p className="font-bold tabular-nums text-slate-900 dark:text-slate-100">{formatCurrency(row.amount)}</p>
+            <p className="text-[11px] text-slate-500 flex items-center justify-end gap-1">
+              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border text-[10px]">{row.currencyCode || YER_CODE}</span>
+              {row.invoiceId ? <span className="text-emerald-600">• مرتبط</span> : null}
+            </p>
+          </div>
+        ),
+      },
+      {
+        key: 'paymentMethod',
+        header: t('accounting.paymentMethod'),
+        width: '115px',
+        render: (row: ReceiptVoucher) => (
+          <Badge
+            className={
+              row.paymentMethod === 'cash'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800 border'
+                : row.paymentMethod === 'bank'
+                  ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800 border'
+                  : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800 border'
+            }
           >
-            {postingId === row.id ? t('accounting.posting') : t('accounting.posted')}
-          </Button>
-        )}
-      </div>
-    )},
-  ];
+            {row.paymentMethod === 'cash' ? t('accounting.cash') : row.paymentMethod === 'bank' ? t('accounting.bank') : t('accounting.check')}
+          </Badge>
+        ),
+      },
+      {
+        key: 'status',
+        header: t('sales.status.label'),
+        width: '110px',
+        render: (row: ReceiptVoucher) => <StatusBadge status={row.status} size="sm" />,
+      },
+      {
+        key: 'createdBy',
+        header: t('accounting.createdBy'),
+        width: '110px',
+        render: (row: ReceiptVoucher) => <span className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[100px] inline-block">{getUserName(row.createdBy)}</span>,
+      },
+      {
+        key: 'actions',
+        header: t('edit'),
+        width: '170px',
+        render: (row: ReceiptVoucher) => (
+          <div className="flex items-center gap-1.5">
+            <ActionButtons
+              size="sm"
+              onView={() => {}}
+              onEdit={() => handleEdit(row)}
+              onDelete={() => setConfirmDelete(row)}
+              onPreview={() => handlePrint(row)}
+              onPrint={() => handlePrint(row)}
+              showView={false}
+              showPreview
+              showPrint
+              showExport={false}
+              disabledEdit={row.status === 'posted'}
+              disabledDelete={row.status === 'posted'}
+            />
+            {row.status === 'draft' && (
+              <Button size="sm" variant="secondary" leftIcon={<CheckSquare size={13} />} onClick={() => handlePost(row)} disabled={postingId === row.id} className="h-7 text-xs px-2">
+                {postingId === row.id ? t('accounting.posting') : 'ترحيل'}
+              </Button>
+            )}
+          </div>
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, formatCurrency, formatDate, getUserName, postingId],
+  );
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Banknote size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('accounting.receiptVouchers')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('accounting.newReceiptVoucher')}</p>
-          </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <select className="input text-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} title={t('accounting.status')}>
-          <option value="">{t('accounting.all')}</option>
-          <option value="draft">{t('accounting.draft')}</option>
-          <option value="posted">{t('accounting.posted')}</option>
-        </select>
-        <Can action="create" module="accounting">
-          <Button leftIcon={<Plus size={18} />} onClick={() => { resetForm(); setIsOpen(true); }}>{t('accounting.newReceiptVoucher')}</Button>
-        </Can>
-      </div>
-    </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <div className="p-4 text-center">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('accounting.totalCashReceipts')}</p>
-            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(totalCash)} {currencySymbol}</p>
-          </div>
-        </Card>
-        <Card>
-          <div className="p-4 text-center">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('accounting.totalBankReceipts')}</p>
-            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(totalBank)} {currencySymbol}</p>
-          </div>
-        </Card>
-        <Card>
-          <div className="p-4 text-center">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t('accounting.voucherCount')}</p>
-            <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{vouchers.length}</p>
-          </div>
-        </Card>
-      </div>
-
-      <Card>
-        <Table
-          data={vouchers}
-          columns={columns}
-          keyExtractor={(row) => row.id}
-          isLoading={isLoading}
-          emptyMessage={t('accounting.noData')}
-        />
-        <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
-      </Card>
-
-      <Modal isOpen={isOpen} title={isEditMode ? t('accounting.editVoucher') : t('accounting.newReceiptVoucher')} onClose={() => setIsOpen(false)} size="md">
-        <div className="space-y-4">
-          <Input label={t('accounting.voucherNumber')} value={form.voucherNumber || ''} onChange={e => setForm({ ...form, voucherNumber: e.target.value })} />
-          <Input label={t('accounting.date')} type="date" value={form.date || ''} onChange={e => setForm({ ...form, date: e.target.value })} />
-          <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.customer')}</label>
-            <CustomerSelect companyId={activeCompany?.id || ''} value={form.customerId || ''} onChange={v => setForm({ ...form, customerId: v || '', invoiceId: undefined, amountApplied: 0 })} />
-          </div>
-          {form.customerId && (
+    <div className="space-y-5 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 dark:from-emerald-600 dark:to-emerald-700 flex items-center justify-center shadow-sm">
+              <Banknote size={22} className="text-white" />
+            </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
-                {t('accounting.applyToInvoice')}
-              </label>
-              <select
-                className="form-control w-full"
-                value={form.invoiceId || ''}
-                onChange={e => {
-                  const newInvoiceId = e.target.value || undefined;
-                  setForm(prev => {
-                    const selectedInvoice = outstandingInvoices.find(inv => inv.id === newInvoiceId);
-                    const newAmountApplied = selectedInvoice
-                      ? Math.max(0, (selectedInvoice.totalAmount || 0) - (selectedInvoice.paidAmount || 0))
-                      : 0;
-                    return {
-                      ...prev,
-                      invoiceId: newInvoiceId,
-                      amountApplied: newInvoiceId ? newAmountApplied : 0,
-                    };
-                  });
-                }}
-                disabled={invoicesLoading}
-                aria-label={t('accounting.applyToInvoice')}
-              >
-                <option value="">{t('accounting.onAccount')}</option>
-                {outstandingInvoices.map(inv => {
-                  const outstanding = (inv.totalAmount || 0) - (inv.paidAmount || 0);
-                  return (
-                    <option key={inv.id} value={inv.id}>
-                      {inv.invoiceNumber} - {formatCurrency(outstanding)} {inv.currencyCode || ''}
-                    </option>
-                  );
-                })}
-              </select>
-              {form.invoiceId && (
-                <p className="text-xs text-slate-500 mt-1">
-                  {t('accounting.amountWillBeApplied')}
-                </p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('accounting.receiptVouchers')}</h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400">سندات القبض — تحصيلات العملاء نقداً / بنكاً / شيكات</p>
+            </div>
+          </div>
+          <Can action="create" module="accounting">
+            <Button leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }} className="shadow-sm self-start sm:self-auto">
+              {t('accounting.newReceiptVoucher')}
+            </Button>
+          </Can>
+        </div>
+
+        <Card className="p-3 sm:p-4">
+          <div className="flex flex-col xl:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={`${t('search')} — ${t('accounting.voucherNumber')} / ${t('accounting.customer')}`}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
+                  <X size={14} />
+                </button>
               )}
             </div>
-          )}
-          <Input label={t('accounting.amount')} type="number" value={String(form.amount || '')} onChange={e => setForm({ ...form, amount: Number(e.target.value) })} />
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.currency')}</label>
-              <CurrencySelect companyId={activeCompany?.id || ''} value={form.currencyCode || YER_CODE} onChange={handleCurrencyChange} />
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+                {[
+                  { v: '', l: t('accounting.all') },
+                  { v: 'draft', l: t('accounting.draft') },
+                  { v: 'posted', l: t('accounting.posted') },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => setStatusFilter(o.v)}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${statusFilter === o.v ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+                {[
+                  { v: '', l: 'الكل' },
+                  { v: 'cash', l: t('accounting.cash') },
+                  { v: 'bank', l: t('accounting.bank') },
+                  { v: 'check', l: t('accounting.check') },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => setMethodFilter(o.v)}
+                    className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition ${methodFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
+                <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
+                <Receipt size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
+              </Button>
             </div>
-            <Input
-              label={t('sales.exchangeRate')}
-              type="number"
-              min={0}
-              step="0.0001"
-              value={String(form.exchangeRate ?? 1)}
-              onChange={e => setForm({ ...form, exchangeRate: Number(e.target.value) || 1 })}
-            />
+          </div>
+          {hasActiveFilter && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+              <span>
+                {total} سند • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter}` : ''} {methodFilter ? `• ${methodFilter}` : ''}
+              </span>
+              <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
+                مسح الفلترة
+              </button>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="relative overflow-hidden">
+          <div className="p-5 flex items-center justify-between">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.baseCurrency')}</label>
-              <div className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-md text-sm font-medium text-slate-700 dark:text-slate-200">
-                {formatCurrency((Number(form.amount) || 0) * (form.exchangeRate ?? 1))} <span className="text-slate-500">{currencySymbol}</span>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalCashReceipts')}</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(totalCash)}</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • مرحّلة نقداً</p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center">
+              <Wallet size={20} className="text-emerald-600 dark:text-emerald-400" />
+            </div>
+          </div>
+          <div className="h-1 bg-gradient-to-r from-emerald-500 to-emerald-600" />
+        </Card>
+        <Card className="relative overflow-hidden">
+          <div className="p-5 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalBankReceipts')}</p>
+              <p className="mt-1 text-2xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totalBank)}</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • مرحّلة بنكاً</p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 flex items-center justify-center">
+              <Landmark size={20} className="text-blue-600 dark:text-blue-400" />
+            </div>
+          </div>
+          <div className="h-1 bg-gradient-to-r from-blue-500 to-blue-600" />
+        </Card>
+        <Card className="relative overflow-hidden">
+          <div className="p-5 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.voucherCount')}</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
+              <p className="text-xs text-slate-500 mt-1">{draftCount} مسودة • {total - draftCount} مرحّل</p>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+              <FileText size={20} className="text-slate-600 dark:text-slate-400" />
+            </div>
+          </div>
+          <div className="h-1 bg-slate-200 dark:bg-slate-700" />
+        </Card>
+      </div>
+
+      <Card noPadding>
+        {isLoading ? (
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : vouchers.length === 0 ? (
+          <div className="py-8">
+            <EmptyState
+              icon={hasActiveFilter ? 'search' : 'inbox'}
+              title={hasActiveFilter ? 'لا توجد نتائج' : t('accounting.noData')}
+              description={hasActiveFilter ? 'جرّب تغيير البحث أو الفلترة' : 'أنشئ أول سند قبض'}
+              action={
+                hasActiveFilter ? (
+                  <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }}>
+                    مسح الفلترة
+                  </Button>
+                ) : (
+                  <Can action="create" module="accounting">
+                    <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }}>
+                      {t('accounting.newReceiptVoucher')}
+                    </Button>
+                  </Can>
+                )
+              }
+            />
+          </div>
+        ) : (
+          <>
+            <Table data={vouchers} columns={columns as never} keyExtractor={(row) => row.id} isLoading={isLoading} emptyMessage={t('accounting.noData')} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Modal
+        isOpen={isOpen}
+        title={isEditMode ? t('accounting.editVoucher') : t('accounting.newReceiptVoucher')}
+        description={isEditMode ? 'تعديل سند القبض — لا يمكن تعديل الحقول المرتبطة بعد الترحيل' : 'إنشاء سند قبض جديد — اختر العميل وطريقة القبض'}
+        onClose={() => {
+          setIsOpen(false);
+          resetForm();
+        }}
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
+              <AlertCircle size={12} /> الحقول المميزة بـ * مطلوبة
+            </p>
+            <div className="flex gap-2 ml-auto">
+              <Button variant="secondary" onClick={() => { setIsOpen(false); resetForm(); }}>
+                {t('cancel')}
+              </Button>
+              <Button onClick={handleSave} isLoading={isSaving} leftIcon={<CheckSquare size={16} />}>
+                {t('save')}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          {/* Voucher info */}
+          <div>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
+              <Hash size={12} /> بيانات السند
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Input label={`${t('accounting.voucherNumber')} (تلقائي)`} value={form.voucherNumber || ''} onChange={(e) => setForm({ ...form, voucherNumber: e.target.value })} placeholder="تلقائي" error={formErrors.voucherNumber} helperText={!isEditMode ? 'يُنشأ تلقائياً عند الحفظ' : undefined} />
+              <Input label={`${t('accounting.date')} *`} type="date" value={form.date || ''} onChange={(e) => setForm({ ...form, date: e.target.value })} error={formErrors.date} required />
+              <div>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">الحالة</label>
+                <div className="h-[42px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center px-3">
+                  <StatusBadge status={(form.status as string) || 'draft'} size="sm" />
+                  <span className="ml-auto text-xs text-slate-500">{form.status === 'posted' ? 'مرحّل' : form.status === 'cancelled' ? 'ملغى' : 'مسودة'}</span>
+                </div>
               </div>
             </div>
           </div>
+
+          <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* Party + Invoice linking */}
           <div>
-            <label className="block text-sm mb-1">{t('accounting.paymentMethod')}</label>
-            <select className="input w-full" value={form.paymentMethod} onChange={e => {
-              const paymentMethod = e.target.value as ReceiptVoucher['paymentMethod'];
-              setForm({
-                ...form,
-                paymentMethod,
-                // Auto-select default cash box / bank when switching method
-                bankAccountId: paymentMethod === 'bank' ? (form.bankAccountId || defaultBankId || undefined) : undefined,
-                cashBoxId: paymentMethod === 'cash' ? (form.cashBoxId || defaultCashBoxId || undefined) : undefined,
-                checkNumber: paymentMethod === 'check' ? form.checkNumber : undefined,
-                checkDate: paymentMethod === 'check' ? form.checkDate : undefined,
-              });
-            }}>
-              <option value="cash">{t('accounting.cash')}</option>
-              <option value="bank">{t('accounting.bank')}</option>
-              <option value="check">{t('accounting.check')}</option>
-            </select>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
+              <Users size={12} /> العميل والربط
+            </h4>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                {t('accounting.customer')} *
+              </label>
+              <CustomerSelect companyId={activeCompany?.id || ''} value={form.customerId || ''} onChange={(v) => setForm({ ...form, customerId: v || '', invoiceId: undefined, amountApplied: 0 })} />
+              {formErrors.customerId && <p className="text-xs text-rose-600 mt-1">{formErrors.customerId}</p>}
+            </div>
+            {form.customerId && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1.5">
+                  <Paperclip size={12} /> {t('accounting.applyToInvoice')}
+                </label>
+                <select
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                  value={form.invoiceId || ''}
+                  onChange={(e) => {
+                    const newInvoiceId = e.target.value || undefined;
+                    setForm((prev) => {
+                      const selectedInvoice = outstandingInvoices.find((inv) => inv.id === newInvoiceId);
+                      const newAmountApplied = selectedInvoice ? Math.max(0, (selectedInvoice.totalAmount || 0) - (selectedInvoice.paidAmount || 0)) : 0;
+                      return { ...prev, invoiceId: newInvoiceId, amountApplied: newInvoiceId ? newAmountApplied : 0 };
+                    });
+                  }}
+                  disabled={invoicesLoading}
+                  aria-label={t('accounting.applyToInvoice')}
+                >
+                  <option value="">{t('accounting.onAccount')}</option>
+                  {outstandingInvoices.map((inv) => {
+                    const outstanding = (inv.totalAmount || 0) - (inv.paidAmount || 0);
+                    return (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoiceNumber} — {formatCurrency(outstanding)} {inv.currencyCode || ''} • {inv.date ? formatDate(inv.date) : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+                {form.invoiceId ? (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1">
+                    <CheckSquare size={12} /> {t('accounting.amountWillBeApplied')} — {formatCurrency(Number(form.amountApplied) || 0)}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-1">اختياري — اتركه فارغاً لدفعة على الحساب</p>
+                )}
+              </div>
+            )}
           </div>
-          {form.paymentMethod === 'cash' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
-              <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={v => setForm({ ...form, cashBoxId: v || '' })} />
-              {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && (
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-              )}
+
+          <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* Amount + Currency */}
+          <div>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
+              <Wallet size={12} /> المبلغ والعملة
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-1">
+                <Input
+                  label={`${t('accounting.amount')} *`}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={String(form.amount || '')}
+                  onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
+                  error={formErrors.amount}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('sales.currency')}</label>
+                <CurrencySelect companyId={activeCompany?.id || ''} value={form.currencyCode || YER_CODE} onChange={handleCurrencyChange} />
+              </div>
+              <Input
+                label={t('sales.exchangeRate')}
+                type="number"
+                min={0}
+                step="0.0001"
+                value={String(form.exchangeRate ?? 1)}
+                onChange={(e) => setForm({ ...form, exchangeRate: Number(e.target.value) || 1 })}
+              />
             </div>
-          )}
-          {form.paymentMethod === 'bank' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.bankAccount')}</label>
-              <BankSelect companyId={activeCompany?.id || ''} value={form.bankAccountId || ''} onChange={v => setForm({ ...form, bankAccountId: v || '' })} />
-              {defaultBankId && form.bankAccountId === defaultBankId && (
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-              )}
+            <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2.5 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500">{t('sales.baseCurrency')}</span>
+              <span className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
+                {formatCurrency((Number(form.amount) || 0) * (form.exchangeRate ?? 1))} <span className="text-xs font-normal text-slate-500">{currencySymbol}</span>
+              </span>
             </div>
-          )}
-          {form.paymentMethod === 'check' && (
-            <>
-              <Input label={t('accounting.checkNumber')} value={form.checkNumber || ''} onChange={e => setForm({ ...form, checkNumber: e.target.value })} />
-              <Input label={t('accounting.checkDate')} type="date" value={form.checkDate || ''} onChange={e => setForm({ ...form, checkDate: e.target.value })} />
-            </>
-          )}
-          <Input label={t('accounting.notes')} value={form.notes || ''} onChange={e => setForm({ ...form, notes: e.target.value })} />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setIsOpen(false)}>{t('cancel')}</Button>
-            <Button onClick={handleSave} isLoading={isSaving} leftIcon={<CheckSquare size={16} />}>{t('save')}</Button>
+          </div>
+
+          <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* Payment method */}
+          <div>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3">طريقة القبض</h4>
+            <div className="grid grid-cols-3 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-800">
+              {(
+                [
+                  { v: 'cash', l: t('accounting.cash'), icon: Wallet },
+                  { v: 'bank', l: t('accounting.bank'), icon: Landmark },
+                  { v: 'check', l: t('accounting.check'), icon: FileText },
+                ] as const
+              ).map((o) => {
+                const Icon = o.icon;
+                const active = form.paymentMethod === o.v;
+                return (
+                  <button
+                    key={o.v}
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        paymentMethod: o.v,
+                        bankAccountId: o.v === 'bank' ? form.bankAccountId || defaultBankId || undefined : undefined,
+                        cashBoxId: o.v === 'cash' ? form.cashBoxId || defaultCashBoxId || undefined : undefined,
+                        checkNumber: o.v === 'check' ? form.checkNumber : undefined,
+                        checkDate: o.v === 'check' ? form.checkDate : undefined,
+                      })
+                    }
+                    className={`flex flex-col items-center gap-1.5 py-3 rounded-lg text-sm font-medium border transition ${active ? 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 shadow-sm text-slate-900 dark:text-slate-100' : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}
+                  >
+                    <Icon size={18} className={active ? 'text-primary-600' : 'text-slate-400'} />
+                    {o.l}
+                  </button>
+                );
+              })}
+            </div>
+
+            {form.paymentMethod === 'cash' && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.cashBox')}</label>
+                <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={(v) => setForm({ ...form, cashBoxId: v || '' })} />
+                {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && <p className="text-xs text-emerald-600 mt-1">★ {t('accounting.defaultSelected')}</p>}
+              </div>
+            )}
+            {form.paymentMethod === 'bank' && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.bankAccount')}</label>
+                <BankSelect companyId={activeCompany?.id || ''} value={form.bankAccountId || ''} onChange={(v) => setForm({ ...form, bankAccountId: v || '' })} />
+                {defaultBankId && form.bankAccountId === defaultBankId && <p className="text-xs text-emerald-600 mt-1">★ {t('accounting.defaultSelected')}</p>}
+              </div>
+            )}
+            {form.paymentMethod === 'check' && (
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input label={t('accounting.checkNumber')} value={form.checkNumber || ''} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} placeholder="رقم الشيك" />
+                <Input label={t('accounting.checkDate')} type="date" value={form.checkDate || ''} onChange={(e) => setForm({ ...form, checkDate: e.target.value })} />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.notes')}</label>
+            <textarea
+              value={form.notes || ''}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              placeholder="ملاحظات إضافية..."
+              rows={2}
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition resize-none"
+            />
           </div>
         </div>
       </Modal>
@@ -425,16 +767,13 @@ export const ReceiptVouchersPage: React.FC = () => {
         onConfirm={async () => {
           if (confirmDelete) {
             const result = await remove(confirmDelete.id);
-            if (result?.success) {
-              addToast('success', t('accounting.receiptVoucher.deleted'));
-            } else {
-              addToast('error', result?.error || t('common.error'));
-            }
+            if (result?.success) addToast('success', t('accounting.receiptVoucher.deleted'));
+            else addToast('error', result?.error || t('common.error'));
             setConfirmDelete(null);
           }
         }}
         title={t('delete')}
-        message={`${t('accounting.deleteReceiptVoucherConfirm')} "${confirmDelete?.voucherNumber}"?`}
+        message={`${t('accounting.deleteReceiptVoucherConfirm')} "${confirmDelete?.voucherNumber}"؟`}
         variant="danger"
       />
     </div>

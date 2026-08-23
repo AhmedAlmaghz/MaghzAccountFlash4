@@ -319,12 +319,14 @@ export function useReceiptVouchers(companyId: string) {
 
 export interface ReceiptVoucherFilters {
   status?: string;
+  search?: string;
+  paymentMethod?: string;
 }
 
 export function useReceiptVouchersPaginated(companyId: string, filters?: ReceiptVoucherFilters) {
   const { reload: reloadList, ...list } = usePaginatedList<ReceiptVoucher>(
     (page, pageSize) => accountingApi.getReceiptVouchersPaginated(companyId, page, pageSize, filters),
-    [companyId, filters?.status]
+    [companyId, filters?.status, filters?.search, filters?.paymentMethod]
   );
 
   const create = useCallback(async (data: Omit<ReceiptVoucher, 'id'>) => {
@@ -421,12 +423,14 @@ export function usePaymentVouchers(companyId: string) {
 
 export interface PaymentVoucherFilters {
   status?: string;
+  search?: string;
+  paymentMethod?: string;
 }
 
 export function usePaymentVouchersPaginated(companyId: string, filters?: PaymentVoucherFilters) {
   const { reload: reloadList, ...list } = usePaginatedList<PaymentVoucher>(
     (page, pageSize) => accountingApi.getPaymentVouchersPaginated(companyId, page, pageSize, filters),
-    [companyId, filters?.status]
+    [companyId, filters?.status, filters?.search, filters?.paymentMethod]
   );
 
   const create = useCallback(async (data: Omit<PaymentVoucher, 'id'>) => {

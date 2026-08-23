@@ -377,7 +377,7 @@ export const accountingApi = {
     companyId: string,
     page: number,
     pageSize: number,
-    filters?: { status?: string }
+    filters?: { status?: string; search?: string; paymentMethod?: string }
   ): Promise<PaginatedQueryResult<ReceiptVoucher>> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
@@ -391,10 +391,18 @@ export const accountingApi = {
         params.push(filters.status);
         conditions.push(`rv.status = $${params.length}`);
       }
+      if (filters?.paymentMethod) {
+        params.push(filters.paymentMethod);
+        conditions.push(`rv.payment_method = $${params.length}`);
+      }
+      if (filters?.search) {
+        params.push(`%${filters.search}%`);
+        conditions.push(`(rv.voucher_number ILIKE $${params.length} OR c.name ILIKE $${params.length})`);
+      }
       const where = conditions.join(' AND ');
 
       const countResult = await adapter.query(
-        `SELECT COUNT(*)::int AS total FROM receipt_vouchers rv WHERE ${where}`,
+        `SELECT COUNT(*)::int AS total FROM receipt_vouchers rv LEFT JOIN customers c ON rv.customer_id = c.id WHERE ${where}`,
         params
       );
       const total = Number(countResult.rows?.[0]?.total || 0);
@@ -574,7 +582,7 @@ export const accountingApi = {
     companyId: string,
     page: number,
     pageSize: number,
-    filters?: { status?: string }
+    filters?: { status?: string; search?: string; paymentMethod?: string }
   ): Promise<PaginatedQueryResult<PaymentVoucher>> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
@@ -588,10 +596,18 @@ export const accountingApi = {
         params.push(filters.status);
         conditions.push(`pv.status = $${params.length}`);
       }
+      if (filters?.paymentMethod) {
+        params.push(filters.paymentMethod);
+        conditions.push(`pv.payment_method = $${params.length}`);
+      }
+      if (filters?.search) {
+        params.push(`%${filters.search}%`);
+        conditions.push(`(pv.voucher_number ILIKE $${params.length} OR c.name ILIKE $${params.length})`);
+      }
       const where = conditions.join(' AND ');
 
       const countResult = await adapter.query(
-        `SELECT COUNT(*)::int AS total FROM payment_vouchers pv WHERE ${where}`,
+        `SELECT COUNT(*)::int AS total FROM payment_vouchers pv LEFT JOIN suppliers c ON pv.supplier_id = c.id WHERE ${where}`,
         params
       );
       const total = Number(countResult.rows?.[0]?.total || 0);
