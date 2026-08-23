@@ -1234,7 +1234,8 @@
       "recordActual": "Record Actual",
       "saveActual": "Save Actual",
       "enterActualQuantity": "Enter actual quantity",
-      "actualUnitCost": "Actual Unit Cost"
+      "actualUnitCost": "Actual Unit Cost",
+      "totalCount": "Total Orders"
     },
     "bom": {
       "title": "Bill of Materials",
@@ -1256,7 +1257,9 @@
       "totalCost": "Total Cost",
       "total": "Total",
       "estimatedCost": "Estimated Cost",
-      "searchPlaceholder": "Search bills of materials..."
+      "searchPlaceholder": "Search bills of materials...",
+      "totalCount": "Total BOMs",
+      "avgCost": "Avg Cost"
     },
     "production": "Production",
     "costs": "Costs",

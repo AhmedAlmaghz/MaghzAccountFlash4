@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer } from 'lucide-react';
+import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2 } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -169,10 +169,31 @@ export const WorkOrdersPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'orderNumber', header: t('manufacturing.table.orderNumber'), width: '130px' },
-    { key: 'productName', header: t('manufacturing.table.product'), render: (row: WorkOrder) => row.productName || row.productId },
-    { key: 'quantity', header: t('manufacturing.table.quantity'), width: '90px' },
-    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: WorkOrder) => row.totalCost !== undefined ? formatCurrency(row.totalCost) : '—' },
+    {
+      key: 'orderNumber',
+      header: t('manufacturing.table.orderNumber'),
+      width: '135px',
+      render: (row: WorkOrder) => (
+        <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
+          <Wrench size={12} className="text-teal-500" />
+          {row.orderNumber}
+        </span>
+      ),
+    },
+    {
+      key: 'productName',
+      header: t('manufacturing.table.product'),
+      render: (row: WorkOrder) => (
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-teal-600 flex items-center justify-center text-white shrink-0">
+            <Layers size={14} />
+          </div>
+          <span className="font-medium truncate">{row.productName || row.productId.slice(0, 8)}</span>
+        </div>
+      ),
+    },
+    { key: 'quantity', header: t('manufacturing.table.quantity'), width: '90px', render: (row: WorkOrder) => <span className="tabular-nums font-medium">{row.quantity}</span> },
+    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: WorkOrder) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
     { key: 'status', header: t('manufacturing.table.status'), width: '120px', render: (row: WorkOrder) => <StatusBadge status={row.status} /> },
     { key: 'actions', header: '', width: '180px', render: (row: WorkOrder) => (
       <div className="flex items-center gap-1">
@@ -193,41 +214,102 @@ export const WorkOrdersPage: React.FC = () => {
     )},
   ];
 
+  const kpis = useMemo(() => ({
+    planned: workOrders.filter((w) => w.status === 'planned').length,
+    inProgress: workOrders.filter((w) => w.status === 'in_progress').length,
+    completed: workOrders.filter((w) => w.status === 'completed').length,
+  }), [workOrders]);
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Wrench size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('manufacturing.workOrders.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('manufacturing.workOrders.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-teal-700 via-teal-600 to-emerald-600 shadow-xl shadow-teal-900/10 dark:shadow-teal-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-teal-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('manufacturing.workOrders.title')}
+            </span>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title={t('manufacturing.workOrders.filterByStatus')} aria-label={t('manufacturing.workOrders.filterByStatus')} className="rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
-            <option value="">{t('settings.common.all')}</option>
-            <option value="planned">{t('manufacturing.status.planned')}</option>
-            <option value="in_progress">{t('manufacturing.status.inProgress')}</option>
-            <option value="completed">{t('manufacturing.status.completed')}</option>
-            <option value="cancelled">{t('manufacturing.status.cancelled')}</option>
-          </select>
-          <Can action="create" module="manufacturing">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-              {t('manufacturing.workOrders.newWorkOrder')}
-            </Button>
-          </Can>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('manufacturing.workOrders.title')}</h2>
+              <p className="text-teal-100/80 text-base max-w-lg">{t('manufacturing.workOrders.subtitle')}</p>
+            </div>
+            <Can action="create" module="manufacturing">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('manufacturing.workOrders.newWorkOrder')}</Button>
+            </Can>
+          </div>
         </div>
       </div>
 
-      <Card>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('manufacturing.workOrders.totalCount'), value: String(total), icon: ClipboardList, color: 'from-teal-600 to-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-900/10 dark:to-teal-800/5' },
+          { label: t('manufacturing.status.planned'), value: String(kpis.planned), icon: PlayCircle, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('manufacturing.status.inProgress'), value: String(kpis.inProgress), icon: Wrench, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('manufacturing.status.completed'), value: String(kpis.completed), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-teal-500/30">
+        <span className="text-xs text-slate-500 font-medium">{t('manufacturing.workOrders.filterByStatus')}:</span>
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          {[
+            { v: '', l: t('settings.common.all') },
+            { v: 'planned', l: t('manufacturing.status.planned') },
+            { v: 'in_progress', l: t('manufacturing.status.inProgress') },
+            { v: 'completed', l: t('manufacturing.status.completed') },
+            { v: 'cancelled', l: t('manufacturing.status.cancelled') },
+          ].map((o) => (
+            <button
+              key={o.v || 'all'}
+              onClick={() => setStatusFilter(o.v)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-teal-600 text-white border-teal-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-teal-300'}`}
+            >{o.l}</button>
+          ))}
+        </div>
+      </Card>
+
+      <Card noPadding>
         {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : workOrders.length === 0 && !statusFilter ? (
+          <div className="py-8">
+            <EmptyState icon="file" title={t('manufacturing.workOrders.emptyTitle')} description={t('manufacturing.workOrders.emptyDescription')} action={
+              <Can action="create" module="manufacturing">
+                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('manufacturing.workOrders.newWorkOrder')}</Button>
+              </Can>
+            } />
+          </div>
         ) : workOrders.length === 0 ? (
-          <EmptyState icon="file" title={t('manufacturing.workOrders.emptyTitle')} description={t('manufacturing.workOrders.emptyDescription')} action={
-            <Can action="create" module="manufacturing">
-              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('manufacturing.workOrders.newWorkOrder')}</Button>
-            </Can>
-          } />
+          <div className="py-10">
+            <EmptyState icon="search" title={t('sales.filter.noResults')} description={t('sales.filter.noResultsDesc')} action={
+              <Button variant="secondary" onClick={() => setStatusFilter('')}>{t('sales.filter.clearFilters')}</Button>
+            } />
+          </div>
         ) : (
           <>
             <Table<WorkOrder>
@@ -236,7 +318,9 @@ export const WorkOrdersPage: React.FC = () => {
               keyExtractor={(row) => row.id}
               emptyMessage={t('manufacturing.workOrders.emptyTitle')}
             />
-            <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
           </>
         )}
       </Card>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Eye, GitBranch, Pencil, Plus, Printer, Search, Trash2 } from 'lucide-react';
+import { Eye, GitBranch, Pencil, Plus, Printer, Search, Trash2, Layers, CheckSquare, XCircle, Wallet } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -140,11 +140,22 @@ export const BomPage: React.FC = () => {
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index));
 
   const columns = [
-    { key: 'productName', header: t('manufacturing.table.product') },
-    { key: 'version', header: t('manufacturing.table.version'), width: '100px' },
+    {
+      key: 'productName',
+      header: t('manufacturing.table.product'),
+      render: (row: BOM) => (
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-cyan-600 flex items-center justify-center text-white shrink-0">
+            <GitBranch size={14} />
+          </div>
+          <span className="font-medium truncate">{row.productName || row.productId.slice(0, 8)}</span>
+        </div>
+      ),
+    },
+    { key: 'version', header: t('manufacturing.table.version'), width: '100px', render: (row: BOM) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border">v{row.version}</span> },
     { key: 'lines', header: t('manufacturing.table.materials'), width: '100px', render: (_row: BOM) => _row.linesCount !== undefined ? `${_row.linesCount} ${t('manufacturing.bom.material')}` : '—' },
-    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? formatCurrency(row.totalCost) : '—' },
-    { key: 'isActive', header: t('manufacturing.table.status'), width: '100px', render: (row: BOM) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
+    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
+    { key: 'isActive', header: t('manufacturing.table.status'), width: '110px', render: (row: BOM) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
     { key: 'actions', header: '', width: '140px', render: (row: BOM) => (
       <div className="flex items-center gap-1">
         <Button size="sm" variant="ghost" onClick={() => openView(row)} title={t('settings.common.view')} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20">
@@ -164,46 +175,103 @@ export const BomPage: React.FC = () => {
     )},
   ];
 
+  const kpis = useMemo(() => {
+    const active = boms.filter((b) => b.isActive).length;
+    const inactive = boms.length - active;
+    const withCost = boms.filter((b) => b.totalCost !== undefined);
+    const avgCost = withCost.length > 0 ? withCost.reduce((s, b) => s + Number(b.totalCost || 0), 0) / withCost.length : 0;
+    return { active, inactive, avgCost };
+  }, [boms]);
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <GitBranch size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('manufacturing.bom.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('manufacturing.bom.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Gradient Header */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-700 via-cyan-600 to-teal-600 shadow-xl shadow-cyan-900/10 dark:shadow-cyan-900/20">
+        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
+        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-cyan-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
+              <Layers size={12} /> {t('manufacturing.bom.title')}
+            </span>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder={t('manufacturing.bom.searchPlaceholder')}
-              aria-label={t('manufacturing.bom.searchPlaceholder')}
-              title={t('manufacturing.bom.searchPlaceholder')}
-              className="w-56 pl-9 pr-3 py-2 text-sm border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-            />
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('manufacturing.bom.title')}</h2>
+              <p className="text-cyan-100/80 text-base max-w-lg">{t('manufacturing.bom.subtitle')}</p>
+            </div>
+            <Can action="create" module="manufacturing">
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('manufacturing.bom.newBom')}</Button>
+            </Can>
           </div>
-          <Can action="create" module="manufacturing">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
-              {t('manufacturing.bom.newBom')}
-            </Button>
-          </Can>
         </div>
       </div>
 
-      <Card>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: t('manufacturing.bom.totalCount'), value: String(total), icon: Layers, color: 'from-cyan-600 to-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 dark:from-cyan-900/10 dark:to-cyan-800/5' },
+          { label: t('settings.common.active'), value: String(kpis.active), icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('settings.common.inactive'), value: String(kpis.inactive), icon: XCircle, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
+          { label: t('manufacturing.bom.avgCost'), value: formatCurrency(kpis.avgCost), icon: Wallet, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+        ].map((k) => (
+          <Card key={k.label} className="p-0 overflow-hidden relative">
+            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
+            <div className={`p-4 ${k.bg}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
+                  <p className="text-lg md:text-xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
+                </div>
+                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
+                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <Card noPadding className="p-4 sm:p-5 border-t-2 border-cyan-500/30">
+        <div className="relative max-w-md">
+          <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder={t('manufacturing.bom.searchPlaceholder')}
+            aria-label={t('manufacturing.bom.searchPlaceholder')}
+            title={t('manufacturing.bom.searchPlaceholder')}
+            className="w-full pr-9 pl-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors"
+          />
+          {searchTerm && (
+            <button onClick={() => setSearchTerm('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Trash2 size={13} /></button>
+          )}
+        </div>
+      </Card>
+
+      <Card noPadding>
         {isLoading ? (
-          <div className="py-12 text-center text-slate-500">{t('settings.common.loading')}</div>
+          <div className="space-y-3 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : boms.length === 0 && !debouncedSearch ? (
+          <div className="py-8">
+            <EmptyState icon="file" title={t('manufacturing.bom.emptyTitle')} description={t('manufacturing.bom.emptyDescription')} action={
+              <Can action="create" module="manufacturing">
+                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('manufacturing.bom.newBom')}</Button>
+              </Can>
+            } />
+          </div>
         ) : boms.length === 0 ? (
-          <EmptyState icon="file" title={t('manufacturing.bom.emptyTitle')} description={t('manufacturing.bom.emptyDescription')} action={
-            <Can action="create" module="manufacturing">
-              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('manufacturing.bom.newBom')}</Button>
-            </Can>
-          } />
+          <div className="py-10">
+            <EmptyState icon="search" title={t('sales.filter.noResults')} description={t('sales.filter.noResultsDesc')} action={
+              <Button variant="secondary" onClick={() => setSearchTerm('')}>{t('sales.filter.clearFilters')}</Button>
+            } />
+          </div>
         ) : (
           <>
             <Table<BOM>
@@ -212,7 +280,9 @@ export const BomPage: React.FC = () => {
               keyExtractor={(row) => row.id}
               emptyMessage={t('manufacturing.bom.emptyTitle')}
             />
-            <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
           </>
         )}
       </Card>

@@ -1234,7 +1234,8 @@
       "recordActual": "تسجيل الفعلي",
       "saveActual": "حفظ الفعلي",
       "enterActualQuantity": "أدخل الكمية الفعلية",
-      "actualUnitCost": "تكلفة الوحدة الفعلية"
+      "actualUnitCost": "تكلفة الوحدة الفعلية",
+      "totalCount": "إجمالي الأوامر"
     },
     "bom": {
       "title": "فاتير المواد",
@@ -1256,7 +1257,9 @@
       "totalCost": "التكلفة الإجمالية",
       "total": "الإجمالي",
       "estimatedCost": "التكلفة التقديرية",
-      "searchPlaceholder": "بحث في فاتير المواد..."
+      "searchPlaceholder": "بحث في فاتير المواد...",
+      "totalCount": "إجمالي الفاتير",
+      "avgCost": "متوسط التكلفة"
     },
     "production": "الإنتاج",
     "costs": "التكاليف",
