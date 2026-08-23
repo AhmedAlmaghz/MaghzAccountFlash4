@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { ArrowRightLeft, Plus, Printer, Download, CheckSquare, Search } from 'lucide-react';
+import { ArrowRightLeft, Plus, Printer, Download, CheckSquare, Search, X, TrendingUp, TrendingDown, Layers, Package } from 'lucide-react';
 import { Card, Button, Modal, Input, Table, Badge, Can } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -13,17 +13,17 @@ import { useToastStore } from '@/core/store/toastStore';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { InventoryTransaction } from '../types';
 
-const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  in: { label: 'inventory.in', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
-  out: { label: 'inventory.out', color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' },
-  adjustment: { label: 'inventory.adjustment', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
-  transfer: { label: 'inventory.transfer', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
+const TYPE_CONFIG: Record<string, { label: string; color: string; icon: typeof TrendingUp }> = {
+  in: { label: 'inventory.in', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800', icon: TrendingUp },
+  out: { label: 'inventory.out', color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border-rose-200 dark:border-rose-800', icon: TrendingDown },
+  adjustment: { label: 'inventory.adjustment', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200 dark:border-amber-800', icon: Layers },
+  transfer: { label: 'inventory.transfer', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200 dark:border-blue-800', icon: ArrowRightLeft },
 };
 
 export const InventoryTransactionsPage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
-  const activeCompany = useAppStore(state => state.activeCompany);
+  const activeCompany = useAppStore((state) => state.activeCompany);
   const [typeFilter, setTypeFilter] = useState<string>('');
   const txFilters = useMemo(() => ({ type: typeFilter || undefined }), [typeFilter]);
   const { transactions, total, page, pageSize, isLoading, goToPage, changePageSize, create, remove } = useInventoryTransactionsPaginated(activeCompany?.id || '', txFilters);
@@ -40,13 +40,23 @@ export const InventoryTransactionsPage: React.FC = () => {
   const filtered = useMemo(() => {
     const term = search.toLowerCase().trim();
     if (!term) return transactions;
-    return transactions.filter(tx =>
+    return transactions.filter((tx) =>
       tx.reference?.toLowerCase().includes(term) ||
       tx.notes?.toLowerCase().includes(term) ||
       tx.productName?.toLowerCase().includes(term) ||
-      tx.warehouseName?.toLowerCase().includes(term)
+      tx.warehouseName?.toLowerCase().includes(term),
     );
   }, [transactions, search]);
+
+  const stats = useMemo(() => {
+    const inCount = transactions.filter((tx) => tx.type === 'in').length;
+    const outCount = transactions.filter((tx) => tx.type === 'out').length;
+    const adjCount = transactions.filter((tx) => tx.type === 'adjustment').length;
+    const trCount = transactions.filter((tx) => tx.type === 'transfer').length;
+    return { inCount, outCount, adjCount, trCount, total: transactions.length };
+  }, [transactions]);
+
+  const hasFilters = !!(search || typeFilter);
 
   const resetForm = useCallback(() => {
     setForm({ date: new Date().toISOString().split('T')[0], type: 'in' });
@@ -91,11 +101,8 @@ export const InventoryTransactionsPage: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     const result = await remove(id);
-    if (result?.success) {
-      addToast('success', t('inventory.transaction.deleted'));
-    } else {
-      addToast('error', result?.error || t('common.error'));
-    }
+    if (result?.success) addToast('success', t('inventory.transaction.deleted'));
+    else addToast('error', result?.error || t('common.error'));
     setConfirmDelete(null);
   };
 
@@ -103,14 +110,14 @@ export const InventoryTransactionsPage: React.FC = () => {
     exportToExcel(
       filtered,
       [
-        { key: 'date', header: t('inventory.date') },
-        { key: 'type', header: t('inventory.type') },
-        { key: 'productName', header: t('inventory.productName') },
-        { key: 'warehouseName', header: t('inventory.warehouse') },
-        { key: 'quantity', header: t('inventory.quantity') },
-        { key: 'reference', header: t('inventory.reference') },
+        { key: 'date', header: t('inventory.date'), width: 12 },
+        { key: 'type', header: t('inventory.type'), width: 12 },
+        { key: 'productName', header: t('inventory.productName'), width: 24 },
+        { key: 'warehouseName', header: t('inventory.warehouse'), width: 18 },
+        { key: 'quantity', header: t('inventory.quantity'), width: 10 },
+        { key: 'reference', header: t('inventory.reference'), width: 16 },
       ],
-      `inventory-transactions-${new Date().toISOString().split('T')[0]}`
+      `inventory-transactions-${new Date().toISOString().split('T')[0]}`,
     );
   };
 
@@ -126,205 +133,279 @@ export const InventoryTransactionsPage: React.FC = () => {
         { key: 'reference', header: t('inventory.reference') },
       ],
       `inventory-transactions-${new Date().toISOString().split('T')[0]}`,
-      {
-        title: t('inventory.transactions'),
-        subtitle: activeCompany?.name,
-        rtl: true,
-      }
+      { title: t('inventory.transactions'), subtitle: activeCompany?.name, rtl: true },
     );
   };
 
   const handlePrint = () => {
-    const html = `
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8"><title>${t('inventory.transactions')}</title>
-<style>
-body{font-family:'Cairo',sans-serif;padding:24px;color:#1e293b}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{background:#4f46e5;color:#fff;padding:10px 12px;border:1px solid #4f46e5}
-td{border:1px solid #e2e8f0;padding:8px 12px}
-tr:nth-child(even){background:#f8fafc}
-.header{text-align:center;margin-bottom:16px}
-.header h1{font-size:18px;font-weight:700;color:#4f46e5}
-</style>
-</head>
-<body>
-<div class="header"><h1>${t('inventory.transactions')}</h1><p>${activeCompany?.name || ''}</p></div>
-<table>
-<thead><tr>
-<th>${t('inventory.date')}</th>
-<th>${t('inventory.type')}</th>
-<th>${t('inventory.productName')}</th>
-<th>${t('inventory.warehouse')}</th>
-<th>${t('inventory.quantity')}</th>
-<th>${t('inventory.reference')}</th>
-</tr></thead>
-<tbody>
-${filtered.map(tx => `<tr>
-<td>${tx.date}</td>
-<td>${t(TYPE_CONFIG[tx.type]?.label || tx.type)}</td>
-<td>${tx.productName || tx.productId}</td>
-<td>${tx.warehouseName || tx.warehouseId}</td>
-<td>${tx.quantity}</td>
-<td>${tx.reference || '-'}</td>
-</tr>`).join('')}
-</tbody>
-</table>
-<script>window.print()</script>
-</body></html>`;
+    const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${t('inventory.transactions')}</title>
+<style>body{font-family:'Cairo',sans-serif;padding:24px;color:#1e293b}table{width:100%;border-collapse:collapse;font-size:13px}th{background:#4f46e5;color:#fff;padding:10px 12px;border:1px solid #4f46e5}td{border:1px solid #e2e8f0;padding:8px 12px}tr:nth-child(even){background:#f8fafc}.header{text-align:center;margin-bottom:16px}.header h1{font-size:18px;font-weight:700;color:#4f46e5}</style>
+</head><body><div class="header"><h1>${t('inventory.transactions')}</h1><p>${activeCompany?.name || ''}</p></div>
+<table><thead><tr><th>${t('inventory.date')}</th><th>${t('inventory.type')}</th><th>${t('inventory.productName')}</th><th>${t('inventory.warehouse')}</th><th>${t('inventory.quantity')}</th><th>${t('inventory.reference')}</th></tr></thead>
+<tbody>${filtered.map((tx) => `<tr><td>${tx.date}</td><td>${t(TYPE_CONFIG[tx.type]?.label || tx.type)}</td><td>${tx.productName || tx.productId}</td><td>${tx.warehouseName || tx.warehouseId}</td><td>${tx.quantity}</td><td>${tx.reference || '-'}</td></tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`;
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <ArrowRightLeft size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('inventory.transactions')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('inventory.page.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
+              <ArrowRightLeft size={22} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('inventory.transactions')}</h1>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t('inventory.page.subtitle')}</p>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder={t('search')}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="h-10 pr-9 pl-3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm w-48"
-              aria-label={t('search')}
-            />
-          </div>
-          <select
-            className="h-10 px-3 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            title={t('inventory.type')}
-            aria-label={t('inventory.type')}
-          >
-            <option value="">{t('all')}</option>
-            <option value="in">{t('inventory.in')}</option>
-            <option value="out">{t('inventory.out')}</option>
-            <option value="adjustment">{t('inventory.adjustment')}</option>
-            <option value="transfer">{t('inventory.transfer')}</option>
-          </select>
-          <Button variant="secondary" size="sm" leftIcon={<Printer size={16} />} onClick={handlePrint}>
-            {t('print')}
-          </Button>
-          <Button variant="secondary" size="sm" leftIcon={<Download size={16} />} onClick={handleExportExcel}>
-            Excel
-          </Button>
-          <Button variant="secondary" size="sm" leftIcon={<Download size={16} />} onClick={handleExportPDF}>
-            PDF
-          </Button>
           <Can action="create" module="inventory">
-            <Button variant="primary" size="sm" leftIcon={<Plus size={16} />} onClick={() => setIsOpen(true)}>
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsOpen(true)} className="shadow-sm">
               {t('inventory.newTransaction')}
             </Button>
           </Can>
         </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الإجمالي</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
+              <p className="text-xs text-slate-500">{filtered.length} ظاهر</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+              <Package size={18} className="text-slate-600" />
+            </div>
+          </Card>
+          <Card className="p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">وارد</p>
+              <p className="text-xl font-bold text-emerald-600 tabular-nums">{stats.inCount}</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+              <TrendingUp size={14} className="text-emerald-600" />
+            </div>
+          </Card>
+          <Card className="p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-rose-600">صادر</p>
+              <p className="text-xl font-bold text-rose-600 tabular-nums">{stats.outCount}</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
+              <TrendingDown size={14} className="text-rose-600" />
+            </div>
+          </Card>
+          <Card className="p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-amber-600">تسوية</p>
+              <p className="text-xl font-bold text-amber-600 tabular-nums">{stats.adjCount}</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
+              <Layers size={14} className="text-amber-600" />
+            </div>
+          </Card>
+          <Card className="p-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-blue-600">تحويل</p>
+              <p className="text-xl font-bold text-blue-600 tabular-nums">{stats.trCount}</p>
+            </div>
+            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+              <ArrowRightLeft size={14} className="text-blue-600" />
+            </div>
+          </Card>
+        </div>
+
+        <Card className="p-3 sm:p-4">
+          <div className="flex flex-col xl:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder={`${t('search')} — منتج / مستودع / مرجع`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+                {[
+                  { v: '', l: t('all') },
+                  { v: 'in', l: t('inventory.in') },
+                  { v: 'out', l: t('inventory.out') },
+                  { v: 'adjustment', l: 'تسوية' },
+                  { v: 'transfer', l: t('inventory.transfer') },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    onClick={() => setTypeFilter(o.v)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${typeFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+              <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={handlePrint} className="gap-1.5">
+                {t('print')}
+              </Button>
+              <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={handleExportExcel} className="gap-1.5">
+                Excel
+              </Button>
+              <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={handleExportPDF} className="gap-1.5">
+                PDF
+              </Button>
+            </div>
+          </div>
+          {hasFilters && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+              <span>{filtered.length} من {transactions.length} • {search ? `"${search}"` : ''} {typeFilter ? `• ${typeFilter}` : ''}</span>
+              <button onClick={() => { setSearch(''); setTypeFilter(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
+            </div>
+          )}
+        </Card>
       </div>
 
-      <Card>
+      <Card noPadding>
         {filtered.length === 0 && !isLoading ? (
-          <EmptyState icon="inbox" title={t('inventory.empty.transactions.title')} description={t('inventory.empty.transactions.description')} />
+          <div className="py-10">
+            <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? 'لا توجد نتائج' : t('inventory.empty.transactions.title')} description={hasFilters ? 'جرّب تغيير البحث أو النوع' : t('inventory.empty.transactions.description')} />
+          </div>
         ) : (
-          <Table<InventoryTransaction>
-            data={filtered}
-            columns={[
-              { key: 'date', header: t('inventory.date'), render: (row) => new Date(row.date).toLocaleDateString('ar-EG') },
-              { key: 'type', header: t('inventory.type'), render: (row) => {
-                const cfg = TYPE_CONFIG[row.type] || TYPE_CONFIG.in;
-                return <Badge className={cfg.color}>{t(cfg.label)}</Badge>;
-              }},
-              { key: 'productName', header: t('inventory.productName'), render: (row) => row.productName ? <span>{row.productName} <span className="text-xs text-slate-500 font-mono">({row.productCode})</span></span> : row.productId },
-              { key: 'warehouseName', header: t('inventory.warehouse'), render: (row) => row.warehouseName || row.warehouseId },
-              { key: 'quantity', header: t('inventory.quantity'), align: 'right' as const, render: (row) => <span className="font-semibold">{row.quantity}</span> },
-              { key: 'reference', header: t('inventory.reference'), render: (row) => row.reference || '-' },
-              { key: 'actions', header: '', width: '80px', render: (row) => (
-                <ActionButtons
-                  onView={undefined}
-                  onEdit={undefined}
-                  onDelete={() => setConfirmDelete(row.id)}
-                  showView={false}
-                  showEdit={false}
-                  showPrint={false}
-                  showExport={false}
-                />
-              )},
-            ]}
-            keyExtractor={(row) => row.id}
-            isLoading={isLoading}
-            emptyMessage=""
-          />
+          <>
+            <Table<InventoryTransaction>
+              data={filtered}
+              columns={[
+                {
+                  key: 'date',
+                  header: t('inventory.date'),
+                  width: '115px',
+                  render: (row: InventoryTransaction) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{new Date(row.date).toLocaleDateString('ar-EG')}</span>,
+                },
+                {
+                  key: 'type',
+                  header: t('inventory.type'),
+                  width: '110px',
+                  render: (row: InventoryTransaction) => {
+                    const cfg = TYPE_CONFIG[row.type] || TYPE_CONFIG.in;
+                    const Icon = cfg.icon;
+                    return (
+                      <Badge className={`${cfg.color} border text-xs gap-1`}>
+                        <Icon size={12} /> {t(cfg.label)}
+                      </Badge>
+                    );
+                  },
+                },
+                {
+                  key: 'productName',
+                  header: t('inventory.productName'),
+                  render: (row: InventoryTransaction) => row.productName ? (
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{row.productName}</p>
+                      <p className="text-xs text-slate-500 font-mono">{row.productCode || ''}</p>
+                    </div>
+                  ) : <span className="font-mono text-xs">{row.productId.slice(0, 8)}</span>,
+                },
+                {
+                  key: 'warehouseName',
+                  header: t('inventory.warehouse'),
+                  width: '150px',
+                  render: (row: InventoryTransaction) => row.warehouseName ? (
+                    <span className="text-xs bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-full border border-blue-200 dark:border-blue-800">{row.warehouseName}</span>
+                  ) : <span className="font-mono text-xs">{row.warehouseId.slice(0, 8)}</span>,
+                },
+                {
+                  key: 'quantity',
+                  header: t('inventory.quantity'),
+                  align: 'right' as const,
+                  width: '100px',
+                  render: (row: InventoryTransaction) => <span className="font-bold tabular-nums">{row.quantity}</span>,
+                },
+                {
+                  key: 'reference',
+                  header: t('inventory.reference'),
+                  width: '130px',
+                  render: (row: InventoryTransaction) => row.reference ? <span className="text-xs truncate max-w-[130px] inline-block">{row.reference}</span> : <span className="text-slate-400 text-xs">—</span>,
+                },
+                {
+                  key: 'actions',
+                  header: '',
+                  width: '80px',
+                  render: (row: InventoryTransaction) => (
+                    <ActionButtons onView={undefined} onEdit={undefined} onDelete={() => setConfirmDelete(row.id)} showView={false} showEdit={false} showPrint={false} showExport={false} />
+                  ),
+                },
+              ] as never}
+              keyExtractor={(row) => row.id}
+              isLoading={isLoading}
+              emptyMessage=""
+            />
+            <div className="border-t border-slate-200 dark:border-slate-800">
+              <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
+            </div>
+          </>
         )}
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPageChange={goToPage}
-          onPageSizeChange={changePageSize}
-        />
       </Card>
 
-      {/* Create Modal */}
       <Modal
         isOpen={isOpen}
         onClose={closeModal}
         title={t('inventory.newTransaction')}
-        size="md"
+        description="إضافة حركة مخزنية يدوية"
+        size="lg"
         footer={
-          <>
+          <div className="flex gap-2 ml-auto">
             <Button variant="secondary" onClick={closeModal} disabled={saving}>{t('cancel')}</Button>
-            <Button variant="primary" onClick={handleAdd} leftIcon={<CheckSquare size={16} />} disabled={saving}>
-              {saving ? t('common.loading') : t('save')}
-            </Button>
-          </>
+            <Button variant="primary" onClick={handleAdd} leftIcon={<CheckSquare size={16} />} isLoading={saving}>{t('save')}</Button>
+          </div>
         }
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm mb-1 font-medium text-slate-700 dark:text-slate-200">{t('inventory.type')}</label>
-              <select
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-                value={form.type || 'in'}
-                onChange={e => setForm(prev => ({ ...prev, type: e.target.value as InventoryTransaction['type'] }))}
-              >
-                <option value="in">{t('inventory.in')}</option>
-                <option value="out">{t('inventory.out')}</option>
-                <option value="adjustment">{t('inventory.adjustment')}</option>
-                <option value="transfer">{t('inventory.transfer')}</option>
-              </select>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.type')} *</label>
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-800">
+                {(['in', 'out', 'adjustment', 'transfer'] as const).map((v) => {
+                  const cfg = TYPE_CONFIG[v];
+                  const active = form.type === v;
+                  return (
+                    <button
+                      key={v}
+                      onClick={() => setForm((prev) => ({ ...prev, type: v }))}
+                      className={`px-2 py-2 rounded-lg text-xs font-medium border transition ${active ? 'bg-white dark:bg-slate-700 shadow-sm border-slate-200 dark:border-slate-600' : 'border-transparent text-slate-600 dark:text-slate-400'}`}
+                    >
+                      {t(cfg.label)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <Input label={t('inventory.date')} type="date" value={form.date || ''} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} required />
+            <Input label={`${t('inventory.date')} *`} type="date" value={form.date || ''} onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))} required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('inventory.productName')} *</label>
-            <ProductSelect companyId={activeCompany?.id || ''} value={form.productId || ''} onChange={v => setForm(prev => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock module="inventory" />
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.productName')} *</label>
+            <ProductSelect companyId={activeCompany?.id || ''} value={form.productId || ''} onChange={(v) => setForm((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock module="inventory" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('inventory.warehouse')} *</label>
-            <WarehouseSelect companyId={activeCompany?.id || ''} value={form.warehouseId || ''} onChange={v => setForm(prev => ({ ...prev, warehouseId: typeof v === 'string' ? v : '' }))} />
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.warehouse')} *</label>
+            <WarehouseSelect companyId={activeCompany?.id || ''} value={form.warehouseId || ''} onChange={(v) => setForm((prev) => ({ ...prev, warehouseId: typeof v === 'string' ? v : '' }))} />
           </div>
-          <Input label={t('inventory.quantity')} type="number" min="0.01" step="0.01" value={String(form.quantity || '')} onChange={e => setForm(prev => ({ ...prev, quantity: Number(e.target.value) }))} required />
-          <Input label={t('inventory.reference')} value={form.reference || ''} onChange={e => setForm(prev => ({ ...prev, reference: e.target.value }))} />
-          <Input label={t('inventory.notes')} value={form.notes || ''} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} />
+          <Input label={`${t('inventory.quantity')} *`} type="number" min="0.01" step="0.01" value={String(form.quantity || '')} onChange={(e) => setForm((prev) => ({ ...prev, quantity: Number(e.target.value) }))} required />
+          <Input label={t('inventory.reference')} value={form.reference || ''} onChange={(e) => setForm((prev) => ({ ...prev, reference: e.target.value }))} placeholder="مرجع اختياري" />
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.notes')}</label>
+            <textarea value={form.notes || ''} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder="ملاحظات..." rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
+          </div>
         </div>
       </Modal>
 
-      <ConfirmDialog
-        isOpen={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
-        title={t('delete')}
-        message={t('inventory.deleteConfirm')}
-        variant="danger"
-      />
+      <ConfirmDialog isOpen={!!confirmDelete} onClose={() => setConfirmDelete(null)} onConfirm={() => confirmDelete && handleDelete(confirmDelete)} title={t('delete')} message={t('inventory.deleteConfirm')} variant="danger" />
     </div>
   );
 };
