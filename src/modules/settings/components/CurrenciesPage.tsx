@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Coins, Plus, Pencil, Trash2, Save, Star } from 'lucide-react';
 import { Card, Button, Input, Table, ConfirmDialog, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { useAppStore } from '@/core/store';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useAuthStore } from '@/modules/auth/store';
@@ -177,21 +178,20 @@ export const CurrenciesPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <Coins size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.currencies.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.currencies.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ code: '', name: '', symbol: '', exchangeRate: 1, isActive: true }); }}>
-            {t('settings.currencies.new')}
-          </Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.currencies.title')}
+        subtitle={t('settings.currencies.subtitle')}
+        icon={Coins}
+        color="from-amber-600 via-amber-500 to-yellow-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ code: '', name: '', symbol: '', exchangeRate: 1, isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+              {t('settings.currencies.new')}
+            </Button>
+          </Can>
+        }
+      />
 
       <Card>
         {(editingId !== null || formData.code) && (

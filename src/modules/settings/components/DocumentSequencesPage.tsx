@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Hash, RotateCcw, Save, Eye, ToggleLeft, ToggleRight } from 'lucide-react';
 import { Card, Button, Table, Input, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { useDocumentSequences } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -148,13 +149,13 @@ export const DocumentSequencesPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.sequences.title')}</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.sequences.subtitle')}</p>
-        </div>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.sequences.title')}
+        subtitle={t('settings.sequences.subtitle')}
+        icon={Hash}
+        color="from-slate-600 via-slate-500 to-gray-600"
+      />
       <Card>
         <Table<DocumentSequence> data={sequences} columns={columns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} emptyMessage={t('settings.sequences.emptyMessage')} />
       </Card>

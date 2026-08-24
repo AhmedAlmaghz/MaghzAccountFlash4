@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Landmark, Plus, Pencil, Trash2, CheckSquare } from 'lucide-react';
 import { Card, Button, Table, Modal, Input, ConfirmDialog, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { AccountSelect, BranchSelect } from '@/core/ui/components/smart';
 import { useBanks } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
@@ -75,19 +76,18 @@ export const BanksPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Landmark size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.banks.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.banks.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { reset(); setIsOpen(true); }}>{t('settings.banks.newBank')}</Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.banks.title')}
+        subtitle={t('settings.banks.subtitle')}
+        icon={Landmark}
+        color="from-purple-600 via-purple-500 to-fuchsia-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { reset(); setIsOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.banks.newBank')}</Button>
+          </Can>
+        }
+      />
 
       <Card>
         <Table<Bank> data={banks} columns={columns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} emptyMessage={t('settings.banks.emptyMessage')} />

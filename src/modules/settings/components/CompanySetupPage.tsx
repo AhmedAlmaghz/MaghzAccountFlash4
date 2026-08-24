@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Save, Upload } from 'lucide-react';
 import { Card, Button, Input, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -136,28 +137,26 @@ export const CompanySetupPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <Building2 size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.company.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.company.subtitle')}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.company.title')}
+        subtitle={t('settings.company.subtitle')}
+        icon={Building2}
+        color="from-primary-600 via-primary-500 to-blue-600"
+        action={
           <Can action="edit" module="settings">
             <Button
-              variant="primary"
+              variant="secondary"
               leftIcon={<Save size={16} />}
               onClick={handleSave}
               isLoading={isSaving}
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
             >
               {t('settings.company.save')}
             </Button>
           </Can>
-        </div>
-      </div>
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Logo & Visual Identity */}

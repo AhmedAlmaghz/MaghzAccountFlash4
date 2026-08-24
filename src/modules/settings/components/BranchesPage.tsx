@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GitBranch, Plus, Pencil, Trash2, Save } from 'lucide-react';
 import { Card, Button, Input, Table, ConfirmDialog } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -142,21 +143,20 @@ export const BranchesPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <GitBranch size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.branches.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.branches.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', code: '', city: '', phone: '', isActive: true }); }}>
-            {t('settings.branches.newBranch')}
-          </Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.branches.title')}
+        subtitle={t('settings.branches.subtitle')}
+        icon={GitBranch}
+        color="from-blue-600 via-blue-500 to-indigo-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', code: '', city: '', phone: '', isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+              {t('settings.branches.newBranch')}
+            </Button>
+          </Can>
+        }
+      />
 
       <Card>
         {(editingId !== null || (formData.name && formData.name.length > 0)) && (

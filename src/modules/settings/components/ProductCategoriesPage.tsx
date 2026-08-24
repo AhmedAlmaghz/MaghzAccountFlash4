@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FolderTree, Plus, Pencil, Trash2, ChevronRight, ChevronDown, CheckSquare } from 'lucide-react';
 import { Card, Button, Modal, Input, ConfirmDialog, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { useProductCategories } from '@/modules/inventory/hooks/useInventory';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -112,19 +113,18 @@ export const ProductCategoriesPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <FolderTree size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.productCategories.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.productCategories.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setForm({ name: '', parentId: '' }); setEditingId(null); setIsOpen(true); }}>{t('settings.productCategories.new')}</Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.productCategories.title')}
+        subtitle={t('settings.productCategories.subtitle')}
+        icon={FolderTree}
+        color="from-cyan-600 via-cyan-500 to-sky-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setForm({ name: '', parentId: '' }); setEditingId(null); setIsOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.productCategories.new')}</Button>
+          </Can>
+        }
+      />
 
       <Card>
         {isLoading ? (

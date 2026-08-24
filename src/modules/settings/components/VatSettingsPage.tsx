@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Receipt, Plus, Pencil, Trash2, Save } from 'lucide-react';
 import { Card, Button, Input, Table, ConfirmDialog, Can } from '@/core/ui/components';
 import { AccountSelect } from '@/core/ui/components/smart';
+import { SettingsHeader } from './SettingsHeader';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -147,21 +148,20 @@ export const VatSettingsPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <Receipt size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.vat.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.vat.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', rate: 15, isActive: true }); }}>
-            {t('settings.vat.new')}
-          </Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.vat.title')}
+        subtitle={t('settings.vat.subtitle')}
+        icon={Receipt}
+        color="from-rose-600 via-rose-500 to-pink-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', rate: 15, isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+              {t('settings.vat.new')}
+            </Button>
+          </Can>
+        }
+      />
 
       <Card>
         {(editingId !== null || (formData.name && formData.name.length > 0)) && (

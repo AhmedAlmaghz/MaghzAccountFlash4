@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Pencil, Trash2, Save, KeyRound } from 'lucide-react';
 import { Card, Button, Input, Table, ConfirmDialog, Modal } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { authApi } from '@/modules/auth/api';
@@ -201,21 +202,20 @@ export const UsersPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="page-header">
-        <div className="flex items-center gap-3">
-          <Users size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.users.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.users.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ username: '', email: '', role: 'accountant', isActive: true }); }}>
-            {t('settings.users.newUser')}
-          </Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.users.title')}
+        subtitle={t('settings.users.subtitle')}
+        icon={Users}
+        color="from-indigo-600 via-indigo-500 to-violet-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ username: '', email: '', role: 'accountant', isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+              {t('settings.users.newUser')}
+            </Button>
+          </Can>
+        }
+      />
 
       <Card>
         {(editingId !== null || (formData.username && formData.username.length > 0)) && (

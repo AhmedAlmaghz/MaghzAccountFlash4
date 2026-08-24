@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Settings, CheckCircle, AlertCircle, Factory, ShoppingCart, Briefcase } from 'lucide-react';
 import { Card, Button, Table, Badge, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { AccountSelect } from '@/core/ui/components/smart';
 import { useDefaultAccounts } from '@/core/hooks/useSettings';
 import { DEFAULT_ACCOUNT_FUNCTIONS } from '@/core/types';
@@ -92,27 +93,26 @@ export const DefaultAccountsPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Settings size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.defaultAccounts.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.defaultAccounts.subtitle')}</p>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.defaultAccounts.title')}
+        subtitle={t('settings.defaultAccounts.subtitle')}
+        icon={Settings}
+        color="from-fuchsia-600 via-fuchsia-500 to-pink-600"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Can action="edit" module="settings">
+              <Button variant="secondary" size="sm" leftIcon={<ShoppingCart size={14} />} onClick={() => handleApplyTemplate('trading')} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.defaultAccounts.templateTrading')}</Button>
+            </Can>
+            <Can action="edit" module="settings">
+              <Button variant="secondary" size="sm" leftIcon={<Factory size={14} />} onClick={() => handleApplyTemplate('manufacturing')} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.defaultAccounts.templateManufacturing')}</Button>
+            </Can>
+            <Can action="edit" module="settings">
+              <Button variant="secondary" size="sm" leftIcon={<Briefcase size={14} />} onClick={() => handleApplyTemplate('services')} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.defaultAccounts.templateServices')}</Button>
+            </Can>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <Can action="edit" module="settings">
-            <Button variant="secondary" size="sm" leftIcon={<ShoppingCart size={14} />} onClick={() => handleApplyTemplate('trading')}>{t('settings.defaultAccounts.templateTrading')}</Button>
-          </Can>
-          <Can action="edit" module="settings">
-            <Button variant="secondary" size="sm" leftIcon={<Factory size={14} />} onClick={() => handleApplyTemplate('manufacturing')}>{t('settings.defaultAccounts.templateManufacturing')}</Button>
-          </Can>
-          <Can action="edit" module="settings">
-            <Button variant="secondary" size="sm" leftIcon={<Briefcase size={14} />} onClick={() => handleApplyTemplate('services')}>{t('settings.defaultAccounts.templateServices')}</Button>
-          </Can>
-        </div>
-      </div>
+        }
+      />
 
       <Card>
         <Table data={DEFAULT_ACCOUNT_FUNCTIONS} columns={columns} keyExtractor={(row) => row.key} isLoading={isLoading} emptyMessage={t('settings.defaultAccounts.empty')} />

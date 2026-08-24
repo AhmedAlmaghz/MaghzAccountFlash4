@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Layers, Plus, Pencil, Trash2, CheckSquare } from 'lucide-react';
 import { Card, Button, Table, Modal, Input, Badge, ConfirmDialog, Can } from '@/core/ui/components';
+import { SettingsHeader } from './SettingsHeader';
 import { AccountSelect } from '@/core/ui/components/smart';
 import { useProductTypes } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
@@ -90,19 +91,18 @@ export const ProductTypesPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Layers size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('settings.productTypes.title')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('settings.productTypes.subtitle')}</p>
-          </div>
-        </div>
-        <Can action="create" module="settings">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setEditingId(null); setIsOpen(true); }}>{t('settings.productTypes.new')}</Button>
-        </Can>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <SettingsHeader
+        title={t('settings.productTypes.title')}
+        subtitle={t('settings.productTypes.subtitle')}
+        icon={Layers}
+        color="from-teal-600 via-teal-500 to-emerald-600"
+        action={
+          <Can action="create" module="settings">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setEditingId(null); setIsOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.productTypes.new')}</Button>
+          </Can>
+        }
+      />
 
       <Card>
         <Table<ProductType> data={types} columns={columns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} emptyMessage={t('settings.productTypes.empty')} />
