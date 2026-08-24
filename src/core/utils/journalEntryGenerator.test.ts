@@ -39,27 +39,43 @@ function createMockAdapter(overrides?: Record<string, unknown>) {
 
   const defaultAccounts: Record<string, string> = {};
 
+  const queryFn = vi.fn(async (sql: string, params: unknown[]) => {
+    const lower = sql.toLowerCase();
+
+    if (lower.includes('from default_accounts')) {
+      const key = params[1] as string;
+      const accId = defaultAccounts[key];
+      return { success: true, rows: accId ? [{ account_id: accId }] : [] };
+    }
+
+    if (lower.includes('from accounts')) {
+      const companyId = params[0] as string;
+      const code = params[1] as string;
+      const match = accounts.find(a => a.company_id === companyId && a.code === code);
+      return { success: true, rows: match ? [{ id: match.id }] : [] };
+    }
+
+    return { success: true, rows: [] };
+  });
+
   return {
-    query: vi.fn(async (sql: string, params: unknown[]) => {
-      const lower = sql.toLowerCase();
-
-      if (lower.includes('from default_accounts')) {
-        const key = params[1] as string;
-        const accId = defaultAccounts[key];
-        return { success: true, rows: accId ? [{ account_id: accId }] : [] };
-      }
-
-      if (lower.includes('from accounts')) {
-        const companyId = params[0] as string;
-        const code = params[1] as string;
-        const match = accounts.find(a => a.company_id === companyId && a.code === code);
-        return { success: true, rows: match ? [{ id: match.id }] : [] };
-      }
-
-      return { success: true, rows: [] };
-    }),
+    query: queryFn,
     createTransaction: vi.fn(async (_data: unknown) => {
       return { success: true, id: 'tx-' + Math.random().toString(36).substring(2, 8) };
+    }),
+    // Atomic batch: executes each statement through the same mocked query impl.
+    transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      try {
+        const results = [];
+        for (const q of queries) {
+          const r = await queryFn(q.sql, q.params || []);
+          if (!r.success) return { success: false, error: r.error };
+          results.push({ rows: r.rows || [], rowCount: r.rows?.length || 0 });
+        }
+        return { success: true, results };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
     }),
     ...overrides,
   };
@@ -259,7 +275,7 @@ describe('journalEntryGenerator', () => {
   });
 
   describe('postSalesReturn', () => {
-    it('posts a sales return successfully', async () => {
+    it('posts a sales return successfully as one atomic transaction', async () => {
       const adapter = createMockAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
@@ -271,15 +287,20 @@ describe('journalEntryGenerator', () => {
       });
 
       expect(result.success).toBe(true);
-      const txCall = adapter.createTransaction.mock.calls[0][0];
-      expect(txCall.entries).toHaveLength(4);
-      expect(txCall.entries[0].debit).toBe(500); // Sales returns
-      expect(txCall.entries[1].credit).toBe(500); // Debtors
+      // Atomic contract: JE + stock movements run inside one adapter.transaction batch.
+      expect(adapter.transaction).toHaveBeenCalledTimes(1);
+      const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      // No ret.id -> only the journal entry statement.
+      expect(stmts.length).toBe(1);
+      expect(stmts[0].sql).toContain('WITH new_tx');
+      expect(stmts[0].sql).toContain('journal_entries');
+      // 4 entries x 4 params + 6 header params
+      expect(stmts[0].params!.length).toBe(6 + 4 * 4);
     });
   });
 
   describe('postPurchaseReturn', () => {
-    it('posts a purchase return successfully', async () => {
+    it('posts a purchase return successfully as one atomic transaction', async () => {
       const adapter = createMockAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
@@ -291,9 +312,10 @@ describe('journalEntryGenerator', () => {
       });
 
       expect(result.success).toBe(true);
-      const txCall = adapter.createTransaction.mock.calls[0][0];
-      expect(txCall.entries[0].debit).toBe(1000); // Creditors
-      expect(txCall.entries[1].credit).toBe(1000); // Inventory
+      expect(adapter.transaction).toHaveBeenCalledTimes(1);
+      const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      expect(stmts.length).toBe(1);
+      expect(stmts[0].sql).toContain('WITH new_tx');
     });
   });
 

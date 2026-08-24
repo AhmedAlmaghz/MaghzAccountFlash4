@@ -45,7 +45,25 @@ import { accountingApi } from './api';
 import { getDbAdapter } from '@/core/database/adapters';
 
 function makeMockAdapter(queryImpl: (sql: string, params: unknown[]) => Promise<{ success: boolean; rows?: unknown[]; error?: string }>) {
-  return { query: vi.fn(queryImpl) };
+  return {
+    query: vi.fn(queryImpl),
+    // Transactional batch executes each statement through the same mocked
+    // query impl so tests keep asserting on SQL/params exactly as before.
+    transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      try {
+        const results = [];
+        for (const q of queries) {
+          const r = await queryImpl(q.sql, q.params || []);
+          if (!r.success) return { success: false, error: r.error };
+          const rc = (r as { rowCount?: number }).rowCount;
+          results.push({ rows: r.rows || [], rowCount: rc ?? r.rows?.length ?? 0 });
+        }
+        return { success: true, results };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
+    }),
+  };
 }
 
 describe('accountingApi.applyPaymentToInvoice', () => {
@@ -111,17 +129,20 @@ describe('accountingApi.applyPaymentToInvoice', () => {
     const queries: string[] = [];
     const adapter = makeMockAdapter(async (sql) => {
       queries.push(sql);
-      if (sql.startsWith('WITH updated AS')) {
-        return { success: true, rows: [{ supplier_id: 'sup-1', total_amount: 1000, paid_amount: 0, currency_code: 'YER' }] };
-      }
-      return { success: true, rows: [] };
+      // The atomic statement is a single UPDATE — PG reports rowCount 1.
+      return { success: true, rows: [], rowCount: sql.includes('WITH updated AS') ? 1 : 0 };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await accountingApi.applyPaymentToInvoice('pv-1', 'comp-1', 'pinv-1', 1000, 1000, 'payment', 'user-1');
     expect(res.success).toBe(true);
-    expect(queries.some(q => q.includes('UPDATE suppliers'))).toBe(true);
-    expect(queries.length).toBe(2);
+    // Atomic contract: invoice CTE + supplier balance update compose into a
+    // SINGLE statement so both effects commit or roll back together.
+    const stmt = queries.find(q => q.includes('WITH updated AS'));
+    expect(stmt).toBeDefined();
+    expect(stmt).toContain('UPDATE purchase_invoices');
+    expect(stmt).toContain('UPDATE suppliers');
+    expect(queries.length).toBe(1);
   });
 
   it('returns error if invoice not found', async () => {

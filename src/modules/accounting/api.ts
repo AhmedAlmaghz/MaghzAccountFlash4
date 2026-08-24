@@ -1,4 +1,5 @@
 import { getDbAdapter } from '@/core/database/adapters';
+import { runTransaction } from '@/core/database/tx';
 import { mapRows } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
@@ -456,23 +457,52 @@ export const accountingApi = {
       if (!data.invoiceId && (data.amountApplied ?? 0) > 0) {
         return { success: false, error: 'Amount applied requires an invoice.' };
       }
-      const adapter = await getDbAdapter();
       const id = crypto.randomUUID();
       const currencyCode = data.currencyCode || YER_CODE;
       const exchangeRate = data.exchangeRate ?? 1;
       const baseCurrencyAmount = data.baseCurrencyAmount ?? (data.amount * exchangeRate);
       const amountApplied = data.amountApplied ?? 0;
       const baseCurrencyApplied = data.baseCurrencyApplied ?? (amountApplied * exchangeRate);
-      const result = await adapter.query(
-        `INSERT INTO receipt_vouchers (id, company_id, voucher_number, date, customer_id, invoice_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, bank_account_id, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
-        [id, data.companyId, data.voucherNumber, data.date, data.customerId, data.invoiceId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.bankAccountId || null, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)]
-      );
-      if (result.success && data.invoiceId && amountApplied > 0) {
-        await this.applyPaymentToInvoice(id, data.companyId, data.invoiceId, amountApplied, baseCurrencyApplied, 'receipt', safeUserId(userId));
+
+      // Atomic batch: voucher INSERT + payment application (invoice paid/status
+      // + customer balance) commit together or roll back together.
+      const statements: Array<{ sql: string; params?: unknown[] }> = [
+        {
+          sql: `INSERT INTO receipt_vouchers (id, company_id, voucher_number, date, customer_id, invoice_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, bank_account_id, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+          params: [id, data.companyId, data.voucherNumber, data.date, data.customerId, data.invoiceId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.bankAccountId || null, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
+        },
+      ];
+      if (data.invoiceId && amountApplied > 0) {
+        statements.push({
+          sql: `WITH updated AS (
+            UPDATE sales_invoices AS i
+            SET
+              paid_amount = COALESCE(i.paid_amount, 0) + $1,
+              base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
+              status = CASE
+                WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount
+                  AND i.status NOT IN ('cancelled', 'paid')
+                THEN 'paid'
+                WHEN COALESCE(i.paid_amount, 0) + $1 > 0
+                  AND i.status NOT IN ('cancelled', 'paid')
+                THEN 'partially_paid'
+                ELSE i.status
+              END,
+              updated_at = NOW()
+            WHERE i.id = $3::uuid AND i.company_id = $4::uuid
+            RETURNING i.customer_id
+          )
+          UPDATE customers SET balance = COALESCE(balance, 0) - $5::numeric, updated_at = NOW()
+          WHERE id = (SELECT customer_id FROM updated) AND company_id = $4::uuid`,
+          params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId, -amountApplied],
+        });
       }
-      if (result.success) return { success: true, id };
-      return { success: false, error: result.error };
+      const result = await runTransaction(statements);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      return { success: true, id };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -665,23 +695,51 @@ export const accountingApi = {
       if (!data.invoiceId && (data.amountApplied ?? 0) > 0) {
         return { success: false, error: 'Amount applied requires an invoice.' };
       }
-      const adapter = await getDbAdapter();
       const id = crypto.randomUUID();
       const currencyCode = data.currencyCode || YER_CODE;
       const exchangeRate = data.exchangeRate ?? 1;
       const baseCurrencyAmount = data.baseCurrencyAmount ?? (data.amount * exchangeRate);
       const amountApplied = data.amountApplied ?? 0;
       const baseCurrencyApplied = data.baseCurrencyApplied ?? (amountApplied * exchangeRate);
-      const result = await adapter.query(
-        `INSERT INTO payment_vouchers (id, company_id, voucher_number, date, supplier_id, invoice_id, expense_account_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, bank_account_id, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
-        [id, data.companyId, data.voucherNumber, data.date, data.supplierId || null, data.invoiceId || null, data.expenseAccountId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.bankAccountId || null, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)]
-      );
-      if (result.success && data.invoiceId && amountApplied > 0) {
-        await this.applyPaymentToInvoice(id, data.companyId, data.invoiceId, amountApplied, baseCurrencyApplied, 'payment', safeUserId(userId));
+
+      // Atomic batch: voucher INSERT + payment application commit together.
+      const statements: Array<{ sql: string; params?: unknown[] }> = [
+        {
+          sql: `INSERT INTO payment_vouchers (id, company_id, voucher_number, date, supplier_id, invoice_id, expense_account_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, bank_account_id, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+          params: [id, data.companyId, data.voucherNumber, data.date, data.supplierId || null, data.invoiceId || null, data.expenseAccountId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.bankAccountId || null, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
+        },
+      ];
+      if (data.invoiceId && amountApplied > 0) {
+        statements.push({
+          sql: `WITH updated AS (
+            UPDATE purchase_invoices AS i
+            SET
+              paid_amount = COALESCE(i.paid_amount, 0) + $1,
+              base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
+              status = CASE
+                WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount
+                  AND i.status NOT IN ('cancelled', 'paid')
+                THEN 'paid'
+                WHEN COALESCE(i.paid_amount, 0) + $1 > 0
+                  AND i.status NOT IN ('cancelled', 'paid')
+                THEN 'partially_paid'
+                ELSE i.status
+              END,
+              updated_at = NOW()
+            WHERE i.id = $3::uuid AND i.company_id = $4::uuid
+            RETURNING i.supplier_id
+          )
+          UPDATE suppliers SET balance = COALESCE(balance, 0) + $5::numeric, updated_at = NOW()
+          WHERE id = (SELECT supplier_id FROM updated) AND company_id = $4::uuid`,
+          params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId, amountApplied],
+        });
       }
-      if (result.success) return { success: true, id };
-      return { success: false, error: result.error };
+      const result = await runTransaction(statements);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      return { success: true, id };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -948,51 +1006,47 @@ export const accountingApi = {
     userId?: string | null
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const adapter = await getDbAdapter();
+      void voucherId;
+      void userId;
       const table = voucherType === 'receipt' ? 'sales_invoices' : 'purchase_invoices';
       const partyTable = voucherType === 'receipt' ? 'customers' : 'suppliers';
       const partyIdColumn = voucherType === 'receipt' ? 'customer_id' : 'supplier_id';
       const balanceDelta = voucherType === 'receipt' ? -amountApplied : amountApplied;
 
-      const result = await adapter.query(
-        `WITH updated AS (
-          UPDATE ${table} AS i
-          SET
-            paid_amount = COALESCE(i.paid_amount, 0) + $1,
-            base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
-            status = CASE
-              WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount
-                AND i.status NOT IN ('cancelled', 'paid')
-              THEN 'paid'
-              WHEN COALESCE(i.paid_amount, 0) + $1 > 0
-                AND i.status NOT IN ('cancelled', 'paid')
-              THEN 'partially_paid'
-              ELSE i.status
-            END,
-            updated_at = NOW()
-          WHERE i.id = $3::uuid AND i.company_id = $4::uuid
-          RETURNING i.${partyIdColumn}, i.total_amount, i.paid_amount, i.currency_code
-        )
-        SELECT ${partyIdColumn}, total_amount, paid_amount, currency_code FROM updated`,
-        [amountApplied, baseCurrencyApplied, invoiceId, companyId]
-      );
-      if (!result.success || !result.rows?.[0]) {
+      // Atomic batch: the invoice payment/status update and the party balance
+      // adjustment commit together or roll back together.
+      const result = await runTransaction([
+        {
+          sql: `WITH updated AS (
+            UPDATE ${table} AS i
+            SET
+              paid_amount = COALESCE(i.paid_amount, 0) + $1,
+              base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
+              status = CASE
+                WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount
+                  AND i.status NOT IN ('cancelled', 'paid')
+                THEN 'paid'
+                WHEN COALESCE(i.paid_amount, 0) + $1 > 0
+                  AND i.status NOT IN ('cancelled', 'paid')
+                THEN 'partially_paid'
+                ELSE i.status
+              END,
+              updated_at = NOW()
+            WHERE i.id = $3::uuid AND i.company_id = $4::uuid
+            RETURNING i.${partyIdColumn}
+          )
+          UPDATE ${partyTable} SET balance = COALESCE(balance, 0) + $5::numeric, updated_at = NOW()
+          WHERE id = (SELECT ${partyIdColumn} FROM updated) AND company_id = $4::uuid`,
+          params: [amountApplied, baseCurrencyApplied, invoiceId, companyId, balanceDelta],
+        },
+      ]);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      const rowCount = Number((result.results?.[0] as { rowCount?: number } | undefined)?.rowCount ?? 0);
+      if (rowCount === 0) {
         return { success: false, error: 'Invoice not found' };
       }
-      const inv = result.rows[0] as Record<string, unknown>;
-      const partyId = String(inv[partyIdColumn] || '');
-      if (!partyId) {
-        void voucherId;
-        void userId;
-        return { success: false, error: 'Invoice has no associated party (customer/supplier)' };
-      }
-      await adapter.query(
-        `UPDATE ${partyTable} SET balance = COALESCE(balance, 0) + $1, updated_at = NOW()
-         WHERE id = $2::uuid AND company_id = $3::uuid`,
-        [balanceDelta, partyId, companyId]
-      );
-      void voucherId;
-      void userId;
       return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };

@@ -1,4 +1,5 @@
 import { getDbAdapter } from '@/core/database/adapters';
+import { runTransaction, buildJournalEntryStatement } from '@/core/database/tx';
 
 /**
  * Opening balance accounting (QuickBooks / Odoo style).
@@ -12,8 +13,8 @@ import { getDbAdapter } from '@/core/database/adapters';
  *  - Employee opening  -> Dr Employee Advances (11202)  / Cr Opening Equity
  *  - Product stock     -> Dr Inventory (11301)          / Cr Opening Equity (qty x cost)
  *
- * Callers are responsible for stamping `opening_balance_posted` and updating
- * the entity's running balance column after a successful post.
+ * Each flow runs as ONE atomic transaction: the journal entry, the entity
+ * stamp and the running-balance update all commit together or not at all.
  */
 
 export type OpeningEntityType = 'customer' | 'supplier' | 'employee' | 'product_stock';
@@ -53,194 +54,113 @@ export async function ensureOpeningBalanceEquityAccount(companyId: string): Prom
   return findAccountIdByCode(companyId, OPENING_EQUITY_CODE);
 }
 
-export interface OpeningBalanceEntryInput {
-  entityType: OpeningEntityType;
-  entityId?: string;
-  /** Human label used in the JE memo, e.g. customer name or product code. */
-  label: string;
-  /** Positive monetary amount, or quantity for product_stock. */
-  amount: number;
-  /** Required for entityType === 'product_stock': unit cost used for valuation. */
-  costPrice?: number;
-}
-
-/**
- * Post the balanced opening journal entry for one entity.
- * Returns the created transaction id on success.
- */
-export async function postOpeningBalanceEntry(
-  companyId: string,
-  input: OpeningBalanceEntryInput
-): Promise<{ success: boolean; transactionId?: string; error?: string }> {
-  const amount = Math.round(Number(input.amount) * 100) / 100;
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return { success: false, error: 'الرصيد الافتتاحي يجب أن يكون رقماً موجباً' };
-  }
-
-  const obeAccountId = await ensureOpeningBalanceEquityAccount(companyId);
-  if (!obeAccountId) return { success: false, error: 'تعذر تجهيز حساب الأرصدة الافتتاحية' };
-
-  let valueAmount = amount;
-  if (input.entityType === 'product_stock') {
-    valueAmount = Math.round(Number(input.costPrice || 0) * amount * 100) / 100;
-    if (valueAmount <= 0) {
-      return { success: false, error: 'قيمة مخزون أول المدة يجب أن تكون أكبر من صفر (تأكد من سعر التكلفة)' };
-    }
-  }
-
-  let drAccountId: string;
-  let crAccountId: string;
-
-  if (input.entityType === 'customer') {
-    const ar = await findAccountIdByCode(companyId, AR_CODE);
-    if (!ar) return { success: false, error: 'حساب المدينين التجاريين غير موجود' };
-    drAccountId = ar;
-    crAccountId = obeAccountId;
-  } else if (input.entityType === 'supplier') {
-    const ap = await findAccountIdByCode(companyId, AP_CODE);
-    if (!ap) return { success: false, error: 'حساب الدائنين التجاريين غير موجود' };
-    drAccountId = obeAccountId;
-    crAccountId = ap;
-  } else if (input.entityType === 'employee') {
-    drAccountId = (await findAccountIdByCode(companyId, ADVANCES_CODE)) || obeAccountId;
-    crAccountId = obeAccountId;
-  } else if (input.entityType === 'product_stock') {
-    const inv = await findAccountIdByCode(companyId, INVENTORY_CODE);
-    if (!inv) return { success: false, error: 'حساب المخزون غير موجود' };
-    drAccountId = inv;
-    crAccountId = obeAccountId;
-  } else {
-    return { success: false, error: 'نوع كيان غير مدعوم للرصيد الافتتاحي' };
-  }
-
-  const lines = [
-    { accountId: drAccountId, debit: valueAmount, credit: 0, memo: input.label },
-    { accountId: crAccountId, debit: 0, credit: valueAmount, memo: input.label },
-  ];
-
-  const adapter = await getDbAdapter();
-  const result = await adapter.createTransaction({
-    companyId,
-    date: new Date().toISOString().split('T')[0],
-    reference: 'OPENING',
-    description: `رصيد افتتاحي - ${input.label}`,
-    totalAmount: valueAmount,
-    status: 'posted',
-    entries: lines,
-  });
-  if (!result.success) return { success: false, error: result.error };
-  void input.entityId;
-  return { success: true, transactionId: result.id };
-}
-
-/**
- * Post an account-level opening balance respecting its natural direction:
- * debit-direction takes Dr <account> / Cr OBE, credit-direction mirrors it.
- * Also aligns the stored snapshot `accounts.balance`.
- */
-export async function postAccountOpeningBalance(
-  companyId: string,
-  opts: { accountId: string; accountCode: string; accountName: string; direction: 'debit' | 'credit'; amount: number }
-): Promise<{ success: boolean; transactionId?: string; error?: string }> {
-  const amount = Math.round(Number(opts.amount) * 100) / 100;
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return { success: false, error: 'الرصيد الافتتاحي يجب أن يكون رقماً موجباً' };
-  }
-  const obeAccountId = await ensureOpeningBalanceEquityAccount(companyId);
-  if (!obeAccountId) return { success: false, error: 'تعذر تجهيز حساب الأرصدة الافتتاحية' };
-
-  const memo = `${opts.accountCode} - ${opts.accountName}`;
-  const drSide = opts.direction === 'debit';
-  const lines = [
-    { accountId: opts.accountId, debit: drSide ? amount : 0, credit: drSide ? 0 : amount, memo },
-    { accountId: obeAccountId, debit: drSide ? 0 : amount, credit: drSide ? amount : 0, memo },
-  ];
-
-  const adapter = await getDbAdapter();
-  const result = await adapter.createTransaction({
-    companyId,
-    date: new Date().toISOString().split('T')[0],
-    reference: 'OPENING',
-    description: `رصيد افتتاحي - ${memo}`,
-    totalAmount: amount,
-    status: 'posted',
-    entries: lines,
-  });
-  if (result.success && result.id) {
-    await adapter.query(
-      'UPDATE accounts SET balance = COALESCE(balance,0) + $1::numeric, opening_amount = $1::numeric, opening_direction = $2, opening_balance_posted = true WHERE company_id = $3::uuid AND id = $4::uuid',
-      [drSide ? amount : -amount, opts.direction, companyId, opts.accountId]
-    );
-  }
-  return result.success ? { success: true, transactionId: result.id } : { success: false, error: result.error };
-}
-
 interface EntityOpeningResult {
   success: boolean;
   error?: string;
 }
 
-/** Customer: Dr AR / Cr OBE, then stamp + bump customers.balance. */
+/** Customer: Dr AR / Cr OBE + stamp + bump customers.balance — atomically. */
 export async function postCustomerOpening(
   companyId: string,
   opts: { id: string; name: string; amount: number }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return { success: true }; // nothing to post
-  const posted = await postOpeningBalanceEntry(companyId, {
-    entityType: 'customer', entityId: opts.id, label: opts.name, amount,
-  });
-  if (!posted.success) return posted;
-  const adapter = await getDbAdapter();
-  const res = await adapter.query(
-    'UPDATE customers SET opening_balance = $1::numeric, opening_balance_posted = true, balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid',
-    [amount, opts.id, companyId]
-  );
-  return res.success ? { success: true } : { success: false, error: res.error };
+
+  const ar = await findAccountIdByCode(companyId, AR_CODE);
+  const obe = await ensureOpeningBalanceEquityAccount(companyId);
+  if (!ar || !obe) return { success: false, error: 'تعذر تجهيز حسابات الرصيد الافتتاحي (المدينون/الأرصدة الافتتاحية)' };
+
+  const result = await runTransaction([
+    buildJournalEntryStatement(companyId, {
+      reference: 'OPENING',
+      description: `رصيد افتتاحي - ${opts.name}`,
+      date: new Date().toISOString().split('T')[0],
+      totalAmount: amount,
+      entries: [
+        { accountId: ar, debit: amount, credit: 0, memo: opts.name },
+        { accountId: obe, debit: 0, credit: amount, memo: opts.name },
+      ],
+    }),
+    {
+      sql: `UPDATE customers SET opening_balance = $1::numeric, opening_balance_posted = true,
+              balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW()
+            WHERE id = $2::uuid AND company_id = $3::uuid`,
+      params: [amount, opts.id, companyId],
+    },
+  ]);
+  return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-/** Supplier: Dr OBE / Cr AP, then stamp + bump suppliers.balance. */
+/** Supplier: Dr OBE / Cr AP + stamp + bump suppliers.balance — atomically. */
 export async function postSupplierOpening(
   companyId: string,
   opts: { id: string; name: string; amount: number }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return { success: true };
-  const posted = await postOpeningBalanceEntry(companyId, {
-    entityType: 'supplier', entityId: opts.id, label: opts.name, amount,
-  });
-  if (!posted.success) return posted;
-  const adapter = await getDbAdapter();
-  const res = await adapter.query(
-    'UPDATE suppliers SET opening_balance = $1::numeric, opening_balance_posted = true, balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid',
-    [amount, opts.id, companyId]
-  );
-  return res.success ? { success: true } : { success: false, error: res.error };
+
+  const ap = await findAccountIdByCode(companyId, AP_CODE);
+  const obe = await ensureOpeningBalanceEquityAccount(companyId);
+  if (!ap || !obe) return { success: false, error: 'تعذر تجهيز حسابات الرصيد الافتتاحي (الدائنون/الأرصدة الافتتاحية)' };
+
+  const result = await runTransaction([
+    buildJournalEntryStatement(companyId, {
+      reference: 'OPENING',
+      description: `رصيد افتتاحي - ${opts.name}`,
+      date: new Date().toISOString().split('T')[0],
+      totalAmount: amount,
+      entries: [
+        { accountId: obe, debit: amount, credit: 0, memo: opts.name },
+        { accountId: ap, debit: 0, credit: amount, memo: opts.name },
+      ],
+    }),
+    {
+      sql: `UPDATE suppliers SET opening_balance = $1::numeric, opening_balance_posted = true,
+              balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW()
+            WHERE id = $2::uuid AND company_id = $3::uuid`,
+      params: [amount, opts.id, companyId],
+    },
+  ]);
+  return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-/** Employee advance: Dr Employee Advances / Cr OBE, then stamp. */
+/** Employee advance: Dr Advances / Cr OBE + stamp — atomically. */
 export async function postEmployeeOpening(
   companyId: string,
   opts: { id: string; name: string; amount: number }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return { success: true };
-  const posted = await postOpeningBalanceEntry(companyId, {
-    entityType: 'employee', entityId: opts.id, label: opts.name, amount,
-  });
-  if (!posted.success) return posted;
-  const adapter = await getDbAdapter();
-  const res = await adapter.query(
-    'UPDATE employees SET opening_balance = $1::numeric, opening_balance_posted = true, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid',
-    [amount, opts.id, companyId]
-  );
-  return res.success ? { success: true } : { success: false, error: res.error };
+
+  const obe = await ensureOpeningBalanceEquityAccount(companyId);
+  if (!obe) return { success: false, error: 'تعذر تجهيز حساب الأرصدة الافتتاحية' };
+  const advances = await findAccountIdByCode(companyId, ADVANCES_CODE);
+
+  const statements = [
+    buildJournalEntryStatement(companyId, {
+      reference: 'OPENING',
+      description: `رصيد افتتاحي - ${opts.name}`,
+      date: new Date().toISOString().split('T')[0],
+      totalAmount: amount,
+      entries: [
+        { accountId: advances || obe, debit: amount, credit: 0, memo: opts.name },
+        { accountId: obe, debit: 0, credit: amount, memo: opts.name },
+      ],
+    }),
+    {
+      sql: `UPDATE employees SET opening_balance = $1::numeric, opening_balance_posted = true, updated_at = NOW()
+            WHERE id = $2::uuid AND company_id = $3::uuid`,
+      params: [amount, opts.id, companyId],
+    },
+  ];
+  const result = await runTransaction(statements);
+  return result.success ? { success: true } : { success: false, error: result.error };
 }
 
 /**
- * Product opening stock: records an 'in' stock movement (reference OPENING),
- * upserts the warehouse stock row, posts Dr Inventory / Cr OBE at cost,
- * then stamps the product row.
+ * Product opening stock: movement audit trail + stock row upsert +
+ * Dr Inventory / Cr OBE at cost + product stamp — all in one transaction.
  */
 export async function postProductStockOpening(
   companyId: string,
@@ -250,45 +170,95 @@ export async function postProductStockOpening(
   if (!Number.isFinite(qty) || qty <= 0) return { success: true };
   if (!opts.warehouseId) return { success: false, error: 'يجب اختيار مستودع لمخزون أول المدة' };
 
+  const valueAmount = Math.round(Number(opts.costPrice || 0) * qty * 100) / 100;
+  if (valueAmount <= 0) return { success: false, error: 'قيمة مخزون أول المدة يجب أن تكون أكبر من صفر (تأكد من سعر التكلفة)' };
+
+  const inv = await findAccountIdByCode(companyId, INVENTORY_CODE);
+  const obe = await ensureOpeningBalanceEquityAccount(companyId);
+  if (!inv || !obe) return { success: false, error: 'تعذر تجهيز حسابات الرصيد الافتتاحي (المخزون/الأرصدة الافتتاحية)' };
+
+  // Pre-read stock row (read-only) so the batch can use a deterministic UPDATE or INSERT.
   const adapter = await getDbAdapter();
-  // 1) movement audit trail
-  await adapter.query(
-    `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes)
-     VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, 'OPENING', $5)`,
-    [companyId, opts.productId, opts.warehouseId, qty, `مخزون أول المدة - ${opts.productName}`]
-  );
-  // 2) upsert stock row (no unique constraint exists on these three columns,
-  //    so we select first and insert/update explicitly)
   const existing = await adapter.query<{ id: string }>(
     'SELECT id FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid LIMIT 1',
     [companyId, opts.productId, opts.warehouseId]
   );
-  if (existing.success && existing.rows?.[0]?.id) {
-    await adapter.query(
-      'UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE id = $2::uuid',
-      [qty, existing.rows[0].id]
-    );
-  } else {
-    await adapter.query(
-      'INSERT INTO stock (company_id, product_id, warehouse_id, quantity) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric)',
-      [companyId, opts.productId, opts.warehouseId, qty]
-    );
+  const stockRowId = existing.success ? existing.rows?.[0]?.id : undefined;
+
+  const statements = [
+    // 1) movement audit trail
+    {
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes)
+            VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, 'OPENING', $5)`,
+      params: [companyId, opts.productId, opts.warehouseId, qty, `مخزون أول المدة - ${opts.productName}`],
+    },
+    // 2) stock row upsert (deterministic branch chosen outside the tx)
+    stockRowId
+      ? { sql: 'UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE id = $2::uuid', params: [qty, stockRowId] }
+      : {
+          sql: 'INSERT INTO stock (company_id, product_id, warehouse_id, quantity) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric)',
+          params: [companyId, opts.productId, opts.warehouseId, qty],
+        },
+    // 3) balanced journal entry at cost
+    buildJournalEntryStatement(companyId, {
+      reference: 'OPENING',
+      description: `رصيد افتتاحي مخزون - ${opts.productName} (${qty})`,
+      date: new Date().toISOString().split('T')[0],
+      totalAmount: valueAmount,
+      entries: [
+        { accountId: inv, debit: valueAmount, credit: 0, memo: `${opts.productName} (${qty})` },
+        { accountId: obe, debit: 0, credit: valueAmount, memo: `${opts.productName} (${qty})` },
+      ],
+    }),
+    // 4) stamp the product row
+    {
+      sql: `UPDATE products SET opening_stock_qty = $1::numeric, opening_warehouse_id = $2::uuid,
+              opening_stock_posted = true, updated_at = NOW()
+            WHERE id = $3::uuid AND company_id = $4::uuid`,
+      params: [qty, opts.warehouseId, opts.productId, companyId],
+    },
+  ];
+
+  const result = await runTransaction(statements);
+  return result.success ? { success: true } : { success: false, error: result.error };
+}
+
+/**
+ * Account-level opening balance respecting its direction:
+ * debit-direction takes Dr <account> / Cr OBE, credit-direction mirrors it.
+ * JE + snapshot balance alignment happen in one transaction.
+ */
+export async function postAccountOpeningBalance(
+  companyId: string,
+  opts: { accountId: string; accountCode: string; accountName: string; direction: 'debit' | 'credit'; amount: number }
+): Promise<EntityOpeningResult> {
+  const amount = Math.round(Number(opts.amount) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { success: false, error: 'الرصيد الافتتاحي يجب أن يكون رقماً موجباً' };
   }
+  const obe = await ensureOpeningBalanceEquityAccount(companyId);
+  if (!obe) return { success: false, error: 'تعذر تجهيز حساب الأرصدة الافتتاحية' };
 
-  // 3) balanced journal entry at cost
-  const posted = await postOpeningBalanceEntry(companyId, {
-    entityType: 'product_stock',
-    entityId: opts.productId,
-    label: `${opts.productName} (${qty})`,
-    amount: qty,
-    costPrice: opts.costPrice,
-  });
-  if (!posted.success) return posted;
+  const memo = `${opts.accountCode} - ${opts.accountName}`;
+  const drSide = opts.direction === 'debit';
 
-  // 4) stamp product row
-  const res = await adapter.query(
-    'UPDATE products SET opening_stock_qty = $1::numeric, opening_warehouse_id = $2::uuid, opening_stock_posted = true, updated_at = NOW() WHERE id = $3::uuid AND company_id = $4::uuid',
-    [qty, opts.warehouseId, opts.productId, companyId]
-  );
-  return res.success ? { success: true } : { success: false, error: res.error };
+  const result = await runTransaction([
+    buildJournalEntryStatement(companyId, {
+      reference: 'OPENING',
+      description: `رصيد افتتاحي - ${memo}`,
+      date: new Date().toISOString().split('T')[0],
+      totalAmount: amount,
+      entries: [
+        { accountId: opts.accountId, debit: drSide ? amount : 0, credit: drSide ? 0 : amount, memo },
+        { accountId: obe, debit: drSide ? 0 : amount, credit: drSide ? amount : 0, memo },
+      ],
+    }),
+    {
+      sql: `UPDATE accounts SET balance = COALESCE(balance,0) + $1::numeric,
+              opening_amount = $2::numeric, opening_direction = $3, opening_balance_posted = true, updated_at = NOW()
+            WHERE company_id = $4::uuid AND id = $5::uuid`,
+      params: [drSide ? amount : -amount, amount, opts.direction, companyId, opts.accountId],
+    },
+  ]);
+  return result.success ? { success: true } : { success: false, error: result.error };
 }

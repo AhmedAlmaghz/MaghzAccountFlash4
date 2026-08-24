@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
+import { runTransaction } from '@/core/database/tx';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createBomSchema, createWorkOrderSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import type { BOM, BOMLine, WorkOrder, WorkOrderLine } from './types';
@@ -486,6 +487,9 @@ export const manufacturingApi = {
         const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
         const warehouseId = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
 
+        // Atomic batch: consumption movements + production output + status
+        // update all commit together or roll back together.
+        const statements: Array<{ sql: string; params?: unknown[] }> = [];
         if (warehouseId) {
           if (consRows.length > 0) {
             const consValues = consRows.map((_c: Record<string, unknown>, i: number) => {
@@ -495,22 +499,23 @@ export const manufacturingApi = {
             const consParams = consRows.flatMap((c: Record<string, unknown>) => [
               companyId, String(c.material_id), warehouseId, Number(c.planned_quantity), id, 'Production consumption', _userId ?? null
             ]);
-            await adapter.query(
-              `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ${consValues}`,
-              consParams
-            );
+            statements.push({
+              sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ${consValues}`,
+              params: consParams,
+            });
           }
-          await adapter.query(
-            `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1, $2, $3, 'in', $4, $5, $6, $7)`,
-            [companyId, String(wo.product_id), warehouseId, finalProducedQty, id, 'Production output', _userId ?? null]
-          );
+          statements.push({
+            sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1, $2, $3, 'in', $4, $5, $6, $7)`,
+            params: [companyId, String(wo.product_id), warehouseId, finalProducedQty, id, 'Production output', _userId ?? null],
+          });
         }
-
-        const result = await adapter.query(
-          `UPDATE work_orders SET status = 'completed', actual_end_date = $1, produced_quantity = $2, updated_at = NOW()${_userId ? ', updated_by = $3' : ''} WHERE id = $${_userId ? 4 : 3} AND company_id = $${_userId ? 5 : 4}`,
-          _userId ? [new Date().toISOString(), finalProducedQty, _userId, id, companyId] : [new Date().toISOString(), finalProducedQty, id, companyId]
-        );
-        return { success: result.success, error: result.error };
+        statements.push({
+          sql: `UPDATE work_orders SET status = 'completed', actual_end_date = $1, produced_quantity = $2, updated_at = NOW()${_userId ? ', updated_by = $3' : ''} WHERE id = $${_userId ? 4 : 3} AND company_id = $${_userId ? 5 : 4}`,
+          params: _userId ? [new Date().toISOString(), finalProducedQty, _userId, id, companyId] : [new Date().toISOString(), finalProducedQty, id, companyId],
+        });
+        const result = await runTransaction(statements);
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true };
       }
 
       {

@@ -1,4 +1,5 @@
 import { getDbAdapter } from '@/core/database/adapters';
+import { runTransaction, buildJournalEntryStatement, type TxStatement } from '@/core/database/tx';
 import { toDateString } from '@/core/utils/mapPgRow';
 
 /**
@@ -308,27 +309,23 @@ export async function postSalesReturn(
     { accountId: cogsId || inventoryId, debit: 0, credit: Math.floor(ret.amount * 0.7), memo: `عكس تكلفة بضاعة مباعة` },
   ];
 
-  const journalResult = await createTransaction(companyId, {
-    reference: ret.returnNumber,
-    description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
-    date: ret.date,
-    totalAmount: ret.amount,
-    entries,
-  });
+  // Atomic batch: the journal entry AND its stock movements commit together
+  // (or roll back together), keeping accounting and inventory in lock-step.
+  const statements: TxStatement[] = [
+    buildJournalEntryStatement(companyId, {
+      reference: ret.returnNumber,
+      description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
+      date: ret.date,
+      totalAmount: ret.amount,
+      entries,
+    }),
+  ];
 
-  if (!journalResult.success) {
-    return journalResult;
-  }
-
-  // Insert stock_movements (type='in') for each return line so the inventory
-  // reflects the goods returning to the warehouse. The warehouse is derived
-  // from the `stock` table (the warehouse that currently holds the product).
-  // If the product isn't in any warehouse we skip (no stock to add to).
   if (ret.id) {
-    try {
-      const adapter = await getDbAdapter();
-      await adapter.query(
-        `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
+    // Insert stock_movements (type='in') for each return line so inventory
+    // reflects goods returning to the warehouse they currently sit in.
+    statements.push({
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
          SELECT sr.company_id, srl.product_id, wh.warehouse_id, srl.quantity, 'in', $1, NOW()
            FROM sales_returns sr
            JOIN sales_return_lines srl ON srl.return_id = sr.id
@@ -340,14 +337,13 @@ export async function postSalesReturn(
               LIMIT 1
            ) wh ON true
           WHERE sr.id = $2 AND sr.company_id = $3`,
-        [ret.returnNumber, ret.id, companyId]
-      );
-    } catch (e) {
-      return { ...journalResult, warning: `Journal entry created but stock movement failed: ${String(e)}` };
-    }
+      params: [ret.returnNumber, ret.id, companyId],
+    });
   }
 
-  return journalResult;
+  const txResult = await runTransaction(statements);
+  if (!txResult.success) return { success: false, error: txResult.error };
+  return { success: true };
 }
 
 /**
@@ -374,29 +370,20 @@ export async function postPurchaseReturn(
     { accountId: inventoryId, debit: 0, credit: ret.amount, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` },
   ];
 
-  const journalResult = await createTransaction(companyId, {
-    reference: ret.returnNumber,
-    description: `قيد تلقائي - مردود مشتريات ${ret.returnNumber}`,
-    date: ret.date,
-    totalAmount: ret.amount,
-    entries,
-  });
+  // Atomic batch: journal entry + stock movements commit/roll back together.
+  const statements: TxStatement[] = [
+    buildJournalEntryStatement(companyId, {
+      reference: ret.returnNumber,
+      description: `قيد تلقائي - مردود مشتريات ${ret.returnNumber}`,
+      date: ret.date,
+      totalAmount: ret.amount,
+      entries,
+    }),
+  ];
 
-  if (!journalResult.success) {
-    return journalResult;
-  }
-
-  // Insert stock_movements (type='out') for each return line so the inventory
-  // reflects the goods leaving the warehouse. The warehouse is derived from
-  // the `stock` table (the warehouse that currently holds the product). When
-  // a product exists in multiple warehouses we pick the first one
-  // (DISTINCT ON product_id). If the product isn't in any warehouse we skip
-  // the movement (no stock to remove). If the return has no id we skip.
   if (ret.id) {
-    try {
-      const adapter = await getDbAdapter();
-      await adapter.query(
-        `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
+    statements.push({
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
          SELECT pr.company_id, prl.product_id, wh.warehouse_id, prl.quantity, 'out', $1, NOW()
            FROM purchase_returns pr
            JOIN purchase_return_lines prl ON prl.return_id = pr.id
@@ -408,16 +395,13 @@ export async function postPurchaseReturn(
               LIMIT 1
            ) wh ON true
           WHERE pr.id = $2 AND pr.company_id = $3`,
-        [ret.returnNumber, ret.id, companyId]
-      );
-    } catch (e) {
-      // Stock movement failure should not roll back the journal entry, but
-      // surface a warning so the caller can investigate.
-      return { ...journalResult, warning: `Journal entry created but stock movement failed: ${String(e)}` };
-    }
+      params: [ret.returnNumber, ret.id, companyId],
+    });
   }
 
-  return journalResult;
+  const txResult = await runTransaction(statements);
+  if (!txResult.success) return { success: false, error: txResult.error };
+  return { success: true };
 }
 
 /**
