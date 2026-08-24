@@ -88,7 +88,20 @@ export const accountingApi = {
         ]
       );
       if (result.success) {
-        return { success: true, id: result.rows?.[0]?.id as string | undefined };
+        const createdId = result.rows?.[0]?.id as string | undefined;
+        // Opening balance: post a balanced JE through Opening Balance Equity
+        const openingAmount = Number((data as Partial<Account> & { openingAmount?: number }).openingAmount) || 0;
+        if (createdId && openingAmount > 0 && !(data as Partial<Account>).openingBalancePosted) {
+          const { postAccountOpeningBalance } = await import('@/core/utils/openingBalance');
+          await postAccountOpeningBalance(data.companyId, {
+            accountId: createdId,
+            accountCode: data.code,
+            accountName: data.nameAr,
+            direction: ((data as Partial<Account> & { openingDirection?: string }).openingDirection === 'credit' ? 'credit' : 'debit'),
+            amount: openingAmount,
+          });
+        }
+        return { success: true, id: createdId };
       }
       return { success: false, error: result.error };
     } catch (e) {

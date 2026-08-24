@@ -14,6 +14,8 @@ export const customers = pgTable('customers', {
   taxNumber: varchar('tax_number', { length: 50 }),
   creditLimit: numeric('credit_limit', { precision: 18, scale: 4 }),
   balance: numeric('balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  openingBalance: numeric('opening_balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  openingBalancePosted: boolean('opening_balance_posted').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

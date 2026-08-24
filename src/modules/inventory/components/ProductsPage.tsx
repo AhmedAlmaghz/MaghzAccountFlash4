@@ -6,7 +6,7 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { UnitSelect, ProductTypeSelect } from '@/core/ui/components/smart';
-import { useProductsPaginated, useProductCategories } from '../hooks/useInventory';
+import { useProductsPaginated, useProductCategories, useWarehouses } from '../hooks/useInventory';
 import { useProductTypes, useDocumentSequences } from '@/core/hooks/useSettings';
 import type { ProductType } from '@/core/types';
 import { useAppStore } from '@/core/store';
@@ -33,6 +33,8 @@ interface FormData {
   minStock: string;
   maxStock: string;
   reorderPoint: string;
+  openingStockQty: string;
+  openingWarehouseId: string;
   image: string;
   categoryIds: string[];
   productTypeId: string;
@@ -52,6 +54,8 @@ const initialForm: FormData = {
   minStock: '0',
   maxStock: '0',
   reorderPoint: '0',
+  openingStockQty: '',
+  openingWarehouseId: '',
   image: '',
   categoryIds: [],
   productTypeId: '',
@@ -74,6 +78,7 @@ export const ProductsPage: React.FC = () => {
   const { products, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useProductsPaginated(companyId, productFilters);
   const { categories } = useProductCategories(companyId);
   const { types: productTypes } = useProductTypes(companyId);
+  const { warehouses } = useWarehouses(companyId);
   const { formatCurrency } = useFormatters(companyId);
   const { peekNextNumber } = useDocumentSequences(companyId);
 
@@ -139,6 +144,8 @@ export const ProductsPage: React.FC = () => {
       minStock: String(product.minStock ?? 0),
       maxStock: String(product.maxStock ?? 0),
       reorderPoint: String(product.reorderPoint ?? 0),
+      openingStockQty: product.openingStockPosted ? String(product.openingStockQty ?? '') : '',
+      openingWarehouseId: product.openingWarehouseId || '',
       image: product.image || '',
       categoryIds: product.categoryIds || [],
       productTypeId: product.productTypeId || '',
@@ -211,6 +218,8 @@ export const ProductsPage: React.FC = () => {
         reorderPoint: Number(formData.reorderPoint) || undefined,
         categoryIds: formData.categoryIds.length > 0 ? formData.categoryIds : undefined,
         productTypeId: formData.productTypeId || undefined,
+        openingStockQty: editingId ? undefined : (Number(formData.openingStockQty) || 0),
+        openingWarehouseId: editingId ? undefined : (formData.openingWarehouseId || null),
       };
 
       if (editingId) {
@@ -724,6 +733,53 @@ export const ProductsPage: React.FC = () => {
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.reorderPoint')}</label>
               <input type="number" step="0.01" min="0" value={formData.reorderPoint} onChange={(e) => setFormData((prev) => ({ ...prev, reorderPoint: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
+            </div>
+          </div>
+
+          {/* Opening stock (create mode only) */}
+          <div className="rounded-xl border border-dashed border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-900/10 p-4 space-y-3">
+            <p className="text-xs font-bold tracking-wider uppercase text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+              <Package size={12} /> {t('openingBalance.stockSection')}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('openingBalance.stockQty')}</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  disabled={!!editingId}
+                  value={formData.openingStockQty}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, openingStockQty: e.target.value }))}
+                  placeholder="0"
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+                {Number(formData.openingStockQty) > 0 && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                    {t('openingBalance.stockValue')}: <span className="font-bold tabular-nums">{formatCurrency(Number(formData.openingStockQty) * (Number(formData.costPrice) || 0))}</span>
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.selectWarehouseLabel')}</label>
+                <select
+                  value={formData.openingWarehouseId}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, openingWarehouseId: e.target.value }))}
+                  disabled={!!editingId}
+                  aria-label={t('inventory.selectWarehouseLabel')}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <option value="">{t('inventory.selectWarehouseLabel')}</option>
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+                {editingId ? (
+                  <p className="text-xs text-slate-400 mt-1">{t('openingBalance.postedHint')}</p>
+                ) : (
+                  <p className="text-xs text-slate-400 mt-1">{t('openingBalance.stockHint')}</p>
+                )}
+              </div>
             </div>
           </div>
 

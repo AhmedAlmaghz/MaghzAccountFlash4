@@ -8,6 +8,9 @@ email?: string;
 address?: string;
 taxNumber?: string;
 balance: number;
+/** Opening payable balance (we owe supplier) - posted via Opening Balance Equity. */
+openingBalance?: number;
+openingBalancePosted?: boolean;
 isActive: boolean;
 createdAt?: string;
 updatedAt?: string;

@@ -13,6 +13,9 @@ export const accounts = pgTable('accounts', {
   nature: varchar('nature', { length: 10 }).notNull(), // debit, credit
   isGroup: boolean('is_group').notNull().default(false),
   balance: numeric('balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  openingAmount: numeric('opening_amount', { precision: 18, scale: 4 }).notNull().default('0'),
+  openingDirection: varchar('opening_direction', { length: 10 }).notNull().default('debit'),
+  openingBalancePosted: boolean('opening_balance_posted').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

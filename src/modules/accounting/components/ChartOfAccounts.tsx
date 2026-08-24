@@ -92,8 +92,6 @@ function filterTree(accounts: Account[], query: string, typeFilter: string, natu
       const hasMatchingChild = !!childrenFiltered && childrenFiltered.length > 0;
       if (selfMatch || hasMatchingChild) {
         res.push({ ...n, children: childrenFiltered && childrenFiltered.length ? childrenFiltered : selfMatch ? n.children : [] });
-      } else if (hasMatchingChild) {
-        res.push({ ...n, children: childrenFiltered! });
       }
     }
     return res.length ? res : null;
@@ -246,6 +244,8 @@ export const ChartOfAccounts: React.FC = () => {
     isGroup: false,
     isActive: true,
   });
+  const [openingAmountStr, setOpeningAmountStr] = useState('');
+  const [openingDirection, setOpeningDirection] = useState<'debit' | 'credit'>('debit');
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Account | null>(null);
@@ -315,8 +315,10 @@ export const ChartOfAccounts: React.FC = () => {
       nature: formData.nature || 'debit',
       isGroup: !!formData.isGroup,
       balance: 0,
+      openingAmount: isEditMode ? undefined : (Number(openingAmountStr) || 0),
+      openingDirection,
       isActive: formData.isActive ?? true,
-    };
+    } as Omit<Account, 'id'>;
     let result;
     if (isEditMode && editingId) result = await update(editingId, payload);
     else result = await create(payload as Omit<Account, 'id'>);
@@ -332,6 +334,8 @@ export const ChartOfAccounts: React.FC = () => {
 
   const resetForm = () => {
     setFormData({ type: 'asset', nature: 'debit', isGroup: false, isActive: true });
+    setOpeningAmountStr('');
+    setOpeningDirection('debit');
     setFormErrors({});
     setIsEditMode(false);
     setEditingId(null);
@@ -704,6 +708,44 @@ export const ChartOfAccounts: React.FC = () => {
                 </select>
               </div>
             </div>
+          </div>
+
+          <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+          {/* Opening balance (create mode only) */}
+          <div className="rounded-xl border border-dashed border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-900/10 p-4 space-y-3">
+            <p className="text-xs font-bold tracking-wider uppercase text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+              <Wallet size={12} /> {t('openingBalance.title')}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('openingBalance.accountAmount')}</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  disabled={isEditMode}
+                  value={openingAmountStr}
+                  onChange={(e) => setOpeningAmountStr(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('openingBalance.accountDirection')}</label>
+                <select
+                  value={openingDirection}
+                  onChange={(e) => setOpeningDirection(e.target.value as 'debit' | 'credit')}
+                  disabled={isEditMode}
+                  aria-label={t('openingBalance.accountDirection')}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <option value="debit">{t('openingBalance.debit')}</option>
+                  <option value="credit">{t('openingBalance.credit')}</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">{isEditMode ? t('openingBalance.postedHint') : t('openingBalance.customerHint')}</p>
           </div>
 
           <div className="h-px bg-slate-100 dark:bg-slate-800" />

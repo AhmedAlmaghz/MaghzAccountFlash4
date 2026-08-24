@@ -26,6 +26,7 @@ interface SupplierForm {
   email: string;
   address: string;
   taxNumber: string;
+  openingBalance: string;
   isActive: boolean;
 }
 
@@ -39,6 +40,7 @@ const initialForm = (): SupplierForm => ({
   email: '',
   address: '',
   taxNumber: '',
+  openingBalance: '',
   isActive: true,
 });
 
@@ -102,6 +104,7 @@ export const SuppliersPage: React.FC = () => {
       email: s.email || '',
       address: s.address || '',
       taxNumber: s.taxNumber || '',
+      openingBalance: s.openingBalancePosted ? String(s.openingBalance || '') : '',
       isActive: s.isActive,
     });
     setFormErrors({});
@@ -130,6 +133,7 @@ export const SuppliersPage: React.FC = () => {
       address: form.address?.trim() || undefined,
       taxNumber: form.taxNumber?.trim() || undefined,
       balance: 0,
+      openingBalance: editingId ? undefined : (Number(form.openingBalance) || 0),
       isActive: form.isActive,
     };
     try {
@@ -616,6 +620,18 @@ export const SuppliersPage: React.FC = () => {
               <Wallet size={12} /> البيانات المالية والحالة
             </h4>
             <Input label={t('purchases.supplier.taxNumber')} value={form.taxNumber} onChange={(e) => setForm((prev) => ({ ...prev, taxNumber: e.target.value }))} placeholder="الرقم الضريبي" dir="ltr" />
+            <Input
+              label={t('openingBalance.title')}
+              type="number"
+              min={0}
+              step="0.01"
+              disabled={!!editingId}
+              value={form.openingBalance}
+              onChange={(e) => setForm((prev) => ({ ...prev, openingBalance: e.target.value }))}
+              placeholder="0.00"
+              helperText={editingId ? t('openingBalance.postedHint') : t('openingBalance.supplierHint')}
+              leftIcon={<span className="text-[11px] font-bold text-slate-400">{activeCompany?.currency || 'YER'}</span>}
+            />
             <label className="mt-4 flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3.5 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition">
               <input type="checkbox" checked={form.isActive} onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
               <div>

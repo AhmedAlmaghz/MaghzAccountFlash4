@@ -9,6 +9,10 @@ export interface Account {
   nature: 'debit' | 'credit';
   isGroup: boolean;
   balance: number;
+  /** Opening balance amount - posted through Opening Balance Equity (31201). */
+  openingAmount?: number;
+  openingDirection?: 'debit' | 'credit';
+  openingBalancePosted?: boolean;
   isActive: boolean;
   children?: Account[];
   createdBy?: string;

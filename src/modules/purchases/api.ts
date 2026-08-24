@@ -287,7 +287,14 @@ export const purchasesApi = {
         [supplierData.companyId, supplierData.code, supplierData.name, supplierData.phone, supplierData.email, supplierData.address, supplierData.taxNumber, supplierData.balance, supplierData.isActive, safeUserId(_userId), safeUserId(_userId)]
       );
       if (result.success && result.rows?.[0]) {
-        return { success: true, id: result.rows[0].id as string };
+        const supplierId = String(result.rows[0].id);
+        // Opening balance: post a balanced JE (Dr Opening Equity / Cr AP)
+        const opening = Number(supplierData.openingBalance) || 0;
+        if (opening > 0 && !supplierData.openingBalancePosted) {
+          const { postSupplierOpening } = await import('@/core/utils/openingBalance');
+          await postSupplierOpening(data.companyId, { id: supplierId, name: supplierData.name, amount: opening });
+        }
+        return { success: true, id: supplierId };
       }
       return { success: false, error: result.error };
     } catch (e) {

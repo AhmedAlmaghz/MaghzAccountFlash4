@@ -21,6 +21,10 @@ export interface Product {
   minStock?: number;
   maxStock?: number;
   reorderPoint?: number;
+  /** Opening stock quantity - posted as movement + Dr Inventory / Cr Opening Equity at cost. */
+  openingStockQty?: number;
+  openingWarehouseId?: string | null;
+  openingStockPosted?: boolean;
   createdBy?: string;
   updatedBy?: string;
 }

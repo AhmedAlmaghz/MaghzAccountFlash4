@@ -28,6 +28,8 @@ export const employees = pgTable('employees', {
   hireDate: date('hire_date').notNull(),
   terminationDate: date('termination_date'),
   baseSalary: numeric('base_salary', { precision: 18, scale: 4 }).notNull(),
+  openingBalance: numeric('opening_balance', { precision: 18, scale: 4 }).notNull().default('0'),
+  openingBalancePosted: boolean('opening_balance_posted').notNull().default(false),
   isActive: boolean('is_active').default(true).notNull(),
   photoUrl: text('photo_url'),
   attachments: jsonb('attachments'),

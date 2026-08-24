@@ -100,7 +100,22 @@ export const inventoryApi = {
       if (!validation.success) return { success: false, error: validation.error };
       const adapter = await getDbAdapter();
       const payload = { ...data, createdBy: _createdBy ?? data.createdBy, updatedBy: _createdBy ?? data.updatedBy };
-      return adapter.createProduct(payload);
+      const created = await adapter.createProduct(payload);
+      if (!created.success || !created.id) return { success: false, error: created.error };
+      const productId = String(created.id);
+      // Opening stock: movement + stock row + balanced JE (Dr Inventory / Cr Opening Equity)
+      const openingQty = Number(data.openingStockQty) || 0;
+      if (productId && openingQty > 0 && !data.openingStockPosted) {
+        const { postProductStockOpening } = await import('@/core/utils/openingBalance');
+        await postProductStockOpening(data.companyId, {
+          productId,
+          productName: `${data.code} - ${data.nameAr}`,
+          quantity: openingQty,
+          warehouseId: data.openingWarehouseId || null,
+          costPrice: Number(data.costPrice) || 0,
+        });
+      }
+      return { success: true, id: productId };
     } catch (e) {
       return { success: false, error: String(e) };
     }

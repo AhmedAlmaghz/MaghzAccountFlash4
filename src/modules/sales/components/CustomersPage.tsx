@@ -93,6 +93,7 @@ export const CustomersPage: React.FC = () => {
     address: '',
     taxNumber: '',
     creditLimit: '',
+    openingBalance: '',
     isActive: true,
   });
   const [formErrors, setFormErrors] = useState<FormErrors>({});
@@ -100,7 +101,7 @@ export const CustomersPage: React.FC = () => {
   const { getNextNumber } = useDocumentSequence();
 
   const resetForm = useCallback(() => {
-    setFormData({ code: '', name: '', phone: '', email: '', address: '', taxNumber: '', creditLimit: '', isActive: true });
+    setFormData({ code: '', name: '', phone: '', email: '', address: '', taxNumber: '', creditLimit: '', openingBalance: '', isActive: true });
     setFormErrors({});
     setEditingId(null);
   }, []);
@@ -132,6 +133,7 @@ export const CustomersPage: React.FC = () => {
       address: c.address || '',
       taxNumber: c.taxNumber || '',
       creditLimit: String(c.creditLimit || ''),
+      openingBalance: c.openingBalancePosted ? String(c.openingBalance || '') : '',
       isActive: c.isActive,
     });
     setFormErrors({});
@@ -162,6 +164,7 @@ export const CustomersPage: React.FC = () => {
       taxNumber: formData.taxNumber?.trim() || undefined,
       creditLimit: Number(formData.creditLimit) || 0,
       balance: 0,
+      openingBalance: editingId ? undefined : (Number(formData.openingBalance) || 0),
       isActive: formData.isActive,
     };
     try {
@@ -743,6 +746,18 @@ export const CustomersPage: React.FC = () => {
                 value={formData.creditLimit}
                 onChange={(e) => setFormData((p) => ({ ...p, creditLimit: e.target.value }))}
                 placeholder="0.00"
+                leftIcon={<span className="text-[11px] font-bold text-slate-400">{activeCompany?.currency || YER_CODE}</span>}
+              />
+              <Input
+                label={t('openingBalance.title')}
+                type="number"
+                min={0}
+                step="0.01"
+                disabled={!!editingId}
+                value={formData.openingBalance}
+                onChange={(e) => setFormData((p) => ({ ...p, openingBalance: e.target.value }))}
+                placeholder="0.00"
+                helperText={editingId ? t('openingBalance.postedHint') : t('openingBalance.customerHint')}
                 leftIcon={<span className="text-[11px] font-bold text-slate-400">{activeCompany?.currency || YER_CODE}</span>}
               />
             </div>

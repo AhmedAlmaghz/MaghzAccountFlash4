@@ -14,6 +14,9 @@ grade?: string;
 hireDate?: string;
 terminationDate?: string;
 baseSalary?: number;
+/** Opening balance = advances/loans receivable from the employee - posted via Opening Balance Equity. */
+openingBalance?: number;
+openingBalancePosted?: boolean;
 isActive: boolean;
 photoUrl?: string;
 attachments?: string[];

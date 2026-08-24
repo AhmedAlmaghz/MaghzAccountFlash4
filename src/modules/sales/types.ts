@@ -9,6 +9,9 @@ export interface Customer {
   taxNumber?: string;
   creditLimit?: number;
   balance: number;
+  /** Opening receivable balance (customer owes us) - posted via Opening Balance Equity. */
+  openingBalance?: number;
+  openingBalancePosted?: boolean;
   isActive: boolean;
   createdBy?: string;
   updatedBy?: string;

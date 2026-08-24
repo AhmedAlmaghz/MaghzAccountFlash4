@@ -441,9 +441,9 @@ describe('Migration 0009: Performance indexes phase 2', () => {
     expect(mig9).toMatch(/pg_constraint WHERE conname/i);
   });
 
-  it('_journal.json has 25 entries (0000-0024)', () => {
+  it('_journal.json has 26 entries (0000-0025)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    expect(journal.entries.length).toBe(25);
+    expect(journal.entries.length).toBe(26);
     expect(journal.entries[11].tag).toBe('0011_manufacturing_schema_fix');
     expect(journal.entries[12].tag).toBe('0012_purchase_invoice_lines_percents');
     expect(journal.entries[13].tag).toBe('0013_hr_schema_drift_fix');
@@ -458,6 +458,48 @@ describe('Migration 0009: Performance indexes phase 2', () => {
     expect(journal.entries[22].tag).toBe('0022_audit_and_document_sequences_fix');
     expect(journal.entries[23].tag).toBe('0023_activities_user_tracking_columns');
     expect(journal.entries[24].tag).toBe('0024_invoice_attachments');
+    expect(journal.entries[25].tag).toBe('0025_opening_balances');
+  });
+});
+
+describe('Migration 0025: Opening balances', () => {
+  let mig25: string;
+
+  beforeAll(() => {
+    const path = join(MIGRATIONS_DIR, '0025_opening_balances.sql');
+    mig25 = readFileSync(path, 'utf-8');
+  });
+
+  it('adds opening_balance + posted flag to customers, suppliers and employees', () => {
+    for (const table of ['customers', 'suppliers', 'employees']) {
+      expect(mig25).toMatch(new RegExp(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS opening_balance numeric\\(18,4\\) NOT NULL DEFAULT 0`, 'i'));
+      expect(mig25).toMatch(new RegExp(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS opening_balance_posted boolean NOT NULL DEFAULT false`, 'i'));
+    }
+  });
+
+  it('adds product opening stock columns with warehouse FK', () => {
+    expect(mig25).toMatch(/ALTER TABLE products ADD COLUMN IF NOT EXISTS opening_stock_qty/i);
+    expect(mig25).toMatch(/opening_warehouse_id uuid REFERENCES warehouses\(id\) ON DELETE SET NULL/i);
+    expect(mig25).toMatch(/opening_stock_posted boolean NOT NULL DEFAULT false/i);
+  });
+
+  it('adds account opening amount + direction columns', () => {
+    expect(mig25).toMatch(/ALTER TABLE accounts ADD COLUMN IF NOT EXISTS opening_amount numeric\(18,4\) NOT NULL DEFAULT 0/i);
+    expect(mig25).toMatch(/opening_direction varchar\(10\) NOT NULL DEFAULT 'debit'/i);
+  });
+
+  it('creates Opening Balance Equity account (31201) idempotently', () => {
+    expect(mig25).toContain("'31201'");
+    expect(mig25).toContain('حساب الأرصدة الافتتاحية');
+    const inserts = mig25.match(/INSERT INTO accounts/g) || [];
+    // Every INSERT must be guarded by WHERE NOT EXISTS on the same code
+    expect(inserts.length).toBeGreaterThanOrEqual(4);
+    expect((mig25.match(/WHERE NOT EXISTS \(SELECT 1 FROM accounts/g) || []).length).toBe(inserts.length);
+  });
+
+  it('creates Employee Advances account (11202)', () => {
+    expect(mig25).toContain("'11202'");
+    expect(mig25).toContain('سلف الموظفين');
   });
 });
 

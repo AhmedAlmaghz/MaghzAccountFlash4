@@ -211,9 +211,15 @@ export const salesApi = {
 
       if (isElectronPg()) {
         const result = await invokeSalesRpc('createCustomer', { ...customerData });
-        return result.success
-          ? { success: true, id: firstId(result.rows) }
-          : { success: false, error: result.error };
+        if (!result.success) return { success: false, error: result.error };
+        const customerId = firstId(result.rows);
+        // Opening balance: post a balanced JE (Dr AR / Cr Opening Equity)
+        const opening = Number(customerData.openingBalance) || 0;
+        if (customerId && opening > 0 && !customerData.openingBalancePosted) {
+          const { postCustomerOpening } = await import('@/core/utils/openingBalance');
+          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening });
+        }
+        return { success: true, id: customerId };
       }
       const adapter = await getDbAdapter();
       
@@ -222,7 +228,15 @@ export const salesApi = {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::uuid) RETURNING id`,
         [customerData.companyId, customerData.code, customerData.name, customerData.phone, customerData.email, customerData.address, customerData.taxNumber, customerData.creditLimit, customerData.balance, customerData.isActive, safeUserId(_userId), safeUserId(_userId)]
       );
-      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id };
+      if (result.success && result.rows?.[0]) {
+        const customerId = String(result.rows[0].id);
+        const opening = Number(customerData.openingBalance) || 0;
+        if (opening > 0 && !customerData.openingBalancePosted) {
+          const { postCustomerOpening } = await import('@/core/utils/openingBalance');
+          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening });
+        }
+        return { success: true, id: customerId };
+      }
       return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };

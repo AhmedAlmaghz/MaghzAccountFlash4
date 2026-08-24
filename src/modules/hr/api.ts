@@ -189,7 +189,16 @@ export const hrApi = {
           photoUrl: employeeData.photoUrl ?? null,
           attachments: employeeData.attachments ?? null,
         });
-        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        if (result.success && result.rows?.[0]) {
+          const employeeId = String(result.rows[0].id);
+          // Opening balance (employee advance): Dr Advances / Cr Opening Equity
+          const opening = Number(employeeData.openingBalance) || 0;
+          if (opening > 0 && !employeeData.openingBalancePosted) {
+            const { postEmployeeOpening } = await import('@/core/utils/openingBalance');
+            await postEmployeeOpening(data.companyId, { id: employeeId, name: employeeData.fullName, amount: opening });
+          }
+          return { success: true, id: employeeId };
+        }
         return { success: false, error: result.error };
       }
 
@@ -199,7 +208,15 @@ export const hrApi = {
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
         [employeeData.companyId, employeeData.employeeNumber, employeeData.fullName, employeeData.nationalId, employeeData.phone, employeeData.email, employeeData.address, employeeData.departmentId, employeeData.position, employeeData.grade, employeeData.hireDate, employeeData.terminationDate, employeeData.baseSalary, employeeData.isActive, employeeData.photoUrl, employeeData.attachments ? JSON.stringify(employeeData.attachments) : null, safeUserId(_userId), safeUserId(_userId)]
       );
-      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id };
+      if (result.success && result.rows?.[0]) {
+        const employeeId = String(result.rows[0].id);
+        const opening = Number(employeeData.openingBalance) || 0;
+        if (opening > 0 && !employeeData.openingBalancePosted) {
+          const { postEmployeeOpening } = await import('@/core/utils/openingBalance');
+          await postEmployeeOpening(data.companyId, { id: employeeId, name: employeeData.fullName, amount: opening });
+        }
+        return { success: true, id: employeeId };
+      }
       return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };

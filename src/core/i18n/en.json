@@ -839,7 +839,8 @@
       "codeGenerationFailed": "Failed to generate auto code",
       "imageTooLarge": "Image size exceeds 2MB",
       "cameraFailed": "Failed to start camera"
-    }
+    },
+    "selectWarehouseLabel": "Select warehouse"
   },
   "sales": {
     "invoices": "Sales Invoices",
@@ -2972,5 +2973,20 @@
     "restoreRecorded": {
       "restoreRecorded": "Restore request recorded for review"
     }
+  },
+  "openingBalance": {
+    "title": "Opening Balance",
+    "postedHint": "This balance was posted to the books and can no longer be edited",
+    "customerHint": "Posts automatically: Dr Trade Receivables / Cr Opening Balance Equity",
+    "supplierHint": "Posts automatically: Dr Opening Balance Equity / Cr Trade Payables",
+    "employeeHint": "Advance/loan receivable from the employee - posted via Employee Advances",
+    "stockSection": "Opening Stock",
+    "stockQty": "Opening Quantity",
+    "stockValue": "Value at Cost",
+    "stockHint": "Creates a stock movement and posts the journal entry at cost automatically",
+    "accountAmount": "Opening Balance Amount",
+    "accountDirection": "Opening Balance Side",
+    "debit": "Debit",
+    "credit": "Credit"
   }
 }

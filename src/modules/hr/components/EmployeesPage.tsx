@@ -35,6 +35,7 @@ export const EmployeesPage: React.FC = () => {
   const [formData, setFormData] = useState({
     employeeNumber: '', fullName: '', nationalId: '', phone: '', email: '',
     address: '', departmentId: '', position: '', grade: '', hireDate: '', baseSalary: '',
+    openingBalance: '',
     isActive: true, photoUrl: '', attachments: [] as string[],
   });
 
@@ -44,6 +45,7 @@ export const EmployeesPage: React.FC = () => {
     setFormData({
       employeeNumber: '', fullName: '', nationalId: '', phone: '', email: '',
       address: '', departmentId: '', position: '', grade: '', hireDate: '', baseSalary: '',
+      openingBalance: '',
       isActive: true, photoUrl: '', attachments: [],
     });
     setEditing(null);
@@ -72,6 +74,7 @@ export const EmployeesPage: React.FC = () => {
       grade: emp.grade || '',
       hireDate: emp.hireDate || '',
       baseSalary: emp.baseSalary !== undefined ? String(emp.baseSalary) : '',
+      openingBalance: emp.openingBalancePosted ? String(emp.openingBalance || '') : '',
       isActive: emp.isActive,
       photoUrl: emp.photoUrl || '',
       attachments: emp.attachments || [],
@@ -107,6 +110,7 @@ export const EmployeesPage: React.FC = () => {
       grade: formData.grade || undefined,
       hireDate: formData.hireDate || undefined,
       baseSalary: formData.baseSalary ? Number(formData.baseSalary) : undefined,
+      openingBalance: editing ? undefined : (Number(formData.openingBalance) || 0),
       isActive: formData.isActive,
       photoUrl: formData.photoUrl || undefined,
       attachments: formData.attachments,
@@ -345,10 +349,21 @@ export const EmployeesPage: React.FC = () => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('hr.employeesPage.hireDate')} type="date" value={formData.hireDate} onChange={(e) => setFormData((prev) => ({ ...prev, hireDate: e.target.value }))} />
-            <div className="flex items-center gap-2 pt-6">
-              <input type="checkbox" id="isActive" checked={formData.isActive} onChange={(e) => setFormData((prev) => ({ ...prev, isActive: e.target.checked }))} className="rounded" />
-              <label htmlFor="isActive" className="text-sm text-slate-700 dark:text-slate-200">{t('settings.common.active')}</label>
-            </div>
+            <Input
+              label={t('openingBalance.title')}
+              type="number"
+              min={0}
+              step="0.01"
+              disabled={!!editing}
+              value={formData.openingBalance}
+              onChange={(e) => setFormData((prev) => ({ ...prev, openingBalance: e.target.value }))}
+              placeholder="0.00"
+              helperText={editing ? t('openingBalance.postedHint') : t('openingBalance.employeeHint')}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="isActive" checked={formData.isActive} onChange={(e) => setFormData((prev) => ({ ...prev, isActive: e.target.checked }))} className="rounded" />
+            <label htmlFor="isActive" className="text-sm text-slate-700 dark:text-slate-200">{t('settings.common.active')}</label>
           </div>
         </div>
       </Modal>

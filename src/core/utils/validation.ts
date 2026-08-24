@@ -114,6 +114,8 @@ export const createCustomerSchema = z.object({
   taxNumber: z.string().max(50).optional(),
   creditLimit: currencyAmountSchema.optional(),
   balance: currencyAmountSchema.default(0),
+  openingBalance: currencyAmountSchema.optional(),
+  openingBalancePosted: z.boolean().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -203,6 +205,8 @@ export const createSupplierSchema = z.object({
   address: z.string().max(1000).optional(),
   taxNumber: z.string().max(50).optional(),
   balance: currencyAmountSchema.default(0),
+  openingBalance: currencyAmountSchema.optional(),
+  openingBalancePosted: z.boolean().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -305,6 +309,9 @@ export const createProductSchema = z.object({
   minStock: currencyAmountSchema.optional(),
   maxStock: currencyAmountSchema.optional(),
   reorderPoint: currencyAmountSchema.optional(),
+  openingStockQty: currencyAmountSchema.optional(),
+  openingWarehouseId: uuidSchema.nullable().optional(),
+  openingStockPosted: z.boolean().optional(),
   createdBy: uuidSchema.optional(),
   updatedBy: uuidSchema.optional(),
 });
@@ -381,6 +388,8 @@ export const createEmployeeSchema = z.object({
   hireDate: dateSchema.optional(),
   terminationDate: dateSchema.optional(),
   baseSalary: currencyAmountSchema.optional(),
+  openingBalance: currencyAmountSchema.optional(),
+  openingBalancePosted: z.boolean().optional(),
   isActive: z.boolean().default(true),
   photoUrl: z.string().max(2000000).optional(),
   attachments: z.array(z.string()).optional(),

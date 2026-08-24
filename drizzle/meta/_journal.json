@@ -176,6 +176,13 @@
       "when": 1804200000000,
       "tag": "0024_invoice_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1804300000000,
+      "tag": "0025_opening_balances",
+      "breakpoints": true
     }
   ]
 }
