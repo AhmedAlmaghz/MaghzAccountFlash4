@@ -792,22 +792,28 @@ export const salesApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       if (isElectronPg()) {
+        // Unified contract (same as the fallback path): create the journal
+        // entry FIRST and propagate its errors, THEN flip status + balance.
+        // Never swallow JE failures — a posted invoice without its journal
+        // entry breaks trial-balance consistency.
+        const full = await this.getInvoiceById(id, companyId);
+        if (!full.success || !full.data) return { success: false, error: full.error || 'Invoice not found or not in draft status' };
+        if (full.data.status !== 'draft') return { success: false, error: 'Invoice not found or not in draft status' };
+        const inv = full.data;
+        const je = await postSalesInvoice(companyId, {
+          invoiceNumber: inv.invoiceNumber,
+          date: inv.date || new Date().toISOString().split('T')[0],
+          customerId: inv.customerId,
+          subtotal: Number(inv.subtotal) || 0,
+          vatAmount: Number(inv.vatAmount) || 0,
+          totalAmount: Number(inv.totalAmount) || 0,
+        });
+        if (!je.success) {
+          return { success: false, error: je.error || 'فشل إنشاء القيد المحاسبي' };
+        }
         const result = await invokeSalesRpc('postInvoice', { id });
         if (!result.success) return { success: false, error: result.error };
         if (!result.rows?.[0]) return { success: false, error: 'Invoice not found or not in draft status' };
-        const inv = result.rows[0];
-        try {
-          await postSalesInvoice(companyId, {
-            invoiceNumber: String(inv.invoice_number || ''),
-            date: String(inv.date || new Date().toISOString().split('T')[0]),
-            customerId: String(inv.customer_id),
-            subtotal: Number(inv.subtotal) || 0,
-            vatAmount: Number(inv.vat_amount) || 0,
-            totalAmount: Number(inv.total_amount) || 0,
-          });
-        } catch (jeErr) {
-          void jeErr;
-        }
         return { success: true };
       }
       const adapter = await getDbAdapter();
@@ -1342,21 +1348,25 @@ export const salesApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       if (isElectronPg()) {
+        // Unified contract: JE (with stock movements) FIRST with propagated
+        // errors, then flip status + balance via the atomic RPC.
+        const full = await this.getReturnById(id, companyId);
+        if (!full.success || !full.data) return { success: false, error: full.error || 'Return not found or not in draft status' };
+        if (full.data.status !== 'draft') return { success: false, error: 'Return not found or not in draft status' };
+        const ret = full.data;
+        const je = await postSalesReturn(companyId, {
+          id: id,
+          returnNumber: ret.returnNumber,
+          date: ret.date || new Date().toISOString().split('T')[0],
+          customer: ret.customer?.name || ret.customerId,
+          amount: Number(ret.totalAmount) || 0,
+        });
+        if (!je.success) {
+          return { success: false, error: je.error || 'فشل إنشاء القيد المحاسبي' };
+        }
         const result = await invokeSalesRpc('postReturn', { id });
         if (!result.success) return { success: false, error: result.error };
         if (!result.rows?.[0]) return { success: false, error: 'Return not found or not in draft status' };
-        const ret = result.rows[0];
-        try {
-          await postSalesReturn(companyId, {
-            id: id,
-            returnNumber: String(ret.return_number || ''),
-            date: String(ret.date || new Date().toISOString().split('T')[0]),
-            customer: String(ret.customer_name || ''),
-            amount: Number(ret.total_amount) || 0,
-          });
-        } catch (jeErr) {
-          void jeErr;
-        }
         return { success: true };
       }
       const adapter = await getDbAdapter();

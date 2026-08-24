@@ -674,7 +674,7 @@ class ChatEngine {
 
         this.history.push({
           role: 'tool',
-          content: outcome.ok ? JSON.stringify(outcome.result) : `خطأ: ${outcome.error}`,
+          content: outcome.ok ? compactToolResultForLlm(outcome.result) : `خطأ: ${outcome.error}`,
           tool_call_id: tc.id,
         });
       }
@@ -842,6 +842,51 @@ function fmtCurrency(v: unknown): string {
  * The formatted text is shown to the user in the ToolCallCard and is also used
  * as context for the LLM in subsequent turns.
  */
+/**
+ * Compact a raw tool result before feeding it back into the LLM context.
+ *
+ * Full JSON dumps of search/report results bloat the context window every
+ * iteration (slower responses, higher token cost, and eventually provider
+ * rejections). Best practice (OpenAI/Anthropic agent guidance): keep tool
+ * payloads small — strip noisy internal fields and cap the serialized size,
+ * marking the truncation explicitly so the model knows data was elided.
+ */
+const TOOL_RESULT_MAX_CHARS = 4000;
+const NOISY_FIELDS = new Set([
+  'companyId', 'company_id', 'createdBy', 'created_by', 'updatedBy', 'updated_by',
+  'createdAt', 'created_at', 'updatedAt', 'updated_at', 'openingBalancePosted',
+  'opening_balance_posted', 'isActive', 'is_active', 'passwordHash', 'notes',
+]);
+
+function compactToolResultForLlm(result: unknown): string {
+  let json: string;
+  try {
+    json = JSON.stringify(result, (key, value) => (NOISY_FIELDS.has(key) ? undefined : value));
+  } catch {
+    return '✅ تم بنجاح';
+  }
+  if (json.length <= TOOL_RESULT_MAX_CHARS) return json;
+
+  // Try trimming array payloads first (search/list tools) so the model keeps
+  // whole items rather than a cut-off JSON fragment.
+  if (result && typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    for (const key of ['matches', 'items', 'data']) {
+      const arr = obj[key];
+      if (Array.isArray(arr) && arr.length > 3) {
+        const trimmed = { ...obj, [key]: arr.slice(0, 3), truncated: true, totalAvailable: arr.length };
+        try {
+          json = JSON.stringify(trimmed, (k, v) => (NOISY_FIELDS.has(k) ? undefined : v));
+          if (json.length <= TOOL_RESULT_MAX_CHARS) {
+            return `${json}\n(تم اقتطاع النتيجة — ${arr.length} عنصراً متاحاً؛ استخدم بحثاً أدق لرؤية البقية)`;
+          }
+        } catch { /* fall through */ }
+      }
+    }
+  }
+  return json.slice(0, TOOL_RESULT_MAX_CHARS) + '\n…(نتيجة كبيرة تم اقتصاصها)';
+}
+
 function summarizeResult(result: unknown): string {
   if (result === null || result === undefined) return '✅ تم بنجاح';
 

@@ -740,30 +740,36 @@ export const purchasesApi = {
       const totalAmount = Number(inv.total_amount) || 0;
       const paidAmount = Number(inv.paid_amount) || 0;
       const outstanding = totalAmount - paidAmount;
-      const result = await adapter.query(
-        `UPDATE purchase_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-        [id, companyId, safeUserId(_userId)]
-      );
-      if (!result.success) {
-        return { success: result.success, error: result.error };
+
+      // Unified contract: journal entry FIRST with propagated errors, then an
+      // atomic batch for status flip + supplier balance.
+      const jeResult = await postPurchaseInvoice(companyId, {
+        invoiceNumber: String(inv.invoice_number || ''),
+        date: String(inv.date || new Date().toISOString().split('T')[0]),
+        supplierId: supplierId,
+        subtotal: Number(inv.subtotal) || 0,
+        vatAmount: Number(inv.vat_amount) || 0,
+        totalAmount: totalAmount,
+      });
+      if (!jeResult.success) {
+        return { success: false, error: jeResult.error || 'فشل إنشاء القيد المحاسبي' };
       }
+
+      const txQueries: { sql: string; params: unknown[] }[] = [
+        {
+          sql: `UPDATE purchase_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+          params: [id, companyId, safeUserId(_userId)],
+        },
+      ];
       if (outstanding !== 0) {
-        await adapter.query(
-          `UPDATE suppliers SET balance = balance + $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
-          [outstanding, supplierId, companyId]
-        );
-      }
-      try {
-        await postPurchaseInvoice(companyId, {
-          invoiceNumber: String(inv.invoice_number || ''),
-          date: String(inv.date || new Date().toISOString().split('T')[0]),
-          supplierId: supplierId,
-          subtotal: Number(inv.subtotal) || 0,
-          vatAmount: Number(inv.vat_amount) || 0,
-          totalAmount: totalAmount,
+        txQueries.push({
+          sql: `UPDATE suppliers SET balance = balance + $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [outstanding, supplierId, companyId],
         });
-      } catch (jeErr) {
-        void jeErr;
+      }
+      const txResult = await adapter.transaction(txQueries);
+      if (!txResult.success) {
+        return { success: false, error: txResult.error };
       }
       return { success: true };
     } catch (e) {
@@ -1194,29 +1200,35 @@ export const purchasesApi = {
       const ret = check.rows[0] as Record<string, unknown>;
       const supplierId = String(ret.supplier_id);
       const totalAmount = Number(ret.total_amount) || 0;
-      const result = await adapter.query(
-        `UPDATE purchase_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-        [id, companyId, safeUserId(_userId)]
-      );
-      if (!result.success) {
-        return { success: result.success, error: result.error };
+
+      // Unified contract: journal entry (with stock movements) FIRST with
+      // propagated errors, then an atomic batch for status + supplier balance.
+      const jeResult = await postPurchaseReturn(companyId, {
+        id: id,
+        returnNumber: String(ret.return_number || ''),
+        date: String(ret.date || new Date().toISOString().split('T')[0]),
+        supplier: String(ret.supplier_name || ''),
+        amount: totalAmount,
+      });
+      if (!jeResult.success) {
+        return { success: false, error: jeResult.error || 'فشل إنشاء القيد المحاسبي' };
       }
+
+      const txQueries: { sql: string; params: unknown[] }[] = [
+        {
+          sql: `UPDATE purchase_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+          params: [id, companyId, safeUserId(_userId)],
+        },
+      ];
       if (totalAmount !== 0) {
-        await adapter.query(
-          `UPDATE suppliers SET balance = balance - $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
-          [totalAmount, supplierId, companyId]
-        );
-      }
-      try {
-        await postPurchaseReturn(companyId, {
-          id: id,
-          returnNumber: String(ret.return_number || ''),
-          date: String(ret.date || new Date().toISOString().split('T')[0]),
-          supplier: String(ret.supplier_name || ''),
-          amount: totalAmount,
+        txQueries.push({
+          sql: `UPDATE suppliers SET balance = balance - $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [totalAmount, supplierId, companyId],
         });
-      } catch (jeErr) {
-        void jeErr;
+      }
+      const txResult = await adapter.transaction(txQueries);
+      if (!txResult.success) {
+        return { success: false, error: txResult.error };
       }
       return { success: true };
     } catch (e) {
