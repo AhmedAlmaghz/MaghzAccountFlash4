@@ -105,7 +105,7 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'sales.create_customer',
     labelAr: 'إنشاء عميل',
-    descriptionAr: 'ينشئ عميلاً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان، رقم ضريبي).',
+    descriptionAr: 'ينشئ عميلاً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان، رقم ضريبي) مع رصيد افتتاحي وحد ائتماني اختياريين. الرصيد الافتتاحي يُرحّل تلقائياً محاسبياً.',
     permission: 'sales.create',
     dangerLevel: 'write',
     parameters: {
@@ -116,13 +116,16 @@ export const writeTools: ToolDefinition[] = [
         email: { type: 'string' },
         address: { type: 'string' },
         taxNumber: { type: 'string', description: 'الرقم الضريبي' },
+        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي المستحق على العميل (يُرحّل تلقائياً عبر حساب الأرصدة الافتتاحية)' },
+        creditLimit: { type: 'number', description: 'الحد الائتماني' },
       },
       required: ['name'],
     },
-    summarizeArgs: (a) => `إنشاء عميل جديد: ${a.name}${a.phone ? ` — هاتف: ${a.phone}` : ''}`,
+    summarizeArgs: (a) => `إنشاء عميل جديد: ${a.name}${a.openingBalance ? ` — رصيد افتتاحي: ${a.openingBalance}` : ''}${a.creditLimit ? ` — حد ائتماني: ${a.creditLimit}` : ''}`,
     execute: async (args, ctx) => {
       const name = str(args.name);
       if (!name) return { error: 'اسم العميل مطلوب' };
+      const openingBalance = num(args.openingBalance);
       const res = await salesApi.createCustomer({
         companyId: ctx.companyId,
         name,
@@ -130,11 +133,18 @@ export const writeTools: ToolDefinition[] = [
         email: str(args.email),
         address: str(args.address),
         taxNumber: str(args.taxNumber),
+        creditLimit: args.creditLimit !== undefined ? num(args.creditLimit) : undefined,
         balance: 0,
+        openingBalance: openingBalance > 0 ? openingBalance : undefined,
         isActive: true,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء العميل' };
-      return { created: true, customerId: res.id, name };
+      return {
+        created: true,
+        customerId: res.id,
+        name,
+        ...(openingBalance > 0 ? { openingBalance, openingPosted: true, note: 'الرصيد الافتتاحي رُحّل تلقائياً (مدين المدينين / دائن الأرصدة الافتتاحية)' } : {}),
+      };
     },
   },
   {
@@ -147,6 +157,7 @@ export const writeTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
+        date: { type: 'string', description: 'تاريخ الفاتورة YYYY-MM-DD (افتراضي اليوم)' },
         dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري)' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
@@ -179,7 +190,7 @@ export const writeTools: ToolDefinition[] = [
         companyId: ctx.companyId,
         invoiceNumber: docNumber.number,
         customerId,
-        date: today(),
+        date: str(args.date) || today(),
         dueDate: str(args.dueDate),
         subtotal,
         discountAmount: 0,
@@ -280,7 +291,7 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'purchases.create_supplier',
     labelAr: 'إنشاء مورد',
-    descriptionAr: 'ينشئ مورداً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان).',
+    descriptionAr: 'ينشئ مورداً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان) مع رصيد افتتاحي اختياري يُرحّل تلقائياً محاسبياً.',
     permission: 'purchases.create',
     dangerLevel: 'write',
     parameters: {
@@ -290,13 +301,15 @@ export const writeTools: ToolDefinition[] = [
         phone: { type: 'string' },
         email: { type: 'string' },
         address: { type: 'string' },
+        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي المستحق للمورد (يُرحّل تلقائياً عبر حساب الأرصدة الافتتاحية)' },
       },
       required: ['name'],
     },
-    summarizeArgs: (a) => `إنشاء مورد جديد: ${a.name}`,
+    summarizeArgs: (a) => `إنشاء مورد جديد: ${a.name}${a.openingBalance ? ` — رصيد افتتاحي: ${a.openingBalance}` : ''}`,
     execute: async (args, ctx) => {
       const name = str(args.name);
       if (!name) return { error: 'اسم المورد مطلوب' };
+      const openingBalance = num(args.openingBalance);
       const res = await purchasesApi.createSupplier({
         companyId: ctx.companyId,
         name,
@@ -304,10 +317,16 @@ export const writeTools: ToolDefinition[] = [
         email: str(args.email),
         address: str(args.address),
         balance: 0,
+        openingBalance: openingBalance > 0 ? openingBalance : undefined,
         isActive: true,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء المورد' };
-      return { created: true, supplierId: res.id, name };
+      return {
+        created: true,
+        supplierId: res.id,
+        name,
+        ...(openingBalance > 0 ? { openingBalance, openingPosted: true, note: 'الرصيد الافتتاحي رُحّل تلقائياً (مدين الأرصدة الافتتاحية / دائن الدائنين)' } : {}),
+      };
     },
   },
   {
@@ -320,6 +339,7 @@ export const writeTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
+        date: { type: 'string', description: 'تاريخ الفاتورة YYYY-MM-DD (افتراضي اليوم)' },
         dueDate: { type: 'string', description: 'YYYY-MM-DD (اختياري)' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
@@ -349,7 +369,7 @@ export const writeTools: ToolDefinition[] = [
         companyId: ctx.companyId,
         invoiceNumber: docNumber.number,
         supplierId,
-        date: today(),
+        date: str(args.date) || today(),
         dueDate: str(args.dueDate),
         subtotal,
         discountAmount: 0,
@@ -369,7 +389,7 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'accounting.create_receipt_voucher',
     labelAr: 'إنشاء سند قبض',
-    descriptionAr: 'ينشئ سند قبض مرحّل لقبض مبلغ من عميل. استخدم search.customers أولاً للحصول على معرف العميل.',
+    descriptionAr: 'ينشئ سند قبض مرحّل لقبض مبلغ من عميل — يُنشأ القيد المحاسبي ويُخفَّض رصيد العميل تلقائياً. استخدم search.customers أولاً.',
     permission: 'accounting.create',
     dangerLevel: 'write',
     parameters: {
@@ -377,7 +397,9 @@ export const writeTools: ToolDefinition[] = [
       properties: {
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
         amount: { type: 'number', description: 'المبلغ المقبوض' },
+        date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
+        reference: { type: 'string', description: 'رقم السند/الحوالة الورقية إن وُجد — يُسجَّل في الملاحظات' },
         notes: { type: 'string' },
       },
       required: ['customerId', 'amount'],
@@ -390,6 +412,8 @@ export const writeTools: ToolDefinition[] = [
       if (amount <= 0) return { error: 'المبلغ يجب أن يكون أكبر من صفر' };
       const method = str(args.paymentMethod);
       if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
+      const reference = str(args.reference);
+      const notesCombined = [str(args.notes), reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'receipt_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
@@ -398,25 +422,28 @@ export const writeTools: ToolDefinition[] = [
         {
           companyId: ctx.companyId,
           voucherNumber: docNumber.number,
-          date: today(),
+          date: str(args.date) || today(),
           customerId,
           customerName: '',
           amount,
           amountApplied: 0,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
-          notes: str(args.notes),
+          notes: notesCombined || undefined,
           status: 'posted',
         },
         ctx.userId
       );
       if (!res.success) return { error: res.error || 'فشل إنشاء السند' };
-      return { created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted' };
+      return {
+        created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
+        journalPosted: true, note: 'القيد المزدوج أُنشئ ورصيد العميل خُفِّض تلقائياً', ...(reference ? { reference } : {}),
+      };
     },
   },
   {
     name: 'accounting.create_payment_voucher',
     labelAr: 'إنشاء سند صرف',
-    descriptionAr: 'ينشئ سند صرف مرحّل لدفع مبلغ لمورد. استخدم search.suppliers أولاً للحصول على معرف المورد.',
+    descriptionAr: 'ينشئ سند صرف مرحّل لدفع مبلغ لمورد — يُنشأ القيد المحاسبي ويُحدَّث رصيد المورد تلقائياً. استخدم search.suppliers أولاً.',
     permission: 'accounting.create',
     dangerLevel: 'write',
     parameters: {
@@ -424,7 +451,9 @@ export const writeTools: ToolDefinition[] = [
       properties: {
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
         amount: { type: 'number', description: 'المبلغ المدفوع' },
+        date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
+        reference: { type: 'string', description: 'رقم الشيك/الحوالة الورقية إن وُجد — يُسجَّل في الملاحظات' },
         notes: { type: 'string' },
       },
       required: ['supplierId', 'amount'],
@@ -437,6 +466,8 @@ export const writeTools: ToolDefinition[] = [
       if (amount <= 0) return { error: 'المبلغ يجب أن يكون أكبر من صفر' };
       const method = str(args.paymentMethod);
       if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
+      const reference = str(args.reference);
+      const notesCombined = [str(args.notes), reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'payment_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
@@ -445,18 +476,21 @@ export const writeTools: ToolDefinition[] = [
         {
           companyId: ctx.companyId,
           voucherNumber: docNumber.number,
-          date: today(),
+          date: str(args.date) || today(),
           supplierId,
           amount,
           amountApplied: 0,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
-          notes: str(args.notes),
+          notes: notesCombined || undefined,
           status: 'posted',
         },
         ctx.userId
       );
       if (!res.success) return { error: res.error || 'فشل إنشاء السند' };
-      return { created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted' };
+      return {
+        created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
+        journalPosted: true, note: 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً', ...(reference ? { reference } : {}),
+      };
     },
   },
 
@@ -464,7 +498,7 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'inventory.create_product',
     labelAr: 'إنشاء منتج',
-    descriptionAr: 'ينشئ منتجاً جديداً بالاسم وسعر البيع وسعر التكلفة والوحدة.',
+    descriptionAr: 'ينشئ منتجاً جديداً بالاسم وسعر البيع وسعر التكلفة والوحدة، مع مخزون افتتاحي اختياري يُرحّل تلقائياً (حركة مخزون + قيد بالمخزون/الأرصدة الافتتاحية).',
     permission: 'inventory.create',
     dangerLevel: 'write',
     parameters: {
@@ -475,10 +509,11 @@ export const writeTools: ToolDefinition[] = [
         costPrice: { type: 'number', description: 'سعر التكلفة (افتراضي 0)' },
         unit: { type: 'string', description: 'الوحدة (افتراضي piece)' },
         barcode: { type: 'string' },
+        openingStockQty: { type: 'number', description: 'كمية المخزون الافتتاحي (تُقيَّم بسعر التكلفة وتُرحّل تلقائياً)' },
       },
       required: ['nameAr', 'salePrice'],
     },
-    summarizeArgs: (a) => `إنشاء منتج جديد: ${a.nameAr} — سعر البيع: ${a.salePrice}`,
+    summarizeArgs: (a) => `إنشاء منتج جديد: ${a.nameAr} — سعر البيع: ${a.salePrice}${a.openingStockQty ? ` — مخزون افتتاحي: ${a.openingStockQty}` : ''}`,
     execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       const salePrice = num(args.salePrice);
@@ -488,6 +523,18 @@ export const writeTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'product');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد كود المنتج' };
       const code = docNumber.number;
+
+      // Opening stock needs a warehouse — auto-pick the first one when the
+      // caller didn't specify (mirrors manufacturing completion behaviour).
+      const openingQty = num(args.openingStockQty);
+      let openingWarehouseId: string | undefined;
+      if (openingQty > 0) {
+        const wh = await inventoryApi.getWarehouses(ctx.companyId);
+        openingWarehouseId = wh.success && wh.data && wh.data.length > 0 ? wh.data[0].id : undefined;
+        if (!openingWarehouseId) {
+          return { error: 'لا يوجد مستودع — أنشئ مستودعاً أولاً لتسجيل المخزون الافتتاحي' };
+        }
+      }
 
       const res = await inventoryApi.createProduct({
         companyId: ctx.companyId,
@@ -499,9 +546,25 @@ export const writeTools: ToolDefinition[] = [
         salePrice,
         isActive: true,
         createdBy: ctx.userId,
-      });
+        ...(openingQty > 0
+          ? { openingStockQty: openingQty, openingWarehouseId }
+          : {}),
+      } as Parameters<typeof inventoryApi.createProduct>[0]);
       if (!res.success) return { error: res.error || 'فشل إنشاء المنتج' };
-      return { created: true, productId: res.id, code, nameAr };
+      return {
+        created: true,
+        productId: res.id,
+        code,
+        nameAr,
+        ...(openingQty > 0
+          ? {
+              openingStockQty: openingQty,
+              openingValue: round2(openingQty * num(args.costPrice)),
+              openingPosted: !!openingWarehouseId,
+              note: openingWarehouseId ? 'المخزون الافتتاحي رُحّل تلقائياً (مدين المخزون / دائن الأرصدة الافتتاحية)' : undefined,
+            }
+          : {}),
+      };
     },
   },
 

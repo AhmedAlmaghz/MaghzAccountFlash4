@@ -5,10 +5,11 @@ import { Card, Button, Modal, Input, Table, Badge } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
 import { SupplierSelect, BankSelect, CashBoxSelect, AccountSelect, CurrencySelect } from '@/core/ui/components/smart';
 import { useAppStore } from '@/core/store';
+import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePaymentVouchersPaginated } from '../hooks/useAccounting';
 import { useOutstandingInvoicesForSupplier } from '@/modules/purchases/hooks/usePurchases';
-import { postPaymentVoucher } from '@/core/utils/journalEntryGenerator';
+import { accountingApi } from '../api';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
@@ -29,6 +30,7 @@ export const PaymentVouchersPage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const user = useAuthStore((state) => state.user);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [methodFilter, setMethodFilter] = useState<string>('');
@@ -109,14 +111,8 @@ export const PaymentVouchersPage: React.FC = () => {
   const handlePost = async (voucher: PaymentVoucher) => {
     if (!activeCompany?.id) return;
     setPostingId(voucher.id);
-    const result = await postPaymentVoucher(activeCompany.id, {
-      voucherNumber: voucher.voucherNumber,
-      date: voucher.date,
-      supplier: voucher.supplierName || '',
-      amount: voucher.amount,
-      paymentMethod: voucher.paymentMethod,
-      expenseAccount: voucher.expenseAccountId,
-    });
+    // Unified atomic posting via the API (JE + supplier balance + status flip).
+    const result = await accountingApi.postVoucher(voucher.id, activeCompany.id, 'payment', user?.id || '');
     setPostingId(null);
     if (result.success) {
       await update(voucher.id, { status: 'posted' });

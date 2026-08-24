@@ -38,6 +38,16 @@ describe('stripImitationToolBlocks', () => {
     expect(stripImitationToolBlocks(content)).toBe('نص نظيف');
   });
 
+  it('strips the @@@call: imitation format (single line)', () => {
+    const content = '@@@call:sales.create_and_post_invoice{customerId:abc,lines:[1]}';
+    expect(stripImitationToolBlocks(content)).toBe('');
+  });
+
+  it('strips @@@call: with a following JSON payload line', () => {
+    const content = 'مقدمة\n@@@call:search.customers{query:"غدرة"}\n{"matches":[]}\nخاتمة';
+    expect(stripImitationToolBlocks(content)).toBe('مقدمة\nخاتمة');
+  });
+
   it('handles multiple consecutive blocks', () => {
     const content = '[تم تنفيذ: a]\n[تم تنفيذ: b]\n[TOOL_RESULT: c]\nآخر سطر';
     expect(stripImitationToolBlocks(content)).toBe('آخر سطر');

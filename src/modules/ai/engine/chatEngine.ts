@@ -120,7 +120,7 @@ const MAX_ITERATIONS = 8;
  */
 export function stripImitationToolBlocks(content: string): string {
   if (!content) return content;
-  const BLOCK_START = /^\s*\[(?:تم (?:تنفيذ|استدعاء):|TOOL_RESULT:|TOOL_CALLED:)/;
+  const BLOCK_START = /^\s*(?:\[(?:تم (?:تنفيذ|استدعاء):|TOOL_RESULT:|TOOL_CALLED:)|@@@call:)/;
   const PAYLOAD_LINE = /^\s*[{}[\]"']/;
   const filtered: string[] = [];
   let skipPayload = false;

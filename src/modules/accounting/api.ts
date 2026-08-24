@@ -1,5 +1,6 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { runTransaction } from '@/core/database/tx';
+import { buildReceiptVoucherStatements, buildPaymentVoucherStatements } from '@/core/utils/journalEntryGenerator';
 import { mapRows } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
@@ -464,8 +465,9 @@ export const accountingApi = {
       const amountApplied = data.amountApplied ?? 0;
       const baseCurrencyApplied = data.baseCurrencyApplied ?? (amountApplied * exchangeRate);
 
-      // Atomic batch: voucher INSERT + payment application (invoice paid/status
-      // + customer balance) commit together or roll back together.
+      // Atomic batch: voucher INSERT (+ payment application) +, when created
+      // directly as posted, the journal entry and customer balance adjustment
+      // all commit together or roll back together.
       const statements: Array<{ sql: string; params?: unknown[] }> = [
         {
           sql: `INSERT INTO receipt_vouchers (id, company_id, voucher_number, date, customer_id, invoice_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, bank_account_id, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
@@ -498,11 +500,98 @@ export const accountingApi = {
           params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId, -amountApplied],
         });
       }
+      // Created directly as posted → include JE + customer balance in the batch.
+      if (data.status === 'posted' && amountApplied === 0 && !data.invoiceId) {
+        const je = await buildReceiptVoucherStatements(data.companyId, {
+          voucherNumber: data.voucherNumber,
+          date: data.date,
+          customerName: data.customerName || '',
+          amount: data.amount,
+          paymentMethod: data.paymentMethod || 'cash',
+          customerId: data.customerId,
+        });
+        if (!je.success) return { success: false, error: je.error };
+        statements.push(...je.statements);
+      }
       const result = await runTransaction(statements);
       if (!result.success) {
         return { success: false, error: result.error };
       }
       return { success: true, id };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * Post a draft receipt voucher: journal entry (Dr cash/bank / Cr debtors) +
+   * customer balance decrement + status flip — one atomic transaction.
+   * Single reference for both UI and AI harness.
+   */
+  async postVoucher(id: string, companyId: string, type: 'receipt' | 'payment', userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const table = type === 'receipt' ? 'receipt_vouchers' : 'payment_vouchers';
+      const row = await adapter.query(
+        `SELECT * FROM ${table} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [id, companyId]
+      );
+      if (!row.success || !row.rows?.[0]) return { success: false, error: 'Voucher not found' };
+      const v = row.rows[0] as Record<string, unknown>;
+      if (String(v.status) !== 'draft') return { success: false, error: 'Voucher is not in draft status' };
+
+      const amount = Number(v.amount) || 0;
+      const common = {
+        voucherNumber: String(v.voucher_number || ''),
+        date: String(v.date || new Date().toISOString().split('T')[0]),
+        amount,
+        paymentMethod: String(v.payment_method || 'cash'),
+      };
+
+      const statements: Array<{ sql: string; params?: unknown[] }> = [];
+      if (type === 'receipt') {
+        const customerId = v.customer_id ? String(v.customer_id) : '';
+        const je = await buildReceiptVoucherStatements(companyId, {
+          ...common,
+          customerName: '',
+          customerId,
+        });
+        if (!je.success) return { success: false, error: je.error };
+        statements.push(...je.statements);
+        if (customerId && amount !== 0) {
+          statements.push({
+            sql: `UPDATE customers SET balance = COALESCE(balance,0) - $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+            params: [amount, customerId, companyId],
+          });
+        }
+      } else {
+        const supplierId = v.supplier_id ? String(v.supplier_id) : '';
+        const expenseAccountId = v.expense_account_id ? String(v.expense_account_id) : undefined;
+        const je = await buildPaymentVoucherStatements(companyId, {
+          ...common,
+          supplierName: '',
+          supplierId,
+          expenseAccountId,
+        });
+        if (!je.success) return { success: false, error: je.error };
+        statements.push(...je.statements);
+        if (supplierId && amount !== 0) {
+          statements.push({
+            sql: `UPDATE suppliers SET balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+            params: [amount, supplierId, companyId],
+          });
+        }
+      }
+      statements.push({
+        sql: `UPDATE ${table} SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+        params: [id, companyId, safeUserId(userId)],
+      });
+
+      const result = await runTransaction(statements);
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -702,7 +791,8 @@ export const accountingApi = {
       const amountApplied = data.amountApplied ?? 0;
       const baseCurrencyApplied = data.baseCurrencyApplied ?? (amountApplied * exchangeRate);
 
-      // Atomic batch: voucher INSERT + payment application commit together.
+      // Atomic batch: voucher INSERT (+ application) +, when posted directly,
+      // JE + supplier balance — all or nothing.
       const statements: Array<{ sql: string; params?: unknown[] }> = [
         {
           sql: `INSERT INTO payment_vouchers (id, company_id, voucher_number, date, supplier_id, invoice_id, expense_account_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, bank_account_id, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
@@ -734,6 +824,25 @@ export const accountingApi = {
           WHERE id = (SELECT supplier_id FROM updated) AND company_id = $4::uuid`,
           params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId, amountApplied],
         });
+      }
+      if (data.status === 'posted' && amountApplied === 0 && !data.invoiceId) {
+        const je = await buildPaymentVoucherStatements(data.companyId, {
+          voucherNumber: data.voucherNumber,
+          date: data.date,
+          supplierName: '',
+          supplierId: data.supplierId || '',
+          expenseAccountId: data.expenseAccountId,
+          amount: data.amount,
+          paymentMethod: data.paymentMethod || 'cash',
+        });
+        if (!je.success) return { success: false, error: je.error };
+        statements.push(...je.statements);
+        if (data.supplierId && data.amount !== 0) {
+          statements.push({
+            sql: `UPDATE suppliers SET balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+            params: [data.amount, data.supplierId, data.companyId],
+          });
+        }
       }
       const result = await runTransaction(statements);
       if (!result.success) {

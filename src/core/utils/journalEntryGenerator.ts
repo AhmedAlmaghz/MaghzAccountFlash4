@@ -152,7 +152,7 @@ export interface SalesInvoicePostingInput {
 /** Resolve default accounts or return a clear error. */
 export async function resolvePostingAccounts(
   companyId: string,
-  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input'>
+  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash' | 'default_bank'>
 ): Promise<{ success: true; ids: Record<string, string> } | { success: false; error: string }> {
   const ids: Record<string, string> = {};
   for (const key of keys) {
@@ -246,6 +246,61 @@ export async function buildSalesReturnPostingStatements(
     });
   }
   return { success: true, statements };
+}
+
+/** JE statements for a receipt voucher: Dr cash/bank / Cr debtors. */
+export async function buildReceiptVoucherStatements(
+  companyId: string,
+  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string }
+): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
+  const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_bank', 'default_debtors']);
+  if (!resolved.success) return resolved;
+  const { default_cash: cashId, default_bank: bankId, default_debtors: debtorsId } = resolved.ids;
+  const debitAccount = v.paymentMethod === 'bank' && bankId ? bankId : cashId;
+
+  return {
+    success: true,
+    statements: [
+      buildJournalEntryStatement(companyId, {
+        reference: v.voucherNumber,
+        description: `قيد تلقائي - سند قبض ${v.voucherNumber}${v.customerName ? ` - ${v.customerName}` : ''}`,
+        date: v.date,
+        totalAmount: v.amount,
+        entries: [
+          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'عميل'}` },
+          { accountId: debtorsId, debit: 0, credit: v.amount, memo: `تخفيض ذمة ${v.customerName || v.customerId || 'عميل'}` },
+        ],
+      }),
+    ],
+  };
+}
+
+/** JE statements for a payment voucher: Dr creditors/expense / Cr cash/bank. */
+export async function buildPaymentVoucherStatements(
+  companyId: string,
+  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string }
+): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
+  const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_bank', 'default_creditors']);
+  if (!resolved.success) return resolved;
+  const { default_cash: cashId, default_bank: bankId, default_creditors: creditorsId } = resolved.ids;
+  const creditAccount = v.paymentMethod === 'bank' && bankId ? bankId : cashId;
+  const debitAccount = v.expenseAccountId || creditorsId;
+
+  return {
+    success: true,
+    statements: [
+      buildJournalEntryStatement(companyId, {
+        reference: v.voucherNumber,
+        description: `قيد تلقائي - سند صرف ${v.voucherNumber}${v.supplierName ? ` - ${v.supplierName}` : ''}`,
+        date: v.date,
+        totalAmount: v.amount,
+        entries: [
+          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `صرف لـ ${v.supplierName || v.supplierId || 'مورد'}` },
+          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `سحب نقدي/بنكي` },
+        ],
+      }),
+    ],
+  };
 }
 
 /** JE + stock-movement statements for a purchase return (goods out of stock). */
