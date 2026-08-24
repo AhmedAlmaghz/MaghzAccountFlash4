@@ -1,7 +1,6 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { runTransaction, buildJournalEntryStatement, type TxStatement } from '@/core/database/tx';
 import { toDateString } from '@/core/utils/mapPgRow';
-
 /**
  * Automatically generates journal entries (accounting transactions)
  * for business documents like invoices, vouchers, returns, etc.
@@ -131,6 +130,162 @@ async function createTransaction(companyId: string, entry: AutoJournalEntry) {
     status: 'posted',
     entries: entry.entries,
   });
+}
+
+// ─── Composable posting-statement builders ──────────────────────────────────
+/**
+ * These builders return raw transaction statements so callers can compose the
+ * journal entry TOGETHER with document-status flips and party-balance updates
+ * in ONE atomic batch — eliminating orphan journal entries entirely.
+ * The exported post*() wrappers below run their statements standalone for
+ * backward compatibility.
+ */
+
+export interface SalesInvoicePostingInput {
+  invoiceNumber: string;
+  date: string;
+  subtotal: number;
+  vatAmount: number;
+  totalAmount: number;
+}
+
+/** Resolve default accounts or return a clear error. */
+export async function resolvePostingAccounts(
+  companyId: string,
+  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input'>
+): Promise<{ success: true; ids: Record<string, string> } | { success: false; error: string }> {
+  const ids: Record<string, string> = {};
+  for (const key of keys) {
+    const id = await getDefaultAccountId(companyId, key);
+    if (!id) {
+      return { success: false, error: 'Required accounts not found in chart of accounts. Please configure default accounts in Settings.' };
+    }
+    ids[key] = id;
+  }
+  return { success: true, ids };
+}
+
+export function buildSalesInvoicePostingStatements(
+  companyId: string,
+  invoice: SalesInvoicePostingInput,
+  ids: { debtors: string; sales: string; vat: string }
+): TxStatement[] {
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: invoice.invoiceNumber,
+      description: `قيد تلقائي - فاتورة مبيعات ${invoice.invoiceNumber}`,
+      date: invoice.date,
+      totalAmount: invoice.totalAmount,
+      entries: [
+        { accountId: ids.debtors, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}` },
+        { accountId: ids.sales, debit: 0, credit: invoice.subtotal, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
+        { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
+      ],
+    }),
+  ];
+}
+
+export function buildPurchaseInvoicePostingStatements(
+  companyId: string,
+  invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number },
+  ids: { inventory: string; creditors: string; vat: string }
+): TxStatement[] {
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: invoice.invoiceNumber,
+      description: `قيد تلقائي - فاتورة مشتريات ${invoice.invoiceNumber}`,
+      date: invoice.date,
+      totalAmount: invoice.totalAmount,
+      entries: [
+        { accountId: ids.inventory, debit: invoice.subtotal, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}` },
+        { accountId: ids.vat, debit: invoice.vatAmount, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
+        { accountId: ids.creditors, debit: 0, credit: invoice.totalAmount, memo: `التزام مورد ${invoice.invoiceNumber}` },
+      ],
+    }),
+  ];
+}
+
+/** JE + stock-movement statements for a sales return (goods back to stock). */
+export async function buildSalesReturnPostingStatements(
+  companyId: string,
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number }
+): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
+  const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs']);
+  if (!resolved.success) return resolved;
+  const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId } = resolved.ids;
+
+  const statements: TxStatement[] = [
+    buildJournalEntryStatement(companyId, {
+      reference: ret.returnNumber,
+      description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
+      date: ret.date,
+      totalAmount: ret.amount,
+      entries: [
+        { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
+        { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
+        // Simplified COGS reversal at an assumed 70% cost ratio.
+        { accountId: inventoryId, debit: Math.floor(ret.amount * 0.7), credit: 0, memo: `إعادة بضاعة للمخزون` },
+        { accountId: cogsId || inventoryId, debit: 0, credit: Math.floor(ret.amount * 0.7), memo: `عكس تكلفة بضاعة مباعة` },
+      ],
+    }),
+  ];
+
+  if (ret.id) {
+    statements.push({
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
+         SELECT sr.company_id, srl.product_id, wh.warehouse_id, srl.quantity, 'in', $1, NOW()
+           FROM sales_returns sr
+           JOIN sales_return_lines srl ON srl.return_id = sr.id
+           JOIN LATERAL (
+             SELECT s.warehouse_id FROM stock s
+              WHERE s.product_id = srl.product_id AND s.company_id = sr.company_id
+              ORDER BY s.quantity DESC LIMIT 1
+           ) wh ON true
+          WHERE sr.id = $2 AND sr.company_id = $3`,
+      params: [ret.returnNumber, ret.id, companyId],
+    });
+  }
+  return { success: true, statements };
+}
+
+/** JE + stock-movement statements for a purchase return (goods out of stock). */
+export async function buildPurchaseReturnPostingStatements(
+  companyId: string,
+  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number }
+): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
+  const resolved = await resolvePostingAccounts(companyId, ['default_creditors', 'default_inventory']);
+  if (!resolved.success) return resolved;
+  const { default_creditors: creditorsId, default_inventory: inventoryId } = resolved.ids;
+
+  const statements: TxStatement[] = [
+    buildJournalEntryStatement(companyId, {
+      reference: ret.returnNumber,
+      description: `قيد تلقائي - مردود مشتريات ${ret.returnNumber}`,
+      date: ret.date,
+      totalAmount: ret.amount,
+      entries: [
+        { accountId: creditorsId, debit: ret.amount, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
+        { accountId: inventoryId, debit: 0, credit: ret.amount, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` },
+      ],
+    }),
+  ];
+
+  if (ret.id) {
+    statements.push({
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
+         SELECT pr.company_id, prl.product_id, wh.warehouse_id, prl.quantity, 'out', $1, NOW()
+           FROM purchase_returns pr
+           JOIN purchase_return_lines prl ON prl.return_id = pr.id
+           JOIN LATERAL (
+             SELECT s.warehouse_id FROM stock s
+              WHERE s.product_id = prl.product_id AND s.company_id = pr.company_id
+              ORDER BY s.quantity DESC LIMIT 1
+           ) wh ON true
+          WHERE pr.id = $2 AND pr.company_id = $3`,
+      params: [ret.returnNumber, ret.id, companyId],
+    });
+  }
+  return { success: true, statements };
 }
 
 /**

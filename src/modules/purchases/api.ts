@@ -6,7 +6,7 @@ import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/cor
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { getNextDocumentNumber } from '@/core/api';
-import { postPurchaseInvoice, postPurchaseReturn } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, buildPurchaseInvoicePostingStatements, buildPurchaseReturnPostingStatements } from '@/core/utils/journalEntryGenerator';
 import type {
   Supplier,
   PurchaseInvoice,
@@ -741,21 +741,22 @@ export const purchasesApi = {
       const paidAmount = Number(inv.paid_amount) || 0;
       const outstanding = totalAmount - paidAmount;
 
-      // Unified contract: journal entry FIRST with propagated errors, then an
-      // atomic batch for status flip + supplier balance.
-      const jeResult = await postPurchaseInvoice(companyId, {
+      // ── Unified atomic contract: JE statements + status flip + supplier
+      // balance all commit together in ONE transaction — no orphan JE ever.
+      const accounts = await resolvePostingAccounts(companyId, ['default_inventory', 'default_creditors', 'default_vat_input']);
+      if (!accounts.success) {
+        return { success: false, error: accounts.error };
+      }
+      const postingStmts = buildPurchaseInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
         date: String(inv.date || new Date().toISOString().split('T')[0]),
-        supplierId: supplierId,
         subtotal: Number(inv.subtotal) || 0,
         vatAmount: Number(inv.vat_amount) || 0,
-        totalAmount: totalAmount,
-      });
-      if (!jeResult.success) {
-        return { success: false, error: jeResult.error || 'فشل إنشاء القيد المحاسبي' };
-      }
+        totalAmount,
+      }, { inventory: accounts.ids.default_inventory, creditors: accounts.ids.default_creditors, vat: accounts.ids.default_vat_input });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
+        ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
         {
           sql: `UPDATE purchase_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserId(_userId)],
@@ -1201,20 +1202,21 @@ export const purchasesApi = {
       const supplierId = String(ret.supplier_id);
       const totalAmount = Number(ret.total_amount) || 0;
 
-      // Unified contract: journal entry (with stock movements) FIRST with
-      // propagated errors, then an atomic batch for status + supplier balance.
-      const jeResult = await postPurchaseReturn(companyId, {
+      // ── Unified atomic contract: JE + stock movements + status flip +
+      // supplier balance all commit together in ONE transaction.
+      const posting = await buildPurchaseReturnPostingStatements(companyId, {
         id: id,
         returnNumber: String(ret.return_number || ''),
         date: String(ret.date || new Date().toISOString().split('T')[0]),
         supplier: String(ret.supplier_name || ''),
         amount: totalAmount,
       });
-      if (!jeResult.success) {
-        return { success: false, error: jeResult.error || 'فشل إنشاء القيد المحاسبي' };
+      if (!posting.success) {
+        return { success: false, error: posting.error };
       }
 
       const txQueries: { sql: string; params: unknown[] }[] = [
+        ...posting.statements.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
         {
           sql: `UPDATE purchase_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserId(_userId)],

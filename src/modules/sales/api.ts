@@ -6,7 +6,7 @@ import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createCust
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { getNextDocumentNumber } from '@/core/api';
-import { postSalesInvoice, postSalesReturn } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, buildSalesInvoicePostingStatements, buildSalesReturnPostingStatements } from '@/core/utils/journalEntryGenerator';
 import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging, InvoiceAttachment } from './types';
 
 // Typed RPC bridge for Sales (Phase 4 slice 10). In Electron the renderer
@@ -791,32 +791,11 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
-      if (isElectronPg()) {
-        // Unified contract (same as the fallback path): create the journal
-        // entry FIRST and propagate its errors, THEN flip status + balance.
-        // Never swallow JE failures — a posted invoice without its journal
-        // entry breaks trial-balance consistency.
-        const full = await this.getInvoiceById(id, companyId);
-        if (!full.success || !full.data) return { success: false, error: full.error || 'Invoice not found or not in draft status' };
-        if (full.data.status !== 'draft') return { success: false, error: 'Invoice not found or not in draft status' };
-        const inv = full.data;
-        const je = await postSalesInvoice(companyId, {
-          invoiceNumber: inv.invoiceNumber,
-          date: inv.date || new Date().toISOString().split('T')[0],
-          customerId: inv.customerId,
-          subtotal: Number(inv.subtotal) || 0,
-          vatAmount: Number(inv.vatAmount) || 0,
-          totalAmount: Number(inv.totalAmount) || 0,
-        });
-        if (!je.success) {
-          return { success: false, error: je.error || 'فشل إنشاء القيد المحاسبي' };
-        }
-        const result = await invokeSalesRpc('postInvoice', { id });
-        if (!result.success) return { success: false, error: result.error };
-        if (!result.rows?.[0]) return { success: false, error: 'Invoice not found or not in draft status' };
-        return { success: true };
-      }
       const adapter = await getDbAdapter();
+
+      // ── Unified atomic contract (single code path, no Electron/fallback split):
+      // fetch draft → build JE statements → ONE transaction that commits the
+      // journal entry, the status flip and the customer balance together.
       const check = await adapter.query(
         'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
         [id, companyId, 'draft']
@@ -835,24 +814,20 @@ export const salesApi = {
       // `sales_invoices_updated_by_fkey`.
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
 
-      // Create the accounting journal entry BEFORE touching the invoice status
-      // or customer balance. If it fails here, we abort cleanly — no partial
-      // state is ever persisted.
-      const journalResult = await postSalesInvoice(companyId, {
+      const accounts = await resolvePostingAccounts(companyId, ['default_debtors', 'default_sales', 'default_vat_output']);
+      if (!accounts.success) {
+        return { success: false, error: accounts.error };
+      }
+      const postingStmts = buildSalesInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
         date: String(inv.date || new Date().toISOString().split('T')[0]),
-        customerId: customerId,
         subtotal: Number(inv.subtotal) || 0,
         vatAmount: Number(inv.vat_amount) || 0,
-        totalAmount: totalAmount,
-      });
-      if (!journalResult.success) {
-        return { success: false, error: journalResult.error || 'فشل إنشاء القيد المحاسبي' };
-      }
+        totalAmount,
+      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output });
 
-      // Atomically flip the invoice status and update the customer balance so a
-      // failure of either leaves no half-posted invoice.
       const txQueries: { sql: string; params: unknown[] }[] = [
+        ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
         {
           sql: `UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserIdValue],
@@ -1347,29 +1322,10 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
-      if (isElectronPg()) {
-        // Unified contract: JE (with stock movements) FIRST with propagated
-        // errors, then flip status + balance via the atomic RPC.
-        const full = await this.getReturnById(id, companyId);
-        if (!full.success || !full.data) return { success: false, error: full.error || 'Return not found or not in draft status' };
-        if (full.data.status !== 'draft') return { success: false, error: 'Return not found or not in draft status' };
-        const ret = full.data;
-        const je = await postSalesReturn(companyId, {
-          id: id,
-          returnNumber: ret.returnNumber,
-          date: ret.date || new Date().toISOString().split('T')[0],
-          customer: ret.customer?.name || ret.customerId,
-          amount: Number(ret.totalAmount) || 0,
-        });
-        if (!je.success) {
-          return { success: false, error: je.error || 'فشل إنشاء القيد المحاسبي' };
-        }
-        const result = await invokeSalesRpc('postReturn', { id });
-        if (!result.success) return { success: false, error: result.error };
-        if (!result.rows?.[0]) return { success: false, error: 'Return not found or not in draft status' };
-        return { success: true };
-      }
       const adapter = await getDbAdapter();
+
+      // ── Unified atomic contract (single code path): JE + stock movements +
+      // status flip + customer balance all commit together or not at all.
       const check = await adapter.query(
         'SELECT sr.customer_id, sr.total_amount, sr.return_number, sr.date, c.name as customer_name FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND sr.status = $3',
         [id, companyId, 'draft']
@@ -1382,20 +1338,19 @@ export const salesApi = {
       const totalAmount = Number(ret.total_amount) || 0;
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
 
-      // Journal first (abort cleanly on failure), then atomically flip status
-      // and update the customer balance in a single transaction.
-      const salesReturnResult = await postSalesReturn(companyId, {
+      const posting = await buildSalesReturnPostingStatements(companyId, {
         id: id,
         returnNumber: String(ret.return_number || ''),
         date: String(ret.date || new Date().toISOString().split('T')[0]),
         customer: String(ret.customer_name || ''),
         amount: totalAmount,
       });
-      if (!salesReturnResult.success) {
-        return { success: false, error: salesReturnResult.error || 'فشل إنشاء القيد المحاسبي' };
+      if (!posting.success) {
+        return { success: false, error: posting.error };
       }
 
       const txQueries: { sql: string; params: unknown[] }[] = [
+        ...posting.statements.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
         {
           sql: `UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserIdValue],

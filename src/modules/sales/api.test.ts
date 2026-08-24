@@ -44,10 +44,9 @@ vi.mock('@/core/utils/pagination', () => ({
   })),
 }));
 
-vi.mock('@/core/utils/journalEntryGenerator', () => ({
-  postSalesInvoice: vi.fn(async () => ({ success: true })),
-  postSalesReturn: vi.fn(async () => ({ success: true })),
-}));
+// NOTE: journalEntryGenerator is NOT mocked anymore — its posting-statement
+// builders are pure SQL composers exercised through the mocked adapter, which
+// lets these tests verify the full atomic batch end-to-end.
 
 import { salesApi } from './api';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -448,35 +447,42 @@ describe('salesApi.postInvoice customer balance tracking', () => {
     const adapter = makeMockAdapter(async (sql, p) => {
       queries.push(sql);
       params.push(p as unknown[]);
-      if (sql.startsWith('SELECT')) {
-        return {
-          success: true,
-          rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 250 }],
-        };
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 250 }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
       }
       return { success: true, rows: [] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await salesApi.postInvoice('inv-1', 'comp-1');
-    expect(res.success).toBe(true);
-    const custIdx = queries.findIndex(q => q.includes('UPDATE customers'));
-    expect(custIdx).toBeGreaterThanOrEqual(0);
-    const custQuery = queries[custIdx];
-    const custParams = params[custIdx];
-    expect(custQuery).toMatch(/balance = balance \+ \$1/);
-    expect(Number(custParams[0])).toBe(750);
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    // Atomic contract: JE + flip + balance run in ONE transaction batch.
+    expect(adapter.transaction).toHaveBeenCalledTimes(1);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>);
+    const custStmt = txStmts.find(q => q.sql.includes('UPDATE customers'));
+    expect(custStmt).toBeDefined();
+    expect(custStmt!.sql).toMatch(/balance = balance \+ \$1/);
+    expect(Number(custStmt!.params![0])).toBe(750);
   });
 
   it('does not update customer balance when invoice is fully paid', async () => {
     const queries: string[] = [];
-    const adapter = makeMockAdapter(async (sql) => {
+    const adapter = makeMockAdapter(async (sql, p) => {
       queries.push(sql);
-      if (sql.startsWith('SELECT')) {
-        return {
-          success: true,
-          rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 1000 }],
-        };
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 1000 }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
       }
       return { success: true, rows: [] };
     });
@@ -484,25 +490,25 @@ describe('salesApi.postInvoice customer balance tracking', () => {
 
     const res = await salesApi.postInvoice('inv-1', 'comp-1');
     expect(res.success).toBe(true);
-    expect(queries.some(q => q.includes('UPDATE customers'))).toBe(false);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>);
+    expect(txStmts.some(q => q.sql.includes('UPDATE customers'))).toBe(false);
   });
 
   it('resolves a stale userId (valid UUID, missing from users) to null instead of failing the FK constraint', async () => {
     const staleUuid = '3776241e-a274-434b-9dc5-6e6798531eca';
-    const queries: string[] = [];
-    const params: unknown[][] = [];
     const adapter = makeMockAdapter(async (sql, p) => {
-      queries.push(sql);
-      params.push(p as unknown[]);
       if (sql.includes('FROM sales_invoices')) {
-        return {
-          success: true,
-          rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0 }],
-        };
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0 }] };
       }
       if (sql.includes('FROM users')) {
         // The UUID is valid-format but the user row no longer exists in the DB
         return { success: true, rows: [] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
       }
       return { success: true, rows: [] };
     });
@@ -510,13 +516,14 @@ describe('salesApi.postInvoice customer balance tracking', () => {
 
     const res = await salesApi.postInvoice('inv-1', 'comp-1', staleUuid);
     expect(res.success).toBe(true);
-    const updateIdx = queries.findIndex(q => q.includes('UPDATE sales_invoices'));
-    expect(updateIdx).toBeGreaterThanOrEqual(0);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    const invUpdate = txStmts.find(q => q.sql.includes('UPDATE sales_invoices'));
+    expect(invUpdate).toBeDefined();
     // updated_by must be null, never the stale UUID (avoids sales_invoices_updated_by_fkey)
-    expect(params[updateIdx][2]).toBeNull();
-    const balanceIdx = queries.findIndex(q => q.includes('UPDATE customers'));
-    expect(balanceIdx).toBeGreaterThanOrEqual(0);
-    expect(params[balanceIdx][3]).toBeNull();
+    expect(invUpdate!.params![2]).toBeNull();
+    const balUpdate = txStmts.find(q => q.sql.includes('UPDATE customers'));
+    expect(balUpdate).toBeDefined();
+    expect(balUpdate!.params![3]).toBeNull();
   });
 });
 
@@ -526,16 +533,15 @@ describe('salesApi.postReturn customer balance tracking', () => {
   });
 
   it('decrements customer balance by return amount on posting', async () => {
-    const queries: string[] = [];
-    const params: unknown[][] = [];
     const adapter = makeMockAdapter(async (sql, p) => {
-      queries.push(sql);
-      params.push(p as unknown[]);
-      if (sql.startsWith('SELECT')) {
-        return {
-          success: true,
-          rows: [{ customer_id: 'c1', total_amount: 200 }],
-        };
+      if (sql.includes('FROM sales_returns')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 200 }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
       }
       return { success: true, rows: [] };
     });
@@ -543,12 +549,16 @@ describe('salesApi.postReturn customer balance tracking', () => {
 
     const res = await salesApi.postReturn('ret-1', 'comp-1');
     expect(res.success).toBe(true);
-    const custIdx = queries.findIndex(q => q.includes('UPDATE customers'));
-    expect(custIdx).toBeGreaterThanOrEqual(0);
-    const custQuery = queries[custIdx];
-    const custParams = params[custIdx];
-    expect(custQuery).toMatch(/balance = balance - \$1/);
-    expect(Number(custParams[0])).toBe(200);
+    // Atomic contract: JE + stock movements + flip + balance in ONE batch.
+    expect(adapter.transaction).toHaveBeenCalledTimes(1);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    // JE + stock movement + status flip + customer balance
+    expect(txStmts.some(q => q.sql.includes('WITH new_tx'))).toBe(true);
+    expect(txStmts.some(q => q.sql.includes("type, reference, created_at)") && q.sql.includes("'in'"))).toBe(true);
+    const custStmt = txStmts.find(q => q.sql.includes('UPDATE customers'));
+    expect(custStmt).toBeDefined();
+    expect(custStmt!.sql).toMatch(/balance = balance - \$1/);
+    expect(Number(custStmt!.params![0])).toBe(200);
   });
 });
 
