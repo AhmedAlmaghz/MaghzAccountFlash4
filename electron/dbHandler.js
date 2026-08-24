@@ -441,6 +441,54 @@ async function execQuery(target, sql, params) {
 }
 
 /**
+ * Runtime schema self-healing.
+ *
+ * If a statement fails because a column/table/relation is missing
+ * (SQLSTATE 42P01 undefined_table, 42703 undefined_column), the live database
+ * has drifted behind the shipped migrations. Kick off the deterministic
+ * schema-sync runner once (single-flight), then let the caller retry.
+ * Works against WHATEVER database the app is currently connected to — local,
+ * Neon, or any future target — closing the "works on my machine" gap forever.
+ */
+let schemaHealPromise = null;
+function healSchemaDriftOnce() {
+  if (!schemaHealPromise) {
+    console.warn('[DB] Schema drift detected (42703/42P01) — running self-healing schema sync...');
+    schemaHealPromise = import('./migrationRunner.js')
+      .then((m) => m.runDrizzleMigrations())
+      .then(() => {
+        console.log('[DB] Schema self-heal completed. Retrying operation.');
+      })
+      .catch((e) => {
+        console.error('[DB] Schema self-heal failed:', e.message);
+        // Allow a later retry on the next drifting call.
+        schemaHealPromise = null;
+        throw e;
+      });
+  }
+  return schemaHealPromise;
+}
+
+function isSchemaDriftError(err) {
+  if (!err) return false;
+  if (err.code === '42703' || err.code === '42P01') return true;
+  const msg = String(err.message || err);
+  return msg.includes('does not exist') && (msg.includes('column ') || msg.includes('relation '));
+}
+
+/** Execute a statement, healing schema drift once and retrying if needed. */
+async function execQueryWithSelfHeal(target, sql, params) {
+  try {
+    return await execQuery(target, sql, params);
+  } catch (err) {
+    if (!isSchemaDriftError(err)) throw err;
+    await healSchemaDriftOnce();
+    // Second attempt after healing; if it still fails, surface the real error.
+    return await execQuery(target, sql, params);
+  }
+}
+
+/**
  * Wrap a pg Client to tag all parameterized queries with a unique comment,
  * preventing type inference conflicts from node-postgres statement caching.
  */
@@ -533,7 +581,7 @@ export function registerDatabaseHandlers() {
         return { success: false, error: 'SQL operation not permitted' };
       }
       assertSqlAuthorized(session, sql, params || []);
-      const result = await execQuery(pool, sql, params);
+      const result = await execQueryWithSelfHeal(pool, sql, params);
       return { success: true, rows: result.rows, rowCount: result.rowCount };
     } catch (err) {
       console.error('[DB] Query error:', err.message, '\nSQL:', sql, '\nParams:', JSON.stringify(params));
@@ -545,27 +593,47 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:internal-transaction', async (event, { queries, sessionToken }) => {
     const session = getSession(event.sender.id, sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const results = [];
-      for (const { sql, params } of queries) {
-        if (!isSqlAllowed(sql)) {
-          await client.query('ROLLBACK');
-          return { success: false, error: 'SQL operation not permitted in transaction' };
+
+    // Run the whole batch on one client; on schema drift, roll back, heal
+    // once, then retry the entire batch from scratch.
+    const runBatch = async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const results = [];
+        for (const { sql, params } of queries) {
+          if (!isSqlAllowed(sql)) {
+            await client.query('ROLLBACK');
+            return { success: false, error: 'SQL operation not permitted in transaction' };
+          }
+          assertSqlAuthorized(session, sql, params || []);
+          const res = await execQuery(client, sql, params);
+          results.push({ rows: res.rows, rowCount: res.rowCount });
         }
-        assertSqlAuthorized(session, sql, params || []);
-        const res = await execQuery(client, sql, params);
-        results.push({ rows: res.rows, rowCount: res.rowCount });
+        await client.query('COMMIT');
+        return { success: true, results };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        err._inTransaction = true;
+        throw err;
+      } finally {
+        client.release();
       }
-      await client.query('COMMIT');
-      return { success: true, results };
+    };
+
+    try {
+      return await runBatch();
     } catch (err) {
-      await client.query('ROLLBACK');
       console.error('[DB] Transaction error:', err.message);
+      if (isSchemaDriftError(err)) {
+        try {
+          await healSchemaDriftOnce();
+          return await runBatch(); // single retry after healing
+        } catch (retryErr) {
+          return { success: false, error: retryErr.message };
+        }
+      }
       return { success: false, error: err.message };
-    } finally {
-      client.release();
     }
   });
 
@@ -595,7 +663,7 @@ export function registerDatabaseHandlers() {
         }
         if (!isSqlAllowed(sql)) return { success: false, error: 'SQL operation not permitted' };
         assertSqlAuthorized(session, sql, params);
-        const result = await execQuery(pool, sql, params);
+        const result = await execQueryWithSelfHeal(pool, sql, params);
         return { success: true, rows: result.rows, rowCount: result.rowCount };
       } catch (err) {
         return { success: false, error: err.message };

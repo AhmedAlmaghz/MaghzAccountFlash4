@@ -1,7 +1,7 @@
 {
   "name": "MaghzAccountPro",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.3.6",
   "author": "Ahmed Almaghz",
   "keywords": [
     "maghzaccount",
@@ -53,7 +53,8 @@
     "db:reset:force": "node electron/resetDatabase.js --yes --force",
     "db:check": "drizzle-kit check --config drizzle.config.ts",
     "preflight": "npm run lint && npx tsc -b && npm run test",
-    "e2e:reset": "node electron/resetDatabase.js --yes --force --admin-password admin1234"
+    "e2e:reset": "node electron/resetDatabase.js --yes --force --admin-password admin1234",
+    "db:sync": "node --env-file=.env.local scripts/db-sync.mjs"
   },
   "build": {
     "appId": "com.maghzaccount.pro",

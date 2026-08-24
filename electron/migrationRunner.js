@@ -26,13 +26,19 @@ const __dirname = path.dirname(__filename);
  */
 export async function runDrizzleMigrations() {
   console.log('[Schema] Starting PostgreSQL schema sync...');
+  // Sanitize env values: .env files may carry BOM/CRLF/invisible padding that
+  // silently breaks pg connections ("connection terminated", bad hostnames).
+  const env = (k, fallback) => {
+    const v = String(process.env[k] ?? '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
+    return v || fallback;
+  };
   const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432'),
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    connectionTimeoutMillis: 5000,
+    host: env('DB_HOST', 'localhost'),
+    port: parseInt(env('DB_PORT', '5432'), 10),
+    database: env('DB_NAME', ''),
+    user: env('DB_USER', ''),
+    password: env('DB_PASSWORD', ''),
+    connectionTimeoutMillis: 15000,
   });
 
   const migrationsFolder = path.join(__dirname, '../drizzle');
