@@ -88,60 +88,16 @@ function normalizeResult<T = unknown>(result: { rows?: unknown[]; error?: unknow
 }
 
 // ─── Migration support ────────────────────────────────────────────────────────
-// Vite exposes the raw SQL files from the drizzle/ folder via `?raw` imports.
-// We import them statically so they are bundled into the web build (this is how
-// the app runs in a pure browser with no backend).
+// Vite exposes the raw SQL from the drizzle folder via ?raw imports.
+// Pre-production squash: a SINGLE consolidated baseline generated from the
+// Drizzle schemas (single source of truth). Replay safety on existing browser
+// databases is provided by normalizeIdempotent() below — mirroring
+// electron/migrationRunner.js.
 
-import schema0000 from '@root/drizzle/0000_unified_schema.sql?raw';
-import schema0001 from '@root/drizzle/0001_multi_currency.sql?raw';
-import schema0002 from '@root/drizzle/0002_bom_schema_fix.sql?raw';
-import schema0003 from '@root/drizzle/0003_warehouse_transfer_columns.sql?raw';
-import schema0004 from '@root/drizzle/0004_performance_indexes.sql?raw';
-import schema0005 from '@root/drizzle/0005_work_order_status_updated_at.sql?raw';
-import schema0006 from '@root/drizzle/0006_products_min_max_stock.sql?raw';
-import schema0007 from '@root/drizzle/0007_opportunity_stage_default.sql?raw';
-import schema0008 from '@root/drizzle/0008_voucher_cash_box_id.sql?raw';
-import schema0009 from '@root/drizzle/0009_performance_indexes_phase2.sql?raw';
-import schema0010 from '@root/drizzle/0010_schema_drift_fix.sql?raw';
-import schema0011 from '@root/drizzle/0011_manufacturing_schema_fix.sql?raw';
-import schema0012 from '@root/drizzle/0012_purchase_invoice_lines_percents.sql?raw';
-import schema0013 from '@root/drizzle/0013_hr_schema_drift_fix.sql?raw';
-import schema0014 from '@root/drizzle/0014_audit_logs_table.sql?raw';
-import schema0015 from '@root/drizzle/0015_payment_allocation.sql?raw';
-import schema0016 from '@root/drizzle/0016_ai_chat_persistence.sql?raw';
-import schema0017 from '@root/drizzle/0017_settings_unique.sql?raw';
-import schema0018 from '@root/drizzle/0018_sequence_numbering.sql?raw';
-import schema0019 from '@root/drizzle/0019_payment_type.sql?raw';
-import schema0020 from '@root/drizzle/0020_invoice_payment_accounts.sql?raw';
-import schema0021 from '@root/drizzle/0021_user_tracking_columns.sql?raw';
-import schema0022 from '@root/drizzle/0022_audit_and_document_sequences_fix.sql?raw';
-import schema0023 from '@root/drizzle/0023_activities_user_tracking_columns.sql?raw';
+import schemaInit from '@root/drizzle/0000_init.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
-  { name: '0000_unified_schema', sql: schema0000 },
-  { name: '0001_multi_currency', sql: schema0001 },
-  { name: '0002_bom_schema_fix', sql: schema0002 },
-  { name: '0003_warehouse_transfer_columns', sql: schema0003 },
-  { name: '0004_performance_indexes', sql: schema0004 },
-  { name: '0005_work_order_status_updated_at', sql: schema0005 },
-  { name: '0006_products_min_max_stock', sql: schema0006 },
-  { name: '0007_opportunity_stage_default', sql: schema0007 },
-  { name: '0008_voucher_cash_box_id', sql: schema0008 },
-  { name: '0009_performance_indexes_phase2', sql: schema0009 },
-  { name: '0010_schema_drift_fix', sql: schema0010 },
-  { name: '0011_manufacturing_schema_fix', sql: schema0011 },
-  { name: '0012_purchase_invoice_lines_percents', sql: schema0012 },
-  { name: '0013_hr_schema_drift_fix', sql: schema0013 },
-  { name: '0014_audit_logs_table', sql: schema0014 },
-  { name: '0015_payment_allocation', sql: schema0015 },
-  { name: '0016_ai_chat_persistence', sql: schema0016 },
-  { name: '0017_settings_unique', sql: schema0017 },
-  { name: '0018_sequence_numbering', sql: schema0018 },
-  { name: '0019_payment_type', sql: schema0019 },
-  { name: '0020_invoice_payment_accounts', sql: schema0020 },
-  { name: '0021_user_tracking_columns', sql: schema0021 },
-  { name: '0022_audit_and_document_sequences_fix', sql: schema0022 },
-  { name: '0023_activities_user_tracking_columns', sql: schema0023 },
+  { name: '0000_init', sql: schemaInit },
 ];
 
 /**
@@ -150,6 +106,35 @@ const MIGRATIONS: { name: string; sql: string }[] = [
  * The result is cached so subsequent calls are no-ops (avoids 24
  * SELECT checks on every query — a major PGlite performance win).
  */
+/**
+ * Normalize a generated migration into an idempotent one so replaying the
+ * baseline over an existing browser database (IndexedDB persists across
+ * reloads) never crashes on pre-existing tables/constraints.
+ * Mirrors electron/migrationRunner.js — keep both in sync.
+ */
+function normalizeIdempotent(rawSql: string): string {
+  let sql = rawSql;
+
+  sql = sql.replace(/\bCREATE TABLE (?!IF NOT EXISTS)/g, 'CREATE TABLE IF NOT EXISTS ');
+  sql = sql.replace(/\bCREATE UNIQUE INDEX (?!IF NOT EXISTS)/g, 'CREATE UNIQUE INDEX IF NOT EXISTS ');
+  sql = sql.replace(/\bCREATE INDEX (?!IF NOT EXISTS)/g, 'CREATE INDEX IF NOT EXISTS ');
+
+  const constraintRe = /^ALTER TABLE (?:ONLY )?("[^"]+"|[\w.]+)\s+ADD CONSTRAINT\s+("[^"]+"|[\w.]+)([^;]*);/gm;
+  const guarded: string[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = constraintRe.exec(sql)) !== null) {
+    const conname = m[2].replace(/"/g, '');
+    guarded.push(sql.slice(last, m.index));
+    guarded.push(
+      `DO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${conname}') THEN\n    ALTER TABLE ${m[1]} ADD CONSTRAINT ${m[2]}${m[3]};\n  END IF;\nEND $$;`
+    );
+    last = m.index + m[0].length;
+  }
+  guarded.push(sql.slice(last));
+  return guarded.join('\n');
+}
+
 let migrationsPromise: Promise<{ success: boolean; error?: string }> | null = null;
 
 export function runPgliteMigrations(): Promise<{ success: boolean; error?: string }> {
@@ -173,7 +158,7 @@ async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?
     for (const migration of MIGRATIONS) {
       const existing = await db.query('SELECT 1 FROM __pglite_migrations WHERE name = $1 LIMIT 1', [migration.name]);
       if (existing.rows.length > 0) continue;
-      await db.exec(migration.sql);
+      await db.exec(normalizeIdempotent(migration.sql));
       await db.query('INSERT INTO __pglite_migrations (name) VALUES ($1)', [migration.name]);
     }
 
