@@ -55,6 +55,23 @@ function today(): string {
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
+/**
+ * Rich confirmation summary for document tools: line count + estimated
+ * pre-VAT total, so the approval card shows real substance the user can
+ * verify before consenting.
+ */
+function summarizeDocLines(label: string, lines: unknown): string {
+  const arr = Array.isArray(lines) ? (lines as Array<Record<string, unknown>>) : [];
+  const total = round2(
+    arr.reduce(
+      (s, l) => s + (Number(l?.quantity) || 0) * (Number(l?.unitPrice) || 0) * (1 - (Number(l?.discountPercent) || 0) / 100),
+      0,
+    ),
+  );
+  const totalStr = new Intl.NumberFormat('ar-YE', { maximumFractionDigits: 2 }).format(total);
+  return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
+}
+
 /** Fetch the company VAT rate (falls back to 15%). */
 async function getVatRate(companyId: string): Promise<number> {
   const res = await coreApi.getVatSettings(companyId);
@@ -164,10 +181,7 @@ export const writeTools: ToolDefinition[] = [
       },
       required: ['customerId', 'lines'],
     },
-    summarizeArgs: (a) => {
-      const count = Array.isArray(a.lines) ? a.lines.length : 0;
-      return `إنشاء فاتورة مبيعات مسودة بعدد أصناف: ${count}`;
-    },
+    summarizeArgs: (a) => summarizeDocLines('إنشاء فاتورة مبيعات (مسودة)', a.lines),
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
       if (!customerId) return { error: 'customerId مطلوب — استخدم search.customers أولاً' };
@@ -346,7 +360,7 @@ export const writeTools: ToolDefinition[] = [
       },
       required: ['supplierId', 'lines'],
     },
-    summarizeArgs: (a) => `إنشاء فاتورة مشتريات مسودة بعدد أصناف: ${Array.isArray(a.lines) ? a.lines.length : 0}`,
+    summarizeArgs: (a) => summarizeDocLines('إنشاء فاتورة مشتريات (مسودة)', a.lines),
     execute: async (args, ctx) => {
       const supplierId = str(args.supplierId);
       if (!supplierId) return { error: 'supplierId مطلوب — استخدم search.suppliers أولاً' };

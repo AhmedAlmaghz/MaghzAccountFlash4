@@ -172,6 +172,7 @@ describe('ChatEngine', () => {
       argsSummary: 'ملخص العملية',
     }));
 
+
     await getChatEngine().resolveConfirmation('write-1', true);
 
     messages = useAiStore.getState().messages;
@@ -204,6 +205,32 @@ describe('ChatEngine', () => {
     const messages = useAiStore.getState().messages;
     expect(messages[1].toolCall?.status).toBe('rejected');
     expect(messages[2].content).toBe('تم إلغاء العملية');
+  });
+
+  it('treats UNKNOWN tool names as write (fail-closed) — confirmation card, never silent execution', async () => {
+    // Regression: `tool?.dangerLevel === 'write' ? write : read` sent any
+    // unregistered name (model hallucination, e.g. "sales.craete_invoice")
+    // straight to the read path where it executed without user approval.
+    mocks.resolveTool.mockReturnValue(undefined);
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: {
+        content: '',
+        toolCalls: [{ id: 'unknown-1', name: 'sales.craete_invoice', arguments: { amount: 1 } }],
+        finishReason: 'tool_calls',
+        usage: null,
+      },
+    });
+
+    await getChatEngine().send('سجل فاتورة');
+
+    expect(mocks.executeToolCall).not.toHaveBeenCalled();
+    const messages = useAiStore.getState().messages;
+    expect(messages[1].toolCall).toEqual(expect.objectContaining({
+      callId: 'unknown-1',
+      status: 'pending-confirmation',
+      dangerLevel: 'write',
+    }));
   });
 
   it('shows provider errors as assistant error messages', async () => {

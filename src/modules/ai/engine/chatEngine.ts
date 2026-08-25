@@ -626,16 +626,20 @@ class ChatEngine {
         return;
       }
 
-      // Separate read vs write tool calls
+      // Separate read vs write tool calls.
+      // FAIL-CLOSED: only tools that are registered AND explicitly 'read'
+      // take the silent path. Unknown names (model hallucination) default to
+      // WRITE so they always require user confirmation instead of executing
+      // unattended.
       const readCalls: typeof data.toolCalls = [];
       const writeCalls: typeof data.toolCalls = [];
 
       for (const tc of data.toolCalls) {
         const tool = resolveTool(tc.name);
-        if (tool?.dangerLevel === 'write') {
-          writeCalls.push(tc);
-        } else {
+        if (tool && tool.dangerLevel === 'read') {
           readCalls.push(tc);
+        } else {
+          writeCalls.push(tc);
         }
       }
 
