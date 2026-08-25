@@ -554,7 +554,7 @@ describe('salesApi.postReturn customer balance tracking', () => {
     const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
     // JE + stock movement + status flip + customer balance
     expect(txStmts.some(q => q.sql.includes('WITH new_tx'))).toBe(true);
-    expect(txStmts.some(q => q.sql.includes("type, reference, created_at)") && q.sql.includes("'in'"))).toBe(true);
+    expect(txStmts.some(q => q.sql.includes('stock_movements') && q.sql.includes("'in'"))).toBe(true);
     const custStmt = txStmts.find(q => q.sql.includes('UPDATE customers'));
     expect(custStmt).toBeDefined();
     expect(custStmt!.sql).toMatch(/balance = balance - \$1/);

@@ -231,21 +231,91 @@ export async function buildSalesReturnPostingStatements(
   ];
 
   if (ret.id) {
+    // Ensure stock rows exist for returned products (in case product never stocked before)
     statements.push({
-      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
-         SELECT sr.company_id, srl.product_id, wh.warehouse_id, srl.quantity, 'in', $1, NOW()
+      sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
+            SELECT $2::uuid, srl.product_id, wh.warehouse_id, 0
+              FROM sales_returns sr
+              JOIN sales_return_lines srl ON srl.return_id = sr.id
+              JOIN LATERAL (
+                SELECT COALESCE(
+                  (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
+                  (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
+                ) AS warehouse_id
+              ) wh ON true
+              LEFT JOIN stock s ON s.company_id = sr.company_id AND s.product_id = srl.product_id AND s.warehouse_id = wh.warehouse_id
+             WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL AND s.id IS NULL
+             GROUP BY srl.product_id, wh.warehouse_id`,
+      params: [ret.id, companyId],
+    });
+    statements.push({
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
+         SELECT sr.company_id, srl.product_id, wh.warehouse_id, 'in', srl.quantity, $1, 'مردود مبيعات', NOW()
            FROM sales_returns sr
            JOIN sales_return_lines srl ON srl.return_id = sr.id
            JOIN LATERAL (
-             SELECT s.warehouse_id FROM stock s
-              WHERE s.product_id = srl.product_id AND s.company_id = sr.company_id
-              ORDER BY s.quantity DESC LIMIT 1
+             SELECT COALESCE(
+               (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
+               (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
+             ) AS warehouse_id
            ) wh ON true
-          WHERE sr.id = $2 AND sr.company_id = $3`,
+          WHERE sr.id = $2::uuid AND sr.company_id = $3::uuid AND wh.warehouse_id IS NOT NULL`,
       params: [ret.returnNumber, ret.id, companyId],
+    });
+    // Increase stock quantities
+    statements.push({
+      sql: `UPDATE stock s SET quantity = s.quantity + sub.qty, updated_at = NOW()
+              FROM (
+                SELECT srl.product_id, wh.warehouse_id, SUM(srl.quantity) AS qty
+                  FROM sales_returns sr
+                  JOIN sales_return_lines srl ON srl.return_id = sr.id
+                  JOIN LATERAL (
+                    SELECT COALESCE(
+                      (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
+                      (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
+                    ) AS warehouse_id
+                  ) wh ON true
+                 WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL
+                 GROUP BY srl.product_id, wh.warehouse_id
+              ) sub
+             WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
+      params: [ret.id, companyId],
     });
   }
   return { success: true, statements };
+}
+
+/** JE statements for a stock adjustment: found → Dr Inventory / Cr Cogs, lost → Dr Cogs / Cr Inventory. */
+export async function buildStockAdjustmentPostingStatements(
+  companyId: string,
+  adj: { product: string; difference: number; reason: string; date: string; id: string }
+): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
+  if (!adj.difference || adj.difference === 0) return { success: true, statements: [] };
+  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
+  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
+  if (!inventoryId) return { success: false, error: 'Inventory account not found. Please configure default accounts in Settings.' };
+  const amount = Math.abs(adj.difference);
+  const entries: JournalEntryLine[] = [];
+  if (adj.difference > 0) {
+    entries.push({ accountId: inventoryId, debit: amount, credit: 0, memo: `عثور ${adj.product}` });
+    entries.push({ accountId: cogsId || inventoryId, debit: 0, credit: amount, memo: `إيراد عثور` });
+  } else {
+    const loss = amount;
+    entries.push({ accountId: cogsId || inventoryId, debit: loss, credit: 0, memo: `فاقد ${adj.product}` });
+    entries.push({ accountId: inventoryId, debit: 0, credit: loss, memo: `خسارة مخزون` });
+  }
+  return {
+    success: true,
+    statements: [
+      buildJournalEntryStatement(companyId, {
+        reference: `ADJ-${adj.id}`,
+        description: `قيد تلقائي - تسوية مخزون ${adj.id} - ${adj.reason}`,
+        date: adj.date,
+        totalAmount: amount,
+        entries,
+      }),
+    ],
+  };
 }
 
 /** JE statements for a receipt voucher: Dr cash/bank / Cr debtors. */
@@ -327,8 +397,8 @@ export async function buildPurchaseReturnPostingStatements(
 
   if (ret.id) {
     statements.push({
-      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
-         SELECT pr.company_id, prl.product_id, wh.warehouse_id, prl.quantity, 'out', $1, NOW()
+      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
+         SELECT pr.company_id, prl.product_id, wh.warehouse_id, 'out', prl.quantity, $1, 'مردود مشتريات', NOW()
            FROM purchase_returns pr
            JOIN purchase_return_lines prl ON prl.return_id = pr.id
            JOIN LATERAL (
@@ -336,8 +406,24 @@ export async function buildPurchaseReturnPostingStatements(
               WHERE s.product_id = prl.product_id AND s.company_id = pr.company_id
               ORDER BY s.quantity DESC LIMIT 1
            ) wh ON true
-          WHERE pr.id = $2 AND pr.company_id = $3`,
+          WHERE pr.id = $2::uuid AND pr.company_id = $3::uuid`,
       params: [ret.returnNumber, ret.id, companyId],
+    });
+    // Decrement stock quantities
+    statements.push({
+      sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
+              FROM (
+                SELECT prl.product_id, wh.warehouse_id, SUM(prl.quantity) AS qty
+                  FROM purchase_returns pr
+                  JOIN purchase_return_lines prl ON prl.return_id = pr.id
+                  JOIN LATERAL (
+                    SELECT warehouse_id FROM stock WHERE product_id = prl.product_id AND company_id = pr.company_id ORDER BY quantity DESC LIMIT 1
+                  ) wh ON true
+                 WHERE pr.id = $1::uuid AND pr.company_id = $2::uuid
+                 GROUP BY prl.product_id, wh.warehouse_id
+              ) sub
+             WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
+      params: [ret.id, companyId],
     });
   }
   return { success: true, statements };
@@ -536,7 +622,7 @@ export async function postSalesReturn(
     // reflects goods returning to the warehouse they currently sit in.
     statements.push({
       sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
-         SELECT sr.company_id, srl.product_id, wh.warehouse_id, srl.quantity, 'in', $1, NOW()
+         SELECT sr.company_id, srl.product_id, wh.warehouse_id, 'in', srl.quantity, $1, NOW()
            FROM sales_returns sr
            JOIN sales_return_lines srl ON srl.return_id = sr.id
            JOIN LATERAL (
@@ -594,7 +680,7 @@ export async function postPurchaseReturn(
   if (ret.id) {
     statements.push({
       sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
-         SELECT pr.company_id, prl.product_id, wh.warehouse_id, prl.quantity, 'out', $1, NOW()
+         SELECT pr.company_id, prl.product_id, wh.warehouse_id, 'out', prl.quantity, $1, NOW()
            FROM purchase_returns pr
            JOIN purchase_return_lines prl ON prl.return_id = pr.id
            JOIN LATERAL (

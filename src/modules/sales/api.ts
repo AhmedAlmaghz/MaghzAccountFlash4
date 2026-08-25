@@ -828,6 +828,57 @@ export const salesApi = {
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
+        // Ensure stock rows exist for all products in the invoice (perpetual inventory)
+        {
+          sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
+                SELECT $2::uuid, sil.product_id, wh.warehouse_id, 0
+                  FROM sales_invoices si
+                  JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
+                  JOIN LATERAL (
+                    SELECT COALESCE(
+                      (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
+                      (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
+                    ) AS warehouse_id
+                  ) wh ON true
+                  LEFT JOIN stock s ON s.company_id = si.company_id AND s.product_id = sil.product_id AND s.warehouse_id = wh.warehouse_id
+                 WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL AND s.id IS NULL
+                 GROUP BY si.company_id, sil.product_id, wh.warehouse_id`,
+          params: [id, companyId],
+        },
+        // Stock movements (out) for each line
+        {
+          sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
+                SELECT si.company_id, sil.product_id, wh.warehouse_id, 'out', sil.quantity, si.invoice_number, 'فاتورة مبيعات', NOW()
+                  FROM sales_invoices si
+                  JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
+                  JOIN LATERAL (
+                    SELECT COALESCE(
+                      (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
+                      (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
+                    ) AS warehouse_id
+                  ) wh ON true
+                 WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL`,
+          params: [id, companyId],
+        },
+        // Decrement stock quantities
+        {
+          sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
+                  FROM (
+                    SELECT sil.product_id, wh.warehouse_id, SUM(sil.quantity) AS qty
+                      FROM sales_invoices si
+                      JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
+                      JOIN LATERAL (
+                        SELECT COALESCE(
+                          (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
+                          (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
+                        ) AS warehouse_id
+                      ) wh ON true
+                     WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL
+                     GROUP BY sil.product_id, wh.warehouse_id
+                  ) sub
+                 WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
+          params: [id, companyId],
+        },
         {
           sql: `UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserIdValue],

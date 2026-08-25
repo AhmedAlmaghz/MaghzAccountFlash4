@@ -757,6 +757,42 @@ export const purchasesApi = {
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
+        // Ensure stock rows exist for all products in the invoice
+        {
+          sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
+                SELECT $2::uuid, pil.product_id, w.warehouse_id, 0
+                  FROM purchase_invoices pi
+                  JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
+                  CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
+                  LEFT JOIN stock s ON s.company_id = $2::uuid AND s.product_id = pil.product_id AND s.warehouse_id = w.warehouse_id
+                 WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid AND s.id IS NULL
+                 GROUP BY pil.product_id, w.warehouse_id`,
+          params: [id, companyId],
+        },
+        // Stock movements (in) for each line
+        {
+          sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
+                SELECT pi.company_id, pil.product_id, w.warehouse_id, 'in', pil.quantity, pi.invoice_number, 'فاتورة مشتريات', NOW()
+                  FROM purchase_invoices pi
+                  JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
+                  CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
+                 WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid`,
+          params: [id, companyId],
+        },
+        // Increment stock quantities
+        {
+          sql: `UPDATE stock s SET quantity = s.quantity + sub.qty, updated_at = NOW()
+                  FROM (
+                    SELECT pil.product_id, w.warehouse_id, SUM(pil.quantity) AS qty
+                      FROM purchase_invoices pi
+                      JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
+                      CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
+                     WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid
+                     GROUP BY pil.product_id, w.warehouse_id
+                  ) sub
+                 WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
+          params: [id, companyId],
+        },
         {
           sql: `UPDATE purchase_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, await resolveExistingUserId(adapter, _userId, companyId)],

@@ -410,10 +410,57 @@ export const inventoryApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
-      return adapter.query(
-        `UPDATE warehouse_transfers SET status = 'completed', updated_by = $3, updated_at = NOW() WHERE id = $1 AND company_id = $2`,
-        [id, companyId, safeUserId(_userId)]
+      const hdr = await adapter.query(
+        `SELECT from_warehouse_id, to_warehouse_id FROM warehouse_transfers WHERE id = $1 AND company_id = $2 AND status = 'draft'`,
+        [id, companyId]
       );
+      if (!hdr.success || !hdr.rows?.[0]) return { success: false, error: 'Transfer not found or not in draft status' };
+      const fromId = String((hdr.rows[0] as Record<string, unknown>).from_warehouse_id);
+      const toId = String((hdr.rows[0] as Record<string, unknown>).to_warehouse_id);
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      // Ensure destination stock rows exist
+      tx.push({
+        sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
+              SELECT $2::uuid, wtl.product_id, $3::uuid, 0
+                FROM warehouse_transfer_lines wtl
+                LEFT JOIN stock s ON s.company_id = $2::uuid AND s.product_id = wtl.product_id AND s.warehouse_id = $3::uuid
+               WHERE wtl.transfer_id = $1::uuid AND s.id IS NULL
+               GROUP BY wtl.product_id`,
+        params: [id, companyId, toId],
+      });
+      // Movements: out from source, in to destination
+      tx.push({
+        sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
+              SELECT $2::uuid, wtl.product_id, $3::uuid, 'transfer', wtl.quantity, $1, 'تحويل صادر', NOW()
+                FROM warehouse_transfer_lines wtl WHERE wtl.transfer_id = $1::uuid`,
+        params: [id, companyId, fromId],
+      });
+      tx.push({
+        sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
+              SELECT $2::uuid, wtl.product_id, $4::uuid, 'transfer', wtl.quantity, $1, 'تحويل وارد', NOW()
+                FROM warehouse_transfer_lines wtl WHERE wtl.transfer_id = $1::uuid`,
+        params: [id, companyId, fromId, toId],
+      });
+      // Stock updates
+      tx.push({
+        sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
+                FROM (SELECT product_id, SUM(quantity) AS qty FROM warehouse_transfer_lines WHERE transfer_id = $1::uuid GROUP BY product_id) sub
+               WHERE s.company_id = $2::uuid AND s.warehouse_id = $3::uuid AND s.product_id = sub.product_id`,
+        params: [id, companyId, fromId],
+      });
+      tx.push({
+        sql: `UPDATE stock s SET quantity = s.quantity + sub.qty, updated_at = NOW()
+                FROM (SELECT product_id, SUM(quantity) AS qty FROM warehouse_transfer_lines WHERE transfer_id = $1::uuid GROUP BY product_id) sub
+               WHERE s.company_id = $2::uuid AND s.warehouse_id = $3::uuid AND s.product_id = sub.product_id`,
+        params: [id, companyId, toId],
+      });
+      // Flip status
+      tx.push({
+        sql: `UPDATE warehouse_transfers SET status = 'completed', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+        params: [id, companyId, safeUserId(_userId)],
+      });
+      const result = await adapter.transaction(tx);
+      return result.success ? { success: true } : { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -505,14 +552,34 @@ export const inventoryApi = {
       const validation = validateInput(createInventoryTransactionSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
       const adapter = await getDbAdapter();
-      const result = await adapter.query(
-        `INSERT INTO stock_movements (company_id, type, product_id, warehouse_id, quantity, reference, notes, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [data.companyId, data.type, data.productId, data.warehouseId, data.quantity, data.reference ?? null, data.notes ?? null, safeUserId(_userId), safeUserId(_userId)]
-      );
-      if (result.success && result.rows?.[0]) {
-        return { success: true, id: result.rows[0].id };
+      const qty = Number(data.quantity) || 0;
+      const delta = data.type === 'out' ? -qty : qty;
+      // Skip stock update for transfers (handled by dedicated transfer flow)
+      if (data.type === 'transfer') {
+        const result = await adapter.query(
+          `INSERT INTO stock_movements (company_id, type, product_id, warehouse_id, quantity, reference, notes, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+          [data.companyId, data.type, data.productId, data.warehouseId, qty, data.reference ?? null, data.notes ?? null, safeUserId(_userId), safeUserId(_userId)]
+        );
+        if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id };
+        return { success: false, error: result.error };
       }
-      return { success: false, error: result.error };
+      const tx = await adapter.transaction([
+        {
+          sql: `INSERT INTO stock_movements (company_id, type, product_id, warehouse_id, quantity, reference, notes, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+          params: [data.companyId, data.type, data.productId, data.warehouseId, qty, data.reference ?? null, data.notes ?? null, safeUserId(_userId), safeUserId(_userId)],
+        },
+        {
+          sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+          params: [data.companyId, data.productId, data.warehouseId],
+        },
+        {
+          sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+          params: [delta, data.companyId, data.productId, data.warehouseId],
+        },
+      ]);
+      if (!tx.success) return { success: false, error: tx.error };
+      const first = (tx.results?.[0] as { rows?: Array<{ id: string }> } | undefined)?.rows?.[0];
+      return { success: true, id: first?.id };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -622,10 +689,51 @@ export const inventoryApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
-      return adapter.query(
-        `UPDATE stock_adjustments SET status = 'posted', posted_at = NOW(), updated_by = $3, updated_at = NOW() WHERE id = $1 AND company_id = $2`,
-        [id, companyId, safeUserId(_userId)]
+      const chk = await adapter.query(
+        `SELECT sa.product_id, sa.warehouse_id, sa.system_qty, sa.actual_qty, sa.difference, sa.reason, sa.date, p.name_ar AS product_name
+           FROM stock_adjustments sa LEFT JOIN products p ON p.id = sa.product_id
+          WHERE sa.id = $1 AND sa.company_id = $2 AND sa.status IN ('draft','approved')`,
+        [id, companyId]
       );
+      if (!chk.success || !chk.rows?.[0]) return { success: false, error: 'Adjustment not found or not in draft/approved status' };
+      const adj = chk.rows[0] as Record<string, unknown>;
+      const productId = String(adj.product_id);
+      const warehouseId = String(adj.warehouse_id);
+      const difference = Number(adj.difference) || 0;
+      const actualQty = Number(adj.actual_qty) || 0;
+      const productName = String(adj.product_name || productId);
+      const reason = String(adj.reason || '');
+      const adjDate = String(adj.date || new Date().toISOString().split('T')[0]);
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      // Ensure stock row exists
+      tx.push({
+        sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+        params: [companyId, productId, warehouseId],
+      });
+      // Movement
+      tx.push({
+        sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, 'adjustment', $4::numeric, $5, $6, NOW())`,
+        params: [companyId, productId, warehouseId, Math.abs(difference), `ADJ-${id}`, reason || 'تسوية جرد'],
+      });
+      // Update stock to actual quantity
+      tx.push({
+        sql: `UPDATE stock SET quantity = $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+        params: [actualQty, companyId, productId, warehouseId],
+      });
+      // Journal entry if difference != 0
+      if (difference !== 0) {
+        const { buildStockAdjustmentPostingStatements } = await import('@/core/utils/journalEntryGenerator');
+        const je = await buildStockAdjustmentPostingStatements(companyId, { product: productName, difference, reason, date: adjDate, id });
+        if (!je.success) return { success: false, error: je.error };
+        for (const s of je.statements) tx.push({ sql: s.sql, params: s.params as unknown[] });
+      }
+      // Flip status
+      tx.push({
+        sql: `UPDATE stock_adjustments SET status = 'posted', posted_at = NOW(), updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+        params: [id, companyId, safeUserId(_userId)],
+      });
+      const result = await adapter.transaction(tx);
+      return result.success ? { success: true } : { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }

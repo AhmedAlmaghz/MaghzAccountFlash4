@@ -487,11 +487,23 @@ export const manufacturingApi = {
         const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
         const warehouseId = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
 
-        // Atomic batch: consumption movements + production output + status
+        // Atomic batch: stock ensure + movements + stock updates + status
         // update all commit together or roll back together.
         const statements: Array<{ sql: string; params?: unknown[] }> = [];
         if (warehouseId) {
+          // Ensure stock rows exist for produced product
+          statements.push({
+            sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+            params: [companyId, String(wo.product_id), warehouseId],
+          });
+          // Ensure stock rows exist for consumed materials
           if (consRows.length > 0) {
+            for (const c of consRows) {
+              statements.push({
+                sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+                params: [companyId, String(c.material_id), warehouseId],
+              });
+            }
             const consValues = consRows.map((_c: Record<string, unknown>, i: number) => {
               const off = i * 7;
               return `($${off + 1}, $${off + 2}, $${off + 3}, 'out', $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7})`;
@@ -503,10 +515,22 @@ export const manufacturingApi = {
               sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ${consValues}`,
               params: consParams,
             });
+            // Decrement stock for consumed materials
+            statements.push({
+              sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
+                      FROM (SELECT material_id AS product_id, SUM(planned_quantity) AS qty FROM work_order_consumptions WHERE work_order_id = $1::uuid GROUP BY material_id) sub
+                     WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = $3::uuid`,
+              params: [id, companyId, warehouseId],
+            });
           }
           statements.push({
             sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1, $2, $3, 'in', $4, $5, $6, $7)`,
             params: [companyId, String(wo.product_id), warehouseId, finalProducedQty, id, 'Production output', _userId ?? null],
+          });
+          // Increment stock for produced product
+          statements.push({
+            sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+            params: [finalProducedQty, companyId, String(wo.product_id), warehouseId],
           });
         }
         statements.push({
