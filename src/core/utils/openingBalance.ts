@@ -47,8 +47,10 @@ export async function ensureOpeningBalanceEquityAccount(companyId: string): Prom
   );
   const parentId = parentRes.rows?.[0]?.id || null;
   await adapter.query(
+    // Single explicit cast — see note in accounting/api.ts createAccount:
+    // "CASE WHEN $N IS NULL" wrappers break PG parameter type inference.
     `INSERT INTO accounts (id, company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance, is_active)
-     VALUES ($1::uuid, $2::uuid, $3, $4, $5, CASE WHEN $6 IS NULL THEN NULL ELSE $6::uuid END, 'equity', 'credit', false, 0, true)`,
+     VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, 'equity', 'credit', false, 0, true)`,
     [crypto.randomUUID(), companyId, OPENING_EQUITY_CODE, 'حساب الأرصدة الافتتاحية', 'Opening Balance Equity', parentId]
   );
   return findAccountIdByCode(companyId, OPENING_EQUITY_CODE);

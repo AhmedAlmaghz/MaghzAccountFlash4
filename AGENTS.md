@@ -3533,5 +3533,12 @@ npx drizzle-kit migrate
 - **Smoke test داخل ROLLBACK يثبت الإصلاح على DB حقيقي**: أعد شكل الـ INSERT الفاشل بالحرف داخل BEGIN…ROLLBACK — يثبت العمود موجود بدون تلويث البيانات، بدون e2e بطيء
 - **pgliteAdapter.MIGRATIONS قائمة يدوية**: إضافة migration `.sql` تتطلب تحديث القائمة أيضاً (migrationRunner في Electron يكتشف الملفات تلقائياً لكن pglite لا)
 
+### إصلاح v0.4.4: `CASE WHEN $N IS NULL` يكسر استنتاج أنواع معاملات PostgreSQL
+- **الخطأ**: `could not determine data type of parameter $6` عند إنشاء حساب جديد (رصيد افتتاحي أو بدون أب)
+- **الجذر**: نمط `CASE WHEN $6 IS NULL THEN NULL ELSE $6::uuid END` في `accounting/api.ts createAccount` و `openingBalance.ts ensureOpeningBalanceEquityAccount` — فرع `IS NULL` لا يعطي PG أي سياق نوع، ولا يُنشر الـ cast من فرع ELSE على المعامل
+- **الإصلاح**: cast واحد مباشر `$6::uuid` — العمود Nullable يقبل NULL تلقائياً؛ الـ wrapper زائد وأضرار
+- **التحقق**: reproduction script على PG حقيقي فشل بالنمط القديم ونجح بالمعدَّل (null + قيم فعلية للوالد والمستخدم)
+- **القاعدة الذهبية**: **لا تلفّ المعاملات Nullable بـ CASE/COALESCE لتوليد NULL — مرّر `$N::type` مباشرة**. INSERT/UPDATE يستنتج النوع من العمود، والـ cast الصريح كافٍ لكل الحالات. أعد إنتاج أي خطأ PG على القاعدة الحقيقية داخل BEGIN…ROLLBACK قبل الإصلاح وبعده
+
 *آخر تحديث: 2026-08-25 | الإصدار: maghzaccount-pro v0.2.0*
 

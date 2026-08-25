@@ -70,8 +70,12 @@ export const accountingApi = {
       const userIdOrNull = safeUserId(userId);
       const accountId = crypto.randomUUID();
       const result = await adapter.query(
+        // NOTE: nullable params get a single explicit cast ($N::uuid). A
+        // "CASE WHEN $N IS NULL ..." wrapper makes PostgreSQL fail with
+        // "could not determine data type of parameter $N" because the IS
+        // NULL branch provides no type context.
         `INSERT INTO accounts (id, company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance, is_active, created_by, updated_by)
-         VALUES ($1::uuid, $2::uuid, $3, $4, $5, CASE WHEN $6 IS NULL THEN NULL ELSE $6::uuid END, $7, $8, $9, $10, $11, CASE WHEN $12 IS NULL THEN NULL ELSE $12::uuid END, CASE WHEN $13 IS NULL THEN NULL ELSE $13::uuid END)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12::uuid, $13::uuid)
          RETURNING id`,
         [
           accountId,
