@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../types';
+import { parseFlexibleNumber } from '../engine/argNormalizers';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { accountingApi } from '@/modules/accounting/api';
@@ -41,8 +42,8 @@ import {
  */
 
 function num(v: unknown): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+  // Flexible parsing: Arabic-Indic digits, thousands separators, currency words
+  return parseFlexibleNumber(v) ?? 0;
 }
 
 function str(v: unknown): string | undefined {

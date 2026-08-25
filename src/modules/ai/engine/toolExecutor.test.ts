@@ -123,5 +123,25 @@ describe('toolExecutor', () => {
       const outcome = await executeToolCall('test.tool', {}, ctx);
       expect(outcome.ok).toBe(true);
     });
+
+    it('sanitizes messy LLM args before the tool sees them (digits, separators, dates)', async () => {
+      useAuthStore.getState().login(adminUser);
+      let received: Record<string, unknown> = {};
+      registerTool(makeTool({
+        execute: async (args) => { received = args; return { ok: true }; },
+      }));
+
+      await executeToolCall('test.tool', {
+        amount: '١٣٢,٥٠٠ ريال',
+        dueDate: '12-8',
+        quantity: '2 500',
+        customerId: 'cust-1',
+      }, ctx);
+
+      expect(received.amount).toBe(132500);
+      expect(received.dueDate).toBe(`${new Date().getFullYear()}-08-12`);
+      expect(received.quantity).toBe(2500);
+      expect(received.customerId).toBe('cust-1'); // untouched
+    });
   });
 });

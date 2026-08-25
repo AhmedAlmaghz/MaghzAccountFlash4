@@ -108,7 +108,9 @@ function reconstructResponseFromChunks(chunks: LlmStreamChunk[]): LlmCompletionD
   };
 }
 
-const MAX_ITERATIONS = 8;
+// Room for: searches → write confirmation → resume → up to 2 anti-fabrication
+// correction cycles, without starving legitimate multi-document requests.
+const MAX_ITERATIONS = 10;
 
 /**
  * Remove fake tool-execution blocks that some models imitate from the
@@ -815,7 +817,8 @@ class ChatEngine {
     this.store().addMessage({
       role: 'assistant',
       kind: 'text',
-      content: 'تم الوصول إلى الحد الأقصى لعدد الخطوات. يرجى إعادة صياغة طلبك.',
+      content:
+        'توقّف قبل إكمال الطلب لأنه تجاوز الحد الأقصى لخطوات التنفيذ. ما نُفِّذ فعلاً يظهر فقط في بطاقات الأدوات أعلاه — لا شيء إضافي. جرّب تقسيم الطلب إلى خطوات أصغر.',
     });
   }
 }

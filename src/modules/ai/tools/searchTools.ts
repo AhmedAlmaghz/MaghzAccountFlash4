@@ -174,6 +174,7 @@ export const searchTools: ToolDefinition[] = [
           salePrice: m.item.salePrice,
           costPrice: m.item.costPrice,
           quantity: m.item.quantity,
+          unit: m.item.unit,
         })),
         totalMatches: matches.length,
       };
