@@ -21,7 +21,6 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { printDocument } from '@/core/utils/printDocument';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { salesApi } from '../api';
-import { postSalesInvoice } from '@/core/utils/journalEntryGenerator';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
@@ -348,16 +347,9 @@ export const InvoicesPage: React.FC = () => {
         setConfirmOpen(false);
         if (!activeCompany?.id) return;
         setPostingId(invoice.id);
-        const postResult = await postSalesInvoice(activeCompany.id, {
-          invoiceNumber: invoice.invoiceNumber,
-          date: invoice.date,
-          customerId: invoice.customerId,
-          subtotal: invoice.subtotal,
-          vatAmount: invoice.vatAmount,
-          totalAmount: invoice.totalAmount,
-        });
+        // Single reference: the API posts atomically (JE + status flip + customer balance).
+        const postResult = await post(invoice.id);
         if (postResult.success) {
-          await post(invoice.id);
           await logAudit({ userId: currentUser?.id || 'system', action: 'post', tableName: 'sales_invoices', recordId: invoice.id, companyId: activeCompany.id });
           addToast('success', t('sales.invoice.posted'));
         } else {

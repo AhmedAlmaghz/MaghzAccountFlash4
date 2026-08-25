@@ -16,7 +16,6 @@ import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccount
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { printDocument } from '@/core/utils/printDocument';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
-import { postSalesReturn } from '@/core/utils/journalEntryGenerator';
 import { logAudit } from '@/core/utils/auditLogger';
 import { salesApi } from '../api';
 import { useToastStore } from '@/core/store/toastStore';
@@ -232,15 +231,9 @@ export const SalesReturnsPage: React.FC = () => {
         setConfirmOpen(false);
         if (!activeCompany?.id) return;
         setPostingId(ret.id);
-        const postResult = await postSalesReturn(activeCompany.id, {
-          id: ret.id,
-          returnNumber: ret.returnNumber,
-          date: ret.date,
-          customer: ret.customer?.name || ret.customerId,
-          amount: ret.totalAmount,
-        });
+        // Single reference: the API posts atomically (JE + stock movements + status flip + customer balance).
+        const postResult = await post(ret.id);
         if (postResult.success) {
-          await post(ret.id);
           await logAudit({ userId: currentUser?.id || 'system', action: 'post', tableName: 'sales_returns', recordId: ret.id, companyId: activeCompany.id });
           addToast('success', t('sales.return.posted'));
         } else {

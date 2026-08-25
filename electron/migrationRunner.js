@@ -65,7 +65,12 @@ function normalizeIdempotent(rawSql) {
   return sql;
 }
 
-export async function runDrizzleMigrations() {
+/**
+ * Run schema sync. Accepts an optional connection config override (used by
+ * dbHandler's self-heal to reuse the EXACT working pool config — host,
+ * credentials, SSL — rather than re-reading env).
+ */
+export async function runDrizzleMigrations(overrideConfig = null) {
   console.log('[Schema] Starting PostgreSQL schema sync...');
   // Sanitize env values: .env files may carry BOM/CRLF/invisible padding that
   // silently breaks pg connections ("connection terminated", bad hostnames).
@@ -73,14 +78,15 @@ export async function runDrizzleMigrations() {
     const v = String(process.env[k] ?? '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
     return v || fallback;
   };
-  const pool = new Pool({
+  const base = {
     host: env('DB_HOST', 'localhost'),
     port: parseInt(env('DB_PORT', '5432'), 10),
     database: env('DB_NAME', ''),
     user: env('DB_USER', ''),
     password: env('DB_PASSWORD', ''),
     connectionTimeoutMillis: 15000,
-  });
+  };
+  const pool = new Pool(overrideConfig ? { ...base, ...overrideConfig } : base);
 
   const migrationsFolder = path.join(__dirname, '../drizzle');
 

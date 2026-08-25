@@ -2,7 +2,6 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, BookOpen, Wallet, Layers } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { logAudit } from '@/core/utils/auditLogger';
-import { postPurchaseReturn } from '@/core/utils/journalEntryGenerator';
 import { Card, Button, Modal, Input, Pagination, Can } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
@@ -230,16 +229,10 @@ export const PurchaseReturnsPage: React.FC = () => {
     const ret = returns.find(r => r.id === confirmPost);
     if (!ret) { setPostingId(null); setConfirmPost(null); return; }
 
-    const result = await postPurchaseReturn(activeCompany.id, {
-      id: ret.id,
-      returnNumber: ret.returnNumber,
-      date: ret.date,
-      supplier: ret.supplier?.name || ret.supplierId,
-      amount: ret.totalAmount,
-    });
+    // Single reference: the API posts atomically (JE + stock movements + status flip + supplier balance).
+    const result = await post(confirmPost);
 
     if (result.success) {
-      await post(confirmPost);
       addToast('success', t('purchases.return.posted'));
       await logAudit({ userId: user?.id || '', action: 'post', tableName: 'purchase_returns', recordId: confirmPost, companyId: activeCompany.id });
     } else {

@@ -18,7 +18,6 @@ import { usePurchaseInvoicesPaginated } from '../hooks/usePurchases';
 import { usePurchaseOrders } from '../hooks/usePurchases';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
-import { postPurchaseInvoice } from '@/core/utils/journalEntryGenerator';
 import { useCurrencyDisplay } from '@/core/utils/useCurrencyDisplay';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { YER_CODE } from '@/core/utils/currencyConverter';
@@ -337,17 +336,10 @@ export const PurchaseInvoicesPage: React.FC = () => {
       return;
     }
 
-    const result = await postPurchaseInvoice(activeCompany.id, {
-      invoiceNumber: invoice.invoiceNumber,
-      date: invoice.date,
-      supplierId: invoice.supplierId,
-      subtotal: invoice.subtotal,
-      vatAmount: invoice.vatAmount,
-      totalAmount: invoice.totalAmount,
-    });
+    // Single reference: the API posts atomically (JE + status flip + supplier balance).
+    const result = await post(confirmPost);
 
     if (result.success) {
-      await post(confirmPost);
       addToast('success', t('purchases.invoice.posted'));
       await logAudit({
         userId: user?.id || '',

@@ -1065,12 +1065,26 @@ ALTER TABLE "ai_chat_sessions" ADD CONSTRAINT "ai_chat_sessions_user_id_users_id
 -- Hand-maintained performance / partial indexes
 -- (not yet modeled in Drizzle schemas — re-append after any regeneration)
 -- ═══════════════════════════════════════════════════════════════════════════
-CREATE INDEX IF NOT EXISTS "idx_journal_entries_company_id" ON "journal_entries" ("company_id", "account_id");
+CREATE INDEX IF NOT EXISTS "idx_journal_entries_company_id" ON "journal_entries" ("company_id", "account_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_receipt_vouchers_invoice
   ON receipt_vouchers(company_id, invoice_id)
-  WHERE invoice_id IS NOT NULL;
+  WHERE invoice_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_payment_vouchers_invoice
   ON payment_vouchers(company_id, invoice_id)
-  WHERE invoice_id IS NOT NULL;
+  WHERE invoice_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_attachments
-  ON sales_invoices ((attachments IS NOT NULL));
+  ON sales_invoices ((attachments IS NOT NULL));--> statement-breakpoint
+-- ── Drift healing for databases created before the squash ─────────────────
+ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "opening_balance" numeric(18, 4) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "customers" ADD COLUMN IF NOT EXISTS "opening_balance_posted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "suppliers" ADD COLUMN IF NOT EXISTS "opening_balance" numeric(18, 4) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "suppliers" ADD COLUMN IF NOT EXISTS "opening_balance_posted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "opening_balance" numeric(18, 4) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "opening_balance_posted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "opening_stock_qty" numeric(18, 4) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "opening_warehouse_id" uuid;--> statement-breakpoint
+ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "opening_stock_posted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "opening_amount" numeric(18, 4) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "opening_direction" varchar(10) DEFAULT 'debit' NOT NULL;--> statement-breakpoint
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "opening_balance_posted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "sales_invoices" ADD COLUMN IF NOT EXISTS "attachments" jsonb DEFAULT '[]'::jsonb;

@@ -455,7 +455,7 @@ function healSchemaDriftOnce() {
   if (!schemaHealPromise) {
     console.warn('[DB] Schema drift detected (42703/42P01) — running self-healing schema sync...');
     schemaHealPromise = import('./migrationRunner.js')
-      .then((m) => m.runDrizzleMigrations())
+      .then((m) => m.runDrizzleMigrations(activeDbConfig ? { ...activeDbConfig } : undefined))
       .then(() => {
         console.log('[DB] Schema self-heal completed. Retrying operation.');
       })
@@ -505,24 +505,32 @@ function wrapClient(client) {
 
 function getRequiredEnv(key) {
   const val = process.env[key];
-  if (!val) {
-    throw new Error(`ظ…طھط؛ظٹط± ط§ظ„ط¨ظٹط¦ط© ${key} ط؛ظٹط± ظ…ط­ط¯ط¯. طھط£ظƒط¯ ظ…ظ† ظ…ظ„ظپ .env.local`);
+  const trimmed = typeof val === 'string' ? val.replace(/^[\uFEFF\s]+|[\s\r]+$/g, '') : val;
+  if (!trimmed) {
+    throw new Error(`Environment variable ${key} is not set. Check .env.local`);
   }
-  return val;
+  return trimmed;
 }
+
+/** Config of the ACTIVE pool — used by schema self-heal to connect identically
+ *  (same host/credentials/SSL) as the working application connection. */
+let activeDbConfig = null;
 
 // Create database connection pool
 function createPool() {
-  pool = new Pool({
+  activeDbConfig = {
     host: getRequiredEnv('DB_HOST'),
-    port: parseInt(getRequiredEnv('DB_PORT')),
+    port: parseInt(getRequiredEnv('DB_PORT'), 10),
     database: getRequiredEnv('DB_NAME'),
     user: getRequiredEnv('DB_USER'),
     password: getRequiredEnv('DB_PASSWORD'),
+    // Neon / managed providers require SSL; local does not.
+    ssl: /^true$/i.test(process.env.DB_SSL || '') || /neon\.tech/i.test(process.env.DB_HOST || ''),
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
+    connectionTimeoutMillis: 15000,
+  };
+  pool = new Pool({ ...activeDbConfig });
 
   pool.on('error', (err) => {
     console.error('[DB] Unexpected pool error:', err.message);

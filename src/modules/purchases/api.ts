@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { getDbAdapter } from '@/core/database/adapters';
-import { safeUserId } from '@/core/utils/userIdValidator';
+import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createSupplierSchema, createPurchaseInvoiceSchema, createPurchaseOrderSchema, createPurchaseReturnSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
@@ -759,7 +759,7 @@ export const purchasesApi = {
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
         {
           sql: `UPDATE purchase_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-          params: [id, companyId, safeUserId(_userId)],
+          params: [id, companyId, await resolveExistingUserId(adapter, _userId, companyId)],
         },
       ];
       if (outstanding !== 0) {
@@ -1215,11 +1215,12 @@ export const purchasesApi = {
         return { success: false, error: posting.error };
       }
 
+      const resolvedUserId = await resolveExistingUserId(adapter, _userId, companyId);
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...posting.statements.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
         {
           sql: `UPDATE purchase_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
-          params: [id, companyId, safeUserId(_userId)],
+          params: [id, companyId, resolvedUserId],
         },
       ];
       if (totalAmount !== 0) {
