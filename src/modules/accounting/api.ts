@@ -1,7 +1,7 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { runTransaction } from '@/core/database/tx';
 import { buildReceiptVoucherStatements, buildPaymentVoucherStatements } from '@/core/utils/journalEntryGenerator';
-import { mapRows } from '@/core/utils/mapPgRow';
+import { mapRows, toDateString } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
@@ -293,7 +293,7 @@ export const accountingApi = {
       }));
       
       const result = await accountingService.postTransaction({
-        date: data.date,
+        date: toDateString(data.date) || new Date().toISOString().split('T')[0],
         description: data.description || '',
         entries,
         reference: data.reference,
@@ -311,8 +311,8 @@ export const accountingApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const txResult = await adapter.query(
-        `UPDATE transactions SET date = $1, reference = $2, description = $3, total_amount = $4, status = $5, updated_at = NOW(), updated_by = $6 WHERE id = $7 AND company_id = $8`,
-        [data.date, data.reference, data.description, data.totalAmount, data.status, safeUserId(userId), id, companyId]
+        `UPDATE transactions SET date = $1::timestamptz, reference = $2, description = $3, total_amount = $4, status = $5, updated_at = NOW(), updated_by = $6 WHERE id = $7 AND company_id = $8`,
+        [toDateString(data.date), data.reference, data.description, data.totalAmount, data.status, safeUserId(userId), id, companyId]
       );
       if (!txResult.success) return txResult;
 
@@ -547,9 +547,13 @@ export const accountingApi = {
       if (String(v.status) !== 'draft') return { success: false, error: 'Voucher is not in draft status' };
 
       const amount = Number(v.amount) || 0;
+      // v comes from a RAW pg row: the driver parses DATE columns as
+      // new Date('YYYY-MM-DD') = UTC midnight, whose String() is
+      // "Tue Aug 25 2026 03:00:00 GMT+0300 (...)" — unparseable by PG
+      // timestamptz. Normalize through toDateString before any reuse.
       const common = {
         voucherNumber: String(v.voucher_number || ''),
-        date: String(v.date || new Date().toISOString().split('T')[0]),
+        date: toDateString(v.date) || new Date().toISOString().split('T')[0],
         amount,
         paymentMethod: String(v.payment_method || 'cash'),
       };
@@ -621,7 +625,7 @@ export const accountingApi = {
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;
-      if (data.date !== undefined) { fields.push(`date = $${idx++}`); values.push(data.date); }
+      if (data.date !== undefined) { fields.push(`date = $${idx++}::date`); values.push(toDateString(data.date)); }
       if (data.customerId !== undefined) { fields.push(`customer_id = $${idx++}`); values.push(data.customerId); }
       if (data.invoiceId !== undefined) { fields.push(`invoice_id = $${idx++}`); values.push(data.invoiceId || null); }
       if (data.amount !== undefined) { fields.push(`amount = $${idx++}`); values.push(data.amount); }
@@ -878,7 +882,7 @@ export const accountingApi = {
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;
-      if (data.date !== undefined) { fields.push(`date = $${idx++}`); values.push(data.date); }
+      if (data.date !== undefined) { fields.push(`date = ${idx++}::date`); values.push(toDateString(data.date)); }
       if (data.supplierId !== undefined) { fields.push(`supplier_id = $${idx++}`); values.push(data.supplierId || null); }
       if (data.invoiceId !== undefined) { fields.push(`invoice_id = $${idx++}`); values.push(data.invoiceId || null); }
       if (data.expenseAccountId !== undefined) { fields.push(`expense_account_id = $${idx++}`); values.push(data.expenseAccountId || null); }

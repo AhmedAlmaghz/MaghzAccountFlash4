@@ -602,3 +602,51 @@ describe('accountingApi.createAccount — FK safety for created_by/updated_by', 
     expect(capturedParams[8]).toBeNull();
   });
 });
+
+describe('accountingApi.postVoucher — raw pg date normalization (v0.4.5 regression)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('normalizes the raw DATE-column Date object before building the JE statement', async () => {
+    // node-postgres parses DATE columns as new Date('YYYY-MM-DD') = UTC
+    // midnight. String(v.date) used to yield "Tue Aug 25 2026 03:00:00
+    // GMT+0300 (...)" which PG rejects with "invalid input syntax for type
+    // timestamp with time zone" when the JE is inserted.
+    const captured: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      if (/FROM\s+receipt_vouchers/.test(sql)) {
+        return {
+          success: true,
+          rows: [
+            {
+              id: 'rv-1',
+              company_id: 'c1',
+              voucher_number: 'RV-001',
+              date: new Date('2026-08-25'),
+              amount: 500,
+              status: 'draft',
+              payment_method: 'cash',
+              customer_id: 'cust-1',
+            },
+          ],
+        };
+      }
+      if (/FROM\s+default_accounts/.test(sql)) {
+        // resolvePostingAccounts → getDefaultAccountId lookups
+        return { success: true, rows: [{ account_id: 'acc-default' }] };
+      }
+      captured.push({ sql, params });
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.postVoucher('rv-1', 'c1', 'receipt', '');
+
+    expect(res.success).toBe(true);
+    const je = captured.find((q) => q.sql.includes('INSERT INTO transactions'));
+    expect(je).toBeTruthy();
+    // The date param must be a strict YYYY-MM-DD string — never a locale Date
+    expect(je?.params?.[1]).toBe('2026-08-25');
+  });
+});

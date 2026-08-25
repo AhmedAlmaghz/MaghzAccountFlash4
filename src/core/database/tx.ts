@@ -1,4 +1,5 @@
 import { getDbAdapter } from '@/core/database/adapters';
+import { toDateString } from '@/core/utils/mapPgRow';
 import type { JournalEntryLine } from '@/core/utils/journalEntryGenerator';
 
 /**
@@ -40,8 +41,13 @@ export interface JournalEntryInput {
  * Build the parameterized statement that inserts a transactions header +
  * its journal_entries lines using a single CTE (same shape the adapters
  * use internally). Include it as one statement inside runTransaction batches.
+ *
+ * The date passes through toDateString() as the FINAL guard: any caller
+ * forwarding a raw pg DATE value (JS Date at UTC midnight) would otherwise
+ * hit `invalid input syntax for type timestamp with time zone`.
  */
 export function buildJournalEntryStatement(companyId: string, entry: JournalEntryInput): TxStatement {
+  const date = toDateString(entry.date) ?? new Date().toISOString().split('T')[0];
   const valueRows = entry.entries.map((_, idx) => {
     const base = 7 + idx * 4;
     return `((SELECT id FROM new_tx), $${base}::uuid, $${base + 1}::numeric, $${base + 2}::numeric, $${base + 3}, $6::uuid)`;
@@ -59,7 +65,7 @@ export function buildJournalEntryStatement(companyId: string, entry: JournalEntr
     `,
     params: [
       companyId,
-      entry.date,
+      date,
       entry.reference,
       entry.description,
       entry.totalAmount,

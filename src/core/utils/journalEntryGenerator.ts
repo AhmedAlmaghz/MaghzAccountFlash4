@@ -333,12 +333,14 @@ export async function buildReceiptVoucherStatements(
     statements: [
       buildJournalEntryStatement(companyId, {
         reference: v.voucherNumber,
-        description: `قيد تلقائي - سند قبض ${v.voucherNumber}${v.customerName ? ` - ${v.customerName}` : ''}`,
-        date: v.date,
+        description: `سند قبض - رقم ${v.voucherNumber}${v.customerName ? ` - ${v.customerName}` : ''}`,
+        // Guard: callers may forward raw pg DATE values (JS Date at UTC
+        // midnight) — normalize before the timestamptz INSERT.
+        date: normalizeDate(v.date),
         totalAmount: v.amount,
         entries: [
-          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'عميل'}` },
-          { accountId: debtorsId, debit: 0, credit: v.amount, memo: `تخفيض ذمة ${v.customerName || v.customerId || 'عميل'}` },
+          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'العميل'}` },
+          { accountId: debtorsId, debit: 0, credit: v.amount, memo: `تسديد دين` },
         ],
       }),
     ],
@@ -361,12 +363,13 @@ export async function buildPaymentVoucherStatements(
     statements: [
       buildJournalEntryStatement(companyId, {
         reference: v.voucherNumber,
-        description: `قيد تلقائي - سند صرف ${v.voucherNumber}${v.supplierName ? ` - ${v.supplierName}` : ''}`,
-        date: v.date,
+        description: `سند صرف - رقم ${v.voucherNumber}${v.supplierName ? ` - ${v.supplierName}` : ''}`,
+        // Guard: same normalization as receipt vouchers (raw pg DATE values).
+        date: normalizeDate(v.date),
         totalAmount: v.amount,
         entries: [
-          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `صرف لـ ${v.supplierName || v.supplierId || 'مورد'}` },
-          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `سحب نقدي/بنكي` },
+          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `صرف إلى ${v.supplierName || v.supplierId || 'المورد'}` },
+          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `صرف نقدي/بنكي` },
         ],
       }),
     ],

@@ -3540,5 +3540,16 @@ npx drizzle-kit migrate
 - **التحقق**: reproduction script على PG حقيقي فشل بالنمط القديم ونجح بالمعدَّل (null + قيم فعلية للوالد والمستخدم)
 - **القاعدة الذهبية**: **لا تلفّ المعاملات Nullable بـ CASE/COALESCE لتوليد NULL — مرّر `$N::type` مباشرة**. INSERT/UPDATE يستنتج النوع من العمود، والـ cast الصريح كافٍ لكل الحالات. أعد إنتاج أي خطأ PG على القاعدة الحقيقية داخل BEGIN…ROLLBACK قبل الإصلاح وبعده
 
+### إصلاح v0.4.5: `String(v.date)` على صفوف pg الخام يفجّر ترحيل السندات
+- **الخطأ**: `invalid input syntax for type timestamp with time zone: "Tue Aug 25 2026 03:00:00 GMT+0300 (...)"` عند **ترحيل** سند قبض/صرف مسودة
+- **الجذر**: `postVoucher` في `accounting/api.ts` كان يبني الـ JE من `SELECT * FROM receipt_vouchers` **خام** — node-postgres يحلّل عمود `date` إلى `new Date('YYYY-MM-DD')` = منتصف ليل UTC، و`String(v.date)` يعطي صيغة locale غير قابلة للتحليل من PG (`03:00 GMT+3` = 00:00 UTC — البصمة الحاسمة في التشخيص)
+- **الإصلاح (defense-in-depth بـ 3 طبقات)**:
+  1. المصدر: `toDateString(v.date)` بدل `String(v.date)`
+  2. المولّدات: `buildReceiptVoucherStatements`/`buildPaymentVoucherStatements` تطبّق `normalizeDate()` على المدخل
+  3. نقطة الاختناق: `tx.ts buildJournalEntryStatement` يطبّق `toDateString(entry.date)` لكل كتّاب القيود
+  - + تطبيع في `createTransaction`/`updateTransaction` (`::timestamptz`) وتحديثات تواريخ السندات (`::date`)
+- **التحقق**: reproduction على PG حقيقي — الصف الخام أعطى `"Thu Aug 20 2026 00:00:00 GMT+0300"` والسلسلة القديمة فشلت بنفس الخطأ والمعدَّلة نجحت (مسارا Date-object و string) + unit regression test يثبت أن param التاريخ `2026-08-25`
+- **القاعدة الذهبية**: **لا تمرر أبداً `Date` خام أو `String(dateValue)` كمعامل SQL — مرّر `toDateString(value)`**. أي `SELECT *` يُعاد استخدامه في كتابة يجب أن يمرّ عبر mappers أو normalization؛ الفارق الزمني في الخطأ (03:00 مقابل 00:00) يكشف فوراً مصدر UTC-midnight
+
 *آخر تحديث: 2026-08-25 | الإصدار: maghzaccount-pro v0.2.0*
 
