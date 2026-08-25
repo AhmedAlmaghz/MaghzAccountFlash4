@@ -165,7 +165,7 @@ export const CashFlowReport: React.FC = () => {
       { name: t('accounting.cashFlow.investing'), value: iAbs, pct: ((iAbs / sum) * 100).toFixed(1) },
       { name: t('accounting.cashFlow.financing'), value: fAbs, pct: ((fAbs / sum) * 100).toFixed(1) },
     ].filter((d) => d.value > 0);
-  }, [totals, t]);
+  }, [totals, t, operating.length, investing.length, financing.length]);
 
   const renderRows = (rows: CFRow[]) => (
     <div className="divide-y divide-slate-100 dark:divide-slate-800">

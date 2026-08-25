@@ -8,6 +8,13 @@
       "when": 1794900000000,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795500000000,
+      "tag": "0001_invoice_payment_columns",
+      "breakpoints": true
     }
   ]
 }

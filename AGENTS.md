@@ -3486,5 +3486,52 @@ npx drizzle-kit migrate
 - **`download={att.name}` على anchor**: يحمّل الملف باسمه الأصلي بدل عرض الـ data URL في المتصفح
 - **Schema drift protection**: `Drizzle schema exports all 63 tables` (was 62) — الـ migration test يفحص تطابق الـ schema مع الـ Drizzle exports
 
-*آخر تحديث: 2026-08-21 | الإصدار: maghzaccount-pro v0.2.0*
+### المرحلة 58: إصلاح فشل الوكيل الذكي (AI Agent) — فواتير + تصحيح الأسماء + بحث الحسابات
+- **الهدف**: إصلاح 3 أعطال حقيقية ظهرت في جلسة استخدام فعلية للوكيل الذكي: (1) فشل إنشاء أي فاتورة مبيعات/مشتريات بخطأ `column "cash_box_id" of relation does not exist`، (2) إفساد أسماء كيانات جديدة أثناء الإنشاء ("الحمادي للتجارة" ← "الحمادي الشجاع للتجارة")، (3) فشل `search.accounts` في إيجاد حساب مصروف ("إشتراك الانترنت" ← لا توجد نتائج)
+- **P0 — Schema drift في جداول الفواتير**:
+  - `sales/api.ts` و `purchases/api.ts` كانت تكتب `cash_box_id` و `bank_account_id` في INSERT/UPDATE لـ 6 جداول (`sales_invoices`, `quotations`, `sales_returns`, `purchase_invoices`, `purchase_orders`, `purchase_returns`) — والأعمدة غير موجودة في `0000_init.sql` ولا في Drizzle schemas → كل إنشاء فاتورة (UI + AI) يفشل
+  - Migration جديدة `drizzle/0001_invoice_payment_columns.sql`: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` لكل جدول (12 عموداً) — plain uuid بلا FK (نفس نمط `receipt_vouchers`) حتى لا يحجب حذف خزنة قراءة الفواتير
+  - `_journal.json`: entry idx=1
+  - Drizzle schemas محدّثة (`sales.ts` ×3 جداول، `purchases.ts` ×3 جداول) — `db:check` نظيف
+  - `pgliteAdapter.ts`: MIGRATIONS list محدّثة (كانت hardcoded بملف واحد فقط)
+  - **تطبيق مباشر على قاعدة التطوير**: migration نُفِّذ على PG الحقيقي (idempotent) + smoke test يعيد شكلَي INSERT الفاشلين بالضبط داخل ROLLBACK transaction → نجاح
+- **P1 — entityResolver كان يُفسد أسماء الكيانات الجديدة**:
+  - الجذر: التقسيم word-by-word + substring shortcut في `fuzzyMatchScore` جعل كلمة "للتجارة" تطابق المورد القائم "الشجاع للتجارة" بدرجة 0.75 بالضبط (0.5 + 0.5×ratio)، ثم `userText.replace(global)` استبدلت كل ورود الكلمة بما فيها داخل اسم المورد الجديد
+  - **4 حراس جدد** في `resolveEntitiesInText`:
+    1. **Definition zones**: النص بعد `اسمه / باسم / المسمى / المسماة / تحت اسم …` يُعرّف كياناً جديداً — لا يُصحَّح أبداً (حتى 48 حرفاً أو نهاية الجملة)
+    2. **Generic tokens stoplist**: `للتجارة/التجارية/للاستيراد/للتصدير/المحدودة/وشركاء…` ليست مراجع صالحة بمفردها
+    3. **Verbatim-presence guard**: إذا الاسم الكانوني موجود نصاً كـ standalone phrase (بحدود Arabic-letter lookaround) لا شيء يحتاج تصحيحاً — يمنع "الشجاع للتجارة" ← "الشجاع الشجاع للتجارة"
+    4. **Ambiguity guard**: تطابقان من نفس النوع بفرق ≤0.05 درجة ← لا استبدال تلقائي
+  - الاستبدال انتقل إلى داخل الـ resolver مع **Arabic-letter boundaries** (`(?<![\u0600-\u06FF])…(?![\u0600-\u06FF])`) — لا استبدال داخل كلمة أطول؛ والـ engine يستخدم `resolved.text` مباشرة (واجهة جديدة `text` في `ResolvedEntitiesResult`)
+- **P1 — search.accounts لم تُرقَّ للبحث الضبابي**:
+  - كانت تستخدم فلتر substring حرفي (`name.includes(cleanQuery)`) بينما بقية أدوات البحث رقّت في Phase 48 — "اشتراك انترنت" ليس substring متجاوزاً في "مصروفات الإنترنت والاتصالات" ← صفر نتائج
+  - Helper جديد `fuzzySearch()`: يقيس الدرجة ضد العبارة الكاملة **وكل token منفرداً** (≥حرفين) ويُرجع الأفضل أولاً — مطبّق على `search.accounts` + `search.cash_boxes` + `search.banks` (مسارات السندات: "محفظة جيب")
+  - رسالة اقتراح عند صفر نتائج تساعد الـ LLM على إعادة المحاولة بكلمة أدق
+- **اختبارات جديدة (15)**:
+  - `src/modules/ai/entityResolver.test.ts` (7): regression اسم المورد الجديد، guard الاسم الحرفي، generic suffixes، تصحيح typo حقيقي، حماية definition zone، مرجع بحرف الجر "لغدة"←"غدة"، نص بدون تطابق
+  - `searchTools.test.ts` (+3): عبارة multi-word غير substring تجد الحساب، ترتيب exact فوق token-only، بحث بالكود
+  - `migrations.test.ts` (+5): baseline أول ملف + additive-only (لا DROP)، journal mirrors files، 12 عموداً على 6 جداول، idempotency (عدد ALTER = عدد IF NOT EXISTS)، Drizzle exposes الجديدة
+  - **مهم**: `clearEntityCache()` في beforeEach — cache الوحدة TTL 30s يسرب حالة بين الاختبارات
+- **إصلاح جانبي**: warning قديم في `CashFlowPage.tsx` (`exhaustive-deps`) — أضيفت deps الناقصة ليصبح `--max-warnings=0` أخضر
+- **النتيجة النهائية**:
+  - `npx tsc -b`: **0 errors** ✓
+  - `npx eslint src --max-warnings=0`: **0 errors, 0 warnings** ✓
+  - `npx vitest run`: **1073+ passed** ✓
+  - `npm run build`: **built in 5.68s** ✓
+  - `npm run db:check`: **Everything's fine** ✓
+  - Live DB: 12 عموداً موجودة + smoke INSERTs (نفس أشكال الفشل) نجحت داخل ROLLBACK ✓
+  - e2e: `11-sales-module` 7/7 ✓ + `16-payment-allocation` 3/3 ✓ + `17-payment-flow` 3/3 ✓
+
+### قواعد ذهبية مضافة (Phase 58)
+- **افحص schema قبل كتابة SQL جديد في API layer**: `cash_box_id` كُتبت في INSERT دون أن تكون في migration — الـ unit tests (mocks) لا تكشف هذا؛ فقط تشغيل حقيقي على PG. **القاعدة**: أي عمود في INSERT يجب أن يكون في migration + Drizzle schema معاً
+- **substring fuzzy shortcut ينتج false positives للأسماء العربية المركبة**: "للتجارة" ⊂ "الشجاع للتجارة" تعطي 0.75 بالضبط. **القاعدة**: التصحيح التلقائي للأسماء يحتاج حراس سياق (definition zones + verbatim presence + generic stoplist + ambiguity) وليس عتبة درجة فقط
+- **لا تستبدل بنص المستخدم خارج الـ resolver**: منطق الاستبدال والحراس في مكان واحد يعيد `correctedText` جاهزاً — الـ engine يستخدمه كما هو. global regex replace بلا حدود يفسد أسماء أخرى في نفس الرسالة
+- **Arabic-letter lookarounds بدل `\b`**: `\b` في JS يعتمد على `\w` الذي لا يشمل العربية — استخدم `(?<![\u0600-\u06FF])…(?![\u0600-\u06FF])`
+- **بحث الحسابات يحتاج token-level scoring**: العبارة الكاملة نادراً ما تكون substring في اسم الحساب ("سداد اشتراك الانترنت" vs "مصروفات الإنترنت والاتصالات"). **القاعدة**: طبّق `fuzzySearch` (عبارة كاملة + كل token) على أي أداة بحث بالاسم العربي — الفلترة substring تفشل بصمت
+- **Migration tests: `length >= 1` لا `=== 1`**: أي افتراض "ملف migration واحد فقط" ينكسر بأول migration إضافية. افحص الترتيب (baseline أولاً) + additive-only (لا DROP) بدل العدد الثابت
+- **Module-level caches تسرب بين الاختبارات**: cache بـ TTL 30s (entityResolver) يجعل الاختبارات تعتمد على ترتيب تنفيذها. **القاعدة**: صدّر `clearCache()` ونادِه في beforeEach لأي cache module-level
+- **Smoke test داخل ROLLBACK يثبت الإصلاح على DB حقيقي**: أعد شكل الـ INSERT الفاشل بالحرف داخل BEGIN…ROLLBACK — يثبت العمود موجود بدون تلويث البيانات، بدون e2e بطيء
+- **pgliteAdapter.MIGRATIONS قائمة يدوية**: إضافة migration `.sql` تتطلب تحديث القائمة أيضاً (migrationRunner في Electron يكتشف الملفات تلقائياً لكن pglite لا)
+
+*آخر تحديث: 2026-08-25 | الإصدار: maghzaccount-pro v0.2.0*
 

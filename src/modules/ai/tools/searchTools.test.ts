@@ -51,6 +51,8 @@ vi.mock('@/modules/hr/api', () => ({
 import { salesApi } from '@/modules/sales/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { purchasesApi } from '@/modules/purchases/api';
+import { accountingApi } from '@/modules/accounting/api';
+import type { Account } from '@/modules/accounting/types';
 
 const ctx: ToolContext = { companyId: 'c1', userId: 'u1' };
 
@@ -174,6 +176,84 @@ describe('AI search tools — fuzzy matching against DB rows', () => {
       const result = await findTool('search.suppliers').execute({ query: 'مورد الاول' }, ctx);
 
       expect((result as { matches: { id: string }[] }).matches.map((m) => m.id)).toContain('s1');
+    });
+  });
+
+  describe('search.accounts', () => {
+    const makeAccount = (over: Partial<Account> & Pick<Account, 'id' | 'code' | 'nameAr'>): Account => ({
+      companyId: 'c1',
+      type: 'expense',
+      nature: 'debit',
+      isGroup: false,
+      balance: 0,
+      isActive: true,
+      ...over,
+    });
+
+    it('finds an expense account from a multi-word request that is NOT a substring of the name', async () => {
+      // Regression (chat transcript): user asked "سند صرف سداد اشتراك الانترنت".
+      // Old behavior: substring filter `name.includes("اشتراك انترنت")` failed
+      // against "مصروفات الإنترنت والاتصالات" → "لا توجد نتائج".
+      vi.mocked(accountingApi.getAccounts).mockResolvedValue({
+        success: true,
+        data: [
+          makeAccount({ id: 'a1', code: '51103', nameAr: 'مصروفات الإنترنت والاتصالات' }),
+          makeAccount({ id: 'a2', code: '51101', nameAr: 'رواتب وأجور', type: 'expense' }),
+        ],
+      });
+
+      const result = await findTool('search.accounts').execute({ query: 'اشتراك الانترنت' }, ctx);
+
+      expect((result as { matches: { id: string }[] }).matches.map((m) => m.id)).toContain('a1');
+    });
+
+    it('ranks exact name matches above token-only matches', async () => {
+      vi.mocked(accountingApi.getAccounts).mockResolvedValue({
+        success: true,
+        data: [
+          makeAccount({ id: 'a1', code: '51103', nameAr: 'مصروفات الإنترنت والاتصالات' }),
+          makeAccount({ id: 'a2', code: '51104', nameAr: 'صيانة أجهزة الاتصالات' }),
+        ],
+      });
+
+      const result = await findTool('search.accounts').execute({ query: 'انترنت' }, ctx);
+      const matches = (result as { matches: { id: string }[] }).matches;
+      expect(matches[0]?.id).toBe('a1');
+    });
+
+    it('matches accounts by code prefix', async () => {
+      vi.mocked(accountingApi.getAccounts).mockResolvedValue({
+        success: true,
+        data: [makeAccount({ id: 'a1', code: '51103', nameAr: 'مصروفات الإنترنت والاتصالات' })],
+      });
+
+      const result = await findTool('search.accounts').execute({ query: '51103' }, ctx);
+      expect((result as { matches: { id: string }[] }).matches[0]?.id).toBe('a1');
+    });
+
+    it('suggests suitable expense accounts when nothing matches', async () => {
+      // Regression (chat): "سداد اشتراك الانترنت" with NO internet account in
+      // the chart → the agent should receive fallback expense suggestions and
+      // post on the most suitable one instead of dead-ending.
+      vi.mocked(accountingApi.getAccounts).mockResolvedValue({
+        success: true,
+        data: [
+          makeAccount({ id: 'g1', code: '52', nameAr: 'مصاريف تشغيلية', isGroup: true }),
+          makeAccount({ id: 'a1', code: '52101', nameAr: 'رواتب الموظفين' }),
+          makeAccount({ id: 'a2', code: '52201', nameAr: 'مصروفات الإيجار' }),
+          makeAccount({ id: 'a3', code: '11101', nameAr: 'الصندوق الرئيسي', type: 'asset' }),
+        ],
+      });
+
+      const result = await findTool('search.accounts').execute({ query: 'اشتراك جوال غير موجود' }, ctx);
+
+      expect(result).toMatchObject({ matches: [], totalMatches: 0 });
+      const suggestions = (result as { suggestions?: { id: string }[] }).suggestions ?? [];
+      // Only leaf ACTIVE expense accounts are suggested — never groups/assets
+      expect(suggestions.map((s) => s.id)).toEqual(expect.arrayContaining(['a1', 'a2']));
+      expect(suggestions.map((s) => s.id)).not.toContain('g1');
+      expect(suggestions.map((s) => s.id)).not.toContain('a3');
+      expect((result as { suggestionNote?: string }).suggestionNote).toBeTruthy();
     });
   });
 

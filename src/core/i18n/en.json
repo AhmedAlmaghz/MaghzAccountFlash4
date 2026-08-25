@@ -678,7 +678,18 @@
       "deleted": "Payment voucher deleted",
       "posted": "Payment voucher posted successfully"
     },
-    "avgInvoiceValue": "Average Invoice Value"
+    "avgInvoiceValue": "Average Invoice Value",
+    "form": {
+      "hierarchy": "Hierarchy",
+      "parentAccount": "Parent account",
+      "parentOptional": "Optional — leave empty for a top-level account",
+      "noParent": "— Top-level account (no parent) —",
+      "inheritHint": "Picking a parent auto-generates the code and inherits properties",
+      "inheritedFromParent": "Inherited from parent",
+      "autoCode": "Auto-suggest code",
+      "codePrefixWarn": "Child account codes should start with the parent code",
+      "groupHint": "Container account — cannot be posted to directly"
+    }
   },
   "inventory": {
     "products": "Products",

@@ -25,6 +25,7 @@ import {
 import { Card, Button, Input, Modal, Badge } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
+import { SmartSelect, type SmartSelectItem } from '@/core/ui/components/smart';
 import { useAccounts } from '../hooks/useAccounting';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -72,6 +73,41 @@ function getDescendantIds(account: Account): Set<string> {
 function computeGroupBalance(acc: Account): number {
   if (!acc.isGroup || !acc.children?.length) return Number(acc.balance) || 0;
   return acc.children.reduce((sum, c) => sum + computeGroupBalance(c), 0);
+}
+
+/** Default balance nature per account type (assets/expenses = debit, rest = credit). */
+const TYPE_NATURE: Record<Account['type'], Account['nature']> = {
+  asset: 'debit',
+  liability: 'credit',
+  equity: 'credit',
+  revenue: 'credit',
+  expense: 'debit',
+};
+
+/** Root code digit per account type in the standard IFRS-style chart. */
+const TYPE_ROOT_CODE: Record<Account['type'], string> = {
+  asset: '1',
+  liability: '2',
+  equity: '3',
+  revenue: '4',
+  expense: '5',
+};
+
+/**
+ * Suggest the next free code under `parentId` (or a top-level code for the
+ * given type when no parent). Tries 2-digit suffixes first (`11103`), then
+ * wider ones — never returns a code already taken by ANY account.
+ */
+function suggestNextCode(type: Account['type'], parentId: string | undefined, flatList: Account[]): string {
+  const taken = new Set(flatList.map((a) => a.code));
+  const parent = parentId ? flatList.find((a) => a.id === parentId) : undefined;
+  const prefix = parentId ? (parent?.code ?? '') : TYPE_ROOT_CODE[type];
+  if (!prefix) return '';
+  for (let n = 1; n <= 999; n++) {
+    const candidate = `${prefix}${String(n).padStart(2, '0')}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return '';
 }
 
 function filterTree(accounts: Account[], query: string, typeFilter: string, natureFilter: string, statusFilter: string): Account[] {
@@ -250,6 +286,9 @@ export const ChartOfAccounts: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Account | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // True once the user types a code manually — auto-suggestion must never
+  // clobber what they typed. Reset on modal open/reset.
+  const [codeTouched, setCodeTouched] = useState(false);
 
   const flatList = useMemo(() => flattenTree(accounts), [accounts]);
   const groupAccounts = useMemo(() => flatList.filter((a) => a.isGroup), [flatList]);
@@ -339,6 +378,27 @@ export const ChartOfAccounts: React.FC = () => {
     setFormErrors({});
     setIsEditMode(false);
     setEditingId(null);
+    setCodeTouched(false);
+  };
+
+  /** Apply a parent pick: inherit type/nature + auto-generate the code. */
+  const applyParent = (parentId: string | undefined) => {
+    const parent = parentId ? flatList.find((a) => a.id === parentId) : undefined;
+    setFormData((p) => ({
+      ...p,
+      parentId,
+      type: (parent?.type as Account['type']) ?? p.type,
+      nature: (parent?.nature as Account['nature']) ?? p.nature,
+      // Auto-fill only while the user hasn't typed their own code.
+      code: !codeTouched && parentId
+        ? (suggestNextCode((parent?.type as Account['type']) ?? p.type, parentId, flatList) || p.code)
+        : p.code,
+    }));
+  };
+
+  const regenerateCode = () => {
+    setFormData((p) => ({ ...p, code: suggestNextCode(p.type || 'asset', p.parentId || undefined, flatList) || '' }));
+    setCodeTouched(false);
   };
 
   const handleEdit = (account: Account) => {
@@ -354,6 +414,8 @@ export const ChartOfAccounts: React.FC = () => {
     });
     setEditingId(account.id);
     setIsEditMode(true);
+    // Existing code belongs to the account — never auto-overwrite it.
+    setCodeTouched(true);
     setIsModalOpen(true);
   };
 
@@ -421,6 +483,21 @@ export const ChartOfAccounts: React.FC = () => {
     exclude.add(editingId);
     return groupAccounts.filter((a) => !exclude.has(a.id));
   }, [groupAccounts, isEditMode, editingId, flatList]);
+
+  const parentSelectItems = useMemo<SmartSelectItem[]>(
+    () => parentOptions.map((a) => ({ id: a.id, label: `${a.code} — ${a.nameAr}` })),
+    [parentOptions],
+  );
+
+  const selectedParent = formData.parentId ? flatList.find((a) => a.id === formData.parentId) ?? null : null;
+  const codeSuggestion = useMemo(
+    () => suggestNextCode(formData.type || 'asset', formData.parentId || undefined, flatList),
+    [formData.type, formData.parentId, flatList],
+  );
+  // Soft warning: child codes conventionally start with the parent code.
+  const codePrefixMismatch = !!selectedParent
+    && !!formData.code
+    && !formData.code.startsWith(selectedParent.code);
 
   if (isLoading) {
     return (
@@ -624,7 +701,7 @@ export const ChartOfAccounts: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); resetForm(); }}
         title={isEditMode ? t('accounting.editAccount') : t('accounting.addAccount')}
-        description={isEditMode ? 'تعديل بيانات الحساب — يراعي التسلسل الهرمي' : 'إضافة حساب جديد — اتبع الترقيم الهرمي (مثال: 11101 تحت 1110)'}
+        description={isEditMode ? 'تعديل بيانات الحساب — يراعي التسلسل الهرمي' : 'اختر الحساب الأب واكتب الاسم — الكود والنوع والطبيعة تُولَّد تلقائياً'}
         size="lg"
         footer={
           <div className="flex items-center justify-between w-full">
@@ -648,7 +725,32 @@ export const ChartOfAccounts: React.FC = () => {
               <Hash size={12} /> البيانات الأساسية
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Input label={`${t('accounting.accountCode')} *`} value={formData.code || ''} onChange={(e) => setFormData((p) => ({ ...p, code: e.target.value }))} placeholder="11101" error={formErrors.code} required dir="ltr" />
+              <div>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.accountCode')} *</label>
+                <div className="flex gap-1.5">
+                  <Input
+                    value={formData.code || ''}
+                    onChange={(e) => { setCodeTouched(true); setFormData((p) => ({ ...p, code: e.target.value })); }}
+                    placeholder={codeSuggestion || '11101'}
+                    error={formErrors.code}
+                    required
+                    dir="ltr"
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={regenerateCode}
+                    title={`${t('accounting.form.autoCode')} — ${codeSuggestion || ''}`}
+                    aria-label={t('accounting.form.autoCode')}
+                    className="shrink-0 w-9 h-9 self-end rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-300 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition flex items-center justify-center"
+                  >
+                    <Hash size={14} />
+                  </button>
+                </div>
+                {!formData.parentId && !isEditMode && (
+                  <p className="text-[11px] text-slate-400 mt-1">{t('accounting.form.inheritHint')}</p>
+                )}
+              </div>
               <div className="sm:col-span-2">
                 <Input label={`${t('accounting.accountName')} (${t('accounting.arabic')}) *`} value={formData.nameAr || ''} onChange={(e) => setFormData((p) => ({ ...p, nameAr: e.target.value }))} placeholder="الصندوق" error={formErrors.nameAr} required />
               </div>
@@ -662,52 +764,76 @@ export const ChartOfAccounts: React.FC = () => {
 
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <FolderTree size={12} /> التسلسل الهرمي
+              <FolderTree size={12} /> {t('accounting.form.hierarchy')}
             </h4>
             <div>
-              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">الحساب الأب (اختياري — اتركه فارغاً لحساب رئيسي)</label>
-              <select
+              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.form.parentAccount')} — {t('accounting.form.parentOptional')}</label>
+              <SmartSelect
                 value={formData.parentId || ''}
-                onChange={(e) => {
-                  const parentId = e.target.value || undefined;
-                  const parent = flatList.find((a) => a.id === parentId);
-                  setFormData((p) => ({
-                    ...p,
-                    parentId,
-                    type: (parent?.type as Account['type']) || p.type,
-                    nature: (parent?.nature as Account['nature']) || p.nature,
-                  }));
-                }}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-              >
-                <option value="">— حساب رئيسي (بدون أب) —</option>
-                {parentOptions.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} — {a.nameAr} {a.isGroup ? '(مجموعة)' : ''}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500 mt-1">عند اختيار أب، يتم توريث النوع والطبيعة تلقائياً — غيّرها فقط إذا لزم.</p>
+                onChange={(v) => applyParent(typeof v === 'string' && v ? v : undefined)}
+                options={parentSelectItems}
+                placeholder={t('accounting.form.noParent')}
+                searchPlaceholder={`${t('accounting.searchAccounts')}…`}
+                clearable
+              />
+              <p className="text-xs text-slate-500 mt-1">{t('accounting.form.inheritHint')}</p>
             </div>
+
+            {/* Type/nature: inherited & locked when a parent is picked, editable otherwise */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-              <div>
-                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.accountType')} *</label>
-                <select value={formData.type} onChange={(e) => setFormData((p) => ({ ...p, type: e.target.value as Account['type'] }))} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20">
-                  <option value="asset">{t('accounting.asset')}</option>
-                  <option value="liability">{t('accounting.liability')}</option>
-                  <option value="equity">{t('accounting.equity')}</option>
-                  <option value="revenue">{t('accounting.revenue')}</option>
-                  <option value="expense">{t('accounting.expense')}</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.nature')} *</label>
-                <select value={formData.nature} onChange={(e) => setFormData((p) => ({ ...p, nature: e.target.value as Account['nature'] }))} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20">
-                  <option value="debit">{t('accounting.debit')}</option>
-                  <option value="credit">{t('accounting.credit')}</option>
-                </select>
-              </div>
+              {selectedParent ? (
+                <>
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-500">{t('accounting.accountType')}</span>
+                    <span className={cn('text-sm font-medium px-2 py-0.5 rounded-full border', TYPE_META[selectedParent.type]?.bg, TYPE_META[selectedParent.type]?.border, TYPE_META[selectedParent.type]?.color)}>
+                      {t(TYPE_META[selectedParent.type]?.labelKey ?? '')}
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-500">{t('accounting.nature')}</span>
+                    <span className={cn('text-sm font-medium px-2 py-0.5 rounded-full border', NATURE_COLORS[selectedParent.nature])}>
+                      {selectedParent.nature === 'debit' ? t('accounting.debit') : t('accounting.credit')}
+                    </span>
+                  </div>
+                  <p className="sm:col-span-2 text-[11px] text-emerald-600 dark:text-emerald-400 -mt-1">
+                    ✓ {t('accounting.form.inheritedFromParent')} ({selectedParent.nameAr})
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.accountType')} *</label>
+                    <select
+                      value={formData.type}
+                      onChange={(e) => {
+                        const type = e.target.value as Account['type'];
+                        setFormData((p) => ({ ...p, type, nature: TYPE_NATURE[type] }));
+                      }}
+                      aria-label={t('accounting.accountType')}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                    >
+                      <option value="asset">{t('accounting.asset')}</option>
+                      <option value="liability">{t('accounting.liability')}</option>
+                      <option value="equity">{t('accounting.equity')}</option>
+                      <option value="revenue">{t('accounting.revenue')}</option>
+                      <option value="expense">{t('accounting.expense')}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.nature')} *</label>
+                    <select value={formData.nature} onChange={(e) => setFormData((p) => ({ ...p, nature: e.target.value as Account['nature'] }))} aria-label={t('accounting.nature')} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20">
+                      <option value="debit">{t('accounting.debit')}</option>
+                      <option value="credit">{t('accounting.credit')}</option>
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
+            {codePrefixMismatch && (
+              <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                <AlertCircle size={12} /> {t('accounting.form.codePrefixWarn')} ({selectedParent?.code}…) — {t('accounting.form.autoCode')}: <button type="button" onClick={regenerateCode} className="underline font-semibold hover:text-amber-700">{codeSuggestion}</button>
+              </p>
+            )}
           </div>
 
           <div className="h-px bg-slate-100 dark:bg-slate-800" />
@@ -759,7 +885,7 @@ export const ChartOfAccounts: React.FC = () => {
                   <p className="text-sm font-medium text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                     <Layers size={14} /> {t('accounting.isGroup')}
                   </p>
-                  <p className="text-xs text-slate-500">حساب حاوية — لا يُرحل عليه قيد مباشر</p>
+                  <p className="text-xs text-slate-500">{t('accounting.form.groupHint')}</p>
                 </div>
                 {formData.isGroup && <span className="ml-auto text-xs px-2 py-1 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-200">مجموعة</span>}
               </label>

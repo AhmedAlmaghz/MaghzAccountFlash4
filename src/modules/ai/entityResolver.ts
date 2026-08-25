@@ -57,6 +57,8 @@ export interface ResolvedEntitiesResult {
   highConfidence: EntityMatch[];
   /** Corrections: original user text → corrected canonical name */
   corrections: EntityCorrection[];
+  /** The message with guarded corrections applied (=== input when none) */
+  text: string;
 }
 
 // ─── Cache ───────────────────────────────────────────────────────────────────
@@ -100,6 +102,11 @@ function norm(text: string): string {
 
 function score(query: string, target: string): number {
   return fuzzyMatchScore(query, target);
+}
+
+/** Escape a literal string for safe use inside a RegExp. */
+function escapeForRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Internal record type for raw DB rows we map into EntityMatch. */
@@ -505,35 +512,88 @@ export async function searchEntities(
  *  - `highConfidence`: matches suitable for auto-replacement
  *  - `corrections`: a list of original→corrected pairs for the user alert
  */
+/**
+ * Pre-process a user message before it reaches the LLM.
+ *
+ * Scans for Arabic entity-indicating patterns, fuzzy-matches each candidate
+ * against the DB, and returns:
+ *  - `all`: every potential match (any confidence)
+ *  - `highConfidence`: matches suitable for auto-replacement
+ *  - `corrections`: original→corrected pairs for the user alert
+ *  - `text`: the message with safe corrections applied (when any)
+ *
+ * Safety guards (a wrong auto-correction corrupts real business data —
+ * e.g. renaming a brand-new supplier while creating it):
+ *   1. Definition zones — words after "اسمه / باسم / المسمى …" introduce a
+ *      NEW entity name and are never corrected.
+ *   2. Generic commercial suffixes ("للتجارة", "المحدودة", …) are never
+ *      treated as unambiguous references on their own.
+ *   3. If the canonical name is already fully present in the text, nothing
+ *      needs correcting (prevents "الشجاع للتجارة" → "الشجاع الشجاع للتجارة"
+ *      duplication when only its suffix was scanned).
+ *   4. Ambiguous matches (two entities of the same type within 0.05 score)
+ *      are never auto-replaced.
+ */
+const DEFINITION_MARKER_RE =
+  /(?:[اأإ]سم(?:ه|ها|هم|هما|كم)?|ب[اأإ]سم|ب[اأإ]لاسم|المسم[ىي]|المسما[ةه]|تحت\s+[اأإ]سم)\s*/g;
+
+/** Normalised generic name fragments — never valid entity references alone. */
+const GENERIC_TOKENS = new Set([
+  'للتجاره', 'التجاره', 'تجاره', 'التجاريه', 'للتجارهوالاستيراد',
+  'للاستيراد', 'الاستيراد', 'للتصدير', 'التصدير',
+  'المحدوده', 'محدوده', 'وشركاه', 'ذمم', 'للمقاولات', 'التجاريين',
+]);
+
+/** Max characters of a defined name zone to protect after a marker. */
+const DEFINITION_ZONE_MAX = 48;
+
 export async function resolveEntitiesInText(
   text: string,
   companyId: string,
 ): Promise<ResolvedEntitiesResult> {
-  if (!text || !companyId) return { all: [], highConfidence: [], corrections: [] };
+  const empty: ResolvedEntitiesResult = { all: [], highConfidence: [], corrections: [], text };
+  if (!text || !companyId) return empty;
 
-  // Extract distinct candidate words/phrases (≥2 chars after normalisation)
-  const words = [...new Set(
-    text.split(/[\s،,.\n]+/)
-      .map((w) => w.trim())
-      .filter((w) => norm(w).length >= 2),
-  )];
+  // ── 1. Protected zones: names being DEFINED ("اسمه X …") ──────────────
+  const protectedSpans: Array<[number, number]> = [];
+  DEFINITION_MARKER_RE.lastIndex = 0;
+  let dm: RegExpExecArray | null;
+  while ((dm = DEFINITION_MARKER_RE.exec(text)) !== null) {
+    const start = dm.index + dm[0].length;
+    const clauseEnd = text.slice(start).search(/[،,.؟\n]/);
+    const end = start + Math.min(clauseEnd === -1 ? DEFINITION_ZONE_MAX : clauseEnd, DEFINITION_ZONE_MAX);
+    protectedSpans.push([start, Math.max(start, end)]);
+  }
+  const isProtected = (idx: number) => protectedSpans.some(([s, e]) => idx >= s && idx < e);
 
-  // Search all entities for each distinct word, in parallel
+  // ── 2. Candidate tokens (with position, deduped by normalised form) ───
+  interface Token { raw: string; norm: string; index: number }
+  const tokens: Token[] = [];
+  const seenTokens = new Set<string>();
+  for (const m of text.matchAll(/[^\s،,.\n]+/g)) {
+    const nw = norm(m[0]);
+    if (nw.length < 2 || seenTokens.has(nw)) continue;
+    seenTokens.add(nw);
+    tokens.push({ raw: m[0], norm: nw, index: m.index ?? 0 });
+  }
+
+  // ── 3. Fuzzy-search each candidate against the DB (batched) ───────────
   const results: EntityMatch[] = [];
   const seen = new Set<string>();
-
   const batchSize = 5;
-  for (let i = 0; i < words.length; i += batchSize) {
-    const batch = words.slice(i, i + batchSize);
+  for (let i = 0; i < tokens.length; i += batchSize) {
+    const batch = tokens.slice(i, i + batchSize);
     const batchResults = await Promise.all(
-      batch.map(async (word) => {
-        const matches = await searchEntities(word, companyId);
-        return matches;
+      batch.map(async (token) => {
+        try {
+          return await searchEntities(token.raw, companyId);
+        } catch {
+          return [];
+        }
       }),
     );
     for (const matches of batchResults) {
       for (const m of matches) {
-        // Deduplicate by (type, id)
         const key = `${m.type}:${m.id}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -543,30 +603,63 @@ export async function resolveEntitiesInText(
     }
   }
 
-  // Build corrections: for any high-confidence match whose name differs from
-  // the user's text (fuzzy match but not exact), record it as a correction.
-  const corrections: EntityCorrection[] = [];
+  const nText = norm(text);
   const highConfidence = results.filter((m) => m.confidence >= 0.75);
 
+  // ── 4. Build guarded corrections ──────────────────────────────────────
+  const corrections: EntityCorrection[] = [];
   for (const match of highConfidence) {
-    const nn = norm(match.name);
-    // Find which word in the text triggered this match
-    for (const word of words) {
-      const nw = norm(word);
-      if (nw && nn !== nw && score(word, match.name) >= 0.75 && score(word, match.name) < 1) {
-        // Avoid duplicates
-        if (!corrections.some((c) => c.original === word && c.type === match.type)) {
-          corrections.push({
-            type: match.type,
-            original: word,
-            corrected: match.name,
-            matchedId: match.id,
-            confidence: match.confidence,
-          });
-        }
+    // Guard 4 — ambiguity: another entity of the same type scores nearly as
+    // well → replacing blindly risks pointing at the wrong record.
+    const rival = results.some(
+      (r) => r.type === match.type && r.id !== match.id && r.confidence >= match.confidence - 0.05,
+    );
+    if (rival) continue;
+
+    const nName = norm(match.name);
+    for (const token of tokens) {
+      if (nName === token.norm) continue;
+      const s = score(token.raw, match.name);
+      if (s < 0.75 || s >= 1) continue;
+
+      // Guard 2 — generic suffix tokens are not references.
+      if (GENERIC_TOKENS.has(token.norm)) continue;
+      // Guard 1 — token sits inside a "name definition" zone.
+      if (isProtected(token.index)) continue;
+      // Guard 3 — the canonical name is already referenced verbatim as a
+      // standalone phrase elsewhere in the text → nothing to fix (replacing
+      // its fragment would duplicate part of the name, e.g.
+      // "الشجاع للتجارة" → "الشجاع الشجاع للتجارة").
+      const namePresentRe = new RegExp(
+        `(?<![\\u0600-\\u06FF])${escapeForRegExp(nName)}(?![\\u0600-\\u06FF])`,
+      );
+      if (namePresentRe.test(nText)) continue;
+
+      if (!corrections.some((c) => c.original === token.raw && c.type === match.type)) {
+        corrections.push({
+          type: match.type,
+          original: token.raw,
+          corrected: match.name,
+          matchedId: match.id,
+          confidence: match.confidence,
+        });
       }
     }
   }
 
-  return { all: results, highConfidence, corrections };
+  // ── 5. Apply corrections with standalone-token boundaries ─────────────
+  let correctedText = text;
+  if (corrections.length > 0) {
+    correctedText = text;
+    for (const c of corrections) {
+      const escaped = c.original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // (?<!Arabic-letter) / (?![Arabic-letter]) → never replace mid-word.
+      correctedText = correctedText.replace(
+        new RegExp(`(?<![\\u0600-\\u06FF])${escaped}(?![\\u0600-\\u06FF])`, 'g'),
+        c.corrected,
+      );
+    }
+  }
+
+  return { all: results, highConfidence, corrections, text: correctedText };
 }

@@ -8,7 +8,7 @@ import { hrApi } from '@/modules/hr/api';
 import { manufacturingApi } from '@/modules/manufacturing/api';
 import type { Account } from '@/modules/accounting/types';
 import * as settingsApi from '@/core/api';
-import { normalizeArabic, findAllFuzzyMatches } from '@/core/utils/normalizeArabic';
+import { normalizeArabic, findAllFuzzyMatches, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
 
 /**
  * Cap for fuzzy-match fetches. Datasets are small enough that fetching all rows
@@ -17,6 +17,43 @@ import { normalizeArabic, findAllFuzzyMatches } from '@/core/utils/normalizeArab
  * normalized pattern uses alef/yeh/teh variants).
  */
 const FUZZY_FETCH_LIMIT = 200;
+
+/**
+ * Token-aware fuzzy search over an in-memory list.
+ *
+ * An item matches when the FULL query or ANY individual token (≥2 chars)
+ * scores ≥ `threshold` against its key. Multi-word Arabic requests
+ * ("اشتراك انترنت") almost never appear verbatim inside entity names
+ * ("مصروفات الإنترنت والاتصالات") — per-token scoring is what makes them
+ * findable while exact/prefix hits still rank highest.
+ *
+ * Returns best-first matches capped at `limit`.
+ */
+function fuzzySearch<T>(
+  query: string,
+  items: T[],
+  keyFn: (item: T) => string,
+  limit = 8,
+  threshold = 0.35,
+): Array<{ item: T; score: number }> {
+  const nq = normalizeArabic(query);
+  if (!nq) return [];
+  const tokens = [...new Set(nq.split(/\s+/).filter((t) => t.length >= 2))];
+
+  return items
+    .map((item) => {
+      const key = normalizeArabic(keyFn(item));
+      let best = fuzzyMatchScore(nq, key);
+      for (const t of tokens) {
+        const s = fuzzyMatchScore(t, key);
+        if (s > best) best = s;
+      }
+      return { item, score: best };
+    })
+    .filter((m) => m.score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
 
 /**
  * Search tools — resolve human names ("العميل محمد") to entity IDs.
@@ -150,29 +187,55 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('كود الحساب أو اسمه أو جزء منه'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await accountingApi.getAccounts(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const flat = flattenAccounts(res.data);
-      const matches = flat
-        .filter(
-          (a) =>
-            String(a.code ?? '').toLowerCase().includes(cleanQuery) ||
-            normalizeQuery(a.nameAr).includes(cleanQuery) ||
-            (a.nameEn || '').toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
-      return {
-        matches: matches.map((a) => ({
+      // Token-aware fuzzy matching: "اشتراك انترنت" must find
+      // "مصروفات الإنترنت والاتصالات" even though neither phrase is a
+      // contiguous substring of the other.
+      const matches = fuzzySearch(
+        query,
+        flat,
+        (a) => `${a.code ?? ''} ${a.nameAr} ${a.nameEn ?? ''}`,
+      );
+
+      // Fallback: no name match at all → suggest suitable leaf EXPENSE
+      // accounts so the agent can still complete the posting ("سداد
+      // اشتراك الانترنت" → أنسب حساب مصروف متاح) instead of dead-ending.
+      if (matches.length === 0) {
+        const expenses = flat.filter((a) => a.type === 'expense' && !a.isGroup && a.isActive);
+        // Most-relevant expenses first, then fill by chart order so the agent
+        // always has a handful of real choices.
+        const ranked = fuzzySearch(query, expenses, (a) => `${a.code ?? ''} ${a.nameAr} ${a.nameEn ?? ''}`, 6, 0.15).map((r) => r.item);
+        const rankedIds = new Set(ranked.map((a) => a.id));
+        const fill = expenses.filter((a) => !rankedIds.has(a.id)).slice(0, Math.max(0, 6 - ranked.length));
+        const suggestions = [...ranked, ...fill].map((a) => ({
           id: a.id,
           code: a.code,
           name: a.nameAr,
           type: a.type,
-          isGroup: a.isGroup,
+        }));
+        return {
+          matches: [],
+          totalMatches: 0,
+          suggestions,
+          suggestionNote:
+            'لا يوجد حساب باسم مطابق. اختر أنسب حساب من "suggestions" وسجّل عليه، وأخبر المستخدم باسم الحساب المُستخدَم. إذا لم يناسب أي منها اقترح إنشاء حساب جديد مخصص.',
+        };
+      }
+
+      return {
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          code: m.item.code,
+          name: m.item.nameAr,
+          type: m.item.type,
+          isGroup: m.item.isGroup,
         })),
         totalMatches: matches.length,
+        ...(matches.length === 0 ? { suggestion: 'جرّب كلمة واحدة من اسم الحساب، مثلاً: مصروف أو انترنت' } : {}),
       };
     },
   },
@@ -856,14 +919,14 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم الخزنة'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       const res = await settingsApi.getCashBoxes(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الخزائن' };
-      const matches = res.data
-        .filter((b) => !query || (b.name || '').toLowerCase().includes(query))
-        .slice(0, 8);
+      const matches = query
+        ? fuzzySearch(query, res.data, (b) => `${b.name ?? ''} ${b.code ?? ''}`)
+        : res.data.slice(0, 8).map((item) => ({ item, score: 1 }));
       return {
-        matches: matches.map((b) => ({ id: b.id, name: b.name, code: b.code, currentBalance: b.currentBalance, isActive: b.isActive })),
+        matches: matches.map((m) => ({ id: m.item.id, name: m.item.name, code: m.item.code, currentBalance: m.item.currentBalance, isActive: m.item.isActive })),
         totalMatches: matches.length,
       };
     },
@@ -877,14 +940,14 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم الحساب البنكي أو اسم البنك'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       const res = await settingsApi.getBanks(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب البنوك' };
-      const matches = res.data
-        .filter((b) => !query || (b.name || '').toLowerCase().includes(query) || (b.bankName || '').toLowerCase().includes(query))
-        .slice(0, 8);
+      const matches = query
+        ? fuzzySearch(query, res.data, (b) => `${b.name ?? ''} ${b.bankName ?? ''} ${b.accountNumber ?? ''}`)
+        : res.data.slice(0, 8).map((item) => ({ item, score: 1 }));
       return {
-        matches: matches.map((b) => ({ id: b.id, name: b.name, bankName: b.bankName, accountNumber: b.accountNumber, currentBalance: b.currentBalance, isActive: b.isActive })),
+        matches: matches.map((m) => ({ id: m.item.id, name: m.item.name, bankName: m.item.bankName, accountNumber: m.item.accountNumber, currentBalance: m.item.currentBalance, isActive: m.item.isActive })),
         totalMatches: matches.length,
       };
     },

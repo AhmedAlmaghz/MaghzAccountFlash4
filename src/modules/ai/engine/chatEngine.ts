@@ -216,23 +216,16 @@ class ChatEngine {
 
       // ── Entity resolution ──────────────────────────────────────────
       // Pre-process the user message: fuzzy-match entity names against the
-      // DB, correct common typos, and alert the user about corrections.
+      // DB, correct common typos (guarded — never inside "اسمه …" definition
+      // zones or when ambiguous), and alert the user about corrections.
       let userText = text;
       let correctionMsg: string | null = null;
 
       try {
         const resolved = await resolveEntitiesInText(text, this.ctx.companyId);
-        if (resolved.corrections.length > 0) {
-          // Build corrected text — replace original names with canonical ones
-          userText = text;
-          for (const c of resolved.corrections) {
-            // Case-insensitive replacement of the original word
-            userText = userText.replace(
-              new RegExp(c.original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-              c.corrected,
-            );
-          }
+        userText = resolved.text || text;
 
+        if (resolved.corrections.length > 0) {
           // Build user-friendly correction summary
           const lines: string[] = [];
           for (const c of resolved.corrections) {

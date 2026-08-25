@@ -3,16 +3,17 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 /**
- * Schema contract tests — single consolidated baseline world.
+ * Schema contract tests — consolidated baseline + additive migrations.
  *
- * Since the project is pre-production, ALL migrations are squashed into one
- * idempotent baseline (0000_init.sql) generated from the Drizzle schemas
- * (single source of truth) plus a small hand-maintained index appendix.
+ * The project starts from ONE squashed idempotent baseline (0000_init.sql)
+ * generated from the Drizzle schemas (single source of truth), followed by
+ * small hand-written ADDITIVE migrations (ALTER TABLE ... IF NOT EXISTS).
  *
  * These tests enforce the contract so future schema work stays safe:
- *   1. Exactly ONE migration file + ONE journal entry (squash discipline).
- *   2. The baseline contains every business table and critical column.
- *   3. Hand-maintained performance/partial indexes are present.
+ *   1. Baseline file exists and is first; later migrations are additive only.
+ *   2. The journal mirrors the migration files in order.
+ *   3. The baseline contains every business table and critical column.
+ *   4. Hand-maintained performance/partial indexes are present.
  */
 
 const MIGRATIONS_DIR = join(process.cwd(), 'drizzle');
@@ -20,14 +21,22 @@ const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort
 const baselineFile = '0000_init.sql';
 const sql = readFileSync(join(MIGRATIONS_DIR, baselineFile), 'utf-8');
 
-describe('Migration layout: single squashed baseline', () => {
-  it('has exactly one SQL migration file named 0000_init.sql', () => {
-    expect(files).toEqual([baselineFile]);
+describe('Migration layout: baseline + additive migrations', () => {
+  it('baseline is the first migration file', () => {
+    expect(files[0]).toBe(baselineFile);
+    expect(files).toContain('0001_invoice_payment_columns.sql');
   });
 
-  it('journal has a single entry pointing at the baseline', () => {
+  it('later migrations are additive only (no DROP / no destructive DDL)', () => {
+    for (const f of files.filter((f) => f !== baselineFile)) {
+      const content = readFileSync(join(MIGRATIONS_DIR, f), 'utf-8');
+      expect(content).not.toMatch(/\bDROP\s+(TABLE|COLUMN|INDEX|CONSTRAINT)\b/i);
+    }
+  });
+
+  it('journal mirrors the migration files in order', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    expect(journal.entries.length).toBe(1);
+    expect(journal.entries.length).toBe(files.length);
     expect(journal.entries[0].tag).toBe('0000_init');
     expect(journal.entries[0].idx).toBe(0);
     expect(journal.dialect).toBe('postgresql');
@@ -142,5 +151,38 @@ describe('FK integrity spot-checks', () => {
     expect(sql).toMatch(
       /ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_company_id_companies_id_fk" FOREIGN KEY \("company_id"\) REFERENCES "public"\."companies"\("id"\) ON DELETE cascade/i
     );
+  });
+});
+
+describe('Migration 0001: invoice payment-location columns', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0001_invoice_payment_columns.sql'), 'utf-8');
+  const PAYMENT_TABLES = [
+    'sales_invoices', 'quotations', 'sales_returns',
+    'purchase_invoices', 'purchase_orders', 'purchase_returns',
+  ];
+
+  it('adds cash_box_id and bank_account_id to all 6 document tables', () => {
+    for (const t of PAYMENT_TABLES) {
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE "${t}" ADD COLUMN IF NOT EXISTS "cash_box_id" uuid`));
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE "${t}" ADD COLUMN IF NOT EXISTS "bank_account_id" uuid`));
+    }
+  });
+
+  it('is idempotent (IF NOT EXISTS on every ALTER)', () => {
+    const alters = migrationSql.match(/ALTER TABLE/g) ?? [];
+    const guarded = migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) ?? [];
+    expect(alters.length).toBeGreaterThan(0);
+    expect(alters.length).toBe(guarded.length);
+  });
+
+  it('Drizzle schemas expose the new columns', async () => {
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    const purchases = readFileSync(join(process.cwd(), 'src/core/database/schema/purchases.ts'), 'utf-8');
+    // sales_invoices + quotations + sales_returns = 3 in sales.ts
+    expect(sales.match(/cashBoxId: uuid\('cash_box_id'\)/g)?.length).toBe(3);
+    expect(sales.match(/bankAccountId: uuid\('bank_account_id'\)/g)?.length).toBe(3);
+    // purchase_invoices + purchase_orders + purchase_returns = 3 in purchases.ts
+    expect(purchases.match(/cashBoxId: uuid\('cash_box_id'\)/g)?.length).toBe(3);
+    expect(purchases.match(/bankAccountId: uuid\('bank_account_id'\)/g)?.length).toBe(3);
   });
 });
