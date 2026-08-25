@@ -138,6 +138,26 @@ export function stripImitationToolBlocks(content: string): string {
 
 let engineInstance: ChatEngine | null = null;
 
+/**
+ * Detects replies that CLAIM a business action happened (document created /
+ * posted / voucher paid…) without any real tool execution behind them.
+ *
+ * The failing pattern from real sessions: the model drifts off the tool
+ * loop and imitates earlier success summaries — inventing sequential doc
+ * numbers (RV-000002…), "مرحّل Posted" status lines, even account codes —
+ * while NOTHING was written to the DB.
+ */
+const DOC_NUMBER_RE = /\b(?:INV|PINV|QTN|RV|PV|JE|SRT|PRT)-?\s?\d{2,}\b/i;
+const ACTION_CLAIM_RE =
+  /(قمت\s+ب?\s*(إنشاء|تسجيل|ترحيل|إصدار|صرف|قبض|سداد|دفع))|(تم\s+(الآن\s+)?(إنشاء|تسجيل|ترحيل|إصدار|صرف|قبض|سداد))|(أنشأت|سجّلت|سجلت|رحّلت|رحلت|أصدرت|صرفت|قبضت|سدّدت|سددت|دفعت)/;
+
+/** True when the reply asserts a completed business action. */
+export function claimsBusinessAction(content: string): boolean {
+  if (!content) return false;
+  if (!ACTION_CLAIM_RE.test(content)) return false;
+  return DOC_NUMBER_RE.test(content) || /مرحّل|مُرحّل|Posted/i.test(content);
+}
+
 export function getChatEngine(): ChatEngine {
   if (!engineInstance) engineInstance = new ChatEngine();
   return engineInstance;
@@ -163,6 +183,16 @@ class ChatEngine {
   private pendingWriteCalls: PendingToolCall[] = [];
   private iterationCount = 0;
   private store = useAiStore.getState;
+
+  /**
+   * Anti-fabrication state (per `send()` invocation):
+   *  - successfulWritesThisSend: write tools that ACTUALLY executed (post
+   *    user approval). A final reply claiming success with zero entries here
+   *    is a hallucination and gets corrected, never displayed.
+   *  - fabricationRetries: correction cycles used for this send (max 2).
+   */
+  private successfulWritesThisSend = new Set<string>();
+  private fabricationRetries = 0;
 
   private get ctx(): ToolContext {
     const company = useAppStore.getState().activeCompany;
@@ -264,6 +294,8 @@ class ChatEngine {
       }
 
       this.iterationCount = 0;
+      this.successfulWritesThisSend.clear();
+      this.fabricationRetries = 0;
 
       await this.runLoop();
     } catch (e) {
@@ -300,6 +332,10 @@ class ChatEngine {
             status: 'success',
             resultSummary: summarizeResult(outcome.result),
           });
+
+          // Mark as REALLY executed — the anti-fabrication guard allows
+          // success claims only when at least one write landed here.
+          this.successfulWritesThisSend.add(pending.toolName);
 
           // Add tool result to LLM history
           this.history.push({
@@ -356,6 +392,45 @@ class ChatEngine {
     this.pendingWriteCalls = [];
     this.iterationCount = 0;
     this.store().clearMessages();
+  }
+
+  /**
+   * Called when the final reply claims business actions with zero executed
+   * writes behind them (or carries silently-stripped imitation blocks).
+   *
+   * Removes the fabricated bubble, injects a mandatory correction turn into
+   * the LLM history and resumes the loop so the model either calls the REAL
+   * tool or honestly admits nothing was done. Bounded to 2 retries — then
+   * an explicit failure is shown instead of a lie.
+   */
+  private async correctFabricatedReply(
+    streamingId: string | null,
+    streamedContent: boolean,
+  ): Promise<void> {
+    this.fabricationRetries++;
+
+    // Remove the fabricated bubble (streamed replies are already rendered).
+    if (streamedContent && streamingId) {
+      this.store().removeMessage(streamingId);
+    }
+
+    if (this.fabricationRetries > 2) {
+      this.store().addMessage({
+        role: 'assistant',
+        kind: 'error',
+        content:
+          'تعذّر تنفيذ العملية: أجاب المساعد دون استدعاء أدوات فعلية. لم يُسجَّل أي شيء. أعِد صياغة الطلب أو نفّذ العملية من الشاشات مباشرة.',
+      });
+      return;
+    }
+
+    this.history.push({
+      role: 'user',
+      content:
+        '[تنبيه نظام — إلزامي]: ردّك الأخير ادّعى تنفيذ عملية (إنشاء/ترحيل مستند أو قيد) دون استدعاء أي أداة كتابة حقيقية، وهذا ممنوع تماماً ولن يُعرض على المستخدم. أكمل الآن بأحد أمرين فقط: (1) استدعِ الأداة المناسبة فعلياً بالمعطيات المتوفرة عبر function-calls، أو (2) أقرّ بوضوح أن العملية لم تُنفَّذ واذكر السبب.',
+    });
+
+    await this.runLoop();
   }
 
   /**
@@ -608,20 +683,43 @@ class ChatEngine {
 
       // If no tool calls → final text response
       if (data.toolCalls.length === 0) {
-        if (data.content) {
-          const cleaned = stripImitationToolBlocks(data.content);
-          if (streamedContent && streamingId) {
-            // Streaming already displayed this content in the placeholder
-            // bubble — update it with the final sanitized text instead of
-            // adding a duplicate message (fixes duplicated assistant replies).
-            this.store().updateMessageContent(streamingId, cleaned);
-          } else {
-            this.store().addMessage({
-              role: 'assistant',
-              kind: 'text',
-              content: cleaned,
-            });
-          }
+        const raw = data.content ?? '';
+        if (!raw) {
+          // Empty streamed placeholder would linger otherwise
+          if (streamedContent && streamingId) this.store().removeMessage(streamingId);
+          return;
+        }
+
+        // ── Anti-fabrication guard ────────────────────────────────────
+        // A final reply must never CLAIM a business action (document
+        // created/posted, voucher paid…) unless a write tool ACTUALLY
+        // executed during this request. Models drifting off the tool loop
+        // imitate earlier success summaries with invented document numbers —
+        // those replies are removed and the model is forced to either call
+        // the real tool or honestly say nothing was done.
+        if (this.successfulWritesThisSend.size === 0 && claimsBusinessAction(raw)) {
+          await this.correctFabricatedReply(streamingId, streamedContent);
+          return;
+        }
+        // Silent stripping of imitation blocks also hides failed attempts:
+        // if the model emitted textual fake tool-calls, correct it too.
+        if (stripImitationToolBlocks(raw) !== raw && this.successfulWritesThisSend.size === 0) {
+          await this.correctFabricatedReply(streamingId, streamedContent);
+          return;
+        }
+
+        const cleaned = stripImitationToolBlocks(raw);
+        if (streamedContent && streamingId) {
+          // Streaming already displayed this content in the placeholder
+          // bubble — update it with the final sanitized text instead of
+          // adding a duplicate message (fixes duplicated assistant replies).
+          this.store().updateMessageContent(streamingId, cleaned);
+        } else {
+          this.store().addMessage({
+            role: 'assistant',
+            kind: 'text',
+            content: cleaned,
+          });
         }
         return;
       }

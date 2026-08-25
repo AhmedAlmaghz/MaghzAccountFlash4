@@ -233,6 +233,91 @@ describe('ChatEngine', () => {
     }));
   });
 
+  describe('anti-fabrication guard', () => {
+    beforeEach(() => {
+      // Empty stream → runLoop falls back to the mocked complete() calls
+      mocks.startStream.mockReturnValue((async function* () {
+        // yields nothing
+      })());
+    });
+
+    it('removes a fabricated success reply and forces a real tool call on retry', async () => {
+      // Real session failure: model answered with an invented invoice number
+      // WITHOUT calling any create tool — nothing reached the DB.
+      vi.mocked(mocks.resolveTool).mockReturnValue(undefined);
+      mocks.complete
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            content: 'تم إنشاء وترحيل فاتورة المبيعات للعميل:\n• رقم الفاتورة: INV-0001\n• الحالة: مرحّل (Posted)\n• الإجمالي: 274,850 ر.ي',
+            toolCalls: [],
+            finishReason: 'stop',
+            usage: null,
+          },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'لم تُنفَّذ أي عملية بعد — سأستدعي أداة الإنشاء الآن.', toolCalls: [], finishReason: 'stop', usage: null },
+        });
+
+      await getChatEngine().send('سجل فاتورة مبيعات لغدرة');
+
+      const messages = useAiStore.getState().messages;
+      // The fabricated reply must NOT be displayed
+      expect(messages.some((m) => m.kind === 'text' && m.content.includes('INV-0001'))).toBe(false);
+      // The retry answer IS displayed
+      expect(messages[messages.length - 1].content).toContain('لم تُنفَّذ أي عملية');
+      // The correction nudge was injected into the LLM history
+      const secondCall = mocks.complete.mock.calls[1][0];
+      const last = secondCall.messages[secondCall.messages.length - 1];
+      expect(last.role).toBe('user');
+      expect(String(last.content)).toContain('تنبيه نظام');
+    });
+
+    it('corrects replies that only IMITATE tool-call blocks textually', async () => {
+      vi.mocked(mocks.resolveTool).mockReturnValue(undefined);
+      mocks.complete
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            content: '[تم تنفيذ: accounting.create_payment_voucher] {"voucherNumber":"PV-000002"}\nتم صرف المبلغ بنجاح.',
+            toolCalls: [],
+            finishReason: 'stop',
+            usage: null,
+          },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'أعتذر — لم يُنفَّذ شيء، سأستخدم الأداة الفعلية.', toolCalls: [], finishReason: 'stop', usage: null },
+        });
+
+      await getChatEngine().send('سجل سند صرف');
+
+      const messages = useAiStore.getState().messages;
+      expect(messages.some((m) => m.kind === 'text' && m.content.includes('PV-000002'))).toBe(false);
+      expect(messages[messages.length - 1].content).toContain('لم يُنفَّذ شيء');
+    });
+
+    it('passes through honest answers that merely REPORT existing documents (no claim verbs)', async () => {
+      vi.mocked(mocks.resolveTool).mockReturnValue(undefined);
+      mocks.complete.mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: 'نعم، فاتورة غدرة مسجّلة برقم INV-0001 وحالتها مرحّلة بحسب السجلات.',
+          toolCalls: [],
+          finishReason: 'stop',
+          usage: null,
+        },
+      });
+
+      await getChatEngine().send('هل سُجلت فاتورة غدرة؟');
+
+      const messages = useAiStore.getState().messages;
+      expect(messages[messages.length - 1].content).toContain('INV-0001');
+      expect(mocks.complete).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('shows provider errors as assistant error messages', async () => {
     mocks.complete.mockResolvedValueOnce({ success: false, error: 'Provider unavailable' });
 
