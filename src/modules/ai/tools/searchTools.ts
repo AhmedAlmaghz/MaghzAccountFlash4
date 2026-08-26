@@ -488,17 +488,11 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم المنتج أو رقم الإصدار'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await manufacturingApi.getBoms(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((b) =>
-          normalizeQuery(b.productName || '').includes(cleanQuery) ||
-          b.version.toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
+      const matches = fuzzySearch(query, res.data, (b) => `${b.productName || ''} ${b.version} ${b.id}`).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((b) => ({
           id: b.id,
@@ -519,17 +513,11 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم أمر التشغيل أو اسم المنتج'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await manufacturingApi.getWorkOrders(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((w) =>
-          w.orderNumber.toLowerCase().includes(cleanQuery) ||
-          normalizeQuery(w.productName || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      const matches = fuzzySearch(query, res.data, (w) => `${w.orderNumber} ${w.productName || ''}`).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((w) => ({
           id: w.id,
@@ -541,6 +529,40 @@ export const searchTools: ToolDefinition[] = [
           totalCost: w.totalCost,
         })),
         totalMatches: matches.length,
+      };
+    },
+  },
+  {
+    name: 'manufacturing.check_bom_availability',
+    labelAr: 'فحص توفر خامات الشجرة',
+    descriptionAr: 'يفحص توفر خامات شجرة منتج لكمية مخططة — يرجع لكل مادة: المطلوب/المتاح/يكفي، وأقصى كمية قابلة للإنتاج. استخدم search.boms أولاً للحصول على bomId.',
+    permission: 'manufacturing.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        bomId: { type: 'string', description: 'معرف الشجرة (من search.boms)' },
+        quantity: { type: 'number', description: 'الكمية المخطط إنتاجها (افتراضي 1)' },
+      },
+      required: ['bomId'],
+    },
+    execute: async (args, ctx) => {
+      const bomId = String(args.bomId || '').trim();
+      if (!bomId) return { error: 'bomId مطلوب — استخدم search.boms أولاً' };
+      const qty = Number(args.quantity) > 0 ? Number(args.quantity) : 1;
+      const res = await manufacturingApi.getBomAvailability(ctx.companyId, bomId, qty);
+      if (!res.success) return { error: res.error || 'فشل فحص التوفر' };
+      return {
+        quantity: qty,
+        fullyAvailable: res.data?.fullyAvailable,
+        maxProducible: res.data?.maxProducible,
+        lines: (res.data?.lines || []).map((l) => ({
+          material: l.materialName || l.materialId.slice(0, 8),
+          materialId: l.materialId,
+          required: l.required,
+          available: l.available,
+          sufficient: l.sufficient,
+        })),
       };
     },
   },

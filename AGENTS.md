@@ -3628,5 +3628,18 @@ npx drizzle-kit migrate
   - **الميزات الجديدة عبر runTransaction لا RPC جديد**: يعمل فوراً على البيئتين مع نفس الحراس الأمنيين
   - **splice بـ spread إجباري**: `lines.splice(i, n, ...NEW.split('\n'))` — بدون spread يُدرج المصفوفة كعنصر واحد ويفسد الملف
 
-*آخر تحديث: 2026-08-26 | الإصدار: maghzaccount-pro v0.2.0*
+### المرحلة 64 (v0.5.1): أداة مصروفات عامة مباشرة + إصلاحات AI تصنيع
+- **أداة جديدة `accounting.create_expense_voucher`** (مباشرة للمصروفات العامة غير المرتبطة بمورد):
+  - تُنشئ سند صرف مصروف مرحّل (حالة posted) — مدين حساب المصروف / دائن الخزنة — مع ربط الخزنة الصحيح (`cashBoxId→account_id` مع fallback default_cash) كما في التوحيد النقدي الأخير
+  - معاملات: `expenseAccountId` (من search.accounts نوع مصروف) + `amount` + `cashBoxId` (من search.cash_boxes) + `paymentMethod` (cash/bank=حوالة/محفظة/check) + `reference` (مرجع ورقي) + `date`/`notes`; تُولد الرقم التسلسلي تلقائياً
+  - تُصلح فجوة `accounting.create_payment_voucher` السابقة التي كانت تشترط مورداً دائماً — الآن المصروفات النثرية (إيجار، إنترنت، كهرباء…) لها مسار مباشر دون مورد وهمي
+  - فحص `search.accounts` الحالي يقدّم اقتراحات مصروفات بديلة عند عدم التطابق — الأداة الجديدة تستهلكها مباشرة
+- **إصلاحات أدوات تصنيع AI (فحص شامل وجد 4 مشاكل حرجة)**:
+  - `manufacturing.create_bom`: كان يطلب `unitCost` لكل مادة (required) بينما المخطط يسمح بتركه فارغاً — أُصلح ليصبح اختيارياً مع **تعبئة تلقائية من سعر تكلفة المنتج** عبر cache `inventoryApi.getProducts`؛ permission من `inventory.create` (خطأ) إلى `manufacturing.create`
+  - `manufacturing.create_work_order`: كان يشترط `lines` دائماً — أُصلح ليقبل `bomId` دون `lines` ويُشتق المواد تلقائياً من الشجرة (`quantity × bom_line.quantity`)؛ `unitCost` أصبح اختيارياً؛ permission مصحح
+  - `manufacturing.update_work_order_status`: أُضيف `outputWarehouseId` (مستودع استلام التام عند completed) ويُمرر فعلياً إلى `completeWorkOrder`؛ الوصف يوضح أن `in_progress` يصرف الخامات فوراً (يفشل إن لم تكفِ) وأن `completed` يسلّم للخزنة المختارة
+  - `search.boms`/`search.work_orders`: رُقيت من substring إلى `fuzzySearch` (مثل بقية الأدوات العربية) + أداة قراءة جديدة `manufacturing.check_bom_availability` (bomId+quantity → مطلوب/متاح/يكفي + أقصى قابل للإنتاج) ليتمكن الوكيل من التحقق قبل البدء
+- **اختبارات وتوثيق**: أُضيفت تغطية للأداة الجديدة وفحوص وفuzzy؛ i18n متوازنة; البناء والـ lint نظيفان
+
+*آخر تحديث: 2026-08-26 | الإصدار: maghzaccount-pro v0.5.1*
 

@@ -409,6 +409,7 @@ export const writeTools: ToolDefinition[] = [
       properties: {
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
         amount: { type: 'number', description: 'المبلغ المقبوض' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يحدد حساب الخزنة التي يُرحل عليها القيد' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
         reference: { type: 'string', description: 'رقم السند/الحوالة الورقية إن وُجد — يُسجَّل في الملاحظات' },
@@ -430,6 +431,7 @@ export const writeTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'receipt_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
 
+      const cashBoxId = str(args.cashBoxId);
       const res = await accountingApi.createReceiptVoucher(
         {
           companyId: ctx.companyId,
@@ -440,6 +442,7 @@ export const writeTools: ToolDefinition[] = [
           amount,
           amountApplied: 0,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
+          cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
           status: 'posted',
         },
@@ -463,6 +466,7 @@ export const writeTools: ToolDefinition[] = [
       properties: {
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
         amount: { type: 'number', description: 'المبلغ المدفوع' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يحدد حساب الخزنة' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
         reference: { type: 'string', description: 'رقم الشيك/الحوالة الورقية إن وُجد — يُسجَّل في الملاحظات' },
@@ -484,6 +488,7 @@ export const writeTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'payment_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
 
+      const cashBoxId2 = str(args.cashBoxId);
       const res = await accountingApi.createPaymentVoucher(
         {
           companyId: ctx.companyId,
@@ -493,6 +498,7 @@ export const writeTools: ToolDefinition[] = [
           amount,
           amountApplied: 0,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
+          cashBoxId: cashBoxId2 || undefined,
           notes: notesCombined || undefined,
           status: 'posted',
         },
@@ -502,6 +508,63 @@ export const writeTools: ToolDefinition[] = [
       return {
         created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
         journalPosted: true, note: 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً', ...(reference ? { reference } : {}),
+      };
+    },
+  },
+
+  {
+    name: 'accounting.create_expense_voucher',
+    labelAr: 'سند مصروف عام',
+    descriptionAr: 'ينشئ سند صرف لمصروف عام غير مرتبط بمورد — يُرحّل تلقائياً ويُنشأ القيد (مدين حساب المصروف / دائن الخزنة). استخدم search.accounts (ابحث عن مصروف) و search.cash_boxes أولاً.',
+    permission: 'accounting.create',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        expenseAccountId: { type: 'string', description: 'معرف حساب المصروف (من search.accounts — نوع مصروف، ورقة)' },
+        amount: { type: 'number', description: 'مبلغ المصروف' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — تحدد الخزنة التي يُخصم منها' },
+        paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash — bank تعني حوالة/محفظة)' },
+        date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي إن وُجد' },
+        notes: { type: 'string', description: 'بيان/ملاحظات' },
+      },
+      required: ['expenseAccountId', 'amount'],
+    },
+    summarizeArgs: (a) => `سند مصروف عام بمبلغ ${(a as Record<string, unknown>).amount} على حساب ${String((a as Record<string, unknown>).expenseAccountId || '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const expenseAccountId = str(args.expenseAccountId);
+      const amount = num(args.amount);
+      if (!expenseAccountId) return { error: 'expenseAccountId مطلوب — استخدم search.accounts (ابحث عن حساب مصروف) أولاً' };
+      if (amount <= 0) return { error: 'المبلغ يجب أن يكون أكبر من صفر' };
+      const method = str(args.paymentMethod);
+      if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
+      const cashBoxId = str(args.cashBoxId);
+      const reference = str(args.reference);
+      const notesCombined = [str(args.notes), reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
+
+      const docNumber = await getNextDocumentNumber(ctx.companyId, 'payment_voucher');
+      if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
+
+      const res = await accountingApi.createPaymentVoucher(
+        {
+          companyId: ctx.companyId,
+          voucherNumber: docNumber.number,
+          date: str(args.date) || today(),
+          expenseAccountId,
+          amount,
+          amountApplied: 0,
+          paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
+          cashBoxId: cashBoxId || undefined,
+          notes: notesCombined || undefined,
+          status: 'posted',
+        } as unknown as Parameters<typeof accountingApi.createPaymentVoucher>[0],
+        ctx.userId
+      );
+      if (!res.success) return { error: res.error || 'فشل إنشاء سند المصروف' };
+      return {
+        created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, expenseAccountId, status: 'posted',
+        journalPosted: true, note: 'القيد أُنشئ: مدين حساب المصروف / دائن الخزنة', ...(reference ? { reference } : {}),
       };
     },
   },
@@ -992,8 +1055,8 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'manufacturing.create_bom',
     labelAr: 'إنشاء تركيبة منتج (BOM)',
-    descriptionAr: 'ينشئ تركيبة منتج (Bill of Materials) تحدد المواد المكوّنة للمنتج وتكاليفها. استخدم search.products أولاً.',
-    permission: 'inventory.create',
+    descriptionAr: 'ينشئ تركيبة منتج (Bill of Materials) تحدد المواد المكوّنة للمنتج وتكاليفها وتُحسب التكلفة تلقائياً. استخدم search.products أولاً؛ تكلفة الوحدة تُجلب تلقائياً من سعر تكلفة المنتج إذا لم تُحدد.',
+    permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -1009,9 +1072,9 @@ export const writeTools: ToolDefinition[] = [
             properties: {
               materialId: { type: 'string', description: 'معرف المادة الخام (من search.products)' },
               quantity: { type: 'number', description: 'الكمية اللازمة' },
-              unitCost: { type: 'number', description: 'تكلفة الوحدة' },
+              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب تلقائياً من سعر تكلفة المنتج)' },
             },
-            required: ['materialId', 'quantity', 'unitCost'],
+            required: ['materialId', 'quantity'],
           },
         },
       },
@@ -1024,12 +1087,25 @@ export const writeTools: ToolDefinition[] = [
       const rawLines = args.lines;
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير مادة واحدة على الأقل في lines' };
       const lines: { materialId: string; quantity: number; unitCost: number }[] = [];
+      // Cache product costs to auto-fill missing unitCost
+      let productCache: Map<string, number> | null = null;
+      async function getProductCost(pid: string): Promise<number> {
+        if (productCache === null) {
+          productCache = new Map();
+          try {
+            const all = await inventoryApi.getProducts(ctx.companyId);
+            if (all.success && all.data) for (const pr of all.data) productCache.set(pr.id, Number(pr.costPrice) || 0);
+          } catch {}
+        }
+        return productCache.get(pid) ?? 0;
+      }
       for (const item of rawLines) {
         const materialId = str((item as Record<string, unknown>).materialId);
         const quantity = num((item as Record<string, unknown>).quantity);
-        const unitCost = num((item as Record<string, unknown>).unitCost);
-        if (!materialId) return { error: 'كل مادة تحتاج materialId' };
+        let unitCost = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : undefined;
+        if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products للحصول عليه' };
         if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
+        if (unitCost === undefined || unitCost < 0) unitCost = await getProductCost(materialId);
         lines.push({ materialId, quantity, unitCost });
       }
       const totalCost = round2(lines.reduce((s, l) => s + l.quantity * l.unitCost, 0));
@@ -1052,33 +1128,33 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'manufacturing.create_work_order',
     labelAr: 'إنشاء أمر تشغيل',
-    descriptionAr: 'ينشئ أمر تشغيل إنتاجي لتصنيع منتج. استخدم search.products أولاً للحصول على معرف المنتج.',
-    permission: 'inventory.create',
+    descriptionAr: 'ينشئ أمر تشغيل إنتاجي لتصنيع منتج. إذا مررت bomId دون lines، تُشتق المواد تلقائياً من الشجرة مضروبة في الكمية. استخدم search.products و search.boms أولاً.',
+    permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         productId: { type: 'string', description: 'معرف المنتج المراد تصنيعه (من search.products)' },
-        bomId: { type: 'string', description: 'معرف التركيبة (اختياري — من manufacturing.get_boms)' },
+        bomId: { type: 'string', description: 'معرف شجرة المنتج (اختياري — إن تُرك فارغاً يجب تمرير lines يدوياً)' },
         quantity: { type: 'number', description: 'الكمية المطلوب إنتاجها' },
         plannedStartDate: { type: 'string', description: 'تاريخ البدء المخطط YYYY-MM-DD (اختياري)' },
         plannedEndDate: { type: 'string', description: 'تاريخ الانتهاء المخطط YYYY-MM-DD (اختياري)' },
         notes: { type: 'string' },
         lines: {
           type: 'array',
-          description: 'المواد المستهلكة',
+          description: 'المواد المستهلكة (اختياري إذا مررت bomId — تُشتق تلقائياً من الشجرة)',
           items: {
             type: 'object',
             properties: {
               materialId: { type: 'string', description: 'معرف المادة (من search.products)' },
               plannedQuantity: { type: 'number', description: 'الكمية المخطط استهلاكها' },
-              unitCost: { type: 'number', description: 'تكلفة الوحدة' },
+              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب من الشجرة/سعر التكلفة)' },
             },
-            required: ['materialId', 'plannedQuantity', 'unitCost'],
+            required: ['materialId', 'plannedQuantity'],
           },
         },
       },
-      required: ['productId', 'quantity', 'lines'],
+      required: ['productId', 'quantity'],
     },
     summarizeArgs: (a) => `إنشاء أمر تشغيل لإنتاج ${(a as Record<string, unknown>).quantity ?? ''} من ${String((a as Record<string, unknown>).productId || '').slice(0, 8)}…`,
 
@@ -1088,14 +1164,21 @@ export const writeTools: ToolDefinition[] = [
       const quantity = num(args.quantity);
       if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
 
-      const rawLines = args.lines;
-      if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير مادة واحدة على الأقل في lines' };
+      let rawLines = args.lines as unknown[] | undefined;
+      // Auto-derive lines from BOM when not supplied
+      if ((!rawLines || rawLines.length === 0) && str(args.bomId)) {
+        const bomRes = await manufacturingApi.getBomById(str(args.bomId)!, ctx.companyId);
+        if (!bomRes.success || !bomRes.data) return { error: bomRes.error || 'تعذر جلب الشجرة المحددة — تحقق من bomId' };
+        rawLines = bomRes.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.quantity * quantity, unitCost: l.unitCost ?? 0 }));
+        if (rawLines.length === 0) return { error: 'الشجرة المختارة بلا مواد — لا يمكن إنشاء أمر تشغيل' };
+      }
+      if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير lines أو bomId صالح لاشتقاق المواد' };
       const lines: { materialId: string; plannedQuantity: number; unitCost: number }[] = [];
       for (const item of rawLines) {
         const materialId = str((item as Record<string, unknown>).materialId);
         const pq = num((item as Record<string, unknown>).plannedQuantity);
-        const uc = num((item as Record<string, unknown>).unitCost);
-        if (!materialId) return { error: 'كل مادة تحتاج materialId' };
+        const uc = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : 0;
+        if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products' };
         if (pq <= 0) return { error: 'plannedQuantity يجب أن تكون أكبر من صفر' };
         lines.push({ materialId, plannedQuantity: pq, unitCost: uc });
       }
@@ -1126,15 +1209,16 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'manufacturing.update_work_order_status',
     labelAr: 'تحديث حالة أمر تشغيل',
-    descriptionAr: 'يُحدّث حالة أمر تشغيل إلى: in_progress, completed, cancelled. استخدم manufacturing.get_work_orders أولاً.',
-    permission: 'inventory.create',
+    descriptionAr: 'يُحدّث حالة أمر تشغيل: in_progress يصرف الخامات من المخزون فوراً (يفشل إن لم يكفِ المخزون)، و completed يسلّم المنتج التام إلى المستودع المختار ويُسوّي الفروق. استخدم search.work_orders أولاً.',
+    permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        workOrderId: { type: 'string', description: 'معرف أمر التشغيل (من manufacturing.get_work_orders)' },
+        workOrderId: { type: 'string', description: 'معرف أمر التشغيل (من search.work_orders)' },
         status: { type: 'string', enum: ['planned', 'in_progress', 'completed', 'cancelled'], description: 'الحالة الجديدة' },
-        producedQuantity: { type: 'number', description: 'الكمية المنتجة فعلياً (مطلوب عند completed)' },
+        producedQuantity: { type: 'number', description: 'الكمية المنتجة فعلياً (اختياري عند completed — افتراضي كمية الأمر)' },
+        outputWarehouseId: { type: 'string', description: 'مستودع استلام المنتج التام عند الإكمال (من search.warehouses — اختياري)' },
       },
       required: ['workOrderId', 'status'],
     },
@@ -1145,9 +1229,11 @@ export const writeTools: ToolDefinition[] = [
       if (!workOrderId) return { error: 'workOrderId مطلوب' };
       if (!status || !['planned', 'in_progress', 'completed', 'cancelled'].includes(status)) return { error: 'حالة غير صحيحة' };
 
+      const outputWarehouseId = str(args.outputWarehouseId);
       const res = await manufacturingApi.updateWorkOrderStatus(
         workOrderId, ctx.companyId, status, ctx.userId,
-        status === 'completed' ? num(args.producedQuantity) : undefined
+        status === 'completed' ? num(args.producedQuantity) : undefined,
+        status === 'completed' ? outputWarehouseId : undefined
       );
       if (!res.success) return { error: res.error || 'فشل تحديث الحالة' };
       return { updated: true, workOrderId, status };
