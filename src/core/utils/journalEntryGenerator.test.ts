@@ -218,7 +218,7 @@ describe('journalEntryGenerator', () => {
       expect(txCall.entries[1].credit).toBe(5000); // Debtors
     });
 
-    it('posts a bank receipt voucher', async () => {
+    it('posts a bank-method receipt voucher to the treasury account (banks unified)', async () => {
       const adapter = createMockAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
@@ -232,7 +232,8 @@ describe('journalEntryGenerator', () => {
 
       expect(result.success).toBe(true);
       const txCall = adapter.createTransaction.mock.calls[0][0];
-      expect(txCall.entries[0].accountId).toBe('acc-bank');
+      // No banks anymore: the debit lands on default cash (11101)
+      expect(txCall.entries[0].accountId).toBe('acc-cash');
     });
   });
 

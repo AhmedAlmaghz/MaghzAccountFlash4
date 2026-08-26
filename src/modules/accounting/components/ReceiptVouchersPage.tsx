@@ -3,7 +3,7 @@ import { Banknote, Plus, CheckSquare, Users, Hash, Search, X, Wallet, Landmark, 
 import { printDocument } from '@/core/utils/printDocument';
 import { Card, Button, Modal, Input, Table, Badge } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
-import { CustomerSelect, BankSelect, CashBoxSelect, CurrencySelect } from '@/core/ui/components/smart';
+import { CustomerSelect, CashBoxSelect, CurrencySelect } from '@/core/ui/components/smart';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -48,7 +48,7 @@ export const ReceiptVouchersPage: React.FC = () => {
   const { settings } = useSettings(activeCompany?.id || '');
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const { currencies, defaultCurrency } = useCurrencyDisplay();
-  const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
 
   const { getUserName } = useUserMap();
@@ -159,7 +159,6 @@ export const ReceiptVouchersPage: React.FC = () => {
       baseCurrencyAmount: (Number(form.amount) || 0) * (form.exchangeRate ?? 1),
       baseCurrencyApplied: form.invoiceId ? (Number(form.amountApplied) || Number(form.amount) || 0) * (form.exchangeRate ?? 1) : 0,
       paymentMethod: form.paymentMethod || 'cash',
-      bankAccountId: form.bankAccountId || undefined,
       cashBoxId: form.cashBoxId || undefined,
       checkNumber: form.checkNumber || undefined,
       checkDate: form.checkDate || undefined,
@@ -198,7 +197,6 @@ export const ReceiptVouchersPage: React.FC = () => {
       currencyCode: defaultCurrency?.code || YER_CODE,
       exchangeRate: 1,
       cashBoxId: defaultCashBoxId || undefined,
-      bankAccountId: undefined,
     });
     setFormErrors({});
     setIsEditMode(false);
@@ -708,8 +706,7 @@ export const ReceiptVouchersPage: React.FC = () => {
                       setForm({
                         ...form,
                         paymentMethod: o.v,
-                        bankAccountId: o.v === 'bank' ? form.bankAccountId || defaultBankId || undefined : undefined,
-                        cashBoxId: o.v === 'cash' ? form.cashBoxId || defaultCashBoxId || undefined : undefined,
+                                                cashBoxId: o.v === 'cash' ? form.cashBoxId || defaultCashBoxId || undefined : undefined,
                         checkNumber: o.v === 'check' ? form.checkNumber : undefined,
                         checkDate: o.v === 'check' ? form.checkDate : undefined,
                       })
@@ -723,20 +720,12 @@ export const ReceiptVouchersPage: React.FC = () => {
               })}
             </div>
 
-            {form.paymentMethod === 'cash' && (
-              <div className="mt-4">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.cashBox')}</label>
-                <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={(v) => setForm({ ...form, cashBoxId: v || '' })} />
-                {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && <p className="text-xs text-emerald-600 mt-1">★ {t('accounting.defaultSelected')}</p>}
-              </div>
-            )}
-            {form.paymentMethod === 'bank' && (
-              <div className="mt-4">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.bankAccount')}</label>
-                <BankSelect companyId={activeCompany?.id || ''} value={form.bankAccountId || ''} onChange={(v) => setForm({ ...form, bankAccountId: v || '' })} />
-                {defaultBankId && form.bankAccountId === defaultBankId && <p className="text-xs text-emerald-600 mt-1">★ {t('accounting.defaultSelected')}</p>}
-              </div>
-            )}
+            {/* Treasury location — shown for ALL payment methods (النقدية والخزائن) */}
+            <div className="mt-4">
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.cashBox')}</label>
+              <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={(v) => setForm({ ...form, cashBoxId: v || '' })} />
+              {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && <p className="text-xs text-emerald-600 mt-1">★ {t('accounting.defaultSelected')}</p>}
+            </div>
             {form.paymentMethod === 'check' && (
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input label={t('accounting.checkNumber')} value={form.checkNumber || ''} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} placeholder="رقم الشيك" />

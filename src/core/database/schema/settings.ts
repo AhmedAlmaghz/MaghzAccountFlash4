@@ -72,23 +72,6 @@ export const cashBoxes = pgTable('cash_boxes', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ─── Banks ────────────────────────────────────────────────────────────────────
-export const banks = pgTable('banks', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
-  name: varchar('name', { length: 100 }).notNull(),
-  bankName: varchar('bank_name', { length: 100 }),
-  accountNumber: varchar('account_number', { length: 50 }),
-  iban: varchar('iban', { length: 50 }),
-  accountId: uuid('account_id').references(() => accounts.id),
-  branchId: uuid('branch_id'),
-  isActive: boolean('is_active').notNull().default(true),
-  currentBalance: numeric('current_balance', { precision: 18, scale: 4 }).notNull().default('0'),
-  createdBy: uuid('created_by'),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-});
-
 // ─── Cost Centers ─────────────────────────────────────────────────────────────
 export const costCenters = pgTable('cost_centers', {
   id: uuid('id').defaultRandom().primaryKey(),

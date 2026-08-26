@@ -238,7 +238,6 @@ async function verify() {
         (SELECT COUNT(*) FROM crm_activities)          AS crm_activities,
         (SELECT COUNT(*) FROM boms)                    AS boms,
         (SELECT COUNT(*) FROM work_orders)             AS work_orders,
-        (SELECT COUNT(*) FROM banks)                   AS banks,
         (SELECT COUNT(*) FROM currencies)              AS currencies,
         (SELECT COUNT(*) FROM cost_centers)            AS cost_centers,
         (SELECT COUNT(*) FROM default_accounts)        AS default_accounts,

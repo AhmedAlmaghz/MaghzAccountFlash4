@@ -10,7 +10,7 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DataTablePro } from '@/core/ui/components/DataTablePro';
-import { SupplierSelect, ProductSelect, CashBoxSelect, BankSelect } from '@/core/ui/components/smart';
+import { SupplierSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseOrdersPaginated } from '../hooks/usePurchases';
 import { useAppStore } from '@/core/store';
@@ -37,7 +37,6 @@ interface OrderForm {
   expectedDate: string;
   paymentType: string;
   cashBoxId: string;
-  bankAccountId: string;
   notes: string;
   lines: OrderFormLine[];
 }
@@ -56,7 +55,6 @@ const initialForm = (defaultCashBoxId?: string): OrderForm => ({
   expectedDate: '',
   paymentType: 'credit',
   cashBoxId: defaultCashBoxId || '',
-  bankAccountId: '',
   notes: '',
   lines: [initialLine()],
 });
@@ -70,7 +68,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   const orderFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
   const { orders, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, convertToInvoice } = usePurchaseOrdersPaginated(activeCompany?.id || '', orderFilters);
   const { getNextNumber } = useDocumentSequence();
-  const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const { settings } = useSettings(activeCompany?.id || '');
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
@@ -129,7 +127,6 @@ export const PurchaseOrdersPage: React.FC = () => {
       expectedDate: order.expectedDate || '',
       paymentType: order.paymentType || 'credit',
       cashBoxId: order.cashBoxId || '',
-      bankAccountId: order.bankAccountId || '',
       notes: order.notes || '',
       lines: order.lines && order.lines.length > 0
         ? order.lines.map(l => ({ productId: l.productId || '', description: l.description || '', quantity: l.quantity, unitPrice: l.unitPrice, lineTotal: l.lineTotal }))
@@ -171,7 +168,6 @@ export const PurchaseOrdersPage: React.FC = () => {
       status: 'draft' as const,
       paymentType: form.paymentType,
       cashBoxId: form.paymentType === 'cash' ? (form.cashBoxId || undefined) : undefined,
-      bankAccountId: form.paymentType === 'cash' ? (form.bankAccountId || undefined) : undefined,
       notes: form.notes,
       lines: form.lines.map(l => ({
         productId: l.productId,
@@ -450,7 +446,6 @@ export const PurchaseOrdersPage: React.FC = () => {
                   ...prev,
                   paymentType: newType,
                   cashBoxId: newType === 'cash' ? (prev.cashBoxId || defaultCashBoxId || '') : '',
-                  bankAccountId: newType === 'cash' ? (prev.bankAccountId || defaultBankId || '') : '',
                 }));
               }}
               aria-label={t('purchases.order.paymentType')}
@@ -465,13 +460,6 @@ export const PurchaseOrdersPage: React.FC = () => {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
                 <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={v => setForm(prev => ({ ...prev, cashBoxId: v || '' }))} />
                 {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.bankAccount')}</label>
-                <BankSelect companyId={activeCompany?.id || ''} value={form.bankAccountId || ''} onChange={v => setForm(prev => ({ ...prev, bankAccountId: v || '' }))} />
-                {defaultBankId && form.bankAccountId === defaultBankId && (
                   <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
                 )}
               </div>

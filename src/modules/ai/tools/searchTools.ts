@@ -932,27 +932,6 @@ export const searchTools: ToolDefinition[] = [
       };
     },
   },
-  // ─── Settings: Banks ──────────────────────────────────────────────────────
-  {
-    name: 'search.banks',
-    labelAr: 'بحث عن بنك',
-    descriptionAr: 'يبحث في الحسابات البنكية ويعيد المعرف والرصيد. استخدم قبل إنشاء سند قبض/صرف بنكي.',
-    permission: 'accounting.view',
-    dangerLevel: 'read',
-    parameters: searchParam('اسم الحساب البنكي أو اسم البنك'),
-    execute: async (args, ctx) => {
-      const query = String(args.query || '').trim();
-      const res = await settingsApi.getBanks(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب البنوك' };
-      const matches = query
-        ? fuzzySearch(query, res.data, (b) => `${b.name ?? ''} ${b.bankName ?? ''} ${b.accountNumber ?? ''}`)
-        : res.data.slice(0, 8).map((item) => ({ item, score: 1 }));
-      return {
-        matches: matches.map((m) => ({ id: m.item.id, name: m.item.name, bankName: m.item.bankName, accountNumber: m.item.accountNumber, currentBalance: m.item.currentBalance, isActive: m.item.isActive })),
-        totalMatches: matches.length,
-      };
-    },
-  },
   // ─── Settings: Cost Centers ───────────────────────────────────────────────
   {
     name: 'search.cost_centers',

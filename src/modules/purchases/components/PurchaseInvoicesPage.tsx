@@ -12,7 +12,7 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DataTablePro } from '@/core/ui/components/DataTablePro';
-import { SupplierSelect, ProductSelect, CurrencySelect, CashBoxSelect, BankSelect } from '@/core/ui/components/smart';
+import { SupplierSelect, ProductSelect, CurrencySelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseInvoicesPaginated } from '../hooks/usePurchases';
 import { usePurchaseOrders } from '../hooks/usePurchases';
@@ -46,7 +46,6 @@ interface InvoiceForm {
   dueDate: string;
   paymentType: string;
   cashBoxId: string;
-  bankAccountId: string;
   notes: string;
   lines: InvoiceFormLine[];
 }
@@ -68,7 +67,6 @@ const initialForm = (defaultCashBoxId?: string): InvoiceForm => ({
   dueDate: new Date().toISOString().split('T')[0],
   paymentType: 'credit',
   cashBoxId: defaultCashBoxId || '',
-  bankAccountId: '',
   notes: '',
   lines: [initialLine()],
 });
@@ -100,7 +98,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const { getNextNumber } = useDocumentSequence();
   const { getUserName } = useUserMap();
   const { currencies, defaultCurrency } = useCurrencyDisplay();
-  const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -197,7 +195,6 @@ export const PurchaseInvoicesPage: React.FC = () => {
       dueDate: invoice.dueDate || invoice.date,
       paymentType: invoice.paymentType || 'credit',
       cashBoxId: invoice.cashBoxId || '',
-      bankAccountId: invoice.bankAccountId || '',
       notes: invoice.notes || '',
       lines: invoice.lines.length > 0
         ? invoice.lines.map(l => ({
@@ -249,7 +246,6 @@ export const PurchaseInvoicesPage: React.FC = () => {
       status: 'draft' as const,
       paymentType: form.paymentType,
       cashBoxId: form.paymentType === 'cash' ? (form.cashBoxId || undefined) : undefined,
-      bankAccountId: form.paymentType === 'cash' ? (form.bankAccountId || undefined) : undefined,
       notes: form.notes,
       lines: form.lines.map(l => ({
         productId: l.productId,
@@ -671,9 +667,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
                   setForm(prev => ({
                     ...prev,
                     paymentType: newType,
-                    // Auto-select default cash box / bank when switching to cash
                     cashBoxId: newType === 'cash' ? (prev.cashBoxId || defaultCashBoxId || '') : '',
-                    bankAccountId: newType === 'cash' ? (prev.bankAccountId || defaultBankId || '') : '',
                   }));
                 }}
                 aria-label={t('purchases.invoice.paymentType')}
@@ -690,13 +684,6 @@ export const PurchaseInvoicesPage: React.FC = () => {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
                 <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={v => setForm(prev => ({ ...prev, cashBoxId: v || '' }))} />
                 {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.bankAccount')}</label>
-                <BankSelect companyId={activeCompany?.id || ''} value={form.bankAccountId || ''} onChange={v => setForm(prev => ({ ...prev, bankAccountId: v || '' }))} />
-                {defaultBankId && form.bankAccountId === defaultBankId && (
                   <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
                 )}
               </div>

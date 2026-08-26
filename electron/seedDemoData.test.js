@@ -181,7 +181,7 @@ describe('seedDemoData', () => {
     // Master data (always seeded)
     const masterExpected = [
       'branches', 'accounts', 'product_types', 'units',
-      'currencies', 'cost_centers', 'banks', 'cash_boxes',
+      'currencies', 'cost_centers', 'cash_boxes',
       'product_categories', 'products', 'warehouses', 'customers',
       'suppliers', 'departments', 'employees', 'payroll_components',
       'payroll_lines', 'payroll_runs', 'leads', 'opportunities',
@@ -287,7 +287,6 @@ describe('seedDemoData', () => {
     expect(t.get('product_product_categories')?.length || 0).toBeGreaterThan(0);
     expect(t.get('warehouses')?.length || 0).toBeGreaterThan(0);
     expect(t.get('branches')?.length || 0).toBeGreaterThan(0);
-    expect(t.get('banks')?.length || 0).toBeGreaterThan(0);
     // New: HR + transactions + returns + vouchers
     expect(t.get('employees')?.length || 0).toBeGreaterThan(0);
     expect(t.get('leads')?.length || 0).toBeGreaterThan(0);

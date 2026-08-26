@@ -335,7 +335,7 @@ function loginAttemptDenied(event, username) {
 const SQL_MODULE_TABLE_RULES = [
   { module: 'settings', tables: ['roles'] },
   { module: 'settings', tables: ['audit_logs'], writeAny: true },
-  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'banks', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true },
+  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true },
   // Document numbering is consumed by every create flow (invoices, products,
   // employees, work orders, ...) — writers only need to hold ANY create right.
   {
@@ -2725,8 +2725,8 @@ export function registerDatabaseHandlers() {
       const cid = session.user.companyId;
       const uid = session.user.id;
       const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
-      const params = [cid, String(p.invoiceNumber || ''), String(p.customerId), p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.bankAccountId || null, p.notes || null, uid, uid];
-      let sql = `WITH inv AS (INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, bank_account_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, $15::varchar, $16, $17::uuid, $18::uuid, $19, $20::uuid, $21::uuid) RETURNING id)`;
+      const params = [cid, String(p.invoiceNumber || ''), String(p.customerId), p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      let sql = `WITH inv AS (INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, $15::varchar, $16, $17::uuid, $18, $19::uuid, $20::uuid) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -2794,7 +2794,6 @@ export function registerDatabaseHandlers() {
       if (p.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(p.status); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
-      if (p.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(p.bankAccountId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       values.push(uid);
@@ -2892,8 +2891,8 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => {
       const cid = session.user.companyId;
       const uid = session.user.id;
-      const params = [cid, String(p.quotationNumber || ''), String(p.customerId), p.date || null, p.expiryDate || null, Number(p.totalAmount) || 0, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.bankAccountId || null, p.notes || null, uid, uid];
-      let sql = `WITH quo AS (INSERT INTO quotations (company_id, quotation_number, customer_id, date, expiry_date, total_amount, status, payment_type, cash_box_id, bank_account_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::varchar, $8, $9::uuid, $10::uuid, $11, $12::uuid, $13::uuid) RETURNING id)`;
+      const params = [cid, String(p.quotationNumber || ''), String(p.customerId), p.date || null, p.expiryDate || null, Number(p.totalAmount) || 0, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      let sql = `WITH quo AS (INSERT INTO quotations (company_id, quotation_number, customer_id, date, expiry_date, total_amount, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::varchar, $8, $9::uuid, $10, $11::uuid, $12::uuid) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -2937,7 +2936,6 @@ export function registerDatabaseHandlers() {
       if (p.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(p.status); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
-      if (p.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(p.bankAccountId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       values.push(uid);
@@ -3020,8 +3018,8 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => {
       const cid = session.user.companyId;
       const uid = session.user.id;
-      const params = [cid, String(p.returnNumber || ''), p.invoiceId || null, String(p.customerId), p.date || null, Number(p.subtotal) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, p.reason || null, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.bankAccountId || null, p.notes || null, uid, uid];
-      let sql = `WITH ret AS (INSERT INTO sales_returns (company_id, return_number, invoice_id, customer_id, date, subtotal, vat_amount, total_amount, reason, status, payment_type, cash_box_id, bank_account_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9, $10::varchar, $11, $12::uuid, $13::uuid, $14, $15::uuid, $16::uuid) RETURNING id)`;
+      const params = [cid, String(p.returnNumber || ''), p.invoiceId || null, String(p.customerId), p.date || null, Number(p.subtotal) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, p.reason || null, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      let sql = `WITH ret AS (INSERT INTO sales_returns (company_id, return_number, invoice_id, customer_id, date, subtotal, vat_amount, total_amount, reason, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9, $10::varchar, $11, $12::uuid, $13, $14::uuid, $15::uuid) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -3070,7 +3068,6 @@ export function registerDatabaseHandlers() {
       if (p.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(p.status); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
-      if (p.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(p.bankAccountId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       values.push(uid);
@@ -3499,7 +3496,7 @@ export async function seedInitialData(adminPassword) {
 
     const cashGroupRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
-      VALUES ($1, '111', 'ط§ظ„طµظ†ط¯ظˆظ‚ ظˆط§ظ„ط¨ظ†ظˆظƒ', 'Cash & Banks', $2, 'asset', 'debit', TRUE) RETURNING id;
+      VALUES ($1, '111', 'ط§ظ„طµظ†ط¯ظˆظ‚ ظˆط§ظ„ط¨ظ†ظˆظƒ', 'Cash & Treasuries', $2, 'asset', 'debit', TRUE) RETURNING id;
     `, [companyId, curAssetsId]);
     const cashGroupId = cashGroupRes.rows[0].id;
 
@@ -3509,18 +3506,7 @@ export async function seedInitialData(adminPassword) {
     `, [companyId, cashGroupId]);
 
     await client.query(`
-      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '11102', 'ط­ط³ط§ط¨ ط¨ظ†ظƒ ط§ظ„ظƒط±ظٹظ…ظٹ', 'Yemen International Bank', $2, 'asset', 'debit', FALSE, 12000000);
-    `, [companyId, cashGroupId]);
-
-    // Liabilities — created below with RETURNING id (used as parent for 21101/21301).
-    // The earlier duplicate insert at this position was removed: it conflicted with the
-    // unique constraint accounts_company_id_code_unique and aborted the seed.
-
-    // Equity
-    const equityRes = await client.query(`
-      INSERT INTO accounts (company_id, code, name_ar, name_en, type, nature, is_group)
-      VALUES ($1, '3', 'ط­ظ‚ظˆظ‚ ط§ظ„ظ…ظ„ظƒظٹط©', 'Equity', 'equity', 'credit', TRUE) RETURNING id;
+      
     `, [companyId]);
     const equityId = equityRes.rows[0].id;
 
@@ -3663,7 +3649,6 @@ export async function seedInitialData(adminPassword) {
     // 5a. Seed default accounts
     const defaultAccountMappings = [
       { key: 'default_cash', code: '11101' },
-      { key: 'default_bank', code: '11102' },
       { key: 'default_sales', code: '41101' },
       { key: 'default_cogs', code: '51101' },
       { key: 'default_inventory', code: '11301' },
@@ -3741,24 +3726,6 @@ export async function seedInitialData(adminPassword) {
         SELECT $1, $2, $3, $4, $5
         WHERE NOT EXISTS (SELECT 1 FROM cash_boxes WHERE company_id = $1 AND code = $3);
       `, [companyId, 'طµظ†ط¯ظˆظ‚ ظپط±ط¹ ط¹ط¯ظ†', 'CB-ADN', 300000, cashBoxAccRes.rows[0].id]);
-    }
-
-    // 5e. Seed banks
-    const bankAccRes = await client.query(
-      `SELECT id FROM accounts WHERE company_id = $1 AND code = $2 LIMIT 1;`,
-      [companyId, '11102']
-    );
-    if (bankAccRes.rows.length > 0) {
-      await client.query(`
-        INSERT INTO banks (company_id, name, bank_name, account_number, current_balance, account_id)
-        VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING;
-      `, [companyId, 'ط­ط³ط§ط¨ ط¨ظ†ظƒ ط§ظ„ظƒط±ظٹظ…ظٹ', 'ط¨ظ†ظƒ ط§ظ„ظƒط±ظٹظ…ظٹ', 'YE123456', 12000000, bankAccRes.rows[0].id]);
-
-      await client.query(`
-        INSERT INTO banks (company_id, name, bank_name, account_number, iban, account_id, is_active, current_balance)
-        SELECT $1, $2, $3, $4, $5, $6, TRUE, $7
-        WHERE NOT EXISTS (SELECT 1 FROM banks WHERE company_id = $1 AND bank_name = $3);
-      `, [companyId, 'ط­ط³ط§ط¨ ط§ظ„ط¨ظ†ظƒ ط§ظ„ظٹظ…ظ†ظٹ ط§ظ„ط¯ظˆظ„ظٹ', 'ط§ظ„ط¨ظ†ظƒ ط§ظ„ظٹظ…ظ†ظٹ ط§ظ„ط¯ظˆظ„ظٹ', '1234567890', 'YE12345678901234', bankAccRes.rows[0].id, 5800000]);
     }
 
     // 5f. Seed cost centers

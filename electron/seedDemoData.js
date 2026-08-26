@@ -37,9 +37,8 @@ const ACCOUNTS = [
   // Assets
   { code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: null },
   { code: '11', name_ar: 'الأصول المتداولة', name_en: 'Current Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
-  { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Banks', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
+  { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Treasuries', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
   { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, balance: 5000000, parent_code: '111' },
-  { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, balance: 12000000, parent_code: '111' },
   { code: '112', name_ar: 'المدينون', name_en: 'Receivables', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
   { code: '11201', name_ar: 'المدينون التجاريون', name_en: 'Trade Customers', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
   { code: '11202', name_ar: 'سلف الموظفين', name_en: 'Employee Advances', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
@@ -105,7 +104,6 @@ const CURRENCIES = [
 
 const DEFAULT_ACCOUNTS = [
   { key: 'default_cash', code: '11101', required: true,  desc: 'الحساب الافتراضي للصناديق النقدية' },
-  { key: 'default_bank', code: '11102', required: false, desc: 'الحساب الافتراضي للبنوك' },
   { key: 'default_sales', code: '41101', required: true,  desc: 'حساب المبيعات الافتراضي' },
   { key: 'default_cogs', code: '51101', required: true,  desc: 'حساب تكلفة البضاعة المباعة' },
   { key: 'default_inventory', code: '11301', required: true, desc: 'حساب المخزون الافتراضي' },
@@ -141,9 +139,7 @@ const PAYROLL_COMPONENTS = [
   { code: 'INS', name_ar: 'تأمينات اجتماعية',     name_en: 'Social Insurance',     type: 'deduction',  method: 'percentage', amount: 9,     gross: false, tax: false, ins: true },
 ];
 
-const BANKS = [
-  { name: 'حساب البنك اليمني الدولي', bank_name: 'البنك اليمني الدولي', account_number: '1234567890', iban: 'YE12345678901234', balance: 5800000, account_code: '11102' },
-];
+
 
 const CASH_BOXES = [
   { name: 'الصندوق الرئيسي',  code: 'CB-MAIN',  balance: 5000000, account_code: '11101', responsible_role: 'admin' },
@@ -335,18 +331,6 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
        SELECT $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::numeric, TRUE
        WHERE NOT EXISTS (SELECT 1 FROM cost_centers WHERE company_id = $1::uuid AND code = $2::text);`,
       [companyId, cc.code, cc.name_ar, cc.name_en, cc.type, cc.budget]
-    );
-  }
-
-  // ─── 6. Banks ───────────────────────────────────────────────────────────
-  console.log('[SEED] Inserting banks...');
-  for (const b of BANKS) {
-    const accountId = codeToId.get(b.account_code);
-    await client.query(
-      `INSERT INTO banks (company_id, name, bank_name, account_number, iban, is_active, current_balance, account_id)
-       SELECT $1::uuid, $2::text, $3::text, $4::text, $5::text, TRUE, $6::numeric, $7::uuid
-       WHERE NOT EXISTS (SELECT 1 FROM banks WHERE company_id = $1::uuid AND bank_name = $3::text);`,
-      [companyId, b.name, b.bank_name, b.account_number, b.iban, b.balance, accountId]
     );
   }
 
@@ -864,17 +848,17 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
   // ─── 25. Receipt Vouchers (سند قبض) ──────────────────────────────────────
   console.log('[SEED] Inserting receipt vouchers...');
   if (custIds.length > 0) {
-    const bankRes = await client.query(`SELECT id FROM banks WHERE company_id = $1::uuid LIMIT 1`, [companyId]);
-    const bankId = bankRes.rows[0]?.id;
+    const boxRes = await client.query(`SELECT id FROM cash_boxes WHERE company_id = $1::uuid AND is_active ORDER BY created_at LIMIT 1`, [companyId]);
+    const boxId = boxRes.rows[0]?.id;
     for (let i = 0; i < 3; i++) {
       const amount = 500000 + (i * 250000);
       const number = `RV-${String(i + 1).padStart(4, '0')}`;
       const date = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(10 + i * 5).padStart(2,'0')}`;
       await client.query(
-        `INSERT INTO receipt_vouchers (company_id, voucher_number, date, customer_id, amount, payment_method, bank_account_id, status, notes, created_by, updated_by)
+        `INSERT INTO receipt_vouchers (company_id, voucher_number, date, customer_id, amount, payment_method, cash_box_id, status, notes, created_by, updated_by)
          SELECT $1::uuid, $2::text, $3::date, $4::uuid, $5::numeric, $6::text, $7::uuid, 'posted', 'سند قبض تجريبي', $8::uuid, $8::uuid
          WHERE NOT EXISTS (SELECT 1 FROM receipt_vouchers WHERE company_id = $1::uuid AND voucher_number = $2::text);`,
-        [companyId, number, date, custIds[i % custIds.length].id, amount, i === 0 ? 'cash' : 'bank', bankId, adminId]
+        [companyId, number, date, custIds[i % custIds.length].id, amount, i === 0 ? 'cash' : 'bank', boxId, adminId]
       );
     }
   }
@@ -882,8 +866,8 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
   // ─── 26. Payment Vouchers (سند صرف) ──────────────────────────────────────
   console.log('[SEED] Inserting payment vouchers...');
   if (supIds.length > 0) {
-    const bankRes = await client.query(`SELECT id FROM banks WHERE company_id = $1::uuid LIMIT 1`, [companyId]);
-    const bankId = bankRes.rows[0]?.id;
+    const boxRes = await client.query(`SELECT id FROM cash_boxes WHERE company_id = $1::uuid AND is_active ORDER BY created_at LIMIT 1`, [companyId]);
+    const boxId = boxRes.rows[0]?.id;
     const expRes = await client.query(`SELECT id FROM accounts WHERE company_id = $1::uuid AND code = '52101' LIMIT 1`, [companyId]);
     const expId = expRes.rows[0]?.id;
     for (let i = 0; i < 3; i++) {
@@ -891,10 +875,10 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
       const number = `PV-${String(i + 1).padStart(4, '0')}`;
       const date = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(12 + i * 5).padStart(2,'0')}`;
       await client.query(
-        `INSERT INTO payment_vouchers (company_id, voucher_number, date, supplier_id, expense_account_id, amount, payment_method, bank_account_id, status, notes, created_by, updated_by)
+        `INSERT INTO payment_vouchers (company_id, voucher_number, date, supplier_id, expense_account_id, amount, payment_method, cash_box_id, status, notes, created_by, updated_by)
          SELECT $1::uuid, $2::text, $3::date, $4::uuid, $5::uuid, $6::numeric, $7::text, $8::uuid, 'posted', 'سند صرف تجريبي', $9::uuid, $9::uuid
          WHERE NOT EXISTS (SELECT 1 FROM payment_vouchers WHERE company_id = $1::uuid AND voucher_number = $2::text);`,
-        [companyId, number, date, supIds[i % supIds.length].id, expId, amount, i === 0 ? 'cash' : 'bank', bankId, adminId]
+        [companyId, number, date, supIds[i % supIds.length].id, expId, amount, i === 0 ? 'cash' : 'bank', boxId, adminId]
       );
     }
   }

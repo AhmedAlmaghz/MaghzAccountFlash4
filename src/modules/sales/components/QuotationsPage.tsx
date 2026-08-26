@@ -5,7 +5,7 @@ import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { CustomerSelect, ProductSelect, CashBoxSelect, BankSelect } from '@/core/ui/components/smart';
+import { CustomerSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useQuotationsPaginated } from '../hooks/useSales';
 import { salesApi } from '../api';
 import { useAppStore } from '@/core/store';
@@ -70,7 +70,7 @@ export const QuotationsPage: React.FC = () => {
   const hasFilters = !!(search || statusFilter);
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
-  const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
 
@@ -83,13 +83,13 @@ export const QuotationsPage: React.FC = () => {
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'warning' | 'info'; confirmText?: string } | null>(null);
 
   const [saving, setSaving] = useState(false);
-  const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: '', bankAccountId: '', notes: '' });
+  const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
   const [lines, setLines] = useState<QuotationLineForm[]>([{ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 }]);
 
   const defaultLine = (): QuotationLineForm => ({ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 });
 
   const resetForm = useCallback(() => {
-    setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', bankAccountId: '', notes: '' });
+    setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
     setLines([defaultLine()]);
     setEditingId(null);
   }, [defaultCashBoxId]);
@@ -102,7 +102,6 @@ export const QuotationsPage: React.FC = () => {
   const openEdit = useCallback((q: Quotation) => {
     if (q.status === 'converted') return;
     setEditingId(q.id);
-    setHeader({ customerId: q.customerId, date: q.date, expiryDate: q.expiryDate || '', paymentType: q.paymentType || 'credit', cashBoxId: q.cashBoxId || '', bankAccountId: q.bankAccountId || '', notes: q.notes || '' });
     setLines(q.lines.map(l => ({ productId: l.productId, productName: l.productName || l.productId, quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent })));
     setFormOpen(true);
   }, []);
@@ -145,7 +144,6 @@ export const QuotationsPage: React.FC = () => {
     totalAmount: calculations.totalAmount,
     paymentType: header.paymentType || 'credit',
     cashBoxId: header.paymentType === 'cash' ? (header.cashBoxId || undefined) : undefined,
-    bankAccountId: header.paymentType === 'cash' ? (header.bankAccountId || undefined) : undefined,
     status: 'draft',
     notes: header.notes,
     lines: lines.map(l => ({
@@ -579,7 +577,6 @@ export const QuotationsPage: React.FC = () => {
                     ...p,
                     paymentType: newType,
                     cashBoxId: newType === 'cash' ? (p.cashBoxId || defaultCashBoxId || '') : '',
-                    bankAccountId: newType === 'cash' ? (p.bankAccountId || defaultBankId || '') : '',
                   }));
                 }}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
@@ -597,13 +594,6 @@ export const QuotationsPage: React.FC = () => {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
                 <CashBoxSelect companyId={activeCompany?.id || ''} value={header.cashBoxId || ''} onChange={v => setHeader(p => ({ ...p, cashBoxId: v || '' }))} />
                 {defaultCashBoxId && header.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.bankAccount')}</label>
-                <BankSelect companyId={activeCompany?.id || ''} value={header.bankAccountId || ''} onChange={v => setHeader(p => ({ ...p, bankAccountId: v || '' }))} />
-                {defaultBankId && header.bankAccountId === defaultBankId && (
                   <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
                 )}
               </div>

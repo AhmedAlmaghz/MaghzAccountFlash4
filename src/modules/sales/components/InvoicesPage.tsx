@@ -5,7 +5,7 @@ import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { CustomerSelect, ProductSelect, CurrencySelect, CashBoxSelect, BankSelect } from '@/core/ui/components/smart';
+import { CustomerSelect, ProductSelect, CurrencySelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useInvoicesPaginated } from '../hooks/useSales';
 import { useAppStore } from '@/core/store';
 import { useToastStore } from '@/core/store/toastStore';
@@ -72,7 +72,7 @@ export const InvoicesPage: React.FC = () => {
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const { getUserName } = useUserMap();
   const { currencies, defaultCurrency } = useCurrencyDisplay();
-  const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
 
   const [formOpen, setFormOpen] = useState(false);
@@ -90,14 +90,14 @@ export const InvoicesPage: React.FC = () => {
     productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0, vatPercent: settings?.vatRate || 15,
   }), [settings?.vatRate]);
 
-  const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: '', bankAccountId: '', notes: '' });
+  const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
   const [currencyCode, setCurrencyCode] = useState<string>(defaultCurrency?.code || YER_CODE);
   const [exchangeRate, setExchangeRate] = useState<number>(1);
   const [lines, setLines] = useState<InvoiceLineForm[]>([defaultLine()]);
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
 
   const resetForm = useCallback(() => {
-    setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', bankAccountId: '', notes: '' });
+    setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
     setCurrencyCode(defaultCurrency?.code || YER_CODE);
     setExchangeRate(1);
     setLines([defaultLine()]);
@@ -137,7 +137,6 @@ export const InvoicesPage: React.FC = () => {
       dueDate: invoice.dueDate || '',
       paymentType: invoice.paymentType || 'credit',
       cashBoxId: invoice.cashBoxId || '',
-      bankAccountId: invoice.bankAccountId || '',
       notes: invoice.notes || '',
     });
     setCurrencyCode(invoice.currencyCode || YER_CODE);
@@ -232,7 +231,6 @@ export const InvoicesPage: React.FC = () => {
       baseCurrencyPaid: 0,
       paymentType: header.paymentType || 'credit',
       cashBoxId: header.paymentType === 'cash' ? (header.cashBoxId || undefined) : undefined,
-      bankAccountId: header.paymentType === 'cash' ? (header.bankAccountId || undefined) : undefined,
       status: 'draft',
       notes: header.notes,
       attachments,
@@ -740,9 +738,7 @@ export const InvoicesPage: React.FC = () => {
                   setHeader(prev => ({
                     ...prev,
                     paymentType: newType,
-                    // Auto-select default cash box / bank when switching to cash
                     cashBoxId: newType === 'cash' ? (prev.cashBoxId || defaultCashBoxId || '') : '',
-                    bankAccountId: newType === 'cash' ? (prev.bankAccountId || defaultBankId || '') : '',
                   }));
                 }}
                 className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
@@ -773,22 +769,13 @@ export const InvoicesPage: React.FC = () => {
           </div>
 
           {header.paymentType === 'cash' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
-                <CashBoxSelect companyId={activeCompany?.id || ''} value={header.cashBoxId || ''} onChange={v => setHeader(prev => ({ ...prev, cashBoxId: v || '' }))} />
-                {defaultCashBoxId && header.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.bankAccount')}</label>
-                <BankSelect companyId={activeCompany?.id || ''} value={header.bankAccountId || ''} onChange={v => setHeader(prev => ({ ...prev, bankAccountId: v || '' }))} />
-                {defaultBankId && header.bankAccountId === defaultBankId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-            </div>
+            <div>
+  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
+  <CashBoxSelect companyId={activeCompany?.id || ''} value={header.cashBoxId || ''} onChange={v => setHeader(prev => ({ ...prev, cashBoxId: v || '' }))} />
+  {defaultCashBoxId && header.cashBoxId === defaultCashBoxId && (
+    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
+  )}
+</div>
           )}
 
           <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2">

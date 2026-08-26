@@ -264,7 +264,7 @@ class ChatEngine {
             const typeLabel: Record<string, string> = {
               account: 'حساب', customer: 'عميل', supplier: 'مورد',
               employee: 'موظف', product: 'منتج', cashBox: 'خزنة',
-              bank: 'بنك', invoice: 'فاتورة مبيعات',
+              invoice: 'فاتورة مبيعات',
               purchaseInvoice: 'فاتورة مشتريات', quotation: 'عرض سعر',
               receiptVoucher: 'سند قبض', paymentVoucher: 'سند صرف',
               workOrder: 'أمر تشغيل', bom: 'شجرة منتج',

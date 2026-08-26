@@ -206,8 +206,7 @@
       "productTypes": "Product Types",
       "productCategories": "Product Categories",
       "units": "Units",
-      "cashBoxes": "Cash Boxes",
-      "banks": "Banks",
+      "cashBoxes": "Cash & Treasuries",
       "costCenters": "Cost Centers",
       "users": "Users",
       "roles": "Roles",
@@ -619,7 +618,7 @@
     "beneficiary": "Beneficiary",
     "paymentMethod": "Payment Method",
     "cash": "Cash",
-    "bank": "Bank",
+    "bank": "Transfer",
     "check": "Check",
     "checkNumber": "Check Number",
     "checkDate": "Check Date",
@@ -642,9 +641,9 @@
     "selectSupplierOrExpense": "Please select a supplier or expense account",
     "deleteConfirm": "Are you sure you want to delete",
     "totalCashReceipts": "Total Cash Receipts",
-    "totalBankReceipts": "Total Bank Receipts",
+    "totalBankReceipts": "Transfer Receipts",
     "totalCashPayments": "Total Cash Payments",
-    "totalBankPayments": "Total Bank Payments",
+    "totalBankPayments": "Transfer Payments",
     "voucherCount": "Voucher Count",
     "deleteReceiptVoucherConfirm": "Are you sure you want to delete this receipt voucher",
     "deletePaymentVoucherConfirm": "Are you sure you want to delete this payment voucher",
@@ -2114,8 +2113,7 @@
       "productTypes": "Product Types",
       "productCategories": "Product Categories",
       "units": "Units",
-      "cashBoxes": "Cash Boxes",
-      "banks": "Banks & Accounts",
+      "cashBoxes": "Cash & Treasuries",
       "costCenters": "Cost Centers",
       "users": "Users",
       "roles": "Roles & Permissions",
@@ -2307,28 +2305,6 @@
       "updated": "Unit updated successfully",
       "deleted": "Unit deleted successfully"
     },
-    "banks": {
-      "title": "Banks & Accounts",
-      "subtitle": "Manage bank accounts",
-      "newBank": "New Bank Account",
-      "editBank": "Edit Account",
-      "accountName": "Account Name",
-      "bankName": "Bank Name",
-      "accountNumber": "Account Number",
-      "iban": "IBAN",
-      "openingBalance": "Opening Balance",
-      "currentBalance": "Current Balance",
-      "accountingAccount": "Accounting Account",
-      "branch": "Branch",
-      "emptyMessage": "No bank accounts found",
-      "deleteTitle": "Delete Bank Account",
-      "deleteMessage": "Are you sure you want to delete this bank account?",
-      "yes": "Yes",
-      "no": "No",
-      "created": "Bank account created successfully",
-      "updated": "Bank account updated successfully",
-      "deleted": "Bank account deleted successfully"
-    },
     "sequences": {
       "title": "Document Numbering",
       "subtitle": "Manage automatic document numbering for all operations",
@@ -2419,8 +2395,8 @@
       "deleted": "Category deleted successfully"
     },
     "cashBoxes": {
-      "title": "Cash Boxes & Safes",
-      "subtitle": "Manage cash boxes and safes",
+      "title": "Cash & Treasuries",
+      "subtitle": "Manage cash & treasuries and link them to accounts",
       "new": "New Cash Box",
       "editTitle": "Edit Cash Box",
       "newTitle": "New Cash Box",
@@ -2671,11 +2647,6 @@
       "search": "Search BOMs...",
       "empty": "No BOMs",
       "version": "Version"
-    },
-    "bank": {
-      "placeholder": "Select bank...",
-      "search": "Search banks...",
-      "empty": "No banks"
     }
   },
   "currencies": {
@@ -2736,20 +2707,6 @@
     },
     "updateError": {
       "updateError": "Failed to update unit"
-    }
-  },
-  "banks": {
-    "deleteError": {
-      "deleteError": "Failed to delete bank account"
-    },
-    "createError": {
-      "createError": "Failed to create bank account"
-    },
-    "updateError": {
-      "updateError": "Failed to update bank account"
-    },
-    "accountNameRequired": {
-      "accountNameRequired": "Account name is required"
     }
   },
   "cashBoxes": {

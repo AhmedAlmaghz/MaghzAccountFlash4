@@ -206,8 +206,7 @@
       "productTypes": "أنواع المنتجات",
       "productCategories": "تصنيفات المنتجات",
       "units": "الوحدات",
-      "cashBoxes": "الصناديق والخزائن",
-      "banks": "البنوك والحسابات",
+      "cashBoxes": "النقدية والخزائن",
       "costCenters": "مراكز التكلفة",
       "users": "المستخدمين",
       "roles": "الأدوار",
@@ -619,7 +618,7 @@
     "beneficiary": "المستفيد",
     "paymentMethod": "طريقة الدفع",
     "cash": "نقدي",
-    "bank": "بنكي",
+    "bank": "حوالة / محفظة",
     "check": "شيك",
     "checkNumber": "رقم الشيك",
     "checkDate": "تاريخ الشيك",
@@ -642,9 +641,9 @@
     "selectSupplierOrExpense": "يرجى اختيار المورد أو حساب المصروف",
     "deleteConfirm": "هل أنت متأكد من حذف",
     "totalCashReceipts": "إجمالي القبض النقدي",
-    "totalBankReceipts": "إجمالي القبض البنكي",
+    "totalBankReceipts": "إجمالي قبض الحوالات",
     "totalCashPayments": "إجمالي الصرف النقدي",
-    "totalBankPayments": "إجمالي الصرف البنكي",
+    "totalBankPayments": "إجمالي صرف الحوالات",
     "voucherCount": "عدد السندات",
     "deleteReceiptVoucherConfirm": "هل أنت متأكد من حذف سند القبض",
     "deletePaymentVoucherConfirm": "هل أنت متأكد من حذف سند الصرف",
@@ -2114,8 +2113,7 @@
       "productTypes": "أنواع المنتجات",
       "productCategories": "تصنيفات المنتجات",
       "units": "الوحدات",
-      "cashBoxes": "الصناديق والخزائن",
-      "banks": "البنوك والحسابات",
+      "cashBoxes": "النقدية والخزائن",
       "costCenters": "مراكز التكلفة",
       "users": "المستخدمين",
       "roles": "الأدوار والصلاحيات",
@@ -2307,28 +2305,6 @@
       "updated": "تم تحديث الوحدة بنجاح",
       "deleted": "تم حذف الوحدة بنجاح"
     },
-    "banks": {
-      "title": "البنوك والحسابات",
-      "subtitle": "إدارة الحسابات البنكية",
-      "newBank": "حساب بنكي جديد",
-      "editBank": "تعديل الحساب",
-      "accountName": "اسم الحساب",
-      "bankName": "اسم البنك",
-      "accountNumber": "رقم الحساب",
-      "iban": "الآيبان (IBAN)",
-      "openingBalance": "الرصيد الافتتاحي",
-      "currentBalance": "الرصيد الحالي",
-      "accountingAccount": "الحساب المحاسبي",
-      "branch": "الفرع",
-      "emptyMessage": "لا توجد حسابات بنكية",
-      "deleteTitle": "حذف الحساب البنكي",
-      "deleteMessage": "هل أنت متأكد من حذف هذا الحساب البنكي؟",
-      "yes": "نعم",
-      "no": "لا",
-      "created": "تم إنشاء الحساب البنكي بنجاح",
-      "updated": "تم تحديث الحساب البنكي بنجاح",
-      "deleted": "تم حذف الحساب البنكي بنجاح"
-    },
     "sequences": {
       "title": "الترقيم المتسلسل",
       "subtitle": "إدارة أرقام المستندات التلقائية لجميع العمليات",
@@ -2419,8 +2395,8 @@
       "deleted": "تم حذف التصنيف بنجاح"
     },
     "cashBoxes": {
-      "title": "الصناديق والخزائن",
-      "subtitle": "إدارة صناديق النقدية والخزائن",
+      "title": "النقدية والخزائن",
+      "subtitle": "إدارة النقدية والخزائن وربطها بالحسابات",
       "new": "صندوق جديد",
       "editTitle": "تعديل الصندوق",
       "newTitle": "صندوق جديد",
@@ -2671,11 +2647,6 @@
       "search": "بحث في BOM...",
       "empty": "لا توجد قوائم مواد",
       "version": "الإصدار"
-    },
-    "bank": {
-      "placeholder": "اختر البنك...",
-      "search": "بحث في البنوك...",
-      "empty": "لا يوجد بنوك"
     }
   },
   "currencies": {
@@ -2736,20 +2707,6 @@
     },
     "updateError": {
       "updateError": "فشل تحديث الوحدة"
-    }
-  },
-  "banks": {
-    "deleteError": {
-      "deleteError": "فشل حذف الحساب البنكي"
-    },
-    "createError": {
-      "createError": "فشل إنشاء الحساب البنكي"
-    },
-    "updateError": {
-      "updateError": "فشل تحديث الحساب البنكي"
-    },
-    "accountNameRequired": {
-      "accountNameRequired": "اسم الحساب مطلوب"
     }
   },
   "cashBoxes": {

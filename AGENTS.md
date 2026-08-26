@@ -3586,5 +3586,27 @@ npx drizzle-kit migrate
 - **اختبارات (+22)**: 21 للأداة الجديدة (بما فيها regression الشهر المُزاح والعملة الملتهمة) + تكامل عبر executeToolCall يثبت وصول القيم المنظفة للأداة
 - **القواعد الذهبية**: طبّع عند نقطة اختناق واحدة لا في كل أداة | Map للأسماء المتعددة الصيغ لا مصفوفة مفهرسة | alternation في regex: الأطول أولاً | الاختبارات أول من يكشف انزياح الفهارس — اكتبها قبل أن تعتقد الكود صحيحاً
 
-*آخر تحديث: 2026-08-25 | الإصدار: maghzaccount-pro v0.2.0*
+### المرحلة 62 (v0.4.9): توحيد النقدية — حذف البنوك وإبقاء الخزائن باسم «النقدية والخزائن»
+- **القرار المعماري**: البنوك ككيان مستقل أُلغيت؛ الخزائن (cash_boxes) هي مفهوم موقع الدفع الوحيد، وكل خزنة مرتبطة بحساب دفتري عبر `account_id` فالترحيل المحاسبي يذهب إلى **حساب الخزنة المختارة نفسه** (أفضل ممارسة: كل خزنة تعكس رصيدها الحقيقي في الدفتر) بدل hardcode default_cash/default_bank
+- **Migration 0002_drop_banks_unify_cash.sql**:
+  1. Backfill: سندات بطريقة 'bank' بلا خزنة ← تُوجَّه لأول خزنة نشطة قبل إسقاط الأعمدة (لا سند يفقد موقعه)
+  2. `DROP COLUMN bank_account_id` من 8 جداول (سندات + 6 مستندات)
+  3. `DROP TABLE banks` + تنظيف `default_accounts` rows ذات function_key='default_bank'
+- **القيم الداخلية**: `payment_method` يبقى 'cash'|'bank'|'check' (لا هجرة بيانات) — 'bank' يعنى تحويل/محفظة؛ التسميات الظاهرة فقط تتغير
+- **النطاق (~30 ملفاً)**:
+  - Schemas: حذف جدول banks + bankAccountId من vouchers/sales/purchases
+  - Core: types(Bank)، api(getBanks/createBank/updateBank/deleteBank + default_bank من القوالب)، useSettings(useBanks)، useDefaultPaymentAccounts(خزنة واحدة)، validation(8 حقول)
+  - Accounting: INSERT/UPDATE السندات بدون bank_account_id؛ مولدات القيود تستخدم cashBoxId→account_id مع fallback default_cash؛ sales/purchases API (6 INSERTs مع إعادة ترقيم placeholders + SET + mappers)
+  - UI: حذف BanksPage/BankSelect/route/sidebar؛ صفحتا السندات تعرضان CashBoxSelect لكل الطرق؛ 6 صفحات مستندات بخزنة واحدة
+  - AI: حذف search.banks + settings.create/update/delete_bank + نوع 'bank' من entityResolver/AutoCompleteDropdown/typeLabel
+  - Electron: dbHandler (RPC SQL للفواتير + قواعد الجداول + بذور البنوك/11102/default_bank)، seedDemoData (BANKS + قسم 6 + مواقع سندات←خزنة)، resetDatabase
+  - i18n: حذف namespaces البنوك؛ sidebar/menu/title ← «النقدية والخزائن/Cash & Treasuries»؛ accounting.bank ← «حوالة / محفظة»
+- **اختبارات**: migrations (+5 لـ0002 وعقد DROP المقيّد بالكيان المتقاعد)، seedDemoData/paletteItems/useSettings/core-api/JE-generator/purchases-api/pgliteSmoke محدّثة | **1103 ✓** | e2e sales+payment 10/10 ✓ | db:reset:force على PG حقيقي ✓ (banks=null, 0 أعمدة متبقية)
+- **قواعد ذهبية مضافة**:
+  - **لا تعدّل ملفات UTF-8 عربية عبر PowerShell Get-Content/Set-Content** — بدون BOM تُقرأ ANSI ويفسد كل العربية (حدث فعلياً: 84 سطر mojibake في journalEntryGenerator). استخدم node fs أو Edit-tool دائماً
+  - **إسقاط عمود FK-ish يستوجب backfill قبل الإسقاط** (سندات bank→أول خزنة) حتى لا تفقد البيانات المرجعية
+  - **إزالة placeholder تتطلب إعادة ترقيم كل ما بعدها** في positional params ($18→...) — عدّ الأعمدة = عدّ القيم في كل INSERT بعد أي حذف
+  - **ترحيل على حساب الموقع المختار لا حساب افتراضي ثابت** عندما يحمل الموقع account_id
+
+*آخر تحديث: 2026-08-26 | الإصدار: maghzaccount-pro v0.2.0*
 

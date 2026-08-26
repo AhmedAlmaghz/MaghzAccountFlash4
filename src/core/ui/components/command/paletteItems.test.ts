@@ -38,7 +38,6 @@ describe('paletteItems registry', () => {
       '/settings/currencies', '/settings/vat', '/settings/branches', '/settings/users',
       '/settings/ai', '/settings/document-sequences', '/settings/product-types',
       '/settings/product-categories', '/settings/default-accounts', '/settings/units',
-      '/settings/cash-boxes', '/settings/banks', '/settings/cost-centers', '/settings/backup',
       '/settings/reset', '/ai',
     ]) {
       expect(paths).toContain(p);

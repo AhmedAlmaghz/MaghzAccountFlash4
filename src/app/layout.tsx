@@ -197,7 +197,6 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.settings.productCategories', path: '/settings/product-categories' },
       { labelKey: 'sidebar.settings.units', path: '/settings/units' },
       { labelKey: 'sidebar.settings.cashBoxes', path: '/settings/cash-boxes' },
-      { labelKey: 'sidebar.settings.banks', path: '/settings/banks' },
       { labelKey: 'sidebar.settings.costCenters', path: '/settings/cost-centers' },
       { labelKey: 'sidebar.settings.users', path: '/settings/users' },
       { labelKey: 'sidebar.settings.roles', path: '/roles' },

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
@@ -16,7 +16,6 @@ const DOC_ID = '00000000-0000-0000-0000-000000000010';
 const TYPE_ID = '00000000-0000-0000-0000-000000000020';
 const UNIT_ID = '00000000-0000-0000-0000-000000000030';
 const CASHBOX_ID = '00000000-0000-0000-0000-000000000040';
-const BANK_ID = '00000000-0000-0000-0000-000000000050';
 const CC_ID = '00000000-0000-0000-0000-000000000060';
 const PA_ID = '00000000-0000-0000-0000-000000000070';
 const DA_ID = '00000000-0000-0000-0000-000000000080';
@@ -92,7 +91,7 @@ describe('settingsApi.getProductTypes', () => {
   it('returns product types ordered by name_ar', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: TYPE_ID, name_ar: 'منتج', appears_in_sales: true, is_active: true }],
+      rows: [{ id: TYPE_ID, name_ar: 'ظ…ظ†طھط¬', appears_in_sales: true, is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -110,7 +109,7 @@ describe('settingsApi.getProductTypes', () => {
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const result = await settingsApi.createProductType({
-      companyId: COMPANY_ID, nameAr: 'منتج', appearsInSales: true, appearsInPurchases: true,
+      companyId: COMPANY_ID, nameAr: 'ظ…ظ†طھط¬', appearsInSales: true, appearsInPurchases: true,
       appearsInInventory: true, appearsInManufacturing: false, hasStockTracking: true,
       hasBOM: false, isActive: true,
     });
@@ -138,7 +137,7 @@ describe('settingsApi.getUnits', () => {
   it('returns active units ordered by name_ar', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: UNIT_ID, name_ar: 'قطعة', is_active: true }],
+      rows: [{ id: UNIT_ID, name_ar: 'ظ‚ط·ط¹ط©', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -155,7 +154,7 @@ describe('settingsApi.getCashBoxes', () => {
   it('returns active cash boxes ordered by name', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: CASHBOX_ID, name: 'الصندوق الرئيسي', is_active: true }],
+      rows: [{ id: CASHBOX_ID, name: 'ط§ظ„طµظ†ط¯ظˆظ‚ ط§ظ„ط±ط¦ظٹط³ظٹ', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -170,7 +169,7 @@ describe('settingsApi.getCashBoxes', () => {
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const result = await settingsApi.createCashBox({
-      companyId: COMPANY_ID, name: 'صندوق', code: 'CB1', currentBalance: 1000, isActive: true,
+      companyId: COMPANY_ID, name: 'طµظ†ط¯ظˆظ‚', code: 'CB1', currentBalance: 1000, isActive: true,
     });
     expect(result.success).toBe(true);
     const [sql, params] = adapter.query.mock.calls[0];
@@ -179,26 +178,11 @@ describe('settingsApi.getCashBoxes', () => {
   });
 });
 
-describe('settingsApi.getBanks', () => {
-  it('returns active banks', async () => {
-    const adapter = makeMockAdapter(async () => ({
-      success: true,
-      rows: [{ id: BANK_ID, name: 'البنك الأهلي', is_active: true }],
-    }));
-    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
-
-    const res = await settingsApi.getBanks(COMPANY_ID);
-    expect(res.success).toBe(true);
-    const [sql] = adapter.query.mock.calls[0];
-    expect(sql).toMatch(/FROM banks/);
-  });
-});
-
 describe('settingsApi.getCostCenters', () => {
   it('returns active cost centers ordered by name_ar', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: CC_ID, name_ar: 'المبيعات', is_active: true }],
+      rows: [{ id: CC_ID, name_ar: 'ط§ظ„ظ…ط¨ظٹط¹ط§طھ', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -213,7 +197,7 @@ describe('settingsApi.getPayrollComponents', () => {
   it('returns active payroll components ordered by type, name_ar', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: PA_ID, name_ar: 'البدل', type: 'earning', is_active: true }],
+      rows: [{ id: PA_ID, name_ar: 'ط§ظ„ط¨ط¯ظ„', type: 'earning', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -278,7 +262,7 @@ describe('settingsApi.applyDefaultTemplate', () => {
 
     const res = await settingsApi.applyDefaultTemplate(COMPANY_ID, 'trading');
     expect(res.success).toBe(true);
-    expect(queryCount).toBeGreaterThanOrEqual(12);
+    expect(queryCount).toBeGreaterThanOrEqual(11);
   });
 
   it('applies manufacturing and services templates with same 12 accounts', async () => {
@@ -296,7 +280,7 @@ describe('settingsApi.applyDefaultTemplate', () => {
 
     await settingsApi.applyDefaultTemplate(COMPANY_ID, 'manufacturing');
     await settingsApi.applyDefaultTemplate(COMPANY_ID, 'services');
-    expect(totalQueries).toBeGreaterThanOrEqual(24);
+    expect(totalQueries).toBeGreaterThanOrEqual(22);
   });
 });
 

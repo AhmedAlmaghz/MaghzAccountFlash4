@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import {
-  User, Building2, Users, Package, Landmark, Wallet, Banknote,
+  User, Building2, Users, Package, Landmark, Wallet,
   FileText, FileCheck, Receipt, ArrowUpDown,
   Wrench, GitBranch, Target, Diamond,
   type LucideIcon,
@@ -25,7 +25,6 @@ const ENTITY_TYPE_CONFIG: Record<EntityType, EntityTypeConfig> = {
   product:       { icon: Package,     color: 'text-amber-600',      bgColor: 'bg-amber-50 dark:bg-amber-900/20' },
   warehouse:     { icon: Building2,   color: 'text-stone-600',      bgColor: 'bg-stone-50 dark:bg-stone-900/20' },
   cashBox:       { icon: Wallet,      color: 'text-emerald-600',    bgColor: 'bg-emerald-50 dark:bg-emerald-900/20' },
-  bank:          { icon: Banknote,    color: 'text-indigo-600',     bgColor: 'bg-indigo-50 dark:bg-indigo-900/20' },
   invoice:       { icon: FileText,    color: 'text-rose-600',       bgColor: 'bg-rose-50 dark:bg-rose-900/20' },
   purchaseInvoice: { icon: FileCheck, color: 'text-orange-600',     bgColor: 'bg-orange-50 dark:bg-orange-900/20' },
   quotation:     { icon: FileCheck,   color: 'text-violet-600',     bgColor: 'bg-violet-50 dark:bg-violet-900/20' },

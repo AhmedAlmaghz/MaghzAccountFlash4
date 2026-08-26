@@ -28,6 +28,7 @@ export interface PrintDocumentData {
   docNumber: string;
   date: string;
   dueDate?: string;
+  cashBoxName?: string;
   partyName: string;
   partyLabel: string;
   partyTaxNumber?: string;
@@ -48,8 +49,6 @@ export interface PrintDocumentData {
   currency?: string;
   paymentType?: string;
   paymentMethod?: string;
-  bankName?: string;
-  bankAccount?: string;
   checkNumber?: string;
   checkDate?: string;
   createdBy?: string;
@@ -263,14 +262,13 @@ function generateHtml(data: PrintDocumentData): string {
     </div>
   `;
 
-  const paymentInfoHtml = !isStatement && (data.bankName || data.paymentMethod) ? `
+  const paymentInfoHtml = !isStatement && (data.cashBoxName || data.paymentMethod) ? `
     <div style="margin-top:16px">
       <h4 style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid ${color};display:inline-block">معلومات الدفع</h4>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:#4b5563;margin-top:8px">
         ${data.paymentType ? `<div><span style="color:#6b7280">نوع الدفع:</span> ${escapeHtml(data.paymentType)}</div>` : ''}
         ${data.paymentMethod ? `<div><span style="color:#6b7280">طريقة الدفع:</span> ${escapeHtml(data.paymentMethod)}</div>` : ''}
-        ${data.bankName ? `<div><span style="color:#6b7280">البنك:</span> ${escapeHtml(data.bankName)}</div>` : ''}
-        ${data.bankAccount ? `<div><span style="color:#6b7280">رقم الحساب:</span> ${escapeHtml(data.bankAccount)}</div>` : ''}
+        ${data.cashBoxName ? `<div><span style="color:#6b7280">الخزنة:</span> ${escapeHtml(data.cashBoxName)}</div>` : ''}
         ${data.checkNumber ? `<div><span style="color:#6b7280">رقم الشيك:</span> ${escapeHtml(data.checkNumber)}</div>` : ''}
         ${data.checkDate ? `<div><span style="color:#6b7280">تاريخ الشيك:</span> ${escapeHtml(data.checkDate)}</div>` : ''}
       </div>

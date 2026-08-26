@@ -70,7 +70,6 @@ export const createReceiptVoucherSchema = z.object({
   amount: currencyAmountSchema,
   amountApplied: currencyAmountSchema.optional(),
   paymentMethod: z.string().max(50),
-  bankAccountId: uuidSchema.optional(),
   cashBoxId: uuidSchema.optional(),
   checkNumber: z.string().max(50).optional(),
   checkDate: dateSchema.optional(),
@@ -92,7 +91,6 @@ export const createPaymentVoucherSchema = z.object({
   amount: currencyAmountSchema,
   amountApplied: currencyAmountSchema.optional(),
   paymentMethod: z.string().max(50),
-  bankAccountId: uuidSchema.optional(),
   cashBoxId: uuidSchema.optional(),
   checkNumber: z.string().max(50).optional(),
   checkDate: dateSchema.optional(),
@@ -136,7 +134,6 @@ export const createInvoiceSchema = z.object({
   baseCurrencyPaid: currencyAmountSchema.optional(),
   paymentType: z.enum(['cash', 'credit']).optional(),
   cashBoxId: uuidSchema.optional(),
-  bankAccountId: uuidSchema.optional(),
   status: z.enum(['draft', 'posted', 'paid', 'partially_paid', 'cancelled']).default('draft'),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
@@ -161,7 +158,6 @@ export const createQuotationSchema = z.object({
   totalAmount: currencyAmountSchema,
   paymentType: z.enum(['cash', 'credit']).optional(),
   cashBoxId: uuidSchema.optional(),
-  bankAccountId: uuidSchema.optional(),
   status: z.enum(['draft', 'sent', 'accepted', 'rejected', 'converted']).default('draft'),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
@@ -185,7 +181,6 @@ export const createSalesReturnSchema = z.object({
   reason: z.string().max(1000).optional(),
   paymentType: z.enum(['cash', 'credit']).optional(),
   cashBoxId: uuidSchema.optional(),
-  bankAccountId: uuidSchema.optional(),
   status: z.enum(['draft', 'posted', 'cancelled']).default('draft'),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
@@ -228,7 +223,6 @@ export const createPurchaseInvoiceSchema = z.object({
   baseCurrencyPaid: currencyAmountSchema.optional(),
   paymentType: z.enum(['cash', 'credit']).optional(),
   cashBoxId: uuidSchema.optional(),
-  bankAccountId: uuidSchema.optional(),
   status: z.enum(['draft', 'posted', 'paid', 'partially_paid', 'cancelled']).default('draft'),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
@@ -254,7 +248,6 @@ export const createPurchaseOrderSchema = z.object({
   totalAmount: currencyAmountSchema,
   paymentType: z.enum(['cash', 'credit']).optional(),
   cashBoxId: uuidSchema.optional(),
-  bankAccountId: uuidSchema.optional(),
   status: z.enum(['draft', 'sent', 'confirmed', 'received', 'invoiced', 'cancelled']).default('draft'),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
@@ -278,7 +271,6 @@ export const createPurchaseReturnSchema = z.object({
   totalAmount: currencyAmountSchema,
   paymentType: z.enum(['cash', 'credit']).optional(),
   cashBoxId: uuidSchema.optional(),
-  bankAccountId: uuidSchema.optional(),
   status: z.enum(['draft', 'posted', 'cancelled']).default('draft'),
   notes: z.string().max(2000).optional(),
   reason: z.string().max(1000).optional(),

@@ -121,7 +121,6 @@ export const paletteItems: PaletteItem[] = [
   { id: 'settings-defaultaccounts', labelKey: 'settings.defaultAccounts.title', path: '/settings/default-accounts', module: 'settings', keywords: ['accounts', 'حسابات'] },
   { id: 'settings-units', labelKey: 'settings.units.title', path: '/settings/units', module: 'settings', keywords: ['units', 'وحدات'] },
   { id: 'settings-cashboxes', labelKey: 'settings.cashBoxes.title', path: '/settings/cash-boxes', module: 'settings', keywords: ['cash', 'صناديق'] },
-  { id: 'settings-banks', labelKey: 'settings.banks.title', path: '/settings/banks', module: 'settings', keywords: ['banks', 'بنوك'] },
   { id: 'settings-costcenters', labelKey: 'settings.costCenters.title', path: '/settings/cost-centers', module: 'settings', keywords: ['cost', 'مراكز'] },
   { id: 'settings-backup', labelKey: 'settings.backup.title', path: '/settings/backup', module: 'settings', keywords: ['backup', 'نسخ'] },
   { id: 'settings-reset', labelKey: 'settings.reset.title', path: '/settings/reset', module: 'settings', keywords: ['reset', 'تهيئة'] },

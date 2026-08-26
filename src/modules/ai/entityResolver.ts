@@ -26,7 +26,7 @@ import * as coreApi from '@/core/api';
 
 export type EntityType =
   | 'account' | 'customer' | 'supplier' | 'employee' | 'product'
-  | 'warehouse' | 'cashBox' | 'bank'
+  | 'warehouse' | 'cashBox'
   | 'invoice' | 'purchaseInvoice' | 'quotation'
   | 'receiptVoucher' | 'paymentVoucher'
   | 'journalEntry' | 'workOrder' | 'bom'
@@ -242,18 +242,6 @@ async function searchCashBoxes(query: string, companyId: string): Promise<Entity
   return rankMatches(query, cached);
 }
 
-async function searchBanks(query: string, companyId: string): Promise<EntityMatch[]> {
-  const key = `banks:${companyId}`;
-  let cached = cacheGet(key);
-  if (!cached) {
-    const res = await coreApi.getBanks(companyId);
-    if (!res.success || !res.data) return [];
-    cached = res.data.map((b) => toMatch(b, 'bank', 'بنك', { accountNumber: 'accountNumber', balance: 'balance' }));
-    cacheSet(key, cached);
-  }
-  return rankMatches(query, cached);
-}
-
 async function searchInvoices(query: string, companyId: string): Promise<EntityMatch[]> {
   const key = `invoices:${companyId}`;
   let cached = cacheGet(key);
@@ -409,7 +397,6 @@ const ENTITY_SEARCHERS: EntitySearcherDef[] = [
   { type: 'product', labelAr: 'منتج', searcher: searchProducts },
   { type: 'warehouse', labelAr: 'مستودع', searcher: searchWarehouses },
   { type: 'cashBox', labelAr: 'خزنة', searcher: searchCashBoxes },
-  { type: 'bank', labelAr: 'بنك', searcher: searchBanks },
   { type: 'invoice', labelAr: 'فاتورة مبيعات', searcher: searchInvoices },
   { type: 'purchaseInvoice', labelAr: 'فاتورة مشتريات', searcher: searchPurchaseInvoices },
   { type: 'quotation', labelAr: 'عرض سعر', searcher: searchQuotations },

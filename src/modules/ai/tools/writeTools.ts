@@ -22,9 +22,6 @@ import {
   createCashBox,
   updateCashBox,
   deleteCashBox,
-  createBank,
-  updateBank,
-  deleteBank,
   createCostCenter,
   updateCostCenter,
   deleteCostCenter,
@@ -2976,107 +2973,6 @@ export const writeTools: ToolDefinition[] = [
       const res = await deleteCashBox(cashBoxId, ctx.companyId);
       if (!res.success) return { error: res.error || 'فشل حذف الصندوق النقدي' };
       return { deleted: true, cashBoxId };
-    },
-  },
-
-  // ─── Settings: Create Bank ───────────────────────────────────────────
-  {
-    name: 'settings.create_bank',
-    labelAr: 'إضافة بنك',
-    descriptionAr: 'يُضيف بنك جديد — الاسم (عربي/إنجليزي)، رقم الحساب، رقم IBAN، الفرع، الرصيد الافتتاحي.',
-    permission: 'settings.view',
-    dangerLevel: 'write',
-    parameters: {
-      type: 'object',
-      properties: {
-        nameAr: { type: 'string', description: 'اسم البنك بالعربية' },
-        nameEn: { type: 'string', description: 'اسم البنك بالإنجليزية' },
-        accountNumber: { type: 'string', description: 'رقم الحساب' },
-        iban: { type: 'string', description: 'رقم IBAN' },
-        branchName: { type: 'string', description: 'اسم الفرع' },
-        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي', default: 0 },
-        isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
-      },
-      required: ['nameAr'],
-    },
-    summarizeArgs: (a) => `إضافة بنك: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
-    execute: async (args) => {
-      const nameAr = str(args.nameAr);
-      if (!nameAr) return { error: 'nameAr مطلوب' };
-      const data: Record<string, unknown> = { nameAr };
-      if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      if (args.accountNumber !== undefined) data.accountNumber = str(args.accountNumber);
-      if (args.iban !== undefined) data.iban = str(args.iban);
-      if (args.branchName !== undefined) data.branchName = str(args.branchName);
-      data.openingBalance = args.openingBalance !== undefined ? num(args.openingBalance) : 0;
-      data.isActive = args.isActive !== undefined ? Boolean(args.isActive) : true;
-      const res = await createBank(data as Parameters<typeof createBank>[0]);
-      if (!res.success) return { error: res.error || 'فشل إضافة البنك' };
-      return { created: true, id: res.id };
-    },
-  },
-
-  // ─── Settings: Update Bank ───────────────────────────────────────────
-  {
-    name: 'settings.update_bank',
-    labelAr: 'تعديل بنك',
-    descriptionAr: 'يُحدّث بنك — الاسم، رقم الحساب، IBAN، الفرع، الرصيد، التفعيل. استخدم settings.get_banks أولاً.',
-    permission: 'settings.view',
-    dangerLevel: 'write',
-    parameters: {
-      type: 'object',
-      properties: {
-        bankId: { type: 'string', description: 'معرف البنك (UUID)' },
-        nameAr: { type: 'string', description: 'الاسم بالعربية' },
-        nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
-        accountNumber: { type: 'string', description: 'رقم الحساب' },
-        iban: { type: 'string', description: 'رقم IBAN' },
-        branchName: { type: 'string', description: 'اسم الفرع' },
-        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي' },
-        isActive: { type: 'boolean', description: 'حالة التفعيل' },
-      },
-      required: ['bankId'],
-    },
-    summarizeArgs: (a) => `تعديل بنك: ${String((a as Record<string, unknown>).bankId || '').slice(0, 8)}…`,
-    execute: async (args, ctx) => {
-      const bankId = str(args.bankId);
-      if (!bankId) return { error: 'bankId مطلوب — استخدم settings.get_banks أولاً' };
-      const data: Record<string, unknown> = {};
-      if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
-      if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      if (args.accountNumber !== undefined) data.accountNumber = str(args.accountNumber);
-      if (args.iban !== undefined) data.iban = str(args.iban);
-      if (args.branchName !== undefined) data.branchName = str(args.branchName);
-      if (args.openingBalance !== undefined) data.openingBalance = num(args.openingBalance);
-      if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
-      if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
-      const res = await updateBank(bankId, data, ctx.companyId);
-      if (!res.success) return { error: res.error || 'فشل تعديل البنك' };
-      return { updated: true, bankId };
-    },
-  },
-
-  // ─── Settings: Delete Bank ───────────────────────────────────────────
-  {
-    name: 'settings.delete_bank',
-    labelAr: 'حذف بنك',
-    descriptionAr: 'يحذف بنك. استخدم settings.get_banks أولاً.',
-    permission: 'settings.view',
-    dangerLevel: 'write',
-    parameters: {
-      type: 'object',
-      properties: {
-        bankId: { type: 'string', description: 'معرف البنك (UUID)' },
-      },
-      required: ['bankId'],
-    },
-    summarizeArgs: (a) => `حذف بنك: ${a.bankId}`,
-    execute: async (args, ctx) => {
-      const bankId = str(args.bankId);
-      if (!bankId) return { error: 'bankId مطلوب — استخدم settings.get_banks أولاً' };
-      const res = await deleteBank(bankId, ctx.companyId);
-      if (!res.success) return { error: res.error || 'فشل حذف البنك' };
-      return { deleted: true, bankId };
     },
   },
 

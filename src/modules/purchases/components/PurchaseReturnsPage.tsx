@@ -7,7 +7,7 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DataTablePro } from '@/core/ui/components/DataTablePro';
-import { SupplierSelect, ProductSelect, CashBoxSelect, BankSelect } from '@/core/ui/components/smart';
+import { SupplierSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseReturnsPaginated, usePurchaseInvoices } from '../hooks/usePurchases';
 import { useAppStore } from '@/core/store';
@@ -37,7 +37,6 @@ interface ReturnForm {
   date: string;
   paymentType: string;
   cashBoxId: string;
-  bankAccountId: string;
   reason: string;
   notes: string;
   lines: ReturnFormLine[];
@@ -57,7 +56,6 @@ const initialForm = (defaultCashBoxId?: string): ReturnForm => ({
   date: new Date().toISOString().split('T')[0],
   paymentType: 'credit',
   cashBoxId: defaultCashBoxId || '',
-  bankAccountId: '',
   reason: '',
   notes: '',
   lines: [initialLine()],
@@ -69,7 +67,7 @@ export const PurchaseReturnsPage: React.FC = () => {
   const activeCompany = useAppStore(state => state.activeCompany);
   const user = useAuthStore(state => state.user);
   const { getNextNumber } = useDocumentSequence();
-  const { defaultCashBoxId, defaultBankId } = useDefaultPaymentAccounts(activeCompany?.id || '');
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const { settings } = useSettings(activeCompany?.id || '');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const returnFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
@@ -132,7 +130,6 @@ export const PurchaseReturnsPage: React.FC = () => {
       date: ret.date,
       paymentType: ret.paymentType || 'credit',
       cashBoxId: ret.cashBoxId || '',
-      bankAccountId: ret.bankAccountId || '',
       reason: ret.reason || '',
       notes: ret.notes || '',
       lines: ret.lines.length > 0
@@ -183,7 +180,6 @@ export const PurchaseReturnsPage: React.FC = () => {
       status: 'draft' as const,
       paymentType: form.paymentType,
       cashBoxId: form.paymentType === 'cash' ? (form.cashBoxId || undefined) : undefined,
-      bankAccountId: form.paymentType === 'cash' ? (form.bankAccountId || undefined) : undefined,
       notes: form.notes,
       reason: form.reason,
       lines: form.lines.map(l => ({
@@ -480,7 +476,6 @@ export const PurchaseReturnsPage: React.FC = () => {
                   ...prev,
                   paymentType: newType,
                   cashBoxId: newType === 'cash' ? (prev.cashBoxId || defaultCashBoxId || '') : '',
-                  bankAccountId: newType === 'cash' ? (prev.bankAccountId || defaultBankId || '') : '',
                 }));
               }}
               aria-label={t('purchases.return.paymentType')}
@@ -495,13 +490,6 @@ export const PurchaseReturnsPage: React.FC = () => {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
                 <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={v => setForm(prev => ({ ...prev, cashBoxId: v || '' }))} />
                 {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.bankAccount')}</label>
-                <BankSelect companyId={activeCompany?.id || ''} value={form.bankAccountId || ''} onChange={v => setForm(prev => ({ ...prev, bankAccountId: v || '' }))} />
-                {defaultBankId && form.bankAccountId === defaultBankId && (
                   <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
                 )}
               </div>

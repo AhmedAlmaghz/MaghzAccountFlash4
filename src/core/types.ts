@@ -53,19 +53,6 @@ export interface CashBox {
   currentBalance: number;
 }
 
-export interface Bank {
-  id: string;
-  companyId: string;
-  name: string;
-  bankName?: string;
-  accountNumber?: string;
-  iban?: string;
-  accountId?: string;
-  branchId?: string;
-  isActive: boolean;
-  currentBalance: number;
-}
-
 export interface CostCenter {
   id: string;
   companyId: string;
@@ -105,7 +92,6 @@ export interface DefaultAccount {
 
 export const DEFAULT_ACCOUNT_FUNCTIONS: { key: string; labelAr: string; labelEn: string; required: boolean }[] = [
   { key: 'default_cash', labelAr: 'الصندوق الافتراضي', labelEn: 'Default Cash', required: true },
-  { key: 'default_bank', labelAr: 'البنك الافتراضي', labelEn: 'Default Bank', required: true },
   { key: 'default_sales', labelAr: 'مبيعات', labelEn: 'Sales', required: true },
   { key: 'default_cogs', labelAr: 'تكلفة البضاعة المباعة', labelEn: 'COGS', required: true },
   { key: 'default_inventory', labelAr: 'المخزون', labelEn: 'Inventory', required: true },

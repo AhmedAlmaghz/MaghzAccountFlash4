@@ -641,13 +641,12 @@ export const salesApi = {
         data.status,
         data.paymentType || 'credit',
         data.cashBoxId || null,
-        data.bankAccountId || null,
         data.notes,
         safeUserId(_userId),
         safeUserId(_userId),
         JSON.stringify(data.attachments ?? []),
       ];
-      let sql = `WITH inv AS (INSERT INTO sales_invoices (id,company_id,invoice_number,customer_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by,attachments) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::numeric,$9::numeric,$10::numeric,$11::numeric,$12::varchar,$13::numeric,$14::numeric,$15::numeric,$16::varchar,$17,$18::uuid,$19::uuid,$20,$21::uuid,$22::uuid,$23::jsonb) RETURNING id)`;
+      let sql = `WITH inv AS (INSERT INTO sales_invoices (id,company_id,invoice_number,customer_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,notes,created_by,updated_by,attachments) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::numeric,$9::numeric,$10::numeric,$11::numeric,$12::varchar,$13::numeric,$14::numeric,$15::numeric,$16::varchar,$17,$18::uuid,$19,$20::uuid,$21::uuid,$22::jsonb) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -714,7 +713,6 @@ export const salesApi = {
       if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
-      if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       if (data.attachments !== undefined) { fields.push(`attachments = $${idx++}::jsonb`); values.push(JSON.stringify(data.attachments ?? [])); }
       fields.push(`updated_by = $${idx++}::uuid`);
@@ -1026,8 +1024,8 @@ export const salesApi = {
       }
       const adapter = await getDbAdapter();
       const quotationId = crypto.randomUUID();
-      const params: unknown[] = [quotationId, data.companyId, data.quotationNumber, data.customerId, data.date, data.expiryDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.bankAccountId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
-      let sql = `WITH quo AS (INSERT INTO quotations (id,company_id,quotation_number,customer_id,date,expiry_date,total_amount,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::varchar,$9,$10::uuid,$11::uuid,$12,$13::uuid,$14::uuid) RETURNING id)`;
+      const params: unknown[] = [quotationId, data.companyId, data.quotationNumber, data.customerId, data.date, data.expiryDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
+      let sql = `WITH quo AS (INSERT INTO quotations (id,company_id,quotation_number,customer_id,date,expiry_date,total_amount,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::varchar,$9,$10::uuid,$11,$12::uuid,$13::uuid) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -1067,7 +1065,6 @@ export const salesApi = {
       if (data.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(data.status); }
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
-      if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
@@ -1271,8 +1268,8 @@ export const salesApi = {
       }
       const adapter = await getDbAdapter();
       const returnId = crypto.randomUUID();
-      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId, data.customerId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.reason, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.bankAccountId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
-      let sql = `WITH ret AS (INSERT INTO sales_returns (id,company_id,return_number,invoice_id,customer_id,date,subtotal,vat_amount,total_amount,reason,status,payment_type,cash_box_id,bank_account_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7,$8,$9,$10,$11,$12,$13::uuid,$14::uuid,$15,$16::uuid,$17::uuid) RETURNING id)`;
+      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId, data.customerId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.reason, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
+      let sql = `WITH ret AS (INSERT INTO sales_returns (id,company_id,return_number,invoice_id,customer_id,date,subtotal,vat_amount,total_amount,reason,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7,$8,$9,$10,$11,$12,$13::uuid,$14,$15::uuid,$16::uuid) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -1315,7 +1312,6 @@ export const salesApi = {
       if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
-      if (data.bankAccountId !== undefined) { fields.push(`bank_account_id = $${idx++}::uuid`); values.push(data.bankAccountId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
@@ -1455,7 +1451,6 @@ function mapInvoiceRow(row: Record<string, unknown>): SalesInvoice {
     baseCurrencyPaid: row.base_currency_paid !== undefined ? Number(row.base_currency_paid) : 0,
     paymentType: String(row.payment_type || 'credit'),
     cashBoxId: row.cash_box_id ? String(row.cash_box_id) : undefined,
-    bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
     status: String(row.status) as SalesInvoice['status'],
     notes: row.notes ? String(row.notes) : undefined,
     attachments: parseJsonAttachments(row.attachments),
@@ -1496,7 +1491,6 @@ function mapQuotationRow(row: Record<string, unknown>): Quotation {
     totalAmount: Number(row.total_amount) || 0,
     paymentType: String(row.payment_type || 'credit'),
     cashBoxId: row.cash_box_id ? String(row.cash_box_id) : undefined,
-    bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
     status: String(row.status) as Quotation['status'],
     notes: row.notes ? String(row.notes) : undefined,
     lines: [],
@@ -1536,7 +1530,6 @@ function mapReturnRow(row: Record<string, unknown>): SalesReturn {
     reason: String(row.reason),
     paymentType: String(row.payment_type || 'credit'),
     cashBoxId: row.cash_box_id ? String(row.cash_box_id) : undefined,
-    bankAccountId: row.bank_account_id ? String(row.bank_account_id) : undefined,
     status: String(row.status) as SalesReturn['status'],
     notes: row.notes ? String(row.notes) : undefined,
     lines: [],

@@ -53,7 +53,6 @@ export interface SalesInvoice {
   baseCurrencyPaid?: number;
   paymentType?: string;
   cashBoxId?: string;
-  bankAccountId?: string;
   status: 'draft' | 'posted' | 'paid' | 'partially_paid' | 'cancelled';
   notes?: string;
   attachments?: InvoiceAttachment[];
@@ -92,7 +91,6 @@ export interface Quotation {
   totalAmount: number;
   paymentType?: string;
   cashBoxId?: string;
-  bankAccountId?: string;
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'converted';
   notes?: string;
   lines: QuotationLine[];
@@ -130,7 +128,6 @@ export interface SalesReturn {
   reason: string;
   paymentType?: string;
   cashBoxId?: string;
-  bankAccountId?: string;
   status: 'draft' | 'posted' | 'cancelled';
   notes?: string;
   lines: SalesReturnLine[];

@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import * as settingsApi from '../api';
-import type { DocumentSequence, ProductType, Unit, CashBox, Bank, CostCenter, PayrollComponent, DefaultAccount } from '../types';
+import type { DocumentSequence, ProductType, Unit, CashBox, CostCenter, PayrollComponent, DefaultAccount } from '../types';
 
-// ─── Document Sequences ───────────────────────────────────────────────────────
+// â”€â”€â”€ Document Sequences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function useDocumentSequences(companyId: string) {
   const [sequences, setSequences] = useState<DocumentSequence[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,7 +37,7 @@ export function useDocumentSequences(companyId: string) {
   return { sequences, isLoading, update, getNextNumber, peekNextNumber };
 }
 
-// ─── Product Types ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Product Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function useProductTypes(companyId: string): {
   types: ProductType[];
   isLoading: boolean;
@@ -80,7 +80,7 @@ export function useProductTypes(companyId: string): {
   return { types, isLoading, create, update, remove };
 }
 
-// ─── Units
+// â”€â”€â”€ Units
 export function useUnits(companyId: string) {
   const [units, setUnits] = useState<Unit[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -117,7 +117,7 @@ export function useUnits(companyId: string) {
   return { units, isLoading, create, update, remove };
 }
 
-// ─── Cash Boxes ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function useCashBoxes(companyId: string) {
   const [boxes, setBoxes] = useState<CashBox[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -154,44 +154,7 @@ export function useCashBoxes(companyId: string) {
   return { boxes, isLoading, create, update, remove };
 }
 
-// ─── Banks ────────────────────────────────────────────────────────────────────
-export function useBanks(companyId: string) {
-  const [banks, setBanks] = useState<Bank[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!companyId) return;
-    async function load() {
-      setIsLoading(true);
-      const result = await settingsApi.getBanks(companyId);
-      if (result.success && result.data) setBanks(result.data);
-      setIsLoading(false);
-    }
-    load();
-  }, [companyId]);
-
-  const create = useCallback(async (data: Omit<Bank, 'id'>) => {
-    const result = await settingsApi.createBank(data);
-    if (result.success && result.id) setBanks(prev => [...prev, { ...data, id: result.id! }]);
-    return result;
-  }, []);
-
-  const update = useCallback(async (id: string, data: Partial<Bank>) => {
-    const result = await settingsApi.updateBank(id, data, companyId);
-    if (result.success) setBanks(prev => prev.map(b => b.id === id ? { ...b, ...data } : b));
-    return result;
-  }, [companyId]);
-
-  const remove = useCallback(async (id: string) => {
-    const result = await settingsApi.deleteBank(id, companyId);
-    if (result.success) setBanks(prev => prev.filter(b => b.id !== id));
-    return result;
-  }, [companyId]);
-
-  return { banks, isLoading, create, update, remove };
-}
-
-// ─── Cost Centers ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Cost Centers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function useCostCenters(companyId: string) {
   const [centers, setCenters] = useState<CostCenter[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -228,7 +191,7 @@ export function useCostCenters(companyId: string) {
   return { centers, isLoading, create, update, remove };
 }
 
-// ─── Payroll Components ───────────────────────────────────────────────────────
+// â”€â”€â”€ Payroll Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function usePayrollComponents(companyId: string) {
   const [components, setComponents] = useState<PayrollComponent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -259,7 +222,7 @@ export function usePayrollComponents(companyId: string) {
   return { components, isLoading, create, update };
 }
 
-// ─── Default Accounts ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Default Accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function useDefaultAccounts(companyId: string) {
   const [accounts, setAccounts] = useState<DefaultAccount[]>([]);
   const [isLoading, setIsLoading] = useState(false);

@@ -107,7 +107,6 @@ const ProductCategoriesPage = React.lazy(() => import('@/modules/settings/compon
 const DefaultAccountsPage = React.lazy(() => import('@/modules/settings/components/DefaultAccountsPage'));
 const UnitsPage = React.lazy(() => import('@/modules/settings/components/UnitsPage'));
 const CashBoxesPage = React.lazy(() => import('@/modules/settings/components/CashBoxesPage'));
-const BanksPage = React.lazy(() => import('@/modules/settings/components/BanksPage'));
 const CostCentersPage = React.lazy(() => import('@/modules/settings/components/CostCentersPage'));
 const DatabaseSettingsPage = React.lazy(() => import('@/modules/settings/components/DatabaseSettingsPage'));
 
@@ -284,7 +283,6 @@ export const AppRouter: React.FC = () => {
                 <Route path="default-accounts" element={withSuspense(DefaultAccountsPage)} />
                 <Route path="units" element={withSuspense(UnitsPage)} />
                 <Route path="cash-boxes" element={withSuspense(CashBoxesPage)} />
-                <Route path="banks" element={withSuspense(BanksPage)} />
                 <Route path="cost-centers" element={withSuspense(CostCentersPage)} />
                 <Route path="database" element={withSuspense(DatabaseSettingsPage)} />
                 <Route path="users" element={withSuspense(UsersSettingsPage)} />

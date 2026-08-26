@@ -111,7 +111,6 @@ describe('pglite seed smoke (node)', () => {
     expect(await counts('product_types')).toBeGreaterThanOrEqual(1);
     expect(await counts('units')).toBeGreaterThanOrEqual(1);
     expect(await counts('cost_centers')).toBeGreaterThanOrEqual(1);
-    expect(await counts('banks')).toBeGreaterThanOrEqual(1);
     expect(await counts('cash_boxes')).toBeGreaterThanOrEqual(1);
     expect(await counts('default_accounts')).toBeGreaterThanOrEqual(1);
     expect(await counts('product_categories')).toBeGreaterThanOrEqual(1);

@@ -18,10 +18,6 @@ vi.mock('../api', () => ({
   createCashBox: vi.fn(),
   updateCashBox: vi.fn(),
   deleteCashBox: vi.fn(),
-  getBanks: vi.fn(),
-  createBank: vi.fn(),
-  updateBank: vi.fn(),
-  deleteBank: vi.fn(),
   getCostCenters: vi.fn(),
   createCostCenter: vi.fn(),
   updateCostCenter: vi.fn(),
@@ -40,7 +36,6 @@ import {
   useProductTypes,
   useUnits,
   useCashBoxes,
-  useBanks,
   useCostCenters,
   useDefaultAccounts,
 } from '../hooks/useSettings';
@@ -188,28 +183,6 @@ describe('useCashBoxes', () => {
     });
 
     expect(result.current.boxes[0].name).toBe('صندوق جديد');
-  });
-});
-
-describe('useBanks', () => {
-  it('loads banks and removes one', async () => {
-    vi.mocked(settingsApi.getBanks).mockResolvedValue({
-      success: true,
-      data: [{ id: 'b1' }, { id: 'b2' }] as never,
-    });
-    vi.mocked(settingsApi.deleteBank).mockResolvedValue({ success: true });
-
-    const { result } = renderHook(() => useBanks(COMPANY_ID));
-    await act(async () => { await Promise.resolve(); });
-
-    expect(result.current.banks).toHaveLength(2);
-
-    await act(async () => {
-      await result.current.remove('b1');
-    });
-
-    expect(result.current.banks).toHaveLength(1);
-    expect(result.current.banks[0].id).toBe('b2');
   });
 });
 

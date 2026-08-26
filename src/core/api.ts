@@ -1,9 +1,9 @@
-import { getDbAdapter } from '@/core/database/adapters';
+﻿import { getDbAdapter } from '@/core/database/adapters';
 import { mapRows } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
-import type { DocumentSequence, ProductType, Unit, CashBox, Bank, CostCenter, PayrollComponent, DefaultAccount } from './types';
+import type { DocumentSequence, ProductType, Unit, CashBox, CostCenter, PayrollComponent, DefaultAccount } from './types';
 
-// ─── Document Sequences ───────────────────────────────────────────────────────
+// â”€â”€â”€ Document Sequences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getDocumentSequences(companyId: string): Promise<{ success: boolean; data?: DocumentSequence[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM document_sequences WHERE company_id = $1 ORDER BY document_type', [companyId]);
@@ -145,7 +145,7 @@ export async function peekNextDocumentNumber(companyId: string, documentType: st
   return { success: true, number: formatSequenceNumber(previewSeq) };
 }
 
-// ─── Product Types ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Product Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getProductTypes(companyId: string): Promise<{ success: boolean; data?: ProductType[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM product_types WHERE company_id = $1 ORDER BY name_ar', [companyId]);
@@ -177,7 +177,7 @@ export async function deleteProductType(id: string, companyId: string): Promise<
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// ─── Units ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Units â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getUnits(companyId: string): Promise<{ success: boolean; data?: Unit[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM units WHERE company_id = $1 AND is_active = true ORDER BY name_ar', [companyId]);
@@ -208,7 +208,7 @@ export async function deleteUnit(id: string, companyId: string): Promise<{ succe
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// ─── Cash Boxes ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getCashBoxes(companyId: string): Promise<{ success: boolean; data?: CashBox[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM cash_boxes WHERE company_id = $1 AND is_active = true ORDER BY name', [companyId]);
@@ -233,45 +233,14 @@ export async function updateCashBox(id: string, data: Partial<CashBox>, companyI
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// ─── Banks ────────────────────────────────────────────────────────────────────
-export async function getBanks(companyId: string): Promise<{ success: boolean; data?: Bank[]; error?: string }> {
-  const adapter = await getDbAdapter();
-  const result = await adapter.query('SELECT * FROM banks WHERE company_id = $1 AND is_active = true ORDER BY name', [companyId]);
-  return result.success ? { success: true, data: mapRows<Bank>(result.rows) } : { success: false, error: result.error };
-}
-
-export async function createBank(data: Omit<Bank, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
-  const adapter = await getDbAdapter();
-  const result = await adapter.query<{ id: string }>(
-    'INSERT INTO banks (company_id, name, bank_name, account_number, iban, account_id, branch_id, is_active, current_balance, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id',
-    [data.companyId, data.name, data.bankName, data.accountNumber, data.iban, data.accountId, data.branchId, data.isActive, data.currentBalance, safeUserId(_userId), safeUserId(_userId)]
-  );
-  return result.success && result.rows?.[0] ? { success: true, id: result.rows[0].id } : { success: false, error: result.error };
-}
-
-export async function updateBank(id: string, data: Partial<Bank>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
-  const adapter = await getDbAdapter();
-  const result = await adapter.query(
-    'UPDATE banks SET name = $1, bank_name = $2, account_number = $3, iban = $4, account_id = $5, branch_id = $6, is_active = $7, current_balance = $8, updated_by = $9, updated_at = NOW() WHERE id = $10 AND company_id = $11',
-    [data.name, data.bankName, data.accountNumber, data.iban, data.accountId, data.branchId, data.isActive, data.currentBalance, safeUserId(_userId), id, companyId]
-  );
-  return result.success ? { success: true } : { success: false, error: result.error };
-}
-
-// ─── Delete Cash Boxes and Banks ──────────────────────────────────────────────
+// â”€â”€â”€ Delete Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function deleteCashBox(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('DELETE FROM cash_boxes WHERE id = $1 AND company_id = $2', [id, companyId]);
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-export async function deleteBank(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
-  const adapter = await getDbAdapter();
-  const result = await adapter.query('DELETE FROM banks WHERE id = $1 AND company_id = $2', [id, companyId]);
-  return result.success ? { success: true } : { success: false, error: result.error };
-}
-
-// ─── Cost Centers ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Cost Centers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getCostCenters(companyId: string): Promise<{ success: boolean; data?: CostCenter[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM cost_centers WHERE company_id = $1 AND is_active = true ORDER BY name_ar', [companyId]);
@@ -302,7 +271,7 @@ export async function deleteCostCenter(id: string, companyId: string): Promise<{
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// ─── Payroll Components ───────────────────────────────────────────────────────
+// â”€â”€â”€ Payroll Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getPayrollComponents(companyId: string): Promise<{ success: boolean; data?: PayrollComponent[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM payroll_components WHERE company_id = $1 AND is_active = true ORDER BY type, name_ar', [companyId]);
@@ -328,7 +297,7 @@ export async function updatePayrollComponent(id: string, data: Partial<PayrollCo
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// ─── Default Accounts ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Default Accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getDefaultAccounts(companyId: string): Promise<{ success: boolean; data?: DefaultAccount[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM default_accounts WHERE company_id = $1 ORDER BY function_key', [companyId]);
@@ -345,19 +314,19 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
   // Templates map function keys to account codes
   const templates: Record<string, Record<string, string>> = {
     trading: {
-      default_cash: '11101', default_bank: '11102', default_sales: '41101', default_cogs: '51101',
+      default_cash: '11101', default_sales: '41101', default_cogs: '51101',
       default_inventory: '11301', default_debtors: '11201', default_creditors: '21101',
       default_vat_output: '21301', default_vat_input: '21301', default_salaries: '52101',
       default_sales_returns: '41103', default_purchase_returns: '21101',
     },
     manufacturing: {
-      default_cash: '11101', default_bank: '11102', default_sales: '41101', default_cogs: '51101',
+      default_cash: '11101', default_sales: '41101', default_cogs: '51101',
       default_inventory: '11301', default_debtors: '11201', default_creditors: '21101',
       default_vat_output: '21301', default_vat_input: '21301', default_salaries: '52101',
       default_sales_returns: '41103', default_purchase_returns: '21101',
     },
     services: {
-      default_cash: '11101', default_bank: '11102', default_sales: '41102', default_cogs: '51101',
+      default_cash: '11101', default_sales: '41102', default_cogs: '51101',
       default_inventory: '11301', default_debtors: '11201', default_creditors: '21101',
       default_vat_output: '21301', default_vat_input: '21301', default_salaries: '52101',
       default_sales_returns: '41103', default_purchase_returns: '21101',

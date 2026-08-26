@@ -37,7 +37,6 @@ export interface AutoJournalEntry {
 // Well-known account codes from our chart of accounts
 const ACC = {
   CASH: '11101',           // الصندوق الرئيسي
-  BANK: '11102',           // حساب بنك الكريمي
   TRADE_DEBTORS: '11201',  // مدينون تجاريون
   INVENTORY: '11301',      // بضاعة أول المدة
   PREPAID_RENT: '11401',   // إيجار مدفوع مقدماً
@@ -100,7 +99,6 @@ async function getDefaultAccountId(companyId: string, functionKey: string): Prom
   // Fallback to hardcoded codes
   const fallbackMap: Record<string, string> = {
     default_cash: ACC.CASH,
-    default_bank: ACC.BANK,
     default_sales: ACC.SALES,
     default_cogs: ACC.COGS,
     default_inventory: ACC.INVENTORY,
@@ -150,9 +148,24 @@ export interface SalesInvoicePostingInput {
 }
 
 /** Resolve default accounts or return a clear error. */
+/**
+ * Resolve the GL account linked to a treasury (خزنة). Banks were unified
+ * away — every payment location is a cash box whose account_id IS the
+ * posting account. Returns null so callers fall back to default_cash.
+ */
+async function getCashBoxAccountId(companyId: string, cashBoxId?: string | null): Promise<string | null> {
+  if (!cashBoxId) return null;
+  const adapter = await getDbAdapter();
+  const res = await adapter.query<{ account_id: string | null }>(
+    'SELECT account_id FROM cash_boxes WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1',
+    [cashBoxId, companyId]
+  );
+  return res.rows?.[0]?.account_id || null;
+}
+
 export async function resolvePostingAccounts(
   companyId: string,
-  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash' | 'default_bank'>
+  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash'>
 ): Promise<{ success: true; ids: Record<string, string> } | { success: false; error: string }> {
   const ids: Record<string, string> = {};
   for (const key of keys) {
@@ -318,15 +331,16 @@ export async function buildStockAdjustmentPostingStatements(
   };
 }
 
-/** JE statements for a receipt voucher: Dr cash/bank / Cr debtors. */
+/** JE statements for a receipt voucher: Dr treasury / Cr debtors. */
 export async function buildReceiptVoucherStatements(
   companyId: string,
-  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string }
+  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
-  const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_bank', 'default_debtors']);
+  const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_debtors']);
   if (!resolved.success) return resolved;
-  const { default_cash: cashId, default_bank: bankId, default_debtors: debtorsId } = resolved.ids;
-  const debitAccount = v.paymentMethod === 'bank' && bankId ? bankId : cashId;
+  const { default_cash: cashId, default_debtors: debtorsId } = resolved.ids;
+  // Post to the SELECTED خزنة's own GL account, falling back to default cash.
+  const debitAccount = (await getCashBoxAccountId(companyId, v.cashBoxId)) || cashId;
 
   return {
     success: true,
@@ -347,15 +361,15 @@ export async function buildReceiptVoucherStatements(
   };
 }
 
-/** JE statements for a payment voucher: Dr creditors/expense / Cr cash/bank. */
+/** JE statements for a payment voucher: Dr creditors/expense / Cr treasury. */
 export async function buildPaymentVoucherStatements(
   companyId: string,
-  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string }
+  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
-  const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_bank', 'default_creditors']);
+  const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_creditors']);
   if (!resolved.success) return resolved;
-  const { default_cash: cashId, default_bank: bankId, default_creditors: creditorsId } = resolved.ids;
-  const creditAccount = v.paymentMethod === 'bank' && bankId ? bankId : cashId;
+  const { default_cash: cashId, default_creditors: creditorsId } = resolved.ids;
+  const creditAccount = (await getCashBoxAccountId(companyId, v.cashBoxId)) || cashId;
   const debitAccount = v.expenseAccountId || creditorsId;
 
   return {
@@ -369,7 +383,7 @@ export async function buildPaymentVoucherStatements(
         totalAmount: v.amount,
         entries: [
           { accountId: debitAccount, debit: v.amount, credit: 0, memo: `صرف إلى ${v.supplierName || v.supplierId || 'المورد'}` },
-          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `صرف نقدي/بنكي` },
+          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `سحب من الخزنة` },
         ],
       }),
     ],
@@ -505,17 +519,17 @@ export async function postPurchaseInvoice(
  */
 export async function postReceiptVoucher(
   companyId: string,
-  voucher: { voucherNumber: string; date: string; customer: string; amount: number; paymentMethod: string }
+  voucher: { voucherNumber: string; date: string; customer: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
 ) {
-  const cashId = await getDefaultAccountId(companyId, 'default_cash');
-  const bankId = await getDefaultAccountId(companyId, 'default_bank');
   const debtorsId = await getDefaultAccountId(companyId, 'default_debtors');
+  const cashId = (await getCashBoxAccountId(companyId, voucher.cashBoxId))
+    || await getDefaultAccountId(companyId, 'default_cash');
 
   if (!cashId || !debtorsId) {
     return { success: false, error: 'Required accounts not found. Please configure default accounts in Settings.' };
   }
 
-  const debitAccount = voucher.paymentMethod === 'bank' && bankId ? bankId : cashId;
+  const debitAccount = cashId;
 
   const entries: JournalEntryLine[] = [
     { accountId: debitAccount, debit: voucher.amount, credit: 0, memo: `قبض من ${voucher.customer}` },
@@ -534,15 +548,15 @@ export async function postReceiptVoucher(
 /**
  * Post a Payment Voucher to accounting
  * Dr: Trade Creditors / Expense Account
- * Cr: Cash / Bank
+ * Cr: Treasury (خزنة account, fallback default cash)
  */
 export async function postPaymentVoucher(
   companyId: string,
-  voucher: { voucherNumber: string; date: string; supplier: string; amount: number; paymentMethod: string; expenseAccount?: string }
+  voucher: { voucherNumber: string; date: string; supplier: string; amount: number; paymentMethod: string; expenseAccount?: string; cashBoxId?: string | null }
 ) {
-  const cashId = await getDefaultAccountId(companyId, 'default_cash');
-  const bankId = await getDefaultAccountId(companyId, 'default_bank');
   const creditorsId = await getDefaultAccountId(companyId, 'default_creditors');
+  const cashId = (await getCashBoxAccountId(companyId, voucher.cashBoxId))
+    || await getDefaultAccountId(companyId, 'default_cash');
   const rentWarehouseId = await findAccountByCode(companyId, ACC.RENT_WAREHOUSE);
   const rentOfficeId = await findAccountByCode(companyId, ACC.RENT_OFFICE);
   const electricityId = await findAccountByCode(companyId, ACC.ELECTRICITY);
@@ -554,7 +568,7 @@ export async function postPaymentVoucher(
     return { success: false, error: 'Required accounts not found. Please configure default accounts in Settings.' };
   }
 
-  const creditAccount = voucher.paymentMethod === 'bank' && bankId ? bankId : cashId;
+  const creditAccount = cashId;
 
   // Determine debit account based on expense type
   let debitAccount = creditorsId;
@@ -570,7 +584,7 @@ export async function postPaymentVoucher(
 
   const entries: JournalEntryLine[] = [
     { accountId: debitAccount, debit: voucher.amount, credit: 0, memo: `صرف لـ ${voucher.supplier}` },
-    { accountId: creditAccount, debit: 0, credit: voucher.amount, memo: `سحب نقدي/بنكي` },
+    { accountId: creditAccount, debit: 0, credit: voucher.amount, memo: `سحب من الخزنة` },
   ];
 
   return createTransaction(companyId, {

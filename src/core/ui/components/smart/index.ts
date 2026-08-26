@@ -1,6 +1,5 @@
 export { SmartSelect, type SmartSelectItem, type SmartSelectProps } from './SmartSelect';
 export { AccountSelect } from './fields/AccountSelect';
-export { BankSelect } from './fields/BankSelect';
 export { BOMSelect } from './fields/BOMSelect';
 export { BranchSelect } from './fields/BranchSelect';
 export { CashBoxSelect } from './fields/CashBoxSelect';

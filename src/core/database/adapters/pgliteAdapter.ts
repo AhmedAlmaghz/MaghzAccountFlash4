@@ -96,10 +96,12 @@ function normalizeResult<T = unknown>(result: { rows?: unknown[]; error?: unknow
 
 import schemaInit from '@root/drizzle/0000_init.sql?raw';
 import invoicePaymentColumns from '@root/drizzle/0001_invoice_payment_columns.sql?raw';
+import dropBanksUnifyCash from '@root/drizzle/0002_drop_banks_unify_cash.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
   { name: '0001_invoice_payment_columns', sql: invoicePaymentColumns },
+  { name: '0002_drop_banks_unify_cash', sql: dropBanksUnifyCash },
 ];
 
 /**

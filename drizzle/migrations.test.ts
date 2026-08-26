@@ -27,10 +27,17 @@ describe('Migration layout: baseline + additive migrations', () => {
     expect(files).toContain('0001_invoice_payment_columns.sql');
   });
 
-  it('later migrations are additive only (no DROP / no destructive DDL)', () => {
+  it('later migrations are additive except the documented banks retirement', () => {
+    // 0002 is a deliberate, documented removal: banks unify into cash boxes
+    // ("النقدية والخزائن"). Nothing ELSE may be dropped.
+    const RETIRED = new Set(['banks']);
     for (const f of files.filter((f) => f !== baselineFile)) {
       const content = readFileSync(join(MIGRATIONS_DIR, f), 'utf-8');
-      expect(content).not.toMatch(/\bDROP\s+(TABLE|COLUMN|INDEX|CONSTRAINT)\b/i);
+      // No table drops outside the retired set
+      const droppedTables = [...content.matchAll(/DROP TABLE IF EXISTS "([^"]+)"/gi)].map((m) => m[1]);
+      expect(droppedTables.every((t) => RETIRED.has(t))).toBe(true);
+      // No index/constraint drops at all
+      expect(content).not.toMatch(/\bDROP\s+(INDEX|CONSTRAINT)\b/i);
     }
   });
 
@@ -180,9 +187,37 @@ describe('Migration 0001: invoice payment-location columns', () => {
     const purchases = readFileSync(join(process.cwd(), 'src/core/database/schema/purchases.ts'), 'utf-8');
     // sales_invoices + quotations + sales_returns = 3 in sales.ts
     expect(sales.match(/cashBoxId: uuid\('cash_box_id'\)/g)?.length).toBe(3);
-    expect(sales.match(/bankAccountId: uuid\('bank_account_id'\)/g)?.length).toBe(3);
     // purchase_invoices + purchase_orders + purchase_returns = 3 in purchases.ts
     expect(purchases.match(/cashBoxId: uuid\('cash_box_id'\)/g)?.length).toBe(3);
-    expect(purchases.match(/bankAccountId: uuid\('bank_account_id'\)/g)?.length).toBe(3);
+  });
+});
+
+describe('Migration 0002: banks unified into النقدية والخزائن (cash boxes)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0002_drop_banks_unify_cash.sql'), 'utf-8');
+  const PAYMENT_TABLES = [
+    'sales_invoices', 'quotations', 'sales_returns',
+    'purchase_invoices', 'purchase_orders', 'purchase_returns',
+  ];
+
+  it('drops the banks table', () => {
+    expect(migrationSql).toMatch(/DROP TABLE IF EXISTS "banks"/);
+  });
+
+  it('drops bank_account_id from all payment-location tables (8 tables)', () => {
+    for (const t of [...PAYMENT_TABLES, 'receipt_vouchers', 'payment_vouchers']) {
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE "${t}" DROP COLUMN IF EXISTS "bank_account_id"`));
+    }
+  });
+
+  it('backfills bank-transfer vouchers with a cash box location before dropping', () => {
+    expect(migrationSql).toMatch(/UPDATE receipt_vouchers[\s\S]*?payment_method = 'bank'/);
+    expect(migrationSql).toMatch(/UPDATE payment_vouchers[\s\S]*?payment_method = 'bank'/);
+  });
+
+  it('Drizzle schemas no longer reference banks or bankAccountId', () => {
+    const settings = readFileSync(join(process.cwd(), 'src/core/database/schema/settings.ts'), 'utf-8');
+    const vouchers = readFileSync(join(process.cwd(), 'src/core/database/schema/vouchers.ts'), 'utf-8');
+    expect(settings).not.toMatch(/export const banks/);
+    expect(vouchers).not.toMatch(/bankAccountId/);
   });
 });
