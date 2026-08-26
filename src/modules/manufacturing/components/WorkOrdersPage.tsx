@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2 } from 'lucide-react';
+import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2, Factory } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -7,6 +7,8 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { ProductSelect } from '@/core/ui/components/smart/fields/ProductSelect';
+import { WarehouseSelect } from '@/core/ui/components/smart';
+import { useToastStore } from '@/core/store/toastStore';
 import { useAppStore } from '@/core/store';
 import { useWorkOrdersPaginated, useWorkOrderVariance } from '../hooks/useManufacturing';
 import { manufacturingApi } from '../api';
@@ -42,8 +44,9 @@ export const WorkOrdersPage: React.FC = () => {
   const [selectedVarianceId, setSelectedVarianceId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmStatus, setConfirmStatus] = useState<{ id: string; status: WorkOrder['status'] } | null>(null);
-  const [producedQty, setProducedQty] = useState('');
-  const [isEditingActual, setIsEditingActual] = useState(false);
+const [producedQty, setProducedQty] = useState('');
+const [outputWarehouseId, setOutputWarehouseId] = useState('');
+const [isEditingActual, setIsEditingActual] = useState(false);
 
   const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '' });
   const [availableBoms, setAvailableBoms] = useState<{ id: string; version: string; totalCost?: number }[]>([]);
@@ -146,9 +149,17 @@ export const WorkOrdersPage: React.FC = () => {
 
   const handleStatusChange = async () => {
     if (!confirmStatus) return;
-    await changeStatus(confirmStatus.id, confirmStatus.status, confirmStatus.status === 'completed' && producedQty ? Number(producedQty) : undefined);
+    const addToast = useToastStore.getState().addToast;
+    await changeStatus(
+      confirmStatus.id,
+      confirmStatus.status,
+      confirmStatus.status === 'completed' && producedQty ? Number(producedQty) : undefined,
+      confirmStatus.status === 'completed' && outputWarehouseId ? outputWarehouseId : undefined
+    );
+    addToast('success', t('manufacturing.workOrders.statusUpdated'));
     setConfirmStatus(null);
     setProducedQty('');
+    setOutputWarehouseId('');
   };
 
   const canAdvance = (status: WorkOrder['status']) => {
@@ -553,16 +564,35 @@ export const WorkOrdersPage: React.FC = () => {
             <p className="text-sm text-slate-600 dark:text-slate-300">
               {t('manufacturing.workOrders.changeStatusTo')} <span className="font-semibold">"{statusLabel(confirmStatus.status, t)}"</span>?
             </p>
-            {confirmStatus.status === 'completed' && (
-              <div>
-                <Input
-                  label={t('manufacturing.workOrders.actualProducedQuantity')}
-                  type="number"
-                  value={producedQty}
-                  onChange={(e) => setProducedQty(e.target.value)}
-                  placeholder={t('manufacturing.workOrders.enterActualQuantity')}
-                />
+            {/* START: explain raw-material issuance consequence */}
+            {confirmStatus.status === 'in_progress' && (
+              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                <Factory size={14} className="mt-0.5 shrink-0" />
+                <span>{t('manufacturing.wo.startIssuesMaterials')}</span>
               </div>
+            )}
+            {/* COMPLETE: produced qty + output warehouse */}
+            {confirmStatus.status === 'completed' && (
+              <>
+                <div>
+                  <Input
+                    label={t('manufacturing.workOrders.actualProducedQuantity')}
+                    type="number"
+                    value={producedQty}
+                    onChange={(e) => setProducedQty(e.target.value)}
+                    placeholder={t('manufacturing.workOrders.enterActualQuantity')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.wo.outputWarehouse')}</label>
+                  <WarehouseSelect
+                    companyId={activeCompany?.id || ''}
+                    value={outputWarehouseId}
+                    onChange={(v) => setOutputWarehouseId(typeof v === 'string' ? v : '')}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">{t('manufacturing.wo.outputWarehouseHint')}</p>
+                </div>
+              </>
             )}
           </div>
         )}

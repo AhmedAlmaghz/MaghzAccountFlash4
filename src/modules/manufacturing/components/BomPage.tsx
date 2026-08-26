@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Eye, GitBranch, Pencil, Plus, Printer, Search, Trash2, Layers, CheckSquare, XCircle, Wallet } from 'lucide-react';
+import { Eye, GitBranch, Pencil, Plus, Printer, Search, Trash2, Layers, CheckSquare, XCircle, Wallet, Calculator, Factory } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -11,8 +11,10 @@ import { useAppStore } from '@/core/store';
 import { useBomsPaginated } from '../hooks/useManufacturing';
 import { useDebouncedValue } from '@/core/hooks/useDebouncedValue';
 import { manufacturingApi } from '../api';
+import { getNextDocumentNumber } from '@/core/api';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import { useToastStore } from '@/core/store/toastStore';
 import type { BOM, BOMLine } from '../types';
 
 interface BomFormLine {
@@ -37,6 +39,59 @@ export const BomPage: React.FC = () => {
   const [editing, setEditing] = useState<BOM | null>(null);
   const [viewing, setViewing] = useState<{ bom: BOM; lines: BOMLine[] } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const addToast = useToastStore((s) => s.addToast);
+
+  // ── Smart availability calculator ────────────────────────────────────
+  const [calcQty, setCalcQty] = useState('1');
+  const [availability, setAvailability] = useState<Awaited<ReturnType<typeof manufacturingApi.getBomAvailability>>['data'] | null>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+
+  const runAvailability = async () => {
+    if (!viewing) return;
+    setIsCalculating(true);
+    const res = await manufacturingApi.getBomAvailability(companyId, viewing.bom.id, Number(calcQty) || 0);
+    setIsCalculating(false);
+    if (res.success && res.data) setAvailability(res.data);
+    else addToast('error', res.error || t('manufacturing.bom.availabilityError'));
+  };
+
+  // ── One-click work order from BOM ────────────────────────────────────
+  const [isCreatingWo, setIsCreatingWo] = useState(false);
+  const createWorkOrderFromBom = async () => {
+    if (!viewing) return;
+    setIsCreatingWo(true);
+    try {
+      const seq = await getNextDocumentNumber(companyId, 'work_order');
+      if (!seq.success || !seq.number) {
+        addToast('error', seq.error || t('manufacturing.wo.seqFailed'));
+        return;
+      }
+      const lines = viewing.lines.map((l) => ({
+        materialId: l.materialId,
+        plannedQuantity: l.quantity,
+        unitCost: l.unitCost || 0,
+      }));
+      const res = await manufacturingApi.createWorkOrder({
+        companyId,
+        orderNumber: seq.number,
+        productId: viewing.bom.productId,
+        bomId: viewing.bom.id,
+        quantity: Math.max(1, Number(calcQty) || 1),
+        status: 'planned',
+        totalCost: viewing.bom.totalCost ?? undefined,
+        notes: `${t('manufacturing.wo.fromBom')} v${viewing.bom.version}`,
+        lines,
+      } as never);
+      if (res.success) {
+        addToast('success', `${t('manufacturing.wo.createdFromBom')} (${seq.number})`);
+        setIsDetailOpen(false);
+      } else {
+        addToast('error', res.error || t('common.error'));
+      }
+    } finally {
+      setIsCreatingWo(false);
+    }
+  };
 
   const [formData, setFormData] = useState({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '' });
   const [lines, setLines] = useState<BomFormLine[]>([{ materialId: '', materialName: '', quantity: 1, unitCost: 0 }]);
@@ -92,6 +147,8 @@ export const BomPage: React.FC = () => {
     const res = await manufacturingApi.getBomById(bom.id, companyId);
     if (res.success && res.data) {
       setViewing(res.data);
+      setAvailability(null);
+      setCalcQty('1');
       setIsDetailOpen(true);
     }
   };
@@ -365,13 +422,24 @@ export const BomPage: React.FC = () => {
       {/* View/Print Modal */}
       <Modal
         isOpen={isDetailOpen}
-        onClose={() => { setIsDetailOpen(false); setViewing(null); }}
+        onClose={() => { setIsDetailOpen(false); setViewing(null); setAvailability(null); }}
         title={t('manufacturing.bom.details')}
         size="lg"
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
             <Button variant="secondary" onClick={() => { setIsDetailOpen(false); setViewing(null); }}>{t('settings.common.close')}</Button>
-            <Button variant="primary" leftIcon={<Printer size={16} />} onClick={handlePrint}>{t('settings.common.print')}</Button>
+            <Can action="create" module="manufacturing">
+              <Button
+                variant="primary"
+                leftIcon={isCreatingWo ? undefined : <Factory size={16} />}
+                onClick={createWorkOrderFromBom}
+                disabled={isCreatingWo || (availability ? !availability.fullyAvailable && availability.lines.length > 0 : false)}
+                title={availability && !availability.fullyAvailable ? t('manufacturing.bom.availabilityWarning') : undefined}
+              >
+                {t('manufacturing.bom.createWo')}
+              </Button>
+            </Can>
+            <Button variant="secondary" leftIcon={<Printer size={16} />} onClick={handlePrint}>{t('settings.common.print')}</Button>
           </div>
         }
       >
@@ -400,6 +468,52 @@ export const BomPage: React.FC = () => {
             <div className="flex justify-between pt-2 border-t border-slate-200 dark:border-slate-700">
               <span className="font-bold text-slate-700 dark:text-slate-200">{t('manufacturing.bom.totalCost')}:</span>
               <span className="font-bold text-primary-600">{viewing.bom.totalCost !== undefined ? formatCurrency(viewing.bom.totalCost) : formatCurrency(estimatedTotal)}</span>
+            </div>
+
+            {/* ── Smart availability calculator ─────────────────────── */}
+            <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-900/10 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Calculator size={16} className="text-cyan-600" />
+                <h4 className="text-sm font-bold text-cyan-800 dark:text-cyan-300">{t('manufacturing.bom.availabilityTitle')}</h4>
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input
+                    label={t('manufacturing.bom.plannedQty')}
+                    type="number"
+                    min={1}
+                    value={calcQty}
+                    onChange={(e) => { setCalcQty(e.target.value); setAvailability(null); }}
+                  />
+                </div>
+                <Button variant="primary" onClick={runAvailability} isLoading={isCalculating} className="shrink-0">
+                  {t('manufacturing.bom.checkAvailability')}
+                </Button>
+              </div>
+
+              {availability && (
+                <div className="space-y-2">
+                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold ${availability.fullyAvailable ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
+                    <span>{availability.fullyAvailable ? t('manufacturing.bom.fullyAvailable') : t('manufacturing.bom.partiallyAvailable')}</span>
+                    {availability.maxProducible !== null && (
+                      <span className="tabular-nums">{t('manufacturing.bom.maxProducible')}: {availability.maxProducible}</span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {availability.lines.map((l) => (
+                      <div key={l.materialId} className="flex items-center justify-between text-xs bg-white dark:bg-slate-800 rounded-lg px-3 py-2 border border-slate-100 dark:border-slate-700">
+                        <span className="flex items-center gap-2 min-w-0 truncate">
+                          {l.sufficient ? <CheckSquare size={13} className="text-emerald-600 shrink-0" /> : <XCircle size={13} className="text-rose-600 shrink-0" />}
+                          <span className="truncate font-medium text-slate-700 dark:text-slate-200">{l.materialName || l.materialId.slice(0, 8)}</span>
+                        </span>
+                        <span className="tabular-nums shrink-0 text-slate-500">
+                          {l.required} / <span className={l.sufficient ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>{l.available}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

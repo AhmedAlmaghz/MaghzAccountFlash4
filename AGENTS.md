@@ -3608,5 +3608,25 @@ npx drizzle-kit migrate
   - **إزالة placeholder تتطلب إعادة ترقيم كل ما بعدها** في positional params ($18→...) — عدّ الأعمدة = عدّ القيم في كل INSERT بعد أي حذف
   - **ترحيل على حساب الموقع المختار لا حساب افتراضي ثابت** عندما يحمل الموقع account_id
 
+### المرحلة 63 (v0.5.0): التصنيع الاحترافي — دورة إنتاج كاملة مربوطة بالمخازن
+- **النموذج العالمي المطبَّق (MRP-lite / Shop-Floor lifecycle)**:
+  - `planned ──start──▶ in_progress ──complete──▶ completed`
+  - **البدء يصرف الخامات فعلياً** (حركات stock 'out' ذرية) بعد بوابة توفر لكل مادة — يفشل بتقرير نقص تفصيلي بدل السماح برصيد سالب
+  - **الإكمال يستلم المنتج التام** في مستودع مختار (`output_warehouse_id` — migration 0003) ويُسوّي الاستهلاك بالفرق: actual > issued ← صرف إضافي؛ actual < issued ← إرجاع فائض ('in')
+  - **ترحيل التكلفة**: total_cost = Σ(actual_qty × actual_unit_cost || unit_cost)
+- **API الجديد** (`runTransaction` — يعمل على Electron وPGlite دون RPC إضافي):
+  - `getBomAvailability(companyId, bomId, qty)` ← لكل مادة: مطلوب/متاح/يكفي + `maxProducible` (أقصى كمية قابلة للإنتاج)
+  - `startWorkOrder` / `completeWorkOrder` مع حراس آلة الحالة (idempotent)
+  - `updateWorkOrderStatus` أصبح مندوباً موحِّداً للسلوك بين البيئتين (أزال الازدواج مع CTE الـ main-process)
+- **شاشة BOM الذكية**: حاسبة توفر الخامات (كمية مخططة → ✓/✗ لكل مادة + أقصى كمية قابلة للإنتاج) + زر «إنشاء أمر إنتاج» مباشرة من الشجرة (يولّد الرقم، يشتق الخطوط، يحذر إن كانت الخامات ناقصة)
+- **شاشة أوامر التشغيل**: مودال البدء ينبه لصرف الخامات؛ مودال الإكمال = كمية منتجة + **مستودع استلام المنتج التام** (WarehouseSelect) + toast تأكيد؛ تمرير outputWarehouseId عبر changeStatus
+- **Migration 0003**: `work_orders.output_warehouse_id uuid` + Drizzle sync + journal idx=3
+- **اختبارات (+5)**: صرف عند البدء ذرياً | رفض البدء عند نقص | إكمال بفرق استهلاك + توريد 10 + ترحيل تكلفة 660 | رفض إكمال غير مبدوء | تفويض updateWorkOrderStatus | migration 0003 (3) | **1108 ✓**
+- **قواعد ذهبية مضافة**:
+  - **آلة حالة الأوامر = مصدر الحقيقة**: كل انتقال له precondition محقق في الـ API لا الـ UI (in_progress يتطلب planned، completed يتطلب in_progress)
+  - **افصل الصرف عن الإنتاج**: خلطهما في خطوة واحدة يخفي الانحرافات ويمنع WIP — الصرف عند البدء والفروقات عند الإكمال
+  - **الميزات الجديدة عبر runTransaction لا RPC جديد**: يعمل فوراً على البيئتين مع نفس الحراس الأمنيين
+  - **splice بـ spread إجباري**: `lines.splice(i, n, ...NEW.split('\n'))` — بدون spread يُدرج المصفوفة كعنصر واحد ويفسد الملف
+
 *آخر تحديث: 2026-08-26 | الإصدار: maghzaccount-pro v0.2.0*
 

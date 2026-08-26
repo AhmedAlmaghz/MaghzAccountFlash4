@@ -221,3 +221,20 @@ describe('Migration 0002: banks unified into النقدية والخزائن (ca
     expect(vouchers).not.toMatch(/bankAccountId/);
   });
 });
+
+describe('Migration 0003: work-order output warehouse', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0003_wo_output_warehouse.sql'), 'utf-8');
+
+  it('adds output_warehouse_id to work_orders (finished-goods destination)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE "work_orders" ADD COLUMN IF NOT EXISTS "output_warehouse_id" uuid/);
+  });
+
+  it('is idempotent', () => {
+    expect(migrationSql.match(/ADD COLUMN IF NOT EXISTS/g)?.length).toBe(1);
+  });
+
+  it('Drizzle schema exposes outputWarehouseId on workOrders', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/manufacturing.ts'), 'utf-8');
+    expect(schema).toMatch(/outputWarehouseId: uuid\('output_warehouse_id'\)/);
+  });
+});

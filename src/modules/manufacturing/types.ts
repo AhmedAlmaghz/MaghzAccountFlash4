@@ -38,6 +38,7 @@ export interface WorkOrder {
   actualStartDate?: string;
   actualEndDate?: string;
   totalCost?: number;
+  outputWarehouseId?: string;
   notes?: string;
   createdBy?: string;
   updatedBy?: string;

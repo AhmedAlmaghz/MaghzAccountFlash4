@@ -88,8 +88,8 @@ export function useWorkOrders(companyId: string) {
     return res;
   }, [refresh, companyId]);
 
-  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number) => {
-    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity);
+  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string) => {
+    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId);
     if (res.success) await refresh();
     return res;
   }, [refresh, companyId]);
@@ -198,8 +198,8 @@ export function useWorkOrdersPaginated(companyId: string, filters?: WorkOrdersFi
     return res;
   }, [companyId, reloadList]);
 
-  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number) => {
-    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity);
+  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string) => {
+    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId);
     if (res.success) await reloadList();
     return res;
   }, [companyId, reloadList]);

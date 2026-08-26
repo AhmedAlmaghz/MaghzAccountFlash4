@@ -1270,7 +1270,16 @@
       "estimatedCost": "التكلفة التقديرية",
       "searchPlaceholder": "بحث في فاتير المواد...",
       "totalCount": "إجمالي الفاتير",
-      "avgCost": "متوسط التكلفة"
+      "avgCost": "متوسط التكلفة",
+      "availabilityTitle": "حاسبة توفر الخامات",
+      "plannedQty": "الكمية المخططة",
+      "checkAvailability": "فحص التوفر",
+      "fullyAvailable": "✓ الخامات متوفرة بالكامل",
+      "partiallyAvailable": "⚠ الخامات غير كافية",
+      "maxProducible": "أقصى كمية قابلة للإنتاج",
+      "availabilityError": "تعذر فحص التوفر",
+      "availabilityWarning": "الخامات غير كافية — سيُنشأ الأمر لكن ابدأه بعد التوريد",
+      "createWo": "إنشاء أمر إنتاج"
     },
     "production": "الإنتاج",
     "costs": "التكاليف",
@@ -1364,7 +1373,16 @@
     "workOrderStatus": "حالة أوامر التشغيل",
     "in_progress": "قيد التنفيذ",
     "completed": "مكتمل",
-    "cancelled": "ملغي"
+    "cancelled": "ملغي",
+    "wo": {
+      "startIssuesMaterials": "سيتم صرف خامات الشجرة من المخزون تلقائياً عند التأكيد — تأكد من توفّر الكميات.",
+      "outputWarehouse": "مستودع استلام المنتج التام",
+      "outputWarehouseHint": "سيُضاف الإنتاج إلى هذا المستودع مع حركة مخزون \"in\".",
+      "fromBom": "أمر مُشتق من شجرة الإنتاج",
+      "createdFromBom": "تم إنشاء أمر التشغيل",
+      "seqFailed": "فشل توليد رقم أمر التشغيل",
+      "statusUpdated": "تم تحديث حالة أمر التشغيل"
+    }
   },
   "hr": {
     "activeEmployees": "الموظفين النشطين",

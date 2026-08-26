@@ -296,59 +296,114 @@ describe('manufacturingApi', () => {
     });
   });
 
-  describe('updateWorkOrderStatus', () => {
-    it('updates status to in_progress with start date', async () => {
-      const adapter = makeMockAdapter(async (sql, _params) => {
-        if (sql.includes("status = 'in_progress'")) {
-          expect(sql).toContain('actual_start_date');
-          return { success: true, rows: [] };
-        }
-        return { success: true, rows: [] };
-      });
+  describe('updateWorkOrderStatus — unified production flow', () => {
+    const baseAdapter = () => makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+        return { success: true, rows: [{ status: 'planned', output_warehouse_id: null }] };
+      }
+      if (sql.includes('FROM work_order_consumptions c')) {
+        return {
+          success: true,
+          rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '6', unit_cost: '100', actual_unit_cost: '110', available: '10' }],
+        };
+      }
+      if (sql.includes('FROM stock st')) {
+        return { success: true, rows: [{ warehouse_id: 'wh-1' }] };
+      }
+      if (sql.includes('FROM warehouses')) {
+        return { success: true, rows: [{ id: 'wh-1' }] };
+      }
+      return { success: true, rows: [] };
+    });
+
+    it('START issues raw materials atomically then flips to in_progress', async () => {
+      const adapter = baseAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
       const res = await manufacturingApi.updateWorkOrderStatus(WO_ID, COMPANY_ID, 'in_progress', USER_ID);
       expect(res.success).toBe(true);
+
+      const txSqls = adapter.transaction.mock.calls[0][0].map((q: { sql: string }) => q.sql);
+      expect(txSqls.some((s: string) => s.includes("'out'"))).toBe(true);
+      expect(txSqls.some((s: string) => s.includes('quantity = quantity - '))).toBe(true);
+      expect(txSqls.some((s: string) => s.includes("status = 'in_progress'"))).toBe(true);
     });
 
-    it('updates status to completed with stock movements', async () => {
-      let insertStockCalls = 0;
+    it('START refuses when stock is insufficient', async () => {
       const adapter = makeMockAdapter(async (sql) => {
-        if (sql.includes('FROM work_orders') && !sql.includes('work_order_consumptions')) {
-          return {
-            success: true,
-            rows: [{ product_id: PRODUCT_ID, produced_quantity: '10', quantity: '10' }],
-          };
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return { success: true, rows: [{ status: 'planned', output_warehouse_id: null }] };
         }
-        if (sql.includes('FROM work_order_consumptions')) {
-          return {
-            success: true,
-            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5' }],
-          };
-        }
-        if (sql.includes('FROM warehouses')) {
-          return { success: true, rows: [{ id: 'wh-1' }] };
-        }
-        if (sql.includes('INSERT INTO stock_movements')) {
-          insertStockCalls++;
-          return { success: true, rows: [] };
-        }
-        if (sql.includes("status = 'completed'")) {
-          return { success: true, rows: [] };
+        if (sql.includes('FROM work_order_consumptions c')) {
+          return { success: true, rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', available: '2' }] };
         }
         return { success: true, rows: [] };
       });
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-      const res = await manufacturingApi.updateWorkOrderStatus(WO_ID, COMPANY_ID, 'completed', USER_ID);
-      expect(res.success).toBe(true);
-      expect(insertStockCalls).toBeGreaterThan(0);
+      const res = await manufacturingApi.startWorkOrder(WO_ID, COMPANY_ID);
+      expect(res.success).toBe(false);
+      expect(String(res.error)).toContain('لا يكفي');
     });
 
-    it('returns error for invalid status', async () => {
-      const res = await manufacturingApi.updateWorkOrderStatus(WO_ID, COMPANY_ID, 'invalid' as never, USER_ID);
-      expect(res.success).toBe(false);
+    it('COMPLETE posts consumption delta + FG receipt + cost rollup', async () => {
+      const adapter = makeMockAdapter(async (sql) => {
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return { success: true, rows: [{ status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null, product_id: PRODUCT_ID }] };
+        }
+        if (sql.includes('FROM work_order_consumptions c')) {
+          return {
+            success: true,
+            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '6', unit_cost: '100', actual_unit_cost: '110' }],
+          };
+        }
+        if (sql.includes('FROM warehouses')) {
+          return { success: true, rows: [{ id: 'wh-out' }] };
+        }
+        if (sql.includes('FROM stock st')) {
+          return { success: true, rows: [{ warehouse_id: 'wh-1' }] };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 10, userId: USER_ID });
+      expect(res.success).toBe(true);
+      expect(res.data?.totalCost).toBe(660); // 6 × 110
+
+      const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;
+      const extraIssue = txQs.find((q) => q.sql.includes("'out'"));
+      expect(extraIssue?.params?.[3]).toBe(1); // actual 6 − issued 5
+      const fgReceipt = txQs.find((q) => q.sql.includes("'in'") && String(q.params?.[5]).includes('تام'));
+      expect(fgReceipt?.params?.[3]).toBe(10);
+      expect(txQs.some((q) => q.sql.includes("status = 'completed'"))).toBe(true);
     });
+
+    it('COMPLETE rejects orders that are not in_progress', async () => {
+      const adapter = makeMockAdapter(async (sql) => {
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return { success: true, rows: [{ status: 'planned', quantity: '10', produced_quantity: '0', product_id: PRODUCT_ID }] };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, {});
+      expect(res.success).toBe(false);
+      expect(String(res.error)).toContain('قيد التشغيل');
+    });
+
+    it('delegates updateWorkOrderStatus(completed) through completeWorkOrder', async () => {
+      const spy = vi.spyOn(manufacturingApi, 'completeWorkOrder').mockResolvedValue({ success: true, data: { producedQuantity: 10, totalCost: 660, outputWarehouseId: 'wh-out' } });
+      const adapter = baseAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.updateWorkOrderStatus(WO_ID, COMPANY_ID, 'completed', USER_ID, 10);
+      expect(res.success).toBe(true);
+      expect(spy).toHaveBeenCalledWith(WO_ID, COMPANY_ID, expect.objectContaining({ producedQuantity: 10, userId: USER_ID }));
+      spy.mockRestore();
+    });
+
   });
 
   describe('deleteWorkOrder', () => {

@@ -444,10 +444,278 @@ export const manufacturingApi = {
     }
   },
 
-  // In Electron this runs as ONE atomic CTE in the main process: stock
-  // movements + status change for 'completed', or a plain status update
-  // otherwise. The fallback (PGlite / e2e) keeps the legacy multi-query flow.
-  async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number): Promise<{ success: boolean; error?: string }> {
+  // ─── Production Flow (MRP-lite) ───────────────────────────────────────────
+  //
+  // Best-practice shop-floor lifecycle:
+  //   planned ──start──▶ in_progress ──complete──▶ completed
+  //  · start    ISSUES raw materials to the floor (stock 'out', atomic) after
+  //             verifying availability — fails with a per-material shortage
+  //             report instead of silently going negative.
+  //  · complete RECEIVES finished goods into the chosen output warehouse and
+  //            posts consumption DELTAS (actual vs issued), rolling total_cost
+  //            from actual quantities × actual unit costs.
+  // Both run through runTransaction so they work on Electron (guarded
+  // db:internal-transaction) AND PGlite without extra RPC handlers.
+
+  async getBomAvailability(
+    companyId: string,
+    bomId: string,
+    quantity: number,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    data?: {
+      lines: Array<{ materialId: string; materialName?: string; required: number; available: number; sufficient: boolean }>;
+      maxProducible: number | null;
+      fullyAvailable: boolean;
+    };
+  }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id: bomId, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const qty = Math.max(0, Number(quantity) || 0);
+
+      const adapter = await getDbAdapter();
+      const res = await adapter.query(
+        `SELECT l.material_id,
+                p.name_ar AS material_name,
+                l.quantity * $3::numeric AS required,
+                COALESCE(s.quantity, 0) AS available
+           FROM bom_lines l
+           LEFT JOIN products p ON p.id = l.material_id
+           LEFT JOIN stock s ON s.product_id = l.material_id AND s.company_id = $1::uuid
+            AND s.warehouse_id = (
+                  SELECT st.warehouse_id FROM stock st
+                   WHERE st.company_id = $1::uuid AND st.product_id = l.material_id
+                   ORDER BY st.quantity DESC LIMIT 1)
+          WHERE l.bom_id = $2::uuid`,
+        [companyId, bomId, qty]
+      );
+      if (!res.success) return { success: false, error: res.error };
+
+      const lines = (res.rows || []).map((r: Record<string, unknown>) => {
+        const required = Number(r.required) || 0;
+        const available = Number(r.available) || 0;
+        return {
+          materialId: String(r.material_id),
+          materialName: r.material_name ? String(r.material_name) : undefined,
+          required,
+          available,
+          sufficient: available >= required,
+        };
+      });
+      const ratios = lines.filter((l) => l.required > 0).map((l) => Math.floor((l.available / l.required) * 10000) / 10000);
+      const maxProducible = lines.length === 0 ? null : Math.min(...ratios);
+      const fullyAvailable = lines.every((l) => l.sufficient);
+
+      return { success: true, data: { lines, maxProducible: Number.isFinite(maxProducible as number) ? (maxProducible as number) : null, fullyAvailable } };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async startWorkOrder(id: string, companyId: string, userId?: string): Promise<{ success: boolean; error?: string; data?: { warehouseId: string | null; issuedLines: number } }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+
+      const adapter = await getDbAdapter();
+
+      // Guard: only planned orders can start (idempotency by state machine).
+      const woRes = await adapter.query(
+        `SELECT w.status, w.output_warehouse_id FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
+        [id, companyId]
+      );
+      if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'أمر التشغيل غير موجود' };
+      if (String(woRes.rows[0].status) !== 'planned') {
+        return { success: false, error: 'لا يمكن بدء أمر غير مخطط — حالته الحالية ليست "مخطط"' };
+      }
+
+      const consRes = await adapter.query(
+        `SELECT c.material_id, c.planned_quantity,
+                COALESCE(s.quantity, 0) AS available
+           FROM work_order_consumptions c
+           LEFT JOIN stock s ON s.product_id = c.material_id AND s.company_id = $2::uuid
+            AND s.warehouse_id = (
+                  SELECT st.warehouse_id FROM stock st
+                   WHERE st.company_id = $2::uuid AND st.product_id = c.material_id
+                   ORDER BY st.quantity DESC LIMIT 1)
+          WHERE c.work_order_id = $1::uuid`,
+        [id, companyId]
+      );
+      if (!consRes.success) return { success: false, error: consRes.error };
+      const consRows = (consRes.rows || []) as Record<string, unknown>[];
+
+      // Availability gate with per-material detail.
+      const shortages = consRows
+        .map((r) => ({ material: String(r.material_id), req: Number(r.planned_quantity) || 0, avail: Number(r.available) || 0 }))
+        .filter((x) => x.avail < x.req);
+      if (shortages.length > 0) {
+        const detail = shortages.map((s) => `${s.material.slice(0, 8)}… مطلوب ${s.req} / متاح ${s.avail}`).join('، ');
+        return { success: false, error: `المخزون لا يكفي لصرف الخامات (${detail})` };
+      }
+
+      // Issue from the richest warehouse of each material (same one the
+      // availability check read) — first active warehouse for FG is NOT used
+      // here because raw materials live wherever stock rows say they are.
+      const statements: Array<{ sql: string; params?: unknown[] }> = [];
+      const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
+      const defaultWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
+      const issuedLines = consRows.length;
+
+      for (const r of consRows) {
+        const materialId = String(r.material_id);
+        const qty = Number(r.planned_quantity) || 0;
+        if (qty <= 0) continue;
+        const whRes2 = await adapter.query(
+          `SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1`,
+          [companyId, materialId]
+        );
+        const whId = whRes2.success && whRes2.rows?.[0]?.warehouse_id ? String(whRes2.rows[0].warehouse_id) : defaultWh;
+        if (!whId) continue;
+
+        statements.push({
+          sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+          params: [companyId, materialId, whId],
+        });
+        statements.push({
+          sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'out', $4::numeric, $5, $6, $7)`,
+          params: [companyId, materialId, whId, qty, id, 'صرف خامات لأمر تشغيل', userId ?? null],
+        });
+        statements.push({
+          sql: `UPDATE stock SET quantity = quantity - $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+          params: [qty, companyId, materialId, whId],
+        });
+      }
+
+      const outWarehouse = woRes.rows[0].output_warehouse_id ? String(woRes.rows[0].output_warehouse_id) : defaultWh;
+      statements.push({
+        sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE${userId ? ', updated_by = $4::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid${userId ? '' : ''}`,
+        params: userId ? [id, companyId, /* placeholder alignment */ outWarehouse, userId] : [id, companyId],
+      });
+
+      const result = await runTransaction(statements);
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, data: { warehouseId: outWarehouse, issuedLines } };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async completeWorkOrder(
+    id: string,
+    companyId: string,
+    opts: { producedQuantity?: number; outputWarehouseId?: string | null; userId?: string } = {},
+  ): Promise<{ success: boolean; error?: string; data?: { producedQuantity: number; totalCost: number; outputWarehouseId: string | null } }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+
+      const adapter = await getDbAdapter();
+      const woRes = await adapter.query(
+        `SELECT w.status, w.quantity, w.produced_quantity, w.output_warehouse_id, w.bom_id FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
+        [id, companyId]
+      );
+      if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'أمر التشغيل غير موجود' };
+      const wo = woRes.rows[0];
+      if (String(wo.status) !== 'in_progress') {
+        return { success: false, error: 'الإكمال متاح فقط لأوامر قيد التشغيل — ابدأ الأمر أولاً ليُصرف خاماته' };
+      }
+
+      const producedQty = Math.max(0, Number(opts.producedQuantity ?? wo.quantity) || 0);
+      const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
+      const fallbackWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
+      const outputWh = opts.outputWarehouseId || (wo.output_warehouse_id ? String(wo.output_warehouse_id) : fallbackWh);
+
+      const consRes = await adapter.query(
+        `SELECT c.material_id, c.planned_quantity, c.actual_quantity, c.unit_cost, c.actual_unit_cost
+           FROM work_order_consumptions c WHERE c.work_order_id = $1::uuid`,
+        [id]
+      );
+      if (!consRes.success) return { success: false, error: consRes.error };
+      const consRows = (consRes.rows || []) as Record<string, unknown>[];
+
+      // Consumption DELTA vs what START already issued (planned quantities):
+      //   delta > 0 → extra issue (out); delta < 0 → return surplus (in).
+      // Total cost rolls up from ACTUAL qty × ACTUAL unit cost (fallback unit_cost).
+      const statements: Array<{ sql: string; params?: unknown[] }> = [];
+      let totalCost = 0;
+
+      for (const r of consRows) {
+        const materialId = String(r.material_id);
+        const planned = Number(r.planned_quantity) || 0;
+        const actual = Number(r.actual_quantity) || planned;
+        const unitCost = Number(r.actual_unit_cost ?? r.unit_cost) || 0;
+        totalCost += actual * unitCost;
+        const delta = Math.round((actual - planned) * 10000) / 10000;
+        if (delta === 0) continue;
+
+        const whRes2 = await adapter.query(
+          `SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1`,
+          [companyId, materialId]
+        );
+        const whId = whRes2.success && whRes2.rows?.[0]?.warehouse_id ? String(whRes2.rows[0].warehouse_id) : fallbackWh;
+        if (!whId) continue;
+
+        statements.push({
+          sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+          params: [companyId, materialId, whId],
+        });
+        if (delta > 0) {
+          statements.push({
+            sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'out', $4::numeric, $5, $6, $7)`,
+            params: [companyId, materialId, whId, delta, id, 'استهلاك فعلي إضافي', opts.userId ?? null],
+          });
+          statements.push({
+            sql: `UPDATE stock SET quantity = quantity - $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+            params: [delta, companyId, materialId, whId],
+          });
+        } else {
+          statements.push({
+            sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
+            params: [companyId, materialId, whId, -delta, id, 'إرجاع فائض خامات', opts.userId ?? null],
+          });
+          statements.push({
+            sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+            params: [-delta, companyId, materialId, whId],
+          });
+        }
+      }
+
+      if (outputWh && producedQty > 0) {
+        statements.push({
+          sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+          params: [companyId, String(wo.product_id ?? ''), outputWh],
+        });
+        statements.push({
+          sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
+          params: [companyId, String(wo.product_id ?? ''), outputWh, producedQty, id, 'توريد منتج تام الإنتاج', opts.userId ?? null],
+        });
+        statements.push({
+          sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+          params: [producedQty, companyId, String(wo.product_id ?? ''), outputWh],
+        });
+      }
+
+      statements.push({
+        sql: `UPDATE work_orders SET status = 'completed', actual_end_date = CURRENT_DATE, produced_quantity = $3::numeric, total_cost = $4::numeric, output_warehouse_id = COALESCE($5::uuid, output_warehouse_id), updated_at = NOW()${opts.userId ? ', updated_by = $6::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        params: opts.userId
+          ? [id, companyId, producedQty, Math.round(totalCost * 100) / 100, outputWh, opts.userId]
+          : [id, companyId, producedQty, Math.round(totalCost * 100) / 100, outputWh],
+      });
+
+      const result = await runTransaction(statements);
+      if (!result.success) return { success: false, error: result.error };
+      return {
+        success: true,
+        data: { producedQuantity: producedQty, totalCost: Math.round(totalCost * 100) / 100, outputWarehouseId: outputWh },
+      };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number, outputWarehouseId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -457,92 +725,26 @@ export const manufacturingApi = {
         const uidValidation = validateInput(uuidSchema, _userId);
         if (!uidValidation.success) return { success: false, error: uidValidation.error };
       }
-      if (isElectronPg()) {
-        const result = await invokeMfgRpc('updateWorkOrderStatus', {
-          id,
-          status,
-          producedQuantity: producedQuantity ?? null,
-        });
-        return { success: result.success, error: result.error };
-      }
-      const adapter = await getDbAdapter();
-
+      // Unified flow for BOTH environments (Electron + PGlite):
+      //   in_progress → startWorkOrder  (issues raw materials atomically)
+      //   completed   → completeWorkOrder (FG receipt into output warehouse
+      //                 + consumption deltas vs issued + cost rollup)
+      // Only terminal bookkeeping statuses stay as plain updates.
       if (status === 'in_progress') {
-        const result = await adapter.query(
-          `UPDATE work_orders SET status = 'in_progress', actual_start_date = $1, updated_at = NOW()${_userId ? ', updated_by = $2' : ''} WHERE id = $${_userId ? 3 : 2} AND company_id = $${_userId ? 4 : 3}`,
-          _userId ? [new Date().toISOString(), _userId, id, companyId] : [new Date().toISOString(), id, companyId]
-        );
-        return { success: result.success, error: result.error };
+        const r = await manufacturingApi.startWorkOrder(id, companyId, _userId || undefined);
+        return { success: r.success, error: r.error };
       }
-
       if (status === 'completed') {
-        const woRes = await adapter.query('SELECT product_id, produced_quantity, quantity FROM work_orders WHERE id = $1 AND company_id = $2', [id, companyId]);
-        if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'Work order not found' };
-        const wo = woRes.rows[0];
-        const finalProducedQty = producedQuantity ?? (Number(wo.produced_quantity) || Number(wo.quantity));
-
-        const consRes = await adapter.query('SELECT material_id, planned_quantity FROM work_order_consumptions WHERE work_order_id = $1', [id]);
-        const consRows = consRes.success ? (consRes.rows || []) : [];
-
-        const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
-        const warehouseId = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
-
-        // Atomic batch: stock ensure + movements + stock updates + status
-        // update all commit together or roll back together.
-        const statements: Array<{ sql: string; params?: unknown[] }> = [];
-        if (warehouseId) {
-          // Ensure stock rows exist for produced product
-          statements.push({
-            sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
-            params: [companyId, String(wo.product_id), warehouseId],
-          });
-          // Ensure stock rows exist for consumed materials
-          if (consRows.length > 0) {
-            for (const c of consRows) {
-              statements.push({
-                sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
-                params: [companyId, String(c.material_id), warehouseId],
-              });
-            }
-            const consValues = consRows.map((_c: Record<string, unknown>, i: number) => {
-              const off = i * 7;
-              return `($${off + 1}, $${off + 2}, $${off + 3}, 'out', $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7})`;
-            }).join(', ');
-            const consParams = consRows.flatMap((c: Record<string, unknown>) => [
-              companyId, String(c.material_id), warehouseId, Number(c.planned_quantity), id, 'Production consumption', _userId ?? null
-            ]);
-            statements.push({
-              sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ${consValues}`,
-              params: consParams,
-            });
-            // Decrement stock for consumed materials
-            statements.push({
-              sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
-                      FROM (SELECT material_id AS product_id, SUM(planned_quantity) AS qty FROM work_order_consumptions WHERE work_order_id = $1::uuid GROUP BY material_id) sub
-                     WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = $3::uuid`,
-              params: [id, companyId, warehouseId],
-            });
-          }
-          statements.push({
-            sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1, $2, $3, 'in', $4, $5, $6, $7)`,
-            params: [companyId, String(wo.product_id), warehouseId, finalProducedQty, id, 'Production output', _userId ?? null],
-          });
-          // Increment stock for produced product
-          statements.push({
-            sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
-            params: [finalProducedQty, companyId, String(wo.product_id), warehouseId],
-          });
-        }
-        statements.push({
-          sql: `UPDATE work_orders SET status = 'completed', actual_end_date = $1, produced_quantity = $2, updated_at = NOW()${_userId ? ', updated_by = $3' : ''} WHERE id = $${_userId ? 4 : 3} AND company_id = $${_userId ? 5 : 4}`,
-          params: _userId ? [new Date().toISOString(), finalProducedQty, _userId, id, companyId] : [new Date().toISOString(), finalProducedQty, id, companyId],
+        const r = await manufacturingApi.completeWorkOrder(id, companyId, {
+          producedQuantity,
+          outputWarehouseId: outputWarehouseId || null,
+          userId: _userId || undefined,
         });
-        const result = await runTransaction(statements);
-        if (!result.success) return { success: false, error: result.error };
-        return { success: true };
+        return { success: r.success, error: r.error };
       }
 
       {
+        const adapter = await getDbAdapter();
         const result = await adapter.query(
           `UPDATE work_orders SET status = $1, updated_at = NOW()${_userId ? ', updated_by = $2' : ''} WHERE id = $${_userId ? 3 : 2} AND company_id = $${_userId ? 4 : 3}`,
           _userId ? [status, _userId, id, companyId] : [status, id, companyId]

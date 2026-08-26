@@ -41,6 +41,7 @@ export const workOrders = pgTable('work_orders', {
   actualStartDate: date('actual_start_date'),
   actualEndDate: date('actual_end_date'),
   totalCost: numeric('total_cost', { precision: 18, scale: 4 }).default('0'),
+  outputWarehouseId: uuid('output_warehouse_id'),
   notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

@@ -1270,7 +1270,16 @@
       "estimatedCost": "Estimated Cost",
       "searchPlaceholder": "Search bills of materials...",
       "totalCount": "Total BOMs",
-      "avgCost": "Avg Cost"
+      "avgCost": "Avg Cost",
+      "availabilityTitle": "Material Availability Calculator",
+      "plannedQty": "Planned Quantity",
+      "checkAvailability": "Check Availability",
+      "fullyAvailable": "✓ All materials available",
+      "partiallyAvailable": "⚠ Materials insufficient",
+      "maxProducible": "Max producible",
+      "availabilityError": "Availability check failed",
+      "availabilityWarning": "Materials short — order will be created; start after restocking",
+      "createWo": "Create Work Order"
     },
     "production": "Production",
     "costs": "Costs",
@@ -1364,7 +1373,16 @@
     "workOrderStatus": "Work Order Status",
     "in_progress": "In Progress",
     "completed": "Completed",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "wo": {
+      "startIssuesMaterials": "BOM materials will be issued from stock upon confirmation — make sure quantities are available.",
+      "outputWarehouse": "Finished-goods warehouse",
+      "outputWarehouseHint": "Output posts here as an IN stock movement.",
+      "fromBom": "Derived from BOM",
+      "createdFromBom": "Work order created",
+      "seqFailed": "Failed to generate work-order number",
+      "statusUpdated": "Work-order status updated"
+    }
   },
   "hr": {
     "activeEmployees": "Active Employees",
