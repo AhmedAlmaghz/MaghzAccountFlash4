@@ -480,15 +480,12 @@ export const manufacturingApi = {
         `SELECT l.material_id,
                 p.name_ar AS material_name,
                 l.quantity * $3::numeric AS required,
-                COALESCE(s.quantity, 0) AS available
+                COALESCE(SUM(s.quantity), 0) AS available
            FROM bom_lines l
            LEFT JOIN products p ON p.id = l.material_id
            LEFT JOIN stock s ON s.product_id = l.material_id AND s.company_id = $1::uuid
-            AND s.warehouse_id = (
-                  SELECT st.warehouse_id FROM stock st
-                   WHERE st.company_id = $1::uuid AND st.product_id = l.material_id
-                   ORDER BY st.quantity DESC LIMIT 1)
-          WHERE l.bom_id = $2::uuid`,
+          WHERE l.bom_id = $2::uuid
+          GROUP BY l.material_id, p.name_ar, l.quantity`,
         [companyId, bomId, qty]
       );
       if (!res.success) return { success: false, error: res.error };
@@ -533,14 +530,11 @@ export const manufacturingApi = {
 
       const consRes = await adapter.query(
         `SELECT c.material_id, c.planned_quantity,
-                COALESCE(s.quantity, 0) AS available
+                COALESCE(SUM(s.quantity), 0) AS available
            FROM work_order_consumptions c
            LEFT JOIN stock s ON s.product_id = c.material_id AND s.company_id = $2::uuid
-            AND s.warehouse_id = (
-                  SELECT st.warehouse_id FROM stock st
-                   WHERE st.company_id = $2::uuid AND st.product_id = c.material_id
-                   ORDER BY st.quantity DESC LIMIT 1)
-          WHERE c.work_order_id = $1::uuid`,
+          WHERE c.work_order_id = $1::uuid
+          GROUP BY c.material_id, c.planned_quantity`,
         [id, companyId]
       );
       if (!consRes.success) return { success: false, error: consRes.error };
@@ -588,15 +582,14 @@ export const manufacturingApi = {
         });
       }
 
-      const outWarehouse = woRes.rows[0].output_warehouse_id ? String(woRes.rows[0].output_warehouse_id) : defaultWh;
       statements.push({
-        sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE${userId ? ', updated_by = $4::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid${userId ? '' : ''}`,
-        params: userId ? [id, companyId, /* placeholder alignment */ outWarehouse, userId] : [id, companyId],
+        sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE${userId ? ', updated_by = $3::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        params: userId ? [id, companyId, userId] : [id, companyId],
       });
 
       const result = await runTransaction(statements);
       if (!result.success) return { success: false, error: result.error };
-      return { success: true, data: { warehouseId: outWarehouse, issuedLines } };
+      return { success: true, data: { warehouseId: defaultWh, issuedLines } };
     } catch (e) {
       return { success: false, error: String(e) };
     }
