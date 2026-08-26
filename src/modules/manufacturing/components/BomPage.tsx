@@ -389,7 +389,28 @@ export const BomPage: React.FC = () => {
               {lines.map((line, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-4">
-                    <ProductSelect companyId={companyId} value={line.materialId} onChange={(v) => updateLine(idx, 'materialId', typeof v === 'string' ? v : '')} showBarcode showStock placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''} />
+                    <ProductSelect
+                      companyId={companyId}
+                      value={line.materialId}
+                      onChange={(v) => updateLine(idx, 'materialId', typeof v === 'string' ? v : '')}
+                      onProductChange={(product) =>
+                        setLines((prev) =>
+                          prev.map((l, i) =>
+                            i === idx
+                              ? {
+                                  ...l,
+                                  materialId: product.id,
+                                  materialName: product.nameAr,
+                                  unitCost: l.unitCost ? l.unitCost : Number(product.costPrice) || 0,
+                                }
+                              : l
+                          )
+                        )
+                      }
+                      showBarcode
+                      showStock
+                      placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
+                    />
                   </div>
                   <div className="col-span-3">
                     <Input label={idx === 0 ? t('manufacturing.bom.materialName') : ''} value={line.materialName} onChange={(e) => updateLine(idx, 'materialName', e.target.value)} />
