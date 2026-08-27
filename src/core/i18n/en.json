@@ -1259,7 +1259,8 @@
       "statusUpdated": "Work order status updated",
       "created": "Work order created successfully",
       "updated": "Work order updated successfully",
-      "requiredFields": "Please fill in the required fields: order number, product and quantity"
+      "requiredFields": "Please fill in the required fields: order number, product and quantity",
+      "unitCost": "Unit Cost"
     },
     "bom": {
       "title": "Bill of Materials",

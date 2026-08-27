@@ -173,6 +173,25 @@ async function resolveInventoryAccountId(companyId: string, productId: string): 
   return findAccountByCodeLocal(companyId, '11301');
 }
 
+/** WIP account code — raw-material value parked here between START and COMPLETE. */
+const WIP_ACCOUNT_CODE = '11302';
+/** Expense account for materials consumed by a CANCELLED work order (no return). */
+const PRODUCTION_LOSS_ACCOUNT_CODE = '53501';
+
+/**
+ * Resolve the Work-in-Progress GL account:
+ * default_accounts(default_wip) → code 11302.
+ */
+async function resolveWipAccountId(companyId: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const daRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_wip'`,
+    [companyId]
+  );
+  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
+  return findAccountByCodeLocal(companyId, WIP_ACCOUNT_CODE);
+}
+
 export const manufacturingApi = {
   // ─── BOM ──────────────────────────────────────────────────────────────────
   async getBoms(companyId: string, ownedByUserId?: string): Promise<{ success: boolean; data?: BOM[]; error?: string }> {
@@ -484,6 +503,33 @@ export const manufacturingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      // Document immutability (best practice): consumption lines are frozen
+      // once the order leaves "planned" — stock movements and the WIP posting
+      // already reference them. The edit form always sends the lines back, so
+      // only an ACTUAL modification is rejected (identical lines pass).
+      if (data.lines !== undefined) {
+        const adapter = await getDbAdapter();
+        const stRes = await adapter.query(
+          `SELECT status FROM work_orders WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+          [id, companyId]
+        );
+        const st = stRes.rows?.[0]?.status ? String(stRes.rows[0].status) : '';
+        if (st && st !== 'planned') {
+          const curRes = await adapter.query(
+            `SELECT material_id, planned_quantity, unit_cost FROM work_order_consumptions WHERE work_order_id = $1::uuid`,
+            [id]
+          );
+          const fmt = (mid: unknown, qty: unknown, uc: unknown) => `${String(mid)}:${Number(qty) || 0}:${Number(uc) || 0}`;
+          const current = ((curRes.rows || []) as Record<string, unknown>[])
+            .map((r) => fmt(r.material_id, r.planned_quantity, r.unit_cost)).sort();
+          const incoming = data.lines
+            .filter((l) => l.materialId && Number(l.plannedQuantity) > 0)
+            .map((l) => fmt(l.materialId, l.plannedQuantity, l.unitCost)).sort();
+          if (JSON.stringify(current) !== JSON.stringify(incoming)) {
+            return { success: false, error: 'لا يمكن تعديل مواد أمر التشغيل بعد البدء — عدّل الكميات الفعلية عند الإكمال' };
+          }
+        }
+      }
       if (isElectronPg()) {
         const result = await invokeMfgRpc('updateWorkOrder', {
           data: {
@@ -660,34 +706,62 @@ export const manufacturingApi = {
 
       // Guard: only planned orders can start (idempotency by state machine).
       const woRes = await adapter.query(
-        `SELECT w.status, w.output_warehouse_id FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
+        `SELECT w.status, w.output_warehouse_id, w.order_number FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
         [id, companyId]
       );
       if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'أمر التشغيل غير موجود' };
       if (String(woRes.rows[0].status) !== 'planned') {
         return { success: false, error: 'لا يمكن بدء أمر غير مخطط — حالته الحالية ليست "مخطط"' };
       }
+      const orderNumber = woRes.rows[0].order_number ? String(woRes.rows[0].order_number) : '';
 
       const consRes = await adapter.query(
-        `SELECT c.material_id, c.planned_quantity,
+        `SELECT c.material_id, c.planned_quantity, c.unit_cost,
                 COALESCE(SUM(s.quantity), 0) AS available
            FROM work_order_consumptions c
-           LEFT JOIN stock s ON s.product_id = c.material_id AND s.company_id = $2::uuid
+            LEFT JOIN stock s ON s.product_id = c.material_id AND s.company_id = $2::uuid
           WHERE c.work_order_id = $1::uuid
-          GROUP BY c.material_id, c.planned_quantity`,
+          GROUP BY c.material_id, c.planned_quantity, c.unit_cost`,
         [id, companyId]
       );
       if (!consRes.success) return { success: false, error: consRes.error };
       const consRows = (consRes.rows || []) as Record<string, unknown>[];
 
-      // Availability gate with per-material detail.
-      const shortages = consRows
-        .map((r) => ({ material: String(r.material_id), req: Number(r.planned_quantity) || 0, avail: Number(r.available) || 0 }))
+      // Availability gate AGGREGATED per material — a material may appear on
+      // several consumption lines; the TOTAL requirement must fit the stock.
+      const reqByMaterial = new Map<string, number>();
+      const availByMaterial = new Map<string, number>();
+      for (const r of consRows) {
+        const mid = String(r.material_id);
+        reqByMaterial.set(mid, (reqByMaterial.get(mid) || 0) + (Number(r.planned_quantity) || 0));
+        if (!availByMaterial.has(mid)) availByMaterial.set(mid, Number(r.available) || 0);
+      }
+      const shortages = [...reqByMaterial.entries()]
+        .map(([material, req]) => ({ material, req, avail: availByMaterial.get(material) || 0 }))
         .filter((x) => x.avail < x.req);
       if (shortages.length > 0) {
         const detail = shortages.map((s) => `${s.material.slice(0, 8)}… مطلوب ${s.req} / متاح ${s.avail}`).join('، ');
         return { success: false, error: `المخزون لا يكفي لصرف الخامات (${detail})` };
       }
+
+      // Issued-material cost per GL inventory account (for the WIP journal
+      // entry): planned qty × unit cost, credited to each material's own
+      // inventory account, debited in total to WIP (11302).
+      let issuedCostTotal = 0;
+      const issueCostByAccount = new Map<string, number>();
+      for (const r of consRows) {
+        const qty = Number(r.planned_quantity) || 0;
+        const uc = Number(r.unit_cost) || 0;
+        const cost = qty * uc;
+        if (cost <= 0) continue;
+        issuedCostTotal += cost;
+        const accId = await resolveInventoryAccountId(companyId, String(r.material_id));
+        if (!accId) {
+          return { success: false, error: 'حساب المخزون غير موجود — قم بتهيئة الحسابات الافتراضية في الإعدادات' };
+        }
+        issueCostByAccount.set(accId, (issueCostByAccount.get(accId) || 0) + cost);
+      }
+      issuedCostTotal = Math.round(issuedCostTotal * 100) / 100;
 
       // Issue from the richest warehouse of each material (same one the
       // availability check read) — first active warehouse for FG is NOT used
@@ -722,9 +796,33 @@ export const manufacturingApi = {
         });
       }
 
+      // WIP journal entry (best practice — IAS 2): raw-material value leaves
+      // inventory NOW (at issue) and parks in WIP until completion.
+      //   DR 11302 WIP            — issued material cost (total)
+      //   CR inventory account(s) — per material's own account
+      if (issuedCostTotal > 0) {
+        const wipAccountId = await resolveWipAccountId(companyId);
+        if (!wipAccountId) {
+          return { success: false, error: `حساب بضاعة تحت التشغيل (${WIP_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
+        }
+        const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [
+          { accountId: wipAccountId, debit: issuedCostTotal, credit: 0, memo: `صرف خامات - ${orderNumber || id}` },
+        ];
+        for (const [accId, amount] of issueCostByAccount) {
+          entries.push({ accountId: accId, debit: 0, credit: Math.round(amount * 100) / 100, memo: 'مواد خام مصروفة لأمر تشغيل' });
+        }
+        statements.push(buildJournalEntryStatement(companyId, {
+          reference: orderNumber || String(id),
+          description: `صرف خامات أمر التشغيل ${orderNumber}`.trim(),
+          date: new Date().toISOString().split('T')[0],
+          totalAmount: issuedCostTotal,
+          entries,
+        }));
+      }
+
       statements.push({
-        sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE${userId ? ', updated_by = $3::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
-        params: userId ? [id, companyId, userId] : [id, companyId],
+        sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE, wip_materials_cost = $3::numeric${userId ? ', updated_by = $4::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        params: userId ? [id, companyId, issuedCostTotal, userId] : [id, companyId, issuedCostTotal],
       });
 
       const result = await runTransaction(statements);
@@ -739,7 +837,7 @@ export const manufacturingApi = {
     id: string,
     companyId: string,
     opts: { producedQuantity?: number; outputWarehouseId?: string | null; userId?: string } = {},
-  ): Promise<{ success: boolean; error?: string; data?: { producedQuantity: number; totalCost: number; outputWarehouseId: string | null } }> {
+  ): Promise<{ success: boolean; error?: string; data?: { producedQuantity: number; totalCost: number; unitCost: number; outputWarehouseId: string | null } }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -747,10 +845,10 @@ export const manufacturingApi = {
       const adapter = await getDbAdapter();
       const woRes = await adapter.query(
         `SELECT w.status, w.quantity, w.produced_quantity, w.output_warehouse_id, w.bom_id, w.product_id,
-                w.order_number, w.production_costs,
+                w.order_number, w.production_costs, w.wip_materials_cost,
                 COALESCE(b.output_quantity, 1) AS bom_output_quantity
            FROM work_orders w
-           LEFT JOIN boms b ON b.id = w.bom_id
+            LEFT JOIN boms b ON b.id = w.bom_id
           WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
         [id, companyId]
       );
@@ -844,20 +942,48 @@ export const manufacturingApi = {
       // Total production cost = materials + labor/energy/packaging/other.
       const materialsCostRounded = Math.round(materialsCost * 100) / 100;
       const totalCost = Math.round((materialsCost + productionCostsTotal) * 100) / 100;
+      const wipPosted = Math.round((Number(wo.wip_materials_cost) || 0) * 100) / 100;
 
-      // Capitalize the full cost into the product's cost_price (unit cost).
+      // Unit cost = total production cost ÷ actual produced quantity.
+      const unitCostNew = producedQty > 0 && totalCost > 0
+        ? Math.round((totalCost / producedQty) * 10000) / 10000
+        : 0;
+
+      // Update the product cost with the MOVING WEIGHTED AVERAGE method
+      // (IAS 2): blend the existing on-hand stock value with the new
+      // production value instead of overwriting it. Stock is read BEFORE the
+      // receipt statements execute (same transaction), so existingQty
+      // excludes the quantity being received now.
       if (producedQty > 0 && totalCost > 0) {
-        const unitCostNew = Math.round((totalCost / producedQty) * 10000) / 10000;
+        const prodId = String(wo.product_id ?? '');
+        const stockRes = await adapter.query(
+          `SELECT COALESCE(SUM(quantity), 0) AS q FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid`,
+          [companyId, prodId]
+        );
+        const prodRes = await adapter.query(
+          `SELECT cost_price FROM products WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [prodId, companyId]
+        );
+        const existingQty = Math.max(0, Number(stockRes.rows?.[0]?.q) || 0);
+        const oldCost = Math.max(0, Number(prodRes.rows?.[0]?.cost_price) || 0);
+        const blended = existingQty + producedQty;
+        const newCostPrice = blended > 0
+          ? Math.round(((existingQty * oldCost + producedQty * unitCostNew) / blended) * 10000) / 10000
+          : unitCostNew;
         statements.push({
           sql: `UPDATE products SET cost_price = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
-          params: [unitCostNew, String(wo.product_id ?? ''), companyId],
+          params: [newCostPrice, prodId, companyId],
         });
       }
 
-      // GL posting (same atomic transaction as stock movements):
-      //   DR inventory account — total production cost (finished goods in)
-      //   CR inventory account — materials consumed (raw materials out)
-      //   CR 53101/53201/53301/53401 — labor/energy/packaging/other
+      // GL posting (same atomic transaction as stock movements).
+      // WIP flow (orders started after migration 0007 — wipPosted > 0):
+      //   DR finished-goods inventory — total production cost
+      //   CR WIP (11302)              — material cost issued at START
+      //   CR inventory                — extra consumption beyond issued (Δ>0)
+      //   DR inventory                — surplus returned to stock    (Δ<0)
+      //   CR 53xxx                    — labor/energy/packaging/other
+      // Legacy flow (wipPosted = 0): materials credited straight to inventory.
       if (totalCost > 0) {
         const inventoryAccountId = await resolveInventoryAccountId(companyId, String(wo.product_id ?? ''));
         if (!inventoryAccountId) {
@@ -866,7 +992,19 @@ export const manufacturingApi = {
         const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [
           { accountId: inventoryAccountId, debit: totalCost, credit: 0, memo: `إنتاج تام - ${String(wo.order_number ?? '')}` },
         ];
-        if (materialsCostRounded > 0) {
+        if (wipPosted > 0) {
+          const wipAccountId = await resolveWipAccountId(companyId);
+          if (!wipAccountId) {
+            return { success: false, error: `حساب بضاعة تحت التشغيل (${WIP_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
+          }
+          entries.push({ accountId: wipAccountId, debit: 0, credit: wipPosted, memo: 'مواد خام مصروفة عند البدء' });
+          const delta = Math.round((materialsCostRounded - wipPosted) * 100) / 100;
+          if (delta > 0) {
+            entries.push({ accountId: inventoryAccountId, debit: 0, credit: delta, memo: 'استهلاك فعلي إضافي' });
+          } else if (delta < 0) {
+            entries.push({ accountId: inventoryAccountId, debit: -delta, credit: 0, memo: 'إرجاع فائض خامات' });
+          }
+        } else if (materialsCostRounded > 0) {
           entries.push({ accountId: inventoryAccountId, debit: 0, credit: materialsCostRounded, memo: 'مواد خام مستهلكة' });
         }
         for (const pc of productionCosts) {
@@ -896,7 +1034,7 @@ export const manufacturingApi = {
       if (!result.success) return { success: false, error: result.error };
       return {
         success: true,
-        data: { producedQuantity: producedQty, totalCost, outputWarehouseId: outputWh },
+        data: { producedQuantity: producedQty, totalCost, unitCost: unitCostNew, outputWarehouseId: outputWh },
       };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -921,11 +1059,13 @@ export const manufacturingApi = {
 
       const adapter = await getDbAdapter();
       const woRes = await adapter.query(
-        `SELECT w.status FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
+        `SELECT w.status, w.wip_materials_cost, w.order_number FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
         [id, companyId]
       );
       if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'أمر التشغيل غير موجود' };
       const status = String(woRes.rows[0].status);
+      const wipPosted = Math.round((Number(woRes.rows[0].wip_materials_cost) || 0) * 100) / 100;
+      const orderNumber = woRes.rows[0].order_number ? String(woRes.rows[0].order_number) : '';
       if (status === 'completed') {
         return { success: false, error: 'لا يمكن إلغاء أمر مكتمل — الإنتاج تم توريده للمخزون' };
       }
@@ -936,12 +1076,15 @@ export const manufacturingApi = {
       const returnMaterials = opts.returnMaterials !== false && status === 'in_progress';
       const statements: Array<{ sql: string; params?: unknown[] }> = [];
       let returnedLines = 0;
+      // Per-account material cost for the WIP reversal journal entry.
+      const returnCostByAccount = new Map<string, number>();
+      let returnCostRawTotal = 0;
 
       if (returnMaterials) {
         // START issued each consumption's planned_quantity — return exactly that.
         const consRes = await adapter.query(
-          `SELECT c.material_id, c.planned_quantity
-             FROM work_order_consumptions c WHERE c.work_order_id = $1::uuid`,
+          `SELECT c.material_id, c.planned_quantity, c.unit_cost
+              FROM work_order_consumptions c WHERE c.work_order_id = $1::uuid`,
           [id]
         );
         if (!consRes.success) return { success: false, error: consRes.error };
@@ -971,11 +1114,60 @@ export const manufacturingApi = {
             params: [qty, companyId, materialId, whId],
           });
           returnedLines++;
+          // Mirror of the START journal entry: cost returns to each
+          // material's own inventory account.
+          const cost = qty * (Number(r.unit_cost) || 0);
+          if (cost > 0 && wipPosted > 0) {
+            const accId = await resolveInventoryAccountId(companyId, materialId);
+            if (accId) {
+              returnCostByAccount.set(accId, (returnCostByAccount.get(accId) || 0) + cost);
+              returnCostRawTotal += cost;
+            }
+          }
         }
       }
 
+      // WIP settlement:
+      //  - materials RETURNED  → DR inventory account(s), CR WIP (reversal)
+      //  - materials NOT returned → DR 53501 production losses, CR WIP
+      //    (consumed value is expensed — abnormal loss per IAS 2)
+      if (wipPosted > 0 && status === 'in_progress') {
+        const wipAccountId = await resolveWipAccountId(companyId);
+        if (!wipAccountId) {
+          return { success: false, error: `حساب بضاعة تحت التشغيل (${WIP_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
+        }
+        const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [];
+        if (returnMaterials && returnCostByAccount.size > 0) {
+          const creditTotal = Math.round(returnCostRawTotal * 100) / 100;
+          let debitTotal = 0;
+          for (const [accId, amount] of returnCostByAccount) {
+            const rounded = Math.round(amount * 100) / 100;
+            entries.push({ accountId: accId, debit: rounded, credit: 0, memo: 'إرجاع خامات أمر تشغيل ملغي' });
+            debitTotal += rounded;
+          }
+          // Absorb rounding difference on the first entry so DR ≡ CR exactly.
+          const diff = Math.round((creditTotal - debitTotal) * 100) / 100;
+          if (diff !== 0 && entries.length > 0) entries[0].debit = Math.round((entries[0].debit + diff) * 100) / 100;
+          entries.push({ accountId: wipAccountId, debit: 0, credit: creditTotal, memo: `عكس قيد خامات - ${orderNumber || id}` });
+        } else {
+          const lossAccountId = await findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE);
+          if (!lossAccountId) {
+            return { success: false, error: `حساب خسائر أوامر التشغيل (${PRODUCTION_LOSS_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
+          }
+          entries.push({ accountId: lossAccountId, debit: wipPosted, credit: 0, memo: `خامات مستهلكة لأمر ملغي - ${orderNumber || id}` });
+          entries.push({ accountId: wipAccountId, debit: 0, credit: wipPosted, memo: `عكس قيد خامات - ${orderNumber || id}` });
+        }
+        statements.push(buildJournalEntryStatement(companyId, {
+          reference: orderNumber || String(id),
+          description: `إلغاء أمر التشغيل ${orderNumber} — تسوية بضاعة تحت التشغيل`.trim(),
+          date: new Date().toISOString().split('T')[0],
+          totalAmount: wipPosted,
+          entries,
+        }));
+      }
+
       statements.push({
-        sql: `UPDATE work_orders SET status = 'cancelled', updated_at = NOW()${opts.userId ? ', updated_by = $3::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        sql: `UPDATE work_orders SET status = 'cancelled', wip_materials_cost = 0, updated_at = NOW()${opts.userId ? ', updated_by = $3::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: opts.userId ? [id, companyId, opts.userId] : [id, companyId],
       });
 
@@ -987,7 +1179,7 @@ export const manufacturingApi = {
     }
   },
 
-  async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number, outputWarehouseId?: string, opts: { returnMaterials?: boolean } = {}): Promise<{ success: boolean; error?: string }> {
+  async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number, outputWarehouseId?: string, opts: { returnMaterials?: boolean } = {}): Promise<{ success: boolean; error?: string; data?: { producedQuantity?: number; totalCost?: number; unitCost?: number; outputWarehouseId?: string | null } }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -1014,7 +1206,7 @@ export const manufacturingApi = {
           outputWarehouseId: outputWarehouseId || null,
           userId: _userId || undefined,
         });
-        return { success: r.success, error: r.error };
+        return { success: r.success, error: r.error, data: r.data };
       }
       if (status === 'cancelled') {
         const r = await manufacturingApi.cancelWorkOrder(id, companyId, {

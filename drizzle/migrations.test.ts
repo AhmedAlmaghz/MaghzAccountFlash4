@@ -238,3 +238,32 @@ describe('Migration 0003: work-order output warehouse', () => {
     expect(schema).toMatch(/outputWarehouseId: uuid\('output_warehouse_id'\)/);
   });
 });
+
+describe('Migration 0007: work-order WIP accounting', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0007_wo_wip_accounting.sql'), 'utf-8');
+
+  it('adds wip_materials_cost to work_orders (amount debited to WIP at START)', () => {
+    expect(migrationSql).toMatch(/ADD COLUMN IF NOT EXISTS "wip_materials_cost" numeric\(18,4\) NOT NULL DEFAULT 0/);
+  });
+
+  it('creates the WIP account 11302 under inventory group 113 for every company', () => {
+    expect(migrationSql).toMatch(/'11302'/);
+    expect(migrationSql).toMatch(/p\.code = '113'/);
+  });
+
+  it('creates the production-loss account 53501 under group 53 for every company', () => {
+    expect(migrationSql).toMatch(/'53501'/);
+    expect(migrationSql).toMatch(/p\.code = '53'/);
+  });
+
+  it('is idempotent (IF NOT EXISTS everywhere)', () => {
+    expect(migrationSql.match(/ADD COLUMN IF NOT EXISTS/g)?.length).toBe(1);
+    expect(migrationSql.match(/WHERE NOT EXISTS/g)?.length).toBe(2);
+    expect(migrationSql).toMatch(/CREATE INDEX IF NOT EXISTS/);
+  });
+
+  it('Drizzle schema exposes wipMaterialsCost on workOrders', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/manufacturing.ts'), 'utf-8');
+    expect(schema).toMatch(/wipMaterialsCost: numeric\('wip_materials_cost'/);
+  });
+});

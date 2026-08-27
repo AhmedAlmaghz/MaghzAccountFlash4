@@ -217,6 +217,11 @@ const [isEditingActual, setIsEditingActual] = useState(false);
     );
     if (res && res.success === false) {
       addToast('error', res.error || t('common.error'));
+    } else if (confirmStatus.status === 'completed' && res?.data) {
+      addToast(
+        'success',
+        `${t('manufacturing.workOrders.statusUpdated')} — ${t('manufacturing.workOrders.unitCost')}: ${formatCurrency(res.data.unitCost ?? 0)} | ${t('manufacturing.workOrders.totalCost')}: ${formatCurrency(res.data.totalCost ?? 0)}`
+      );
     } else {
       addToast('success', t('manufacturing.workOrders.statusUpdated'));
     }
@@ -660,6 +665,13 @@ const [isEditingActual, setIsEditingActual] = useState(false);
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3"><span className="text-slate-500">{t('manufacturing.form.product')}:</span><p className="font-semibold">{viewing.workOrder.productName || viewing.workOrder.productId}</p></div>
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3"><span className="text-slate-500">{t('manufacturing.table.status')}:</span><p className="font-semibold"><StatusBadge status={viewing.workOrder.status} /></p></div>
             </div>
+            {viewing.workOrder.status === 'completed' && Number(viewing.workOrder.totalCost) > 0 && (
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded p-3"><span className="text-slate-500">{t('manufacturing.workOrders.totalCost')}:</span><p className="font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(Number(viewing.workOrder.totalCost))}</p></div>
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded p-3"><span className="text-slate-500">{t('manufacturing.workOrders.actualProducedQuantity')}:</span><p className="font-semibold text-blue-700 dark:text-blue-300">{Number(viewing.workOrder.producedQuantity) || 0}</p></div>
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded p-3"><span className="text-slate-500">{t('manufacturing.workOrders.unitCost')}:</span><p className="font-semibold text-emerald-700 dark:text-emerald-300">{formatCurrency(Number(viewing.workOrder.producedQuantity) > 0 ? Number(viewing.workOrder.totalCost) / Number(viewing.workOrder.producedQuantity) : 0)}</p></div>
+              </div>
+            )}
             {viewing.workOrder.notes && (
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3 text-sm">
                 <span className="text-slate-500">{t('manufacturing.form.notes')}:</span>

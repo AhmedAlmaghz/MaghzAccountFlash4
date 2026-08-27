@@ -44,6 +44,7 @@ const ACCOUNTS = [
   { code: '11202', name_ar: 'سلف الموظفين', name_en: 'Employee Advances', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
   { code: '113', name_ar: 'المخزون', name_en: 'Inventory', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
   { code: '11301', name_ar: 'بضاعة أول المدة', name_en: 'Opening Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
+  { code: '11302', name_ar: 'بضاعة تحت التشغيل', name_en: 'Work in Progress', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
   // Liabilities
   { code: '2', name_ar: 'الالتزامات', name_en: 'Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: null },
   { code: '21', name_ar: 'الالتزامات المتداولة', name_en: 'Current Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: '2' },
@@ -78,6 +79,7 @@ const ACCOUNTS = [
   { code: '53201', name_ar: 'تكاليف إنتاج - طاقة', name_en: 'Production Costs - Energy', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
   { code: '53301', name_ar: 'تكاليف إنتاج - تغليف', name_en: 'Production Costs - Packaging', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
   { code: '53401', name_ar: 'تكاليف إنتاج - أخرى', name_en: 'Production Costs - Other', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
+  { code: '53501', name_ar: 'خسائر أوامر التشغيل', name_en: 'Production Losses', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
 ];
 
 const PRODUCT_TYPES = [

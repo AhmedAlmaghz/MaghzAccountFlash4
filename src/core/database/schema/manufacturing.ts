@@ -51,6 +51,9 @@ export const workOrders = pgTable('work_orders', {
   // [{category: 'labor'|'energy'|'packaging'|'other', description, amount}]
   // capitalized into product cost + posted to GL on completion.
   productionCosts: jsonb('production_costs').notNull().default([]),
+  // Amount debited to the WIP account (11302) when the order was STARTed.
+  // 0 = legacy/not started; completion falls back to pre-WIP posting then.
+  wipMaterialsCost: numeric('wip_materials_cost', { precision: 18, scale: 4 }).notNull().default('0'),
   notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
