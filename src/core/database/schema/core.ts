@@ -71,6 +71,7 @@ export const branches = pgTable('branches', {
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 export const currencies = pgTable('currencies', {
@@ -85,6 +86,7 @@ export const currencies = pgTable('currencies', {
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 export const vatSettings = pgTable('vat_settings', {

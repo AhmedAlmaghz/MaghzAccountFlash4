@@ -57,6 +57,20 @@
       "when": 1796100000000,
       "tag": "0007_wo_wip_accounting",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1796200000000,
+      "tag": "0008_product_types_updated_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1796300000000,
+      "tag": "0009_missing_updated_at",
+      "breakpoints": true
     }
   ]
 }

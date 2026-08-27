@@ -43,6 +43,7 @@ export const productTypes = pgTable('product_types', {
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 // ─── Units (UOM) ──────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ export const payrollComponents = pgTable('payroll_components', {
   defaultAccountId: uuid('default_account_id').references(() => accounts.id),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 // ─── Default Accounts Configuration ───────────────────────────────────────────

@@ -102,6 +102,8 @@ import manufacturingPro from '@root/drizzle/0004_manufacturing_pro.sql?raw';
 import woProductionCosts from '@root/drizzle/0005_wo_production_costs.sql?raw';
 import productTypeBomFlags from '@root/drizzle/0006_product_type_bom_flags.sql?raw';
 import woWipAccounting from '@root/drizzle/0007_wo_wip_accounting.sql?raw';
+import productTypesUpdatedAt from '@root/drizzle/0008_product_types_updated_at.sql?raw';
+import missingUpdatedAt from '@root/drizzle/0009_missing_updated_at.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -112,6 +114,8 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0005_wo_production_costs', sql: woProductionCosts },
   { name: '0006_product_type_bom_flags', sql: productTypeBomFlags },
   { name: '0007_wo_wip_accounting', sql: woWipAccounting },
+  { name: '0008_product_types_updated_at', sql: productTypesUpdatedAt },
+  { name: '0009_missing_updated_at', sql: missingUpdatedAt },
 ];
 
 /**
