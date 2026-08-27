@@ -159,7 +159,12 @@ export const BomPage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.productId || lines.length === 0 || lines.some((l) => !l.materialId)) return;
+    const addToast = useToastStore.getState().addToast;
+    const validLines = lines.filter((l) => l.materialId && Number(l.quantity) > 0);
+    if (!formData.productId || validLines.length === 0) {
+      addToast('error', t('manufacturing.bom.requiredFields'));
+      return;
+    }
     const totalCost = formData.totalCost ? Number(formData.totalCost) : estimatedTotal;
     const payload = {
       companyId,
@@ -169,15 +174,16 @@ export const BomPage: React.FC = () => {
       outputQuantity: Math.max(Number(formData.outputQuantity) || 1, 0.0001),
       totalCost,
       notes: formData.notes || undefined,
-      lines: lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
+      lines: validLines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity), unitCost: Number(l.unitCost) || 0 })),
     };
-    if (editing) {
-      await update(editing.id, payload);
+    const res = editing ? await update(editing.id, payload) : await create(payload);
+    if (res && res.success) {
+      addToast('success', t(editing ? 'manufacturing.bom.updated' : 'manufacturing.bom.created'));
+      setIsModalOpen(false);
+      resetForm();
     } else {
-      await create(payload);
+      addToast('error', res?.error || t('common.error'));
     }
-    setIsModalOpen(false);
-    resetForm();
   };
 
   const handleDelete = async () => {
@@ -368,7 +374,7 @@ export const BomPage: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.finishedProduct')}</label>
-              <ProductSelect companyId={companyId} value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
+              <ProductSelect companyId={companyId} manufacturingRole="finished" value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
             </div>
             <Input label={t('manufacturing.form.version')} value={formData.version} onChange={(e) => setFormData((prev) => ({ ...prev, version: e.target.value }))} />
           </div>
@@ -410,6 +416,7 @@ export const BomPage: React.FC = () => {
                   <div className="col-span-4">
                     <ProductSelect
                       companyId={companyId}
+                      manufacturingRole="material"
                       value={line.materialId}
                       onChange={(v) => updateLine(idx, 'materialId', typeof v === 'string' ? v : '')}
                       onProductChange={(product) =>

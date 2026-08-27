@@ -29,14 +29,14 @@ export interface ProductSelectProps {
   module?: ProductModule;
   categoryId?: string;
   /**
-   * Manufacturing semantic filter on the product TYPE:
-   *  - 'finished': only products whose type usage is finished/complete
-   *    (منتج نهائي / تام الإنتاج)
-   *  - 'raw': only products whose type usage is raw material
-   *    (مواد أولية / مواد خام)
+   * Manufacturing semantic filter based on the product TYPE flags:
+   *  - 'finished': type.appearsInManufacturing = true AND type.hasBOM = false
+   *    (المنتج النهائي — يظهَر في التصنيع ولا يدعم BOM)
+   *  - 'material': type.appearsInManufacturing = true AND type.hasBOM = true
+   *    (المواد — تظهر في التصنيع وتدعم BOM)
    * Products without a type are excluded when this filter is active.
    */
-  usage?: 'finished' | 'raw';
+  manufacturingRole?: 'finished' | 'material';
 }
 
 export const ProductSelect: React.FC<ProductSelectProps> = ({
@@ -54,7 +54,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
   showBarcode = true,
   module,
   categoryId,
-  usage,
+  manufacturingRole,
 }) => {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('select.product.placeholder');
@@ -68,9 +68,14 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
     if (module) {
       filtered = filterProductsByModule(filtered, productTypes, module);
     }
-    if (usage) {
+    if (manufacturingRole) {
+      // Finished product: type appears in manufacturing AND does NOT support BOM.
+      // Material:        type appears in manufacturing AND supports BOM.
+      const wantBom = manufacturingRole === 'material';
       const typeIds = new Set(
-        productTypes.filter((tt) => tt.usage === usage).map((tt) => tt.id)
+        productTypes
+          .filter((tt) => tt.appearsInManufacturing === true && tt.hasBOM === wantBom)
+          .map((tt) => tt.id)
       );
       filtered = filtered.filter((p) => p.productTypeId != null && typeIds.has(p.productTypeId));
     }
@@ -105,7 +110,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
         disabled: !p.isActive,
       } as SmartSelectItem;
     });
-  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, usage, formatCurrency, t]);
+  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, manufacturingRole, formatCurrency, t]);
 
   return (
     <SmartSelect

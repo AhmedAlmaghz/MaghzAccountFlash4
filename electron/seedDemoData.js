@@ -84,7 +84,7 @@ const PRODUCT_TYPES = [
   { code: 'TRADE', name_ar: 'سلعة تجارية', name_en: 'Trading Goods', appears_in_sales: true, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: false, has_stock_tracking: true, has_bom: false, sales: '41101', cogs: '51101', inv: '11301' },
   { code: 'SRV',   name_ar: 'خدمة',           name_en: 'Service',          appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: false, appears_in_manufacturing: false, has_stock_tracking: false, has_bom: false, sales: '41102', cogs: null, inv: null },
   { code: 'RAW',   name_ar: 'مواد أولية',     name_en: 'Raw Materials',    appears_in_sales: false, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: true, sales: null, cogs: '51101', inv: '11301' },
-  { code: 'FG',    name_ar: 'سلع تامة الإنتاج', name_en: 'Finished Goods',  appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: true, sales: '41101', cogs: '51101', inv: '11301' },
+  { code: 'FG',    name_ar: 'سلع تامة الإنتاج', name_en: 'Finished Goods',  appears_in_sales: true, appears_in_purchases: false, appears_in_inventory: true, appears_in_manufacturing: true, has_stock_tracking: true, has_bom: false, sales: '41101', cogs: '51101', inv: '11301' },
   { code: 'CON',   name_ar: 'مستهلك',         name_en: 'Consumable',       appears_in_sales: false, appears_in_purchases: true, appears_in_inventory: true, appears_in_manufacturing: false, has_stock_tracking: true, has_bom: false, sales: null, cogs: null, inv: '11301' },
 ];
 
@@ -173,6 +173,9 @@ const PRODUCTS = [
   { code: 'PRD-013', name_ar: 'مناديل فاين 200 منديل',  name_en: 'Fine Tissues 200',       barcode: '6223000123468', sku: 'TIS-FIN-200',  unit: 'علبة', cost: 350,   price: 420,   type: 'CON' },
   { code: 'PRD-014', name_ar: 'قهوة العربية 250غ',      name_en: 'Arabian Coffee 250g',    barcode: '6223000123469', sku: 'COF-ARA-250G', unit: 'علبة', cost: 2200,  price: 2600,  type: 'TRADE' },
   { code: 'PRD-015', name_ar: 'بسكويت أوريو 154غ',      name_en: 'Oreo Biscuits 154g',     barcode: '6223000123470', sku: 'BIS-ORE-154G', unit: 'علبة', cost: 550,   price: 650,   type: 'TRADE' },
+  { code: 'PRD-016', name_ar: 'قمح سائب 100 كغ',        name_en: 'Bulk Wheat 100kg',       barcode: '6223000123471', sku: 'WHT-BLK-100KG', unit: 'كيس', cost: 18000, price: 20000, type: 'RAW' },
+  { code: 'PRD-017', name_ar: 'زيت طعام سائب 20 لتر',   name_en: 'Bulk Cooking Oil 20L',   barcode: '6223000123472', sku: 'OIL-BLK-20L',  unit: 'عبوة', cost: 35000, price: 38000, type: 'RAW' },
+  { code: 'PRD-018', name_ar: 'سلة الأمل التموينية',    name_en: 'Al-Amal Food Basket',    barcode: '6223000123473', sku: 'BSK-AML-001',  unit: 'سلة', cost: 25000, price: 30000, type: 'FG' },
 ];
 
 const WAREHOUSES = [

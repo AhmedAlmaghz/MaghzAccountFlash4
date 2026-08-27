@@ -1256,7 +1256,10 @@
       "producedDefaultHint": "Leave empty to use batches × BOM output quantity",
       "productionCosts": "Production Costs",
       "productionCostsHint": "These costs are added to the product cost and posted to the GL on completion",
-      "statusUpdated": "Work order status updated"
+      "statusUpdated": "Work order status updated",
+      "created": "Work order created successfully",
+      "updated": "Work order updated successfully",
+      "requiredFields": "Please fill in the required fields: order number, product and quantity"
     },
     "bom": {
       "title": "Bill of Materials",
@@ -1293,7 +1296,10 @@
       "unit": "unit",
       "batchesCount": "Batches Count",
       "batchesHint": "Number of BOM batches to check material availability for",
-      "maxBatches": "Max Producible Batches"
+      "maxBatches": "Max Producible Batches",
+      "created": "BOM created successfully",
+      "updated": "BOM updated successfully",
+      "requiredFields": "Please select a finished product and add at least one material"
     },
     "production": "Production",
     "costs": {

@@ -465,6 +465,21 @@ export const manufacturingApi = {
     }
   },
 
+  /**
+   * Preview the next auto-generated batch/lot number (YYYYMMDD-NNN) without
+   * creating anything. Used by the form to show the number before saving;
+   * the API regenerates it on create when batchNumber is left empty.
+   */
+  async getNextBatchNumber(companyId: string): Promise<{ success: boolean; number?: string; error?: string }> {
+    try {
+      const validation = validateInput(companyIdSchema, companyId);
+      if (!validation.success) return { success: false, error: validation.error };
+      return { success: true, number: await generateBatchNumber(companyId) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
   async updateWorkOrder(id: string, companyId: string, _userId?: string, data: Partial<Omit<WorkOrder, 'id' | 'companyId'>> & { lines?: Partial<WorkOrderLine>[] } = {}): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });

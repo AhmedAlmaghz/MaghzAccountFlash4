@@ -149,7 +149,18 @@ export async function peekNextDocumentNumber(companyId: string, documentType: st
 export async function getProductTypes(companyId: string): Promise<{ success: boolean; data?: ProductType[]; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM product_types WHERE company_id = $1 ORDER BY name_ar', [companyId]);
-  return result.success ? { success: true, data: mapRows<ProductType>(result.rows) } : { success: false, error: result.error };
+  if (!result.success) return { success: false, error: result.error };
+  const rows = mapRows<ProductType>(result.rows);
+  // snakeToCamel turns `has_bom` into `hasBom`, but the ProductType contract
+  // (and every consumer) uses `hasBOM`. Normalize the key here — the single
+  // read path shared by Electron and PGlite.
+  for (const r of rows as unknown as Array<Record<string, unknown>>) {
+    if (r.hasBOM === undefined && r.hasBom !== undefined) {
+      r.hasBOM = r.hasBom;
+      delete r.hasBom;
+    }
+  }
+  return { success: true, data: rows };
 }
 
 export async function createProductType(data: Omit<ProductType, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {

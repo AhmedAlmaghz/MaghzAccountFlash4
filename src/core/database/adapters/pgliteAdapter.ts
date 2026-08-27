@@ -98,12 +98,18 @@ import schemaInit from '@root/drizzle/0000_init.sql?raw';
 import invoicePaymentColumns from '@root/drizzle/0001_invoice_payment_columns.sql?raw';
 import dropBanksUnifyCash from '@root/drizzle/0002_drop_banks_unify_cash.sql?raw';
 import woOutputWarehouse from '@root/drizzle/0003_wo_output_warehouse.sql?raw';
+import manufacturingPro from '@root/drizzle/0004_manufacturing_pro.sql?raw';
+import woProductionCosts from '@root/drizzle/0005_wo_production_costs.sql?raw';
+import productTypeBomFlags from '@root/drizzle/0006_product_type_bom_flags.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
   { name: '0001_invoice_payment_columns', sql: invoicePaymentColumns },
   { name: '0002_drop_banks_unify_cash', sql: dropBanksUnifyCash },
   { name: '0003_wo_output_warehouse', sql: woOutputWarehouse },
+  { name: '0004_manufacturing_pro', sql: manufacturingPro },
+  { name: '0005_wo_production_costs', sql: woProductionCosts },
+  { name: '0006_product_type_bom_flags', sql: productTypeBomFlags },
 ];
 
 /**

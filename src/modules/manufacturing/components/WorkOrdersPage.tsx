@@ -98,7 +98,13 @@ const [isEditingActual, setIsEditingActual] = useState(false);
   const openCreate = async () => {
     resetForm();
     const seq = await getNextNumber('work_order', companyId);
-    setFormData((prev) => ({ ...prev, orderNumber: seq?.number || 'WO-00001' }));
+    // Auto-generate the lot number up front so the user sees it before saving.
+    const bn = await manufacturingApi.getNextBatchNumber(companyId);
+    setFormData((prev) => ({
+      ...prev,
+      orderNumber: seq?.number || 'WO-00001',
+      batchNumber: bn?.success && bn.number ? bn.number : prev.batchNumber,
+    }));
     setIsModalOpen(true);
   };
 
@@ -154,8 +160,11 @@ const [isEditingActual, setIsEditingActual] = useState(false);
   };
 
   const handleSave = async () => {
-    if (!formData.orderNumber || !formData.productId) return;
-    if (!formData.quantity || Number(formData.quantity) <= 0) return;
+    const addToast = useToastStore.getState().addToast;
+    if (!formData.orderNumber || !formData.productId || !formData.quantity || Number(formData.quantity) <= 0) {
+      addToast('error', t('manufacturing.workOrders.requiredFields'));
+      return;
+    }
     const totalCost = formData.totalCost ? Number(formData.totalCost) : estimatedTotal;
     const pcs = productionCosts
       .filter((c) => Number(c.amount) > 0)
@@ -174,15 +183,20 @@ const [isEditingActual, setIsEditingActual] = useState(false);
       supervisorId: formData.supervisorId || undefined,
       productionCosts: pcs,
       notes: formData.notes || undefined,
-      lines: lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost })),
+      // Empty default rows (materialId = '') must be excluded — zod rejects ''
+      // as a uuid and the whole save fails silently otherwise.
+      lines: lines
+        .filter((l) => l.materialId && Number(l.plannedQuantity) > 0)
+        .map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.plannedQuantity), unitCost: Number(l.unitCost) || 0 })),
     };
-    if (editing) {
-      await update(editing.id, payload);
+    const res = editing ? await update(editing.id, payload) : await create(payload);
+    if (res && res.success) {
+      addToast('success', t(editing ? 'manufacturing.workOrders.updated' : 'manufacturing.workOrders.created'));
+      setIsModalOpen(false);
+      resetForm();
     } else {
-      await create(payload);
+      addToast('error', res?.error || t('common.error'));
     }
-    setIsModalOpen(false);
-    resetForm();
   };
 
   const handleDelete = async () => {
@@ -421,7 +435,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
             <Input label={t('manufacturing.workOrders.orderNumber')} value={formData.orderNumber} onChange={(e) => setFormData((prev) => ({ ...prev, orderNumber: e.target.value }))} />
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.product')}</label>
-              <ProductSelect companyId={companyId} value={formData.productId} onChange={async (v) => {
+              <ProductSelect companyId={companyId} manufacturingRole="finished" value={formData.productId} onChange={async (v) => {
                 const productId = typeof v === 'string' ? v : '';
                 setFormData((prev) => ({ ...prev, productId, bomId: '' }));
                 if (productId) {
@@ -556,6 +570,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                   <div className="col-span-5">
                     <ProductSelect
                       companyId={companyId}
+                      manufacturingRole="material"
                       value={line.materialId}
                       onChange={(v) => setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, materialId: typeof v === 'string' ? v : '' } : l)))}
                       onProductChange={(product) =>
