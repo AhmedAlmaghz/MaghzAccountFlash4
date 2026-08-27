@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { parseFlexibleNumber } from '../engine/argNormalizers';
+import { getDbAdapter } from '@/core/database/adapters';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { accountingApi } from '@/modules/accounting/api';

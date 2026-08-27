@@ -187,8 +187,8 @@ export async function getUnits(companyId: string): Promise<{ success: boolean; d
 export async function createUnit(data: Omit<Unit, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
-    'INSERT INTO units (company_id, name_ar, name_en, code, conversion_factor, base_unit_id, is_active, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
-    [data.companyId, data.nameAr, data.nameEn, data.code, data.conversionFactor, data.baseUnitId, data.isActive, safeUserId(_userId), safeUserId(_userId)]
+    'INSERT INTO units (company_id, name_ar, name_en, code, conversion_factor, base_unit_id, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+    [data.companyId, data.nameAr, data.nameEn, data.code, data.conversionFactor, data.baseUnitId, data.isActive]
   );
   return result.success && result.rows?.[0] ? { success: true, id: result.rows[0].id } : { success: false, error: result.error };
 }
@@ -196,8 +196,8 @@ export async function createUnit(data: Omit<Unit, 'id'>, _userId?: string): Prom
 export async function updateUnit(id: string, data: Partial<Unit>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query(
-    'UPDATE units SET name_ar = $1, name_en = $2, code = $3, conversion_factor = $4, base_unit_id = $5, is_active = $6, updated_by = $7, updated_at = NOW() WHERE id = $8 AND company_id = $9',
-    [data.nameAr, data.nameEn, data.code, data.conversionFactor, data.baseUnitId, data.isActive, safeUserId(_userId), id, companyId]
+    'UPDATE units SET name_ar = $1, name_en = $2, code = $3, conversion_factor = $4, base_unit_id = $5, is_active = $6 WHERE id = $7 AND company_id = $8',
+    [data.nameAr, data.nameEn, data.code, data.conversionFactor, data.baseUnitId, data.isActive, id, companyId]
   );
   return result.success ? { success: true } : { success: false, error: result.error };
 }
@@ -250,8 +250,8 @@ export async function getCostCenters(companyId: string): Promise<{ success: bool
 export async function createCostCenter(data: Omit<CostCenter, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
-    'INSERT INTO cost_centers (company_id, name_ar, name_en, code, parent_id, type, budget_amount, is_active, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
-    [data.companyId, data.nameAr, data.nameEn, data.code, data.parentId, data.type, data.budgetAmount, data.isActive, safeUserId(_userId), safeUserId(_userId)]
+    'INSERT INTO cost_centers (company_id, name_ar, name_en, code, parent_id, type, budget_amount, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+    [data.companyId, data.nameAr, data.nameEn, data.code, data.parentId, data.type, data.budgetAmount, data.isActive]
   );
   return result.success && result.rows?.[0] ? { success: true, id: result.rows[0].id } : { success: false, error: result.error };
 }
@@ -259,8 +259,8 @@ export async function createCostCenter(data: Omit<CostCenter, 'id'>, _userId?: s
 export async function updateCostCenter(id: string, data: Partial<CostCenter>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query(
-    'UPDATE cost_centers SET name_ar = $1, name_en = $2, code = $3, parent_id = $4, type = $5, budget_amount = $6, is_active = $7, updated_by = $8, updated_at = NOW() WHERE id = $9 AND company_id = $10',
-    [data.nameAr, data.nameEn, data.code, data.parentId, data.type, data.budgetAmount, data.isActive, safeUserId(_userId), id, companyId]
+    'UPDATE cost_centers SET name_ar = $1, name_en = $2, code = $3, parent_id = $4, type = $5, budget_amount = $6, is_active = $7 WHERE id = $8 AND company_id = $9',
+    [data.nameAr, data.nameEn, data.code, data.parentId, data.type, data.budgetAmount, data.isActive, id, companyId]
   );
   return result.success ? { success: true } : { success: false, error: result.error };
 }
