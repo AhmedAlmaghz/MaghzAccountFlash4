@@ -431,7 +431,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                 } else {
                   setAvailableBoms([]);
                 }
-              }} usage="finished" placeholder={t('manufacturing.form.selectProduct')} />
+              }} placeholder={t('manufacturing.form.selectProduct')} />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-4">
@@ -567,7 +567,6 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                       }
                       showBarcode
                       showStock
-                      usage="raw"
                       placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
                     />
                   </div>

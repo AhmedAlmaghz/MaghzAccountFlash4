@@ -18,14 +18,14 @@ export const ProductTypesPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState<Partial<ProductType>>({
-    nameAr: '', nameEn: '', code: '', usage: 'other',
+    nameAr: '', nameEn: '', code: '',
     appearsInSales: true, appearsInPurchases: true, appearsInInventory: true,
     appearsInManufacturing: false, hasStockTracking: true, hasBOM: false,
     isActive: true,
   });
 
   const resetForm = () => {
-    setForm({ nameAr: '', nameEn: '', code: '', usage: 'other', appearsInSales: true, appearsInPurchases: true, appearsInInventory: true, appearsInManufacturing: false, hasStockTracking: true, hasBOM: false, isActive: true });
+    setForm({ nameAr: '', nameEn: '', code: '', appearsInSales: true, appearsInPurchases: true, appearsInInventory: true, appearsInManufacturing: false, hasStockTracking: true, hasBOM: false, isActive: true });
   };
 
   const handleSave = async () => {
@@ -73,11 +73,6 @@ export const ProductTypesPage: React.FC = () => {
   const columns = [
     { key: 'nameAr', header: t('settings.productTypes.name'), render: (row: ProductType) => <span className="font-medium">{row.nameAr}</span> },
     { key: 'code', header: t('settings.productTypes.code'), width: '80px', render: (row: ProductType) => <span className="font-mono text-xs text-slate-500">{row.code}</span> },
-    { key: 'usage', header: t('settings.productTypes.usage'), width: '110px', render: (row: ProductType) => (
-      <Badge className={row.usage === 'finished' ? 'bg-emerald-100 text-emerald-700' : row.usage === 'raw' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}>
-        {row.usage === 'finished' ? t('settings.productTypes.usageFinished') : row.usage === 'raw' ? t('settings.productTypes.usageRaw') : t('settings.productTypes.usageOther')}
-      </Badge>
-    )},
     { key: 'sales', header: t('settings.productTypes.sales'), width: '70px', render: (row: ProductType) => boolBadge(row.appearsInSales) },
     { key: 'purchases', header: t('settings.productTypes.purchases'), width: '80px', render: (row: ProductType) => boolBadge(row.appearsInPurchases) },
     { key: 'inventory', header: t('settings.productTypes.inventory'), width: '70px', render: (row: ProductType) => boolBadge(row.appearsInInventory) },
@@ -122,19 +117,6 @@ export const ProductTypesPage: React.FC = () => {
               <Input label={t('settings.productTypes.nameAr')} value={form.nameAr || ''} onChange={e => setForm({ ...form, nameAr: e.target.value })} />
               <Input label={t('settings.productTypes.nameEn')} value={form.nameEn || ''} onChange={e => setForm({ ...form, nameEn: e.target.value })} />
               <Input label={t('settings.productTypes.code')} value={form.code || ''} onChange={e => setForm({ ...form, code: e.target.value })} />
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('settings.productTypes.usage')}</label>
-                <select
-                  value={form.usage || 'other'}
-                  onChange={e => setForm({ ...form, usage: e.target.value as ProductType['usage'] })}
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
-                >
-                  <option value="other">{t('settings.productTypes.usageOther')}</option>
-                  <option value="finished">{t('settings.productTypes.usageFinished')}</option>
-                  <option value="raw">{t('settings.productTypes.usageRaw')}</option>
-                </select>
-                <p className="text-xs text-slate-500 mt-1">{t('settings.productTypes.usageHint')}</p>
-              </div>
             </div>
             <div className="flex items-center gap-2 mb-2">
               <input

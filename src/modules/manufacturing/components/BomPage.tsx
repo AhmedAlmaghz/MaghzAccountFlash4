@@ -368,7 +368,7 @@ export const BomPage: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.finishedProduct')}</label>
-              <ProductSelect companyId={companyId} value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} usage="finished" showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
+              <ProductSelect companyId={companyId} value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
             </div>
             <Input label={t('manufacturing.form.version')} value={formData.version} onChange={(e) => setFormData((prev) => ({ ...prev, version: e.target.value }))} />
           </div>
@@ -428,7 +428,6 @@ export const BomPage: React.FC = () => {
                       }
                       showBarcode
                       showStock
-                      usage="raw"
                       placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
                     />
                   </div>

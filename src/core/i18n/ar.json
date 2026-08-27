@@ -1255,7 +1255,8 @@
       "batchFormatHint": "الصيغة: YYYYMMDD-NNN (تاريخ اليوم + تسلسل)",
       "producedDefaultHint": "اتركه فارغاً لاستخدام عدد الدفعات × كمية إنتاج الـ BOM",
       "productionCosts": "تكاليف الإنتاج",
-      "productionCostsHint": "تُضاف هذه التكاليف إلى تكلفة المنتج وتُرحَّل إلى الحسابات عند اكتمال الإنتاج"
+      "productionCostsHint": "تُضاف هذه التكاليف إلى تكلفة المنتج وتُرحَّل إلى الحسابات عند اكتمال الإنتاج",
+      "statusUpdated": "تم تحديث حالة أمر التشغيل"
     },
     "bom": {
       "title": "فاتير المواد",
@@ -1289,7 +1290,10 @@
       "availabilityError": "تعذر فحص التوفر",
       "availabilityWarning": "الخامات غير كافية — سيُنشأ الأمر لكن ابدأه بعد التوريد",
       "createWo": "إنشاء أمر إنتاج",
-      "unit": "وحدة"
+      "unit": "وحدة",
+      "batchesCount": "عدد الدفعات",
+      "batchesHint": "عدد دفعات الـ BOM المراد حساب توفر خاماتها",
+      "maxBatches": "أقصى دفعات قابلة للإنتاج"
     },
     "production": "الإنتاج",
     "costs": {
@@ -1358,7 +1362,10 @@
       "selectProduct": "اختر المنتج...",
       "bom": "فاتورة المواد",
       "totalCost": "التكلفة الإجمالية",
-      "autoCalculatedCost": "التكلفة المحسوبة تلقائياً"
+      "autoCalculatedCost": "التكلفة المحسوبة تلقائياً",
+      "outputQuantity": "كمية الإنتاج للدفعة",
+      "outputQuantityHint": "عدد وحدات المنتج النهائي التي تنتجها الدفعة الواحدة",
+      "unitCostPerUnit": "تكلفة الوحدة"
     },
     "actions": {
       "addMaterial": "إضافة مادة",
@@ -2337,7 +2344,8 @@
       "all": "الكل",
       "close": "إغلاق",
       "print": "طباعة",
-      "export": "تصدير"
+      "export": "تصدير",
+      "view": "عرض"
     },
     "units": {
       "title": "وحدات القياس",

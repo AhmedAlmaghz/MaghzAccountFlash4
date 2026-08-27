@@ -1255,7 +1255,8 @@
       "batchFormatHint": "Format: YYYYMMDD-NNN (today + sequence)",
       "producedDefaultHint": "Leave empty to use batches × BOM output quantity",
       "productionCosts": "Production Costs",
-      "productionCostsHint": "These costs are added to the product cost and posted to the GL on completion"
+      "productionCostsHint": "These costs are added to the product cost and posted to the GL on completion",
+      "statusUpdated": "Work order status updated"
     },
     "bom": {
       "title": "Bill of Materials",
@@ -1289,7 +1290,10 @@
       "availabilityError": "Availability check failed",
       "availabilityWarning": "Materials short — order will be created; start after restocking",
       "createWo": "Create Work Order",
-      "unit": "unit"
+      "unit": "unit",
+      "batchesCount": "Batches Count",
+      "batchesHint": "Number of BOM batches to check material availability for",
+      "maxBatches": "Max Producible Batches"
     },
     "production": "Production",
     "costs": {
@@ -1358,7 +1362,10 @@
       "selectProduct": "Select product...",
       "bom": "Bill of Materials",
       "totalCost": "Total Cost",
-      "autoCalculatedCost": "Auto-calculated cost"
+      "autoCalculatedCost": "Auto-calculated cost",
+      "outputQuantity": "Output Quantity per Batch",
+      "outputQuantityHint": "How many finished-product units one batch yields",
+      "unitCostPerUnit": "Unit Cost"
     },
     "actions": {
       "addMaterial": "Add Material",
@@ -2337,7 +2344,8 @@
       "all": "All",
       "close": "Close",
       "print": "Print",
-      "export": "Export"
+      "export": "Export",
+      "view": "View"
     },
     "units": {
       "title": "Units of Measure",
