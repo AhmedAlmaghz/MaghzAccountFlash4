@@ -1246,7 +1246,16 @@
       "saveActual": "Save Actual",
       "enterActualQuantity": "Enter actual quantity",
       "actualUnitCost": "Actual Unit Cost",
-      "totalCount": "Total Orders"
+      "totalCount": "Total Orders",
+      "batchesHint": "Number of BOM batches to produce — expected output = batches × BOM output quantity",
+      "expectedProduction": "Expected Production",
+      "supervisor": "Production Supervisor",
+      "selectSupervisor": "Select production supervisor",
+      "batchAutoHint": "Leave empty for auto-generation",
+      "batchFormatHint": "Format: YYYYMMDD-NNN (today + sequence)",
+      "producedDefaultHint": "Leave empty to use batches × BOM output quantity",
+      "productionCosts": "Production Costs",
+      "productionCostsHint": "These costs are added to the product cost and posted to the GL on completion"
     },
     "bom": {
       "title": "Bill of Materials",
@@ -1279,10 +1288,20 @@
       "maxProducible": "Max producible",
       "availabilityError": "Availability check failed",
       "availabilityWarning": "Materials short — order will be created; start after restocking",
-      "createWo": "Create Work Order"
+      "createWo": "Create Work Order",
+      "unit": "unit"
     },
     "production": "Production",
-    "costs": "Costs",
+    "costs": {
+      "labor": "Labor",
+      "energy": "Energy",
+      "packaging": "Packaging",
+      "other": "Other",
+      "description": "Description",
+      "descriptionPlaceholder": "Optional cost description",
+      "amount": "Amount",
+      "total": "Total Production Costs"
+    },
     "productionCostReport": "Production Cost Analysis",
     "totalPlannedCost": "Total Planned Cost",
     "totalActualCost": "Total Actual Cost",
@@ -1324,7 +1343,10 @@
       "cost": "Cost",
       "status": "Status",
       "orderNumber": "Order #",
-      "quantity": "Quantity"
+      "quantity": "Quantity",
+      "batches": "Batches",
+      "batchNumber": "Batch Number",
+      "supervisor": "Production Supervisor"
     },
     "form": {
       "finishedProduct": "Finished Product",
@@ -1349,7 +1371,9 @@
       "cancelled": "Cancelled",
       "startExecution": "Start Execution",
       "complete": "Complete",
-      "actual": "Actual"
+      "actual": "Actual",
+      "cancel": "Cancel",
+      "reopen": "Reopen"
     },
     "orderNumber": "Order No.",
     "product": "Product",
@@ -1381,7 +1405,9 @@
       "fromBom": "Derived from BOM",
       "createdFromBom": "Work order created",
       "seqFailed": "Failed to generate work-order number",
-      "statusUpdated": "Work-order status updated"
+      "statusUpdated": "Work-order status updated",
+      "cancelExplanation": "The work order will be cancelled. If in progress, you can return issued materials to stock.",
+      "returnMaterials": "Return issued materials to stock"
     }
   },
   "hr": {
@@ -2401,7 +2427,12 @@
       "inventoryAccount": "Inventory Account",
       "created": "Product type created successfully",
       "updated": "Product type updated successfully",
-      "deleted": "Product type deleted successfully"
+      "deleted": "Product type deleted successfully",
+      "usage": "Usage",
+      "usageFinished": "Finished Product",
+      "usageRaw": "Raw Material",
+      "usageOther": "Other",
+      "usageHint": "Determines product visibility in manufacturing lists (finished product or raw material)"
     },
     "productCategories": {
       "title": "Product Categories",

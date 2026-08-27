@@ -33,6 +33,9 @@ export const productTypes = pgTable('product_types', {
   appearsInManufacturing: boolean('appears_in_manufacturing').notNull().default(false),
   hasStockTracking: boolean('has_stock_tracking').notNull().default(true),
   hasBOM: boolean('has_bom').notNull().default(false),
+  // Semantic classification for manufacturing pickers:
+  // 'finished' (منتج نهائي/تام), 'raw' (مواد أولية/خام), 'other'.
+  usage: varchar('usage', { length: 20 }).notNull().default('other'),
   defaultSalesAccountId: uuid('default_sales_account_id').references(() => accounts.id),
   defaultCOGSAccountId: uuid('default_cogs_account_id').references(() => accounts.id),
   defaultInventoryAccountId: uuid('default_inventory_account_id').references(() => accounts.id),

@@ -5,6 +5,8 @@ productId: string;
 productName?: string;
 version: string;
 isActive: boolean;
+/** How many finished-product units one BOM batch yields (default 1). */
+outputQuantity?: number;
 totalCost?: number;
 notes?: string;
 linesCount?: number;
@@ -23,6 +25,14 @@ unitCost?: number;
 totalCost?: number;
 }
 
+export type ProductionCostCategory = 'labor' | 'energy' | 'packaging' | 'other';
+
+export interface ProductionCost {
+  category: ProductionCostCategory;
+  description?: string;
+  amount: number;
+}
+
 export interface WorkOrder {
   id: string;
   companyId: string;
@@ -30,6 +40,7 @@ export interface WorkOrder {
   productId: string;
   productName?: string;
   bomId?: string;
+  /** Number of BOM batches to produce; expected output = quantity × BOM.outputQuantity. */
   quantity: number;
   producedQuantity?: number;
   status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
@@ -39,6 +50,11 @@ export interface WorkOrder {
   actualEndDate?: string;
   totalCost?: number;
   outputWarehouseId?: string;
+  batchNumber?: string;
+  supervisorId?: string;
+  supervisorName?: string;
+  /** Labor / energy / packaging / other costs — capitalized into product cost on completion. */
+  productionCosts?: ProductionCost[];
   notes?: string;
   createdBy?: string;
   updatedBy?: string;

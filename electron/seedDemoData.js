@@ -72,6 +72,12 @@ const ACCOUNTS = [
   { code: '52', name_ar: 'مصاريف تشغيلية', name_en: 'Operating Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
   { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+  // Production costs (capitalized into finished-goods cost on work-order completion)
+  { code: '53', name_ar: 'تكاليف الإنتاج', name_en: 'Production Costs', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
+  { code: '53101', name_ar: 'تكاليف إنتاج - أجور', name_en: 'Production Costs - Labor', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
+  { code: '53201', name_ar: 'تكاليف إنتاج - طاقة', name_en: 'Production Costs - Energy', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
+  { code: '53301', name_ar: 'تكاليف إنتاج - تغليف', name_en: 'Production Costs - Packaging', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
+  { code: '53401', name_ar: 'تكاليف إنتاج - أخرى', name_en: 'Production Costs - Other', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
 ];
 
 const PRODUCT_TYPES = [

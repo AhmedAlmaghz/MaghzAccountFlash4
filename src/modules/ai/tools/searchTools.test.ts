@@ -48,6 +48,10 @@ vi.mock('@/modules/hr/api', () => ({
   },
 }));
 
+vi.mock('@/core/api', () => ({
+  getProductTypes: vi.fn().mockResolvedValue({ success: true, data: [] }),
+}));
+
 import { salesApi } from '@/modules/sales/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { purchasesApi } from '@/modules/purchases/api';

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2, Factory } from 'lucide-react';
+import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2, Factory, XCircle, RotateCcw, UserCog } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -7,6 +7,7 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { ProductSelect } from '@/core/ui/components/smart/fields/ProductSelect';
+import { EmployeeSelect } from '@/core/ui/components/smart/fields/EmployeeSelect';
 import { WarehouseSelect } from '@/core/ui/components/smart';
 import { useToastStore } from '@/core/store/toastStore';
 import { useAppStore } from '@/core/store';
@@ -25,6 +26,7 @@ interface WorkOrderFormLine {
 }
 
 const STATUS_FLOW: WorkOrder['status'][] = ['planned', 'in_progress', 'completed', 'cancelled'];
+void STATUS_FLOW;
 
 export const WorkOrdersPage: React.FC = () => {
   const { t } = useTranslation();
@@ -46,20 +48,50 @@ export const WorkOrdersPage: React.FC = () => {
   const [confirmStatus, setConfirmStatus] = useState<{ id: string; status: WorkOrder['status'] } | null>(null);
 const [producedQty, setProducedQty] = useState('');
 const [outputWarehouseId, setOutputWarehouseId] = useState('');
+const [returnMaterials, setReturnMaterials] = useState(true);
 const [isEditingActual, setIsEditingActual] = useState(false);
 
-  const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '' });
-  const [availableBoms, setAvailableBoms] = useState<{ id: string; version: string; totalCost?: number }[]>([]);
+  const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '', batchNumber: '', supervisorId: '' });
+  const [availableBoms, setAvailableBoms] = useState<{ id: string; version: string; totalCost?: number; outputQuantity?: number }[]>([]);
+  // Per-batch material quantities of the selected BOM (base, before × batches).
+  const [bomBaseLines, setBomBaseLines] = useState<WorkOrderFormLine[] | null>(null);
+  const [bomOutputQuantity, setBomOutputQuantity] = useState<number>(1);
   const [lines, setLines] = useState<WorkOrderFormLine[]>([{ materialId: '', plannedQuantity: 1, unitCost: 0 }]);
+  // Production costs (labor / energy / packaging / other) — capitalized on completion.
+  const [productionCosts, setProductionCosts] = useState<{ category: 'labor' | 'energy' | 'packaging' | 'other'; description: string; amount: string }[]>([
+    { category: 'labor', description: '', amount: '' },
+    { category: 'energy', description: '', amount: '' },
+    { category: 'packaging', description: '', amount: '' },
+    { category: 'other', description: '', amount: '' },
+  ]);
 
   const estimatedTotal = useMemo(() =>
     lines.reduce((sum, l) => sum + (l.plannedQuantity * l.unitCost), 0),
   [lines]);
 
+  const productionCostsTotal = useMemo(
+    () => productionCosts.reduce((s, c) => s + (Number(c.amount) || 0), 0),
+    [productionCosts]
+  );
+
+  const batches = Math.max(Number(formData.quantity) || 0, 0);
+  const expectedProduction = useMemo(
+    () => Math.round(batches * bomOutputQuantity * 10000) / 10000,
+    [batches, bomOutputQuantity]
+  );
+
   const resetForm = () => {
-    setFormData({ orderNumber: '', productId: '', bomId: '', quantity: '', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '' });
+    setFormData({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '', batchNumber: '', supervisorId: '' });
     setAvailableBoms([]);
+    setBomBaseLines(null);
+    setBomOutputQuantity(1);
     setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0 }]);
+    setProductionCosts([
+      { category: 'labor', description: '', amount: '' },
+      { category: 'energy', description: '', amount: '' },
+      { category: 'packaging', description: '', amount: '' },
+      { category: 'other', description: '', amount: '' },
+    ]);
     setEditing(null);
   };
 
@@ -81,19 +113,25 @@ const [isEditingActual, setIsEditingActual] = useState(false);
       plannedEndDate: wo.plannedEndDate || '',
       totalCost: String(wo.totalCost || ''),
       notes: wo.notes || '',
+      batchNumber: wo.batchNumber || '',
+      supervisorId: wo.supervisorId || '',
     });
     const res = await manufacturingApi.getWorkOrderById(wo.id, companyId);
     if (res.success && res.data) {
       setLines(res.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost || 0 })));
-      if (wo.bomId) {
-        const bomsRes = await manufacturingApi.getBoms(companyId);
-        if (bomsRes.success && bomsRes.data) {
-          setAvailableBoms(bomsRes.data.filter((b) => b.productId === wo.productId));
-        }
-      } else {
-        const bomsRes = await manufacturingApi.getBoms(companyId);
-        if (bomsRes.success && bomsRes.data) {
-          setAvailableBoms(bomsRes.data.filter((b) => b.productId === wo.productId));
+      const pcs = res.data.workOrder.productionCosts || [];
+      setProductionCosts([
+        { category: 'labor', description: pcs.find((c) => c.category === 'labor')?.description || '', amount: pcs.find((c) => c.category === 'labor') ? String(pcs.find((c) => c.category === 'labor')!.amount) : '' },
+        { category: 'energy', description: pcs.find((c) => c.category === 'energy')?.description || '', amount: pcs.find((c) => c.category === 'energy') ? String(pcs.find((c) => c.category === 'energy')!.amount) : '' },
+        { category: 'packaging', description: pcs.find((c) => c.category === 'packaging')?.description || '', amount: pcs.find((c) => c.category === 'packaging') ? String(pcs.find((c) => c.category === 'packaging')!.amount) : '' },
+        { category: 'other', description: pcs.find((c) => c.category === 'other')?.description || '', amount: pcs.find((c) => c.category === 'other') ? String(pcs.find((c) => c.category === 'other')!.amount) : '' },
+      ]);
+      const bomsRes = await manufacturingApi.getBoms(companyId);
+      if (bomsRes.success && bomsRes.data) {
+        setAvailableBoms(bomsRes.data.filter((b) => b.productId === wo.productId));
+        if (wo.bomId) {
+          const selected = bomsRes.data.find((b) => b.id === wo.bomId);
+          setBomOutputQuantity(selected?.outputQuantity ?? 1);
         }
       }
     } else {
@@ -119,6 +157,9 @@ const [isEditingActual, setIsEditingActual] = useState(false);
     if (!formData.orderNumber || !formData.productId) return;
     if (!formData.quantity || Number(formData.quantity) <= 0) return;
     const totalCost = formData.totalCost ? Number(formData.totalCost) : estimatedTotal;
+    const pcs = productionCosts
+      .filter((c) => Number(c.amount) > 0)
+      .map((c) => ({ category: c.category, description: c.description || undefined, amount: Number(c.amount) }));
     const payload = {
       companyId,
       orderNumber: formData.orderNumber,
@@ -129,6 +170,9 @@ const [isEditingActual, setIsEditingActual] = useState(false);
       plannedStartDate: formData.plannedStartDate || undefined,
       plannedEndDate: formData.plannedEndDate || undefined,
       totalCost: totalCost || undefined,
+      batchNumber: formData.batchNumber || undefined,
+      supervisorId: formData.supervisorId || undefined,
+      productionCosts: pcs,
       notes: formData.notes || undefined,
       lines: lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost })),
     };
@@ -150,27 +194,34 @@ const [isEditingActual, setIsEditingActual] = useState(false);
   const handleStatusChange = async () => {
     if (!confirmStatus) return;
     const addToast = useToastStore.getState().addToast;
-    await changeStatus(
+    const res = await changeStatus(
       confirmStatus.id,
       confirmStatus.status,
       confirmStatus.status === 'completed' && producedQty ? Number(producedQty) : undefined,
-      confirmStatus.status === 'completed' && outputWarehouseId ? outputWarehouseId : undefined
+      confirmStatus.status === 'completed' && outputWarehouseId ? outputWarehouseId : undefined,
+      confirmStatus.status === 'cancelled' ? { returnMaterials } : undefined
     );
-    addToast('success', t('manufacturing.workOrders.statusUpdated'));
+    if (res && res.success === false) {
+      addToast('error', res.error || t('common.error'));
+    } else {
+      addToast('success', t('manufacturing.workOrders.statusUpdated'));
+    }
     setConfirmStatus(null);
     setProducedQty('');
     setOutputWarehouseId('');
+    setReturnMaterials(true);
   };
 
-  const canAdvance = (status: WorkOrder['status']) => {
-    const idx = STATUS_FLOW.indexOf(status);
-    return idx >= 0 && idx < STATUS_FLOW.length - 1 && status !== 'cancelled';
-  };
+  // ── Status machine ────────────────────────────────────────────────────
+  // Production flow: planned → in_progress → completed.
+  // Cancellation is a SEPARATE action available from planned / in_progress.
+  // A cancelled order can be reopened back to planned.
+  const canAdvance = (status: WorkOrder['status']) => status === 'planned' || status === 'in_progress';
 
-  const nextStatus = (status: WorkOrder['status']): WorkOrder['status'] | undefined => {
-    const idx = STATUS_FLOW.indexOf(status);
-    return STATUS_FLOW[idx + 1];
-  };
+  const nextStatus = (status: WorkOrder['status']): WorkOrder['status'] | undefined =>
+    status === 'planned' ? 'in_progress' : status === 'in_progress' ? 'completed' : undefined;
+
+  const canCancel = (status: WorkOrder['status']) => status === 'planned' || status === 'in_progress';
 
   const statusActionLabel: Record<string, string> = {
     planned: t('manufacturing.status.startExecution'),
@@ -203,16 +254,32 @@ const [isEditingActual, setIsEditingActual] = useState(false);
         </div>
       ),
     },
-    { key: 'quantity', header: t('manufacturing.table.quantity'), width: '90px', render: (row: WorkOrder) => <span className="tabular-nums font-medium">{row.quantity}</span> },
+    { key: 'quantity', header: t('manufacturing.table.batches'), width: '90px', render: (row: WorkOrder) => <span className="tabular-nums font-medium">{row.quantity}</span> },
+    { key: 'batchNumber', header: t('manufacturing.table.batchNumber'), width: '130px', render: (row: WorkOrder) => row.batchNumber ? <span className="font-mono text-xs bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300 px-2 py-1 rounded border border-cyan-200 dark:border-cyan-800">{row.batchNumber}</span> : '—' },
+    { key: 'supervisorName', header: t('manufacturing.table.supervisor'), width: '130px', render: (row: WorkOrder) => row.supervisorName ? <span className="text-sm text-slate-600 dark:text-slate-300">{row.supervisorName}</span> : '—' },
     { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: WorkOrder) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
     { key: 'status', header: t('manufacturing.table.status'), width: '120px', render: (row: WorkOrder) => <StatusBadge status={row.status} /> },
-    { key: 'actions', header: '', width: '180px', render: (row: WorkOrder) => (
+    { key: 'actions', header: '', width: '210px', render: (row: WorkOrder) => (
       <div className="flex items-center gap-1">
         <ActionButtons onView={() => openView(row)} onEdit={() => openEdit(row)} onDelete={() => setConfirmDelete(row.id)} showPrint={false} />
         {canAdvance(row.status) && (
           <Can action="edit" module="manufacturing">
             <Button variant="ghost" size="sm" title={statusActionLabel[row.status]} onClick={() => setConfirmStatus({ id: row.id, status: nextStatus(row.status)! })} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50">
               <ArrowRight size={14} />
+            </Button>
+          </Can>
+        )}
+        {canCancel(row.status) && (
+          <Can action="edit" module="manufacturing">
+            <Button variant="ghost" size="sm" title={t('manufacturing.status.cancel')} onClick={() => setConfirmStatus({ id: row.id, status: 'cancelled' })} className="text-rose-600 hover:text-rose-700 hover:bg-rose-50">
+              <XCircle size={14} />
+            </Button>
+          </Can>
+        )}
+        {row.status === 'cancelled' && (
+          <Can action="edit" module="manufacturing">
+            <Button variant="ghost" size="sm" title={t('manufacturing.status.reopen')} onClick={() => setConfirmStatus({ id: row.id, status: 'planned' })} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+              <RotateCcw size={14} />
             </Button>
           </Can>
         )}
@@ -364,7 +431,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                 } else {
                   setAvailableBoms([]);
                 }
-              }} placeholder={t('manufacturing.form.selectProduct')} />
+              }} usage="finished" placeholder={t('manufacturing.form.selectProduct')} />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-4">
@@ -377,28 +444,108 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                   const res = await manufacturingApi.getBomById(bomId, companyId);
                   if (res.success && res.data) {
                     const { bom, lines } = res.data;
-                    setLines(lines.map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.quantity), unitCost: Number(l.unitCost || 0) })));
+                    const outQty = Math.max(Number(bom.outputQuantity) || 1, 0.0001);
+                    setBomOutputQuantity(outQty);
+                    const base = lines.map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.quantity), unitCost: Number(l.unitCost || 0) }));
+                    setBomBaseLines(base);
+                    const n = Math.max(Number(formData.quantity) || 1, 1);
+                    setLines(base.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
                     if (bom.totalCost) {
-                      setFormData((prev) => ({ ...prev, totalCost: String(bom.totalCost) }));
+                      setFormData((prev) => ({ ...prev, totalCost: String(Math.round(bom.totalCost! * n * 100) / 100) }));
                     }
                   }
                 } else {
+                  setBomBaseLines(null);
+                  setBomOutputQuantity(1);
                   setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0 }]);
                 }
               }} disabled={availableBoms.length === 0} className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
                 <option value="">{availableBoms.length === 0 ? t('manufacturing.workOrders.noBom') : t('manufacturing.workOrders.withoutBom')}</option>
                 {availableBoms.map((b) => (
-                  <option key={b.id} value={b.id}>{t('manufacturing.form.version')} {b.version}</option>
+                  <option key={b.id} value={b.id}>{t('manufacturing.form.version')} {b.version} ({b.outputQuantity ?? 1} {t('manufacturing.bom.unit')})</option>
                 ))}
               </select>
             </div>
-            <Input label={t('manufacturing.bom.quantity')} type="number" value={formData.quantity} onChange={(e) => setFormData((prev) => ({ ...prev, quantity: e.target.value }))} />
+            <Input
+              label={t('manufacturing.table.batches')}
+              type="number"
+              min={1}
+              value={formData.quantity}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFormData((prev) => ({ ...prev, quantity: val }));
+                const n = Math.max(Number(val) || 1, 1);
+                if (bomBaseLines) {
+                  setLines(bomBaseLines.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
+                  const bom = availableBoms.find((b) => b.id === formData.bomId);
+                  if (bom?.totalCost) setFormData((prev) => ({ ...prev, totalCost: String(Math.round(bom.totalCost! * n * 100) / 100) }));
+                }
+              }}
+              helperText={t('manufacturing.workOrders.batchesHint')}
+            />
             <Input label={t('manufacturing.workOrders.totalCost')} type="number" value={formData.totalCost} onChange={(e) => setFormData((prev) => ({ ...prev, totalCost: e.target.value }))} />
           </div>
+          {formData.bomId && (
+            <div className="rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 px-3 py-2 text-sm text-teal-800 dark:text-teal-300 flex items-center gap-2">
+              <Factory size={14} />
+              {t('manufacturing.workOrders.expectedProduction')}: <span className="font-bold tabular-nums">{expectedProduction}</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('manufacturing.workOrders.plannedStartDate')} type="date" value={formData.plannedStartDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedStartDate: e.target.value }))} />
             <Input label={t('manufacturing.workOrders.plannedEndDate')} type="date" value={formData.plannedEndDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedEndDate: e.target.value }))} />
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1"><UserCog size={13} /> {t('manufacturing.workOrders.supervisor')}</label>
+              <EmployeeSelect companyId={companyId} value={formData.supervisorId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, supervisorId: typeof v === 'string' ? v : '' }))} placeholder={t('manufacturing.workOrders.selectSupervisor')} />
+            </div>
+            <Input
+              label={t('manufacturing.table.batchNumber')}
+              value={formData.batchNumber}
+              onChange={(e) => setFormData((prev) => ({ ...prev, batchNumber: e.target.value }))}
+              placeholder={t('manufacturing.workOrders.batchAutoHint')}
+              helperText={t('manufacturing.workOrders.batchFormatHint')}
+            />
+          </div>
+
+          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4">
+            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.workOrders.productionCosts')}</h4>
+            <p className="text-xs text-slate-500 mb-3">{t('manufacturing.workOrders.productionCostsHint')}</p>
+            <div className="space-y-2">
+              {productionCosts.map((pc, idx) => (
+                <div key={pc.category} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-3">
+                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 pb-2">
+                      {pc.category === 'labor' ? t('manufacturing.costs.labor') : pc.category === 'energy' ? t('manufacturing.costs.energy') : pc.category === 'packaging' ? t('manufacturing.costs.packaging') : t('manufacturing.costs.other')}
+                    </span>
+                  </div>
+                  <div className="col-span-6">
+                    <Input
+                      label={idx === 0 ? t('manufacturing.costs.description') : ''}
+                      value={pc.description}
+                      onChange={(e) => setProductionCosts((prev) => prev.map((c, i) => i === idx ? { ...c, description: e.target.value } : c))}
+                      placeholder={t('manufacturing.costs.descriptionPlaceholder')}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <Input
+                      label={idx === 0 ? t('manufacturing.costs.amount') : ''}
+                      type="number"
+                      min={0}
+                      value={pc.amount}
+                      onChange={(e) => setProductionCosts((prev) => prev.map((c, i) => i === idx ? { ...c, amount: e.target.value } : c))}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between">
+              <span className="font-semibold text-slate-700 dark:text-slate-200">{t('manufacturing.costs.total')}:</span>
+              <span className="font-bold text-amber-600 tabular-nums">{formatCurrency(productionCostsTotal)}</span>
+            </div>
+          </div>
+
           <Input label={t('manufacturing.form.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t('manufacturing.form.notesPlaceholder')} />
 
           <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4">
@@ -420,6 +567,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                       }
                       showBarcode
                       showStock
+                      usage="raw"
                       placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
                     />
                   </div>
@@ -561,14 +709,14 @@ const [isEditingActual, setIsEditingActual] = useState(false);
       {/* Status Change Modal */}
       <Modal
         isOpen={!!confirmStatus}
-        onClose={() => { setConfirmStatus(null); setProducedQty(''); }}
-        title={t('manufacturing.workOrders.changeStatus')}
+        onClose={() => { setConfirmStatus(null); setProducedQty(''); setReturnMaterials(true); }}
+        title={confirmStatus?.status === 'cancelled' ? t('manufacturing.status.cancel') : t('manufacturing.workOrders.changeStatus')}
         size="sm"
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => { setConfirmStatus(null); setProducedQty(''); }}>{t('settings.common.cancel')}</Button>
-            <Button variant="primary" onClick={handleStatusChange}>
-              {confirmStatus?.status === 'in_progress' ? t('manufacturing.status.startExecution') : confirmStatus?.status === 'completed' ? t('manufacturing.status.complete') : t('settings.common.save')}
+            <Button variant="secondary" onClick={() => { setConfirmStatus(null); setProducedQty(''); setReturnMaterials(true); }}>{t('settings.common.cancel')}</Button>
+            <Button variant={confirmStatus?.status === 'cancelled' ? 'danger' : 'primary'} onClick={handleStatusChange}>
+              {confirmStatus?.status === 'in_progress' ? t('manufacturing.status.startExecution') : confirmStatus?.status === 'completed' ? t('manufacturing.status.complete') : confirmStatus?.status === 'cancelled' ? t('manufacturing.status.cancel') : t('settings.common.save')}
             </Button>
           </div>
         }
@@ -585,6 +733,19 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                 <span>{t('manufacturing.wo.startIssuesMaterials')}</span>
               </div>
             )}
+            {/* CANCEL: separate action with optional material return */}
+            {confirmStatus.status === 'cancelled' && (
+              <div className="rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 p-3 text-xs text-rose-800 dark:text-rose-300 space-y-2">
+                <div className="flex items-start gap-2">
+                  <XCircle size={14} className="mt-0.5 shrink-0" />
+                  <span>{t('manufacturing.wo.cancelExplanation')}</span>
+                </div>
+                <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                  <input type="checkbox" checked={returnMaterials} onChange={(e) => setReturnMaterials(e.target.checked)} className="rounded" />
+                  <span className="font-medium">{t('manufacturing.wo.returnMaterials')}</span>
+                </label>
+              </div>
+            )}
             {/* COMPLETE: produced qty + output warehouse */}
             {confirmStatus.status === 'completed' && (
               <>
@@ -595,6 +756,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                     value={producedQty}
                     onChange={(e) => setProducedQty(e.target.value)}
                     placeholder={t('manufacturing.workOrders.enterActualQuantity')}
+                    helperText={t('manufacturing.workOrders.producedDefaultHint')}
                   />
                 </div>
                 <div>

@@ -1246,7 +1246,16 @@
       "saveActual": "حفظ الفعلي",
       "enterActualQuantity": "أدخل الكمية الفعلية",
       "actualUnitCost": "تكلفة الوحدة الفعلية",
-      "totalCount": "إجمالي الأوامر"
+      "totalCount": "إجمالي الأوامر",
+      "batchesHint": "عدد دفعات الـ BOM المطلوب إنتاجها — الإنتاج المتوقع = الدفعات × كمية إنتاج التركيبة",
+      "expectedProduction": "الإنتاج المتوقع",
+      "supervisor": "مسؤول الإنتاج",
+      "selectSupervisor": "اختر مسؤول الإنتاج",
+      "batchAutoHint": "اتركه فارغاً للتوليد التلقائي",
+      "batchFormatHint": "الصيغة: YYYYMMDD-NNN (تاريخ اليوم + تسلسل)",
+      "producedDefaultHint": "اتركه فارغاً لاستخدام عدد الدفعات × كمية إنتاج الـ BOM",
+      "productionCosts": "تكاليف الإنتاج",
+      "productionCostsHint": "تُضاف هذه التكاليف إلى تكلفة المنتج وتُرحَّل إلى الحسابات عند اكتمال الإنتاج"
     },
     "bom": {
       "title": "فاتير المواد",
@@ -1279,10 +1288,20 @@
       "maxProducible": "أقصى كمية قابلة للإنتاج",
       "availabilityError": "تعذر فحص التوفر",
       "availabilityWarning": "الخامات غير كافية — سيُنشأ الأمر لكن ابدأه بعد التوريد",
-      "createWo": "إنشاء أمر إنتاج"
+      "createWo": "إنشاء أمر إنتاج",
+      "unit": "وحدة"
     },
     "production": "الإنتاج",
-    "costs": "التكاليف",
+    "costs": {
+      "labor": "أجور العمال",
+      "energy": "الطاقة",
+      "packaging": "التغليف",
+      "other": "أخرى",
+      "description": "الوصف",
+      "descriptionPlaceholder": "وصف اختياري للتكلفة",
+      "amount": "المبلغ",
+      "total": "إجمالي تكاليف الإنتاج"
+    },
     "productionCostReport": "تحليل تكاليف الإنتاج",
     "totalPlannedCost": "التكلفة المخططة",
     "totalActualCost": "التكلفة الفعلية",
@@ -1324,7 +1343,10 @@
       "cost": "التكلفة",
       "status": "الحالة",
       "orderNumber": "رقم الأمر",
-      "quantity": "الكمية"
+      "quantity": "الكمية",
+      "batches": "عدد الدفعات",
+      "batchNumber": "رقم الدفعة",
+      "supervisor": "مسؤول الإنتاج"
     },
     "form": {
       "finishedProduct": "المنتج النهائي",
@@ -1349,7 +1371,9 @@
       "cancelled": "ملغي",
       "startExecution": "بدء التنفيذ",
       "complete": "اكتمال",
-      "actual": "الفعلي"
+      "actual": "الفعلي",
+      "cancel": "إلغاء",
+      "reopen": "إعادة فتح"
     },
     "orderNumber": "رقم الأمر",
     "product": "المنتج",
@@ -1381,7 +1405,9 @@
       "fromBom": "أمر مُشتق من شجرة الإنتاج",
       "createdFromBom": "تم إنشاء أمر التشغيل",
       "seqFailed": "فشل توليد رقم أمر التشغيل",
-      "statusUpdated": "تم تحديث حالة أمر التشغيل"
+      "statusUpdated": "تم تحديث حالة أمر التشغيل",
+      "cancelExplanation": "سيتم إلغاء أمر التشغيل. إذا كان قيد التنفيذ، يمكنك إرجاع الخامات المصروفة إلى المخزون.",
+      "returnMaterials": "إرجاع الخامات المصروفة إلى المخزون"
     }
   },
   "hr": {
@@ -2401,7 +2427,12 @@
       "inventoryAccount": "حساب المخزون",
       "created": "تم إنشاء نوع المنتج بنجاح",
       "updated": "تم تحديث نوع المنتج بنجاح",
-      "deleted": "تم حذف نوع المنتج بنجاح"
+      "deleted": "تم حذف نوع المنتج بنجاح",
+      "usage": "الاستخدام",
+      "usageFinished": "منتج نهائي / تام الإنتاج",
+      "usageRaw": "مادة أولية / خام",
+      "usageOther": "أخرى",
+      "usageHint": "يحدد ظهور المنتج في قوائم التصنيع (منتج نهائي أو مادة خام)"
     },
     "productCategories": {
       "title": "تصنيفات المنتجات",

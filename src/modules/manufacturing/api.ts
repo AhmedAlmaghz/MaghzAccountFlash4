@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
-import { runTransaction } from '@/core/database/tx';
+import { runTransaction, buildJournalEntryStatement } from '@/core/database/tx';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createBomSchema, createWorkOrderSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
-import type { BOM, BOMLine, WorkOrder, WorkOrderLine } from './types';
+import { safeUserId } from '@/core/utils/userIdValidator';
+import type { BOM, BOMLine, WorkOrder, WorkOrderLine, ProductionCost } from './types';
 
 const workOrderStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'cancelled']);
 
@@ -37,6 +38,7 @@ function mapBomRow(r: Record<string, unknown>, withLinesCount = false): BOM {
     productName: r.product_name ? String(r.product_name) : undefined,
     version: String(r.version),
     isActive: r.is_active === true || r.is_active === 'true',
+    outputQuantity: r.output_quantity != null && r.output_quantity !== '' ? Number(r.output_quantity) : 1,
     totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
     notes: r.notes ? String(r.notes) : undefined,
     createdBy: r.created_by ? String(r.created_by) : undefined,
@@ -75,6 +77,11 @@ function mapWorkOrderRow(r: Record<string, unknown>): WorkOrder {
     actualStartDate: r.actual_start_date ? String(r.actual_start_date) : undefined,
     actualEndDate: r.actual_end_date ? String(r.actual_end_date) : undefined,
     totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
+    outputWarehouseId: r.output_warehouse_id ? String(r.output_warehouse_id) : undefined,
+    batchNumber: r.batch_number ? String(r.batch_number) : undefined,
+    supervisorId: r.supervisor_id ? String(r.supervisor_id) : undefined,
+    supervisorName: r.supervisor_name ? String(r.supervisor_name) : undefined,
+    productionCosts: parseProductionCosts(r.production_costs),
     notes: r.notes ? String(r.notes) : undefined,
     createdBy: r.created_by ? String(r.created_by) : undefined,
     updatedBy: r.updated_by ? String(r.updated_by) : undefined,
@@ -106,6 +113,64 @@ function parseJsonLines(value: unknown): Record<string, unknown>[] {
     }
   }
   return [];
+}
+
+const PRODUCTION_COST_CATEGORIES = ['labor', 'energy', 'packaging', 'other'] as const;
+
+function parseProductionCosts(value: unknown): ProductionCost[] {
+  const rows = parseJsonLines(value);
+  const out: ProductionCost[] = [];
+  for (const row of rows) {
+    const category = String(row.category ?? '');
+    if (!(PRODUCTION_COST_CATEGORIES as readonly string[]).includes(category)) continue;
+    const amount = Number(row.amount) || 0;
+    if (amount <= 0) continue;
+    out.push({
+      category: category as ProductionCost['category'],
+      description: row.description ? String(row.description) : undefined,
+      amount,
+    });
+  }
+  return out;
+}
+
+/** GL account codes for each production-cost category (chart of accounts). */
+const PRODUCTION_COST_ACCOUNT_CODES: Record<ProductionCost['category'], string> = {
+  labor: '53101',
+  energy: '53201',
+  packaging: '53301',
+  other: '53401',
+};
+
+async function findAccountByCodeLocal(companyId: string, code: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const res = await adapter.query<{ id: string }>(
+    `SELECT id FROM accounts WHERE company_id = $1 AND code = $2 LIMIT 1`,
+    [companyId, code]
+  );
+  return res.rows?.[0]?.id ? String(res.rows[0].id) : null;
+}
+
+/**
+ * Resolve the inventory GL account for a product:
+ * product-type default → default_accounts(default_inventory) → code 11301.
+ */
+async function resolveInventoryAccountId(companyId: string, productId: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const ptRes = await adapter.query<{ default_inventory_account_id: string | null }>(
+    `SELECT pt.default_inventory_account_id
+       FROM products p
+       LEFT JOIN product_types pt ON pt.id = p.product_type_id
+      WHERE p.id = $1::uuid AND p.company_id = $2::uuid LIMIT 1`,
+    [productId, companyId]
+  );
+  if (ptRes.rows?.[0]?.default_inventory_account_id) return String(ptRes.rows[0].default_inventory_account_id);
+  const daRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_inventory'`,
+    [companyId]
+  );
+  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
+  return findAccountByCodeLocal(companyId, '11301');
 }
 
 export const manufacturingApi = {
@@ -177,6 +242,7 @@ export const manufacturingApi = {
           productId: data.productId,
           version: data.version,
           isActive: data.isActive,
+          outputQuantity: data.outputQuantity ?? 1,
           totalCost: data.totalCost,
           notes: data.notes,
           lines: (data.lines || []).map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
@@ -185,18 +251,29 @@ export const manufacturingApi = {
         const first = result.rows?.[0];
         return first?.id ? { success: true, id: String(first.id) } : { success: false, error: 'Insert failed' };
       }
+      // Single atomic CTE (same shape as the Electron RPC handler): header +
+      // lines insert together, so a failed lines insert can never leave an
+      // orphaned BOM header. Also avoids the `adapter.transaction` result
+      // shape mismatch (`results[0]` is `{rows, rowCount}`, not a row array).
       const adapter = await getDbAdapter();
-      const tx = await adapter.transaction([
-        { sql: `INSERT INTO boms (company_id, product_id, version, is_active, total_cost, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, params: [data.companyId, data.productId, data.version, data.isActive, data.totalCost, data.notes, _userId ?? null] },
-      ]);
-      if (tx.success && tx.results?.[0]?.[0]) {
-        const bomId = tx.results[0][0].id as string;
-        await batchInsertLines(adapter, 'bom_lines', ['bom_id', 'material_id', 'quantity', 'unit_cost', 'total_cost'],
-          data.lines.map(l => [bomId, l.materialId, l.quantity, l.unitCost, (l.quantity || 0) * (l.unitCost || 0)])
-        );
-        return { success: true, id: bomId };
+      const params: unknown[] = [data.companyId, data.productId, data.version, data.isActive, data.outputQuantity ?? 1, data.totalCost, data.notes, safeUserId(_userId)];
+      const rowValues: string[] = [];
+      let idx = 9;
+      for (const l of data.lines) {
+        rowValues.push(`($${idx}::uuid, $${idx + 1}::numeric, $${idx + 2}::numeric, $${idx + 3}::numeric)`);
+        params.push(l.materialId, l.quantity, l.unitCost ?? 0, (l.quantity || 0) * (l.unitCost || 0));
+        idx += 4;
       }
-      return { success: false, error: tx.error };
+      const result = await adapter.query<{ id: string }>(`WITH bom AS (
+        INSERT INTO boms (company_id, product_id, version, is_active, output_quantity, total_cost, notes, created_by)
+        VALUES ($1::uuid, $2::uuid, $3, $4, $5::numeric, $6::numeric, $7, $8::uuid) RETURNING id
+      ), lines AS (
+        INSERT INTO bom_lines (bom_id, material_id, quantity, unit_cost, total_cost)
+        SELECT bom.id, v.material_id, v.quantity, v.unit_cost, v.total_cost
+        FROM bom JOIN (VALUES ${rowValues.join(', ')}) v(material_id, quantity, unit_cost, total_cost) ON true
+      ) SELECT id FROM bom`, params);
+      const first = result.rows?.[0];
+      return first?.id ? { success: true, id: String(first.id) } : { success: false, error: result.error || 'Insert failed' };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -213,6 +290,7 @@ export const manufacturingApi = {
             productId: data.productId ?? undefined,
             version: data.version ?? undefined,
             isActive: data.isActive ?? undefined,
+            outputQuantity: data.outputQuantity ?? undefined,
             totalCost: data.totalCost ?? undefined,
             notes: data.notes ?? undefined,
             lines: data.lines === undefined ? undefined : data.lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
@@ -227,6 +305,7 @@ export const manufacturingApi = {
       if (data.productId !== undefined) { fields.push(`product_id = $${idx++}`); values.push(data.productId); }
       if (data.version !== undefined) { fields.push(`version = $${idx++}`); values.push(data.version); }
       if (data.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(data.isActive); }
+      if (data.outputQuantity !== undefined) { fields.push(`output_quantity = $${idx++}`); values.push(data.outputQuantity); }
       if (data.totalCost !== undefined) { fields.push(`total_cost = $${idx++}`); values.push(data.totalCost); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
 
@@ -280,7 +359,7 @@ export const manufacturingApi = {
           : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
-      let sql = `SELECT w.*, p.name_ar as product_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id WHERE w.company_id = $1`;
+      let sql = `SELECT w.*, p.name_ar as product_name, e.full_name as supervisor_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id LEFT JOIN employees e ON w.supervisor_id = e.id WHERE w.company_id = $1`;
       const params: unknown[] = [companyId];
       if (ownedByUserId) {
         sql += ' AND (w.created_by = $2 OR w.created_by IS NULL)';
@@ -312,7 +391,7 @@ export const manufacturingApi = {
         return { success: true, data: { workOrder, lines } };
       }
       const adapter = await getDbAdapter();
-      const sql = 'SELECT w.*, p.name_ar as product_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id WHERE w.id = $1 AND w.company_id = $2 LIMIT 1';
+      const sql = 'SELECT w.*, p.name_ar as product_name, e.full_name as supervisor_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id LEFT JOIN employees e ON w.supervisor_id = e.id WHERE w.id = $1 AND w.company_id = $2 LIMIT 1';
       const res = await adapter.query(sql, [id, companyId]);
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
       const workOrder = mapWorkOrderRow(res.rows[0] as Record<string, unknown>);
@@ -328,6 +407,11 @@ export const manufacturingApi = {
     try {
       const validation = validateInput(createWorkOrderSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      // Lot number is generated here (API layer) so the normal screens and the
+      // AI agent share one implementation. Format: YYYYMMDD-NNN.
+      const batchNumber = data.batchNumber && String(data.batchNumber).trim() !== ''
+        ? String(data.batchNumber).trim()
+        : await generateBatchNumber(data.companyId);
       if (isElectronPg()) {
         const result = await invokeMfgRpc('createWorkOrder', {
           orderNumber: data.orderNumber,
@@ -338,6 +422,9 @@ export const manufacturingApi = {
           plannedStartDate: data.plannedStartDate ?? null,
           plannedEndDate: data.plannedEndDate ?? null,
           totalCost: data.totalCost ?? null,
+          batchNumber,
+          supervisorId: data.supervisorId ?? null,
+          productionCosts: data.productionCosts ?? [],
           notes: data.notes ?? null,
           lines: (data.lines || []).map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost })),
         });
@@ -345,18 +432,34 @@ export const manufacturingApi = {
         const first = result.rows?.[0];
         return first?.id ? { success: true, id: String(first.id) } : { success: false, error: 'Insert failed' };
       }
+      // Single atomic CTE (same shape as the Electron RPC handler): header +
+      // consumption lines insert together; avoids the `adapter.transaction`
+      // result shape mismatch (`results[0]` is `{rows, rowCount}`, not rows).
       const adapter = await getDbAdapter();
-      const tx = await adapter.transaction([
-        { sql: `INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, params: [data.companyId, data.orderNumber, data.productId, data.bomId, data.quantity, data.status, data.plannedStartDate, data.plannedEndDate, data.totalCost, data.notes, _userId ?? null] },
-      ]);
-      if (tx.success && tx.results?.[0]?.[0]) {
-        const woId = tx.results[0][0].id as string;
-        await batchInsertLines(adapter, 'work_order_consumptions', ['work_order_id', 'material_id', 'planned_quantity', 'unit_cost'],
-          data.lines.map(l => [woId, l.materialId, l.plannedQuantity, l.unitCost])
-        );
-        return { success: true, id: woId };
+      const params: unknown[] = [data.companyId, data.orderNumber, data.productId, data.bomId ?? null, data.quantity, data.status, data.plannedStartDate ?? null, data.plannedEndDate ?? null, data.totalCost ?? null, batchNumber, safeUserId(data.supervisorId), JSON.stringify(data.productionCosts ?? []), data.notes ?? null, safeUserId(_userId)];
+      let sql = `WITH wo AS (
+        INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, batch_number, supervisor_id, production_costs, notes, created_by)
+        VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::numeric, $6, $7::date, $8::date, $9::numeric, $10, $11::uuid, $12::jsonb, $13, $14::uuid) RETURNING id
+      )`;
+      const woLines = data.lines || [];
+      if (woLines.length > 0) {
+        const rowValues: string[] = [];
+        let idx = 15;
+        for (const l of woLines) {
+          rowValues.push(`($${idx}::uuid, $${idx + 1}::numeric, $${idx + 2}::numeric)`);
+          params.push(l.materialId, l.plannedQuantity, l.unitCost ?? 0);
+          idx += 3;
+        }
+        sql += `, cons AS (
+          INSERT INTO work_order_consumptions (work_order_id, material_id, planned_quantity, unit_cost)
+          SELECT wo.id, v.material_id, v.planned_quantity, v.unit_cost
+          FROM wo JOIN (VALUES ${rowValues.join(', ')}) v(material_id, planned_quantity, unit_cost) ON true
+        )`;
       }
-      return { success: false, error: tx.error };
+      sql += ' SELECT id FROM wo';
+      const result = await adapter.query<{ id: string }>(sql, params);
+      const first = result.rows?.[0];
+      return first?.id ? { success: true, id: String(first.id) } : { success: false, error: result.error || 'Insert failed' };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -381,6 +484,9 @@ export const manufacturingApi = {
             actualStartDate: data.actualStartDate ?? undefined,
             actualEndDate: data.actualEndDate ?? undefined,
             totalCost: data.totalCost ?? undefined,
+            batchNumber: data.batchNumber ?? undefined,
+            supervisorId: data.supervisorId ?? undefined,
+            productionCosts: data.productionCosts ?? undefined,
             notes: data.notes ?? undefined,
             lines: data.lines === undefined ? undefined : data.lines.map((l) => ({
               materialId: l.materialId,
@@ -408,6 +514,9 @@ export const manufacturingApi = {
       if (data.actualStartDate !== undefined) { fields.push(`actual_start_date = $${idx++}`); values.push(data.actualStartDate); }
       if (data.actualEndDate !== undefined) { fields.push(`actual_end_date = $${idx++}`); values.push(data.actualEndDate); }
       if (data.totalCost !== undefined) { fields.push(`total_cost = $${idx++}`); values.push(data.totalCost); }
+      if (data.batchNumber !== undefined) { fields.push(`batch_number = $${idx++}`); values.push(data.batchNumber || null); }
+      if (data.supervisorId !== undefined) { fields.push(`supervisor_id = $${idx++}`); values.push(safeUserId(data.supervisorId)); }
+      if (data.productionCosts !== undefined) { fields.push(`production_costs = $${idx++}::jsonb`); values.push(JSON.stringify(data.productionCosts ?? [])); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
 
       fields.push(`updated_at = NOW()`);
@@ -467,18 +576,29 @@ export const manufacturingApi = {
     data?: {
       lines: Array<{ materialId: string; materialName?: string; required: number; available: number; sufficient: boolean }>;
       maxProducible: number | null;
+      maxBatches: number | null;
+      outputQuantity: number;
       fullyAvailable: boolean;
     };
   }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id: bomId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
-      const qty = Math.max(0, Number(quantity) || 0);
+      // `quantity` = number of BOM batches requested (work-order semantics).
+      const batches = Math.max(0, Number(quantity) || 0);
 
       const adapter = await getDbAdapter();
+      const bomRes = await adapter.query(
+        `SELECT output_quantity FROM boms WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [bomId, companyId]
+      );
+      if (!bomRes.success || !bomRes.rows?.[0]) return { success: false, error: 'التركيبة غير موجودة' };
+      const outputQuantity = Math.max(Number(bomRes.rows[0].output_quantity) || 1, 0.0001);
+
       const res = await adapter.query(
         `SELECT l.material_id,
                 p.name_ar AS material_name,
+                l.quantity AS per_batch,
                 l.quantity * $3::numeric AS required,
                 COALESCE(SUM(s.quantity), 0) AS available
            FROM bom_lines l
@@ -486,7 +606,7 @@ export const manufacturingApi = {
            LEFT JOIN stock s ON s.product_id = l.material_id AND s.company_id = $1::uuid
           WHERE l.bom_id = $2::uuid
           GROUP BY l.material_id, p.name_ar, l.quantity`,
-        [companyId, bomId, qty]
+        [companyId, bomId, batches]
       );
       if (!res.success) return { success: false, error: res.error };
 
@@ -501,11 +621,16 @@ export const manufacturingApi = {
           sufficient: available >= required,
         };
       });
-      const ratios = lines.filter((l) => l.required > 0).map((l) => Math.floor((l.available / l.required) * 10000) / 10000);
-      const maxProducible = lines.length === 0 ? null : Math.min(...ratios);
+      // Max whole batches producible (floor per material), then in units.
+      const batchRatios = (res.rows || [])
+        .map((r: Record<string, unknown>) => ({ perBatch: Number(r.per_batch) || 0, available: Number(r.available) || 0 }))
+        .filter((l) => l.perBatch > 0)
+        .map((l) => Math.floor(l.available / l.perBatch));
+      const maxBatches = batchRatios.length === 0 ? null : Math.min(...batchRatios);
+      const maxProducible = maxBatches == null ? null : Math.floor(maxBatches * outputQuantity * 10000) / 10000;
       const fullyAvailable = lines.every((l) => l.sufficient);
 
-      return { success: true, data: { lines, maxProducible: Number.isFinite(maxProducible as number) ? (maxProducible as number) : null, fullyAvailable } };
+      return { success: true, data: { lines, maxProducible, maxBatches, outputQuantity, fullyAvailable } };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -606,16 +731,26 @@ export const manufacturingApi = {
 
       const adapter = await getDbAdapter();
       const woRes = await adapter.query(
-        `SELECT w.status, w.quantity, w.produced_quantity, w.output_warehouse_id, w.bom_id FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
+        `SELECT w.status, w.quantity, w.produced_quantity, w.output_warehouse_id, w.bom_id, w.product_id,
+                w.order_number, w.production_costs,
+                COALESCE(b.output_quantity, 1) AS bom_output_quantity
+           FROM work_orders w
+           LEFT JOIN boms b ON b.id = w.bom_id
+          WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
         [id, companyId]
       );
       if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'أمر التشغيل غير موجود' };
       const wo = woRes.rows[0];
       if (String(wo.status) !== 'in_progress') {
-        return { success: false, error: 'الإكمال متاح فقط لأوامر قيد التشغيل — ابدأ الأمر أولاً ليُصرف خاماته' };
+        return { success: false, error: 'الإكمال متاح فقط لأوامر قيد التشغيل — ابدأ الأمر أولاُ ليُصرف خاماته' };
       }
+      const productionCosts = parseProductionCosts(wo.production_costs);
+      const productionCostsTotal = Math.round(productionCosts.reduce((s, c) => s + c.amount, 0) * 100) / 100;
 
-      const producedQty = Math.max(0, Number(opts.producedQuantity ?? wo.quantity) || 0);
+      // Expected output = number of batches × BOM output quantity per batch.
+      const bomOutputQty = Math.max(Number(wo.bom_output_quantity) || 1, 0);
+      const expectedOutput = Math.round((Number(wo.quantity) || 0) * bomOutputQty * 10000) / 10000;
+      const producedQty = Math.max(0, Number(opts.producedQuantity ?? expectedOutput) || 0);
       const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
       const fallbackWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
       const outputWh = opts.outputWarehouseId || (wo.output_warehouse_id ? String(wo.output_warehouse_id) : fallbackWh);
@@ -630,16 +765,17 @@ export const manufacturingApi = {
 
       // Consumption DELTA vs what START already issued (planned quantities):
       //   delta > 0 → extra issue (out); delta < 0 → return surplus (in).
-      // Total cost rolls up from ACTUAL qty × ACTUAL unit cost (fallback unit_cost).
+      // Material cost rolls up from ACTUAL qty × ACTUAL unit cost (fallback unit_cost);
+      // production costs (labor/energy/packaging/other) are added on top.
       const statements: Array<{ sql: string; params?: unknown[] }> = [];
-      let totalCost = 0;
+      let materialsCost = 0;
 
       for (const r of consRows) {
         const materialId = String(r.material_id);
         const planned = Number(r.planned_quantity) || 0;
         const actual = Number(r.actual_quantity) || planned;
         const unitCost = Number(r.actual_unit_cost ?? r.unit_cost) || 0;
-        totalCost += actual * unitCost;
+        materialsCost += actual * unitCost;
         const delta = Math.round((actual - planned) * 10000) / 10000;
         if (delta === 0) continue;
 
@@ -690,25 +826,153 @@ export const manufacturingApi = {
         });
       }
 
+      // Total production cost = materials + labor/energy/packaging/other.
+      const materialsCostRounded = Math.round(materialsCost * 100) / 100;
+      const totalCost = Math.round((materialsCost + productionCostsTotal) * 100) / 100;
+
+      // Capitalize the full cost into the product's cost_price (unit cost).
+      if (producedQty > 0 && totalCost > 0) {
+        const unitCostNew = Math.round((totalCost / producedQty) * 10000) / 10000;
+        statements.push({
+          sql: `UPDATE products SET cost_price = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [unitCostNew, String(wo.product_id ?? ''), companyId],
+        });
+      }
+
+      // GL posting (same atomic transaction as stock movements):
+      //   DR inventory account — total production cost (finished goods in)
+      //   CR inventory account — materials consumed (raw materials out)
+      //   CR 53101/53201/53301/53401 — labor/energy/packaging/other
+      if (totalCost > 0) {
+        const inventoryAccountId = await resolveInventoryAccountId(companyId, String(wo.product_id ?? ''));
+        if (!inventoryAccountId) {
+          return { success: false, error: 'حساب المخزون غير موجود — قم بتهيئة الحسابات الافتراضية في الإعدادات' };
+        }
+        const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [
+          { accountId: inventoryAccountId, debit: totalCost, credit: 0, memo: `إنتاج تام - ${String(wo.order_number ?? '')}` },
+        ];
+        if (materialsCostRounded > 0) {
+          entries.push({ accountId: inventoryAccountId, debit: 0, credit: materialsCostRounded, memo: 'مواد خام مستهلكة' });
+        }
+        for (const pc of productionCosts) {
+          const accId = await findAccountByCodeLocal(companyId, PRODUCTION_COST_ACCOUNT_CODES[pc.category]);
+          if (!accId) {
+            return { success: false, error: `حساب تكاليف الإنتاج (${PRODUCTION_COST_ACCOUNT_CODES[pc.category]}) غير موجود في شجرة الحسابات` };
+          }
+          entries.push({ accountId: accId, debit: 0, credit: pc.amount, memo: pc.description || undefined });
+        }
+        statements.push(buildJournalEntryStatement(companyId, {
+          reference: String(wo.order_number ?? id),
+          description: `تكاليف إنتاج أمر التشغيل ${String(wo.order_number ?? '')}`,
+          date: new Date().toISOString().split('T')[0],
+          totalAmount: totalCost,
+          entries,
+        }));
+      }
+
       statements.push({
         sql: `UPDATE work_orders SET status = 'completed', actual_end_date = CURRENT_DATE, produced_quantity = $3::numeric, total_cost = $4::numeric, output_warehouse_id = COALESCE($5::uuid, output_warehouse_id), updated_at = NOW()${opts.userId ? ', updated_by = $6::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: opts.userId
-          ? [id, companyId, producedQty, Math.round(totalCost * 100) / 100, outputWh, opts.userId]
-          : [id, companyId, producedQty, Math.round(totalCost * 100) / 100, outputWh],
+          ? [id, companyId, producedQty, totalCost, outputWh, opts.userId]
+          : [id, companyId, producedQty, totalCost, outputWh],
       });
 
       const result = await runTransaction(statements);
       if (!result.success) return { success: false, error: result.error };
       return {
         success: true,
-        data: { producedQuantity: producedQty, totalCost: Math.round(totalCost * 100) / 100, outputWarehouseId: outputWh },
+        data: { producedQuantity: producedQty, totalCost, outputWarehouseId: outputWh },
       };
     } catch (e) {
       return { success: false, error: String(e) };
     }
   },
 
-  async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number, outputWarehouseId?: string): Promise<{ success: boolean; error?: string }> {
+  /**
+   * Cancel a work order — an action separate from the production flow.
+   * Allowed from planned / in_progress only (completed orders cannot be
+   * cancelled). When cancelling an in_progress order with `returnMaterials`
+   * (default true), the quantities issued at START are returned to stock
+   * atomically in the same transaction as the status change.
+   */
+  async cancelWorkOrder(
+    id: string,
+    companyId: string,
+    opts: { returnMaterials?: boolean; userId?: string } = {},
+  ): Promise<{ success: boolean; error?: string; data?: { returnedLines: number } }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+
+      const adapter = await getDbAdapter();
+      const woRes = await adapter.query(
+        `SELECT w.status FROM work_orders w WHERE w.id = $1::uuid AND w.company_id = $2::uuid LIMIT 1`,
+        [id, companyId]
+      );
+      if (!woRes.success || !woRes.rows?.[0]) return { success: false, error: 'أمر التشغيل غير موجود' };
+      const status = String(woRes.rows[0].status);
+      if (status === 'completed') {
+        return { success: false, error: 'لا يمكن إلغاء أمر مكتمل — الإنتاج تم توريده للمخزون' };
+      }
+      if (status === 'cancelled') {
+        return { success: false, error: 'الأمر ملغي بالفعل' };
+      }
+
+      const returnMaterials = opts.returnMaterials !== false && status === 'in_progress';
+      const statements: Array<{ sql: string; params?: unknown[] }> = [];
+      let returnedLines = 0;
+
+      if (returnMaterials) {
+        // START issued each consumption's planned_quantity — return exactly that.
+        const consRes = await adapter.query(
+          `SELECT c.material_id, c.planned_quantity
+             FROM work_order_consumptions c WHERE c.work_order_id = $1::uuid`,
+          [id]
+        );
+        if (!consRes.success) return { success: false, error: consRes.error };
+        const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
+        const fallbackWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
+
+        for (const r of (consRes.rows || []) as Record<string, unknown>[]) {
+          const materialId = String(r.material_id);
+          const qty = Number(r.planned_quantity) || 0;
+          if (qty <= 0) continue;
+          const whRes2 = await adapter.query(
+            `SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1`,
+            [companyId, materialId]
+          );
+          const whId = whRes2.success && whRes2.rows?.[0]?.warehouse_id ? String(whRes2.rows[0].warehouse_id) : fallbackWh;
+          if (!whId) continue;
+          statements.push({
+            sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
+            params: [companyId, materialId, whId],
+          });
+          statements.push({
+            sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
+            params: [companyId, materialId, whId, qty, id, 'إلغاء أمر تشغيل — إرجاع خامات', opts.userId ?? null],
+          });
+          statements.push({
+            sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
+            params: [qty, companyId, materialId, whId],
+          });
+          returnedLines++;
+        }
+      }
+
+      statements.push({
+        sql: `UPDATE work_orders SET status = 'cancelled', updated_at = NOW()${opts.userId ? ', updated_by = $3::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        params: opts.userId ? [id, companyId, opts.userId] : [id, companyId],
+      });
+
+      const result = await runTransaction(statements);
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, data: { returnedLines } };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateWorkOrderStatus(id: string, companyId: string, status: WorkOrder['status'], _userId?: string, producedQuantity?: number, outputWarehouseId?: string, opts: { returnMaterials?: boolean } = {}): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -719,10 +983,12 @@ export const manufacturingApi = {
         if (!uidValidation.success) return { success: false, error: uidValidation.error };
       }
       // Unified flow for BOTH environments (Electron + PGlite):
-      //   in_progress → startWorkOrder  (issues raw materials atomically)
-      //   completed   → completeWorkOrder (FG receipt into output warehouse
+      //   in_progress → startWorkOrder   (issues raw materials atomically)
+      //   completed   → completeWorkOrder (FG receipt = batches × BOM output
       //                 + consumption deltas vs issued + cost rollup)
-      // Only terminal bookkeeping statuses stay as plain updates.
+      //   cancelled   → cancelWorkOrder  (separate action; optional return of
+      //                 issued materials atomically)
+      // Only planned (reopen) stays as a plain update.
       if (status === 'in_progress') {
         const r = await manufacturingApi.startWorkOrder(id, companyId, _userId || undefined);
         return { success: r.success, error: r.error };
@@ -731,6 +997,13 @@ export const manufacturingApi = {
         const r = await manufacturingApi.completeWorkOrder(id, companyId, {
           producedQuantity,
           outputWarehouseId: outputWarehouseId || null,
+          userId: _userId || undefined,
+        });
+        return { success: r.success, error: r.error };
+      }
+      if (status === 'cancelled') {
+        const r = await manufacturingApi.cancelWorkOrder(id, companyId, {
+          returnMaterials: opts.returnMaterials,
           userId: _userId || undefined,
         });
         return { success: r.success, error: r.error };
@@ -937,7 +1210,7 @@ export const manufacturingApi = {
       params.push(ps);
       params.push(offset);
       const dataResult = await adapter.query(
-        `SELECT w.*, p.name_ar as product_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id WHERE ${where} ORDER BY w.order_number DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        `SELECT w.*, p.name_ar as product_name, e.full_name as supervisor_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id LEFT JOIN employees e ON w.supervisor_id = e.id WHERE ${where} ORDER BY w.order_number DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
       );
       const rows = (dataResult.rows || []).map((r: Record<string, unknown>) => mapWorkOrderRow(r));
@@ -957,4 +1230,28 @@ async function batchInsertLines(adapter: Awaited<ReturnType<typeof getDbAdapter>
   }).join(',');
   const values = rows.flat();
   await adapter.query(`INSERT INTO ${table} (${columns.join(',')}) VALUES ${placeholders}`, values);
+}
+
+/**
+ * Lot/batch number: today's local date + daily sequential suffix,
+ * e.g. 20260827-001. Collision-safe via existence check + retry.
+ */
+async function generateBatchNumber(companyId: string): Promise<string> {
+  const adapter = await getDbAdapter();
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const countRes = await adapter.query(
+    `SELECT COUNT(*)::int AS n FROM work_orders WHERE company_id = $1::uuid AND batch_number LIKE $2`,
+    [companyId, `${ymd}%`]
+  );
+  const seq = Number(countRes.rows?.[0]?.n ?? 0) + 1;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = `${ymd}-${String(seq + attempt).padStart(3, '0')}`;
+    const exists = await adapter.query(
+      `SELECT 1 FROM work_orders WHERE company_id = $1::uuid AND batch_number = $2 LIMIT 1`,
+      [companyId, candidate]
+    );
+    if (!exists.rows?.length) return candidate;
+  }
+  return `${ymd}-${String(Date.now()).slice(-6)}`;
 }

@@ -155,9 +155,9 @@ export async function getProductTypes(companyId: string): Promise<{ success: boo
 export async function createProductType(data: Omit<ProductType, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
-    `INSERT INTO product_types (company_id, name_ar, name_en, code, appears_in_sales, appears_in_purchases, appears_in_inventory, appears_in_manufacturing, has_stock_tracking, has_bom, default_sales_account_id, default_cogs_account_id, default_inventory_account_id, is_active, created_by, updated_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
-    [data.companyId, data.nameAr, data.nameEn, data.code, data.appearsInSales, data.appearsInPurchases, data.appearsInInventory, data.appearsInManufacturing, data.hasStockTracking, data.hasBOM, data.defaultSalesAccountId, data.defaultCOGSAccountId, data.defaultInventoryAccountId, data.isActive, safeUserId(_userId), safeUserId(_userId)]
+    `INSERT INTO product_types (company_id, name_ar, name_en, code, usage, appears_in_sales, appears_in_purchases, appears_in_inventory, appears_in_manufacturing, has_stock_tracking, has_bom, default_sales_account_id, default_cogs_account_id, default_inventory_account_id, is_active, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+    [data.companyId, data.nameAr, data.nameEn, data.code, data.usage || 'other', data.appearsInSales, data.appearsInPurchases, data.appearsInInventory, data.appearsInManufacturing, data.hasStockTracking, data.hasBOM, data.defaultSalesAccountId, data.defaultCOGSAccountId, data.defaultInventoryAccountId, data.isActive, safeUserId(_userId), safeUserId(_userId)]
   );
   return result.success && result.rows?.[0] ? { success: true, id: result.rows[0].id } : { success: false, error: result.error };
 }
@@ -165,8 +165,8 @@ export async function createProductType(data: Omit<ProductType, 'id'>, _userId?:
 export async function updateProductType(id: string, data: Partial<ProductType>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
   const adapter = await getDbAdapter();
   const result = await adapter.query(
-    `UPDATE product_types SET name_ar = $1, name_en = $2, code = $3, appears_in_sales = $4, appears_in_purchases = $5, appears_in_inventory = $6, appears_in_manufacturing = $7, has_stock_tracking = $8, has_bom = $9, default_sales_account_id = $10, default_cogs_account_id = $11, default_inventory_account_id = $12, is_active = $13, updated_by = $14, updated_at = NOW() WHERE id = $15 AND company_id = $16`,
-    [data.nameAr, data.nameEn, data.code, data.appearsInSales, data.appearsInPurchases, data.appearsInInventory, data.appearsInManufacturing, data.hasStockTracking, data.hasBOM, data.defaultSalesAccountId, data.defaultCOGSAccountId, data.defaultInventoryAccountId, data.isActive, safeUserId(_userId), id, companyId]
+    `UPDATE product_types SET name_ar = $1, name_en = $2, code = $3, usage = $4, appears_in_sales = $5, appears_in_purchases = $6, appears_in_inventory = $7, appears_in_manufacturing = $8, has_stock_tracking = $9, has_bom = $10, default_sales_account_id = $11, default_cogs_account_id = $12, default_inventory_account_id = $13, is_active = $14, updated_by = $15, updated_at = NOW() WHERE id = $16 AND company_id = $17`,
+    [data.nameAr, data.nameEn, data.code, data.usage || 'other', data.appearsInSales, data.appearsInPurchases, data.appearsInInventory, data.appearsInManufacturing, data.hasStockTracking, data.hasBOM, data.defaultSalesAccountId, data.defaultCOGSAccountId, data.defaultInventoryAccountId, data.isActive, safeUserId(_userId), id, companyId]
   );
   return result.success ? { success: true } : { success: false, error: result.error };
 }

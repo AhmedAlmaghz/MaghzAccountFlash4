@@ -104,7 +104,7 @@ describe('settingsApi.getProductTypes', () => {
     );
   });
 
-  it('createProductType includes all 14 columns + RETURNING id', async () => {
+  it('createProductType includes all 17 columns + RETURNING id', async () => {
     const adapter = makeMockAdapter(async () => ({ success: true, rows: [{ id: TYPE_ID }] }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -117,8 +117,9 @@ describe('settingsApi.getProductTypes', () => {
     expect(result.id).toBe(TYPE_ID);
     const [sql, params] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/INSERT INTO product_types/);
+    expect(sql).toMatch(/usage/);
     expect(sql).toMatch(/RETURNING id/);
-    expect(params).toHaveLength(16);
+    expect(params).toHaveLength(17);
   });
 
   it('deleteProductType uses company_id filter', async () => {

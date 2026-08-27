@@ -1,5 +1,6 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, jsonb } from 'drizzle-orm/pg-core';
 import { companies } from './core';
+import { employees } from './hr';
 
 // ─── Bills of Materials (BOM) ─────────────────────────────────────────────────
 export const boms = pgTable('boms', {
@@ -8,6 +9,9 @@ export const boms = pgTable('boms', {
   productId: uuid('product_id').notNull(), // finished product
   version: varchar('version', { length: 20 }).default('1.0'),
   isActive: boolean('is_active').notNull().default(true),
+  // How many finished-product units one BOM batch yields (work-order
+  // quantity counts batches; expected production = batches × outputQuantity).
+  outputQuantity: numeric('output_quantity', { precision: 18, scale: 4 }).notNull().default('1'),
   totalCost: numeric('total_cost', { precision: 18, scale: 4 }).default('0'),
   notes: text('notes'),
   createdBy: uuid('created_by'),
@@ -42,6 +46,11 @@ export const workOrders = pgTable('work_orders', {
   actualEndDate: date('actual_end_date'),
   totalCost: numeric('total_cost', { precision: 18, scale: 4 }).default('0'),
   outputWarehouseId: uuid('output_warehouse_id'),
+  batchNumber: varchar('batch_number', { length: 50 }),
+  supervisorId: uuid('supervisor_id').references(() => employees.id, { onDelete: 'set null' }),
+  // [{category: 'labor'|'energy'|'packaging'|'other', description, amount}]
+  // capitalized into product cost + posted to GL on completion.
+  productionCosts: jsonb('production_costs').notNull().default([]),
   notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

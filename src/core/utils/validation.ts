@@ -494,6 +494,7 @@ export const createBomSchema = z.object({
   productId: uuidSchema,
   version: nonEmptyString,
   isActive: z.boolean().default(true),
+  outputQuantity: z.number().positive().default(1),
   totalCost: currencyAmountSchema.optional(),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
@@ -513,6 +514,13 @@ export const createWorkOrderSchema = z.object({
   plannedStartDate: dateSchema.optional(),
   plannedEndDate: dateSchema.optional(),
   totalCost: currencyAmountSchema.optional(),
+  batchNumber: z.string().max(50).optional(),
+  supervisorId: uuidSchema.optional().nullable(),
+  productionCosts: z.array(z.object({
+    category: z.enum(['labor', 'energy', 'packaging', 'other']),
+    description: z.string().max(500).optional(),
+    amount: currencyAmountSchema,
+  })).optional(),
   notes: z.string().max(2000).optional(),
   lines: z.array(z.object({
     materialId: uuidSchema,

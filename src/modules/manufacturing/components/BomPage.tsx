@@ -66,9 +66,12 @@ export const BomPage: React.FC = () => {
         addToast('error', seq.error || t('manufacturing.wo.seqFailed'));
         return;
       }
+      // Work-order quantity = number of BOM batches; consumption lines must
+      // carry the TOTAL planned quantity (per-batch qty × batches).
+      const batches = Math.max(1, Number(calcQty) || 1);
       const lines = viewing.lines.map((l) => ({
         materialId: l.materialId,
-        plannedQuantity: l.quantity,
+        plannedQuantity: Math.round(l.quantity * batches * 10000) / 10000,
         unitCost: l.unitCost || 0,
       }));
       const res = await manufacturingApi.createWorkOrder({
@@ -76,9 +79,9 @@ export const BomPage: React.FC = () => {
         orderNumber: seq.number,
         productId: viewing.bom.productId,
         bomId: viewing.bom.id,
-        quantity: Math.max(1, Number(calcQty) || 1),
+        quantity: batches,
         status: 'planned',
-        totalCost: viewing.bom.totalCost ?? undefined,
+        totalCost: viewing.bom.totalCost !== undefined ? Math.round((viewing.bom.totalCost * batches) * 100) / 100 : undefined,
         notes: `${t('manufacturing.wo.fromBom')} v${viewing.bom.version}`,
         lines,
       } as never);
@@ -93,7 +96,7 @@ export const BomPage: React.FC = () => {
     }
   };
 
-  const [formData, setFormData] = useState({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '' });
+  const [formData, setFormData] = useState({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '', outputQuantity: '1' });
   const [lines, setLines] = useState<BomFormLine[]>([{ materialId: '', materialName: '', quantity: 1, unitCost: 0 }]);
 
   const estimatedTotal = useMemo(() =>
@@ -101,7 +104,7 @@ export const BomPage: React.FC = () => {
   [lines]);
 
   const resetForm = () => {
-    setFormData({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '' });
+    setFormData({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '', outputQuantity: '1' });
     setLines([{ materialId: '', materialName: '', quantity: 1, unitCost: 0 }]);
     setEditing(null);
   };
@@ -122,6 +125,7 @@ export const BomPage: React.FC = () => {
         isActive: res.data.bom.isActive,
         notes: res.data.bom.notes || '',
         totalCost: res.data.bom.totalCost !== undefined ? String(res.data.bom.totalCost) : '',
+        outputQuantity: String(res.data.bom.outputQuantity ?? 1),
       });
       setLines(res.data.lines.map((l) => ({
         materialId: l.materialId,
@@ -137,6 +141,7 @@ export const BomPage: React.FC = () => {
         isActive: bom.isActive,
         notes: bom.notes || '',
         totalCost: bom.totalCost !== undefined ? String(bom.totalCost) : '',
+        outputQuantity: String(bom.outputQuantity ?? 1),
       });
       setLines([]);
     }
@@ -161,6 +166,7 @@ export const BomPage: React.FC = () => {
       productId: formData.productId,
       version: formData.version,
       isActive: formData.isActive,
+      outputQuantity: Math.max(Number(formData.outputQuantity) || 1, 0.0001),
       totalCost,
       notes: formData.notes || undefined,
       lines: lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
@@ -210,6 +216,7 @@ export const BomPage: React.FC = () => {
       ),
     },
     { key: 'version', header: t('manufacturing.table.version'), width: '100px', render: (row: BOM) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border">v{row.version}</span> },
+    { key: 'outputQuantity', header: t('manufacturing.form.outputQuantity'), width: '120px', render: (row: BOM) => <span className="tabular-nums font-medium">{row.outputQuantity ?? 1}</span> },
     { key: 'lines', header: t('manufacturing.table.materials'), width: '100px', render: (_row: BOM) => _row.linesCount !== undefined ? `${_row.linesCount} ${t('manufacturing.bom.material')}` : '—' },
     { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
     { key: 'isActive', header: t('manufacturing.table.status'), width: '110px', render: (row: BOM) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
@@ -361,11 +368,18 @@ export const BomPage: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.finishedProduct')}</label>
-              <ProductSelect companyId={companyId} value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
+              <ProductSelect companyId={companyId} value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} usage="finished" showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
             </div>
             <Input label={t('manufacturing.form.version')} value={formData.version} onChange={(e) => setFormData((prev) => ({ ...prev, version: e.target.value }))} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
+            <Input
+              label={t('manufacturing.form.outputQuantity')}
+              type="number"
+              value={formData.outputQuantity}
+              onChange={(e) => setFormData((prev) => ({ ...prev, outputQuantity: e.target.value }))}
+              helperText={t('manufacturing.form.outputQuantityHint')}
+            />
             <Input
               label={t('manufacturing.form.totalCost')}
               type="number"
@@ -374,6 +388,11 @@ export const BomPage: React.FC = () => {
               placeholder={String(estimatedTotal)}
               helperText={t('manufacturing.form.autoCalculatedCost') + ': ' + formatCurrency(estimatedTotal)}
             />
+            <div className="flex items-end pb-1">
+              <div className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 rounded p-2 w-full">
+                {t('manufacturing.form.unitCostPerUnit')}: <span className="font-bold tabular-nums">{formatCurrency(estimatedTotal / Math.max(Number(formData.outputQuantity) || 1, 0.0001))}</span>
+              </div>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="flex items-center gap-2 pt-6">
@@ -409,6 +428,7 @@ export const BomPage: React.FC = () => {
                       }
                       showBarcode
                       showStock
+                      usage="raw"
                       placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
                     />
                   </div>
@@ -466,7 +486,7 @@ export const BomPage: React.FC = () => {
       >
         {viewing && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-3 gap-4 text-sm">
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3">
                 <span className="text-slate-500">{t('manufacturing.form.product')}:</span>
                 <p className="font-semibold text-slate-900 dark:text-slate-50">{viewing.bom.productName || viewing.bom.productId}</p>
@@ -474,6 +494,10 @@ export const BomPage: React.FC = () => {
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3">
                 <span className="text-slate-500">{t('manufacturing.form.version')}:</span>
                 <p className="font-semibold text-slate-900 dark:text-slate-50">{viewing.bom.version}</p>
+              </div>
+              <div className="bg-slate-50 dark:bg-slate-800 rounded p-3">
+                <span className="text-slate-500">{t('manufacturing.form.outputQuantity')}:</span>
+                <p className="font-semibold text-slate-900 dark:text-slate-50 tabular-nums">{viewing.bom.outputQuantity ?? 1}</p>
               </div>
             </div>
             <Table<BOMLine>
@@ -500,11 +524,12 @@ export const BomPage: React.FC = () => {
               <div className="flex items-end gap-2">
                 <div className="flex-1">
                   <Input
-                    label={t('manufacturing.bom.plannedQty')}
+                    label={t('manufacturing.bom.batchesCount')}
                     type="number"
                     min={1}
                     value={calcQty}
                     onChange={(e) => { setCalcQty(e.target.value); setAvailability(null); }}
+                    helperText={t('manufacturing.bom.batchesHint')}
                   />
                 </div>
                 <Button variant="primary" onClick={runAvailability} isLoading={isCalculating} className="shrink-0">
@@ -516,8 +541,8 @@ export const BomPage: React.FC = () => {
                 <div className="space-y-2">
                   <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold ${availability.fullyAvailable ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
                     <span>{availability.fullyAvailable ? t('manufacturing.bom.fullyAvailable') : t('manufacturing.bom.partiallyAvailable')}</span>
-                    {availability.maxProducible !== null && (
-                      <span className="tabular-nums">{t('manufacturing.bom.maxProducible')}: {availability.maxProducible}</span>
+                    {availability.maxBatches !== null && (
+                      <span className="tabular-nums">{t('manufacturing.bom.maxBatches')}: {availability.maxBatches} ({availability.maxProducible} {t('manufacturing.bom.unit')})</span>
                     )}
                   </div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">

@@ -151,7 +151,7 @@ export const searchTools: ToolDefinition[] = [
   {
     name: 'search.products',
     labelAr: 'بحث عن منتج',
-    descriptionAr: 'يبحث عن منتج بالاسم أو الكود ويعيد معرفه (id) وسعر البيع وسعر التكلفة. استخدمه دائماً قبل أي عملية تحتاج معرف منتج.',
+    descriptionAr: 'يبحث عن منتج بالاسم أو الكود ويعيد معرفه (id) وسعر البيع وسعر التكلفة ونوعه (usage: finished=منتج نهائي/تام الإنتاج، raw=مادة أولية/خام، other). استخدمه دائماً قبل أي عملية تحتاج معرف منتج.',
     permission: 'inventory.view',
     dangerLevel: 'read',
     parameters: searchParam('اسم المنتج أو كوده أو جزء منه'),
@@ -160,6 +160,13 @@ export const searchTools: ToolDefinition[] = [
       if (!query) return { error: 'نص البحث مطلوب' };
       const res = await inventoryApi.getProductsPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      let typeUsage = new Map<string, { usage: string; name: string }>();
+      try {
+        const typesRes = await settingsApi.getProductTypes(ctx.companyId);
+        if (typesRes.success && typesRes.data) {
+          typeUsage = new Map(typesRes.data.map((pt) => [pt.id, { usage: pt.usage || 'other', name: pt.nameAr || '' }]));
+        }
+      } catch {}
       const matches = findAllFuzzyMatches(
         query,
         res.data.items,
@@ -167,15 +174,20 @@ export const searchTools: ToolDefinition[] = [
         0.35,
       ).slice(0, 8);
       return {
-        matches: matches.map((m) => ({
-          id: m.item.id,
-          code: m.item.code,
-          name: m.item.nameAr,
-          salePrice: m.item.salePrice,
-          costPrice: m.item.costPrice,
-          quantity: m.item.quantity,
-          unit: m.item.unit,
-        })),
+        matches: matches.map((m) => {
+          const pt = m.item.productTypeId ? typeUsage.get(m.item.productTypeId) : undefined;
+          return {
+            id: m.item.id,
+            code: m.item.code,
+            name: m.item.nameAr,
+            salePrice: m.item.salePrice,
+            costPrice: m.item.costPrice,
+            quantity: m.item.quantity,
+            unit: m.item.unit,
+            usage: pt?.usage ?? 'other',
+            productTypeName: pt?.name ?? '',
+          };
+        }),
         totalMatches: matches.length,
       };
     },

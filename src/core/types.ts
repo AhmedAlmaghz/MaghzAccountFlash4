@@ -24,6 +24,8 @@ export interface ProductType {
   appearsInManufacturing: boolean;
   hasStockTracking: boolean;
   hasBOM: boolean;
+  /** Semantic classification: 'finished' (منتج نهائي/تام), 'raw' (مواد أولية/خام), 'other'. */
+  usage?: 'finished' | 'raw' | 'other';
   defaultSalesAccountId?: string;
   defaultCOGSAccountId?: string;
   defaultInventoryAccountId?: string;

@@ -349,7 +349,7 @@ describe('manufacturingApi', () => {
     it('COMPLETE posts consumption delta + FG receipt + cost rollup', async () => {
       const adapter = makeMockAdapter(async (sql) => {
         if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
-          return { success: true, rows: [{ status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null, product_id: PRODUCT_ID }] };
+          return { success: true, rows: [{ status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null, product_id: PRODUCT_ID, order_number: 'WO-001', production_costs: [] }] };
         }
         if (sql.includes('FROM work_order_consumptions c')) {
           return {
@@ -362,6 +362,9 @@ describe('manufacturingApi', () => {
         }
         if (sql.includes('FROM stock st')) {
           return { success: true, rows: [{ warehouse_id: 'wh-1' }] };
+        }
+        if (sql.includes('product_types pt')) {
+          return { success: true, rows: [{ default_inventory_account_id: 'inv-acc-1' }] };
         }
         return { success: true, rows: [] };
       });
@@ -377,6 +380,66 @@ describe('manufacturingApi', () => {
       const fgReceipt = txQs.find((q) => q.sql.includes("'in'") && String(q.params?.[5]).includes('تام'));
       expect(fgReceipt?.params?.[3]).toBe(10);
       expect(txQs.some((q) => q.sql.includes("status = 'completed'"))).toBe(true);
+      // GL journal entry: DR inventory 660 / CR inventory 660 (materials only, no production costs)
+      const je = txQs.find((q) => q.sql.includes('INSERT INTO transactions'));
+      expect(je).toBeTruthy();
+      // product cost_price updated with unit cost (660 / 10 = 66)
+      const costUpdate = txQs.find((q) => q.sql.includes('UPDATE products SET cost_price'));
+      expect(costUpdate?.params?.[0]).toBe(66);
+    });
+
+    it('COMPLETE capitalizes production costs into product cost and GL', async () => {
+      const adapter = makeMockAdapter(async (sql, params) => {
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return {
+            success: true,
+            rows: [{
+              status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null,
+              product_id: PRODUCT_ID, order_number: 'WO-002',
+              production_costs: JSON.stringify([
+                { category: 'labor', amount: 200 },
+                { category: 'energy', amount: 100 },
+                { category: 'packaging', description: 'كرتون', amount: 40 },
+              ]),
+            }],
+          };
+        }
+        if (sql.includes('FROM work_order_consumptions c')) {
+          return {
+            success: true,
+            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '5', unit_cost: '100', actual_unit_cost: '100' }],
+          };
+        }
+        if (sql.includes('FROM warehouses')) {
+          return { success: true, rows: [{ id: 'wh-out' }] };
+        }
+        if (sql.includes('product_types pt')) {
+          return { success: true, rows: [{ default_inventory_account_id: 'inv-acc-1' }] };
+        }
+        if (sql.includes('FROM accounts') && sql.includes('code')) {
+          const code = String(params?.[1] || '');
+          if (code === '53101') return { success: true, rows: [{ id: 'labor-acc' }] };
+          if (code === '53201') return { success: true, rows: [{ id: 'energy-acc' }] };
+          if (code === '53301') return { success: true, rows: [{ id: 'pack-acc' }] };
+          return { success: true, rows: [] };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 10, userId: USER_ID });
+      expect(res.success).toBe(true);
+      // materials 5×100=500 + labor 200 + energy 100 + packaging 40 = 840
+      expect(res.data?.totalCost).toBe(840);
+
+      const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;
+      const je = txQs.find((q) => q.sql.includes('INSERT INTO transactions'));
+      expect(je).toBeTruthy();
+      // JE params: [companyId, date, reference, description, totalAmount, companyId, ...lines]
+      expect(je?.params?.[4]).toBe(840);
+      // product cost_price = 840 / 10 = 84
+      const costUpdate = txQs.find((q) => q.sql.includes('UPDATE products SET cost_price'));
+      expect(costUpdate?.params?.[0]).toBe(84);
     });
 
     it('COMPLETE rejects orders that are not in_progress', async () => {

@@ -28,6 +28,15 @@ export interface ProductSelectProps {
   showBarcode?: boolean;
   module?: ProductModule;
   categoryId?: string;
+  /**
+   * Manufacturing semantic filter on the product TYPE:
+   *  - 'finished': only products whose type usage is finished/complete
+   *    (منتج نهائي / تام الإنتاج)
+   *  - 'raw': only products whose type usage is raw material
+   *    (مواد أولية / مواد خام)
+   * Products without a type are excluded when this filter is active.
+   */
+  usage?: 'finished' | 'raw';
 }
 
 export const ProductSelect: React.FC<ProductSelectProps> = ({
@@ -45,6 +54,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
   showBarcode = true,
   module,
   categoryId,
+  usage,
 }) => {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('select.product.placeholder');
@@ -57,6 +67,12 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
     let filtered = products;
     if (module) {
       filtered = filterProductsByModule(filtered, productTypes, module);
+    }
+    if (usage) {
+      const typeIds = new Set(
+        productTypes.filter((tt) => tt.usage === usage).map((tt) => tt.id)
+      );
+      filtered = filtered.filter((p) => p.productTypeId != null && typeIds.has(p.productTypeId));
     }
     if (categoryId) {
       filtered = filtered.filter(
@@ -89,7 +105,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
         disabled: !p.isActive,
       } as SmartSelectItem;
     });
-  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, formatCurrency, t]);
+  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, usage, formatCurrency, t]);
 
   return (
     <SmartSelect

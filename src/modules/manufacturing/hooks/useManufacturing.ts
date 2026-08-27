@@ -108,8 +108,8 @@ export function useWorkOrders(companyId: string) {
     return res;
   }, [refresh, companyId]);
 
-  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string) => {
-    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId);
+  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string, opts?: { returnMaterials?: boolean }) => {
+    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId, opts);
     if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh, companyId]);
@@ -220,8 +220,8 @@ export function useWorkOrdersPaginated(companyId: string, filters?: WorkOrdersFi
     return res;
   }, [companyId, reloadList]);
 
-  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string) => {
-    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId);
+  const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string, opts?: { returnMaterials?: boolean }) => {
+    const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId, opts);
     if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [companyId, reloadList]);

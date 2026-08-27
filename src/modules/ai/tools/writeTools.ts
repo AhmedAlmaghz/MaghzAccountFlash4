@@ -1074,24 +1074,25 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'manufacturing.create_bom',
     labelAr: 'إنشاء تركيبة منتج (BOM)',
-    descriptionAr: 'ينشئ تركيبة منتج (Bill of Materials) تحدد المواد المكوّنة للمنتج وتكاليفها وتُحسب التكلفة تلقائياً. استخدم search.products أولاً؛ تكلفة الوحدة تُجلب تلقائياً من سعر تكلفة المنتج إذا لم تُحدد.',
+    descriptionAr: 'ينشئ تركيبة منتج (Bill of Materials) تحدد المواد المكوّنة للمنتج وتكاليفها وتُحسب التكلفة تلقائياً. outputQuantity = كمية المنتج النهائي التي تنتجها دفعة واحدة من هذه التركيبة (افتراضي 1). استخدم search.products أولاً؛ تكلفة الوحدة تُجلب تلقائياُ من سعر تكلفة المنتج إذا لم تُحدد.',
     permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        productId: { type: 'string', description: 'معرف المنتج النهائي (من search.products)' },
+        productId: { type: 'string', description: 'معرف المنتج النهائي (من search.products — يجب أن يكون نوعه منتج نهائي/تام الإنتاج)' },
         version: { type: 'string', description: 'إصدار التركيبة (افتراضي "1.0")' },
+        outputQuantity: { type: 'number', description: 'كمية المنتج النهائي المنتجة من دفعة واحدة بهذه المواد (افتراضي 1)' },
         notes: { type: 'string' },
         lines: {
           type: 'array',
-          description: 'المواد المكوّنة للتركيبة مع كمياتها وتكاليفها',
+          description: 'المواد المكوّنة للتركيبة مع كمياتها وتكاليفها (يجب أن تكون أنواعها مواد أولية/خام)',
           items: {
             type: 'object',
             properties: {
               materialId: { type: 'string', description: 'معرف المادة الخام (من search.products)' },
-              quantity: { type: 'number', description: 'الكمية اللازمة' },
-              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب تلقائياً من سعر تكلفة المنتج)' },
+              quantity: { type: 'number', description: 'الكمية اللازمة لدفعة واحدة' },
+              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب تلقائياُ من سعر تكلفة المنتج)' },
             },
             required: ['materialId', 'quantity'],
           },
@@ -1128,18 +1129,20 @@ export const writeTools: ToolDefinition[] = [
         lines.push({ materialId, quantity, unitCost });
       }
       const totalCost = round2(lines.reduce((s, l) => s + l.quantity * l.unitCost, 0));
+      const outputQuantity = num(args.outputQuantity) > 0 ? num(args.outputQuantity) : 1;
 
       const res = await manufacturingApi.createBom({
         companyId: ctx.companyId,
         productId,
         version: str(args.version) || '1.0',
         isActive: true,
+        outputQuantity,
         totalCost,
         notes: str(args.notes),
         lines,
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء التركيبة' };
-      return { created: true, bomId: res.id, productId, totalCost };
+      return { created: true, bomId: res.id, productId, outputQuantity, totalCost };
     },
   },
 
@@ -1147,27 +1150,42 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'manufacturing.create_work_order',
     labelAr: 'إنشاء أمر تشغيل',
-    descriptionAr: 'ينشئ أمر تشغيل إنتاجي لتصنيع منتج. إذا مررت bomId دون lines، تُشتق المواد تلقائياً من الشجرة مضروبة في الكمية. استخدم search.products و search.boms أولاً.',
+    descriptionAr: 'ينشئ أمر تشغيل إنتاجي لتصنيع منتج. quantity = عدد دفعات الـ BOM (الإنتاج المتوقع = quantity × outputQuantity للتركيبة). إذا مررت bomId دون lines، تٌشتق المواد تلقائياُ من الشجرة مضروبة في عدد الدفعات. رقم الدفعة يُولَّد تلقائياُ بصيغة YYYYMMDD-NNN. استخدم search.products و search.boms أولاُ.',
     permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         productId: { type: 'string', description: 'معرف المنتج المراد تصنيعه (من search.products)' },
-        bomId: { type: 'string', description: 'معرف شجرة المنتج (اختياري — إن تُرك فارغاً يجب تمرير lines يدوياً)' },
-        quantity: { type: 'number', description: 'الكمية المطلوب إنتاجها' },
+        bomId: { type: 'string', description: 'معرف شجرة المنتج (اختياري — إن تٌرك فارغاُ يجب تمرير lines يدوياُ)' },
+        quantity: { type: 'number', description: 'عدد دفعات الـ BOM المطلوب إنتاجها (افتراضي 1)' },
+        supervisorId: { type: 'string', description: 'معرف مسؤول الإنتاج من الموظفين (اختياري — من search.employees)' },
+        batchNumber: { type: 'string', description: 'رقم الدفعة (اختياري — يٌولَّد تلقائياُ بصيغة YYYYMMDD-NNN إن لم يٌمرر)' },
+        productionCosts: {
+          type: 'array',
+          description: 'تكاليف الإنتاج الإضافية (أجور/طاقة/تغليف/أخرى) — تُضاف لتكلفة المنتج وتُرحَّل للحسابات عند الإكمال',
+          items: {
+            type: 'object',
+            properties: {
+              category: { type: 'string', enum: ['labor', 'energy', 'packaging', 'other'], description: 'labor=أجور العمال، energy=الطاقة، packaging=التغليف، other=أخرى' },
+              description: { type: 'string', description: 'وصف التكلفة (اختياري)' },
+              amount: { type: 'number', description: 'المبلغ' },
+            },
+            required: ['category', 'amount'],
+          },
+        },
         plannedStartDate: { type: 'string', description: 'تاريخ البدء المخطط YYYY-MM-DD (اختياري)' },
         plannedEndDate: { type: 'string', description: 'تاريخ الانتهاء المخطط YYYY-MM-DD (اختياري)' },
         notes: { type: 'string' },
         lines: {
           type: 'array',
-          description: 'المواد المستهلكة (اختياري إذا مررت bomId — تُشتق تلقائياً من الشجرة)',
+          description: 'المواد المستهلكة (اختياري إذا مررت bomId — تٌشتق تلقائياُ من الشجرة)',
           items: {
             type: 'object',
             properties: {
               materialId: { type: 'string', description: 'معرف المادة (من search.products)' },
               plannedQuantity: { type: 'number', description: 'الكمية المخطط استهلاكها' },
-              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب من الشجرة/سعر التكلفة)' },
+              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تٌجلب من الشجرة/سعر التكلفة)' },
             },
             required: ['materialId', 'plannedQuantity'],
           },
@@ -1175,7 +1193,7 @@ export const writeTools: ToolDefinition[] = [
       },
       required: ['productId', 'quantity'],
     },
-    summarizeArgs: (a) => `إنشاء أمر تشغيل لإنتاج ${(a as Record<string, unknown>).quantity ?? ''} من ${String((a as Record<string, unknown>).productId || '').slice(0, 8)}…`,
+    summarizeArgs: (a) => `إنشاء أمر تشغيل لإنتاج ${(a as Record<string, unknown>).quantity ?? ''} دفعة من ${String((a as Record<string, unknown>).productId || '').slice(0, 8)}…`,
 
     execute: async (args, ctx) => {
       const productId = str(args.productId);
@@ -1207,6 +1225,20 @@ export const writeTools: ToolDefinition[] = [
 
       const totalCost = round2(lines.reduce((s, l) => s + l.plannedQuantity * l.unitCost, 0));
 
+      // Production costs (labor/energy/packaging/other) — validated & sanitized.
+      const productionCosts: { category: 'labor' | 'energy' | 'packaging' | 'other'; description?: string; amount: number }[] = [];
+      const rawCosts = args.productionCosts as unknown[] | undefined;
+      if (Array.isArray(rawCosts)) {
+        for (const item of rawCosts) {
+          const rec = item as Record<string, unknown>;
+          const category = str(rec.category);
+          if (category !== 'labor' && category !== 'energy' && category !== 'packaging' && category !== 'other') continue;
+          const amount = num(rec.amount);
+          if (amount <= 0) continue;
+          productionCosts.push({ category, description: str(rec.description), amount });
+        }
+      }
+
       const res = await manufacturingApi.createWorkOrder({
         companyId: ctx.companyId,
         orderNumber: docNumber.number,
@@ -1214,14 +1246,17 @@ export const writeTools: ToolDefinition[] = [
         bomId: str(args.bomId),
         quantity,
         status: 'planned',
+        supervisorId: str(args.supervisorId),
+        batchNumber: str(args.batchNumber),
         plannedStartDate: str(args.plannedStartDate),
         plannedEndDate: str(args.plannedEndDate),
         totalCost,
+        productionCosts,
         notes: str(args.notes),
         lines,
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء أمر التشغيل' };
-      return { created: true, workOrderId: res.id, orderNumber: docNumber.number, quantity, totalCost, status: 'planned' };
+      return { created: true, workOrderId: res.id, orderNumber: docNumber.number, quantity, totalCost, productionCostsTotal: round2(productionCosts.reduce((sum, c) => sum + c.amount, 0)), status: 'planned' };
     },
   },
 
@@ -1238,6 +1273,7 @@ export const writeTools: ToolDefinition[] = [
         status: { type: 'string', enum: ['planned', 'in_progress', 'completed', 'cancelled'], description: 'الحالة الجديدة' },
         producedQuantity: { type: 'number', description: 'الكمية المنتجة فعلياً (اختياري عند completed — افتراضي كمية الأمر)' },
         outputWarehouseId: { type: 'string', description: 'مستودع استلام المنتج التام عند الإكمال (من search.warehouses — اختياري)' },
+        returnMaterials: { type: 'boolean', description: 'عند الإلغاء: هل ترجع الخامات المصروفة للمخزون؟ (افتراضي true)' },
       },
       required: ['workOrderId', 'status'],
     },
@@ -1252,7 +1288,8 @@ export const writeTools: ToolDefinition[] = [
       const res = await manufacturingApi.updateWorkOrderStatus(
         workOrderId, ctx.companyId, status, ctx.userId,
         status === 'completed' ? num(args.producedQuantity) : undefined,
-        status === 'completed' ? outputWarehouseId : undefined
+        status === 'completed' ? outputWarehouseId : undefined,
+        status === 'cancelled' ? { returnMaterials: args.returnMaterials !== false } : undefined
       );
       if (!res.success) return { error: res.error || 'فشل تحديث الحالة' };
       return { updated: true, workOrderId, status };

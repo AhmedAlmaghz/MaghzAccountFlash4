@@ -1677,17 +1677,18 @@ export function registerDatabaseHandlers() {
         p.productId,
         String(p.version),
         p.isActive !== false,
+        p.outputQuantity != null ? Number(p.outputQuantity) : 1,
         p.totalCost != null ? Number(p.totalCost) : null,
         p.notes || null,
         session.user.id,
       ];
       let sql = `WITH bom AS (
-        INSERT INTO boms (company_id, product_id, version, is_active, total_cost, notes, created_by)
-        VALUES ($1::uuid, $2::uuid, $3, $4, $5::numeric, $6, $7::uuid) RETURNING id
+        INSERT INTO boms (company_id, product_id, version, is_active, output_quantity, total_cost, notes, created_by)
+        VALUES ($1::uuid, $2::uuid, $3, $4, $5::numeric, $6::numeric, $7, $8::uuid) RETURNING id
       )`;
       if (lines.length > 0) {
         const rowValues = [];
-        let idx = 8;
+        let idx = 9;
         for (const line of lines) {
           const qty = Number(line.quantity || 0);
           const uc = line.unitCost != null ? Number(line.unitCost) : 0;
@@ -1721,8 +1722,10 @@ export function registerDatabaseHandlers() {
   registerRpc('manufacturing.getWorkOrders', {
     paramCount: 2,
     compose: (p, session) => ({
-      sql: `SELECT w.*, p.name_ar AS product_name
-              FROM work_orders w LEFT JOIN products p ON w.product_id = p.id
+      sql: `SELECT w.*, p.name_ar AS product_name, e.full_name AS supervisor_name
+              FROM work_orders w
+              LEFT JOIN products p ON w.product_id = p.id
+              LEFT JOIN employees e ON w.supervisor_id = e.id
              WHERE w.company_id = $1
                AND ($2::uuid IS NULL OR (w.created_by = $2 OR w.created_by IS NULL))
              ORDER BY w.order_number DESC`,
@@ -1737,8 +1740,10 @@ export function registerDatabaseHandlers() {
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT w.*, p.name_ar AS product_name, COUNT(*) OVER() AS total_count
-                FROM work_orders w LEFT JOIN products p ON w.product_id = p.id
+        sql: `SELECT w.*, p.name_ar AS product_name, e.full_name AS supervisor_name, COUNT(*) OVER() AS total_count
+                FROM work_orders w
+                LEFT JOIN products p ON w.product_id = p.id
+                LEFT JOIN employees e ON w.supervisor_id = e.id
                WHERE w.company_id = $1
                  AND ($2::text IS NULL OR w.status = $2)
                ORDER BY w.order_number DESC
@@ -1753,7 +1758,7 @@ export function registerDatabaseHandlers() {
     paramCount: 2,
     validate: (p) => { if (!p.id) throw new Error('id required'); },
     compose: (p, session) => ({
-      sql: `SELECT w.*, p.name_ar AS product_name,
+      sql: `SELECT w.*, p.name_ar AS product_name, e.full_name AS supervisor_name,
                     COALESCE(json_agg(json_build_object(
                       'id', c.id, 'work_order_id', c.work_order_id, 'material_id', c.material_id,
                       'material_name', cp.name_ar, 'planned_quantity', c.planned_quantity,
@@ -1762,16 +1767,18 @@ export function registerDatabaseHandlers() {
                     )) FILTER (WHERE c.id IS NOT NULL), '[]'::json) AS lines
              FROM work_orders w
              LEFT JOIN products p ON w.product_id = p.id
+             LEFT JOIN employees e ON w.supervisor_id = e.id
              LEFT JOIN work_order_consumptions c ON c.work_order_id = w.id
              LEFT JOIN products cp ON c.material_id = cp.id
             WHERE w.id = $1::uuid AND w.company_id = $2::uuid
-            GROUP BY w.id, p.name_ar
+            GROUP BY w.id, p.name_ar, e.full_name
             LIMIT 1`,
       params: [String(p.id), session.user.companyId],
     }),
   });
 
-  // manufacturing.createWorkOrder — CTE inserts the order then consumptions
+  // manufacturing.createWorkOrder — CTE inserts the order then consumptions.
+  // batchNumber is generated in the API layer (shared by screens + AI agent).
   registerRpc('manufacturing.createWorkOrder', {
     paramCount: null,
     validate: (p) => { if (!p.orderNumber || !p.productId) throw new Error('orderNumber and productId required'); },
@@ -1787,16 +1794,19 @@ export function registerDatabaseHandlers() {
         p.plannedStartDate || null,
         p.plannedEndDate || null,
         p.totalCost != null ? Number(p.totalCost) : null,
+        p.batchNumber || null,
+        UUID_FILTER(p.supervisorId),
+        JSON.stringify(Array.isArray(p.productionCosts) ? p.productionCosts : []),
         p.notes || null,
         session.user.id,
       ];
       let sql = `WITH wo AS (
-        INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, notes, created_by)
-        VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::numeric, $6, $7::date, $8::date, $9::numeric, $10, $11::uuid) RETURNING id
+        INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, batch_number, supervisor_id, production_costs, notes, created_by)
+        VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::numeric, $6, $7::date, $8::date, $9::numeric, $10, $11::uuid, $12::jsonb, $13, $14::uuid) RETURNING id
       )`;
       if (lines.length > 0) {
         const rowValues = [];
-        let idx = 12;
+        let idx = 15;
         for (const line of lines) {
           rowValues.push(`($${idx}::uuid, $${idx + 1}::numeric, $${idx + 2}::numeric)`);
           params.push(line.materialId, Number(line.plannedQuantity || 0), line.unitCost != null ? Number(line.unitCost) : null);
@@ -1951,6 +1961,7 @@ export function registerDatabaseHandlers() {
       if (p.productId !== undefined) { fields.push(`product_id = $${idx++}`); values.push(UUID_FILTER(p.productId)); }
       if (p.version !== undefined) { fields.push(`version = $${idx++}`); values.push(p.version); }
       if (p.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(Boolean(p.isActive)); }
+      if (p.outputQuantity !== undefined) { fields.push(`output_quantity = $${idx++}`); values.push(Number(p.outputQuantity) || 1); }
       if (p.totalCost !== undefined) { fields.push(`total_cost = $${idx++}`); values.push(p.totalCost != null ? Number(p.totalCost) : null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes || null); }
       fields.push(`updated_by = $${idx++}`); values.push(session.user.id);
@@ -2016,6 +2027,9 @@ export function registerDatabaseHandlers() {
       if (p.actualStartDate !== undefined) { fields.push(`actual_start_date = $${idx++}`); values.push(p.actualStartDate || null); }
       if (p.actualEndDate !== undefined) { fields.push(`actual_end_date = $${idx++}`); values.push(p.actualEndDate || null); }
       if (p.totalCost !== undefined) { fields.push(`total_cost = $${idx++}`); values.push(p.totalCost != null ? Number(p.totalCost) : null); }
+      if (p.batchNumber !== undefined) { fields.push(`batch_number = $${idx++}`); values.push(p.batchNumber || null); }
+      if (p.supervisorId !== undefined) { fields.push(`supervisor_id = $${idx++}`); values.push(UUID_FILTER(p.supervisorId)); }
+      if (p.productionCosts !== undefined) { fields.push(`production_costs = $${idx++}::jsonb`); values.push(JSON.stringify(Array.isArray(p.productionCosts) ? p.productionCosts : [])); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes || null); }
       fields.push(`updated_by = $${idx++}`); values.push(session.user.id);
       fields.push(`updated_at = NOW()`);
