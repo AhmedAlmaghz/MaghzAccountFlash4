@@ -95,6 +95,10 @@ export const InvoicesPage: React.FC = () => {
   const [exchangeRate, setExchangeRate] = useState<number>(1);
   const [lines, setLines] = useState<InvoiceLineForm[]>([defaultLine()]);
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
+  const [invoiceDiscount, setInvoiceDiscount] = useState(0);
+  const [invoiceDiscountType, setInvoiceDiscountType] = useState<'amount' | 'percent'>('amount');
+  const showDiscount = settings?.invoiceShowDiscount ?? true;
+  const showVat = settings?.invoiceShowVat ?? true;
 
   const resetForm = useCallback(() => {
     setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
@@ -102,6 +106,8 @@ export const InvoicesPage: React.FC = () => {
     setExchangeRate(1);
     setLines([defaultLine()]);
     setAttachments([]);
+    setInvoiceDiscount(0);
+    setInvoiceDiscountType('amount');
     setEditingId(null);
   }, [defaultLine, defaultCurrency?.code, defaultCashBoxId]);
 
@@ -150,8 +156,15 @@ export const InvoicesPage: React.FC = () => {
       vatPercent: l.vatPercent,
     })));
     setAttachments(invoice.attachments ?? []);
+    // Invoice-level discount under subtotal — derive from stored discountAmount if visible
+    if (showDiscount && invoice.discountAmount) {
+      setInvoiceDiscount(invoice.discountAmount);
+      setInvoiceDiscountType('amount');
+    } else {
+      setInvoiceDiscount(0);
+    }
     setFormOpen(true);
-  }, []);
+  }, [showDiscount]);
 
   const addLine = () => setLines(prev => [...prev, defaultLine()]);
   const removeLine = (idx: number) => setLines(prev => prev.filter((_, i) => i !== idx));
@@ -186,48 +199,66 @@ export const InvoicesPage: React.FC = () => {
   }, []);
 
   const calculations = useMemo(() => {
-    const subtotal = lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 - l.discountPercent / 100)), 0);
-    const vatAmount = lines.reduce((s, l) => {
-      const lineNet = l.quantity * l.unitPrice * (1 - l.discountPercent / 100);
-      return s + (lineNet * (l.vatPercent / 100));
-    }, 0);
-    const discountAmount = lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0);
-    const totalAmount = subtotal + vatAmount;
-    return { subtotal, vatAmount, discountAmount, totalAmount };
-  }, [lines]);
+    const lineDiscountTotal = showDiscount ? lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
+    const subtotalBeforeInvoiceDiscount = lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (showDiscount ? (1 - l.discountPercent / 100) : 1)), 0);
+    const invoiceDiscountAmount = showDiscount
+      ? (invoiceDiscountType === 'percent' ? subtotalBeforeInvoiceDiscount * (invoiceDiscount / 100) : invoiceDiscount)
+      : 0;
+    const cappedInvoiceDiscount = Math.min(invoiceDiscountAmount, subtotalBeforeInvoiceDiscount);
+    const netSubtotal = subtotalBeforeInvoiceDiscount - cappedInvoiceDiscount;
+    const totalDiscountAmount = lineDiscountTotal + cappedInvoiceDiscount;
+    const vatRate = settings?.vatRate ?? 15;
+    const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
+    const totalAmount = netSubtotal + vatAmount;
+    return {
+      subtotal: subtotalBeforeInvoiceDiscount,
+      vatAmount,
+      discountAmount: totalDiscountAmount,
+      invoiceDiscountAmount: cappedInvoiceDiscount,
+      totalAmount,
+      vatRate,
+    };
+  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate]);
 
   const buildInvoicePayload = (invoiceNumber: string): Omit<SalesInvoice, 'id'> => {
     const mappedLines: SalesInvoiceLine[] = lines.map(l => {
-      const lineNet = l.quantity * l.unitPrice * (1 - l.discountPercent / 100);
-      const lineVat = lineNet * (l.vatPercent / 100);
+      const effectiveDiscount = showDiscount ? l.discountPercent : 0;
+      const lineNet = l.quantity * l.unitPrice * (1 - effectiveDiscount / 100);
+      // VAT is now invoice-level when showVat is enabled; line VAT is ignored in that mode
+      const lineVat = showVat ? 0 : lineNet * (l.vatPercent / 100);
       const lineTotal = lineNet + lineVat;
       return {
         productId: l.productId,
         productName: l.productName,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
-        discountPercent: l.discountPercent,
-        vatPercent: l.vatPercent,
+        discountPercent: effectiveDiscount,
+        vatPercent: showVat ? 0 : l.vatPercent,
         lineTotal,
         currencyCode,
         exchangeRate,
         baseCurrencyLineTotal: lineTotal * exchangeRate,
       };
     });
+    // When VAT is invoice-level, totals already include it; line totals are net, so add invoice VAT back via payload totals
+    const payloadSubtotal = calculations.subtotal;
+    const payloadDiscount = calculations.discountAmount;
+    const payloadVat = calculations.vatAmount;
+    const payloadTotal = calculations.totalAmount;
     return {
       companyId: activeCompany!.id,
       invoiceNumber,
       customerId: header.customerId,
       date: header.date,
       dueDate: header.dueDate || undefined,
-      subtotal: calculations.subtotal,
-      discountAmount: calculations.discountAmount,
-      vatAmount: calculations.vatAmount,
-      totalAmount: calculations.totalAmount,
+      subtotal: payloadSubtotal,
+      discountAmount: payloadDiscount,
+      vatAmount: payloadVat,
+      totalAmount: payloadTotal,
       paidAmount: 0,
       currencyCode,
       exchangeRate,
-      baseCurrencyAmount: calculations.totalAmount * exchangeRate,
+      baseCurrencyAmount: payloadTotal * exchangeRate,
       baseCurrencyPaid: 0,
       paymentType: header.paymentType || 'credit',
       cashBoxId: header.paymentType === 'cash' ? (header.cashBoxId || undefined) : undefined,
@@ -716,8 +747,8 @@ export const InvoicesPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Form Modal */}
-      <Modal isOpen={formOpen} onClose={() => { setFormOpen(false); resetForm(); }} size="3xl" title={editingId ? (t('sales.invoice.edit')) : (t('sales.invoice.new'))}>
+      {/* Form Modal — Modern Full-Featured Invoice Editor */}
+      <Modal isOpen={formOpen} onClose={() => { setFormOpen(false); resetForm(); }} size="4xl" title={editingId ? (t('sales.invoice.edit')) : (t('sales.invoice.new'))}>
         <div className="space-y-4 p-1">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -778,31 +809,42 @@ export const InvoicesPage: React.FC = () => {
 </div>
           )}
 
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2">
-            <div className="flex justify-between items-center">
-              <h4 className="font-semibold text-sm">{t('sales.invoice.lines')}</h4>
-              <Button size="sm" variant="secondary" onClick={addLine} leftIcon={<Plus size={14} />}>{t('sales.invoice.addLine')}</Button>
+          {/* ===== Enlarged Modern Items Section — The Heart of the Invoice ===== */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-white dark:bg-slate-900">
+            <div className="bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 px-4 py-3 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                  <Layers size={18} className="text-primary-600 dark:text-primary-400" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
+                    {t('sales.invoice.lines')}
+                    <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{lines.length} {t('sales.itemsCount')}</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{t('sales.invoice.linesDesc') || 'أضف المنتجات والكميات — الأسعار تُملأ تلقائياً'}</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                  <tr>
-                    <th className="px-2 py-1 text-right">{t('inventory.productName')}</th>
-                    <th className="px-2 py-1 text-right w-20">{t('inventory.quantity')}</th>
-                    <th className="px-2 py-1 text-right w-24">{t('inventory.unitPrice')}</th>
-                    <th className="px-2 py-1 text-right w-20">{t('sales.discount')}</th>
-                    <th className="px-2 py-1 text-right w-20">{t('sales.vat')}</th>
-                    <th className="px-2 py-1 text-right w-24">{t('sales.total')}</th>
-                    <th className="px-2 py-1 w-10"></th>
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
+                    <th className="px-4 py-3 text-right font-semibold w-[48%]">{t('inventory.productName')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
+                    <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
+                    {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
+                    <th className="px-4 py-3 text-right font-semibold w-32">{t('sales.total')}</th>
+                    <th className="px-2 py-3 w-10"></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {lines.map((line, idx) => {
-                    const lineNet = line.quantity * line.unitPrice * (1 - line.discountPercent / 100);
-                    const lineTotal = lineNet + (lineNet * (line.vatPercent / 100));
+                    const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                    const lineTotal = lineNet;
                     return (
-                      <tr key={idx} className="border-b border-slate-100 dark:border-slate-800">
-                        <td className="px-2 py-1">
+                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors group">
+                        <td className="px-3 py-3">
                           <ProductSelect
                             companyId={activeCompany?.id || ''}
                             value={line.productId}
@@ -814,32 +856,86 @@ export const InvoicesPage: React.FC = () => {
                             module="sales"
                           />
                         </td>
-                        <td className="px-2 py-1"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1"><Input type="number" min={0} value={String(line.vatPercent)} onChange={e => updateLine(idx, 'vatPercent', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1 text-slate-700 dark:text-slate-200 font-medium">{formatCurrency(lineTotal)}</td>
-                        <td className="px-2 py-1"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
+                        <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" /></td>
+                        <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" /></td>
+                        {showDiscount && <td className="px-3 py-2"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" /></td>}
+                        <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-slate-50 tabular-nums bg-slate-50/50 dark:bg-slate-800/30">{formatCurrency(lineTotal)}</td>
+                        <td className="px-2 py-2"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="opacity-60 group-hover:opacity-100 hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+            {lines.length === 0 && (
+              <div className="py-12 text-center text-slate-400">
+                <Layers size={32} className="mx-auto mb-2 opacity-30" />
+                <p className="text-sm">{t('sales.invoice.emptyLines') || 'لا توجد سطور — أضف منتجاً للبدء'}</p>
+              </div>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(prev => ({ ...prev, notes: e.target.value }))} />
-            <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 space-y-1 text-sm">
-              <div className="flex justify-between text-slate-600 dark:text-slate-300"><span>{t('sales.subtotal')}</span><span className="font-medium">{formatCurrency(calculations.subtotal)}</span></div>
-              <div className="flex justify-between text-slate-600 dark:text-slate-300"><span>{t('sales.discount')}</span><span className="font-medium">{formatCurrency(calculations.discountAmount)}</span></div>
-              <div className="flex justify-between text-slate-600 dark:text-slate-300"><span>{t('sales.vat')}</span><span className="font-medium">{formatCurrency(calculations.vatAmount)}</span></div>
-              <div className="flex justify-between text-lg font-bold text-primary-600 dark:text-primary-400 pt-1 border-t border-slate-200 dark:border-slate-700">
-                <span>{t('sales.total')}</span>
-                <span>{formatCurrency(calculations.totalAmount)}</span>
-             </div>
-           </div>
-         </div>
+          {/* ===== Modern Totals Card — Discount under Subtotal per Settings ===== */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-3">
+              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(prev => ({ ...prev, notes: e.target.value }))} placeholder={t('sales.notesPlaceholder') || 'ملاحظات إضافية للفاتورة...'} />
+              <p className="text-xs text-slate-400 mt-2 flex items-center gap-1"><Paperclip size={12} /> {t('sales.invoice.notesHint') || 'ستظهر الملاحظات في الطباعة وكشف الحساب'}</p>
+            </div>
+            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
+              <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
+                <span className="text-sm font-semibold flex items-center gap-2"><Wallet size={16} /> {t('sales.invoice.summary')}</span>
+                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} {t('sales.itemsCount')}</span>
+              </div>
+              <div className="p-4 space-y-3 text-sm">
+                <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-600 dark:text-slate-300 flex items-center gap-2"><Layers size={14} className="text-slate-400" /> {t('sales.subtotal')}</span>
+                  <span className="font-semibold tabular-nums">{formatCurrency(calculations.subtotal)}</span>
+                </div>
+                {showDiscount && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-amber-900 dark:text-amber-100 flex items-center gap-1.5">٪ {t('sales.discount')}</span>
+                      <div className="flex items-center gap-1 bg-white dark:bg-slate-800 rounded-full p-1 border">
+                        <button onClick={() => setInvoiceDiscountType('amount')} className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${invoiceDiscountType === 'amount' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow' : 'text-slate-600'}`}>{currencySymbol}</button>
+                        <button onClick={() => setInvoiceDiscountType('percent')} className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${invoiceDiscountType === 'percent' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow' : 'text-slate-600'}`}>%</button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input type="number" min={0} max={invoiceDiscountType === 'percent' ? 100 : undefined} value={String(invoiceDiscount)} onChange={e => setInvoiceDiscount(Math.max(0, Number(e.target.value) || 0))} placeholder="0" size="sm" className="flex-1" />
+                      <div className="px-3 py-2 bg-white dark:bg-slate-800 rounded-lg border text-sm font-bold tabular-nums min-w-[110px] text-center text-amber-700 dark:text-amber-300">
+                        -{formatCurrency(calculations.invoiceDiscountAmount)}
+                      </div>
+                    </div>
+                    {invoiceDiscount > 0 && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        {invoiceDiscountType === 'percent' ? `${invoiceDiscount}% ${t('sales.discount')} = ${formatCurrency(calculations.invoiceDiscountAmount)}` : `${t('sales.discount')} ${formatCurrency(calculations.invoiceDiscountAmount)}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {showVat ? (
+                  <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                      {t('sales.vat')} <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full">{calculations.vatRate}%</span>
+                    </span>
+                    <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{formatCurrency(calculations.vatAmount)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700 opacity-60">
+                    <span className="text-slate-500 text-xs">{t('sales.vat')} — {t('settings.vat.disabled') || 'غير مفعّل'}</span>
+                    <span className="text-xs">{formatCurrency(0)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-2">
+                  <span className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2"><TrendingUp size={16} className="text-primary-600" /> {t('sales.total')}</span>
+                  <span className="text-xl font-black tabular-nums text-primary-600 dark:text-primary-400">{formatCurrency(calculations.totalAmount)}</span>
+                </div>
+                <p className="text-xs text-slate-400 text-center pt-2 border-t border-slate-100 dark:border-slate-700">
+                  {currencySymbol} {t('sales.baseCurrency')} • {formatCurrency(calculations.totalAmount * exchangeRate)} {t('sales.invoice.baseTotal') || 'بالأساسية'}
+                </p>
+              </div>
+            </div>
+          </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">

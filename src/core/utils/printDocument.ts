@@ -233,32 +233,40 @@ function generateHtml(data: PrintDocumentData): string {
     : null;
 
   const totalsHtml = isInvoice ? `
-    <table style="width:50%;margin-right:auto;border-collapse:collapse;font-size:13px">
-      <tr>
-        <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280">المجموع الفرعي</td>
-        <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;text-align:left;direction:ltr;font-weight:600">${formatCurrency(data.subtotal, data.currency)}</td>
-      </tr>
-      ${data.discountAmount != null && data.discountAmount > 0 ? `
-      <tr>
-        <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#dc2626">الخصم</td>
-        <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;text-align:left;direction:ltr;font-weight:600;color:#dc2626">-${formatCurrency(data.discountAmount, data.currency)}</td>
-      </tr>
-      ` : ''}
-      <tr>
-        <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280">ضريبة القيمة المضافة</td>
-        <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;text-align:left;direction:ltr;font-weight:600">${formatCurrency(data.vatAmount, data.currency)}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px;background:${color};color:white;font-weight:700;font-size:15px">الإجمالي النهائي</td>
-        <td style="padding:10px;background:${color};color:white;font-weight:700;font-size:15px;text-align:left;direction:ltr">${formatCurrency(data.totalAmount, data.currency)}</td>
-      </tr>
-    </table>
-  ` : `
-    <div style="margin-top:16px;border-top:2px solid ${color};padding:12px 0">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:15px;font-weight:700;color:#1f2937">المبلغ الإجمالي:</span>
-        <span style="font-size:15px;font-weight:700;color:${color};direction:ltr">${formatCurrency(data.totalAmount, data.currency)}</span>
+    <div style="width:52%;margin-right:auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
+      <div style="background:linear-gradient(135deg, ${color} 0%, ${color}dd 100%);color:white;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13px;letter-spacing:0.5px">ملخص الفاتورة</span>
+        <span style="font-size:11px;opacity:0.9;background:rgba(255,255,255,0.15);padding:3px 8px;border-radius:20px">${data.lines.length} صنف</span>
       </div>
+      <div style="padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px">
+          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#e5e7eb;border-radius:50%;display:inline-block"></span> المجموع الفرعي</span>
+          <span style="font-weight:600;direction:ltr">${formatCurrency(data.subtotal, data.currency)}</span>
+        </div>
+        ${data.discountAmount != null && data.discountAmount > 0 ? `
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px;background:#fef3c7;margin:0 -14px;padding-left:14px;padding-right:14px">
+          <span style="color:#92400e;display:flex;align-items:center;gap:6px">٪ الخصم <span style="font-size:11px;background:#f59e0b;color:white;padding:1px 6px;border-radius:10px">${((data.discountAmount / (data.subtotal || 1)) * 100).toFixed(1)}%</span></span>
+          <span style="font-weight:700;direction:ltr;color:#b45309">-${formatCurrency(data.discountAmount, data.currency)}</span>
+        </div>
+        ` : ''}
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px">
+          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#10b981;border-radius:50%;display:inline-block"></span> ضريبة القيمة المضافة <span style="font-size:11px;background:#ecfdf5;color:#047857;padding:1px 6px;border-radius:10px">15%</span></span>
+          <span style="font-weight:600;direction:ltr;color:#047857">${formatCurrency(data.vatAmount, data.currency)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin:8px -14px -12px;background:${color};color:white;border-radius:0 0 10px 10px">
+          <span style="font-weight:800;font-size:14px;letter-spacing:0.3px">الإجمالي النهائي</span>
+          <span style="font-weight:800;font-size:16px;direction:ltr;letter-spacing:0.5px">${formatCurrency(data.totalAmount, data.currency)}</span>
+        </div>
+      </div>
+      <div style="padding:8px 14px;background:#f9fafb;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#6b7280">
+        <span>المبلغ بالحروف:</span>
+        <span style="font-weight:600;color:#374151;direction:ltr">${escapeHtml(amountInWords)}</span>
+      </div>
+    </div>
+  ` : `
+    <div style="margin-top:20px;background:linear-gradient(135deg, ${color} 0%, ${color}dd 100%);border-radius:10px;padding:16px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 6px rgba(0,0,0,0.1)">
+      <span style="font-size:13px;font-weight:600;opacity:0.9">المبلغ الإجمالي</span>
+      <span style="font-size:18px;font-weight:800;direction:ltr;letter-spacing:0.5px">${formatCurrency(data.totalAmount, data.currency)}</span>
     </div>
   `;
 

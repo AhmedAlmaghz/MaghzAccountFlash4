@@ -29,6 +29,9 @@ export const VatSettingsPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<VatType>>({ name: '', rate: 15, isActive: true });
+  const [invoiceShowDiscount, setInvoiceShowDiscount] = useState(true);
+  const [invoiceShowVat, setInvoiceShowVat] = useState(true);
+  const [invoiceSettingsLoading, setInvoiceSettingsLoading] = useState(false);
 
   const loadData = async () => {
     if (!activeCompany?.id) return;
@@ -56,6 +59,54 @@ export const VatSettingsPage: React.FC = () => {
   };
 
   useEffect(() => { loadData(); }, [activeCompany?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadInvoiceSettings = async () => {
+    if (!activeCompany?.id) return;
+    setInvoiceSettingsLoading(true);
+    try {
+      const adapter = await getDbAdapter();
+      const result = await adapter.query<{ key: string; value: string }>(
+        `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showDiscount', 'invoice.showVat')`,
+        [activeCompany.id]
+      );
+      if (result.success && result.rows) {
+        for (const row of result.rows) {
+          if (row.key === 'invoice.showDiscount') setInvoiceShowDiscount(row.value === 'true');
+          if (row.key === 'invoice.showVat') setInvoiceShowVat(row.value === 'true');
+        }
+      }
+    } catch {
+      // ignore, defaults remain true
+    } finally {
+      setInvoiceSettingsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadInvoiceSettings(); }, [activeCompany?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveInvoiceSetting = async (key: string, value: boolean) => {
+    if (!activeCompany?.id) return;
+    try {
+      const adapter = await getDbAdapter();
+      await adapter.query(
+        `INSERT INTO settings (id, company_id, key, value, category) VALUES ($1, $2, $3, $4, 'invoice')
+         ON CONFLICT (company_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [crypto.randomUUID(), activeCompany.id, key, String(value)]
+      );
+      await logAudit({
+        userId: user?.id || 'system',
+        username: user?.username,
+        action: 'update',
+        tableName: 'settings',
+        recordId: key,
+        recordLabel: `${key}=${value}`,
+        companyId: activeCompany.id,
+      });
+      addToast('success', t('settings.vat.invoiceSettingsSaved'));
+    } catch {
+      addToast('error', t('settings.vat.saveError'));
+    }
+  };
 
   const handleSave = async () => {
     if (!activeCompany?.id || !formData.name) {
@@ -194,6 +245,61 @@ export const VatSettingsPage: React.FC = () => {
           isLoading={isLoading}
           emptyMessage={t('settings.vat.empty')}
         />
+      </Card>
+
+      <Card className="border-t-4 border-t-primary-500">
+        <div className="p-1">
+          <h3 className="text-lg font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2 mb-1">
+            <Receipt size={18} className="text-primary-600" />
+            {t('settings.vat.invoiceDisplayTitle')}
+          </h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">{t('settings.vat.invoiceDisplaySubtitle')}</p>
+          {invoiceSettingsLoading ? (
+            <div className="space-y-3">
+              <div className="h-16 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+              <div className="h-16 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${invoiceShowDiscount ? 'border-primary-200 bg-primary-50 dark:bg-primary-900/20 dark:border-primary-800' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'}`}>
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">{t('settings.vat.showDiscount')}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('settings.vat.showDiscountDesc')}</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={invoiceShowDiscount}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setInvoiceShowDiscount(v);
+                    saveInvoiceSetting('invoice.showDiscount', v);
+                  }}
+                  className="w-11 h-6 rounded-full appearance-none bg-slate-200 dark:bg-slate-700 checked:bg-primary-600 relative before:content-[''] before:absolute before:w-5 before:h-5 before:bg-white before:rounded-full before:top-0.5 before:left-0.5 checked:before:translate-x-5 transition-all cursor-pointer"
+                />
+              </label>
+              <label className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${invoiceShowVat ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'}`}>
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">{t('settings.vat.showVat')}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('settings.vat.showVatDesc')}</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={invoiceShowVat}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setInvoiceShowVat(v);
+                    saveInvoiceSetting('invoice.showVat', v);
+                  }}
+                  className="w-11 h-6 rounded-full appearance-none bg-slate-200 dark:bg-slate-700 checked:bg-emerald-600 relative before:content-[''] before:absolute before:w-5 before:h-5 before:bg-white before:rounded-full before:top-0.5 before:left-0.5 checked:before:translate-x-5 transition-all cursor-pointer"
+                />
+              </label>
+            </div>
+          )}
+          <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg flex gap-2">
+            <Receipt size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">{t('settings.vat.invoiceSettingsHint')}</p>
+          </div>
+        </div>
       </Card>
 
       <ConfirmDialog

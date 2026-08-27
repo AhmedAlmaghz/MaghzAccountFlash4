@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart } from 'lucide-react';
+import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart, TrendingUp } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
@@ -107,6 +107,10 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const [form, setForm] = useState<InvoiceForm>(initialForm(defaultCashBoxId ?? undefined));
   const [currencyCode, setCurrencyCode] = useState<string>(defaultCurrency?.code || YER_CODE);
   const [exchangeRate, setExchangeRate] = useState<number>(1);
+  const [invoiceDiscount, setInvoiceDiscount] = useState(0);
+  const [invoiceDiscountType, setInvoiceDiscountType] = useState<'amount' | 'percent'>('amount');
+  const showDiscount = settings?.invoiceShowDiscount ?? true;
+  const showVat = settings?.invoiceShowVat ?? true;
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmPost, setConfirmPost] = useState<string | null>(null);
   const [postingId, setPostingId] = useState<string | null>(null);
@@ -126,23 +130,35 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const vatRate = settings?.vatRate ?? 15;
 
   const calculateLine = useCallback((line: InvoiceFormLine): InvoiceFormLine => {
+    const effectiveDiscount = showDiscount ? line.discountPercent : 0;
     const gross = line.quantity * line.unitPrice;
-    const discount = gross * (line.discountPercent / 100);
+    const discount = gross * (effectiveDiscount / 100);
     const net = gross - discount;
-    const vat = net * (line.vatPercent / 100);
+    const vat = showVat ? 0 : net * (line.vatPercent / 100);
     const total = net + vat;
     return { ...line, lineTotal: Number(total.toFixed(2)) };
-  }, []);
+  }, [showDiscount, showVat]);
 
   const formTotals = useMemo(() => {
-    const subtotal = form.lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 - l.discountPercent / 100)), 0);
-    const vatAmount = form.lines.reduce((s, l) => {
-      const net = l.quantity * l.unitPrice * (1 - l.discountPercent / 100);
-      return s + net * (l.vatPercent / 100);
-    }, 0);
-    const totalAmount = subtotal + vatAmount;
-    return { subtotal: Number(subtotal.toFixed(2)), vatAmount: Number(vatAmount.toFixed(2)), totalAmount: Number(totalAmount.toFixed(2)) };
-  }, [form.lines]);
+    const lineDiscountTotal = showDiscount ? form.lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
+    const subtotalBeforeInvoiceDiscount = form.lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (showDiscount ? (1 - l.discountPercent / 100) : 1)), 0);
+    const invoiceDiscountAmount = showDiscount
+      ? (invoiceDiscountType === 'percent' ? subtotalBeforeInvoiceDiscount * (invoiceDiscount / 100) : invoiceDiscount)
+      : 0;
+    const cappedInvoiceDiscount = Math.min(invoiceDiscountAmount, subtotalBeforeInvoiceDiscount);
+    const netSubtotal = subtotalBeforeInvoiceDiscount - cappedInvoiceDiscount;
+    const totalDiscountAmount = lineDiscountTotal + cappedInvoiceDiscount;
+    const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
+    const totalAmount = netSubtotal + vatAmount;
+    return {
+      subtotal: Number(subtotalBeforeInvoiceDiscount.toFixed(2)),
+      vatAmount: Number(vatAmount.toFixed(2)),
+      discountAmount: Number(totalDiscountAmount.toFixed(2)),
+      invoiceDiscountAmount: Number(cappedInvoiceDiscount.toFixed(2)),
+      totalAmount: Number(totalAmount.toFixed(2)),
+      vatRate,
+    };
+  }, [form.lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, vatRate]);
 
   const updateLine = useCallback((idx: number, patch: Partial<InvoiceFormLine>) => {
     setForm(prev => {
@@ -181,6 +197,8 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const openCreate = useCallback(() => {
     setEditingId(null);
     setForm({ ...initialForm(), lines: [{ ...initialLine(), vatPercent: vatRate }] });
+    setInvoiceDiscount(0);
+    setInvoiceDiscountType('amount');
     setModalOpen(true);
   }, [vatRate]);
 
@@ -208,8 +226,14 @@ export const PurchaseInvoicesPage: React.FC = () => {
           }))
         : [initialLine()],
     });
+    if (showDiscount && invoice.discountAmount) {
+      setInvoiceDiscount(invoice.discountAmount);
+      setInvoiceDiscountType('amount');
+    } else {
+      setInvoiceDiscount(0);
+    }
     setModalOpen(true);
-  }, [vatRate]);
+  }, [vatRate, showDiscount]);
 
   const openView = useCallback(async (invoice: PurchaseInvoice) => {
     if (activeCompany?.id) {
@@ -227,6 +251,24 @@ export const PurchaseInvoicesPage: React.FC = () => {
       addToast('error', t('purchases.invoice.numberError'));
       return;
     }
+    const mappedLines = form.lines.map(l => {
+      const effectiveDiscount = showDiscount ? l.discountPercent : 0;
+      const lineNet = l.quantity * l.unitPrice * (1 - effectiveDiscount / 100);
+      const lineVat = showVat ? 0 : lineNet * (l.vatPercent / 100);
+      const lineTotal = lineNet + lineVat;
+      return {
+        productId: l.productId,
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discountPercent: effectiveDiscount,
+        vatPercent: showVat ? 0 : l.vatPercent,
+        lineTotal,
+        currencyCode,
+        exchangeRate,
+        baseCurrencyLineTotal: lineTotal * exchangeRate,
+      };
+    });
     const payload = {
       companyId: activeCompany.id,
       invoiceNumber: editingId ? existingInvoice!.invoiceNumber : '',
@@ -235,7 +277,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
       date: form.date,
       dueDate: form.dueDate,
       subtotal: formTotals.subtotal,
-      discountAmount: 0,
+      discountAmount: formTotals.discountAmount,
       vatAmount: formTotals.vatAmount,
       totalAmount: formTotals.totalAmount,
       paidAmount: 0,
@@ -247,18 +289,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
       paymentType: form.paymentType,
       cashBoxId: form.paymentType === 'cash' ? (form.cashBoxId || undefined) : undefined,
       notes: form.notes,
-      lines: form.lines.map(l => ({
-        productId: l.productId,
-        description: l.description,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        discountPercent: l.discountPercent,
-        vatPercent: l.vatPercent,
-        lineTotal: l.lineTotal,
-        currencyCode,
-        exchangeRate,
-        baseCurrencyLineTotal: l.lineTotal * exchangeRate,
-      })),
+      lines: mappedLines,
     };
 
     if (editingId) {
@@ -298,7 +329,9 @@ export const PurchaseInvoicesPage: React.FC = () => {
     setModalOpen(false);
     setEditingId(null);
     setForm(initialForm());
-  }, [activeCompany, form, formTotals, editingId, invoices, create, update, user, getNextNumber, currencyCode, exchangeRate, addToast, t]);
+    setInvoiceDiscount(0);
+    setInvoiceDiscountType('amount');
+  }, [activeCompany, form, formTotals, editingId, invoices, create, update, user, getNextNumber, currencyCode, exchangeRate, showDiscount, showVat, addToast, t]);
 
   const handleDelete = useCallback(async (id: string) => {
     setConfirmDelete(id);
@@ -615,15 +648,15 @@ export const PurchaseInvoicesPage: React.FC = () => {
         </div>
       </Card>
 
-      {/* Create / Edit Modal */}
+      {/* Create / Edit Modal — Modern Full-Featured Invoice Editor */}
       <Modal
         isOpen={modalOpen}
         title={editingId ? t('purchases.invoice.edit') : t('purchases.invoice.new')}
-        onClose={() => { setModalOpen(false); setEditingId(null); setForm(initialForm()); }}
-        size="3xl"
+        onClose={() => { setModalOpen(false); setEditingId(null); setForm(initialForm()); setInvoiceDiscount(0); setInvoiceDiscountType('amount'); }}
+        size="4xl"
         footer={
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => { setModalOpen(false); setEditingId(null); setForm(initialForm()); }}>
+            <Button variant="secondary" onClick={() => { setModalOpen(false); setEditingId(null); setForm(initialForm()); setInvoiceDiscount(0); setInvoiceDiscountType('amount'); }}>
               {t('cancel')}
             </Button>
             <Button variant="primary" onClick={handleSave} disabled={!canSave} leftIcon={<CheckSquare size={16} />}>
@@ -632,35 +665,21 @@ export const PurchaseInvoicesPage: React.FC = () => {
           </div>
         }
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-4 p-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier')}</label>
               <SupplierSelect companyId={activeCompany?.id || ''} value={form.supplierId} onChange={v => setForm(prev => ({ ...prev, supplierId: v || '' }))} />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.invoice.linkOrder')}</label>
-              <select
-                className="form-control w-full"
-                value={form.purchaseOrderId}
-                onChange={e => setForm(prev => ({ ...prev, purchaseOrderId: e.target.value }))}
-              >
-                <option value="">{t('all')}</option>
-                {orders.map(o => (
-                  <option key={o.id} value={o.id}>{o.orderNumber} - {o.supplier?.name || o.supplierId}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
             <Input label={t('purchases.date')} type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
             <Input label={t('purchases.dueDate')} type="date" value={form.dueDate} onChange={e => setForm(prev => ({ ...prev, dueDate: e.target.value }))} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.invoice.paymentType')}</label>
               <select
-                className="form-control w-full"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
                 value={form.paymentType}
                 onChange={e => {
                   const newType = e.target.value;
@@ -676,24 +695,26 @@ export const PurchaseInvoicesPage: React.FC = () => {
                 <option value="credit">{t('purchases.invoice.credit')}</option>
               </select>
             </div>
-            <Input label={t('purchases.notes')} value={form.notes} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} />
-          </div>
-          {form.paymentType === 'cash' && (
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
-                <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={v => setForm(prev => ({ ...prev, cashBoxId: v || '' }))} />
-                {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.invoice.linkOrder')}</label>
+              <select
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
+                value={form.purchaseOrderId}
+                onChange={e => setForm(prev => ({ ...prev, purchaseOrderId: e.target.value }))}
+              >
+                <option value="">{t('all')}</option>
+                {orders.map(o => (
+                  <option key={o.id} value={o.id}>{o.orderNumber} - {o.supplier?.name || o.supplierId}</option>
+                ))}
+              </select>
             </div>
-          )}
-          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.currency')}</label>
               <CurrencySelect companyId={activeCompany?.id || ''} value={currencyCode} onChange={handleCurrencyChange} />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Input
               label={t('purchases.exchangeRate')}
               type="number"
@@ -708,49 +729,144 @@ export const PurchaseInvoicesPage: React.FC = () => {
                 {formatCurrency(formTotals.totalAmount * exchangeRate)} <span className="text-slate-500">{currencySymbol}</span>
               </div>
             </div>
+            {form.paymentType === 'cash' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
+                <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={v => setForm(prev => ({ ...prev, cashBoxId: v || '' }))} />
+                {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2">
-            <div className="flex justify-between items-center">
-              <h4 className="font-semibold text-sm">{t('purchases.invoice.lines')}</h4>
-              <Button size="sm" variant="secondary" onClick={addLine} leftIcon={<Plus size={14} />}>
-                {t('purchases.invoice.addLine')}
-              </Button>
-            </div>
-            {form.lines.map((line, idx) => (
-              <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-3">
-                  <label className="text-xs text-slate-500">{t('inventory.productName')}</label>
-                  <ProductSelect companyId={activeCompany?.id || ''} value={line.productId} onChange={v => updateLine(idx, { productId: Array.isArray(v) ? (v[0] || '') : (v || '') })} onProductChange={(p) => handleProductChange(idx, p)} showBarcode showStock size="sm" module="purchases" />
+          {/* ===== Enlarged Modern Items Section — The Heart of the Invoice ===== */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-white dark:bg-slate-900">
+            <div className="bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 px-4 py-3 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                  <Layers size={18} className="text-primary-600 dark:text-primary-400" />
                 </div>
-                <div className="col-span-2">
-                  <Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} />
-                </div>
-                <div className="col-span-1">
-                  <Input type="number" placeholder={t('inventory.quantity')} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} />
-                </div>
-                <div className="col-span-2">
-                  <Input type="number" placeholder={t('inventory.unitPrice')} value={String(line.unitPrice)} onChange={e => updateLine(idx, { unitPrice: Number(e.target.value) })} />
-                </div>
-                <div className="col-span-2">
-                  <Input type="number" placeholder={t('purchases.vat') + '%'} value={String(line.vatPercent)} onChange={e => updateLine(idx, { vatPercent: Number(e.target.value) })} />
-                </div>
-                <div className="col-span-1 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">
-                  {formatCurrency(line.lineTotal)}
-                </div>
-                <div className="col-span-1">
-                  <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                <div>
+                  <h4 className="font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
+                    {t('purchases.invoice.lines')}
+                    <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{form.lines.length} {t('sales.itemsCount')}</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{t('sales.invoice.linesDesc') || 'أضف المنتجات والكميات — الأسعار تُملأ تلقائياً'}</p>
                 </div>
               </div>
-            ))}
+              <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('purchases.invoice.addLine')}</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
+                    <th className="px-4 py-3 text-right font-semibold w-[38%]">{t('inventory.productName')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-28">{t('description')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
+                    <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
+                    {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
+                    <th className="px-4 py-3 text-right font-semibold w-32">{t('purchases.total')}</th>
+                    <th className="px-2 py-3 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {form.lines.map((line, idx) => {
+                    const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                    const lineTotal = lineNet;
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors group">
+                        <td className="px-3 py-3">
+                          <ProductSelect
+                            companyId={activeCompany?.id || ''}
+                            value={line.productId}
+                            onChange={v => updateLine(idx, { productId: Array.isArray(v) ? (v[0] || '') : (v || '') })}
+                            onProductChange={(p) => handleProductChange(idx, p)}
+                            showStock
+                            showBarcode
+                            size="sm"
+                            module="purchases"
+                          />
+                        </td>
+                        <td className="px-3 py-2"><Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} size="sm" /></td>
+                        <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} size="sm" className="text-center font-medium" /></td>
+                        <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, { unitPrice: Number(e.target.value) })} size="sm" className="text-right tabular-nums" /></td>
+                        {showDiscount && <td className="px-3 py-2"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, { discountPercent: Number(e.target.value) })} size="sm" className="text-center" /></td>}
+                        <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-slate-50 tabular-nums bg-slate-50/50 dark:bg-slate-800/30">{formatCurrency(lineTotal)}</td>
+                        <td className="px-2 py-2"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="opacity-60 group-hover:opacity-100 hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {form.lines.length === 0 && (
+              <div className="py-12 text-center text-slate-400">
+                <Layers size={32} className="mx-auto mb-2 opacity-30" />
+                <p className="text-sm">{t('sales.invoice.emptyLines') || 'لا توجد سطور — أضف منتجاً للبدء'}</p>
+              </div>
+            )}
           </div>
 
-          <div className="flex justify-between text-sm border-t border-slate-200 dark:border-slate-700 pt-3">
-            <span className="text-slate-500">{t('purchases.vat')}: {vatRate}%</span>
-            <div className="space-y-1 text-end">
-              <p>{t('purchases.subtotal')}: <strong>{formatCurrency(formTotals.subtotal)}</strong></p>
-              <p>{t('purchases.vat')}: <strong>{formatCurrency(formTotals.vatAmount)}</strong></p>
-              <p className="text-lg font-bold text-primary-600">{t('purchases.total')}: {formatCurrency(formTotals.totalAmount)}</p>
+          {/* ===== Modern Totals Card — Discount under Subtotal per Settings ===== */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-3">
+              <Input label={t('purchases.notes')} value={form.notes} onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))} placeholder={t('sales.notesPlaceholder') || 'ملاحظات إضافية للفاتورة...'} />
+              <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">{t('sales.invoice.notesHint') || 'ستظهر الملاحظات في الطباعة وكشف الحساب'}</p>
+            </div>
+            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
+              <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
+                <span className="text-sm font-semibold flex items-center gap-2"><Wallet size={16} /> {t('sales.invoice.summary')}</span>
+                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{form.lines.length} {t('sales.itemsCount')}</span>
+              </div>
+              <div className="p-4 space-y-3 text-sm">
+                <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-600 dark:text-slate-300 flex items-center gap-2"><Layers size={14} className="text-slate-400" /> {t('purchases.subtotal')}</span>
+                  <span className="font-semibold tabular-nums">{formatCurrency(formTotals.subtotal)}</span>
+                </div>
+                {showDiscount && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-amber-900 dark:text-amber-100 flex items-center gap-1.5">٪ {t('sales.discount')}</span>
+                      <div className="flex items-center gap-1 bg-white dark:bg-slate-800 rounded-full p-1 border">
+                        <button onClick={() => setInvoiceDiscountType('amount')} className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${invoiceDiscountType === 'amount' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow' : 'text-slate-600'}`}>{currencySymbol}</button>
+                        <button onClick={() => setInvoiceDiscountType('percent')} className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${invoiceDiscountType === 'percent' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow' : 'text-slate-600'}`}>%</button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input type="number" min={0} max={invoiceDiscountType === 'percent' ? 100 : undefined} value={String(invoiceDiscount)} onChange={e => setInvoiceDiscount(Math.max(0, Number(e.target.value) || 0))} placeholder="0" size="sm" className="flex-1" />
+                      <div className="px-3 py-2 bg-white dark:bg-slate-800 rounded-lg border text-sm font-bold tabular-nums min-w-[110px] text-center text-amber-700 dark:text-amber-300">
+                        -{formatCurrency(formTotals.invoiceDiscountAmount)}
+                      </div>
+                    </div>
+                    {invoiceDiscount > 0 && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        {invoiceDiscountType === 'percent' ? `${invoiceDiscount}% ${t('sales.discount')} = ${formatCurrency(formTotals.invoiceDiscountAmount)}` : `${t('sales.discount')} ${formatCurrency(formTotals.invoiceDiscountAmount)}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {showVat ? (
+                  <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                      {t('purchases.vat')} <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full">{formTotals.vatRate}%</span>
+                    </span>
+                    <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{formatCurrency(formTotals.vatAmount)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700 opacity-60">
+                    <span className="text-slate-500 text-xs">{t('purchases.vat')} — {t('settings.vat.disabled') || 'غير مفعّل'}</span>
+                    <span className="text-xs">{formatCurrency(0)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-2">
+                  <span className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2"><TrendingUp size={16} className="text-primary-600" /> {t('purchases.total')}</span>
+                  <span className="text-xl font-black tabular-nums text-primary-600 dark:text-primary-400">{formatCurrency(formTotals.totalAmount)}</span>
+                </div>
+                <p className="text-xs text-slate-400 text-center pt-2 border-t border-slate-100 dark:border-slate-700">
+                  {currencySymbol} {t('purchases.baseCurrency')} • {formatCurrency(formTotals.totalAmount * exchangeRate)} {t('sales.invoice.baseTotal') || 'بالأساسية'}
+                </p>
+              </div>
             </div>
           </div>
         </div>

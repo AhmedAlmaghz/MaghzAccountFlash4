@@ -85,12 +85,18 @@ export const QuotationsPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
   const [lines, setLines] = useState<QuotationLineForm[]>([{ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 }]);
+  const [invoiceDiscount, setInvoiceDiscount] = useState(0);
+  const [invoiceDiscountType, setInvoiceDiscountType] = useState<'amount' | 'percent'>('amount');
+  const showDiscount = settings?.invoiceShowDiscount ?? true;
+  const showVat = settings?.invoiceShowVat ?? true;
 
   const defaultLine = (): QuotationLineForm => ({ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 });
 
   const resetForm = useCallback(() => {
     setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
     setLines([defaultLine()]);
+    setInvoiceDiscount(0);
+    setInvoiceDiscountType('amount');
     setEditingId(null);
   }, [defaultCashBoxId]);
 
@@ -131,9 +137,16 @@ export const QuotationsPage: React.FC = () => {
   }, []);
 
   const calculations = useMemo(() => {
-    const totalAmount = lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 - l.discountPercent / 100)), 0);
-    return { totalAmount };
-  }, [lines]);
+    const lineDiscountTotal = showDiscount ? lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
+    const subtotal = lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (showDiscount ? (1 - l.discountPercent / 100) : 1)), 0);
+    const invoiceDiscountAmount = showDiscount ? (invoiceDiscountType === 'percent' ? subtotal * (invoiceDiscount / 100) : invoiceDiscount) : 0;
+    const cappedInvoiceDiscount = Math.min(invoiceDiscountAmount, subtotal);
+    const netSubtotal = subtotal - cappedInvoiceDiscount;
+    const vatRate = settings?.vatRate ?? 15;
+    const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
+    const totalAmount = netSubtotal + vatAmount;
+    return { subtotal, vatAmount, discountAmount: lineDiscountTotal + cappedInvoiceDiscount, invoiceDiscountAmount: cappedInvoiceDiscount, totalAmount, vatRate };
+  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate]);
 
   const buildPayload = (quotationNumber: string): Omit<Quotation, 'id'> => ({
     companyId: activeCompany!.id,
@@ -554,8 +567,8 @@ export const QuotationsPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Form Modal */}
-      <Modal isOpen={formOpen} onClose={() => { setFormOpen(false); resetForm(); }} size="3xl" title={editingId ? (t('sales.quotation.edit')) : (t('sales.quotation.new'))}>
+      {/* Form Modal — Modern Quotation Editor */}
+      <Modal isOpen={formOpen} onClose={() => { setFormOpen(false); resetForm(); }} size="4xl" title={editingId ? (t('sales.quotation.edit')) : (t('sales.quotation.new'))}>
         <div className="space-y-4 p-1">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -600,34 +613,46 @@ export const QuotationsPage: React.FC = () => {
             </div>
           )}
 
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2">
-            <div className="flex justify-between items-center">
-              <h4 className="font-semibold text-sm">{t('sales.invoice.lines')}</h4>
-              <Button size="sm" variant="secondary" onClick={addLine} leftIcon={<Plus size={14} />}>{t('sales.invoice.addLine')}</Button>
+          {/* Enlarged Modern Items — Quotations */}
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-white dark:bg-slate-900">
+            <div className="bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 px-4 py-3 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                  <Layers size={18} className="text-violet-600 dark:text-violet-400" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
+                    {t('sales.invoice.lines')}
+                    <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{lines.length} {t('sales.itemsCount')}</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">أضف المنتجات — الأسعار تُملأ تلقائياً</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                  <tr>
-                    <th className="px-2 py-1 text-right">{t('inventory.productName')}</th>
-                    <th className="px-2 py-1 text-right w-20">{t('inventory.quantity')}</th>
-                    <th className="px-2 py-1 text-right w-24">{t('inventory.unitPrice')}</th>
-                    <th className="px-2 py-1 text-right w-20">{t('sales.discount')}</th>
-                    <th className="px-2 py-1 text-right w-24">{t('sales.total')}</th>
-                    <th className="px-2 py-1 w-10"></th>
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
+                    <th className="px-4 py-3 text-right font-semibold w-[48%]">{t('inventory.productName')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
+                    <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
+                    {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
+                    <th className="px-4 py-3 text-right font-semibold w-32">{t('sales.total')}</th>
+                    <th className="px-2 py-3 w-10"></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {lines.map((line, idx) => {
-                    const lineTotal = line.quantity * line.unitPrice * (1 - line.discountPercent / 100);
+                    const lineTotal = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
                     return (
-                      <tr key={idx} className="border-b border-slate-100 dark:border-slate-800">
-                        <td className="px-2 py-1"><ProductSelect companyId={activeCompany?.id || ''} value={line.productId} onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))} onProductChange={(p) => handleProductChange(idx, p)} showBarcode showStock size="sm" module="sales" /></td>
-                        <td className="px-2 py-1"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" /></td>
-                        <td className="px-2 py-1 text-slate-700 dark:text-slate-200 font-medium">{formatCurrency(lineTotal)}</td>
-                        <td className="px-2 py-1"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
+                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors group">
+                        <td className="px-3 py-3"><ProductSelect companyId={activeCompany?.id || ''} value={line.productId} onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))} onProductChange={(p) => handleProductChange(idx, p)} showBarcode showStock size="sm" module="sales" /></td>
+                        <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" /></td>
+                        <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" /></td>
+                        {showDiscount && <td className="px-3 py-2"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" /></td>}
+                        <td className="px-4 py-3 text-right font-bold tabular-nums bg-slate-50/50 dark:bg-slate-800/30">{formatCurrency(lineTotal)}</td>
+                        <td className="px-2 py-2"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="opacity-60 group-hover:opacity-100 hover:bg-rose-50" leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
                       </tr>
                     );
                   })}
@@ -636,11 +661,39 @@ export const QuotationsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} />
-            <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-300 font-medium">{t('sales.total')}</span>
-              <span className="text-xl font-bold text-primary-600 dark:text-primary-400">{formatCurrency(calculations.totalAmount)}</span>
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-3">
+              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder="ملاحظات العرض..." />
+            </div>
+            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
+              <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
+                <span className="text-sm font-semibold">الملخص</span>
+                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} صنف</span>
+              </div>
+              <div className="p-4 space-y-2 text-sm">
+                <div className="flex justify-between py-2 border-b border-dashed border-slate-200 dark:border-slate-700"><span className="text-slate-600 dark:text-slate-300">{t('sales.subtotal')}</span><span className="font-semibold tabular-nums">{formatCurrency(calculations.subtotal)}</span></div>
+                {showDiscount && (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-amber-900 dark:text-amber-100">٪ {t('sales.discount')}</span>
+                      <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-full p-1 border">
+                        <button onClick={() => setInvoiceDiscountType('amount')} className={`px-2.5 py-1 rounded-full text-xs font-medium ${invoiceDiscountType === 'amount' ? 'bg-slate-900 text-white shadow' : 'text-slate-600'}`}>{currencySymbol}</button>
+                        <button onClick={() => setInvoiceDiscountType('percent')} className={`px-2.5 py-1 rounded-full text-xs font-medium ${invoiceDiscountType === 'percent' ? 'bg-slate-900 text-white shadow' : 'text-slate-600'}`}>%</button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input type="number" min={0} value={String(invoiceDiscount)} onChange={e => setInvoiceDiscount(Math.max(0, Number(e.target.value) || 0))} size="sm" className="flex-1" />
+                      <div className="px-3 py-2 bg-white dark:bg-slate-800 rounded-lg border text-sm font-bold min-w-[110px] text-center text-amber-700">-{formatCurrency(calculations.invoiceDiscountAmount)}</div>
+                    </div>
+                  </div>
+                )}
+                {showVat ? (
+                  <div className="flex justify-between py-2 border-b border-dashed border-slate-200 dark:border-slate-700"><span className="text-slate-600 dark:text-slate-300 flex items-center gap-1">{t('sales.vat')} <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{calculations.vatRate}%</span></span><span className="font-semibold text-emerald-700">{formatCurrency(calculations.vatAmount)}</span></div>
+                ) : (
+                  <div className="flex justify-between py-2 border-b border-dashed opacity-60 text-xs"><span>{t('sales.vat')} — غير مفعّل</span><span>{formatCurrency(0)}</span></div>
+                )}
+                <div className="flex justify-between items-center pt-2"><span className="font-black text-slate-900 dark:text-white">{t('sales.total')}</span><span className="text-xl font-black text-violet-600">{formatCurrency(calculations.totalAmount)}</span></div>
+              </div>
             </div>
           </div>
 

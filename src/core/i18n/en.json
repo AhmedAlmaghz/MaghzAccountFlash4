@@ -2231,7 +2231,15 @@
       "deleteTitle": "Delete VAT Type",
       "deleteMessage": "Are you sure you want to delete this type? This cannot be undone.",
       "created": "VAT type created successfully",
-      "updated": "VAT type updated successfully"
+      "updated": "VAT type updated successfully",
+      "invoiceDisplayTitle": "Invoice Display",
+      "invoiceDisplaySubtitle": "Control discount & VAT visibility for all sales and purchase invoices",
+      "showDiscount": "Show Discount",
+      "showDiscountDesc": "Show discount column and invoice discount field under subtotal",
+      "showVat": "Show VAT",
+      "showVatDesc": "Show VAT column and calculate VAT on invoice total",
+      "invoiceSettingsSaved": "Invoice display settings saved",
+      "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — ideal for exempt businesses or simplified billing."
     },
     "users": {
       "title": "Users",

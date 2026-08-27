@@ -13,6 +13,8 @@ interface AppSettings {
   decimalPlaces: number;
   calendar: 'gregorian' | 'hijri';
   fiscalYearStart?: string;
+  invoiceShowDiscount: boolean;
+  invoiceShowVat: boolean;
 }
 
 export function useSettings(companyId: string) {
@@ -93,6 +95,24 @@ export function useSettings(companyId: string) {
         ? String(companyResult.rows[0].fiscal_year_start).split('T')[0]
         : undefined;
 
+      // Load invoice display settings (global for sales & purchases)
+      let invoiceShowDiscount = true;
+      let invoiceShowVat = true;
+      try {
+        const invSettingsResult = await adapter.query<{ key: string; value: string }>(
+          `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showDiscount', 'invoice.showVat')`,
+          [companyId]
+        );
+        if (invSettingsResult.success && invSettingsResult.rows) {
+          for (const row of invSettingsResult.rows) {
+            if (row.key === 'invoice.showDiscount') invoiceShowDiscount = row.value === 'true';
+            if (row.key === 'invoice.showVat') invoiceShowVat = row.value === 'true';
+          }
+        }
+      } catch {
+        // defaults remain true
+      }
+
       setSettings({
         vatRate,
         baseCurrency,
@@ -103,6 +123,8 @@ export function useSettings(companyId: string) {
         decimalPlaces,
         calendar,
         fiscalYearStart,
+        invoiceShowDiscount,
+        invoiceShowVat,
       });
     } catch (_error) {
       // Error handled via setError below
