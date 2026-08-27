@@ -68,12 +68,7 @@ export const AuditLogPage: React.FC = () => {
     toDate: filters.toDate || undefined,
   });
 
-  // Redirect if no permission
-  React.useEffect(() => {
-    if (!hasPermission('settings.audit_log')) {
-      navigate('/');
-    }
-  }, [hasPermission, navigate]);
+  const hasAuditPermission = hasPermission('settings.audit_log');
 
   const handleExportExcel = () => {
     exportToExcel(
@@ -178,6 +173,21 @@ export const AuditLogPage: React.FC = () => {
   ];
 
   const hasActiveFilters = filters.userId || filters.tableName || filters.action || filters.fromDate || filters.toDate;
+
+  if (!hasAuditPermission) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 gap-4">
+        <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+          <ScrollText size={28} className="text-amber-600" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50">ليس لديك صلاحية عرض سجل التدقيق</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 text-center max-w-md">
+          سجل التدقيق متاح فقط للمستخدمين المصرح لهم (الإدارة). تواصل مع مدير النظام لمنحك الصلاحية <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs">settings.audit_log</code>.
+        </p>
+        <Button variant="secondary" onClick={() => navigate('/')}>العودة للرئيسية</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

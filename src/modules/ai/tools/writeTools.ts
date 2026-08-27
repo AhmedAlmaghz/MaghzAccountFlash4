@@ -585,15 +585,32 @@ export const writeTools: ToolDefinition[] = [
         unit: { type: 'string', description: 'الوحدة (افتراضي piece)' },
         barcode: { type: 'string' },
         openingStockQty: { type: 'number', description: 'كمية المخزون الافتتاحي (تُقيَّم بسعر التكلفة وتُرحّل تلقائياً)' },
+        productTypeId: { type: 'string', description: 'معرف نوع المنتج (من search.product_types — اذكره مثل: منتج نهائي، خامة، خدمة)' },
+        productTypeName: { type: 'string', description: 'اسم نوع المنتج نصاً (بديل — سيُبحث تلقائياً مثل: منتج نهائي)' },
       },
       required: ['nameAr', 'salePrice'],
     },
-    summarizeArgs: (a) => `إنشاء منتج جديد: ${a.nameAr} — سعر البيع: ${a.salePrice}${a.openingStockQty ? ` — مخزون افتتاحي: ${a.openingStockQty}` : ''}`,
+    summarizeArgs: (a) => `إنشاء منتج جديد: ${a.nameAr} — سعر البيع: ${a.salePrice}${a.openingStockQty ? ` — مخزون افتتاحي: ${a.openingStockQty}` : ''}${(a as Record<string, unknown>).productTypeName ? ` — النوع: ${(a as Record<string, unknown>).productTypeName}` : ''}`,
     execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       const salePrice = num(args.salePrice);
       if (!nameAr) return { error: 'اسم المنتج مطلوب' };
       if (salePrice < 0) return { error: 'سعر البيع لا يمكن أن يكون سالباً' };
+
+      // Resolve product type if mentioned by name
+      let productTypeId = str(args.productTypeId);
+      const productTypeName = str(args.productTypeName);
+      if (!productTypeId && productTypeName) {
+        try {
+          const typesRes = await getDbAdapter().then(adapter => adapter.query(`SELECT id, name_ar FROM product_types WHERE company_id = $1 AND is_active = true`, [ctx.companyId]));
+          if (typesRes.success && typesRes.rows) {
+            const norm = (s: string) => s.replace(/[أإآ]/g, 'ا').replace(/[ةه]/g, 'ه').toLowerCase().trim();
+            const target = norm(productTypeName);
+            const found = (typesRes.rows as Record<string, unknown>[]).find(r => norm(String(r.name_ar || '')) === target || String(r.name_ar || '').includes(productTypeName) || target.includes(norm(String(r.name_ar || ''))));
+            if (found) productTypeId = String(found.id);
+          }
+        } catch {}
+      }
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'product');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد كود المنتج' };
@@ -621,6 +638,7 @@ export const writeTools: ToolDefinition[] = [
         salePrice,
         isActive: true,
         createdBy: ctx.userId,
+        ...(productTypeId ? { productTypeId } : {}),
         ...(openingQty > 0
           ? { openingStockQty: openingQty, openingWarehouseId }
           : {}),

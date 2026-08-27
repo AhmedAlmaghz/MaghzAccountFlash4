@@ -3,9 +3,28 @@ import { manufacturingApi } from '../api';
 import { usePaginatedList } from '@/core/hooks/usePaginatedList';
 import type { BOM, WorkOrder, WorkOrderLine, WorkOrderVariance } from '../types';
 
+// Global refresh signal for manufacturing — any write bumps the counter so
+// ALL manufacturing hooks (paginated or not, on any page) reload.
+let manufacturingVersion = 0;
+const manufacturingListeners = new Set<() => void>();
+function bumpManufacturingVersion() {
+  manufacturingVersion++;
+  manufacturingListeners.forEach((cb) => cb());
+}
+function useManufacturingVersion() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const cb = () => setTick((v) => v + 1);
+    manufacturingListeners.add(cb);
+    return () => { manufacturingListeners.delete(cb); };
+  }, []);
+  return manufacturingVersion;
+}
+
 export function useBoms(companyId: string) {
   const [boms, setBoms] = useState<BOM[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const version = useManufacturingVersion();
 
   useEffect(() => {
     if (!companyId) return;
@@ -16,7 +35,7 @@ export function useBoms(companyId: string) {
       setIsLoading(false);
     }
     load();
-  }, [companyId]);
+  }, [companyId, version]);
 
   const refresh = useCallback(async () => {
     if (!companyId) return;
@@ -28,19 +47,19 @@ export function useBoms(companyId: string) {
 
   const create = useCallback(async (data: Omit<BOM, 'id'> & { lines: { materialId: string; quantity: number; unitCost?: number }[] }) => {
     const res = await manufacturingApi.createBom(data);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh]);
 
   const update = useCallback(async (id: string, data: Partial<Omit<BOM, 'id' | 'companyId'>> & { lines?: Partial<{ materialId: string; quantity: number; unitCost?: number }>[] }) => {
     const res = await manufacturingApi.updateBom(id, companyId, undefined, data);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh, companyId]);
 
   const remove = useCallback(async (id: string) => {
     const res = await manufacturingApi.deleteBom(id, companyId);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh, companyId]);
 
@@ -50,6 +69,7 @@ export function useBoms(companyId: string) {
 export function useWorkOrders(companyId: string) {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const version = useManufacturingVersion();
 
   useEffect(() => {
     if (!companyId) return;
@@ -60,7 +80,7 @@ export function useWorkOrders(companyId: string) {
       setIsLoading(false);
     }
     load();
-  }, [companyId]);
+  }, [companyId, version]);
 
   const refresh = useCallback(async () => {
     if (!companyId) return;
@@ -72,25 +92,25 @@ export function useWorkOrders(companyId: string) {
 
   const create = useCallback(async (data: Omit<WorkOrder, 'id'> & { lines: { materialId: string; plannedQuantity: number; unitCost: number }[] }) => {
     const res = await manufacturingApi.createWorkOrder(data);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh]);
 
   const update = useCallback(async (id: string, data: Partial<Omit<WorkOrder, 'id' | 'companyId'>> & { lines?: Partial<WorkOrderLine>[] }) => {
     const res = await manufacturingApi.updateWorkOrder(id, companyId, undefined, data);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh, companyId]);
 
   const remove = useCallback(async (id: string) => {
     const res = await manufacturingApi.deleteWorkOrder(id, companyId);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh, companyId]);
 
   const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string) => {
     const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId);
-    if (res.success) await refresh();
+    if (res.success) { bumpManufacturingVersion(); await refresh(); }
     return res;
   }, [refresh, companyId]);
 
@@ -144,26 +164,27 @@ export interface BomsFilters {
 }
 
 export function useBomsPaginated(companyId: string, filters?: BomsFilters) {
+  const version = useManufacturingVersion();
   const { reload: reloadList, ...list } = usePaginatedList<BOM>(
     (page, pageSize) => manufacturingApi.getBomsPaginated(companyId, page, pageSize, filters),
-    [companyId, filters?.search, filters?.isActive]
+    [companyId, filters?.search, filters?.isActive, version]
   );
 
   const create = useCallback(async (data: Omit<BOM, 'id'> & { lines: { materialId: string; quantity: number; unitCost?: number }[] }) => {
     const res = await manufacturingApi.createBom(data);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [reloadList]);
 
   const update = useCallback(async (id: string, data: Partial<Omit<BOM, 'id' | 'companyId'>> & { lines?: Partial<{ materialId: string; quantity: number; unitCost?: number }>[] }) => {
     const res = await manufacturingApi.updateBom(id, companyId, undefined, data);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [companyId, reloadList]);
 
   const remove = useCallback(async (id: string) => {
     const res = await manufacturingApi.deleteBom(id, companyId);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [companyId, reloadList]);
 
@@ -175,32 +196,33 @@ export interface WorkOrdersFilters {
 }
 
 export function useWorkOrdersPaginated(companyId: string, filters?: WorkOrdersFilters) {
+  const version = useManufacturingVersion();
   const { reload: reloadList, ...list } = usePaginatedList<WorkOrder>(
     (page, pageSize) => manufacturingApi.getWorkOrdersPaginated(companyId, page, pageSize, filters),
-    [companyId, filters?.status]
+    [companyId, filters?.status, version]
   );
 
   const create = useCallback(async (data: Omit<WorkOrder, 'id'> & { lines: { materialId: string; plannedQuantity: number; unitCost: number }[] }) => {
     const res = await manufacturingApi.createWorkOrder(data);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [reloadList]);
 
   const update = useCallback(async (id: string, data: Partial<Omit<WorkOrder, 'id' | 'companyId'>> & { lines?: Partial<WorkOrderLine>[] }) => {
     const res = await manufacturingApi.updateWorkOrder(id, companyId, undefined, data);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [companyId, reloadList]);
 
   const remove = useCallback(async (id: string) => {
     const res = await manufacturingApi.deleteWorkOrder(id, companyId);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [companyId, reloadList]);
 
   const changeStatus = useCallback(async (id: string, status: WorkOrder['status'], producedQuantity?: number, outputWarehouseId?: string) => {
     const res = await manufacturingApi.updateWorkOrderStatus(id, companyId, status, undefined, producedQuantity, outputWarehouseId);
-    if (res.success) await reloadList();
+    if (res.success) { bumpManufacturingVersion(); await reloadList(); }
     return res;
   }, [companyId, reloadList]);
 
