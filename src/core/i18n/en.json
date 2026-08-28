@@ -1428,7 +1428,9 @@
       "seqFailed": "Failed to generate work-order number",
       "statusUpdated": "Work-order status updated",
       "cancelExplanation": "The work order will be cancelled. If in progress, you can return issued materials to stock.",
-      "returnMaterials": "Return issued materials to stock"
+      "returnMaterials": "Return issued materials to stock",
+      "actualConsumption": "Actual material consumption",
+      "actualConsumptionHint": "Leave a field empty to use its planned quantity — enter the actual quantity only when it differs"
     }
   },
   "hr": {

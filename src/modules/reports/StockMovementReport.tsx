@@ -3,6 +3,7 @@ import { Package, ArrowUp, ArrowDown, ArrowLeftRight, FileDown, RefreshCw } from
 import { Card, Button } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
+import { mapRows } from '@/core/utils/mapPgRow';
 import { exportToExcel } from '@/core/utils/exportEngine';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { formatNumber } from '@/core/utils/locale';
@@ -46,8 +47,10 @@ const CHART_COLORS: Record<string, string> = {
 const PIE_COLORS = ['#10b981', '#f59e0b', '#6366f1'];
 
 function monthDateToLabel(monthStr: string, months: string[]): string {
-  const d = new Date(monthStr);
-  return months[d.getMonth()] + ' ' + d.getFullYear();
+  // monthStr is 'YYYY-MM' (to_char) — build from parts to avoid timezone shifts.
+  const [y, m] = monthStr.split('-').map(Number);
+  if (!y || !m) return monthStr;
+  return `${months[m - 1] ?? monthStr} ${y}`;
 }
 
 function formatDateInput(d: Date): string {
@@ -96,7 +99,9 @@ export const StockMovementReport: React.FC = () => {
       }
 
       const monthlyResult = await adapter.query(
-        `SELECT date_trunc('month', sm.created_at)::date as month,
+        // to_char yields a sortable TEXT 'YYYY-MM' — a ::date column would come
+        // back as a JS Date object and crash string operations (localeCompare).
+        `SELECT to_char(date_trunc('month', sm.created_at), 'YYYY-MM') as month,
                 sm.type,
                 SUM(sm.quantity) as total_qty,
                 COUNT(*) as transaction_count
@@ -131,9 +136,10 @@ export const StockMovementReport: React.FC = () => {
         [companyId],
       );
 
-      setMonthlyData((monthlyResult.rows || []) as MonthlyRow[]);
-      setTopProducts((topResult.rows || []) as TopProduct[]);
-      setProducts((productsResult.rows || []) as ProductOption[]);
+      // mapRows: snake_case → camelCase (total_qty → totalQty) + numeric coerce.
+      setMonthlyData(mapRows<MonthlyRow>(monthlyResult.rows));
+      setTopProducts(mapRows<TopProduct>(topResult.rows));
+      setProducts(mapRows<ProductOption>(productsResult.rows));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {

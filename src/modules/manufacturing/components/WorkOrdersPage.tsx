@@ -50,6 +50,30 @@ const [producedQty, setProducedQty] = useState('');
 const [outputWarehouseId, setOutputWarehouseId] = useState('');
 const [returnMaterials, setReturnMaterials] = useState(true);
 const [isEditingActual, setIsEditingActual] = useState(false);
+// Consumption lines of the order being COMPLETED — the user records the ACTUAL
+// quantity per material; an empty field means "same as planned".
+const [completionLines, setCompletionLines] = useState<{ id: string; materialName: string; plannedQuantity: number; actualQuantity: string; unitCost: number; actualUnitCost: number }[]>([]);
+
+  const openStatusConfirm = async (id: string, status: WorkOrder['status']) => {
+    setConfirmStatus({ id, status });
+    setCompletionLines([]);
+    if (status !== 'completed') return;
+    // Ask the user for actual consumption: load the order's material lines.
+    const res = await manufacturingApi.getWorkOrderById(id, companyId);
+    if (res.success && res.data?.lines?.length) {
+      setCompletionLines(
+        res.data.lines.map((l) => ({
+          id: l.id,
+          materialName: l.materialName || l.materialId.slice(0, 8),
+          plannedQuantity: Number(l.plannedQuantity) || 0,
+          // Pre-fill a previously recorded actual (if any); blank otherwise.
+          actualQuantity: l.actualQuantity ? String(Number(l.actualQuantity)) : '',
+          unitCost: Number(l.unitCost) || 0,
+          actualUnitCost: Number(l.actualUnitCost ?? l.unitCost) || 0,
+        }))
+      );
+    }
+  };
 
   const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '', batchNumber: '', supervisorId: '' });
   const [availableBoms, setAvailableBoms] = useState<{ id: string; version: string; totalCost?: number; outputQuantity?: number }[]>([]);
@@ -208,6 +232,20 @@ const [isEditingActual, setIsEditingActual] = useState(false);
   const handleStatusChange = async () => {
     if (!confirmStatus) return;
     const addToast = useToastStore.getState().addToast;
+    // Persist user-entered ACTUAL consumption before completing. Empty input
+    // falls back to the planned quantity (business rule: unentered = planned).
+    if (confirmStatus.status === 'completed' && completionLines.length > 0) {
+      const consumptions = completionLines.map((l) => {
+        const entered = l.actualQuantity.trim() === '' ? NaN : Number(l.actualQuantity);
+        const actual = Number.isFinite(entered) && entered >= 0 ? entered : l.plannedQuantity;
+        return { id: l.id, actualQuantity: actual, actualUnitCost: l.actualUnitCost, unitCost: l.unitCost };
+      });
+      const upd = await manufacturingApi.batchUpdateConsumptions(consumptions, companyId);
+      if (!upd.success) {
+        addToast('error', upd.error || t('common.error'));
+        return;
+      }
+    }
     const res = await changeStatus(
       confirmStatus.id,
       confirmStatus.status,
@@ -229,6 +267,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
     setProducedQty('');
     setOutputWarehouseId('');
     setReturnMaterials(true);
+    setCompletionLines([]);
   };
 
   // ── Status machine ────────────────────────────────────────────────────
@@ -283,21 +322,21 @@ const [isEditingActual, setIsEditingActual] = useState(false);
         <ActionButtons onView={() => openView(row)} onEdit={() => openEdit(row)} onDelete={() => setConfirmDelete(row.id)} showPrint={false} />
         {canAdvance(row.status) && (
           <Can action="edit" module="manufacturing">
-            <Button variant="ghost" size="sm" title={statusActionLabel[row.status]} onClick={() => setConfirmStatus({ id: row.id, status: nextStatus(row.status)! })} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50">
+            <Button variant="ghost" size="sm" title={statusActionLabel[row.status]} onClick={() => void openStatusConfirm(row.id, nextStatus(row.status)!)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50">
               <ArrowRight size={14} />
             </Button>
           </Can>
         )}
         {canCancel(row.status) && (
           <Can action="edit" module="manufacturing">
-            <Button variant="ghost" size="sm" title={t('manufacturing.status.cancel')} onClick={() => setConfirmStatus({ id: row.id, status: 'cancelled' })} className="text-rose-600 hover:text-rose-700 hover:bg-rose-50">
+            <Button variant="ghost" size="sm" title={t('manufacturing.status.cancel')} onClick={() => void openStatusConfirm(row.id, 'cancelled')} className="text-rose-600 hover:text-rose-700 hover:bg-rose-50">
               <XCircle size={14} />
             </Button>
           </Can>
         )}
         {row.status === 'cancelled' && (
           <Can action="edit" module="manufacturing">
-            <Button variant="ghost" size="sm" title={t('manufacturing.status.reopen')} onClick={() => setConfirmStatus({ id: row.id, status: 'planned' })} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+            <Button variant="ghost" size="sm" title={t('manufacturing.status.reopen')} onClick={() => void openStatusConfirm(row.id, 'planned')} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
               <RotateCcw size={14} />
             </Button>
           </Can>
@@ -735,12 +774,12 @@ const [isEditingActual, setIsEditingActual] = useState(false);
       {/* Status Change Modal */}
       <Modal
         isOpen={!!confirmStatus}
-        onClose={() => { setConfirmStatus(null); setProducedQty(''); setReturnMaterials(true); }}
+        onClose={() => { setConfirmStatus(null); setProducedQty(''); setReturnMaterials(true); setCompletionLines([]); }}
         title={confirmStatus?.status === 'cancelled' ? t('manufacturing.status.cancel') : t('manufacturing.workOrders.changeStatus')}
-        size="sm"
+        size={confirmStatus?.status === 'completed' && completionLines.length > 0 ? 'lg' : 'sm'}
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => { setConfirmStatus(null); setProducedQty(''); setReturnMaterials(true); }}>{t('settings.common.cancel')}</Button>
+            <Button variant="secondary" onClick={() => { setConfirmStatus(null); setProducedQty(''); setReturnMaterials(true); setCompletionLines([]); }}>{t('settings.common.cancel')}</Button>
             <Button variant={confirmStatus?.status === 'cancelled' ? 'danger' : 'primary'} onClick={handleStatusChange}>
               {confirmStatus?.status === 'in_progress' ? t('manufacturing.status.startExecution') : confirmStatus?.status === 'completed' ? t('manufacturing.status.complete') : confirmStatus?.status === 'cancelled' ? t('manufacturing.status.cancel') : t('settings.common.save')}
             </Button>
@@ -772,7 +811,7 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                 </label>
               </div>
             )}
-            {/* COMPLETE: produced qty + output warehouse */}
+            {/* COMPLETE: produced qty + output warehouse + actual consumption */}
             {confirmStatus.status === 'completed' && (
               <>
                 <div>
@@ -785,6 +824,32 @@ const [isEditingActual, setIsEditingActual] = useState(false);
                     helperText={t('manufacturing.workOrders.producedDefaultHint')}
                   />
                 </div>
+                {completionLines.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">{t('manufacturing.wo.actualConsumption')}</label>
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800 max-h-52 overflow-y-auto">
+                      {completionLines.map((l, i) => (
+                        <div key={l.id} className="flex items-center gap-3 px-3 py-2">
+                          <span className="flex-1 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={l.materialName}>{l.materialName}</span>
+                          <span className="text-[11px] text-slate-400 tabular-nums whitespace-nowrap">
+                            {t('manufacturing.status.planned')}: {formatCurrency(l.plannedQuantity)}
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={l.actualQuantity}
+                            onChange={(e) => setCompletionLines((prev) => prev.map((x, xi) => (xi === i ? { ...x, actualQuantity: e.target.value } : x)))}
+                            placeholder={String(l.plannedQuantity)}
+                            aria-label={`${t('manufacturing.status.actual')} — ${l.materialName}`}
+                            className="w-24 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-xs tabular-nums text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1.5">{t('manufacturing.wo.actualConsumptionHint')}</p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.wo.outputWarehouse')}</label>
                   <WarehouseSelect

@@ -109,7 +109,6 @@ contextBridge.exposeInMainWorld('electronDB', {
     createWorkOrder: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.createWorkOrder', { ...payload, sessionToken }),
     updateWorkOrder: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.updateWorkOrder', { ...payload, sessionToken }),
     deleteWorkOrder: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.deleteWorkOrder', { ...payload, sessionToken }),
-    updateWorkOrderStatus: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.updateWorkOrderStatus', { ...payload, sessionToken }),
     batchUpdateConsumptions: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.batchUpdateConsumptions', { ...payload, sessionToken }),
     updateConsumption: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.updateConsumption', { ...payload, sessionToken }),
     getManufacturingKpis: (payload) => ipcRenderer.invoke('db:rpc:manufacturing.getManufacturingKpis', { ...payload, sessionToken }),

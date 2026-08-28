@@ -1832,56 +1832,13 @@ export function registerDatabaseHandlers() {
     }),
   });
 
-  // manufacturing.updateWorkOrderStatus — branching CTE. For 'completed' the
-  // stock movements (material consumption out + finished-goods in) are written
-  // by data-modifying CTEs so the whole transition is one atomic statement.
-  registerRpc('manufacturing.updateWorkOrderStatus', {
-    paramCount: null,
-    validate: (p) => {
-      if (!p.id) throw new Error('id required');
-      if (!WO_STATUSES.has(p.status)) throw new Error('Invalid status');
-    },
-    compose: (p, session) => {
-      const cid = session.user.companyId;
-      const uid = session.user.id;
-      const woId = String(p.id);
-      if (p.status === 'in_progress') {
-        return {
-          sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE, updated_at = NOW(), updated_by = $1::uuid
-                WHERE id = $2::uuid AND company_id = $3::uuid RETURNING id`,
-          params: [uid, woId, cid],
-        };
-      }
-      if (p.status === 'completed') {
-        const produced = p.producedQuantity != null && p.producedQuantity !== '' ? Number(p.producedQuantity) : null;
-        return {
-          sql: `WITH wo_data AS (
-                  SELECT id, product_id, COALESCE($1::numeric, NULLIF(produced_quantity, 0), quantity) AS produced_qty
-                  FROM work_orders WHERE id = $2::uuid AND company_id = $3::uuid
-                ), warehouse AS (
-                  SELECT id AS warehouse_id FROM warehouses WHERE company_id = $3::uuid ORDER BY created_at ASC LIMIT 1
-                ), move_out AS (
-                  INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by)
-                  SELECT $3::uuid, c.material_id, w.warehouse_id, 'out', c.planned_quantity, wd.id::text, 'Production consumption', $4::uuid
-                  FROM work_order_consumptions c CROSS JOIN warehouse w CROSS JOIN wo_data wd WHERE c.work_order_id = $2::uuid
-                ), move_in AS (
-                  INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by)
-                  SELECT $3::uuid, wd.product_id, w.warehouse_id, 'in', wd.produced_qty, wd.id::text, 'Production output', $4::uuid
-                  FROM wo_data wd CROSS JOIN warehouse w
-                )
-                UPDATE work_orders SET status = 'completed', actual_end_date = CURRENT_DATE,
-                  produced_quantity = (SELECT produced_qty FROM wo_data), updated_at = NOW(), updated_by = $4::uuid
-                WHERE id = $2::uuid AND company_id = $3::uuid RETURNING id`,
-          params: [produced, woId, cid, uid],
-        };
-      }
-      return {
-        sql: `UPDATE work_orders SET status = $1, updated_at = NOW(), updated_by = $2::uuid
-              WHERE id = $3::uuid AND company_id = $4::uuid RETURNING id`,
-        params: [p.status, uid, woId, cid],
-      };
-    },
-  });
+  // manufacturing.updateWorkOrderStatus was REMOVED from the RPC surface:
+  // start/complete/cancel run through the renderer-side unified flow
+  // (manufacturingApi.updateWorkOrderStatus → startWorkOrder / completeWorkOrder
+  // / cancelWorkOrder) which handles stock upserts, WIP + GL posting and cost
+  // rollup atomically via runTransaction. The old branching-CTE handler here
+  // duplicated that logic and drifted (it wrote stock_movements without ever
+  // updating stock quantities) — a single source of truth lives in the API.
 
   // manufacturing.batchUpdateConsumptions — single UPDATE joined to a VALUES
   // list, scoped to the session's company via the parent work order.

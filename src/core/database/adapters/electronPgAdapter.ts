@@ -72,7 +72,6 @@ export interface ElectronDB extends PreloadDB {
     createWorkOrder(payload: { orderNumber: string; productId: string; bomId?: string | null; quantity: number; status?: string; plannedStartDate?: string | null; plannedEndDate?: string | null; totalCost?: number | null; notes?: string | null; lines?: { materialId: string; plannedQuantity: number; unitCost?: number | null }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateWorkOrder(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
     deleteWorkOrder(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    updateWorkOrderStatus(payload: { id: string; status: string; producedQuantity?: number | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     batchUpdateConsumptions(payload: { consumptions: { id: string; actualQuantity: number; actualUnitCost: number; unitCost?: number }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateConsumption(payload: { id: string; actualQuantity?: number; actualUnitCost?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getManufacturingKpis(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
