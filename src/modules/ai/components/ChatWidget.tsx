@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Bot, Settings, X } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
@@ -22,6 +22,7 @@ import { cn } from '@/core/utils';
 export function ChatWidget() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const company = useAppStore((s) => s.activeCompany);
   const canUse = usePermission('ai.use');
   const canConfigure = usePermission('ai.settings');
@@ -74,6 +75,9 @@ export function ChatWidget() {
   // Once a company is loaded, the FAB renders even when AI is not configured,
   // and its popup shows the setup card instead of the chat.
   if (!canUse || !company?.id || isConfigured === null) return null;
+  // The full AI chat page already hosts the assistant — hide the FAB there
+  // to avoid a redundant floating control (cleaner UX).
+  if (location.pathname === '/ai') return null;
 
   return (
     <>

@@ -350,6 +350,13 @@
     "widget": {
       "open": "AI Assistant",
       "close": "Close"
+    },
+    "voice": {
+      "start": "Voice input",
+      "stop": "Stop recording",
+      "listening": "Listening… speak now",
+      "error": "Voice recognition failed — try again",
+      "notAllowed": "Please allow microphone access first"
     }
   },
   "auth": {
