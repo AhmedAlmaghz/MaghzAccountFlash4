@@ -650,3 +650,36 @@ describe('accountingApi.postVoucher — raw pg date normalization (v0.4.5 regres
     expect(je?.params?.[1]).toBe('2026-08-25');
   });
 });
+
+describe('accountingApi.getAccounts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('coerces numeric-looking account codes back to strings (startsWith regression)', async () => {
+    // PG returns codes as varchar strings, but snakeToCamel auto-converts
+    // purely numeric strings to numbers — which crashes code.startsWith()
+    // in the chart of accounts UI. The API must hand back strings.
+    const adapter = {
+      getAccounts: vi.fn(async () => ({
+        success: true,
+        data: [
+          { id: 'a1', company_id: 'c1', code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', balance: '0', is_group: true, parent_id: null, is_active: true },
+          { id: 'a2', company_id: 'c1', code: '11101', name_ar: 'الصندوق', name_en: 'Cash', type: 'asset', nature: 'debit', balance: '1500.00', is_group: false, parent_id: 'a1', is_active: true },
+        ],
+      })),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.getAccounts('c1');
+
+    expect(res.success).toBe(true);
+    const root = res.data?.[0];
+    expect(typeof root?.code).toBe('string');
+    expect(root?.code).toBe('1');
+    const child = root?.children?.[0];
+    expect(typeof child?.code).toBe('string');
+    expect(child?.code).toBe('11101');
+    expect(typeof child?.code === 'string' && child.code.startsWith('1')).toBe(true);
+  });
+});

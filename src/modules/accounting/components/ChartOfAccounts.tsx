@@ -99,9 +99,9 @@ const TYPE_ROOT_CODE: Record<Account['type'], string> = {
  * wider ones — never returns a code already taken by ANY account.
  */
 function suggestNextCode(type: Account['type'], parentId: string | undefined, flatList: Account[]): string {
-  const taken = new Set(flatList.map((a) => a.code));
+  const taken = new Set(flatList.map((a) => String(a.code ?? '')));
   const parent = parentId ? flatList.find((a) => a.id === parentId) : undefined;
-  const prefix = parentId ? (parent?.code ?? '') : TYPE_ROOT_CODE[type];
+  const prefix = parentId ? String(parent?.code ?? '') : TYPE_ROOT_CODE[type];
   if (!prefix) return '';
   for (let n = 1; n <= 999; n++) {
     const candidate = `${prefix}${String(n).padStart(2, '0')}`;
@@ -113,7 +113,7 @@ function suggestNextCode(type: Account['type'], parentId: string | undefined, fl
 function filterTree(accounts: Account[], query: string, typeFilter: string, natureFilter: string, statusFilter: string): Account[] {
   const q = query.trim().toLowerCase();
   const match = (a: Account): boolean => {
-    if (q && !((a.nameAr?.toLowerCase() || '').includes(q) || (a.nameEn?.toLowerCase() || '').includes(q) || a.code.includes(q))) return false;
+    if (q && !((a.nameAr?.toLowerCase() || '').includes(q) || (a.nameEn?.toLowerCase() || '').includes(q) || String(a.code ?? '').includes(q))) return false;
     if (typeFilter && a.type !== typeFilter) return false;
     if (natureFilter && a.nature !== natureFilter) return false;
     if (statusFilter === 'active' && !a.isActive) return false;
@@ -497,7 +497,7 @@ export const ChartOfAccounts: React.FC = () => {
   // Soft warning: child codes conventionally start with the parent code.
   const codePrefixMismatch = !!selectedParent
     && !!formData.code
-    && !formData.code.startsWith(selectedParent.code);
+    && !String(formData.code).startsWith(String(selectedParent.code));
 
   if (isLoading) {
     return (

@@ -19,7 +19,13 @@ export const accountingApi = {
       const result = await adapter.getAccounts(companyId);
 
       if (result.success && result.data) {
-        let accounts = mapRows<Account>(result.data);
+        // mapRows/snakeToCamel auto-converts purely numeric strings to
+        // numbers (for PG numeric columns) — but account codes are TEXT that
+        // happens to look numeric ('11101'), and number codes crash string
+        // methods (code.startsWith / code.includes). Coerce back to string.
+        const withStringCode = (rows: Account[]) =>
+          rows.map((a) => ({ ...a, code: String(a.code ?? '') }));
+        let accounts = withStringCode(mapRows<Account>(result.data));
 
         if (ownedByUserId) {
           const filterResult = await adapter.query(
@@ -27,7 +33,7 @@ export const accountingApi = {
             [companyId, ownedByUserId]
           );
           if (filterResult.success && filterResult.rows) {
-            accounts = mapRows<Account>(filterResult.rows);
+            accounts = withStringCode(mapRows<Account>(filterResult.rows));
           }
         }
 
