@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { ClipboardList, Plus, CheckSquare, Trash2, Printer, ArrowRightLeft, Layers, Clock, PackageCheck, Wallet, TrendingUp } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { logAudit } from '@/core/utils/auditLogger';
@@ -9,6 +9,8 @@ import { Card, Button, Modal, Input, Pagination, Can } from '@/core/ui/component
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { purchaseOrderFingerprint, detectDocumentDuplicates, genericNearScore } from '@/core/utils/documentDuplicate';
 import { DataTablePro } from '@/core/ui/components/DataTablePro';
 import { SupplierSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -88,6 +90,11 @@ export const PurchaseOrdersPage: React.FC = () => {
   const [confirmConvert, setConfirmConvert] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
+  const [docDuplicateInput, setDocDuplicateInput] = useState('');
+  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const docDuplicateConfirmedRef = useRef(false);
 
   const calculateLine = useCallback((line: OrderFormLine): OrderFormLine => {
     const effectiveDiscount = showDiscount ? line.discountPercent : 0;
@@ -213,6 +220,54 @@ export const PurchaseOrdersPage: React.FC = () => {
       notes: form.notes,
       lines: mappedLines,
     };
+    if (!docDuplicateConfirmedRef.current) {
+      try {
+        const existingRes = await purchasesApi.getOrdersPaginated(activeCompany.id, 1, 200);
+        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: unknown[] })?.items ?? (existingRes.data as unknown as unknown[]) ?? []) : []) as unknown[];
+        const inputForFp = {
+          supplierId: payload.supplierId,
+          date: payload.date,
+          expectedDate: payload.expectedDate,
+          totalAmount: payload.totalAmount,
+          lines: payload.lines.map((l: unknown) => {
+            const x = l as { productId?: string; quantity?: unknown; unitPrice?: unknown };
+            return { productId: x.productId, quantity: x.quantity, unitPrice: x.unitPrice };
+          }),
+        };
+        const fp = purchaseOrderFingerprint(inputForFp as never);
+        const getFp = (d: unknown) => {
+          const x = d as { supplierId?: string; date?: string; expectedDate?: string; totalAmount?: unknown };
+          return purchaseOrderFingerprint({ supplierId: x.supplierId, date: x.date, expectedDate: x.expectedDate, totalAmount: x.totalAmount } as never);
+        };
+        const getNear = (inp: unknown, ex: unknown) => {
+          const a = inp as { supplierId?: string; date?: string; lines?: Array<{ productId?: string }>; totalAmount?: unknown };
+          const b = ex as { supplierId?: string; date?: string; lines?: Array<{ productId?: string }>; totalAmount?: unknown };
+          return genericNearScore(a.supplierId, b.supplierId, a.date, b.date, a.lines ?? [], b.lines ?? [], a.totalAmount, b.totalAmount);
+        };
+        const dup = detectDocumentDuplicates(fp, inputForFp, existingList as never[], getFp, getNear, { excludeId: editingId || undefined });
+        if (dup.exactMatch) {
+          const doc = dup.exactMatch as unknown as { orderNumber?: string; id: string; date?: string; totalAmount?: unknown };
+          setDocDuplicateInput(`${payload.supplierId} • ${payload.date} • ${payload.totalAmount}`);
+          setDocDuplicateExact({ name: doc.orderNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
+          setDocDuplicateNear([]);
+          setDocDuplicateOpen(true);
+          return;
+        }
+        if (dup.nearMatches.length) {
+          setDocDuplicateInput(`${payload.supplierId} • ${payload.date}`);
+          setDocDuplicateNear(
+            dup.nearMatches.map((m: { item: unknown; score: number }) => {
+              const d = m.item as unknown as { orderNumber?: string; id: string; date?: string; totalAmount?: unknown };
+              return { name: d.orderNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
+            }),
+          );
+          setDocDuplicateExact(null);
+          setDocDuplicateOpen(true);
+          return;
+        }
+      } catch {}
+    }
+    docDuplicateConfirmedRef.current = false;
 
     if (editingId) {
       await update(editingId, payload);
@@ -709,6 +764,22 @@ export const PurchaseOrdersPage: React.FC = () => {
         title={t('purchases.order.convertTitle')}
         message={t('purchases.order.convertConfirm')}
         variant="warning"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={docDuplicateOpen}
+        onClose={() => setDocDuplicateOpen(false)}
+        onConfirm={() => {
+          docDuplicateConfirmedRef.current = true;
+          setDocDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={docDuplicateInput}
+        entityLabel={t('purchases.orders')}
+        exactMatch={docDuplicateExact}
+        nearMatches={docDuplicateNear}
+        isDocument
+        isEdit={!!editingId}
       />
     </div>
   );

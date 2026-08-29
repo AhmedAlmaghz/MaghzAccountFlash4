@@ -13,6 +13,9 @@ import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useToastStore } from '@/core/store/toastStore';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates } from '@/core/utils/duplicateDetection';
+import { hrApi } from '../api';
 
 export const EmployeesPage: React.FC = () => {
   const activeCompany = useAppStore((state) => state.activeCompany);
@@ -31,6 +34,11 @@ export const EmployeesPage: React.FC = () => {
   const [editing, setEditing] = useState<Employee | null>(null);
   const [viewing, setViewing] = useState<Employee | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
 
   const [formData, setFormData] = useState({
     employeeNumber: '', fullName: '', nationalId: '', phone: '', email: '',
@@ -97,6 +105,37 @@ export const EmployeesPage: React.FC = () => {
       addToast('error', t('hr.employeesPage.requiredFields') || 'يرجى ملء الحقول المطلوبة');
       return;
     }
+    const inputName = formData.fullName.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await hrApi.getEmployees(companyId);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as Employee[], (e) => e.fullName, {
+            excludeId: editing?.id || undefined,
+            getId: (e) => e.id,
+            getCode: (e) => e.employeeNumber,
+            nearThreshold: 0.85,
+          });
+          if (result.exactMatch) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact({ name: result.exactMatch.matchedName, code: result.exactMatch.matchedCode });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    duplicateConfirmedRef.current = false;
     const payload = {
       companyId,
       employeeNumber: formData.employeeNumber,
@@ -404,6 +443,21 @@ export const EmployeesPage: React.FC = () => {
         title={t('hr.employeesPage.deleteTitle')}
         message={t('hr.employeesPage.deleteConfirm')}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('hr.employeesPage.title')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editing}
       />
     </div>
   );

@@ -984,43 +984,65 @@ export const manufacturingApi = {
       //   DR inventory                — surplus returned to stock    (Δ<0)
       //   CR 53xxx                    — labor/energy/packaging/other
       // Legacy flow (wipPosted = 0): materials credited straight to inventory.
-      if (totalCost > 0) {
+      // ── GL posting — إصلاح شامل للمبالغ والحسابات (IAS 2) ──
+      const shouldPost = totalCost > 0 || wipPosted > 0 || productionCostsTotal > 0;
+      if (shouldPost) {
         const inventoryAccountId = await resolveInventoryAccountId(companyId, String(wo.product_id ?? ''));
         if (!inventoryAccountId) {
           return { success: false, error: 'حساب المخزون غير موجود — قم بتهيئة الحسابات الافتراضية في الإعدادات' };
         }
-        const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [
-          { accountId: inventoryAccountId, debit: totalCost, credit: 0, memo: `إنتاج تام - ${String(wo.order_number ?? '')}` },
-        ];
+        const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [];
+        if (totalCost > 0) {
+          entries.push({ accountId: inventoryAccountId, debit: totalCost, credit: 0, memo: `إنتاج تام - ${String(wo.order_number ?? '')} - ${producedQty} وحدة` });
+        }
         if (wipPosted > 0) {
           const wipAccountId = await resolveWipAccountId(companyId);
           if (!wipAccountId) {
             return { success: false, error: `حساب بضاعة تحت التشغيل (${WIP_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
           }
-          entries.push({ accountId: wipAccountId, debit: 0, credit: wipPosted, memo: 'مواد خام مصروفة عند البدء' });
-          const delta = Math.round((materialsCostRounded - wipPosted) * 100) / 100;
-          if (delta > 0) {
-            entries.push({ accountId: inventoryAccountId, debit: 0, credit: delta, memo: 'استهلاك فعلي إضافي' });
-          } else if (delta < 0) {
-            entries.push({ accountId: inventoryAccountId, debit: -delta, credit: 0, memo: 'إرجاع فائض خامات' });
+          entries.push({ accountId: wipAccountId, debit: 0, credit: wipPosted, memo: 'مواد خام مصروفة عند البدء — تسوية WIP' });
+          // فائض/عجز لكل مادة بحسابها الخاص (أفضل من تجميع واحد)
+          for (const r of consRows) {
+            const planned = Number(r.planned_quantity) || 0;
+            const actual = r.actual_quantity != null && r.actual_quantity !== '' ? Number(r.actual_quantity) : planned;
+            const deltaQty = Math.round((actual - planned) * 10000) / 10000;
+            if (deltaQty === 0) continue;
+            const uc = Number(r.actual_unit_cost ?? r.unit_cost) || 0;
+            const deltaCost = Math.round(deltaQty * uc * 100) / 100;
+            if (deltaCost === 0) continue;
+            const matAccId = await resolveInventoryAccountId(companyId, String(r.material_id));
+            if (!matAccId) continue;
+            if (deltaCost > 0) {
+              entries.push({ accountId: matAccId, debit: 0, credit: deltaCost, memo: `استهلاك إضافي - مادة ${String(r.material_id).slice(0, 8)}` });
+            } else {
+              entries.push({ accountId: matAccId, debit: -deltaCost, credit: 0, memo: `إرجاع فائض - مادة ${String(r.material_id).slice(0, 8)}` });
+            }
           }
         } else if (materialsCostRounded > 0) {
-          entries.push({ accountId: inventoryAccountId, debit: 0, credit: materialsCostRounded, memo: 'مواد خام مستهلكة' });
+          entries.push({ accountId: inventoryAccountId, debit: 0, credit: materialsCostRounded, memo: 'مواد خام مستهلكة (مسار قديم — بلا WIP)' });
         }
         for (const pc of productionCosts) {
           const accId = await findAccountByCodeLocal(companyId, PRODUCTION_COST_ACCOUNT_CODES[pc.category]);
           if (!accId) {
             return { success: false, error: `حساب تكاليف الإنتاج (${PRODUCTION_COST_ACCOUNT_CODES[pc.category]}) غير موجود في شجرة الحسابات` };
           }
-          entries.push({ accountId: accId, debit: 0, credit: pc.amount, memo: pc.description || undefined });
+          entries.push({ accountId: accId, debit: 0, credit: pc.amount, memo: pc.description || `تكلفة ${pc.category}` });
         }
-        statements.push(buildJournalEntryStatement(companyId, {
-          reference: String(wo.order_number ?? id),
-          description: `تكاليف إنتاج أمر التشغيل ${String(wo.order_number ?? '')}`,
-          date: new Date().toISOString().split('T')[0],
-          totalAmount: totalCost,
-          entries,
-        }));
+        const totalDebits = Math.round(entries.reduce((s, e) => s + e.debit, 0) * 100) / 100;
+        const totalCredits = Math.round(entries.reduce((s, e) => s + e.credit, 0) * 100) / 100;
+        if (Math.abs(totalDebits - totalCredits) > 0.01) {
+          return { success: false, error: `القيد غير متوازن: مدين ${totalDebits} ≠ دائن ${totalCredits} — راجع تكاليف الإنتاج والمواد` };
+        }
+        const balancedTotal = totalDebits;
+        if (balancedTotal > 0) {
+          statements.push(buildJournalEntryStatement(companyId, {
+            reference: String(wo.order_number ?? id),
+            description: `تكاليف إنتاج أمر التشغيل ${String(wo.order_number ?? '')} — إنتاج ${producedQty} وحدة`,
+            date: new Date().toISOString().split('T')[0],
+            totalAmount: balancedTotal,
+            entries,
+          }));
+        }
       }
 
       statements.push({

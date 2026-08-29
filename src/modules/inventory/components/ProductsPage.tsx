@@ -19,6 +19,9 @@ import { useToastStore } from '@/core/store/toastStore';
 import { getNextDocumentNumber } from '@/core/api';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { Product } from '../types';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates, buildCompositeName } from '@/core/utils/duplicateDetection';
+import { inventoryApi } from '../api';
 
 interface FormData {
   code: string;
@@ -92,6 +95,11 @@ export const ProductsPage: React.FC = () => {
   const [filterCategoryId, setFilterCategoryId] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [codePreview, setCodePreview] = useState<string>('');
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const filteredProducts = useMemo(() => products.filter((p) => {
@@ -183,6 +191,48 @@ export const ProductsPage: React.FC = () => {
       addToast('error', t('inventory.errors.unitRequired'));
       return;
     }
+    const inputName = formData.nameAr.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await inventoryApi.getProducts(activeCompany.id);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as Product[], (p) => buildCompositeName(p.nameAr, p.nameEn), {
+            excludeId: editingId || undefined,
+            getId: (p) => p.id,
+            getCode: (p) => p.code || p.barcode || p.sku,
+            nearThreshold: 0.85,
+          });
+          // أيضاً فحص الكود المدخل يدوياً (إن لم يكن تلقائياً)
+          let codeDuplicate: typeof result.exactMatch | null = null;
+          if (!formData.codeAuto && formData.code.trim()) {
+            const codeRes = detectDuplicates(formData.code.trim(), allRes.data as Product[], (p) => p.code || '', {
+              excludeId: editingId || undefined,
+              getId: (p) => p.id,
+              nearThreshold: 0.9,
+            });
+            if (codeRes.exactMatch) codeDuplicate = codeRes.exactMatch;
+          }
+          const exactToShow = codeDuplicate ?? result.exactMatch;
+          if (exactToShow) {
+            setDuplicateInputName(codeDuplicate ? formData.code.trim() : inputName);
+            setDuplicateExact({ name: exactToShow.matchedName, code: exactToShow.matchedCode });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    duplicateConfirmedRef.current = false;
     setSaving(true);
     try {
       let finalCode = formData.code.trim();
@@ -872,6 +922,21 @@ export const ProductsPage: React.FC = () => {
       </Modal>
 
       <ConfirmDialog isOpen={!!confirmDelete} onClose={() => setConfirmDelete(null)} onConfirm={() => confirmDelete && handleDelete(confirmDelete)} title={t('delete')} message={t('inventory.deleteConfirm')} variant="danger" />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('inventory.products')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editingId}
+      />
     </div>
   );
 };

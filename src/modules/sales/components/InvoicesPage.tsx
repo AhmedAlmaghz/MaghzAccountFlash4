@@ -1,7 +1,9 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Search, Wallet, TrendingUp, Layers } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectSalesInvoiceDuplicate } from '@/core/utils/documentDuplicate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -85,6 +87,11 @@ export const InvoicesPage: React.FC = () => {
 
   const [postingId, setPostingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
+  const [docDuplicateInput, setDocDuplicateInput] = useState('');
+  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const docDuplicateConfirmedRef = useRef(false);
 
   const defaultLine = useCallback((): InvoiceLineForm => ({
     productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0, vatPercent: settings?.vatRate || 15,
@@ -322,6 +329,48 @@ export const InvoicesPage: React.FC = () => {
       invoiceNumber = seq.number;
     }
     const payload = buildInvoicePayload(invoiceNumber);
+    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
+    if (!docDuplicateConfirmedRef.current) {
+      try {
+        const existingRes = await salesApi.getInvoicesPaginated(activeCompany.id, 1, 200);
+        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: SalesInvoice[] })?.items ?? (existingRes.data as unknown as SalesInvoice[]) ?? []) : []) as SalesInvoice[];
+        const inputForFp = {
+          customerId: payload.customerId,
+          date: payload.date,
+          currencyCode: payload.currencyCode,
+          totalAmount: payload.totalAmount,
+          discountAmount: payload.discountAmount,
+          vatAmount: payload.vatAmount,
+          lines: payload.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent })),
+        };
+        const dup = detectSalesInvoiceDuplicate(inputForFp as never, existingList as never, editingId || undefined);
+        if (dup.exactMatch) {
+          const doc = dup.exactMatch as unknown as SalesInvoice;
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date} • ${payload.totalAmount}`);
+          setDocDuplicateExact({ name: doc.invoiceNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
+          setDocDuplicateNear([]);
+          setDocDuplicateOpen(true);
+          setSaving(false);
+          return;
+        }
+        if (dup.nearMatches.length > 0) {
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date}`);
+          setDocDuplicateNear(
+            dup.nearMatches.map((m) => {
+              const d = m.item as unknown as SalesInvoice;
+              return { name: d.invoiceNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
+            }),
+          );
+          setDocDuplicateExact(null);
+          setDocDuplicateOpen(true);
+          setSaving(false);
+          return;
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    docDuplicateConfirmedRef.current = false;
     if (editingId) {
       const res = await update(editingId, { ...payload, status: 'draft' });
       if (res.success) {
@@ -1070,6 +1119,22 @@ export const InvoicesPage: React.FC = () => {
         variant={confirmConfig?.variant || 'warning'}
         confirmText={confirmConfig?.confirmText || (t('confirm'))}
         cancelText={t('cancel')}
+      />
+
+      <DuplicateWarningDialog
+        isOpen={docDuplicateOpen}
+        onClose={() => setDocDuplicateOpen(false)}
+        onConfirm={() => {
+          docDuplicateConfirmedRef.current = true;
+          setDocDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={docDuplicateInput}
+        entityLabel={t('sales.invoices')}
+        exactMatch={docDuplicateExact}
+        nearMatches={docDuplicateNear}
+        isDocument
+        isEdit={!!editingId}
       />
     </div>
   );

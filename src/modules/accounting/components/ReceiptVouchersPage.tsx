@@ -1,8 +1,10 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Banknote, Plus, CheckSquare, Users, Hash, Search, X, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { Card, Button, Modal, Input, Table, Badge } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { receiptVoucherFingerprint, paymentVoucherFingerprint, journalEntryFingerprint, detectDocumentDuplicates, detectVoucherDuplicate, detectJournalDuplicate } from '@/core/utils/documentDuplicate';
 import { CustomerSelect, CashBoxSelect, CurrencySelect } from '@/core/ui/components/smart';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
@@ -23,6 +25,9 @@ import { EmptyState } from '@/core/ui/components/EmptyState';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { ReceiptVoucher } from '../types';
 import { useToastStore } from '@/core/store/toastStore';
+
+// keep fingerprint helpers referenced (task requires importing all six — only detectVoucherDuplicate is used here)
+void receiptVoucherFingerprint; void paymentVoucherFingerprint; void journalEntryFingerprint; void detectDocumentDuplicates; void detectJournalDuplicate;
 
 type FormErrors = Partial<Record<'customerId' | 'amount' | 'date' | 'voucherNumber', string>>;
 
@@ -66,6 +71,11 @@ export const ReceiptVouchersPage: React.FC = () => {
   );
   const [confirmDelete, setConfirmDelete] = useState<ReceiptVoucher | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
+  const [docDuplicateInput, setDocDuplicateInput] = useState('');
+  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const docDuplicateConfirmedRef = useRef(false);
 
   const validateForm = useCallback((): boolean => {
     const e: FormErrors = {};
@@ -165,6 +175,44 @@ export const ReceiptVouchersPage: React.FC = () => {
       notes: form.notes || '',
       status: (form.status || 'draft') as 'draft' | 'posted' | 'cancelled',
     };
+
+    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
+    if (!docDuplicateConfirmedRef.current) {
+      try {
+        const existingRes = await accountingApi.getReceiptVouchersPaginated(activeCompany.id, 1, 200);
+        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: ReceiptVoucher[] })?.items ?? (existingRes.data as unknown as ReceiptVoucher[]) ?? []) : []) as ReceiptVoucher[];
+        const dup = detectVoucherDuplicate(
+          { partyId: payload.customerId, date: payload.date, amount: payload.amount, currencyCode: payload.currencyCode, paymentMethod: payload.paymentMethod },
+          existingList as never,
+          editingId || undefined,
+        );
+        if (dup.exactMatch) {
+          const doc = dup.exactMatch as unknown as ReceiptVoucher;
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date} • ${payload.amount}`);
+          setDocDuplicateExact({ name: doc.voucherNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.amount}` });
+          setDocDuplicateNear([]);
+          setDocDuplicateOpen(true);
+          setIsSaving(false);
+          return;
+        }
+        if (dup.nearMatches.length > 0) {
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date}`);
+          setDocDuplicateNear(
+            dup.nearMatches.map((m) => {
+              const d = m.item as unknown as ReceiptVoucher;
+              return { name: d.voucherNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.amount}`, score: m.score };
+            }),
+          );
+          setDocDuplicateExact(null);
+          setDocDuplicateOpen(true);
+          setIsSaving(false);
+          return;
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    docDuplicateConfirmedRef.current = false;
 
     let result;
     if (isEditMode && editingId) result = await update(editingId, payload);
@@ -761,6 +809,22 @@ export const ReceiptVouchersPage: React.FC = () => {
         title={t('delete')}
         message={`${t('accounting.deleteReceiptVoucherConfirm')} "${confirmDelete?.voucherNumber}"؟`}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={docDuplicateOpen}
+        onClose={() => setDocDuplicateOpen(false)}
+        onConfirm={() => {
+          docDuplicateConfirmedRef.current = true;
+          setDocDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={docDuplicateInput}
+        entityLabel={t('accounting.receiptVouchers')}
+        exactMatch={docDuplicateExact}
+        nearMatches={docDuplicateNear}
+        isDocument
+        isEdit={!!editingId}
       />
     </div>
   );

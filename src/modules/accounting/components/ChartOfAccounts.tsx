@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   Calculator,
   Plus,
@@ -24,6 +24,8 @@ import {
 } from 'lucide-react';
 import { Card, Button, Input, Modal, Badge } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates, buildCompositeName } from '@/core/utils/duplicateDetection';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { SmartSelect, type SmartSelectItem } from '@/core/ui/components/smart';
 import { useAccounts } from '../hooks/useAccounting';
@@ -286,6 +288,11 @@ export const ChartOfAccounts: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Account | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
   // True once the user types a code manually — auto-suggestion must never
   // clobber what they typed. Reset on modal open/reset.
   const [codeTouched, setCodeTouched] = useState(false);
@@ -343,6 +350,30 @@ export const ChartOfAccounts: React.FC = () => {
       if (!validate()) addToast('error', 'يرجى تصحيح الحقول المطلوبة');
       return;
     }
+    const inputName = (formData.nameAr || '').trim() || (formData.nameEn || '').trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      const result = detectDuplicates(inputName, flatList as Account[], (a) => buildCompositeName(a.nameAr, a.nameEn), {
+        excludeId: editingId || undefined,
+        getId: (a) => a.id,
+        getCode: (a) => a.code,
+        nearThreshold: 0.85,
+      });
+      if (result.exactMatch) {
+        setDuplicateInputName(inputName);
+        setDuplicateExact({ name: result.exactMatch.matchedName, code: result.exactMatch.matchedCode });
+        setDuplicateNear([]);
+        setDuplicateOpen(true);
+        return;
+      }
+      if (result.nearMatches.length > 0) {
+        setDuplicateInputName(inputName);
+        setDuplicateExact(null);
+        setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+        setDuplicateOpen(true);
+        return;
+      }
+    }
+    duplicateConfirmedRef.current = false;
     setIsSaving(true);
     const payload = {
       companyId: activeCompany.id,
@@ -912,6 +943,21 @@ export const ChartOfAccounts: React.FC = () => {
         message={`${t('accounting.deleteAccountConfirm')} — ${confirmDelete?.code} ${confirmDelete?.nameAr}`}
         variant="danger"
         isLoading={isDeleting}
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('accounting.chartOfAccounts')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={isEditMode}
       />
     </div>
   );

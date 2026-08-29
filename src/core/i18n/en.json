@@ -3037,5 +3037,28 @@
     "accountDirection": "Opening Balance Side",
     "debit": "Debit",
     "credit": "Credit"
+  },
+  "duplicate": {
+    "exactTitle": "Duplicate name",
+    "exactMessage": "A record with the exact same name already exists: \"{{name}}\". Please choose a different name.",
+    "exactHint": "Two records cannot share the same name. Pick a different name or edit the existing one.",
+    "nearTitle": "Very similar names found",
+    "nearSubtitle": "We found records very close to the entered name",
+    "nearMessage": "Found {{count}} record(s) similar to \"{{name}}\" with high similarity. Do you want to proceed anyway?",
+    "nearHint": "Review the list below — you can cancel to edit the name or proceed to create it anyway.",
+    "fieldName": "Entered name",
+    "similarRecords": "Similar records",
+    "similarity": "Similarity",
+    "code": "Code",
+    "proceed": "Proceed anyway",
+    "proceedEdit": "Proceed with edit anyway",
+    "document": {
+      "exactTitle": "Duplicate document",
+      "exactMessage": "A document with identical data already exists (No: {{number}}). Cannot create a duplicate.",
+      "exactHint": "Check the document data — same party, date, lines and total already exist.",
+      "nearTitle": "Very similar document",
+      "nearMessage": "Found {{count}} document(s) very similar to the entered data. Proceed anyway?",
+      "inputLabel": "Entered document"
+    }
   }
 }

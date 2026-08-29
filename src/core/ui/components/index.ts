@@ -14,3 +14,4 @@ export { Pagination } from './Pagination';
 export { PermissionGate, Can } from './PermissionGate';
 export { ToastContainer } from './Toast';
 export { PageLoader } from './PageLoader';
+export { DuplicateWarningDialog } from './DuplicateWarningDialog';

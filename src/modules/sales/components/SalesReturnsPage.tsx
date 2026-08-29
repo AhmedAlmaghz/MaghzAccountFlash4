@@ -1,7 +1,9 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, Package, BookOpen, Search, X, Wallet, Layers, Sparkles, Download } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { salesReturnFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -74,6 +76,11 @@ export const SalesReturnsPage: React.FC = () => {
 
   const [postingId, setPostingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
+  const [docDuplicateInput, setDocDuplicateInput] = useState('');
+  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const docDuplicateConfirmedRef = useRef(false);
 
   const [header, setHeader] = useState({ invoiceId: '', customerId: '', date: new Date().toISOString().split('T')[0], paymentType: 'credit', cashBoxId: '', reason: '', notes: '' });
   const [lines, setLines] = useState<ReturnLineForm[]>([{ productId: '', productName: '', quantity: 1, unitPrice: 0 }]);
@@ -180,13 +187,6 @@ export const SalesReturnsPage: React.FC = () => {
     if (editingId) {
       const existing = returns.find(r => r.id === editingId);
       returnNumber = existing?.returnNumber || '';
-      const res = await update(editingId, buildPayload(returnNumber));
-      if (res.success && activeCompany.id) {
-        await logAudit({ userId: currentUser?.id || 'system', action: 'update', tableName: 'sales_returns', recordId: editingId, companyId: activeCompany.id });
-        addToast('success', t('sales.return.updated'));
-      } else {
-        addToast('error', res.error || t('error'));
-      }
     } else {
       const seq = await getNextNumber('sales_return', activeCompany.id);
       if (!seq.success || !seq.number) {
@@ -195,7 +195,75 @@ export const SalesReturnsPage: React.FC = () => {
         return;
       }
       returnNumber = seq.number;
-      const res = await create(buildPayload(returnNumber));
+    }
+    const payload = buildPayload(returnNumber);
+    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
+    if (!docDuplicateConfirmedRef.current) {
+      try {
+        const existingRes = await salesApi.getReturnsPaginated(activeCompany.id, 1, 200);
+        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: SalesReturn[] })?.items ?? (existingRes.data as unknown as SalesReturn[]) ?? []) : []) as SalesReturn[];
+        const inputForFp = {
+          customerId: payload.customerId,
+          invoiceId: payload.invoiceId,
+          date: payload.date,
+          totalAmount: payload.totalAmount,
+          reason: payload.reason,
+          lines: payload.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
+        };
+        const fp = salesReturnFingerprint(inputForFp as never);
+        const result = detectDocumentDuplicates(
+          fp,
+          inputForFp,
+          existingList as never[],
+          (d: unknown) => {
+            const doc = d as SalesReturn;
+            return salesReturnFingerprint({ customerId: doc.customerId, invoiceId: doc.invoiceId, date: doc.date, totalAmount: doc.totalAmount, reason: doc.reason } as never);
+          },
+          (inp: unknown, ex: unknown) => {
+            const a = inp as { customerId?: string; invoiceId?: string; date?: string; lines?: Array<{ productId?: string }>; totalAmount?: unknown };
+            const b = ex as SalesReturn;
+            if (String(a.invoiceId ?? '') !== String(b.invoiceId ?? '')) return 0;
+            return genericNearScore(a.customerId, b.customerId, a.date, b.date, a.lines ?? [], (b.lines ?? []) as Array<{ productId?: string }>, a.totalAmount, b.totalAmount);
+          },
+          { excludeId: editingId || undefined },
+        );
+        if (result.exactMatch) {
+          const doc = result.exactMatch as unknown as SalesReturn;
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date} • ${payload.totalAmount}`);
+          setDocDuplicateExact({ name: doc.returnNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
+          setDocDuplicateNear([]);
+          setDocDuplicateOpen(true);
+          setSaving(false);
+          return;
+        }
+        if (result.nearMatches.length > 0) {
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date}`);
+          setDocDuplicateNear(
+            result.nearMatches.map((m) => {
+              const d = m.item as unknown as SalesReturn;
+              return { name: d.returnNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
+            }),
+          );
+          setDocDuplicateExact(null);
+          setDocDuplicateOpen(true);
+          setSaving(false);
+          return;
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    docDuplicateConfirmedRef.current = false;
+    if (editingId) {
+      const res = await update(editingId, payload);
+      if (res.success && activeCompany.id) {
+        await logAudit({ userId: currentUser?.id || 'system', action: 'update', tableName: 'sales_returns', recordId: editingId, companyId: activeCompany.id });
+        addToast('success', t('sales.return.updated'));
+      } else {
+        addToast('error', res.error || t('error'));
+      }
+    } else {
+      const res = await create(payload);
       if (res.success && res.id && activeCompany.id) {
         await logAudit({ userId: currentUser?.id || 'system', action: 'create', tableName: 'sales_returns', recordId: res.id, companyId: activeCompany.id });
         addToast('success', t('sales.return.created'));
@@ -741,6 +809,22 @@ export const SalesReturnsPage: React.FC = () => {
         variant={confirmConfig?.variant || 'warning'}
         confirmText={confirmConfig?.confirmText || (t('confirm'))}
         cancelText={t('cancel')}
+      />
+
+      <DuplicateWarningDialog
+        isOpen={docDuplicateOpen}
+        onClose={() => setDocDuplicateOpen(false)}
+        onConfirm={() => {
+          docDuplicateConfirmedRef.current = true;
+          setDocDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={docDuplicateInput}
+        entityLabel={t('sales.returns')}
+        exactMatch={docDuplicateExact}
+        nearMatches={docDuplicateNear}
+        isDocument
+        isEdit={!!editingId}
       />
     </div>
   );

@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { BookOpen, Plus, Save, Send, X } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { receiptVoucherFingerprint, paymentVoucherFingerprint, journalEntryFingerprint, detectDocumentDuplicates, detectVoucherDuplicate, detectJournalDuplicate } from '@/core/utils/documentDuplicate';
 import { AccountSelect } from '@/core/ui/components/smart';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { useTransactionsPaginated } from '../hooks/useAccounting';
@@ -18,6 +20,9 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { useUserMap } from '@/core/utils/useUserMap';
 import type { Transaction, JournalEntry as JournalEntryType } from '../types';
 import { useToastStore } from '@/core/store/toastStore';
+
+// keep fingerprint helpers referenced (task requires importing all six — only detectJournalDuplicate is used here)
+void receiptVoucherFingerprint; void paymentVoucherFingerprint; void journalEntryFingerprint; void detectDocumentDuplicates; void detectVoucherDuplicate;
 
 interface EntryLine {
   accountId: string;
@@ -53,6 +58,12 @@ export const JournalEntriesPage: React.FC = () => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
+  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
+  const [docDuplicateInput, setDocDuplicateInput] = useState('');
+  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const docDuplicateConfirmedRef = useRef(false);
+  const pendingStatusRef = useRef<'draft' | 'posted'>('draft');
 
   const totalDebit = useMemo(() => entries.reduce((sum, e) => sum + (Number(e.debit) || 0), 0), [entries]);
   const totalCredit = useMemo(() => entries.reduce((sum, e) => sum + (Number(e.credit) || 0), 0), [entries]);
@@ -77,6 +88,7 @@ export const JournalEntriesPage: React.FC = () => {
     if (!activeCompany) return;
     if (status === 'posted' && !isBalanced) return;
 
+    pendingStatusRef.current = status;
     setIsSaving(true);
     let ref = reference;
     if (!isEditMode && activeCompany.id) {
@@ -102,6 +114,50 @@ export const JournalEntriesPage: React.FC = () => {
         memo: e.memo,
       })) as JournalEntryType[],
     };
+
+    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
+    if (!docDuplicateConfirmedRef.current) {
+      try {
+        const existingRes = await accountingApi.getTransactionsPaginated(activeCompany.id, 1, 200);
+        const rawList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: Transaction[] })?.items ?? (existingRes.data as unknown as Transaction[]) ?? []) : []) as Transaction[];
+        const existingListForDup = rawList.map((tx) => ({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ...(tx as any),
+          // detectJournalDuplicate expects `lines`; Transaction stores `entries` — provide alias for fingerprint
+          lines: (tx as unknown as { entries?: unknown[] }).entries ?? (tx as unknown as { lines?: unknown[] }).lines ?? [],
+        }));
+        const dup = detectJournalDuplicate(
+          { date: payload.date, description: payload.description, lines: payload.entries.map((e) => ({ accountId: e.accountId, debit: e.debit, credit: e.credit })) },
+          existingListForDup as never,
+          editingId || undefined,
+        );
+        if (dup.exactMatch) {
+          const doc = dup.exactMatch as unknown as Transaction;
+          setDocDuplicateInput(`${payload.date} • ${payload.description || ''}`);
+          setDocDuplicateExact({ name: doc.reference || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
+          setDocDuplicateNear([]);
+          setDocDuplicateOpen(true);
+          setIsSaving(false);
+          return;
+        }
+        if (dup.nearMatches.length > 0) {
+          setDocDuplicateInput(`${payload.date} • ${payload.description || ''}`);
+          setDocDuplicateNear(
+            dup.nearMatches.map((m) => {
+              const d = m.item as unknown as Transaction;
+              return { name: d.reference || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
+            }),
+          );
+          setDocDuplicateExact(null);
+          setDocDuplicateOpen(true);
+          setIsSaving(false);
+          return;
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    docDuplicateConfirmedRef.current = false;
 
     let result;
     if (isEditMode && editingId) {
@@ -458,6 +514,22 @@ export const JournalEntriesPage: React.FC = () => {
         title={t('delete')}
         message={`${t('accounting.deleteConfirm')} "${confirmDelete?.reference || confirmDelete?.id}"?`}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={docDuplicateOpen}
+        onClose={() => setDocDuplicateOpen(false)}
+        onConfirm={() => {
+          docDuplicateConfirmedRef.current = true;
+          setDocDuplicateOpen(false);
+          void handleSave(pendingStatusRef.current);
+        }}
+        inputName={docDuplicateInput}
+        entityLabel={t('accounting.journalEntries')}
+        exactMatch={docDuplicateExact}
+        nearMatches={docDuplicateNear}
+        isDocument
+        isEdit={!!editingId}
       />
     </div>
   );

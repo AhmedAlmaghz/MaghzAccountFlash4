@@ -1,7 +1,9 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Tag, Plus, FileText, CheckSquare, Trash2, Printer, ArrowRightLeft, Search, X, Layers, Sparkles, Download } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { salesQuotationFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -83,6 +85,12 @@ export const QuotationsPage: React.FC = () => {
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'warning' | 'info'; confirmText?: string } | null>(null);
 
   const [saving, setSaving] = useState(false);
+  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
+  const [docDuplicateInput, setDocDuplicateInput] = useState('');
+  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const docDuplicateConfirmedRef = useRef(false);
+
   const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
   const [lines, setLines] = useState<QuotationLineForm[]>([{ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 }]);
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
@@ -184,13 +192,6 @@ export const QuotationsPage: React.FC = () => {
     if (editingId) {
       const existing = quotations.find(q => q.id === editingId);
       quotationNumber = existing?.quotationNumber || '';
-      const res = await update(editingId, buildPayload(quotationNumber));
-      if (res.success && activeCompany.id) {
-        await logAudit({ userId: currentUser?.id || 'system', action: 'update', tableName: 'quotations', recordId: editingId, companyId: activeCompany.id });
-        addToast('success', t('sales.quotation.updated'));
-      } else {
-        addToast('error', res.error || t('error'));
-      }
     } else {
       const seq = await getNextNumber('quotation', activeCompany.id);
       if (!seq.success || !seq.number) {
@@ -199,7 +200,73 @@ export const QuotationsPage: React.FC = () => {
         return;
       }
       quotationNumber = seq.number;
-      const res = await create(buildPayload(quotationNumber));
+    }
+    const payload = buildPayload(quotationNumber);
+    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
+    if (!docDuplicateConfirmedRef.current) {
+      try {
+        const existingRes = await salesApi.getQuotationsPaginated(activeCompany.id, 1, 200);
+        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: Quotation[] })?.items ?? (existingRes.data as unknown as Quotation[]) ?? []) : []) as Quotation[];
+        const inputForFp = {
+          customerId: payload.customerId,
+          date: payload.date,
+          expiryDate: payload.expiryDate,
+          totalAmount: payload.totalAmount,
+          lines: payload.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent })),
+        };
+        const fp = salesQuotationFingerprint(inputForFp as never);
+        const result = detectDocumentDuplicates(
+          fp,
+          inputForFp,
+          existingList as never[],
+          (d: unknown) => {
+            const doc = d as Quotation;
+            return salesQuotationFingerprint({ customerId: doc.customerId, date: doc.date, expiryDate: doc.expiryDate, totalAmount: doc.totalAmount } as never);
+          },
+          (inp: unknown, ex: unknown) => {
+            const a = inp as { customerId?: string; date?: string; lines?: Array<{ productId?: string }>; totalAmount?: unknown };
+            const b = ex as Quotation;
+            return genericNearScore(a.customerId, b.customerId, a.date, b.date, a.lines ?? [], (b.lines ?? []) as Array<{ productId?: string }>, a.totalAmount, b.totalAmount);
+          },
+          { excludeId: editingId || undefined },
+        );
+        if (result.exactMatch) {
+          const doc = result.exactMatch as unknown as Quotation;
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date} • ${payload.totalAmount}`);
+          setDocDuplicateExact({ name: doc.quotationNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
+          setDocDuplicateNear([]);
+          setDocDuplicateOpen(true);
+          setSaving(false);
+          return;
+        }
+        if (result.nearMatches.length > 0) {
+          setDocDuplicateInput(`${payload.customerId} • ${payload.date}`);
+          setDocDuplicateNear(
+            result.nearMatches.map((m) => {
+              const d = m.item as unknown as Quotation;
+              return { name: d.quotationNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
+            }),
+          );
+          setDocDuplicateExact(null);
+          setDocDuplicateOpen(true);
+          setSaving(false);
+          return;
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    docDuplicateConfirmedRef.current = false;
+    if (editingId) {
+      const res = await update(editingId, payload);
+      if (res.success && activeCompany.id) {
+        await logAudit({ userId: currentUser?.id || 'system', action: 'update', tableName: 'quotations', recordId: editingId, companyId: activeCompany.id });
+        addToast('success', t('sales.quotation.updated'));
+      } else {
+        addToast('error', res.error || t('error'));
+      }
+    } else {
+      const res = await create(payload);
       if (res.success && res.id && activeCompany.id) {
         await logAudit({ userId: currentUser?.id || 'system', action: 'create', tableName: 'quotations', recordId: res.id, companyId: activeCompany.id });
         addToast('success', t('sales.quotation.created'));
@@ -751,6 +818,22 @@ export const QuotationsPage: React.FC = () => {
         variant={confirmConfig?.variant || 'warning'}
         confirmText={confirmConfig?.confirmText || (t('confirm'))}
         cancelText={t('cancel')}
+      />
+
+      <DuplicateWarningDialog
+        isOpen={docDuplicateOpen}
+        onClose={() => setDocDuplicateOpen(false)}
+        onConfirm={() => {
+          docDuplicateConfirmedRef.current = true;
+          setDocDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={docDuplicateInput}
+        entityLabel={t('sales.quotations')}
+        exactMatch={docDuplicateExact}
+        nearMatches={docDuplicateNear}
+        isDocument
+        isEdit={!!editingId}
       />
     </div>
   );

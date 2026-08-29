@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   Users,
   Plus,
@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { Card, Button, Table, Input, Modal } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates } from '@/core/utils/duplicateDetection';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -100,6 +102,13 @@ export const CustomersPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const { getNextNumber } = useDocumentSequence();
 
+  // Duplicate guard — يمنع صمت التكرار
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
+
   const resetForm = useCallback(() => {
     setFormData({ code: '', name: '', phone: '', email: '', address: '', taxNumber: '', creditLimit: '', openingBalance: '', isActive: true });
     setFormErrors({});
@@ -153,6 +162,37 @@ export const CustomersPage: React.FC = () => {
       addToast('error', t('validation.required') || 'يرجى تصحيح الحقول المطلوبة');
       return;
     }
+    const inputName = formData.name.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await salesApi.getCustomers(activeCompany.id);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as Customer[], (c) => c.name, {
+            excludeId: editingId || undefined,
+            getId: (c) => c.id,
+            getCode: (c) => c.code,
+            nearThreshold: 0.85,
+          });
+          if (result.exactMatch) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact({ name: result.exactMatch.matchedName, code: result.exactMatch.matchedCode });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* فشل الفحص لا يمنع الحفظ */
+      }
+    }
+    duplicateConfirmedRef.current = false;
     setSaving(true);
     const payload = {
       companyId: activeCompany.id,
@@ -912,6 +952,21 @@ export const CustomersPage: React.FC = () => {
         title={confirmConfig?.title || ''}
         message={confirmConfig?.message || ''}
         variant={confirmConfig?.variant || 'danger'}
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('sales.customer.title')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editingId}
       />
     </div>
   );
