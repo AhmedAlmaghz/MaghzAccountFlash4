@@ -334,7 +334,7 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_sales', account_code: '41101', required: true, description: 'إيرادات المبيعات' },
   { key: 'default_cogs', account_code: '51101', required: true, description: 'تكلفة البضاعة المباعة' },
   { key: 'default_inventory', account_code: '11301', required: true, description: 'حساب المخزون' },
-  { key: 'default_wip', account_code: '11302', required: false, description: 'حساب بحاة تحتل التشغيل' },
+  { key: 'default_wip', account_code: '11302', required: false, description: 'حساب بضاعة تحت التشغيل' },
   { key: 'default_production_labor', account_code: '53101', required: false, description: 'حساب عمالة الإنتاج' },
   { key: 'default_production_energy', account_code: '53201', required: false, description: 'حساب طاقة الإنتاج' },
   { key: 'default_production_packaging', account_code: '53301', required: false, description: 'حساب تغليف الإنتاج' },
@@ -404,7 +404,7 @@ const PRODUCTS: Array<{
   ];
 
 const WAREHOUSES: Array<{ code: string; name: string }> = [
-  { code: 'WH-MAIN', name: 'المستودع الرئيسي - صنعاء' },
+  { code: 'WH-001', name: 'المستودع الرئيسي' },
 
 ];
 
@@ -471,8 +471,8 @@ const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: n
   { type: 'work_order', prefix: 'WO-', start: 1, current: 0, pad: 4 },
   { type: 'bom', prefix: 'BOM-', start: 1, current: 0, pad: 0 },
   { type: 'payroll_run', prefix: 'PAY-', start: 1, current: 0, pad: 6 },
-  { type: 'product', prefix: 'PRD-', start: 1, current: 15, pad: 0 },
-  { type: 'warehouse', prefix: 'WH-', start: 1, current: 1, pad: 0 },
+  { type: 'product', prefix: 'PRD-', start: 1, current: 0, pad: 0 },
+  { type: 'warehouse', prefix: 'WH-', start: 1, current: 0, pad: 0 },
   { type: 'stock_adjustment', prefix: 'ADJ-', start: 1, current: 0, pad: 6 },
   { type: 'inventory_transfer', prefix: 'TRF-', start: 1, current: 0, pad: 6 },
   { type: 'customer', prefix: 'CUS-', start: 1, current: 0, pad: 5 },
