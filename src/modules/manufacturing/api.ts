@@ -192,6 +192,29 @@ async function resolveWipAccountId(companyId: string): Promise<string | null> {
   return findAccountByCodeLocal(companyId, WIP_ACCOUNT_CODE);
 }
 
+/** Resolve production-cost GL account via default_accounts, fallback to chart-of-accounts code. */
+async function resolveProductionCostAccount(companyId: string, category: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const daRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = $2::text`,
+    [companyId, `default_production_${category}` as string]
+  );
+  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
+  const code = PRODUCTION_COST_ACCOUNT_CODES[category as keyof typeof PRODUCTION_COST_ACCOUNT_CODES];
+  return code ? findAccountByCodeLocal(companyId, code) : null;
+}
+
+/** Resolve production-loss GL account via default_accounts, fallback to code 53501. */
+async function resolveProductionLossAccount(companyId: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const daRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_production_loss'`,
+    [companyId]
+  );
+  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
+  return await resolveProductionLossAccount(companyId);
+}
+
 export const manufacturingApi = {
   // ─── BOM ──────────────────────────────────────────────────────────────────
   async getBoms(companyId: string, ownedByUserId?: string): Promise<{ success: boolean; data?: BOM[]; error?: string }> {
@@ -1022,7 +1045,7 @@ export const manufacturingApi = {
           entries.push({ accountId: inventoryAccountId, debit: 0, credit: materialsCostRounded, memo: 'مواد خام مستهلكة (مسار قديم — بلا WIP)' });
         }
         for (const pc of productionCosts) {
-          const accId = await findAccountByCodeLocal(companyId, PRODUCTION_COST_ACCOUNT_CODES[pc.category]);
+          const accId = await resolveProductionCostAccount(companyId, pc.category);
           if (!accId) {
             return { success: false, error: `حساب تكاليف الإنتاج (${PRODUCTION_COST_ACCOUNT_CODES[pc.category]}) غير موجود في شجرة الحسابات` };
           }
@@ -1172,7 +1195,7 @@ export const manufacturingApi = {
           if (diff !== 0 && entries.length > 0) entries[0].debit = Math.round((entries[0].debit + diff) * 100) / 100;
           entries.push({ accountId: wipAccountId, debit: 0, credit: creditTotal, memo: `عكس قيد خامات - ${orderNumber || id}` });
         } else {
-          const lossAccountId = await findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE);
+          const lossAccountId = await resolveProductionLossAccount(companyId);
           if (!lossAccountId) {
             return { success: false, error: `حساب خسائر أوامر التشغيل (${PRODUCTION_LOSS_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
           }
