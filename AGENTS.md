@@ -3692,6 +3692,20 @@ npx drizzle-kit migrate
   - **فحص الـ shim عبر تقييم template literal**: `new Function('return `...`')` ثم `new Function(code)` وليس فحص النص الخام
   - **الـ shim الضخم سطر واحد**: أي edit يدوي قد يبتلع الفواصل/الأقواس — افحص `},core:{` وعداد backticks=2 بعد كل تعديل
   - **الفهرس المركب للـ AI chat**: `(company_id, user_id, updated_at)` يخدم تحميل الجلسات (فهرس قديم كان بلا `company_id`)
+### المرحلة 68 (v0.6.2): منع التكرار الشامل (أسماء + مستندات) + إصلاح قيد التصنيع
+- **الهدف**: منع صمت التكرار عند إنشاء العملاء/الموردين/الموظفين/المنتجات/الحسابات وأي مستند بنفس البيانات — مع رسالة واضحة وتخيير احترافي
+- **أداة مركزية `duplicateDetection.ts`** (Pure): `normalizeArabic` + `fuzzyMatchScore (Levenshtein + substring 0.5+0.5*ratio)` — تام `normalize equal → 1` (حظر)، قريب `≥0.85` (تحذير)، `excludeId` عند التعديل، `getCode` لتعزيز الرمز، `limit=5`
+- **مكون موحد `DuplicateWarningDialog.tsx`**: `Modal` بحالتين — تام `rose/XCircle` زر واحد إلغاء، قريب `amber/AlertTriangle` قائمة مع % وbar + `إلغاء / متابعة رغم التشابه` — i18n متوازن `duplicate.*` + `duplicate.document.*`
+- **الكيانات (5):**
+  - عملاء `CustomersPage.tsx` — `salesApi.getCustomers` + `c.name/code`
+  - موردون `SuppliersPage.tsx` — `purchasesApi.getSuppliers`
+  - موظفون `EmployeesPage.tsx` — `hrApi.getEmployees` + `fullName/employeeNumber`
+  - منتجات `ProductsPage.tsx` — `inventoryApi.getProducts` + `buildCompositeName(nameAr,nameEn)` + فحص كود يدوي
+  - حسابات `ChartOfAccounts.tsx` — `flatList` + `buildCompositeName(nameAr,nameEn)` + `code`
+- **المستندات: كل الأنواع ببصمة كاملة** `documentDuplicate.ts` — `party|date|currency|lines|total` مطبعة مع `toDateString` و `toFixed(2)` وترتيب سطور — تام `fingerprint equal` → حظر كامل، قريب `genericNearScore (Jaccard + totalSimilarity) ≥0.85` → تحذير — يستبعد `cancelled/rejected` وذاته
+  - أدوات: `salesInvoiceFingerprint`/`salesQuotationFingerprint`/`salesReturnFingerprint`/`purchaseInvoiceFingerprint`/`purchaseOrderFingerprint`/`purchaseReturnFingerprint`/`receiptVoucherFingerprint`/`paymentVoucherFingerprint`/`journalEntryFingerprint`
+  - دمج في 9 صفحات: `InvoicesPage`/`QuotationsPage`/`SalesReturnsPage`/`PurchaseInvoicesPage`/`OrdersPage`/`ReturnsPage`/`ReceiptVouchersPage`/`PaymentVouchersPage`/`JournalEntriesPage` — جلب `get*Paginated 200` و `detectDocumentDuplicates` قبل الحفظ، `isDocument` في الحوار
+  - اختبارات `documentDuplicate.test.ts` (9) + `duplicateDetection.test.ts` (11) — `tsc` 0 | `build` 7.15s
+- **إصلاح قيد التصنيع `WO-0002`**: `المبلغ 23k` ≠ مجموع السطور `93k` — `totalAmount` كان `totalCost` — أُصلح إلى `entries.reduce(debit)` مع تحقق توازن `|debits-credits|≤0.01` — فصل فائض/عجز لكل مادة بحسابها الخاص `resolveInventoryAccountId(materialId)` بدل تجميع واحد على حساب المنتج التام — رسائل أوضح `إنتاج تام - 10 وحدة` + `إرجاع فائض - مادة X` — `src/modules/manufacturing/api.ts:987`
 
-*آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.1*
-
+*آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.2*
