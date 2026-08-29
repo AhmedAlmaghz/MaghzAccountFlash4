@@ -115,6 +115,7 @@ const DEFAULT_ACCOUNTS = [
   { key: 'default_sales', code: '41101', required: true,  desc: 'حساب المبيعات الافتراضي' },
   { key: 'default_cogs', code: '51101', required: true,  desc: 'حساب تكلفة البضاعة المباعة' },
   { key: 'default_inventory', code: '11301', required: true, desc: 'حساب المخزون الافتراضي' },
+  { key: 'default_wip', code: '11302', required: false, desc: 'حساب بحاة تحتل التشغيل' },
   { key: 'default_debtors', code: '11201', required: true, desc: 'حساب المدينون التجاريون' },
   { key: 'default_creditors', code: '21101', required: true, desc: 'حساب الدائنون التجاريون' },
   { key: 'default_vat_output', code: '21301', required: true, desc: 'ضريبة القيمة المضافة على المبيعات' },
@@ -150,7 +151,9 @@ const PAYROLL_COMPONENTS = [
 
 
 const CASH_BOXES = [
-  { name: 'الصندوق الرئيسي',  code: 'CB-MAIN',  balance: 5000000, account_code: '11101', responsible_role: 'admin' },
+  { name: 'الصندوق الرئيسي',  code: 'CB-MAIN',  balance: 0, account_code: '11101', responsible_role: 'admin' },
+  { name: 'البنك اليمني الدولي',  code: 'BNK-001',  balance: 0, account_code: '11102', responsible_role: 'admin' },
+  { name: 'محفظة جيب',  code: 'WLT-JEB',  balance: 0, account_code: '11103', responsible_role: 'admin' },
 ];
 
 const PRODUCT_CATEGORIES = [
