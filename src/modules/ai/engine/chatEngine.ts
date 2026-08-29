@@ -602,17 +602,29 @@ class ChatEngine {
         });
 
         const chunks: LlmStreamChunk[] = [];
+        // Incremental accumulation + rAF-throttled flushes: re-joining every
+        // chunk was O(n²) and each chunk triggered a full message-list render.
+        const sid = streamingId;
+        let contentAcc = '';
+        let flushScheduled = false;
+        const scheduleFlush = () => {
+          if (flushScheduled) return;
+          flushScheduled = true;
+          const run = () => {
+            flushScheduled = false;
+            this.store().updateMessageContent(sid, stripImitationToolBlocks(contentAcc));
+          };
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+          else setTimeout(run, 16);
+        };
 
         for await (const chunk of streamGen) {
           chunks.push(chunk);
           // Progressively update the text content as chunks arrive
           if (chunk.type === 'content' && chunk.content) {
             streamedContent = true;
-            const accumulated = chunks
-              .filter((c): c is LlmStreamChunk & { content: string } => c.type === 'content' && typeof c.content === 'string')
-              .map((c) => c.content as string)
-              .join('');
-            this.store().updateMessageContent(streamingId, stripImitationToolBlocks(accumulated));
+            contentAcc += chunk.content;
+            scheduleFlush();
           }
         }
 

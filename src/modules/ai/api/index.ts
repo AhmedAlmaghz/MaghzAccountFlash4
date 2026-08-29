@@ -54,6 +54,7 @@ interface ElectronAI {
   listSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<AiChatSessionSummary[]>>;
   getSessionMessages: (payload: { companyId: string; sessionId: string }) => Promise<IpcResult<ChatMessage[]>>;
   saveSession: (payload: AiSaveSessionPayload) => Promise<IpcResult<{ sessionId: string }>>;
+  renameSession: (payload: { sessionId: string; title: string; companyId?: string; userId?: string }) => Promise<IpcResult<void>>;
   deleteSession: (payload: { companyId: string; userId: string; sessionId: string }) => Promise<IpcResult<void>>;
 }
 
@@ -247,6 +248,12 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.saveSession(payload);
+  },
+
+  async renameSession(params: { sessionId: string; title: string; companyId?: string; userId?: string }): Promise<IpcResult<void>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.renameSession(params);
   },
 
   async deleteSession(companyId: string, userId: string, sessionId: string): Promise<IpcResult<void>> {

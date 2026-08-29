@@ -129,14 +129,31 @@ export interface SystemPromptContext {
   activeSkills?: Skill[];
 }
 
+/**
+ * Compact tool inventory: names grouped by domain, one line per domain.
+ * Full descriptions + parameter schemas already travel in the request's
+ * `tools` parameter — repeating them here used to add thousands of tokens
+ * to EVERY request and noticeably slowed first-token latency.
+ */
+function renderToolInventory(tools: ToolDefinition[]): string {
+  const groups = new Map<string, string[]>();
+  for (const t of tools) {
+    const domain = t.name.includes('.') ? t.name.split('.')[0] : 'other';
+    const list = groups.get(domain) ?? [];
+    list.push(t.name);
+    groups.set(domain, list);
+  }
+  return [...groups.entries()]
+    .map(([domain, names]) => `- ${domain}: ${names.join('، ')}`)
+    .join('\n');
+}
+
 export function buildSystemPrompt({ tools, activeSkills = [] }: SystemPromptContext): string {
   const company = useAppStore.getState().activeCompany;
   const user = useAuthStore.getState().user;
   const today = new Date().toISOString().split('T')[0];
 
-  const toolList = tools
-    .map((t) => `- ${t.name}: ${t.descriptionAr}`)
-    .join('\n');
+  const toolList = renderToolInventory(tools);
 
   const skillsBlock = renderSkillsBlock(activeSkills);
 
@@ -156,7 +173,7 @@ export function buildSystemPrompt({ tools, activeSkills = [] }: SystemPromptCont
     ``,
     RESPONSE_STYLE,
     ``,
-    `الأدوات المتاحة لك (${tools.length} أداة):`,
+    `الأدوات المتاحة لك (${tools.length} أداة) — التفاصيل والمعاملات في تعريفات الأدوات المرفقة بالطلب:`,
     toolList,
     ``,
     TOOL_USAGE_GUIDE,

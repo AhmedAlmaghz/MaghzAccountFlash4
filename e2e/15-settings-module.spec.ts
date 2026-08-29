@@ -68,14 +68,8 @@ test.describe('Settings Module', () => {
     await loginAs(page);
     await page.goto('/settings/cash-boxes');
     // Wait for heading to be visible — settings pages may be slow to load all data
-    const heading = page.getByRole('heading', { name: /الصناديق/i }).first();
+    const heading = page.getByRole('heading', { name: /النقدية والخزائن/i }).first();
     await expect(heading).toBeVisible({ timeout: 30_000 });
-  });
-
-  test('Banks page loads', async ({ page }) => {
-    await loginAs(page);
-    await page.goto('/settings/banks');
-    await expect(page.getByRole('heading', { name: /البنوك/i }).first()).toBeVisible({ timeout: 20_000 });
   });
 
   test('Cost Centers page loads', async ({ page }) => {

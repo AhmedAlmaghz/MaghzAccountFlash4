@@ -15,9 +15,8 @@ test.describe('Supplier', () => {
     await expect(modalHeading).toBeVisible({ timeout: 10_000 });
 
     const modalPanel = page.getByRole('heading', { name: /مورد جديد/i }).locator('..').locator('..').locator('..');
-    const modalInputs = modalPanel.locator('.overflow-y-auto input');
-    await modalInputs.nth(0).fill('مورد اختبار e2e');
-    await modalInputs.nth(2).fill('777000000');
+    await modalPanel.getByLabel(/الاسم/i).first().fill('مورد اختبار e2e');
+    await modalPanel.getByLabel(/الهاتف/i).first().fill('777000000');
 
     const saveBtn = page.getByRole('button', { name: /إنشاء/i });
     await expect(saveBtn).toBeEnabled({ timeout: 5_000 });

@@ -53,12 +53,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('accountant');
   });
 
-  it('lists all provided tools with Arabic descriptions', () => {
+  it('lists tool names grouped by domain without duplicating descriptions', () => {
+    // Descriptions travel in the request's `tools` parameter — repeating them
+    // in the prompt wastes thousands of tokens per request (slower TTFT).
     const tools = [makeTool('sales.get_invoices'), makeTool('inventory.get_products')];
     const prompt = buildSystemPrompt({ tools });
     expect(prompt).toContain('sales.get_invoices');
     expect(prompt).toContain('inventory.get_products');
-    expect(prompt).toContain('وصف sales.get_invoices');
+    expect(prompt).toContain('- sales: sales.get_invoices');
+    expect(prompt).not.toContain('وصف sales.get_invoices');
   });
 
   it('includes today date in ISO format', () => {

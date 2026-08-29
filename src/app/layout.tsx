@@ -31,7 +31,6 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { hrApi } from '@/modules/hr/api';
 import { crmApi } from '@/modules/crm/api';
-import { ChatWidget } from '@/modules/ai/components/ChatWidget';
 import { useAppStore } from '@/core/store';
 import { ToastContainer } from '@/core/ui/components/Toast';
 import { useAuthStore } from '@/modules/auth/store';
@@ -39,6 +38,10 @@ import { useCanAccessModule } from '@/modules/auth/hooks/usePermission';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 import type { Permission } from '@/modules/auth/types';
+
+const ChatWidget = React.lazy(() =>
+  import('@/modules/ai/components/ChatWidget').then((m) => ({ default: m.ChatWidget }))
+);
 
 interface MenuItem {
   id: string;
@@ -550,7 +553,9 @@ export const AppLayout = () => {
         entitySources={entitySources}
       />
       <ToastContainer />
-      <ChatWidget />
+      <React.Suspense fallback={null}>
+        <ChatWidget />
+      </React.Suspense>
     </div>
   );
 };

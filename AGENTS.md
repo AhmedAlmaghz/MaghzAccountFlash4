@@ -3666,5 +3666,32 @@ npx drizzle-kit migrate
 - **النطاق**: 6 شاشات فواتير + VatSettings + useSettings + printDocument + i18n؛ جميع الشاشات تستخدم نفس المنطق والتصميم الموحد
 - **التحقق**: `tsc -b` 0 ✓ | `npm run build` 11s ✓ | `npx vitest` سيتم تأكيده في CI
 
-*آخر تحديث: 2026-08-27 | الإصدار: maghzaccount-pro v0.6.0*
+### المرحلة 66 (v0.6.1): أداء دردشة الذكاء الاصطناعي — حفظ دفعات + بث مُخنّق + تحميل كسول
+- **الهدف**: إزالة البطء في فتح دردشة جديدة / استعادة جلسة / دوران الرسالة الواحدة لكثرة الرسائل أو كثرة الأدوات
+- **المشاكل المُصلحة (7)**:
+  1. `aiHandler.persistSession` / `browserBridge.persistSession`: N+1 INSERT متسلسل لكل رسائل الجلسة → دفعة واحدة بحجم 100 (`MESSAGE_BATCH_SIZE`) ببناء `INSERT ... VALUES ($1..$8),($9..$16)...`
+  2. `persistence.saveCurrentSession` كان متزامناً (await) → snapshot + fingerprint-skipping + تسلسل بـ `saveInFlight` و `saveQueued` واحد فقط
+  3. `AiChatPage` ينتظر الحفظ قبل فتح جلسة جديدة → إزالة await (non-blocking)
+  4. `renameSession` كان يعيد حفظ الجلسة كاملة داخل الجلسة المُعاد تسميتها (data-loss) → قناة `ai:rename-session` تحدّث العنوان فقط (`UPDATE ... SET title`)
+  5. `entityResolver` يجلب جداول كاملة ويُوقف الإرسال 2500ms → `ENTITY_FETCH_LIMIT=50` لكل جدول + `prefetchEntityCache` عند mount + حد 16 token + deadline
+  6. `systemPrompt` يكرر وصف كل أداة رغم تمرير `tools` للـ LLM → تجميع حسب المجال (`renderToolInventory`)
+  7. `ChatWidget` محمّل ساكناً في `layout` → `React.lazy` + `Suspense`
+- **البث المُحسّن (`chatEngine`)**: تراكم `contentAcc += chunk` بدل إعادة join كل chunk (O(n²)) + `scheduleFlush` عبر `requestAnimationFrame` (fallback 16ms) بدل setState لكل chunk
+- **DB**: `drizzle/0010_ai_chat_performance.sql` → `idx_ai_chat_messages_session(session_id, sort_order)` و `idx_ai_chat_sessions_user(company_id, user_id, updated_at)` + `_journal.json` idx=10
+- **التحقق**: `tsc -b` 0 ✓ | `vitest` 1132/1132 ✓ | `build` 30.64s ✓ — `ChatPanel` صار chunk كسول 421kB (86kB gzip)
+
+### المرحلة 67 (v0.6.1): إصلاح شامل لمنصة e2e + انجراف أعمدة CRM الحرجة
+- **إصلاح فساد `e2e/vite-e2e-plugin.ts`**: الالتزام `a9d1c5a` استبدل giant sham line (143→393 سطراً) بتكرار دوري وجزء `updateBom` مقطوع (`f.push('total_cost=f.push('updated_by=NULL')`). أُعيد البناء من `535ea8b` + إضافات التصنيع المقصودة (`createBom.output_quantity` و `createWorkOrder.batch_number/supervisor_id/production_costs`) مع الحفاظ على `updateBom` القديم (لا حقول batch في `boms`)
+- **انجراف أعمدة CRM** (production bug): `activities` بلا `created_by/updated_by/updated_at` و `tasks` بلا `updated_at` لكن كل الكتّاب (`dbHandler` RPC + fallback + shim) يكتبها → إنشاء النشاط و تعديل المهام مكسوران في كل البيئات
+  - **الإصلاح**: `drizzle/0011_crm_audit_columns.sql` (4 ALTERs idempotent) + `_journal.json` idx=11 + تحديث Drizzle `crm.ts` + إضافة 0010 و0011 لقائمة `pgliteAdapter.MIGRATIONS` المنسية
+  - تحقق INSERT داخل ROLLBACK على PG حقيقي ✓ و `npm run db:check` لا drift ✓
+- **اختبارات e2e قديمة (78/78 ✓)**: headings `<h2>` بدل `<h1>` (08/09)، حقول مورد `nth()` أزاحها redesign، فلاتر CRM تحولت pill buttons، «الصناديق» → «النقدية والخزائن»، واختبار «البنوك» المحذوفة في Phase 62 أُزيل
+- **القواعد الذهبية المضافة**:
+  - **Backticks في PowerShell مُفسدة**: `node -e` مع backticks يُكسر؛ استخدم ملفات `.cjs` بدل inline
+  - **`>` redirection يكتب UTF-16LE**: استخدم `git diff --output` أو `node child_process`
+  - **فحص الـ shim عبر تقييم template literal**: `new Function('return `...`')` ثم `new Function(code)` وليس فحص النص الخام
+  - **الـ shim الضخم سطر واحد**: أي edit يدوي قد يبتلع الفواصل/الأقواس — افحص `},core:{` وعداد backticks=2 بعد كل تعديل
+  - **الفهرس المركب للـ AI chat**: `(company_id, user_id, updated_at)` يخدم تحميل الجلسات (فهرس قديم كان بلا `company_id`)
+
+*آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.1*
 

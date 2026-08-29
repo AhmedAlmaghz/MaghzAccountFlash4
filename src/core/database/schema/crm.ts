@@ -88,6 +88,7 @@ export const tasks = pgTable('tasks', {
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 // ─── Activities ───────────────────────────────────────────────────────────────
@@ -103,5 +104,8 @@ export const activities = pgTable('activities', {
   activityDate: timestamp('activity_date', { withTimezone: true }).notNull(),
   durationMinutes: integer('duration_minutes'),
   assignedTo: uuid('assigned_to').references(() => users.id),
+  createdBy: uuid('created_by'),
+  updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

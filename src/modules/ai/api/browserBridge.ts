@@ -383,23 +383,36 @@ async function persistSession(payload: AiSaveSessionPayload): Promise<string> {
     );
   }
 
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    await adapter.query(
-      `INSERT INTO ai_chat_messages
-         (company_id, session_id, role, kind, content, tool_call, sort_order, created_at)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7, $8::timestamptz)`,
-      [
+  // Batched multi-row INSERT (8 params/row) — one round-trip per 100 messages
+  // instead of one per message.
+  const BATCH_SIZE = 100;
+  for (let start = 0; start < messages.length; start += BATCH_SIZE) {
+    const batch = messages.slice(start, start + BATCH_SIZE);
+    const placeholders: string[] = [];
+    const params: unknown[] = [];
+    batch.forEach((m, i) => {
+      const base = i * 8;
+      placeholders.push(
+        `($${base + 1}::uuid, $${base + 2}::uuid, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}::jsonb, $${base + 7}, $${base + 8}::timestamptz)`
+      );
+      params.push(
         companyId,
         sid,
         m.role,
         m.kind,
         m.content || null,
         m.toolCall ? JSON.stringify(m.toolCall) : null,
-        i,
-        new Date(m.createdAt).toISOString(),
-      ]
+        start + i,
+        new Date(m.createdAt).toISOString()
+      );
+    });
+    const res = await adapter.query(
+      `INSERT INTO ai_chat_messages
+         (company_id, session_id, role, kind, content, tool_call, sort_order, created_at)
+       VALUES ${placeholders.join(', ')}`,
+      params
     );
+    if (!res.success) throw new Error(res.error || 'Failed to save chat messages');
   }
 
   return sid;
@@ -621,6 +634,24 @@ export const browserAiBridge = {
       if (!isValidChatMessages(payload.messages)) return { success: false, error: 'messages must be a valid chat array' };
       const sid = await persistSession(payload);
       return { success: true, data: { sessionId: sid } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async renameSession(payload: { sessionId: string; title: string; companyId?: string; userId?: string }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `UPDATE ai_chat_sessions
+            SET title = $2, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid
+        RETURNING id`,
+        [payload.sessionId, payload.title.trim().slice(0, 200), payload.companyId ?? null, payload.userId ?? null]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      if (!result.rows || result.rows.length === 0) return { success: false, error: 'Session not found' };
+      return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

@@ -16,7 +16,7 @@ test.describe('Manufacturing', () => {
     await loginAs(page);
     await page.goto('/manufacturing/work-orders');
 
-    await expect(page.locator('h1:has-text("أوامر التشغيل")')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /أوامر التشغيل/ })).toBeVisible({ timeout: 10_000 });
     await expect.poll(async () => {
       const rows = page.locator('table tbody tr');
       return rows.count();

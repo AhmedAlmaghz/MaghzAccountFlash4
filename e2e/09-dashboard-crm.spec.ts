@@ -6,7 +6,7 @@ test.describe('Dashboard and CRM Reports', () => {
     await loginAs(page);
     await page.goto('/');
 
-    await expect(page.locator('h1:has-text("لوحة التحكم")')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /لوحة التحكم/ })).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('h2:has-text("العملاء")')).toBeVisible({ timeout: 15_000 });
   });
 

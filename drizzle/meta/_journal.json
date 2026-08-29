@@ -71,6 +71,20 @@
       "when": 1796300000000,
       "tag": "0009_missing_updated_at",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1796400000000,
+      "tag": "0010_ai_chat_performance",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1796500000000,
+      "tag": "0011_crm_audit_columns",
+      "breakpoints": true
     }
   ]
 }

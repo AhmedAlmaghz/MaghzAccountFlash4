@@ -373,6 +373,36 @@ function isValidChatMessages(messages) {
   );
 }
 
+// Messages are written in multi-row batches instead of one round-trip per
+// message. 8 params/row × 100 rows = 800 params — far under PG's 65535 limit
+// while keeping each statement payload small enough for fast planning.
+const MESSAGE_BATCH_SIZE = 100;
+
+function buildMessageBatchInsert(batchCount) {
+  const cols = '(company_id, session_id, role, kind, content, tool_call, sort_order, created_at)';
+  const placeholders = [];
+  for (let i = 0; i < batchCount; i++) {
+    const base = i * 8;
+    placeholders.push(
+      `($${base + 1}::uuid, $${base + 2}::uuid, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}::jsonb, $${base + 7}, $${base + 8}::timestamptz)`
+    );
+  }
+  return `INSERT INTO ai_chat_messages ${cols} VALUES ${placeholders.join(', ')}`;
+}
+
+function messageRowParams(companyId, sid, m, sortOrder) {
+  return [
+    companyId,
+    sid,
+    m.role,
+    m.kind,
+    m.content || null,
+    m.toolCall ? JSON.stringify(m.toolCall) : null,
+    sortOrder,
+    new Date(m.createdAt).toISOString(),
+  ];
+}
+
 /** Replace-all save: upsert session header, then rewrite its messages atomically. */
 async function persistSession({ companyId, userId, sessionId, title, messages }) {
   const pool = getPool();
@@ -398,7 +428,7 @@ async function persistSession({ companyId, userId, sessionId, title, messages })
       const ins = await client.query(
         `INSERT INTO ai_chat_sessions (company_id, user_id, title, message_count)
          VALUES ($1::uuid, $2::uuid, $3, $4)
-         RETURNING id`,
+        RETURNING id`,
         [companyId, userId, title, messages.length]
       );
       sid = ins.rows[0].id;
@@ -409,23 +439,12 @@ async function persistSession({ companyId, userId, sessionId, title, messages })
       );
     }
 
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i];
-      await client.query(
-        `INSERT INTO ai_chat_messages
-           (company_id, session_id, role, kind, content, tool_call, sort_order, created_at)
-         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7, $8::timestamptz)`,
-        [
-          companyId,
-          sid,
-          m.role,
-          m.kind,
-          m.content || null,
-          m.toolCall ? JSON.stringify(m.toolCall) : null,
-          i,
-          new Date(m.createdAt).toISOString(),
-        ]
-      );
+    for (let start = 0; start < messages.length; start += MESSAGE_BATCH_SIZE) {
+      const batch = messages.slice(start, start + MESSAGE_BATCH_SIZE);
+      const sql = buildMessageBatchInsert(batch.length);
+      const flatParams = [];
+      batch.forEach((m, i) => flatParams.push(...messageRowParams(companyId, sid, m, start + i)));
+      await client.query(sql, flatParams);
     }
 
     await client.query('COMMIT');
@@ -699,6 +718,34 @@ export function registerAiHandlers() {
       const safeTitle = typeof title === 'string' ? title.slice(0, 200) : null;
       const sid = await persistSession({ companyId, userId, sessionId, title: safeTitle, messages });
       return { success: true, data: { sessionId: sid } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Rename one of the caller's own sessions — title-only UPDATE. Never
+  // rewrites messages (a full save here would be O(N) round-trips and risks
+  // clobbering the session with another conversation's messages).
+  ipcMain.handle('ai:rename-session', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { sessionId, title } = payload;
+      if (!sessionId) return { success: false, error: 'sessionId is required' };
+      if (typeof title !== 'string' || !title.trim()) return { success: false, error: 'title is required' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const result = await pool.query(
+        `UPDATE ai_chat_sessions
+            SET title = $3, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid
+        RETURNING id`,
+        [sessionId, companyId, title.trim().slice(0, 200), userId]
+      );
+      if (result.rows.length === 0) return { success: false, error: 'Session not found' };
+      return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }

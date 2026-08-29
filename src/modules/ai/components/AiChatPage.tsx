@@ -45,9 +45,11 @@ export default function AiChatPage() {
     return () => { cancelled = true; };
   }, [company?.id]);
 
-  const handleNewChat = async () => {
-    // Save current session before creating a new one
-    await aiPersistence.saveCurrentSession();
+  const handleNewChat = () => {
+    // Persist the current conversation in the background — the save snapshots
+    // the store synchronously, so resetting immediately afterwards is safe and
+    // the UI never waits on the DB round-trip.
+    void aiPersistence.saveCurrentSession();
     getChatEngine().reset();
     setSessionsKey((k) => k + 1);
     setShowSessions(false);
@@ -62,16 +64,18 @@ export default function AiChatPage() {
   };
 
   const handleSelectSession = async (sid: string) => {
-    // Save current session first
-    await aiPersistence.saveCurrentSession();
+    // Background save of the conversation we're leaving (snapshot is taken
+    // synchronously inside the persistence layer) — never block the switch.
+    void aiPersistence.saveCurrentSession();
+    setShowSessions(false);
     // Reset (clears engine LLM history + store), then restore the
     // saved messages into the store. Engine history starts fresh — the
     // system prompt is re-injected on the next send.
     getChatEngine().reset();
-    await aiPersistence.loadSession(sid);
+    const loaded = await aiPersistence.loadSession(sid);
+    if (!loaded) return;
     // Rebuild LLM history from persisted messages so the model has context
     getChatEngine().restoreHistory(useAiStore.getState().messages);
-    setShowSessions(false);
   };
 
   const handleRenameSession = async (sid: string, newTitle: string) => {

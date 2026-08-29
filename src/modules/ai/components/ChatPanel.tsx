@@ -1,8 +1,10 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import { useAppStore } from '@/core/store';
 import { useAiStore } from '../store';
 import { getChatEngine } from '../engine/chatEngine';
 import { aiPersistence } from '../api/persistence';
+import { prefetchEntityCache } from '../entityResolver';
 import { registerNavigator, unregisterNavigator, navigateTo } from '../engine/navigationBridge';
 import { useNavigate } from 'react-router-dom';
 import { MessageBubble } from './MessageBubble';
@@ -23,6 +25,13 @@ export function ChatPanel() {
     registerNavigator(navigate);
     return () => unregisterNavigator();
   }, [navigate]);
+
+  // Warm the entity cache in the background so the first message doesn't pay
+  // the cold-fetch cost of every entity type (fire-and-forget, cached 30s).
+  const companyId = useAppStore((s) => s.activeCompany?.id ?? '');
+  useEffect(() => {
+    if (companyId) prefetchEntityCache(companyId);
+  }, [companyId]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

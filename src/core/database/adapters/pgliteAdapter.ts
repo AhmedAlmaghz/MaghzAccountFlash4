@@ -104,6 +104,8 @@ import productTypeBomFlags from '@root/drizzle/0006_product_type_bom_flags.sql?r
 import woWipAccounting from '@root/drizzle/0007_wo_wip_accounting.sql?raw';
 import productTypesUpdatedAt from '@root/drizzle/0008_product_types_updated_at.sql?raw';
 import missingUpdatedAt from '@root/drizzle/0009_missing_updated_at.sql?raw';
+import aiChatPerformance from '@root/drizzle/0010_ai_chat_performance.sql?raw';
+import crmAuditColumns from '@root/drizzle/0011_crm_audit_columns.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -116,6 +118,8 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0007_wo_wip_accounting', sql: woWipAccounting },
   { name: '0008_product_types_updated_at', sql: productTypesUpdatedAt },
   { name: '0009_missing_updated_at', sql: missingUpdatedAt },
+  { name: '0010_ai_chat_performance', sql: aiChatPerformance },
+  { name: '0011_crm_audit_columns', sql: crmAuditColumns },
 ];
 
 /**

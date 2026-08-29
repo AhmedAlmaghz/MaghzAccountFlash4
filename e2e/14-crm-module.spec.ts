@@ -125,8 +125,8 @@ test.describe('Tasks', () => {
     await page.goto('/crm/tasks');
     await expect(page.getByRole('heading', { name: /المهام|Tasks/i }).first()).toBeVisible({ timeout: 15_000 });
 
-    // Filters for status and priority should be visible
-    await expect(page.getByLabel(/الأولوية|Priority/i).first()).toBeVisible({ timeout: 5_000 });
+    // Priority filter (pill buttons) should be visible
+    await expect(page.getByText(/الأولوية|Priority/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('create task with title and verify in list', async ({ page }) => {
@@ -159,8 +159,8 @@ test.describe('Activities', () => {
     await page.goto('/crm/activities');
     await expect(page.getByRole('heading', { name: /سجل الأنشطة|Activity Log|Activities/i }).first()).toBeVisible({ timeout: 15_000 });
 
-    // Type filter should be visible
-    await expect(page.getByLabel(/النوع|Type/i).first()).toBeVisible({ timeout: 5_000 });
+    // Type filter (pill buttons) should be visible
+    await expect(page.getByText(/النوع|Type/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('create activity with subject', async ({ page }) => {

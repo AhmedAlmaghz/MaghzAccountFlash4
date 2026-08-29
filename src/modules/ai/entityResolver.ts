@@ -168,11 +168,15 @@ async function searchAccounts(query: string, companyId: string): Promise<EntityM
   return rankMatches(query, cached);
 }
 
+// Window fetched per entity type and held in the 30s cache. Large enough for
+// reliable fuzzy correction, small enough to stay a single fast query.
+const ENTITY_FETCH_LIMIT = 50;
+
 async function searchCustomers(query: string, companyId: string): Promise<EntityMatch[]> {
   const key = `customers:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await salesApi.getCustomersPaginated(companyId, 1, 8, { isActive: true });
+    const res = await salesApi.getCustomersPaginated(companyId, 1, ENTITY_FETCH_LIMIT, { isActive: true });
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((c) => toMatch(c, 'customer', 'عميل', { phone: 'phone', balance: 'balance' }));
     cacheSet(key, cached);
@@ -184,7 +188,7 @@ async function searchSuppliers(query: string, companyId: string): Promise<Entity
   const key = `suppliers:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await purchasesApi.getSuppliersPaginated(companyId, 1, 8, { isActive: true });
+    const res = await purchasesApi.getSuppliersPaginated(companyId, 1, ENTITY_FETCH_LIMIT, { isActive: true });
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((s) => toMatch(s, 'supplier', 'مورد', { phone: 'phone', balance: 'balance' }));
     cacheSet(key, cached);
@@ -196,7 +200,7 @@ async function searchEmployees(query: string, companyId: string): Promise<Entity
   const key = `employees:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await hrApi.getEmployeesPaginated(companyId, 1, 8, { isActive: true });
+    const res = await hrApi.getEmployeesPaginated(companyId, 1, ENTITY_FETCH_LIMIT, { isActive: true });
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((e) =>
       toMatch(e, 'employee', 'موظف', { department: 'department', phone: 'phone' }));
@@ -209,7 +213,7 @@ async function searchProducts(query: string, companyId: string): Promise<EntityM
   const key = `products:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await inventoryApi.getProductsPaginated(companyId, 1, 8, { isActive: true });
+    const res = await inventoryApi.getProductsPaginated(companyId, 1, ENTITY_FETCH_LIMIT, { isActive: true });
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((p) =>
       toMatch(p, 'product', 'منتج', { salePrice: 'salePrice', costPrice: 'costPrice', unit: 'unit', barcode: 'barcode', sku: 'sku' }));
@@ -246,9 +250,11 @@ async function searchInvoices(query: string, companyId: string): Promise<EntityM
   const key = `invoices:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await salesApi.getInvoices(companyId);
+    // Capped recent window — the old full-table fetch loaded EVERY invoice
+    // on the first message of every session (major cold-start latency).
+    const res = await salesApi.getInvoicesPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
-    cached = res.data.map((i) => {
+    cached = res.data.items.map((i) => {
       const inv = str(i, 'invoiceNumber');
       return {
         ...toMatch(i, 'invoice', 'فاتورة مبيعات', { customerName: 'customerName', total: 'totalAmount', date: 'date', status: 'status' }),
@@ -265,9 +271,9 @@ async function searchPurchaseInvoices(query: string, companyId: string): Promise
   const key = `purchaseInvoices:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await purchasesApi.getInvoices(companyId);
+    const res = await purchasesApi.getInvoicesPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
-    cached = res.data.map((i) => {
+    cached = res.data.items.map((i) => {
       const inv = str(i, 'invoiceNumber');
       return {
         ...toMatch(i, 'purchaseInvoice', 'فاتورة مشتريات', { supplierName: 'supplierName', total: 'totalAmount', date: 'date', status: 'status' }),
@@ -284,9 +290,9 @@ async function searchQuotations(query: string, companyId: string): Promise<Entit
   const key = `quotations:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await salesApi.getQuotations(companyId);
+    const res = await salesApi.getQuotationsPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
-    cached = res.data.map((q) => {
+    cached = res.data.items.map((q) => {
       const qn = str(q, 'quotationNumber');
       return {
         ...toMatch(q, 'quotation', 'عرض سعر', { customerName: 'customerName', total: 'totalAmount', date: 'date', status: 'status' }),
@@ -303,7 +309,7 @@ async function searchReceiptVouchers(query: string, companyId: string): Promise<
   const key = `receiptVouchers:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await accountingApi.getReceiptVouchersPaginated(companyId, 1, 8);
+    const res = await accountingApi.getReceiptVouchersPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((v) => {
       const vn = str(v, 'voucherNumber');
@@ -322,7 +328,7 @@ async function searchPaymentVouchers(query: string, companyId: string): Promise<
   const key = `paymentVouchers:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await accountingApi.getPaymentVouchersPaginated(companyId, 1, 8);
+    const res = await accountingApi.getPaymentVouchersPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((v) => {
       const vn = str(v, 'voucherNumber');
@@ -341,9 +347,9 @@ async function searchWorkOrders(query: string, companyId: string): Promise<Entit
   const key = `workOrders:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await manufacturingApi.getWorkOrders(companyId);
+    const res = await manufacturingApi.getWorkOrdersPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
-    cached = res.data.map((w) => {
+    cached = res.data.items.map((w) => {
       const on = str(w, 'orderNumber');
       return {
         ...toMatch(w, 'workOrder', 'أمر تشغيل', { productName: 'productName', quantity: 'quantity', status: 'status' }),
@@ -360,9 +366,9 @@ async function searchBoms(query: string, companyId: string): Promise<EntityMatch
   const key = `boms:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await manufacturingApi.getBoms(companyId);
+    const res = await manufacturingApi.getBomsPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
-    cached = res.data.map((b) =>
+    cached = res.data.items.map((b) =>
       toMatch(b, 'bom', 'شجرة منتج', { productName: 'productName', totalCost: 'totalCost' }));
     cacheSet(key, cached);
   }
@@ -373,7 +379,10 @@ async function searchLeads(query: string, companyId: string): Promise<EntityMatc
   const key = `leads:${companyId}`;
   let cached = cacheGet(key);
   if (!cached) {
-    const res = await crmApi.getLeadsPaginated(companyId, 1, 8, { search: query });
+    // Query-independent fetch: the cache key is per-company, so the payload
+    // must be too (a query-filtered fetch would poison the cache for other
+    // queries). Ranking happens locally below.
+    const res = await crmApi.getLeadsPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
     if (!res.success || !res.data) return [];
     cached = res.data.items.map((l) => toMatch(l, 'lead', 'عميل محتمل', { phone: 'phone', status: 'status' }));
     cacheSet(key, cached);
@@ -491,6 +500,18 @@ export async function searchEntities(
 }
 
 /**
+ * Warm the entity cache in the background (fire-and-forget). Called when the
+ * chat panel mounts so the FIRST user message doesn't pay the cold-fetch cost
+ * of every entity type — by the time the user finishes typing, all lists are
+ * already in memory.
+ */
+export function prefetchEntityCache(companyId: string): void {
+  if (!companyId) return;
+  // Each searcher checks its own cache first — safe to call unconditionally.
+  void Promise.allSettled(ENTITY_SEARCHERS.map((s) => s.searcher('ا', companyId)));
+}
+
+/**
  * Pre-process a user message before it reaches the LLM.
  *
  * Scans for Arabic entity-indicating patterns, fuzzy-matches each candidate
@@ -554,21 +575,32 @@ export async function resolveEntitiesInText(
   const isProtected = (idx: number) => protectedSpans.some(([s, e]) => idx >= s && idx < e);
 
   // ── 2. Candidate tokens (with position, deduped by normalised form) ───
+  // Resolution runs BEFORE the LLM call, so it is strictly budgeted: only
+  // letter-bearing tokens are candidates (pure numbers never typo-match a
+  // name) and only the first MAX_RESOLVE_TOKENS of them are searched.
+  const MAX_RESOLVE_TOKENS = 16;
   interface Token { raw: string; norm: string; index: number }
   const tokens: Token[] = [];
   const seenTokens = new Set<string>();
   for (const m of text.matchAll(/[^\s،,.\n]+/g)) {
     const nw = norm(m[0]);
     if (nw.length < 2 || seenTokens.has(nw)) continue;
+    if (!/[\u0600-\u06FFa-zA-Z]/.test(nw)) continue;
     seenTokens.add(nw);
     tokens.push({ raw: m[0], norm: nw, index: m.index ?? 0 });
+    if (tokens.length >= MAX_RESOLVE_TOKENS) break;
   }
 
   // ── 3. Fuzzy-search each candidate against the DB (batched) ───────────
+  // Hard wall-clock budget: entity correction is best-effort and must never
+  // be the reason a message feels slow to send.
+  const RESOLVE_DEADLINE_MS = 2500;
+  const startedAt = Date.now();
   const results: EntityMatch[] = [];
   const seen = new Set<string>();
   const batchSize = 5;
   for (let i = 0; i < tokens.length; i += batchSize) {
+    if (Date.now() - startedAt > RESOLVE_DEADLINE_MS) break;
     const batch = tokens.slice(i, i + batchSize);
     const batchResults = await Promise.all(
       batch.map(async (token) => {

@@ -208,6 +208,7 @@ contextBridge.exposeInMainWorld('electronAI', {
   listSessions: () => ipcRenderer.invoke('ai:list-sessions', { sessionToken }),
   getSessionMessages: (payload) => ipcRenderer.invoke('ai:get-session-messages', { ...payload, sessionToken }),
   saveSession: (payload) => ipcRenderer.invoke('ai:save-session', { ...payload, sessionToken }),
+  renameSession: (payload) => ipcRenderer.invoke('ai:rename-session', { ...payload, sessionToken }),
   deleteSession: (payload) => ipcRenderer.invoke('ai:delete-session', { ...payload, sessionToken }),
 });
 
