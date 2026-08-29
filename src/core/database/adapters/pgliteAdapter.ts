@@ -352,7 +352,7 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
 ];
 
 const BRANCHES: Array<{ code: string; name: string; address: string }> = [
-  { code: 'HQ', name: 'الفرع الرئيسي - صنعاء', address: 'صنعاء - شارع الستين' },
+  { code: 'HQ', name: 'الفرع الرئيسي ', address: 'صنعاء ' },
 
 ];
 
