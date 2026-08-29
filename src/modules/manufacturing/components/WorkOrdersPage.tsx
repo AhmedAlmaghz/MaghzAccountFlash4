@@ -59,23 +59,36 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     setCompletionLines([]);
     if (status !== 'completed') return;
     // Ask the user for actual consumption: load the order's material lines.
+    // ACTUAL = PLANNED by default (best practice): fields are PRE-FILLED with
+    // the planned quantities/costs so completing a standard order is one
+    // click; the user only edits the rows that deviated.
     const res = await manufacturingApi.getWorkOrderById(id, companyId);
+    if (res.success && res.data) {
+      const wo = res.data.workOrder;
+      // Default produced qty = batches × BOM output (expected production).
+      const outQty = Math.max(Number(wo.bomOutputQuantity) || 1, 1);
+      setProducedQty(String(Math.round((Number(wo.quantity) || 0) * outQty * 10000) / 10000));
+    }
     if (res.success && res.data?.lines?.length) {
       setCompletionLines(
-        res.data.lines.map((l) => ({
-          id: l.id,
-          materialName: l.materialName || l.materialId.slice(0, 8),
-          plannedQuantity: Number(l.plannedQuantity) || 0,
-          // Pre-fill a previously recorded actual (if any); blank otherwise.
-          actualQuantity: l.actualQuantity ? String(Number(l.actualQuantity)) : '',
-          unitCost: Number(l.unitCost) || 0,
-          actualUnitCost: Number(l.actualUnitCost ?? l.unitCost) || 0,
-        }))
+        res.data.lines.map((l) => {
+          const planned = Number(l.plannedQuantity) || 0;
+          const hasActual = l.actualQuantity != null && Number(l.actualQuantity) > 0;
+          const hasActualCost = l.actualUnitCost != null && Number(l.actualUnitCost) > 0;
+          return {
+            id: l.id,
+            materialName: l.materialName || l.materialId.slice(0, 8),
+            plannedQuantity: planned,
+            actualQuantity: hasActual ? String(Number(l.actualQuantity)) : String(planned),
+            unitCost: Number(l.unitCost) || 0,
+            actualUnitCost: hasActualCost ? Number(l.actualUnitCost) : Number(l.unitCost) || 0,
+          };
+        })
       );
     }
   };
 
-  const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '', batchNumber: '', supervisorId: '' });
+  const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', notes: '', batchNumber: '', supervisorId: '' });
   const [availableBoms, setAvailableBoms] = useState<{ id: string; version: string; totalCost?: number; outputQuantity?: number }[]>([]);
   // Per-batch material quantities of the selected BOM (base, before × batches).
   const [bomBaseLines, setBomBaseLines] = useState<WorkOrderFormLine[] | null>(null);
@@ -89,13 +102,20 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     { category: 'other', description: '', amount: '' },
   ]);
 
-  const estimatedTotal = useMemo(() =>
-    lines.reduce((sum, l) => sum + (l.plannedQuantity * l.unitCost), 0),
-  [lines]);
+  // ── Live cost computation (server recomputes the same formula on save) ──
+  const materialsTotal = useMemo(
+    () => Math.round(lines.reduce((s, l) => s + ((Number(l.plannedQuantity) || 0) * (Number(l.unitCost) || 0)), 0) * 100) / 100,
+    [lines]
+  );
 
   const productionCostsTotal = useMemo(
-    () => productionCosts.reduce((s, c) => s + (Number(c.amount) || 0), 0),
+    () => Math.round(productionCosts.reduce((s, c) => s + (Number(c.amount) || 0), 0) * 100) / 100,
     [productionCosts]
+  );
+
+  const grandTotal = useMemo(
+    () => Math.round((materialsTotal + productionCostsTotal) * 100) / 100,
+    [materialsTotal, productionCostsTotal]
   );
 
   const batches = Math.max(Number(formData.quantity) || 0, 0);
@@ -104,8 +124,10 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     [batches, bomOutputQuantity]
   );
 
+  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+
   const resetForm = () => {
-    setFormData({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', totalCost: '', notes: '', batchNumber: '', supervisorId: '' });
+    setFormData({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: today, plannedEndDate: today, notes: '', batchNumber: '', supervisorId: '' });
     setAvailableBoms([]);
     setBomBaseLines(null);
     setBomOutputQuantity(1);
@@ -139,9 +161,8 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
       productId: wo.productId,
       bomId: wo.bomId || '',
       quantity: String(wo.quantity),
-      plannedStartDate: wo.plannedStartDate || '',
-      plannedEndDate: wo.plannedEndDate || '',
-      totalCost: String(wo.totalCost || ''),
+      plannedStartDate: wo.plannedStartDate || today,
+      plannedEndDate: wo.plannedEndDate || today,
       notes: wo.notes || '',
       batchNumber: wo.batchNumber || '',
       supervisorId: wo.supervisorId || '',
@@ -189,7 +210,12 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
       addToast('error', t('manufacturing.workOrders.requiredFields'));
       return;
     }
-    const totalCost = formData.totalCost ? Number(formData.totalCost) : estimatedTotal;
+    // Date validation (best practice): a schedule must make sense —
+    // the planned end can never be before the planned start.
+    if (formData.plannedStartDate && formData.plannedEndDate && formData.plannedEndDate < formData.plannedStartDate) {
+      addToast('error', t('manufacturing.workOrders.invalidDates'));
+      return;
+    }
     const pcs = productionCosts
       .filter((c) => Number(c.amount) > 0)
       .map((c) => ({ category: c.category, description: c.description || undefined, amount: Number(c.amount) }));
@@ -202,11 +228,12 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
       status: (editing ? editing.status : 'planned') as WorkOrder['status'],
       plannedStartDate: formData.plannedStartDate || undefined,
       plannedEndDate: formData.plannedEndDate || undefined,
-      totalCost: totalCost || undefined,
       batchNumber: formData.batchNumber || undefined,
       supervisorId: formData.supervisorId || undefined,
       productionCosts: pcs,
       notes: formData.notes || undefined,
+      // totalCost is computed SERVER-SIDE (materials + production costs) —
+      // the same formula the live card shows. No client override.
       // Empty default rows (materialId = '') must be excluded — zod rejects ''
       // as a uuid and the whole save fails silently otherwise.
       lines: lines
@@ -232,19 +259,28 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
   const handleStatusChange = async () => {
     if (!confirmStatus) return;
     const addToast = useToastStore.getState().addToast;
-    // Persist user-entered ACTUAL consumption before completing. Empty input
-    // falls back to the planned quantity (business rule: unentered = planned).
+    // Persist user-entered ACTUAL consumption before completing. The fields
+    // are PRE-FILLED with planned values; the user edits only what deviated.
     if (confirmStatus.status === 'completed' && completionLines.length > 0) {
+      const bad = completionLines.find((l) => Number(l.actualQuantity) < 0 || Number(l.actualUnitCost) < 0);
+      if (bad) {
+        addToast('error', t('manufacturing.workOrders.negativeValuesError'));
+        return;
+      }
       const consumptions = completionLines.map((l) => {
         const entered = l.actualQuantity.trim() === '' ? NaN : Number(l.actualQuantity);
         const actual = Number.isFinite(entered) && entered >= 0 ? entered : l.plannedQuantity;
-        return { id: l.id, actualQuantity: actual, actualUnitCost: l.actualUnitCost, unitCost: l.unitCost };
+        return { id: l.id, actualQuantity: actual, actualUnitCost: Number(l.actualUnitCost) || l.unitCost, unitCost: l.unitCost };
       });
       const upd = await manufacturingApi.batchUpdateConsumptions(consumptions, companyId);
       if (!upd.success) {
         addToast('error', upd.error || t('common.error'));
         return;
       }
+    }
+    if (confirmStatus.status === 'completed' && producedQty && Number(producedQty) < 0) {
+      addToast('error', t('manufacturing.workOrders.negativeValuesError'));
+      return;
     }
     const res = await changeStatus(
       confirmStatus.id,
@@ -315,6 +351,26 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     { key: 'quantity', header: t('manufacturing.table.batches'), width: '90px', render: (row: WorkOrder) => <span className="tabular-nums font-medium">{row.quantity}</span> },
     { key: 'batchNumber', header: t('manufacturing.table.batchNumber'), width: '130px', render: (row: WorkOrder) => row.batchNumber ? <span className="font-mono text-xs bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300 px-2 py-1 rounded border border-cyan-200 dark:border-cyan-800">{row.batchNumber}</span> : '—' },
     { key: 'supervisorName', header: t('manufacturing.table.supervisor'), width: '130px', render: (row: WorkOrder) => row.supervisorName ? <span className="text-sm text-slate-600 dark:text-slate-300">{row.supervisorName}</span> : '—' },
+    {
+      key: 'dates',
+      header: t('manufacturing.table.dates'),
+      width: '160px',
+      render: (row: WorkOrder) => {
+        const planned = row.plannedStartDate || row.plannedEndDate
+          ? `${row.plannedStartDate || '—'} → ${row.plannedEndDate || '—'}`
+          : null;
+        const actual = row.actualStartDate || row.actualEndDate
+          ? `${row.actualStartDate || '—'} → ${row.actualEndDate || '—'}`
+          : null;
+        return (
+          <div className="text-[11px] leading-tight space-y-0.5">
+            {planned && <div className="text-slate-500 dark:text-slate-400 tabular-nums" title={t('manufacturing.workOrders.plannedDatesTitle')}>{planned}</div>}
+            {actual && <div className="text-teal-600 dark:text-teal-400 font-medium tabular-nums" title={t('manufacturing.workOrders.actualDatesTitle')}>{actual}</div>}
+            {!planned && !actual && <span className="text-slate-300">—</span>}
+          </div>
+        );
+      },
+    },
     { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: WorkOrder) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
     { key: 'status', header: t('manufacturing.table.status'), width: '120px', render: (row: WorkOrder) => <StatusBadge status={row.status} /> },
     { key: 'actions', header: '', width: '210px', render: (row: WorkOrder) => (
@@ -492,7 +548,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
               }} placeholder={t('manufacturing.form.selectProduct')} />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.bom')}</label>
               <select value={formData.bomId} onChange={async (e) => {
@@ -508,9 +564,6 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                     setBomBaseLines(base);
                     const n = Math.max(Number(formData.quantity) || 1, 1);
                     setLines(base.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
-                    if (bom.totalCost) {
-                      setFormData((prev) => ({ ...prev, totalCost: String(Math.round(bom.totalCost! * n * 100) / 100) }));
-                    }
                   }
                 } else {
                   setBomBaseLines(null);
@@ -535,13 +588,10 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                 const n = Math.max(Number(val) || 1, 1);
                 if (bomBaseLines) {
                   setLines(bomBaseLines.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
-                  const bom = availableBoms.find((b) => b.id === formData.bomId);
-                  if (bom?.totalCost) setFormData((prev) => ({ ...prev, totalCost: String(Math.round(bom.totalCost! * n * 100) / 100) }));
                 }
               }}
               helperText={t('manufacturing.workOrders.batchesHint')}
             />
-            <Input label={t('manufacturing.workOrders.totalCost')} type="number" value={formData.totalCost} onChange={(e) => setFormData((prev) => ({ ...prev, totalCost: e.target.value }))} />
           </div>
           {formData.bomId && (
             <div className="rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 px-3 py-2 text-sm text-teal-800 dark:text-teal-300 flex items-center gap-2">
@@ -551,8 +601,11 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
           )}
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('manufacturing.workOrders.plannedStartDate')} type="date" value={formData.plannedStartDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedStartDate: e.target.value }))} />
-            <Input label={t('manufacturing.workOrders.plannedEndDate')} type="date" value={formData.plannedEndDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedEndDate: e.target.value }))} />
+            <Input label={t('manufacturing.workOrders.plannedEndDate')} type="date" min={formData.plannedStartDate || undefined} value={formData.plannedEndDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedEndDate: e.target.value }))} />
           </div>
+          {formData.plannedStartDate && formData.plannedEndDate && formData.plannedEndDate < formData.plannedStartDate && (
+            <p className="text-xs text-rose-600 font-medium">{t('manufacturing.workOrders.invalidDates')}</p>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1"><UserCog size={13} /> {t('manufacturing.workOrders.supervisor')}</label>
@@ -646,10 +699,23 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
               ))}
             </div>
             <Button variant="secondary" className="mt-3" onClick={() => setLines((prev) => [...prev, { materialId: '', plannedQuantity: 1, unitCost: 0 }])}>+ {t('manufacturing.actions.addMaterial')}</Button>
-            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between">
-              <span className="font-semibold text-slate-700 dark:text-slate-200">{t('manufacturing.workOrders.estimatedCostAuto')}:</span>
-              <span className="font-bold text-primary-600 tabular-nums">{formatCurrency(estimatedTotal)}</span>
+          </div>
+
+          {/* Live auto-total card (server recomputes the same formula on save) */}
+          <div className="rounded-xl border border-teal-200 dark:border-teal-800 bg-gradient-to-br from-teal-50 to-emerald-50 dark:from-teal-900/20 dark:to-emerald-900/20 p-4 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600 dark:text-slate-300">{t('manufacturing.workOrders.materialsCost')}</span>
+              <span className="font-semibold tabular-nums">{formatCurrency(materialsTotal)}</span>
             </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600 dark:text-slate-300">{t('manufacturing.workOrders.productionCostsTotal')}</span>
+              <span className="font-semibold tabular-nums">{formatCurrency(productionCostsTotal)}</span>
+            </div>
+            <div className="border-t border-teal-200 dark:border-teal-800 pt-2 flex items-center justify-between">
+              <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5"><Factory size={15} className="text-teal-600" /> {t('manufacturing.workOrders.autoTotalCost')}</span>
+              <span className="text-lg font-extrabold tabular-nums text-teal-700 dark:text-teal-300">{formatCurrency(grandTotal)}</span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('manufacturing.workOrders.autoTotalHint')}</p>
           </div>
         </div>
       </Modal>
@@ -704,6 +770,18 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3"><span className="text-slate-500">{t('manufacturing.form.product')}:</span><p className="font-semibold">{viewing.workOrder.productName || viewing.workOrder.productId}</p></div>
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3"><span className="text-slate-500">{t('manufacturing.table.status')}:</span><p className="font-semibold"><StatusBadge status={viewing.workOrder.status} /></p></div>
             </div>
+            {(viewing.workOrder.plannedStartDate || viewing.workOrder.plannedEndDate || viewing.workOrder.actualStartDate || viewing.workOrder.actualEndDate) && (
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="bg-slate-50 dark:bg-slate-800 rounded p-3">
+                  <span className="text-xs text-slate-500 block mb-0.5">{t('manufacturing.workOrders.plannedDatesTitle')}</span>
+                  <p className="font-semibold tabular-nums">{viewing.workOrder.plannedStartDate || '—'} → {viewing.workOrder.plannedEndDate || '—'}</p>
+                </div>
+                <div className="bg-teal-50 dark:bg-teal-900/20 rounded p-3">
+                  <span className="text-xs text-slate-500 block mb-0.5">{t('manufacturing.workOrders.actualDatesTitle')}</span>
+                  <p className="font-semibold tabular-nums text-teal-700 dark:text-teal-300">{viewing.workOrder.actualStartDate || '—'} → {viewing.workOrder.actualEndDate || '—'}</p>
+                </div>
+              </div>
+            )}
             {viewing.workOrder.status === 'completed' && Number(viewing.workOrder.totalCost) > 0 && (
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div className="bg-blue-50 dark:bg-blue-900/20 rounded p-3"><span className="text-slate-500">{t('manufacturing.workOrders.totalCost')}:</span><p className="font-semibold text-blue-700 dark:text-blue-300">{formatCurrency(Number(viewing.workOrder.totalCost))}</p></div>
@@ -715,6 +793,28 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
               <div className="bg-slate-50 dark:bg-slate-800 rounded p-3 text-sm">
                 <span className="text-slate-500">{t('manufacturing.form.notes')}:</span>
                 <p className="mt-1 text-slate-700 dark:text-slate-300">{viewing.workOrder.notes}</p>
+              </div>
+            )}
+            {(viewing.workOrder.productionCosts?.length || Number(viewing.workOrder.totalCost) > 0) && (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-1.5 text-sm">
+                <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">{t('manufacturing.workOrders.costBreakdown')}</h4>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600 dark:text-slate-300">{t('manufacturing.workOrders.materialsCost')}</span>
+                  <span className="font-semibold tabular-nums">{formatCurrency(viewing.lines.reduce((s, l) => s + (Number(l.actualQuantity) || Number(l.plannedQuantity) || 0) * (Number(l.actualUnitCost) || Number(l.unitCost) || 0), 0))}</span>
+                </div>
+                {(viewing.workOrder.productionCosts || []).map((pc, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <span className="text-slate-600 dark:text-slate-300">
+                      {pc.category === 'labor' ? t('manufacturing.costs.labor') : pc.category === 'energy' ? t('manufacturing.costs.energy') : pc.category === 'packaging' ? t('manufacturing.costs.packaging') : t('manufacturing.costs.other')}
+                      {pc.description ? <span className="text-slate-400 text-xs"> — {pc.description}</span> : null}
+                    </span>
+                    <span className="font-semibold tabular-nums">{formatCurrency(pc.amount)}</span>
+                  </div>
+                ))}
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{t('manufacturing.workOrders.totalCost')}</span>
+                  <span className="font-extrabold tabular-nums text-teal-700 dark:text-teal-300">{formatCurrency(Number(viewing.workOrder.totalCost) || 0)}</span>
+                </div>
               </div>
             )}
             <Table<WorkOrderLine>
@@ -811,7 +911,8 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                 </label>
               </div>
             )}
-            {/* COMPLETE: produced qty + output warehouse + actual consumption */}
+            {/* COMPLETE: produced qty + actual consumption (pre-filled with
+                planned = best practice) + output warehouse */}
             {confirmStatus.status === 'completed' && (
               <>
                 <div>
@@ -826,26 +927,52 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                 </div>
                 {completionLines.length > 0 && (
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1.5">{t('manufacturing.wo.actualConsumption')}</label>
-                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800 max-h-52 overflow-y-auto">
-                      {completionLines.map((l, i) => (
-                        <div key={l.id} className="flex items-center gap-3 px-3 py-2">
-                          <span className="flex-1 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={l.materialName}>{l.materialName}</span>
-                          <span className="text-[11px] text-slate-400 tabular-nums whitespace-nowrap">
-                            {t('manufacturing.status.planned')}: {formatCurrency(l.plannedQuantity)}
-                          </span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            value={l.actualQuantity}
-                            onChange={(e) => setCompletionLines((prev) => prev.map((x, xi) => (xi === i ? { ...x, actualQuantity: e.target.value } : x)))}
-                            placeholder={String(l.plannedQuantity)}
-                            aria-label={`${t('manufacturing.status.actual')} — ${l.materialName}`}
-                            className="w-24 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-xs tabular-nums text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500"
-                          />
-                        </div>
-                      ))}
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">{t('manufacturing.wo.actualConsumption')}</label>
+                      <span className="text-[11px] text-teal-600 dark:text-teal-400 font-medium">{t('manufacturing.wo.actualPrefilledHint')}</span>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto">
+                      {completionLines.map((l, i) => {
+                        const actual = Number(l.actualQuantity) || 0;
+                        const variance = Math.round((actual - l.plannedQuantity) * 10000) / 10000;
+                        const variancePct = l.plannedQuantity > 0 ? Math.round((variance / l.plannedQuantity) * 10000) / 100 : 0;
+                        return (
+                          <div key={l.id} className="px-3 py-2.5 space-y-1.5">
+                            <div className="flex items-center gap-3">
+                              <span className="flex-1 text-xs font-medium text-slate-700 dark:text-slate-300 truncate" title={l.materialName}>{l.materialName}</span>
+                              <span className="text-[11px] text-slate-400 tabular-nums whitespace-nowrap">
+                                {t('manufacturing.status.planned')}: {l.plannedQuantity}
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={l.actualQuantity}
+                                onChange={(e) => setCompletionLines((prev) => prev.map((x, xi) => (xi === i ? { ...x, actualQuantity: e.target.value } : x)))}
+                                aria-label={`${t('manufacturing.status.actual')} — ${l.materialName}`}
+                                className="w-24 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-xs tabular-nums text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500"
+                              />
+                              <span className={`text-[11px] font-semibold tabular-nums w-16 text-left ${variance > 0 ? 'text-rose-600' : variance < 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                {variance === 0 ? '±0' : `${variance > 0 ? '+' : ''}${variance} (${variancePct}%)`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="flex-1 text-[11px] text-slate-400">
+                                {t('manufacturing.bom.unitCost')}: {formatCurrency(l.unitCost)} → {t('manufacturing.workOrders.actualUnitCost')}:
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={String(l.actualUnitCost)}
+                                onChange={(e) => setCompletionLines((prev) => prev.map((x, xi) => (xi === i ? { ...x, actualUnitCost: Number(e.target.value) || 0 } : x)))}
+                                aria-label={`${t('manufacturing.workOrders.actualUnitCost')} — ${l.materialName}`}
+                                className="w-24 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-[11px] tabular-nums text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                     <p className="text-xs text-slate-500 mt-1.5">{t('manufacturing.wo.actualConsumptionHint')}</p>
                   </div>

@@ -81,6 +81,7 @@ function mapWorkOrderRow(r: Record<string, unknown>): WorkOrder {
     batchNumber: r.batch_number ? String(r.batch_number) : undefined,
     supervisorId: r.supervisor_id ? String(r.supervisor_id) : undefined,
     supervisorName: r.supervisor_name ? String(r.supervisor_name) : undefined,
+    bomOutputQuantity: r.bom_output_quantity != null && r.bom_output_quantity !== '' ? Number(r.bom_output_quantity) : undefined,
     productionCosts: parseProductionCosts(r.production_costs),
     notes: r.notes ? String(r.notes) : undefined,
     createdBy: r.created_by ? String(r.created_by) : undefined,
@@ -464,7 +465,7 @@ export const manufacturingApi = {
         return { success: true, data: { workOrder, lines } };
       }
       const adapter = await getDbAdapter();
-      const sql = 'SELECT w.*, p.name_ar as product_name, e.full_name as supervisor_name FROM work_orders w LEFT JOIN products p ON w.product_id = p.id LEFT JOIN employees e ON w.supervisor_id = e.id WHERE w.id = $1 AND w.company_id = $2 LIMIT 1';
+      const sql = 'SELECT w.*, p.name_ar as product_name, e.full_name as supervisor_name, COALESCE(b.output_quantity, 1) AS bom_output_quantity FROM work_orders w LEFT JOIN products p ON w.product_id = p.id LEFT JOIN employees e ON w.supervisor_id = e.id LEFT JOIN boms b ON b.id = w.bom_id WHERE w.id = $1 AND w.company_id = $2 LIMIT 1';
       const res = await adapter.query(sql, [id, companyId]);
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
       const workOrder = mapWorkOrderRow(res.rows[0] as Record<string, unknown>);
@@ -485,6 +486,12 @@ export const manufacturingApi = {
       const batchNumber = data.batchNumber && String(data.batchNumber).trim() !== ''
         ? String(data.batchNumber).trim()
         : await generateBatchNumber(data.companyId);
+      // Server-side source of truth (best practice): estimated total cost is
+      // ALWAYS materials + production costs. The UI computes it live, but the
+      // server recomputes so a stale/malicious client can never desync it.
+      const materialsTotal = (data.lines || []).reduce((s, l) => s + (Number(l.plannedQuantity) || 0) * (Number(l.unitCost) || 0), 0);
+      const costsTotal = (data.productionCosts || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const autoTotalCost = Math.round((materialsTotal + costsTotal) * 100) / 100;
       if (isElectronPg()) {
         const result = await invokeMfgRpc('createWorkOrder', {
           orderNumber: data.orderNumber,
@@ -494,7 +501,7 @@ export const manufacturingApi = {
           status: data.status || 'planned',
           plannedStartDate: data.plannedStartDate ?? null,
           plannedEndDate: data.plannedEndDate ?? null,
-          totalCost: data.totalCost ?? null,
+          totalCost: autoTotalCost,
           batchNumber,
           supervisorId: data.supervisorId ?? null,
           productionCosts: data.productionCosts ?? [],
@@ -509,7 +516,7 @@ export const manufacturingApi = {
       // consumption lines insert together; avoids the `adapter.transaction`
       // result shape mismatch (`results[0]` is `{rows, rowCount}`, not rows).
       const adapter = await getDbAdapter();
-      const params: unknown[] = [data.companyId, data.orderNumber, data.productId, data.bomId ?? null, data.quantity, data.status, data.plannedStartDate ?? null, data.plannedEndDate ?? null, data.totalCost ?? null, batchNumber, safeUserId(data.supervisorId), JSON.stringify(data.productionCosts ?? []), data.notes ?? null, safeUserId(_userId)];
+      const params: unknown[] = [data.companyId, data.orderNumber, data.productId, data.bomId ?? null, data.quantity, data.status, data.plannedStartDate ?? null, data.plannedEndDate ?? null, autoTotalCost, batchNumber, safeUserId(data.supervisorId), JSON.stringify(data.productionCosts ?? []), data.notes ?? null, safeUserId(_userId)];
       let sql = `WITH wo AS (
         INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, batch_number, supervisor_id, production_costs, notes, created_by)
         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::numeric, $6, $7::date, $8::date, $9::numeric, $10, $11::uuid, $12::jsonb, $13, $14::uuid) RETURNING id
@@ -585,6 +592,40 @@ export const manufacturingApi = {
         }
       }
       if (isElectronPg()) {
+        // Auto-recompute total cost whenever the cost drivers change.
+        // The server reads the CURRENT lines/production costs from the DB when
+        // the incoming payload doesn't carry them, then applies the same
+        // formula as createWorkOrder (materials + production costs).
+        let linesForCost: { materialId: string; plannedQuantity: number; unitCost: number }[] | undefined;
+        let pcsForCost: ProductionCost[] | undefined;
+        const costRelevant = data.lines !== undefined || data.productionCosts !== undefined;
+        if (costRelevant) {
+          const curRes = await (await getDbAdapter()).query(
+            `SELECT c.material_id, c.planned_quantity, c.unit_cost, w.production_costs, w.status
+               FROM work_orders w
+               JOIN work_order_consumptions c ON c.work_order_id = w.id
+              WHERE w.id = $1::uuid AND w.company_id = $2::uuid`,
+            [id, companyId]
+          );
+          const curRows = (curRes.rows || []) as Record<string, unknown>[];
+          const curStatus = curRows[0]?.status ? String(curRows[0].status) : '';
+          // Completed orders keep their final posted cost — the estimate stays
+          // live only while the order is still editable (planned/in_progress).
+          if (curStatus !== 'completed') {
+            const curPcs = parseProductionCosts(curRows[0]?.production_costs);
+            linesForCost = data.lines
+              ? (data.lines as { materialId?: string; plannedQuantity?: number; unitCost?: number }[])
+                  .filter((l) => l.materialId && Number(l.plannedQuantity) > 0)
+                  .map((l) => ({ materialId: String(l.materialId), plannedQuantity: Number(l.plannedQuantity), unitCost: Number(l.unitCost) || 0 }))
+              : curRows.map((r) => ({ materialId: String(r.material_id), plannedQuantity: Number(r.planned_quantity) || 0, unitCost: Number(r.unit_cost) || 0 }));
+            pcsForCost = data.productionCosts ?? curPcs;
+          }
+        }
+        const materialsTotal = (linesForCost || []).reduce((s, l) => s + l.plannedQuantity * l.unitCost, 0);
+        const costsTotal = (pcsForCost || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+        const autoTotalCost = (linesForCost !== undefined || pcsForCost !== undefined)
+          ? Math.round((materialsTotal + costsTotal) * 100) / 100
+          : undefined;
         const result = await invokeMfgRpc('updateWorkOrder', {
           data: {
             id,
@@ -598,7 +639,7 @@ export const manufacturingApi = {
             plannedEndDate: data.plannedEndDate ?? undefined,
             actualStartDate: data.actualStartDate ?? undefined,
             actualEndDate: data.actualEndDate ?? undefined,
-            totalCost: data.totalCost ?? undefined,
+            totalCost: autoTotalCost ?? data.totalCost ?? undefined,
             batchNumber: data.batchNumber ?? undefined,
             supervisorId: data.supervisorId ?? undefined,
             productionCosts: data.productionCosts ?? undefined,
@@ -628,7 +669,38 @@ export const manufacturingApi = {
       if (data.plannedEndDate !== undefined) { fields.push(`planned_end_date = $${idx++}`); values.push(data.plannedEndDate); }
       if (data.actualStartDate !== undefined) { fields.push(`actual_start_date = $${idx++}`); values.push(data.actualStartDate); }
       if (data.actualEndDate !== undefined) { fields.push(`actual_end_date = $${idx++}`); values.push(data.actualEndDate); }
-      if (data.totalCost !== undefined) { fields.push(`total_cost = $${idx++}`); values.push(data.totalCost); }
+      // Auto-recompute estimated total cost (same formula as create) whenever
+      // the cost drivers are part of this update. For non-completed orders the
+      // estimate stays live; completed orders keep their final posted cost.
+      const costRelevant = data.lines !== undefined || data.productionCosts !== undefined;
+      if (costRelevant) {
+        const stRes2 = await adapter.query(
+          `SELECT status FROM work_orders WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+          [id, companyId]
+        );
+        const st2 = stRes2.rows?.[0]?.status ? String(stRes2.rows[0].status) : '';
+        if (st2 !== 'completed') {
+          const curRes = await adapter.query(
+            `SELECT c.material_id, c.planned_quantity, c.unit_cost, w.production_costs
+               FROM work_orders w
+               JOIN work_order_consumptions c ON c.work_order_id = w.id
+              WHERE w.id = $1::uuid AND w.company_id = $2::uuid`,
+            [id, companyId]
+          );
+          const curRows = (curRes.rows || []) as Record<string, unknown>[];
+          const effLines = data.lines
+            ? data.lines.filter((l) => l.materialId && Number(l.plannedQuantity) > 0)
+            : curRows.map((r) => ({ materialId: String(r.material_id), plannedQuantity: Number(r.planned_quantity) || 0, unitCost: Number(r.unit_cost) || 0 }));
+          const effPcs = data.productionCosts ?? parseProductionCosts(curRows[0]?.production_costs);
+          const mTotal = effLines.reduce((s, l) => s + Number(l.plannedQuantity || 0) * Number(l.unitCost || 0), 0);
+          const cTotal = effPcs.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+          fields.push(`total_cost = $${idx++}`);
+          values.push(Math.round((mTotal + cTotal) * 100) / 100);
+        }
+      } else if (data.totalCost !== undefined) {
+        fields.push(`total_cost = $${idx++}`);
+        values.push(data.totalCost);
+      }
       if (data.batchNumber !== undefined) { fields.push(`batch_number = $${idx++}`); values.push(data.batchNumber || null); }
       if (data.supervisorId !== undefined) { fields.push(`supervisor_id = $${idx++}`); values.push(safeUserId(data.supervisorId)); }
       if (data.productionCosts !== undefined) { fields.push(`production_costs = $${idx++}::jsonb`); values.push(JSON.stringify(data.productionCosts ?? [])); }
@@ -923,7 +995,7 @@ export const manufacturingApi = {
       const outputWh = opts.outputWarehouseId || (wo.output_warehouse_id ? String(wo.output_warehouse_id) : fallbackWh);
 
       const consRes = await adapter.query(
-        `SELECT c.material_id, c.planned_quantity, c.actual_quantity, c.unit_cost, c.actual_unit_cost
+        `SELECT c.id, c.material_id, c.planned_quantity, c.actual_quantity, c.unit_cost, c.actual_unit_cost
            FROM work_order_consumptions c WHERE c.work_order_id = $1::uuid`,
         [id]
       );
@@ -932,17 +1004,28 @@ export const manufacturingApi = {
 
       // Consumption DELTA vs what START already issued (planned quantities):
       //   delta > 0 → extra issue (out); delta < 0 → return surplus (in).
-      // Material cost rolls up from ACTUAL qty × ACTUAL unit cost (fallback unit_cost);
-      // production costs (labor/energy/packaging/other) are added on top.
+      // BEST PRACTICE — actual = planned unless the user overrode it:
+      //   actual_quantity  defaults to planned_quantity when NULL
+      //   actual_unit_cost defaults to unit_cost when NULL
+      // The defaults are PERSISTED below so variance reports read real values
+      // instead of mixed NULL/planned data.
       const statements: Array<{ sql: string; params?: unknown[] }> = [];
       let materialsCost = 0;
 
       for (const r of consRows) {
         const materialId = String(r.material_id);
         const planned = Number(r.planned_quantity) || 0;
-        const actual = Number(r.actual_quantity) || planned;
-        const unitCost = Number(r.actual_unit_cost ?? r.unit_cost) || 0;
+        // Schema DEFAULT '0' means "not recorded" → fall back to planned.
+        const actual = r.actual_quantity != null && r.actual_quantity !== '' && Number(r.actual_quantity) > 0 ? Number(r.actual_quantity) : planned;
+        const unitCost = r.actual_unit_cost != null && r.actual_unit_cost !== '' && Number(r.actual_unit_cost) > 0 ? Number(r.actual_unit_cost) : (Number(r.unit_cost) || 0);
         materialsCost += actual * unitCost;
+        // Persist the effective actuals (fill defaults once, at completion).
+        // NOTE: actual_quantity/actual_unit_cost have DEFAULT '0' in the
+        // schema, so 0 means "not entered" → treated as planned above.
+        statements.push({
+          sql: `UPDATE work_order_consumptions SET actual_quantity = $2::numeric, actual_unit_cost = $3::numeric, updated_at = NOW() WHERE id = $1::uuid`,
+          params: [String(r.id), actual, unitCost],
+        });
         const delta = Math.round((actual - planned) * 10000) / 10000;
         if (delta === 0) continue;
 
@@ -1058,10 +1141,10 @@ export const manufacturingApi = {
           // فائض/عجز لكل مادة بحسابها الخاص (أفضل من تجميع واحد)
           for (const r of consRows) {
             const planned = Number(r.planned_quantity) || 0;
-            const actual = r.actual_quantity != null && r.actual_quantity !== '' ? Number(r.actual_quantity) : planned;
+            const actual = r.actual_quantity != null && r.actual_quantity !== '' && Number(r.actual_quantity) > 0 ? Number(r.actual_quantity) : planned;
             const deltaQty = Math.round((actual - planned) * 10000) / 10000;
             if (deltaQty === 0) continue;
-            const uc = Number(r.actual_unit_cost ?? r.unit_cost) || 0;
+            const uc = r.actual_unit_cost != null && r.actual_unit_cost !== '' && Number(r.actual_unit_cost) > 0 ? Number(r.actual_unit_cost) : (Number(r.unit_cost) || 0);
             const deltaCost = Math.round(deltaQty * uc * 100) / 100;
             if (deltaCost === 0) continue;
             const matAccId = await resolveInventoryAccountId(companyId, String(r.material_id));
@@ -1292,12 +1375,21 @@ export const manufacturingApi = {
         return { success: r.success, error: r.error };
       }
 
+      // Reopen (cancelled → planned): reset the operational trail so the
+      // order can start fresh — actual dates, WIP cost and recorded actuals
+      // belong to the cancelled run, not the new one.
       {
         const adapter = await getDbAdapter();
         const result = await adapter.query(
-          `UPDATE work_orders SET status = $1, updated_at = NOW()${_userId ? ', updated_by = $2' : ''} WHERE id = $${_userId ? 3 : 2} AND company_id = $${_userId ? 4 : 3}`,
+          `UPDATE work_orders SET status = $1, actual_start_date = NULL, actual_end_date = NULL, wip_materials_cost = 0, updated_at = NOW()${_userId ? ', updated_by = $2' : ''} WHERE id = $${_userId ? 3 : 2} AND company_id = $${_userId ? 4 : 3}`,
           _userId ? [status, _userId, id, companyId] : [status, id, companyId]
         );
+        if (result.success) {
+          await adapter.query(
+            `UPDATE work_order_consumptions SET actual_quantity = 0, actual_unit_cost = 0 WHERE work_order_id = $1::uuid`,
+            [id]
+          );
+        }
         return { success: result.success, error: result.error };
       }
     } catch (e) {

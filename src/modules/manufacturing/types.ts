@@ -53,6 +53,8 @@ export interface WorkOrder {
   batchNumber?: string;
   supervisorId?: string;
   supervisorName?: string;
+  /** BOM output quantity per batch (joined for expected-output math). */
+  bomOutputQuantity?: number;
   /** Labor / energy / packaging / other costs — capitalized into product cost on completion. */
   productionCosts?: ProductionCost[];
   notes?: string;

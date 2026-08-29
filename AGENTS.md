@@ -3743,4 +3743,33 @@ npx drizzle-kit migrate
 - **التحقق**: `tsc -b` 0 ✓ | `eslint --max-warnings=0` 0 ✓ | migrations 102 ✓ | JE-generator 17 ✓ | manufacturing 28 ✓ | seedDemoData 13 ✓ | pgliteSmoke (يشغّل 0012 فعلياً) ✓ | `db:check` clean ✓ | build 1m08s ✓
 - **القاعدة الذهبية المضافة**: كل حساب يُستخدم في posting يجب أن يكون قابلاً للتكوين عبر default_accounts — الأكواد المضمّنة hardcoded fallback فقط. سلسلة FG: product-type override أولاً (أدق)، ثم default_accounts، ثم الكود المحاسبي، ثم حساب المخزون العام (آخر وسيلة)
 
-*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.6.4*
+### المرحلة 71 (v0.6.5): أوامر التشغيل الاحترافية — تكلفة آلية + فعلي=مخطط افتراضياً + تواريخ
+- **الهدف**: ضبط أمر التشغيل وفق أفضل الممارسات العالمية (Odoo/MRP-lite): التكلفة الإجمالية آلية، الفعلي يطابق المخطط افتراضياً عند الإكمال، تفعيل التواريخ، وواجهة محسّنة
+- **التكلفة الإجمالية = المواد + تكاليف الإنتاج (آلي دائماً)**:
+  - `createWorkOrder`: الـ API يحسب `autoTotalCost = Σ(plannedQty × unitCost) + Σ(productionCosts)` — مصدر الحقيقة على الـ server، لا يمكن للـ client تخطيه
+  - `updateWorkOrder` (Electron + PGlite): إعادة الحساب عند تغيّر lines/production_costs — يقرأ الحالي من DB عند غياب الـ payload؛ الأوامر المكتملة تحتفظ بتكلفتها المرحّلة النهائية
+  - الـ UI: بطاقة إجمالي حيّة (مواد / تكاليف إنتاج / إجمالي) تتحدث لحظياً مع كل تعديل — حقل `totalCost` اليدوي **حُذف نهائياً** من الفورم والـ payload
+- **الفعلي = المخطط افتراضياً عند الإكمال** (world-class UX):
+  - مودال الإكمال يُعبّأ مسبقاً: `producedQty = batches × BOM.outputQuantity`، وكل سطر استهلاك `actualQuantity = plannedQuantity` و `actualUnitCost = unitCost`
+  - المستخدم يعدّل **فقط ما انحرف** — مع مؤشر انحراف حي لكل مادة (كمية + نسبة %: أخضر للفائض، أحمر للزيادة، ±0 للمطابقة)
+  - `completeWorkOrder` (server): `actual_quantity = 0 (DEFAULT)` ⇒ يُعامل كمخطط؛ `actual_unit_cost = 0` ⇒ unit_cost؛ **وتُثبَّت القيم الفعالة فعلياً في DB عند الإكمال** (`UPDATE work_order_consumptions SET actual_*, updated_at`) حتى تقرأ تقارير الانحراف قيماً حقيقية لا NULL/0 مختلطة
+  - حماية من القيم السالبة (client + toast)
+- **التواريخ مفعّلة بالكامل**:
+  - `plannedStartDate`/`plannedEndDate` افتراضياً **تاريخ اليوم** في الإنشاء والتعديل
+  - تحقق: `endDate < startDate` ⇒ خطأ (client toast + منع الحفظ)
+  - `startWorkOrder` يختم `actual_start_date = CURRENT_DATE`؛ `completeWorkOrder` يختم `actual_end_date` (موجودان سابقاً — تم التأكد)
+  - **إعادة الفتح (cancelled → planned)**: يصفّر المسار التشغيلي — `actual_start_date/actual_end_date = NULL`، `wip_materials_cost = 0`، و `actual_quantity/actual_unit_cost = 0` في كل سطور الاستهلاك (الأمر يبدأ من جديد نظيفاً)
+- **واجهة وتجربة مستخدم**:
+  - عمود «التواريخ» في الجدول: المخطط (رمادي) + الفعلي (teal) كلٌّ في سطر
+  - مودال التفاصيل: بطاقتا «الجدول الزمني المخطط/الفعلي» + بطاقة **تفصيل التكلفة** (مواد + كل تكلفة إنتاج + الإجمالي)
+  - `bomOutputQuantity` أُضيف للـ type + الـ mapper + استعلام `getWorkOrderById` (JOIN boms) — دفعات × ناتج الدفعة متاح في أي مكان
+  - i18n: +13 مفاتيح متوازنة (`workOrders.materialsCost/productionCostsTotal/autoTotalCost/autoTotalHint/invalidDates/negativeValuesError/plannedDatesTitle/actualDatesTitle/costBreakdown` + `wo.actualPrefilledHint` + `table.dates`)
+- **التحقق**: `tsc -b` 0 ✓ | `eslint --max-warnings=0` 0 ✓ | manufacturing 28 ✓ | i18n balance 6 ✓ | build 25.87s ✓
+- **القواعد الذهبية المضافة**:
+  - **التكلفة التقديرية تُحسب في الـ API layer دائماً**: الـ UI يعرضها live لكن لا يملك حق إرسالها — نفس صيغة الطبقتين (مواد + تكاليف إنتاج) حتى لا يحدث أي انفصال
+  - **`DEFAULT '0'` في schema = "غير مُدخل"**: `actual_quantity = 0` لا تعني استهلاكاً صفرياً بل تراجع للمخطط — البوابة `Number(x) > 0 ? x : planned`
+  - **ثبّت القيم الفعالة عند الإكمال**: عدم حفظ الافتراضات يترك DB بصيغة NULL/0 مختلطة وتقارير الانحراف تخمن — الحفظ مرة واحدة عند الإكمال
+  - **إعادة الفتح تصفّر المسار التشغيلي**: actual dates/WIP/actuals تنتمي للتشغيل الملغي لا للجديد
+  - **الإكمال بنقرة واحدة للأمر القياسي**: التعبئة المسبقة بالمخطط تعني أن الأوامر المطابقة تُكمل بضغطة زر — والتعديل فقط لما انحرف (variance-by-exception UX)
+
+*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.6.5*

@@ -1267,7 +1267,16 @@
       "created": "Work order created successfully",
       "updated": "Work order updated successfully",
       "requiredFields": "Please fill in the required fields: order number, product and quantity",
-      "unitCost": "Unit Cost"
+      "unitCost": "Unit Cost",
+      "materialsCost": "Total Raw Materials Cost",
+      "productionCostsTotal": "Total Production Costs",
+      "autoTotalCost": "Total Production Cost (auto)",
+      "autoTotalHint": "Computed automatically = raw materials + production costs; updates live as values change",
+      "invalidDates": "Planned end date cannot be before planned start date",
+      "negativeValuesError": "Negative values are not allowed — quantities and costs must be ≥ 0",
+      "plannedDatesTitle": "Planned Schedule",
+      "actualDatesTitle": "Actual Schedule",
+      "costBreakdown": "Cost Breakdown"
     },
     "bom": {
       "title": "Bill of Materials",
@@ -1364,7 +1373,8 @@
       "quantity": "Quantity",
       "batches": "Batches",
       "batchNumber": "Batch Number",
-      "supervisor": "Production Supervisor"
+      "supervisor": "Production Supervisor",
+      "dates": "Dates"
     },
     "form": {
       "finishedProduct": "Finished Product",
@@ -1430,7 +1440,8 @@
       "cancelExplanation": "The work order will be cancelled. If in progress, you can return issued materials to stock.",
       "returnMaterials": "Return issued materials to stock",
       "actualConsumption": "Actual material consumption",
-      "actualConsumptionHint": "Leave a field empty to use its planned quantity — enter the actual quantity only when it differs"
+      "actualConsumptionHint": "Leave a field empty to use its planned quantity — enter the actual quantity only when it differs",
+      "actualPrefilledHint": "Actual = planned by default — edit only what deviated"
     }
   },
   "hr": {
