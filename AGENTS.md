@@ -3716,12 +3716,14 @@ npx drizzle-kit migrate
   - `default_production_other` → 53401
   - `default_production_loss` → 53501
   - `default_wip` → 11302 (أُضيف في المرحلة 68)
+- **pgliteAdapter.ts**: ACCOUNTS array + DEFAULT_ACCOUNTS entries + production cost accounts (53, 53101-53501) + `312`/`31201` (Opening Balance & Adjustments) + `11202` (Employee Advances) + `BTK` unit
 - **manufacturing/api.ts**:
   - `resolveProductionCostAccount(companyId, category)`: تبحث في `default_accounts WHERE function_key = 'default_production_<category>'` ثم تعود لـ `findAccountByCodeLocal`
-  - `resolveProductionLossAccount(companyId)`: تبحث في `default_accounts WHERE function_key = 'default_production_loss'` ثم تعود لـ `findAccountByCodeLocal`
+  - `resolveProductionLossAccount(companyId)`: تبحث في `default_accounts WHERE function_key = 'default_production_loss'` ثم تعود لـ `findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE)` — **تم إصلاح infinite recursion** (كانت تستدعي نفسها بدل `findAccountByCodeLocal`)
   - استبدال `findAccountByCodeLocal(companyId, PRODUCTION_COST_ACCOUNT_CODES[pc.category])` بـ `await resolveProductionCostAccount(companyId, pc.category)`
   - استبدال `findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE)` بـ `await resolveProductionLossAccount(companyId)`
-- **التحقق**: `tsc -b` 0 ✓ | `npm run build` ✓
+- **التحقق**: `tsc -b` 0 ✓ | `npm run build` ✓ | `npm run db:check` ✓
+- **Commits**: `7148604` (default_wip) → `48621b6` (production accounts + resolvers) → `fef89b2` (fix recursion) → `68d7b64` (description fix)
 - **ملاحظة**: الـ PRODUCTION_COST_ACCOUNT_CODES و PRODUCTION_LOSS_ACCOUNT_CODE constants لا تزال موجودة كـ fallback للـ code الذي لا يوجد له entry في default_accounts
 
 *آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.3*
