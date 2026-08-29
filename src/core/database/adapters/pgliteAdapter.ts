@@ -106,6 +106,7 @@ import productTypesUpdatedAt from '@root/drizzle/0008_product_types_updated_at.s
 import missingUpdatedAt from '@root/drizzle/0009_missing_updated_at.sql?raw';
 import aiChatPerformance from '@root/drizzle/0010_ai_chat_performance.sql?raw';
 import crmAuditColumns from '@root/drizzle/0011_crm_audit_columns.sql?raw';
+import defaultAccountsExpansion from '@root/drizzle/0012_default_accounts_expansion.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -120,6 +121,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0009_missing_updated_at', sql: missingUpdatedAt },
   { name: '0010_ai_chat_performance', sql: aiChatPerformance },
   { name: '0011_crm_audit_columns', sql: crmAuditColumns },
+  { name: '0012_default_accounts_expansion', sql: defaultAccountsExpansion },
 ];
 
 /**
@@ -255,6 +257,7 @@ const ACCOUNTS: Array<{
     { code: '113', name_ar: 'المخزون', name_en: 'Inventory', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
     { code: '11301', name_ar: 'بضاعة أول المدة', name_en: 'Opening Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
     { code: '11302', name_ar: 'بضاعة تحت التشغيل', name_en: 'Work in Progress', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
+    { code: '11303', name_ar: 'بضاعة تامة الصنع', name_en: 'Finished Goods Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
     // Liabilities
     { code: '2', name_ar: 'الالتزامات', name_en: 'Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: null },
     { code: '21', name_ar: 'الالتزامات المتداولة', name_en: 'Current Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: '2' },
@@ -284,6 +287,7 @@ const ACCOUNTS: Array<{
     { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52301', name_ar: 'مصروفات متنوعة ونثريات', name_en: 'Miscellaneous Expenses', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+    { code: '52401', name_ar: 'مصروفات نقل وشحن', name_en: 'Shipping & Freight', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     // Production costs (capitalized into finished-goods cost on work-order completion)
     { code: '53', name_ar: 'تكاليف الإنتاج', name_en: 'Production Costs', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
     { code: '53101', name_ar: 'تكاليف إنتاج - أجور', name_en: 'Production Costs - Labor', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
@@ -335,11 +339,16 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_cogs', account_code: '51101', required: true, description: 'تكلفة البضاعة المباعة' },
   { key: 'default_inventory', account_code: '11301', required: true, description: 'حساب المخزون' },
   { key: 'default_wip', account_code: '11302', required: false, description: 'حساب بضاعة تحت التشغيل' },
+  { key: 'default_finished_goods', account_code: '11303', required: false, description: 'حساب مخزون البضاعة التامة' },
   { key: 'default_production_labor', account_code: '53101', required: false, description: 'حساب عمالة الإنتاج' },
   { key: 'default_production_energy', account_code: '53201', required: false, description: 'حساب طاقة الإنتاج' },
   { key: 'default_production_packaging', account_code: '53301', required: false, description: 'حساب تغليف الإنتاج' },
   { key: 'default_production_other', account_code: '53401', required: false, description: 'حساب أخرى الإنتاج' },
   { key: 'default_production_loss', account_code: '53501', required: false, description: 'حساب خسائر الإنتاج' },
+  { key: 'default_opening_balance', account_code: '31201', required: false, description: 'حساب الأرصدة الافتتاحية' },
+  { key: 'default_shipping', account_code: '52401', required: false, description: 'حساب مصروفات النقل والشحن' },
+  { key: 'default_rent', account_code: '52201', required: false, description: 'حساب مصروفات الإيجار' },
+  { key: 'default_misc_expense', account_code: '52301', required: false, description: 'حساب المصروفات المتنوعة' },
   { key: 'default_debtors', account_code: '11201', required: true, description: 'المدينون التجاريون' },
   { key: 'default_creditors', account_code: '21101', required: true, description: 'الدائنون التجاريون' },
   { key: 'default_vat_output', account_code: '21301', required: true, description: 'ضريبة المخرجات' },

@@ -329,18 +329,28 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_inventory: '11301', default_debtors: '11201', default_creditors: '21101',
       default_vat_output: '21301', default_vat_input: '21301', default_salaries: '52101',
       default_sales_returns: '41103', default_purchase_returns: '21101',
+      default_opening_balance: '31201', default_shipping: '52401',
+      default_rent: '52201', default_misc_expense: '52301',
     },
     manufacturing: {
       default_cash: '11101', default_sales: '41101', default_cogs: '51101',
       default_inventory: '11301', default_debtors: '11201', default_creditors: '21101',
       default_vat_output: '21301', default_vat_input: '21301', default_salaries: '52101',
       default_sales_returns: '41103', default_purchase_returns: '21101',
+      default_wip: '11302', default_finished_goods: '11303',
+      default_production_labor: '53101', default_production_energy: '53201',
+      default_production_packaging: '53301', default_production_other: '53401',
+      default_production_loss: '53501',
+      default_opening_balance: '31201', default_shipping: '52401',
+      default_rent: '52201', default_misc_expense: '52301',
     },
     services: {
       default_cash: '11101', default_sales: '41102', default_cogs: '51101',
       default_inventory: '11301', default_debtors: '11201', default_creditors: '21101',
       default_vat_output: '21301', default_vat_input: '21301', default_salaries: '52101',
       default_sales_returns: '41103', default_purchase_returns: '21101',
+      default_opening_balance: '31201', default_shipping: '52401',
+      default_rent: '52201', default_misc_expense: '52301',
     },
   };
   const adapter = await getDbAdapter();

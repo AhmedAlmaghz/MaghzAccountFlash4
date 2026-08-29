@@ -111,6 +111,17 @@ async function getDefaultAccountId(companyId: string, functionKey: string): Prom
     default_purchase_returns: ACC.TRADE_CREDITORS,
     default_discount_allowed: ACC.SALES,
     default_discount_received: ACC.TRADE_CREDITORS,
+    default_wip: '11302',
+    default_finished_goods: '11303',
+    default_production_labor: '53101',
+    default_production_energy: '53201',
+    default_production_packaging: '53301',
+    default_production_other: '53401',
+    default_production_loss: '53501',
+    default_opening_balance: '31201',
+    default_shipping: ACC.SHIPPING,
+    default_rent: ACC.RENT_OFFICE,
+    default_misc_expense: ACC.ELECTRICITY,
   };
   const code = fallbackMap[functionKey];
   if (code) return findAccountByCode(companyId, code);
@@ -557,12 +568,15 @@ export async function postPaymentVoucher(
   const creditorsId = await getDefaultAccountId(companyId, 'default_creditors');
   const cashId = (await getCashBoxAccountId(companyId, voucher.cashBoxId))
     || await getDefaultAccountId(companyId, 'default_cash');
+  // Best practice: expense accounts resolve via default_accounts first, then chart codes.
   const rentWarehouseId = await findAccountByCode(companyId, ACC.RENT_WAREHOUSE);
-  const rentOfficeId = await findAccountByCode(companyId, ACC.RENT_OFFICE);
+  const rentOfficeId = (await getDefaultAccountId(companyId, 'default_rent'))
+    || await findAccountByCode(companyId, ACC.RENT_OFFICE);
   const electricityId = await findAccountByCode(companyId, ACC.ELECTRICITY);
   const advertisingId = await findAccountByCode(companyId, ACC.ADVERTISING);
   const maintenanceId = await findAccountByCode(companyId, ACC.MAINTENANCE);
-  const shippingId = await findAccountByCode(companyId, ACC.SHIPPING);
+  const shippingId = (await getDefaultAccountId(companyId, 'default_shipping'))
+    || await findAccountByCode(companyId, ACC.SHIPPING);
 
   if (!cashId || !creditorsId) {
     return { success: false, error: 'Required accounts not found. Please configure default accounts in Settings.' };

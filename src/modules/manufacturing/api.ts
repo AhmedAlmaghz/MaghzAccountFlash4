@@ -215,6 +215,37 @@ async function resolveProductionLossAccount(companyId: string): Promise<string |
   return findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE);
 }
 
+/**
+ * Resolve the finished-goods GL account for a completed work order's output:
+ * product-type default → default_accounts(default_finished_goods)
+ * → default_accounts(default_inventory) → code 11303 → code 11301.
+ * (IAS 2: finished goods are tracked separately from raw materials.)
+ */
+async function resolveFinishedGoodsAccountId(companyId: string, productId: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const ptRes = await adapter.query<{ default_inventory_account_id: string | null }>(
+    `SELECT pt.default_inventory_account_id
+       FROM products p
+       LEFT JOIN product_types pt ON pt.id = p.product_type_id
+      WHERE p.id = $1::uuid AND p.company_id = $2::uuid LIMIT 1`,
+    [productId, companyId]
+  );
+  if (ptRes.rows?.[0]?.default_inventory_account_id) return String(ptRes.rows[0].default_inventory_account_id);
+  const daRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_finished_goods'`,
+    [companyId]
+  );
+  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
+  const fgByCode = await findAccountByCodeLocal(companyId, '11303');
+  if (fgByCode) return fgByCode;
+  const invRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_inventory'`,
+    [companyId]
+  );
+  if (invRes.rows?.[0]?.account_id) return String(invRes.rows[0].account_id);
+  return findAccountByCodeLocal(companyId, '11301');
+}
+
 export const manufacturingApi = {
   // ─── BOM ──────────────────────────────────────────────────────────────────
   async getBoms(companyId: string, ownedByUserId?: string): Promise<{ success: boolean; data?: BOM[]; error?: string }> {
@@ -1010,7 +1041,7 @@ export const manufacturingApi = {
       // ── GL posting — إصلاح شامل للمبالغ والحسابات (IAS 2) ──
       const shouldPost = totalCost > 0 || wipPosted > 0 || productionCostsTotal > 0;
       if (shouldPost) {
-        const inventoryAccountId = await resolveInventoryAccountId(companyId, String(wo.product_id ?? ''));
+        const inventoryAccountId = await resolveFinishedGoodsAccountId(companyId, String(wo.product_id ?? ''));
         if (!inventoryAccountId) {
           return { success: false, error: 'حساب المخزون غير موجود — قم بتهيئة الحسابات الافتراضية في الإعدادات' };
         }

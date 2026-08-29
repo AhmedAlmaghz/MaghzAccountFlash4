@@ -85,6 +85,13 @@
       "when": 1796500000000,
       "tag": "0011_crm_audit_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1796600000000,
+      "tag": "0012_default_accounts_expansion",
+      "breakpoints": true
     }
   ]
 }

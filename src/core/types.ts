@@ -106,4 +106,17 @@ export const DEFAULT_ACCOUNT_FUNCTIONS: { key: string; labelAr: string; labelEn:
   { key: 'default_discount_received', labelAr: 'خصم مقبوض', labelEn: 'Discount Received', required: false },
   { key: 'default_sales_returns', labelAr: 'مردودات مبيعات', labelEn: 'Sales Returns', required: true },
   { key: 'default_purchase_returns', labelAr: 'مردودات مشتريات', labelEn: 'Purchase Returns', required: true },
+  // ── المخازن والتصنيع ──
+  { key: 'default_wip', labelAr: 'بضاعة تحت التشغيل', labelEn: 'Work in Progress', required: false },
+  { key: 'default_finished_goods', labelAr: 'مخزون البضاعة التامة', labelEn: 'Finished Goods', required: false },
+  { key: 'default_production_labor', labelAr: 'عمالة الإنتاج', labelEn: 'Production Labor', required: false },
+  { key: 'default_production_energy', labelAr: 'طاقة الإنتاج', labelEn: 'Production Energy', required: false },
+  { key: 'default_production_packaging', labelAr: 'تغليف الإنتاج', labelEn: 'Production Packaging', required: false },
+  { key: 'default_production_other', labelAr: 'تكاليف إنتاج أخرى', labelEn: 'Production Other', required: false },
+  { key: 'default_production_loss', labelAr: 'خسائر الإنتاج', labelEn: 'Production Losses', required: false },
+  // ── حسابات عامة ──
+  { key: 'default_opening_balance', labelAr: 'الأرصدة الافتتاحية', labelEn: 'Opening Balance Equity', required: false },
+  { key: 'default_shipping', labelAr: 'النقل والشحن', labelEn: 'Shipping & Freight', required: false },
+  { key: 'default_rent', labelAr: 'الإيجار', labelEn: 'Rent', required: false },
+  { key: 'default_misc_expense', labelAr: 'مصروفات متنوعة', labelEn: 'Miscellaneous Expenses', required: false },
 ];

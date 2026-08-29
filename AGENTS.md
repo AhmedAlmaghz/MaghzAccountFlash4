@@ -3726,4 +3726,21 @@ npx drizzle-kit migrate
 - **Commits**: `7148604` (default_wip) → `48621b6` (production accounts + resolvers) → `fef89b2` (fix recursion) → `68d7b64` (description fix)
 - **ملاحظة**: الـ PRODUCTION_COST_ACCOUNT_CODES و PRODUCTION_LOSS_ACCOUNT_CODE constants لا تزال موجودة كـ fallback للـ code الذي لا يوجد له entry في default_accounts
 
-*آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.3*
+### المرحلة 70 (v0.6.4): حسابات التصنيع والمخازن في شاشة الحسابات الافتراضية
+- **الهدف**: إظهار كل حسابات التصنيع والمخازن في شاشة «الحسابات الافتراضية» + إضافة الحسابات الناقصة المطلوبة (وفق أفضل الممارسات — Odoo/QuickBooks: كل posting account قابل للتكوين)
+- **حسابات شجرة جديدة** (migration `0012_default_accounts_expansion.sql` + كلا الـ seeds):
+  - `11303` بضاعة تامة الصنع (Finished Goods) — IAS 2 يفصل التام عن الخام
+  - `52301` مصروفات متنوعة ونثريات (كانت مفقودة من PG seed)
+  - `52401` مصروفات نقل وشحن (يستخدمها postPaymentVoucher)
+- **مفاتيح default_accounts الجديدة (11)** — في seedDemoData.js + pgliteAdapter.ts + migration 0012 (idempotent: `WHERE NOT EXISTS` لكل شركة قائمة):
+  - التصنيع: `default_wip`/11302، `default_finished_goods`/11303، `default_production_labor`/53101، `default_production_energy`/53201، `default_production_packaging`/53301، `default_production_other`/53401، `default_production_loss`/53501
+  - عامة: `default_opening_balance`/31201، `default_shipping`/52401، `default_rent`/52201، `default_misc_expense`/52301
+- **شاشة الإعدادات** (`src/core/types.ts` DEFAULT_ACCOUNT_FUNCTIONS): +13 صف — ظهرت كل حسابات التصنيع في الجدول مع زر إنشاء الوظائف
+- **القوالب** (`src/core/api.ts` applyDefaultTemplate): قالب `manufacturing` يحصل على mapping حقيقي (WIP + FG + تكاليف الإنتاج الـ 5)؛ trading/services تحصل على المفاتيح العامة
+- **`journalEntryGenerator.ts`**: fallbackMap موسّع بالمفاتيح الـ 11 الجديدة؛ `postPaymentVoucher` صار يبحث `default_rent` و `default_shipping` في default_accounts أولاً ثم fallback للأكواد
+- **`manufacturing/api.ts`**: `resolveFinishedGoodsAccountId(companyId, productId)` جديدة — سلسلة: product-type default → `default_finished_goods` → 11303 → `default_inventory` → 11301. `completeWorkOrder` يستخدمها لإنتاج التام (بدل حساب المخزون العام)
+- **pgliteAdapter MIGRATIONS**: أُضيف 0012 للقائمة اليدوية (migrationRunner في Electron يكتشف تلقائياً)
+- **التحقق**: `tsc -b` 0 ✓ | `eslint --max-warnings=0` 0 ✓ | migrations 102 ✓ | JE-generator 17 ✓ | manufacturing 28 ✓ | seedDemoData 13 ✓ | pgliteSmoke (يشغّل 0012 فعلياً) ✓ | `db:check` clean ✓ | build 1m08s ✓
+- **القاعدة الذهبية المضافة**: كل حساب يُستخدم في posting يجب أن يكون قابلاً للتكوين عبر default_accounts — الأكواد المضمّنة hardcoded fallback فقط. سلسلة FG: product-type override أولاً (أدق)، ثم default_accounts، ثم الكود المحاسبي، ثم حساب المخزون العام (آخر وسيلة)
+
+*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.6.4*
