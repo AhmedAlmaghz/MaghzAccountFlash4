@@ -3707,5 +3707,21 @@ npx drizzle-kit migrate
   - دمج في 9 صفحات: `InvoicesPage`/`QuotationsPage`/`SalesReturnsPage`/`PurchaseInvoicesPage`/`OrdersPage`/`ReturnsPage`/`ReceiptVouchersPage`/`PaymentVouchersPage`/`JournalEntriesPage` — جلب `get*Paginated 200` و `detectDocumentDuplicates` قبل الحفظ، `isDocument` في الحوار
   - اختبارات `documentDuplicate.test.ts` (9) + `duplicateDetection.test.ts` (11) — `tsc` 0 | `build` 7.15s
 - **إصلاح قيد التصنيع `WO-0002`**: `المبلغ 23k` ≠ مجموع السطور `93k` — `totalAmount` كان `totalCost` — أُصلح إلى `entries.reduce(debit)` مع تحقق توازن `|debits-credits|≤0.01` — فصل فائض/عجز لكل مادة بحسابها الخاص `resolveInventoryAccountId(materialId)` بدل تجميع واحد على حساب المنتج التام — رسائل أوضح `إنتاج تام - 10 وحدة` + `إرجاع فائض - مادة X` — `src/modules/manufacturing/api.ts:987`
+### المرحلة 69 (v0.6.3): حسابات الإنتاج القابلة للتكوين عبر default_accounts
+- **الهدف**: جعل حسابات الإنتاج (عمالة، طاقة، تغليف، أخرى، خسائر) قابلة للتكوين لكل شركة عبر جدول `default_accounts` بدل الـ hardcodes
+- **seedDemoData.js — DEFAULT_ACCOUNTS**: أضيفت 5 entries جديدة:
+  - `default_production_labor` → 53101
+  - `default_production_energy` → 53201
+  - `default_production_packaging` → 53301
+  - `default_production_other` → 53401
+  - `default_production_loss` → 53501
+  - `default_wip` → 11302 (أُضيف في المرحلة 68)
+- **manufacturing/api.ts**:
+  - `resolveProductionCostAccount(companyId, category)`: تبحث في `default_accounts WHERE function_key = 'default_production_<category>'` ثم تعود لـ `findAccountByCodeLocal`
+  - `resolveProductionLossAccount(companyId)`: تبحث في `default_accounts WHERE function_key = 'default_production_loss'` ثم تعود لـ `findAccountByCodeLocal`
+  - استبدال `findAccountByCodeLocal(companyId, PRODUCTION_COST_ACCOUNT_CODES[pc.category])` بـ `await resolveProductionCostAccount(companyId, pc.category)`
+  - استبدال `findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE)` بـ `await resolveProductionLossAccount(companyId)`
+- **التحقق**: `tsc -b` 0 ✓ | `npm run build` ✓
+- **ملاحظة**: الـ PRODUCTION_COST_ACCOUNT_CODES و PRODUCTION_LOSS_ACCOUNT_CODE constants لا تزال موجودة كـ fallback للـ code الذي لا يوجد له entry في default_accounts
 
-*آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.2*
+*آخر تحديث: 2026-08-29 | الإصدار: maghzaccount-pro v0.6.3*
