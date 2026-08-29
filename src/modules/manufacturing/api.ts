@@ -212,7 +212,7 @@ async function resolveProductionLossAccount(companyId: string): Promise<string |
     [companyId]
   );
   if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
-  return await resolveProductionLossAccount(companyId);
+  return findAccountByCodeLocal(companyId, PRODUCTION_LOSS_ACCOUNT_CODE);
 }
 
 export const manufacturingApi = {
