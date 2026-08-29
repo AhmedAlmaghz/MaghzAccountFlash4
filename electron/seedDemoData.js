@@ -115,7 +115,7 @@ const DEFAULT_ACCOUNTS = [
   { key: 'default_sales', code: '41101', required: true,  desc: 'حساب المبيعات الافتراضي' },
   { key: 'default_cogs', code: '51101', required: true,  desc: 'حساب تكلفة البضاعة المباعة' },
   { key: 'default_inventory', code: '11301', required: true, desc: 'حساب المخزون الافتراضي' },
-  { key: 'default_wip', code: '11302', required: false, desc: 'حساب بحاة تحتل التشغيل' },
+  { key: 'default_wip', code: '11302', required: false, desc: 'حساب بضاعة تحت التشغيل' },
   { key: 'default_production_labor', code: '53101', required: false, desc: 'حساب عمالة الإنتاج' },
   { key: 'default_production_energy', code: '53201', required: false, desc: 'حساب طاقة الإنتاج' },
   { key: 'default_production_packaging', code: '53301', required: false, desc: 'حساب تغليف الإنتاج' },
@@ -407,32 +407,32 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
   
   const sequences = [
     // Sales
-    { type: 'sales_invoice',     prefix: 'INV-',  start: 1, current: 6,  pad: 6 },
-    { type: 'sales_return',      prefix: 'SRT-',  start: 1, current: 4,  pad: 4 },
-    { type: 'quotation',         prefix: 'QOT-',  start: 1, current: 2,  pad: 4 },
+    { type: 'sales_invoice',     prefix: 'INV-',  start: 1, current: 0,  pad: 6 },
+    { type: 'sales_return',      prefix: 'SRT-',  start: 1, current: 0,  pad: 4 },
+    { type: 'quotation',         prefix: 'QOT-',  start: 1, current: 0,  pad: 4 },
     // Purchases
-    { type: 'purchase_order',    prefix: 'PO-',   start: 1, current: 6,  pad: 6 },
-    { type: 'purchase_invoice',  prefix: 'PINV-', start: 1, current: 4,  pad: 4 },
-    { type: 'purchase_return',   prefix: 'PRT-',  start: 1, current: 2,  pad: 4 },
+    { type: 'purchase_order',    prefix: 'PO-',   start: 1, current: 0,  pad: 6 },
+    { type: 'purchase_invoice',  prefix: 'PINV-', start: 1, current: 0,  pad: 4 },
+    { type: 'purchase_return',   prefix: 'PRT-',  start: 1, current: 0,  pad: 4 },
     // Accounting
     { type: 'journal_voucher',   prefix: 'JV-',   start: 1, current: 0,  pad: 7 },
-    { type: 'receipt_voucher',   prefix: 'RV-',   start: 1, current: 3,  pad: 6 },
-    { type: 'payment_voucher',   prefix: 'PV-',   start: 1, current: 3,  pad: 6 },
+    { type: 'receipt_voucher',   prefix: 'RV-',   start: 1, current: 0,  pad: 6 },
+    { type: 'payment_voucher',   prefix: 'PV-',   start: 1, current: 0,  pad: 6 },
     // Manufacturing
     { type: 'work_order',        prefix: 'WO-',   start: 1, current: 0,  pad: 4 },
     { type: 'bom',               prefix: 'BOM-',  start: 1, current: 0,  pad: 4 },
     // HR
     { type: 'payroll_run',       prefix: 'PAY-',  start: 1, current: 0,  pad: 6 },
+    { type: 'employee',          prefix: 'EMP-',  start: 1, current: 0,  pad: 4 },
     // Inventory
-    { type: 'product',           prefix: 'PRD-',  start: 1, current: 15,  pad: 7 },
-    { type: 'warehouse',         prefix: 'WH-',   start: 1, current: 1,  pad: 3 },
+    { type: 'product',           prefix: 'PRD-',  start: 1, current: 0,  pad: 7 },
+    { type: 'warehouse',         prefix: 'WH-',   start: 1, current: 0,  pad: 3 },
     { type: 'stock_adjustment',  prefix: 'ADJ-',  start: 1, current: 0,  pad: 6 },
     { type: 'inventory_transfer',prefix: 'TRF-',  start: 1, current: 0,  pad: 6 },
     // CRM
-    { type: 'customer',          prefix: 'CUS-',  start: 1, current: 5,  pad: 5 },
-    { type: 'supplier',          prefix: 'SUP-',  start: 1, current: 5,  pad: 4 },
-    // HR
-    { type: 'employee',          prefix: 'EMP-',  start: 1, current: 15,  pad: 4 },
+    { type: 'customer',          prefix: 'CUS-',  start: 1, current: 0,  pad: 5 },
+    { type: 'supplier',          prefix: 'SUP-',  start: 1, current: 0,  pad: 4 },
+    
   ];
 
 
