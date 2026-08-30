@@ -164,7 +164,7 @@ export interface SalesInvoicePostingInput {
  * away — every payment location is a cash box whose account_id IS the
  * posting account. Returns null so callers fall back to default_cash.
  */
-async function getCashBoxAccountId(companyId: string, cashBoxId?: string | null): Promise<string | null> {
+export async function getCashBoxAccountId(companyId: string, cashBoxId?: string | null): Promise<string | null> {
   if (!cashBoxId) return null;
   const adapter = await getDbAdapter();
   const res = await adapter.query<{ account_id: string | null }>(
@@ -191,17 +191,22 @@ export async function resolvePostingAccounts(
 
 export function buildSalesInvoicePostingStatements(
   companyId: string,
-  invoice: SalesInvoicePostingInput,
+  invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null },
   ids: { debtors: string; sales: string; vat: string }
 ): TxStatement[] {
+  // CASH invoice: money entered the treasury at sale time — debit the cash
+  // box's own GL account instead of Debtors (the customer owes nothing).
+  // CREDIT invoice (default): Dr Debtors / Cr Sales + VAT.
+  const isCash = invoice.paymentType === 'cash';
+  const debitAccount = (isCash && invoice.cashAccountSubstitute) || ids.debtors;
   return [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
-      description: `قيد تلقائي - فاتورة مبيعات ${invoice.invoiceNumber}`,
+      description: `قيد تلقائي - فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
       totalAmount: invoice.totalAmount,
       entries: [
-        { accountId: ids.debtors, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}` },
+        { accountId: debitAccount, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
         { accountId: ids.sales, debit: 0, credit: invoice.subtotal, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
         { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
       ],
@@ -211,19 +216,23 @@ export function buildSalesInvoicePostingStatements(
 
 export function buildPurchaseInvoicePostingStatements(
   companyId: string,
-  invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number },
+  invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number; paymentType?: string; cashAccountSubstitute?: string | null },
   ids: { inventory: string; creditors: string; vat: string }
 ): TxStatement[] {
+  // CASH purchase: money left the treasury immediately — credit the cash box
+  // account instead of Creditors (we owe the supplier nothing).
+  const isCash = invoice.paymentType === 'cash';
+  const creditAccount = (isCash && invoice.cashAccountSubstitute) || ids.creditors;
   return [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
-      description: `قيد تلقائي - فاتورة مشتريات ${invoice.invoiceNumber}`,
+      description: `قيد تلقائي - فاتورة مشتريات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
       totalAmount: invoice.totalAmount,
       entries: [
         { accountId: ids.inventory, debit: invoice.subtotal, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}` },
         { accountId: ids.vat, debit: invoice.vatAmount, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
-        { accountId: ids.creditors, debit: 0, credit: invoice.totalAmount, memo: `التزام مورد ${invoice.invoiceNumber}` },
+        { accountId: creditAccount, debit: 0, credit: invoice.totalAmount, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` },
       ],
     }),
   ];

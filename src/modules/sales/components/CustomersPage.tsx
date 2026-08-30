@@ -480,6 +480,11 @@ export const CustomersPage: React.FC = () => {
   );
 
   const totalBalance = useMemo(() => customers.reduce((s, c) => s + (Number(c.balance) || 0), 0), [customers]);
+  // Receivable (positive balances) vs credit (negative) — the CURRENT NET
+  // balance is what matters; debit/credit are shown as a breakdown, never
+  // summed together (summing cancels real receivables).
+  const receivableTotal = useMemo(() => customers.reduce((s, c) => s + Math.max(0, Number(c.balance) || 0), 0), [customers]);
+  const creditTotal = useMemo(() => customers.reduce((s, c) => s + Math.abs(Math.min(0, Number(c.balance) || 0)), 0), [customers]);
   const activeCount = useMemo(() => customers.filter((c) => c.isActive).length, [customers]);
   const inactiveCount = total - activeCount;
   const hasActiveFilter = search.trim().length > 0 || statusFilter !== 'all';
@@ -614,8 +619,17 @@ export const CustomersPage: React.FC = () => {
               >
                 {formatCurrency(totalBalance)}
               </p>
-              <p className="mt-1 text-xs text-slate-500">
-                {activeCompany?.currency || YER_CODE} • رصيد الصفحة الحالية
+              <p className="mt-1 text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  مدين: <span className="font-semibold tabular-nums">{formatCurrency(receivableTotal)}</span>
+                </span>
+                {creditTotal > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    دائن: <span className="font-semibold tabular-nums">{formatCurrency(creditTotal)}</span>
+                  </span>
+                )}
               </p>
             </div>
             <div

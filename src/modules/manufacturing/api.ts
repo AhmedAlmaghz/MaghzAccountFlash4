@@ -4,6 +4,7 @@ import { runTransaction, buildJournalEntryStatement } from '@/core/database/tx';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createBomSchema, createWorkOrderSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { safeUserId } from '@/core/utils/userIdValidator';
+import { toDateString } from '@/core/utils/mapPgRow';
 import type { BOM, BOMLine, WorkOrder, WorkOrderLine, ProductionCost } from './types';
 
 const workOrderStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'cancelled']);
@@ -72,10 +73,13 @@ function mapWorkOrderRow(r: Record<string, unknown>): WorkOrder {
     quantity: Number(r.quantity) || 0,
     producedQuantity: r.produced_quantity != null && r.produced_quantity !== '' ? Number(r.produced_quantity) : undefined,
     status: String(r.status) as WorkOrder['status'],
-    plannedStartDate: r.planned_start_date ? String(r.planned_start_date) : undefined,
-    plannedEndDate: r.planned_end_date ? String(r.planned_end_date) : undefined,
-    actualStartDate: r.actual_start_date ? String(r.actual_start_date) : undefined,
-    actualEndDate: r.actual_end_date ? String(r.actual_end_date) : undefined,
+    // date columns come back as JS Date objects (UTC midnight) — String(Date)
+    // yields the ugly locale form ("Sat Aug 29 2026 00:00:00 GMT+0300 ...").
+    // toDateString() keeps them as strict YYYY-MM-DD for display + sorting.
+    plannedStartDate: toDateString(r.planned_start_date) ?? undefined,
+    plannedEndDate: toDateString(r.planned_end_date) ?? undefined,
+    actualStartDate: toDateString(r.actual_start_date) ?? undefined,
+    actualEndDate: toDateString(r.actual_end_date) ?? undefined,
     totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
     outputWarehouseId: r.output_warehouse_id ? String(r.output_warehouse_id) : undefined,
     batchNumber: r.batch_number ? String(r.batch_number) : undefined,
@@ -914,7 +918,9 @@ export const manufacturingApi = {
         });
         statements.push({
           sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'out', $4::numeric, $5, $6, $7)`,
-          params: [companyId, materialId, whId, qty, id, 'صرف خامات لأمر تشغيل', userId ?? null],
+          // reference = the HUMAN order number (WO-0001), never the UUID —
+          // the inventory transactions screen shows references verbatim.
+          params: [companyId, materialId, whId, qty, orderNumber || id, 'صرف خامات لأمر تشغيل', userId ?? null],
         });
         statements.push({
           sql: `UPDATE stock SET quantity = quantity - $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
@@ -1001,6 +1007,8 @@ export const manufacturingApi = {
       );
       if (!consRes.success) return { success: false, error: consRes.error };
       const consRows = (consRes.rows || []) as Record<string, unknown>[];
+      // Human-readable reference for every stock movement below.
+      const orderNumber = wo.order_number ? String(wo.order_number) : id;
 
       // Consumption DELTA vs what START already issued (planned quantities):
       //   delta > 0 → extra issue (out); delta < 0 → return surplus (in).
@@ -1043,7 +1051,7 @@ export const manufacturingApi = {
         if (delta > 0) {
           statements.push({
             sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'out', $4::numeric, $5, $6, $7)`,
-            params: [companyId, materialId, whId, delta, id, 'استهلاك فعلي إضافي', opts.userId ?? null],
+            params: [companyId, materialId, whId, delta, orderNumber, 'استهلاك فعلي إضافي', opts.userId ?? null],
           });
           statements.push({
             sql: `UPDATE stock SET quantity = quantity - $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
@@ -1052,7 +1060,7 @@ export const manufacturingApi = {
         } else {
           statements.push({
             sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
-            params: [companyId, materialId, whId, -delta, id, 'إرجاع فائض خامات', opts.userId ?? null],
+            params: [companyId, materialId, whId, -delta, orderNumber, 'إرجاع فائض خامات', opts.userId ?? null],
           });
           statements.push({
             sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
@@ -1068,7 +1076,7 @@ export const manufacturingApi = {
         });
         statements.push({
           sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
-          params: [companyId, String(wo.product_id ?? ''), outputWh, producedQty, id, 'توريد منتج تام الإنتاج', opts.userId ?? null],
+          params: [companyId, String(wo.product_id ?? ''), outputWh, producedQty, orderNumber, 'توريد منتج تام الإنتاج', opts.userId ?? null],
         });
         statements.push({
           sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
@@ -1266,7 +1274,7 @@ export const manufacturingApi = {
           });
           statements.push({
             sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
-            params: [companyId, materialId, whId, qty, id, 'إلغاء أمر تشغيل — إرجاع خامات', opts.userId ?? null],
+            params: [companyId, materialId, whId, qty, orderNumber || id, 'إلغاء أمر تشغيل — إرجاع خامات', opts.userId ?? null],
           });
           statements.push({
             sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,

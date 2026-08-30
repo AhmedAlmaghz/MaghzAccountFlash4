@@ -6,7 +6,7 @@ import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/cor
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { getNextDocumentNumber } from '@/core/api';
-import { resolvePostingAccounts, buildPurchaseInvoicePostingStatements, buildPurchaseReturnPostingStatements } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, buildPurchaseInvoicePostingStatements, buildPurchaseReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
 import type {
   Supplier,
   PurchaseInvoice,
@@ -724,7 +724,7 @@ export const purchasesApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const check = await adapter.query(
-        'SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+        'SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, payment_type, cash_box_id FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
@@ -733,8 +733,12 @@ export const purchasesApi = {
       const inv = check.rows[0] as Record<string, unknown>;
       const supplierId = String(inv.supplier_id);
       const totalAmount = Number(inv.total_amount) || 0;
-      const paidAmount = Number(inv.paid_amount) || 0;
-      const outstanding = totalAmount - paidAmount;
+      const paymentType = String(inv.payment_type || 'credit');
+      const cashBoxId = inv.cash_box_id ? String(inv.cash_box_id) : null;
+      // A CASH purchase is fully paid at purchase time (Cr treasury instead of
+      // Creditors) — it never touches the supplier balance.
+      const paidAmount = paymentType === 'cash' ? totalAmount : (Number(inv.paid_amount) || 0);
+      const outstanding = paymentType === 'cash' ? 0 : (totalAmount - paidAmount);
 
       // ── Unified atomic contract: JE statements + status flip + supplier
       // balance all commit together in ONE transaction — no orphan JE ever.
@@ -742,12 +746,17 @@ export const purchasesApi = {
       if (!accounts.success) {
         return { success: false, error: accounts.error };
       }
+      // CASH purchase: the treasury account (selected cash box, or default
+      // cash) replaces Creditors on the credit side — we owe the supplier nothing.
+      const cashSubstitute = paymentType === 'cash' ? (await getCashBoxGLAccountId(companyId, cashBoxId)) : undefined;
       const postingStmts = buildPurchaseInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
         date: String(inv.date || new Date().toISOString().split('T')[0]),
         subtotal: Number(inv.subtotal) || 0,
         vatAmount: Number(inv.vat_amount) || 0,
         totalAmount,
+        paymentType,
+        cashAccountSubstitute: cashSubstitute,
       }, { inventory: accounts.ids.default_inventory, creditors: accounts.ids.default_creditors, vat: accounts.ids.default_vat_input });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
@@ -793,6 +802,14 @@ export const purchasesApi = {
           params: [id, companyId, await resolveExistingUserId(adapter, _userId, companyId)],
         },
       ];
+      if (paymentType === 'cash') {
+        // Cash purchase: record it as fully paid so registers and paid badges
+        // stay truthful (paid_amount + status flip in the same transaction).
+        txQueries.push({
+          sql: `UPDATE purchase_invoices SET paid_amount = total_amount, base_currency_paid = base_currency_amount, status = 'paid', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+          params: [id, companyId, await resolveExistingUserId(adapter, _userId, companyId)],
+        });
+      }
       if (outstanding !== 0) {
         txQueries.push({
           sql: `UPDATE suppliers SET balance = balance + $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,

@@ -78,8 +78,8 @@ export const inventoryApi = {
                    WHERE ppc.product_id = p.id), '[]'::json
                 ) AS category_names
            FROM products p
-           LEFT JOIN product_types pt ON pt.id = p.product_type_id
-           LEFT JOIN units u ON u.code = p.unit AND u.company_id = p.company_id
+            LEFT JOIN product_types pt ON pt.id = p.product_type_id
+            LEFT JOIN units u ON (u.name_ar = p.unit OR u.code = p.unit) AND u.company_id = p.company_id
           WHERE ${where}
           ORDER BY p.code, p.name_ar
           LIMIT $${limitIdx} OFFSET $${offsetIdx}`,

@@ -1070,18 +1070,47 @@ export const accountingApi = {
       const cidValidation = validateInput(idCompanySchema, { companyId, id: accountId });
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
-      // Ledger with a leading OPENING row: everything posted BEFORE startDate
-      // collapses into it (so opening JEs are never lost when filtering), and
-      // the LAST row's balance always equals the account's FULL balance.
+
+      // Movement rows (posted JEs within the optional window).
       const params: unknown[] = [accountId, companyId];
       let movementWhere = 'je.account_id = $1 AND t.company_id = $2 AND t.status = \'posted\'';
       if (startDate) { params.push(startDate); movementWhere += ` AND t.date >= $${params.length}`; }
       if (endDate) { params.push(endDate); movementWhere += ` AND t.date <= $${params.length}`; }
-      // prior: same filters EXCLUSIVE of the start boundary (< startDate).
-      const priorParams: unknown[] = [accountId, companyId];
-      let priorWhere = 'je.account_id = $1 AND t.company_id = $2 AND t.status = \'posted\'';
-      if (startDate) { priorParams.push(startDate); priorWhere += ` AND t.date < $${priorParams.length}`; }
-      if (endDate) { priorParams.push(endDate); priorWhere += ` AND t.date <= $${priorParams.length}`; }
+
+      // Opening row: ONLY when a start date filters the window — it carries
+      // the balance of everything posted BEFORE that date (real opening JEs
+      // included), so the last row's balance still equals the FULL balance.
+      // Without a start date the movement already shows every JE from zero,
+      // and a separate opening row would display the opening twice.
+      if (!startDate) {
+        const result = await adapter.query(`
+          SELECT t.id::text AS id, t.date, t.reference, t.description, je.debit, je.credit
+          FROM journal_entries je
+          JOIN transactions t ON je.transaction_id = t.id
+          WHERE ${movementWhere}
+          ORDER BY t.date, t.created_at`, params);
+        if (!result.success) return { success: false, error: result.error };
+        let runningBalance = 0;
+        const rows: LedgerRow[] = (result.rows || []).map((row) => {
+          const debit = Number(row.debit) || 0;
+          const credit = Number(row.credit) || 0;
+          runningBalance += debit - credit;
+          return {
+            id: String(row.id),
+            date: row.date ? String(toDateString(row.date) ?? row.date) : '',
+            reference: row.reference || undefined,
+            description: row.description || undefined,
+            debit,
+            credit,
+            balance: runningBalance,
+          } as LedgerRow;
+        });
+        return { success: true, data: rows };
+      }
+
+      // prior: everything posted strictly BEFORE startDate.
+      const priorParams: unknown[] = [accountId, companyId, startDate];
+      const priorWhere = "je.account_id = $1 AND t.company_id = $2 AND t.status = 'posted' AND t.date < $3";
 
       const sql = `
       WITH movement AS (
@@ -1108,7 +1137,7 @@ export const accountingApi = {
       ) rows
       ORDER BY sort_type, date, id`;
       // Final param order: movement params ($1..) then the prior CTE's own
-      // shifted copies ($5..$8 = accountId, companyId, start, end) then the
+      // shifted copies ($5.. = accountId, companyId, startDate) then the
       // OPENING label — the prior WHERE references its own renumbered $N.
       const finalParams: unknown[] = [...params, ...priorParams, 'OPENING'];
 
@@ -1131,7 +1160,7 @@ export const accountingApi = {
             runningBalance = Number(row.opening) || 0;
             return {
               id: 'OPENING',
-              date: startDate || '',
+              date: startDate,
               reference: 'OPENING',
               description: 'رصيد افتتاحي',
               debit: 0,

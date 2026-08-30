@@ -738,7 +738,34 @@ describe('accountingApi.getAccountLedger — opening balance integration', () =>
     };
   }
 
-  it('SQL builds movement + prior CTEs with correct param shifting', async () => {
+  it('without startDate: plain movement rows only — no duplicate opening row', async () => {
+    const adapter = {
+      query: vi.fn(async () => ({
+        success: true,
+        rows: [
+          { id: 'tx-1', date: '2026-01-05', reference: 'OPENING', description: 'رصيد افتتاحي', debit: 5000, credit: 0 },
+          { id: 'tx-2', date: '2026-08-05', reference: 'INV-1', description: 'فاتورة', debit: 1200, credit: 0 },
+        ],
+      })),
+      transaction: vi.fn(async () => ({ success: true, results: [] })),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.getAccountLedger(ACCOUNT_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    const rows = res.data!;
+    // no separate opening row — the OPENING JE itself is a movement row
+    expect(rows).toHaveLength(2);
+    expect(rows[0].id).toBe('tx-1');
+    expect(rows[0].balance).toBe(5000);
+    expect(rows[1].balance).toBe(6200);
+    // simple query, no prior CTE
+    const sql = adapter.query.mock.calls[0][0] as string;
+    expect(sql).not.toMatch(/prior AS/);
+    expect(sql).toMatch(/ORDER BY t\.date, t\.created_at/);
+  });
+
+  it('with startDate: SQL builds movement + prior CTEs with correct param shifting', async () => {
     const captured: Array<{ sql: string; params: unknown[] }> = [];
     const adapter = {
       query: vi.fn(async (sql: string, params: unknown[]) => {
@@ -757,15 +784,14 @@ describe('accountingApi.getAccountLedger — opening balance integration', () =>
     expect(sql).toMatch(/t\.date >= \$3/);
     expect(sql).toMatch(/t\.date <= \$4/);
     // prior window: same account/company but BEFORE the start boundary,
-    // with params shifted by priorParams.length (4) → $1..$4 become $5..$8
+    // with params shifted by priorParams.length (3) → $1..$3 become $4..$6
     expect(sql).toMatch(/prior AS/);
-    expect(sql).toMatch(/t\.date < \$7/);
-    expect(sql).toMatch(/t\.date <= \$8/);
+    expect(sql).toMatch(/t\.date < \$6/);
     // opening row first (sort_type 0) via the trailing OPENING label param
     expect(sql).toMatch(/رصيد افتتاحي/);
     expect(sql).toMatch(/ORDER BY sort_type, date, id/);
-    // param order: [accountId, companyId, start, end, accountId, companyId, start, end, 'OPENING']
-    expect(params).toEqual([ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31', ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31', 'OPENING']);
+    // param order: [accountId, companyId, start, end, accountId, companyId, start, 'OPENING']
+    expect(params).toEqual([ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31', ACCOUNT_ID, COMPANY_ID, '2026-08-01', 'OPENING']);
   });
 
   it('maps the opening row first and runs the balance from it', async () => {

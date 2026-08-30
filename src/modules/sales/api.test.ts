@@ -558,6 +558,74 @@ describe('salesApi.postInvoice customer balance tracking', () => {
     expect(balUpdate).toBeDefined();
     expect(balUpdate!.params![3]).toBeNull();
   });
+
+  it('CASH invoice: posts to the treasury account (not Debtors), marks paid, never touches the customer', async () => {
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, payment_type: 'cash', cash_box_id: 'box-1' }] };
+      }
+      if (sql.includes('FROM cash_boxes')) {
+        // getCashBoxAccountId: the cash box's own GL account
+        return { success: true, rows: [{ account_id: 'cash-gl-acc' }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-cash', 'comp-1');
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    // 1) Debit side of the JE = the cash box GL account, NOT Debtors.
+    // buildJournalEntryStatement params layout: [companyId, date, ref, desc,
+    // total, companyId, ...entries.flatMap(l => [accountId, debit, credit, memo])]
+    const jeInsert = txStmts.find(q => q.sql.includes('INSERT INTO journal_entries'));
+    expect(jeInsert).toBeDefined();
+    const flat = (jeInsert!.params || []).slice(6);
+    expect(String(flat[0])).toBe('cash-gl-acc');
+    expect(Number(flat[1])).toBe(1150);
+    expect(Number(flat[2])).toBe(0);
+    // 2) The invoice is recorded as fully paid + status 'paid'
+    const paidUpdate = txStmts.find(q => q.sql.includes("paid_amount = total_amount") && q.sql.includes("status = 'paid'"));
+    expect(paidUpdate).toBeDefined();
+    // 3) The customer balance is NEVER touched
+    expect(txStmts.some(q => q.sql.includes('UPDATE customers'))).toBe(false);
+  });
+
+  it('CREDIT invoice (default): posts to Debtors as before', async () => {
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-credit', 'comp-1');
+    expect(res.success).toBe(true);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    const jeInsert = txStmts.find(q => q.sql.includes('INSERT INTO journal_entries'));
+    const flat = (jeInsert!.params || []).slice(6);
+    expect(String(flat[0])).toBe('acc-default_debtors');
+    expect(Number(flat[1])).toBe(1150);
+    // No cash-box lookup happened at all
+    expect(txStmts.some(q => q.sql.includes('paid_amount = total_amount'))).toBe(false);
+    // Customer balance IS updated (outstanding 1150)
+    const balUpdate = txStmts.find(q => q.sql.includes('UPDATE customers'));
+    expect(balUpdate).toBeDefined();
+    expect(Number(balUpdate!.params![0])).toBe(1150);
+  });
 });
 
 describe('salesApi.postReturn customer balance tracking', () => {

@@ -6,7 +6,7 @@ import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createCust
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { getNextDocumentNumber } from '@/core/api';
-import { resolvePostingAccounts, buildSalesInvoicePostingStatements, buildSalesReturnPostingStatements } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, buildSalesInvoicePostingStatements, buildSalesReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
 import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging, InvoiceAttachment } from './types';
 
 // Typed RPC bridge for Sales (Phase 4 slice 10). In Electron the renderer
@@ -808,7 +808,7 @@ export const salesApi = {
       // fetch draft → build JE statements → ONE transaction that commits the
       // journal entry, the status flip and the customer balance together.
       const check = await adapter.query(
-        'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+        'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, payment_type, cash_box_id FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
@@ -817,8 +817,13 @@ export const salesApi = {
       const inv = check.rows[0] as Record<string, unknown>;
       const customerId = String(inv.customer_id);
       const totalAmount = Number(inv.total_amount) || 0;
-      const paidAmount = Number(inv.paid_amount) || 0;
-      const outstanding = totalAmount - paidAmount;
+      const paymentType = String(inv.payment_type || 'credit');
+      const cashBoxId = inv.cash_box_id ? String(inv.cash_box_id) : null;
+      // A CASH invoice is fully paid the moment it exists — the sale itself
+      // IS the payment (Dr treasury / Cr sales). It must never touch the
+      // customer balance nor linger as receivable.
+      const paidAmount = paymentType === 'cash' ? totalAmount : (Number(inv.paid_amount) || 0);
+      const outstanding = paymentType === 'cash' ? 0 : (totalAmount - paidAmount);
       // Verify the userId exists in the users table. A stale localStorage
       // session may reference a user that no longer exists (e.g., after a
       // db:reset) — passing it here would violate the FK constraint
@@ -829,12 +834,17 @@ export const salesApi = {
       if (!accounts.success) {
         return { success: false, error: accounts.error };
       }
+      // CASH invoice: the treasury account (selected cash box, or default
+      // cash) replaces Debtors on the debit side — the customer owes nothing.
+      const cashSubstitute = paymentType === 'cash' ? (await getCashBoxGLAccountId(companyId, cashBoxId)) : undefined;
       const postingStmts = buildSalesInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
         date: String(inv.date || new Date().toISOString().split('T')[0]),
         subtotal: Number(inv.subtotal) || 0,
         vatAmount: Number(inv.vat_amount) || 0,
         totalAmount,
+        paymentType,
+        cashAccountSubstitute: cashSubstitute,
       }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
@@ -895,6 +905,14 @@ export const salesApi = {
           params: [id, companyId, safeUserIdValue],
         },
       ];
+      if (paymentType === 'cash') {
+        // Cash invoice: record the sale as fully paid so every register and
+        // the paid badge stay truthful (status flip + paid_amount together).
+        txQueries.push({
+          sql: `UPDATE sales_invoices SET paid_amount = total_amount, base_currency_paid = base_currency_amount, status = 'paid', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+          params: [id, companyId, safeUserIdValue],
+        });
+      }
       if (outstanding !== 0) {
         txQueries.push({
           sql: `UPDATE customers SET balance = balance + $1, updated_by = $4::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,

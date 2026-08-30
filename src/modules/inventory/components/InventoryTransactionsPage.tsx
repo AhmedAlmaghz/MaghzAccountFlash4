@@ -11,6 +11,7 @@ import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { useFormatters } from '@/core/utils/useFormatters';
 import type { InventoryTransaction } from '../types';
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; icon: typeof TrendingUp }> = {
@@ -24,6 +25,7 @@ export const InventoryTransactionsPage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const { formatDate } = useFormatters(activeCompany?.id || '');
   const [typeFilter, setTypeFilter] = useState<string>('');
   const txFilters = useMemo(() => ({ type: typeFilter || undefined }), [typeFilter]);
   const { transactions, total, page, pageSize, isLoading, goToPage, changePageSize, create, remove } = useInventoryTransactionsPaginated(activeCompany?.id || '', txFilters);
@@ -286,7 +288,7 @@ export const InventoryTransactionsPage: React.FC = () => {
                   key: 'date',
                   header: t('inventory.date'),
                   width: '115px',
-                  render: (row: InventoryTransaction) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{new Date(row.date).toLocaleDateString('ar-EG')}</span>,
+                  render: (row: InventoryTransaction) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span>,
                 },
                 {
                   key: 'type',

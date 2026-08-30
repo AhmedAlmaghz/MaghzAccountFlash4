@@ -413,6 +413,10 @@ export const SuppliersPage: React.FC = () => {
   );
 
   const totalBalance = useMemo(() => suppliers.reduce((s, sup) => s + (Number(sup.balance) || 0), 0), [suppliers]);
+  // Payable (positive balances) vs credit-to-us (negative) — the CURRENT NET
+  // balance is the headline; debit/credit shown as a breakdown, never summed.
+  const payableTotal = useMemo(() => suppliers.reduce((s, sup) => s + Math.max(0, Number(sup.balance) || 0), 0), [suppliers]);
+  const creditTotal = useMemo(() => suppliers.reduce((s, sup) => s + Math.abs(Math.min(0, Number(sup.balance) || 0)), 0), [suppliers]);
   const activeCount = useMemo(() => suppliers.filter((s) => s.isActive).length, [suppliers]);
   const inactiveCount = total - activeCount;
   const hasActiveFilter = search.trim().length > 0 || statusFilter !== 'all';
@@ -548,7 +552,18 @@ export const SuppliersPage: React.FC = () => {
               <p className={`mt-1 text-2xl font-bold tabular-nums truncate ${totalBalance > 0 ? 'text-amber-600 dark:text-amber-400' : totalBalance < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-900 dark:text-slate-50'}`} title={formatCurrency(totalBalance)}>
                 {formatCurrency(totalBalance)}
               </p>
-              <p className="mt-1 text-xs text-slate-500">رصيد الصفحة الحالية</p>
+              <p className="mt-1 text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  دائن (مستحق لنا للمورد): <span className="font-semibold tabular-nums">{formatCurrency(payableTotal)}</span>
+                </span>
+                {creditTotal > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    مدين: <span className="font-semibold tabular-nums">{formatCurrency(creditTotal)}</span>
+                  </span>
+                )}
+              </p>
             </div>
             <div className={`w-12 h-12 rounded-xl border flex items-center justify-center shrink-0 ml-3 ${totalBalance > 0 ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800' : totalBalance < 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
               <Wallet size={20} className={totalBalance > 0 ? 'text-amber-600 dark:text-amber-400' : totalBalance < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'} />

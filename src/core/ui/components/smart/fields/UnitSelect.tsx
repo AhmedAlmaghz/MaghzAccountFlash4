@@ -21,12 +21,19 @@ export const UnitSelect: React.FC<UnitSelectProps> = ({
   const { units, isLoading } = useUnits(companyId);
 
   const options = useMemo(() => {
-    return units.map(u => ({
-      label: u.nameAr,
-      sublabel: u.code || undefined,
-      disabled: !u.isActive,
-      ...u,
-    })) as SmartSelectItem[];
+    // The `unit` column on products/documents is a plain TEXT field (varchar
+    // "كيس"/"piece"), NOT a units.id FK — so the select's VALUE must be the
+    // unit NAME. Feeding the UUID here would store a UUID string in the text
+    // column and every screen would display a UUID instead of the unit name.
+    return units.map(u => {
+      const primary = u.nameAr || u.nameEn || u.code || String(u.id);
+      return {
+        id: primary,
+        label: primary,
+        sublabel: u.code && u.code !== primary ? u.code : undefined,
+        disabled: !u.isActive,
+      } as SmartSelectItem;
+    });
   }, [units]);
 
   return (

@@ -3803,4 +3803,25 @@ npx drizzle-kit migrate
   - **CTE prior يتطلب params مستقلة**: إعادة ترقيم `$N → $N + priorParams.length` مع تمرير priorParams كاملة في الـ params النهائية
   - **e2e cleanup قبل الإنشاء**: حارس التكرار يمنع إعادة إنشاء كيان موجود — أي e2e test يُنشئ بيانات يجب أن يحذف أثره أولاً عبر `/__e2e/db` (مسموح: DELETE على جداول business)
 
-*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.7.0*
+### المرحلة 73 (v0.7.1): إصلاحات UX/محاسبة شاملة من الاستخدام الفعلي
+- **الأستاذ العام — إصلاح ازدواج الافتتاحي**: بلا فلترة تواريخ كان سطر «رصيد افتتاحي» (CTE prior) يظهر **مع** قيد OPENING-SEED الحقيقي = نفس المبلغ مرتين. المنطق الجديد: سطر الافتتاحي يظهر **فقط عند وجود startDate** (يحمل رصيد ما قبل الفترة)؛ بلا فلترة تُعرض كل القيود من الصفر مباشرة
+- **بطاقة الرصيد في العملاء/الموردين**: الرقم الرئيسي = **الرصيد الحالي (صافي)** + تفصيل تحته (مدين بالكهرماني / دائن بالزمردي) — لا يُجمع المدين والدائن معاً أبداً (الجمع يُلغي مستحقات حقيقية)
+- **أوامر التشغيل — التواريخ الطويلة**: `String(r.planned_start_date)` على أعمدة date يرجع locale format طويل — استُبدل بـ `toDateString()` في `mapWorkOrderRow` (نفس فخ Phase 45)
+- **الحركات المخزنية**:
+  - التاريخ: `toLocaleDateString('ar-EG')` يعرض **التقويم الهجري** في Chrome — استُبدل بـ `formatDate` (يحترم إعدادات الشركة)
+  - المرجع من التصنيع: كان **UUID أمر التشغيل** — أصبح **رقم الأمر** (`WO-0001`) في كل مواضع INSERT INTO stock_movements (بدء/إكمال/فروق/إلغاء)
+- **وحدات القياس — فخ UUID في حقل نصي**: `products.unit` عمود **varchar** (يخزن الاسم) بينما `UnitSelect` كان يعيد `u.id` (UUID) → UUID يُخزَّن في عمود نصي ويظهر في كل الشاشات. الإصلاح: القيمة = `nameAr` + إصلاح JOIN الـ API `ON (u.name_ar = p.unit OR u.code = p.unit)` (كان `u.code = p.unit` فقط ولا يطابق أبداً)
+- **الفواتير النقدية (AI + المحاسبة)**:
+  - أدوات الوكيل `sales.create_invoice` / `purchases.create_invoice` أضيف لها `paymentType` (cash/credit) + `cashBoxId` مع إلزام cashBoxId للنقدي + قاعدة برومبت 28 (خريطة "نقدي/كاش" ← paymentType=cash)
+  - **القيد المحاسبي الصحيح**: `buildSalesInvoicePostingStatements` يدعم `cashAccountSubstitute` — النقدي: **Dr حساب الخزنة المختارة / Cr مبيعات+VAT** (لا يلمس المدينين)؛ `buildPurchaseInvoicePostingStatements` بالمرآة (Cr خزنة بدل الدائنين). `getCashBoxAccountId` أصبح exported
+  - `postInvoice` (sales/purchases): النقدي = `outstanding=0` (لا يُحدَّث رصيد العميل/المورد) + UPDATE `paid_amount=total_amount, status='paid'` في نفس الـ transaction — السجل نفسه يبقى صادقاً في كل السجلات والتقارير
+- **اختبارات (+3)**: ledger بلا startDate (لا سطر افتتاحي + استعلام بسيط) | CASH invoice (Dr خزنة + paid + لا يلمس العميل) | CREDIT invoice (Dr مدينين كما كان) — المجموع 1171/1171 ✓ (81 ملف)
+- **التحقق**: tsc 0 ✓ | eslint 0/0 ✓ | build 24.59s ✓ | e2e sales/invoices/payment 12/12 ✓ | E2E حي على PG داخل ROLLBACK: فاتورة نقدية ⇒ status=paid + رصيد العميل=0 ✓
+- **القواعد الذهبية المضافة**:
+  - **سطر الافتتاحي في الدفتر مشروط بـ startDate**: بلا فلترة يعرضه مرتين (prior + قيد الافتتاحي الحقيقي) — الافتتاحي المُجمَّع منطقي فقط عند وجود فترة مقصوصة
+  - **`toLocaleDateString('ar-EG')` = هجري في Chrome**: للعرض الغريغوري استخدم `formatDate` من useFormatters — لا تفترض أن ar-EG يعني ميلادياً
+  - **مرجع stock_movements = رقم المستند البشري دائماً**: UUID في عمود reference يظهر للمستخدم في شاشة الحركات — مرّر `orderNumber`/`invoiceNumber` لا `id`
+  - **عمود varchar لا يستقبل UUID من Select**: قبل ربط أي Select بحقل نصي افحص نوع العمود — `UnitSelect` يعيد الآن الاسم لأن العمود نصي. لو أردت FK فأضف عمود uuid migration كاملة
+  - **الفاتورة النقدية قيدُها على الخزنة لا على الطرف**: `paymentType='cash'` ⇒ debit/credit حساب الخزنة + `paid_amount=total` + `status='paid'` + لا يلمس رصيد العميل/المورد — وإلا انفصل السجل عن القيد
+
+*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.7.1*

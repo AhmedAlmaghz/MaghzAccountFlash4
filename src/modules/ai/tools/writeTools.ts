@@ -166,7 +166,7 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'sales.create_invoice',
     labelAr: 'إنشاء فاتورة مبيعات',
-    descriptionAr: 'ينشئ فاتورة مبيعات مسودة لعميل مع أصناف. الإجمالي والضريبة تُحسب تلقائياً حسب إعدادات الشركة. استخدم search.customers و search.products أولاً للحصول على المعرفات والأسعار.',
+    descriptionAr: 'ينشئ فاتورة مبيعات مسودة لعميل مع أصناف. الإجمالي والضريبة تُحسب تلقائياً حسب إعدادات الشركة. استخدم search.customers و search.products أولاً للحصول على المعرفات والأسعار. إذا قال المستخدم "نقدي/فوري/دفعت نقداً" مرّر paymentType="cash" + cashBoxId (من search.cash_boxes).',
     permission: 'sales.create',
     dangerLevel: 'write',
     parameters: {
@@ -174,18 +174,28 @@ export const writeTools: ToolDefinition[] = [
       properties: {
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
         date: { type: 'string', description: 'تاريخ الفاتورة YYYY-MM-DD (افتراضي اليوم)' },
-        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري)' },
+        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري — للآجل)' },
+        paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُقيَّد على الخزنة عند الترحيل ولا يُسجَّل دين على العميل)، credit = آجل (افتراضي — يُقيَّد على المدينين)' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash لتحديد الخزنة المقبوض فيها' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
       },
       required: ['customerId', 'lines'],
     },
-    summarizeArgs: (a) => summarizeDocLines('إنشاء فاتورة مبيعات (مسودة)', a.lines),
+    summarizeArgs: (a) => {
+      const base = summarizeDocLines('إنشاء فاتورة مبيعات (مسودة)', a.lines);
+      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+    },
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
       if (!customerId) return { error: 'customerId مطلوب — استخدم search.customers أولاً' };
       const parsed = parseLines(args.lines);
       if ('error' in parsed) return { error: parsed.error };
+      const paymentType = str(args.paymentType) === 'cash' ? 'cash' : 'credit';
+      const cashBoxId = str(args.cashBoxId);
+      if (paymentType === 'cash' && !cashBoxId) {
+        return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
+      }
 
       const vatRate = await getVatRate(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_invoice');
@@ -211,6 +221,10 @@ export const writeTools: ToolDefinition[] = [
         totalAmount,
         paidAmount: 0,
         status: 'draft',
+        // CASH invoice: the invoice itself is the payment — paidAmount is set
+        // at posting time (Dr treasury / Cr sales), the customer owes nothing.
+        paymentType,
+        cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
         notes: str(args.notes),
         lines,
       });
@@ -220,17 +234,20 @@ export const writeTools: ToolDefinition[] = [
         invoiceId: res.id,
         invoiceNumber: docNumber.number,
         status: 'draft',
+        paymentType,
         subtotal,
         vatAmount,
         totalAmount,
-        note: 'الفاتورة مسودة — استخدم sales.post_invoice لترحيلها عند طلب المستخدم',
+        note: paymentType === 'cash'
+          ? 'فاتورة نقدية (مسودة) — استخدم sales.post_invoice لترحيلها؛ سيُقيَّد المبلغ على الخزنة لا على العميل'
+          : 'الفاتورة مسودة — استخدم sales.post_invoice لترحيلها عند طلب المستخدم',
       };
     },
   },
   {
     name: 'sales.post_invoice',
     labelAr: 'ترحيل فاتورة مبيعات',
-    descriptionAr: 'يرحّل فاتورة مبيعات مسودة (تصبح نافذة محاسبياً وتُحدّث رصيد العميل). يتطلب معرف الفاتورة — من sales.get_invoices.',
+    descriptionAr: 'يرحّل فاتورة مبيعات مسودة (تصبح نافذة محاسبياً). الآجل: يُقيَّد على المدينين ويُحدَّث رصيد العميل. النقدية: يُقيَّد على خزنة الفاتورة ولا يُسجَّل أي دين على العميل. يتطلب معرف الفاتورة — من sales.get_invoices.',
     permission: 'sales.post',
     dangerLevel: 'write',
     parameters: {
@@ -345,7 +362,7 @@ export const writeTools: ToolDefinition[] = [
   {
     name: 'purchases.create_invoice',
     labelAr: 'إنشاء فاتورة مشتريات',
-    descriptionAr: 'ينشئ فاتورة مشتريات مسودة لمورد مع أصناف. استخدم search.suppliers و search.products أولاً (سعر التكلفة costPrice).',
+    descriptionAr: 'ينشئ فاتورة مشتريات مسودة لمورد مع أصناف. استخدم search.suppliers و search.products أولاً (سعر التكلفة costPrice). إذا قال المستخدم "نقدي/دفعت نقداً من الخزنة" مرّر paymentType="cash" + cashBoxId (من search.cash_boxes).',
     permission: 'purchases.create',
     dangerLevel: 'write',
     parameters: {
@@ -353,18 +370,28 @@ export const writeTools: ToolDefinition[] = [
       properties: {
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
         date: { type: 'string', description: 'تاريخ الفاتورة YYYY-MM-DD (افتراضي اليوم)' },
-        dueDate: { type: 'string', description: 'YYYY-MM-DD (اختياري)' },
+        dueDate: { type: 'string', description: 'YYYY-MM-DD (اختياري — للآجل)' },
+        paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُخصم من الخزنة عند الترحيل ولا يُسجَّل دين للمورد)، credit = آجل (افتراضي — يُقيَّد على الدائنين)' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
       },
       required: ['supplierId', 'lines'],
     },
-    summarizeArgs: (a) => summarizeDocLines('إنشاء فاتورة مشتريات (مسودة)', a.lines),
+    summarizeArgs: (a) => {
+      const base = summarizeDocLines('إنشاء فاتورة مشتريات (مسودة)', a.lines);
+      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+    },
     execute: async (args, ctx) => {
       const supplierId = str(args.supplierId);
       if (!supplierId) return { error: 'supplierId مطلوب — استخدم search.suppliers أولاً' };
       const parsed = parseLines(args.lines);
       if ('error' in parsed) return { error: parsed.error };
+      const paymentType = str(args.paymentType) === 'cash' ? 'cash' : 'credit';
+      const cashBoxId = str(args.cashBoxId);
+      if (paymentType === 'cash' && !cashBoxId) {
+        return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
+      }
 
       const vatRate = await getVatRate(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_invoice');
@@ -390,11 +417,24 @@ export const writeTools: ToolDefinition[] = [
         totalAmount,
         paidAmount: 0,
         status: 'draft',
+        // CASH purchase: paid at purchase time — Cr treasury at posting,
+        // the supplier is never owed.
+        paymentType,
+        cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
         notes: str(args.notes),
         lines,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء الفاتورة' };
-      return { created: true, invoiceId: res.id, invoiceNumber: docNumber.number, totalAmount };
+      return {
+        created: true,
+        invoiceId: res.id,
+        invoiceNumber: docNumber.number,
+        paymentType,
+        totalAmount,
+        note: paymentType === 'cash'
+          ? 'فاتورة مشتريات نقدية (مسودة) — استخدم purchases.post_invoice لترحيلها؛ سيُخصم المبلغ من الخزنة لا من ذمة المورد'
+          : undefined,
+      };
     },
   },
 
