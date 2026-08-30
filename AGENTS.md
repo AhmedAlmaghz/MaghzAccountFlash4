@@ -3772,4 +3772,35 @@ npx drizzle-kit migrate
   - **إعادة الفتح تصفّر المسار التشغيلي**: actual dates/WIP/actuals تنتمي للتشغيل الملغي لا للجديد
   - **الإكمال بنقرة واحدة للأمر القياسي**: التعبئة المسبقة بالمخطط تعني أن الأوامر المطابقة تُكمل بضغطة زر — والتعديل فقط لما انحرف (variance-by-exception UX)
 
-*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.6.5*
+### المرحلة 72 (v0.7.0): دمج الرصيد الافتتاحي في كل الأرصدة والكشوفات — بلا استثناء
+- **المبدأ المعتمد (Odoo/QuickBooks)**: لا معنى لأي رصيد أو كشف حساب أو تقرير أعمار لا يتضمن الرصيد الافتتاحي. كل عرض مالي في التطبيق يجب أن يظهر «افتتاحي + حركة» — التطبيق كله الآن يتبع هذا المبدأ
+- **Migration `0013_opening_balance_dates.sql`**:
+  - `opening_date date` على `customers`/`suppliers`/`employees`/`accounts` — يحدد موقع السطر الافتتاحي في الكشوفات وتصنيفه في أعمار الديون
+  - Drizzle schemas محدّثة (sales/purchases/hr/accounting) + `pgliteAdapter.MIGRATIONS` + `_journal.json` idx=13 + migration tests (+5)
+- **`openingBalance.ts`**: كل دوال الترحيل تقبل الآن `openingDate?` — تخزّمه في العمود الجديد وتستخدمه كتاريخ القيد (بدل `new Date()` الصامت)
+- **كشف حساب العميل** (`getCustomerStatement`): UNION ALL موحد يبدأ بسطر «رصيد افتتاحي» (sort_type 0، تاريخه `opening_date` أو `1900-01-01`) — رصيد آخر سطر = الرصيد الكامل (افتتاحي + فواتير − سندات). مطبّق في 3 مسارات متطابقة: fallback SQL + Electron RPC (`dbHandler.js`) + e2e shim
+- **كشف حساب المورد** (`getSupplierStatement`): أعيدت كتابته بالكامل من 3 استعلامات منفصلة + منطق JS إلى **استعلام واحد** بنفس نمط العميل (دائن = ندين للمورد، مدين = دفعنا/رددنا، والرصيد يجري `SUM(credit - debit)`)
+- **أعمار الديون (AR/AP)**: فرع `UNION ALL` جديد يجلب كل `opening_balance > 0` بتاريخه (أو 1900-01-01) → الافتتاحي غير المؤرخ يقع دائماً في bucket «90+» (أقدم دين بالتعريف). مطبّق في: `getCustomerArAging` (API + RPC + shim) + `getApAging` (بطاقة المورد الفردية) + `getApAgingTotal` (التدفق النقدي — الفواتير غير المدفوعة + مجموع افتتاحيات الموردين) + `CustomerStatementReport` + `SupplierStatementReport` (مع لف فلاتر التاريخ حول الـ UNION كـ subselect `aged`)
+- **شجرة الحسابات (`getAccounts`) — رصيد كامل من JEs**: استعلام المسارات الثلاثة (RPC + pglite + shim) يضيف `running_balance = COALESCE(SUM(je.debit - je.credit))` لكل حساب (الافتتاحي مضمّن تلقائياً لأنه قيد). الـ API يستبدل `balance` بـ `runningBalance` عند توفره مع fallback للعمود القديم — شاشة الشجرة والإحصاءات تعرض الآن الرصيد الكامل (افتتاحي + حركة)
+- **ميزان المراجعة والميزانية (`AccountingService`) — إصلاح احتساب مزدوج**: كانت الصيغة `a.balance + SUM(je)` تحسب الرصيد الافتتاحي مرتين (لأن `postAccountOpeningBalance` يرحّله كقيد JE **ويضيفه** للعمود). الحل الجذري: **`SUM(journal_entries)` وحدها هي مصدر الحقيقة** — كل ترحيل في التطبيق (افتتاحي، فواتير، سندات، رواتب، تصنيع) يمر عبر `journal_entries`
+- **الـ seed يرحّل أرصدته كقيود حقيقية**: قسم «2b» في `seedDemoData.js` يُنشئ قيداً متوازناً مرجعه `OPENING-SEED` لكل حساب seeded ب balance (الصندوق 5M + رأس المال 20M...) مقابل حساب الأرصدة الافتتاحية — بعد التحقق: الميزان الكامل متوازن (Dr = Cr = 20M) و idempotent (يتخطى إن وُجد المرجع)
+- **دفتر الأستاذ (`getAccountLedger`) بسطر افتتاحي**: CTE `prior` يجمع كل القيود قبل `startDate` في سطر «رصيد افتتاحي» أول (sort_type 0) — فلترة التاريخ لا تُفقد الافتتاحي أبداً ورصيد آخر سطر = الرصيد الكامل. `priorWhere` يُعاد ترقيمه (`$N → $N + priorParams.length`) والـ params النهائية = movement params + prior params كاملة (بما فيها accountId/companyId مكررة) + 'OPENING'
+- **شاشات العملاء/الموردين**:
+  - حقل جديد «تاريخ الرصيد الافتتاحي» في نموذجي الإنشاء (`openingDate` في payload، يُمرر حتى `postCustomerOpening`/`postSupplierOpening`)
+  - بطاقة التفاصيل تعرض سطر «الرصيد الافتتاحي: X» تحت الرصيد الكامل
+  - سطر الافتتاحي في جداول الكشوفات مميز بصرياً (Badge primary لعميل / صف خلفية slate للمورد / صف خلفية في دفتر الأستاذ)
+- **i18n**: +3 مفاتيح متوازنة (`openingBalance.dateLabel/dateHint/statementRow`) — 2514 AR = 2514 EN
+- **اختبارات (+13)**: statement SQL يشمل فرع الافتتاحي (3 فروع scoped بـ company_id) | aging يشمل الافتتاحي + bucket >90 | supplier statement الموحد (استعلام واحد + mapping) | ledger opening (بناء params + جرّ الرصيد من الافتتاحي) | getAccounts runningBalance (2: يستبدل legacy + fallback) | statementWithOpening (4) | migration 0013 (5) — المجموع 1168/1168 ✓ (81 ملف)
+- **التحقق على PG حقيقي**: migration مطبق (4 أعمدة opening_date) | كشوفات/أعمار/ميزان/دفتر/شجرة حسابات تعمل | FULL_LEDGER متوازن (Dr=Cr=20M) | E2E داخل ROLLBACK: عميل افتتاحي 250k + فاتورة 115k ⇒ الكشف 250k→365k والأعمار 365k ✓ | e2e 78/78 ✓ (أُصلح strict-mode في 16/17-payment + cleanup قبل الإنشاء في 06-suppliers لأن حارس التكرار يمنع إعادة إنشاء مورد موجود)
+- **القواعد الذهبية المضافة**:
+  - **`SUM(journal_entries)` هي مصدر الحقيقة الوحيد للأرصدة المحاسبية**: لا تجمع `a.balance + SUM(je)` أبداً — عمود balance مرآة عرض يحدّثه مسار الافتتاحي، وكل الجمع معه يضاعف الافتتاحي
+  - **`running_balance` في كل استعلام حسابات**: أي SELECT للـ accounts لأغراض عرض مالي يجب أن يجلب `running_balance` من JEs — العمود legacy يبقى fallback فقط
+  - **كل كشف حساب يبدأ بسطر افتتاحي (sort_type 0)**: رصيد آخر سطر = الرصيد الكامل بالضرورة الرياضية — أي كشف بلا افتتاحي كشف ناقص
+  - **الافتتاحي غير المؤرخ = 1900-01-01 = bucket 90+**: أقدم دين بالتعريف
+  - **فلترة كشف بالتاريخ؟ اجمع ما قبل الفلترة في سطر افتتاحي** (CTE prior) — الفلترة لا تُفقد الرصيد أبداً
+  - **SQL واحد متطابق في 3 مسارات**: fallback API + Electron RPC + e2e shim يجب أن تبقى نسخاً حرفية لبعضها — عدّل الثلاثة معاً أو لا شيء
+  - **الأرصدة المseeded بدون قيود = ديون خفية في الميزان**: أي `balance` يُنشأ بـ INSERT مباشر يجب أن يُرحَّل كقيد متوازن عبر 31201
+  - **CTE prior يتطلب params مستقلة**: إعادة ترقيم `$N → $N + priorParams.length` مع تمرير priorParams كاملة في الـ params النهائية
+  - **e2e cleanup قبل الإنشاء**: حارس التكرار يمنع إعادة إنشاء كيان موجود — أي e2e test يُنشئ بيانات يجب أن يحذف أثره أولاً عبر `/__e2e/db` (مسموح: DELETE على جداول business)
+
+*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.7.0*

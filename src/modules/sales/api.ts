@@ -217,12 +217,12 @@ export const salesApi = {
         const opening = Number(customerData.openingBalance) || 0;
         if (customerId && opening > 0 && !customerData.openingBalancePosted) {
           const { postCustomerOpening } = await import('@/core/utils/openingBalance');
-          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening });
+          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
         }
         return { success: true, id: customerId };
       }
       const adapter = await getDbAdapter();
-      
+
       const result = await adapter.query(
         `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, credit_limit, balance, is_active, created_by, updated_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::uuid) RETURNING id`,
@@ -233,7 +233,7 @@ export const salesApi = {
         const opening = Number(customerData.openingBalance) || 0;
         if (opening > 0 && !customerData.openingBalancePosted) {
           const { postCustomerOpening } = await import('@/core/utils/openingBalance');
-          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening });
+          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
         }
         return { success: true, id: customerId };
       }
@@ -321,23 +321,30 @@ export const salesApi = {
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `WITH entries AS (
+          SELECT COALESCE(c.opening_date, DATE '1900-01-01') AS date, 'رصيد افتتاحي'::varchar as document_type, 'OPENING'::varchar as document_number,
+                 CASE WHEN c.opening_balance >= 0 THEN c.opening_balance ELSE 0 END AS debit,
+                 CASE WHEN c.opening_balance < 0 THEN -c.opening_balance ELSE 0 END AS credit,
+                 NULL::text AS notes, 0 AS sort_type
+          FROM customers c
+          WHERE c.id = $1::uuid AND c.company_id = $2::uuid AND c.opening_balance <> 0
+          UNION ALL
           SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number,
                  total_amount as debit, 0::numeric as credit, notes,
-                 date as sort_date, 1 as sort_type
+                 1 as sort_type
           FROM sales_invoices
           WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled'
           UNION ALL
           SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number,
                  0::numeric as debit, amount as credit, notes,
-                 date as sort_date, 2 as sort_type
+                 2 as sort_type
           FROM receipt_vouchers
           WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
         )
         SELECT date, document_type, document_number, debit, credit,
-               SUM(debit - credit) OVER (ORDER BY sort_date, sort_type, document_number) as balance,
+               SUM(debit - credit) OVER (ORDER BY date, sort_type, document_number) as balance,
                notes
         FROM entries
-        ORDER BY sort_date, sort_type, document_number`,
+        ORDER BY date, sort_type, document_number`,
         [customerId, companyId]
       );
       if (result.success) return { success: true, data: mapRows<CustomerStatementRow>(result.rows) };
@@ -357,11 +364,17 @@ export const salesApi = {
         return { success: true, data: buildArAging(result.rows || []) };
       }
       const adapter = await getDbAdapter();
+      // Aging must include the opening balance (an undated opening receivable
+      // is by definition the OLDEST debt → it always falls in the >90 bucket).
       const result = await adapter.query(
         `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date
         FROM customers c
         JOIN sales_invoices i ON i.customer_id = c.id
-        WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0`,
+        WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0
+        UNION ALL
+        SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date
+        FROM customers c
+        WHERE c.company_id = $1 AND c.opening_balance > 0`,
         [companyId]
       );
       if (!result.success) return { success: false, error: result.error };

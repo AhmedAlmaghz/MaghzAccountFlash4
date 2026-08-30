@@ -246,18 +246,21 @@ export const AccountLedgerPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                {filteredRows.map((row) => {
+                  const isOpening = row.id === 'OPENING' || row.reference === 'OPENING';
+                  return (
+                  <tr key={row.id} className={isOpening ? 'bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700' : 'border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors'}>
                     <td className="px-4 py-3 text-sm tabular-nums text-slate-700 dark:text-slate-300">{row.date ? formatDate(row.date) : '-'}</td>
-                    <td className="px-4 py-3 text-sm font-mono text-slate-600 dark:text-slate-400">{row.reference || '-'}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-slate-600 dark:text-slate-400">{isOpening ? '—' : (row.reference || '-')}</td>
                     <td className="px-4 py-3 text-sm text-slate-800 dark:text-slate-200 max-w-[320px] truncate" title={row.description}>
-                      {row.description || '-'}
+                      {isOpening ? <span className="font-bold text-primary-700 dark:text-primary-300">{row.description}</span> : (row.description || '-')}
                     </td>
                     <td className="px-4 py-3 text-sm text-right tabular-nums">{row.debit > 0 ? <span className="font-medium text-blue-700 dark:text-blue-300">{formatCurrency(row.debit)}</span> : <span className="text-slate-300">—</span>}</td>
                     <td className="px-4 py-3 text-sm text-right tabular-nums">{row.credit > 0 ? <span className="font-medium text-rose-700 dark:text-rose-300">{formatCurrency(row.credit)}</span> : <span className="text-slate-300">—</span>}</td>
                     <td className={cn('px-4 py-3 text-sm text-right tabular-nums font-bold', Number(row.balance) >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-rose-600 dark:text-rose-400')}>{formatCurrency(row.balance)}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 <tr className="bg-slate-900 dark:bg-slate-800 text-white font-bold">
                   <td className="px-4 py-3 text-sm" colSpan={3}>
                     الإجمالي — {filteredRows.length} حركة

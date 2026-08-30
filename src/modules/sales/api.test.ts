@@ -98,8 +98,11 @@ describe('salesApi.getCustomerStatement', () => {
     expect(sql).toMatch(/FROM sales_invoices/);
     expect(sql).toMatch(/FROM receipt_vouchers/);
     expect(sql).toMatch(/voucher_number as document_number/);
-    // both UNION branches must filter by the caller's company
-    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(2);
+    // the opening-balance branch must exist and fall outside the movement rows
+    expect(sql).toMatch(/FROM customers c/);
+    expect(sql).toMatch(/رصيد افتتاحي/);
+    // all three UNION branches (opening + invoices + receipts) must filter by the caller's company
+    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(3);
     expect(params).toEqual([CUSTOMER_ID, COMPANY_ID]);
   });
 
@@ -204,6 +207,36 @@ describe('salesApi.getCustomerArAging', () => {
     expect(sql).toMatch(/status IN \('posted', 'partially_paid'\)/);
     expect(sql).toMatch(/total_amount - i\.paid_amount\) > 0/);
     expect(params[0]).toBe(COMPANY_ID);
+  });
+
+  it('includes each customer opening balance in the aging SQL (oldest bucket)', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await salesApi.getCustomerArAging(COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    // Opening-balance branch: undated (or explicitly dated) opening rows
+    // always land in the oldest bucket via the 1900-01-01 fallback.
+    expect(sql).toMatch(/UNION ALL/);
+    expect(sql).toMatch(/c\.opening_balance as due_amount/);
+    expect(sql).toMatch(/COALESCE\(c\.opening_date, DATE '1900-01-01'\)/);
+    expect(sql).toMatch(/c\.opening_balance > 0/);
+  });
+
+  it('buckets an opening-balance row into >90', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [
+        { customer_id: CUSTOMER_ID, customer_name: 'عميل قديم', due_amount: 700, aging_date: '1900-01-01' },
+      ],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.getCustomerArAging(COMPANY_ID);
+    expect(res.success).toBe(true);
+    const row = res.data![0];
+    expect(row.totalDue).toBe(700);
+    expect(row.buckets.find(b => b.period === '>90')?.amount).toBe(700);
   });
 });
 

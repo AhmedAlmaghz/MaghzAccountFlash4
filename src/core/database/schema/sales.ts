@@ -16,6 +16,7 @@ export const customers = pgTable('customers', {
   balance: numeric('balance', { precision: 18, scale: 4 }).notNull().default('0'),
   openingBalance: numeric('opening_balance', { precision: 18, scale: 4 }).notNull().default('0'),
   openingBalancePosted: boolean('opening_balance_posted').notNull().default(false),
+  openingDate: date('opening_date'),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

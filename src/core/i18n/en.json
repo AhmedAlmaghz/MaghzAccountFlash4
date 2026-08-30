@@ -3047,7 +3047,10 @@
     "accountAmount": "Opening Balance Amount",
     "accountDirection": "Opening Balance Side",
     "debit": "Debit",
-    "credit": "Credit"
+    "credit": "Credit",
+    "dateLabel": "Opening Balance Date",
+    "dateHint": "Positions the opening row in statements and aging (defaults to today)",
+    "statementRow": "Opening balance"
   },
   "duplicate": {
     "exactTitle": "Duplicate name",

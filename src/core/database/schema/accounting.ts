@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 
 // ─── Accounts (Chart of Accounts) ─────────────────────────────────────────────
@@ -16,6 +16,7 @@ export const accounts = pgTable('accounts', {
   openingAmount: numeric('opening_amount', { precision: 18, scale: 4 }).notNull().default('0'),
   openingDirection: varchar('opening_direction', { length: 10 }).notNull().default('debit'),
   openingBalancePosted: boolean('opening_balance_posted').notNull().default(false),
+  openingDate: date('opening_date'),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

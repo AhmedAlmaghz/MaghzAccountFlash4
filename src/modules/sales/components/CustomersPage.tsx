@@ -96,6 +96,7 @@ export const CustomersPage: React.FC = () => {
     taxNumber: '',
     creditLimit: '',
     openingBalance: '',
+    openingDate: '',
     isActive: true,
   });
   const [formErrors, setFormErrors] = useState<FormErrors>({});
@@ -110,7 +111,7 @@ export const CustomersPage: React.FC = () => {
   const duplicateConfirmedRef = useRef(false);
 
   const resetForm = useCallback(() => {
-    setFormData({ code: '', name: '', phone: '', email: '', address: '', taxNumber: '', creditLimit: '', openingBalance: '', isActive: true });
+    setFormData({ code: '', name: '', phone: '', email: '', address: '', taxNumber: '', creditLimit: '', openingBalance: '', openingDate: '', isActive: true });
     setFormErrors({});
     setEditingId(null);
   }, []);
@@ -143,6 +144,7 @@ export const CustomersPage: React.FC = () => {
       taxNumber: c.taxNumber || '',
       creditLimit: String(c.creditLimit || ''),
       openingBalance: c.openingBalancePosted ? String(c.openingBalance || '') : '',
+      openingDate: c.openingDate ? String(c.openingDate).slice(0, 10) : '',
       isActive: c.isActive,
     });
     setFormErrors({});
@@ -205,6 +207,7 @@ export const CustomersPage: React.FC = () => {
       creditLimit: Number(formData.creditLimit) || 0,
       balance: 0,
       openingBalance: editingId ? undefined : (Number(formData.openingBalance) || 0),
+      openingDate: editingId ? undefined : (formData.openingDate?.trim() || undefined),
       isActive: formData.isActive,
     };
     try {
@@ -800,6 +803,14 @@ export const CustomersPage: React.FC = () => {
                 helperText={editingId ? t('openingBalance.postedHint') : t('openingBalance.customerHint')}
                 leftIcon={<span className="text-[11px] font-bold text-slate-400">{activeCompany?.currency || YER_CODE}</span>}
               />
+              <Input
+                label={t('openingBalance.dateLabel')}
+                type="date"
+                disabled={!!editingId}
+                value={formData.openingDate}
+                onChange={(e) => setFormData((p) => ({ ...p, openingDate: e.target.value }))}
+                helperText={t('openingBalance.dateHint')}
+              />
             </div>
             <label className="mt-4 flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3.5 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition">
               <input
@@ -907,6 +918,11 @@ export const CustomersPage: React.FC = () => {
                       {formatCurrency(viewing.balance || 0)}{' '}
                       <span className="text-sm font-normal text-slate-500">{activeCompany?.currency || YER_CODE}</span>
                     </p>
+                    {Number(viewing.openingBalance) > 0 && (
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        {t('openingBalance.title')}: <span className="font-semibold tabular-nums">{formatCurrency(Number(viewing.openingBalance) || 0)}</span>
+                      </p>
+                    )}
                     {Number(viewing.balance) !== 0 && (
                       <span className={`inline-flex mt-2 text-xs px-2 py-1 rounded-full border ${Number(viewing.balance) > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                         {Number(viewing.balance) > 0 ? 'ذمة مدينة على العميل' : 'رصيد دائن للعميل'}
@@ -998,12 +1014,12 @@ function CustomerStatementTab({ customerId }: { customerId: string }) {
         header: t('sales.documentType'),
         width: '130px',
         render: (row: (typeof rows)[0]) => (
-          <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs">
+          <Badge className={row.documentNumber === 'OPENING' ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800 text-xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs'}>
             {row.documentType}
           </Badge>
         ),
       },
-      { key: 'documentNumber', header: t('sales.documentNumber'), width: '140px', render: (row: (typeof rows)[0]) => <span className="font-mono text-xs">{row.documentNumber}</span> },
+      { key: 'documentNumber', header: t('sales.documentNumber'), width: '140px', render: (row: (typeof rows)[0]) => <span className="font-mono text-xs">{row.documentNumber === 'OPENING' ? '—' : row.documentNumber}</span> },
       {
         key: 'debit',
         header: t('accounting.debit'),

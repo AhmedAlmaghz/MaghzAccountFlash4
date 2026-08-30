@@ -107,6 +107,7 @@ import missingUpdatedAt from '@root/drizzle/0009_missing_updated_at.sql?raw';
 import aiChatPerformance from '@root/drizzle/0010_ai_chat_performance.sql?raw';
 import crmAuditColumns from '@root/drizzle/0011_crm_audit_columns.sql?raw';
 import defaultAccountsExpansion from '@root/drizzle/0012_default_accounts_expansion.sql?raw';
+import openingBalanceDates from '@root/drizzle/0013_opening_balance_dates.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -122,6 +123,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0010_ai_chat_performance', sql: aiChatPerformance },
   { name: '0011_crm_audit_columns', sql: crmAuditColumns },
   { name: '0012_default_accounts_expansion', sql: defaultAccountsExpansion },
+  { name: '0013_opening_balance_dates', sql: openingBalanceDates },
 ];
 
 /**
@@ -1097,7 +1099,15 @@ export const pgliteAdapter: DbAdapter = {
   },
 
   async getAccounts(companyId: string) {
-    const result = await this.query('SELECT * FROM accounts WHERE company_id = $1 ORDER BY code', [companyId]);
+    // `running_balance` = SUM of ALL posted JEs (opening included) — the
+    // single source of truth for financial balances (see AGENTS.md Phase 72).
+    const result = await this.query(
+      `SELECT a.*, COALESCE((SELECT SUM(je.debit - je.credit)
+         FROM journal_entries je JOIN transactions t ON je.transaction_id = t.id
+         WHERE je.account_id = a.id AND t.company_id = a.company_id AND t.status = 'posted'), 0) AS running_balance
+       FROM accounts a WHERE a.company_id = $1 ORDER BY a.code`,
+      [companyId],
+    );
     return { success: result.success, data: result.rows, error: result.error };
   },
 

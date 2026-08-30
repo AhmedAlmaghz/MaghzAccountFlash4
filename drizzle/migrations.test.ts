@@ -267,3 +267,37 @@ describe('Migration 0007: work-order WIP accounting', () => {
     expect(schema).toMatch(/wipMaterialsCost: numeric\('wip_materials_cost'/);
   });
 });
+
+describe('Migration 0013: opening-balance dates (statements & aging completeness)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0013_opening_balance_dates.sql'), 'utf-8');
+
+  it('adds opening_date to customers, suppliers, employees and accounts', () => {
+    for (const table of ['customers', 'suppliers', 'employees', 'accounts']) {
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "opening_date" date`));
+    }
+  });
+
+  it('is purely additive and idempotent (IF NOT EXISTS everywhere)', () => {
+    expect(migrationSql.match(/ADD COLUMN/g)?.length).toBe(4);
+    expect(migrationSql.match(/ADD COLUMN IF NOT EXISTS/g)?.length).toBe(4);
+    expect(migrationSql).not.toMatch(/DROP|DELETE/i);
+  });
+
+  it('journal entry mirrors the migration files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    const last = journal.entries[journal.entries.length - 1];
+    expect(last.tag).toBe('0013_opening_balance_dates');
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('Drizzle schema exposes openingDate on all four tables', () => {
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    const purchases = readFileSync(join(process.cwd(), 'src/core/database/schema/purchases.ts'), 'utf-8');
+    const hr = readFileSync(join(process.cwd(), 'src/core/database/schema/hr.ts'), 'utf-8');
+    const accounting = readFileSync(join(process.cwd(), 'src/core/database/schema/accounting.ts'), 'utf-8');
+    expect(sales).toMatch(/openingDate: date\('opening_date'\)/);
+    expect(purchases).toMatch(/openingDate: date\('opening_date'\)/);
+    expect(hr).toMatch(/openingDate: date\('opening_date'\)/);
+    expect(accounting).toMatch(/openingDate: date\('opening_date'\)/);
+  });
+});

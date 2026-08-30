@@ -1,5 +1,6 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { runTransaction, buildJournalEntryStatement } from '@/core/database/tx';
+import { toDateString } from '@/core/utils/mapPgRow';
 
 /**
  * Opening balance accounting (QuickBooks / Odoo style).
@@ -64,10 +65,11 @@ interface EntityOpeningResult {
 /** Customer: Dr AR / Cr OBE + stamp + bump customers.balance — atomically. */
 export async function postCustomerOpening(
   companyId: string,
-  opts: { id: string; name: string; amount: number }
+  opts: { id: string; name: string; amount: number; openingDate?: string }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return { success: true }; // nothing to post
+  const openingDate = toDateString(opts.openingDate ?? new Date()) || new Date().toISOString().split('T')[0];
 
   const ar = await findAccountIdByCode(companyId, AR_CODE);
   const obe = await ensureOpeningBalanceEquityAccount(companyId);
@@ -77,7 +79,7 @@ export async function postCustomerOpening(
     buildJournalEntryStatement(companyId, {
       reference: 'OPENING',
       description: `رصيد افتتاحي - ${opts.name}`,
-      date: new Date().toISOString().split('T')[0],
+      date: openingDate,
       totalAmount: amount,
       entries: [
         { accountId: ar, debit: amount, credit: 0, memo: opts.name },
@@ -85,10 +87,10 @@ export async function postCustomerOpening(
       ],
     }),
     {
-      sql: `UPDATE customers SET opening_balance = $1::numeric, opening_balance_posted = true,
+      sql: `UPDATE customers SET opening_balance = $1::numeric, opening_balance_posted = true, opening_date = $4::date,
               balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW()
             WHERE id = $2::uuid AND company_id = $3::uuid`,
-      params: [amount, opts.id, companyId],
+      params: [amount, opts.id, companyId, openingDate],
     },
   ]);
   return result.success ? { success: true } : { success: false, error: result.error };
@@ -97,10 +99,11 @@ export async function postCustomerOpening(
 /** Supplier: Dr OBE / Cr AP + stamp + bump suppliers.balance — atomically. */
 export async function postSupplierOpening(
   companyId: string,
-  opts: { id: string; name: string; amount: number }
+  opts: { id: string; name: string; amount: number; openingDate?: string }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return { success: true };
+  const openingDate = toDateString(opts.openingDate ?? new Date()) || new Date().toISOString().split('T')[0];
 
   const ap = await findAccountIdByCode(companyId, AP_CODE);
   const obe = await ensureOpeningBalanceEquityAccount(companyId);
@@ -110,7 +113,7 @@ export async function postSupplierOpening(
     buildJournalEntryStatement(companyId, {
       reference: 'OPENING',
       description: `رصيد افتتاحي - ${opts.name}`,
-      date: new Date().toISOString().split('T')[0],
+      date: openingDate,
       totalAmount: amount,
       entries: [
         { accountId: obe, debit: amount, credit: 0, memo: opts.name },
@@ -118,10 +121,10 @@ export async function postSupplierOpening(
       ],
     }),
     {
-      sql: `UPDATE suppliers SET opening_balance = $1::numeric, opening_balance_posted = true,
+      sql: `UPDATE suppliers SET opening_balance = $1::numeric, opening_balance_posted = true, opening_date = $4::date,
               balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW()
             WHERE id = $2::uuid AND company_id = $3::uuid`,
-      params: [amount, opts.id, companyId],
+      params: [amount, opts.id, companyId, openingDate],
     },
   ]);
   return result.success ? { success: true } : { success: false, error: result.error };
@@ -130,10 +133,11 @@ export async function postSupplierOpening(
 /** Employee advance: Dr Advances / Cr OBE + stamp — atomically. */
 export async function postEmployeeOpening(
   companyId: string,
-  opts: { id: string; name: string; amount: number }
+  opts: { id: string; name: string; amount: number; openingDate?: string }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return { success: true };
+  const openingDate = toDateString(opts.openingDate ?? new Date()) || new Date().toISOString().split('T')[0];
 
   const obe = await ensureOpeningBalanceEquityAccount(companyId);
   if (!obe) return { success: false, error: 'تعذر تجهيز حساب الأرصدة الافتتاحية' };
@@ -143,7 +147,7 @@ export async function postEmployeeOpening(
     buildJournalEntryStatement(companyId, {
       reference: 'OPENING',
       description: `رصيد افتتاحي - ${opts.name}`,
-      date: new Date().toISOString().split('T')[0],
+      date: openingDate,
       totalAmount: amount,
       entries: [
         { accountId: advances || obe, debit: amount, credit: 0, memo: opts.name },
@@ -151,9 +155,9 @@ export async function postEmployeeOpening(
       ],
     }),
     {
-      sql: `UPDATE employees SET opening_balance = $1::numeric, opening_balance_posted = true, updated_at = NOW()
+      sql: `UPDATE employees SET opening_balance = $1::numeric, opening_balance_posted = true, opening_date = $4::date, updated_at = NOW()
             WHERE id = $2::uuid AND company_id = $3::uuid`,
-      params: [amount, opts.id, companyId],
+      params: [amount, opts.id, companyId, openingDate],
     },
   ];
   const result = await runTransaction(statements);
@@ -232,12 +236,13 @@ export async function postProductStockOpening(
  */
 export async function postAccountOpeningBalance(
   companyId: string,
-  opts: { accountId: string; accountCode: string; accountName: string; direction: 'debit' | 'credit'; amount: number }
+  opts: { accountId: string; accountCode: string; accountName: string; direction: 'debit' | 'credit'; amount: number; openingDate?: string }
 ): Promise<EntityOpeningResult> {
   const amount = Math.round(Number(opts.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) {
     return { success: false, error: 'الرصيد الافتتاحي يجب أن يكون رقماً موجباً' };
   }
+  const openingDate = toDateString(opts.openingDate ?? new Date()) || new Date().toISOString().split('T')[0];
   const obe = await ensureOpeningBalanceEquityAccount(companyId);
   if (!obe) return { success: false, error: 'تعذر تجهيز حساب الأرصدة الافتتاحية' };
 
@@ -248,7 +253,7 @@ export async function postAccountOpeningBalance(
     buildJournalEntryStatement(companyId, {
       reference: 'OPENING',
       description: `رصيد افتتاحي - ${memo}`,
-      date: new Date().toISOString().split('T')[0],
+      date: openingDate,
       totalAmount: amount,
       entries: [
         { accountId: opts.accountId, debit: drSide ? amount : 0, credit: drSide ? 0 : amount, memo },
@@ -257,9 +262,10 @@ export async function postAccountOpeningBalance(
     }),
     {
       sql: `UPDATE accounts SET balance = COALESCE(balance,0) + $1::numeric,
-              opening_amount = $2::numeric, opening_direction = $3, opening_balance_posted = true, updated_at = NOW()
+              opening_amount = $2::numeric, opening_direction = $3, opening_balance_posted = true,
+              opening_date = $6::date, updated_at = NOW()
             WHERE company_id = $4::uuid AND id = $5::uuid`,
-      params: [drSide ? amount : -amount, amount, opts.direction, companyId, opts.accountId],
+      params: [drSide ? amount : -amount, amount, opts.direction, companyId, opts.accountId, openingDate],
     },
   ]);
   return result.success ? { success: true } : { success: false, error: result.error };

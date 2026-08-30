@@ -282,6 +282,13 @@ export class AccountingService extends BaseService {
 
   /**
    * Get trial balance as of a specific date
+   *
+   * Balance = SUM of ALL posted journal entries only — the single source of
+   * truth. Opening balances are already posted as balanced JEs through the
+   * Opening Balance Equity account, so they are included automatically.
+   * NEVER add `a.balance` on top of the SUM: account balances are a display
+   * mirror that opening flows also bump, so `balance + SUM(je)` double-counts
+   * every opening amount.
    */
   async getTrialBalance(asOfDate?: string) {
     this.requirePermission('accounting.view');
@@ -291,7 +298,7 @@ export class AccountingService extends BaseService {
       const date = asOfDate || new Date().toISOString().split('T')[0];
 
       const result = await this.query(
-        `SELECT 
+        `SELECT
           a.id,
           a.code,
           a.name_ar as account_name,
@@ -300,17 +307,17 @@ export class AccountingService extends BaseService {
           a.nature,
           COALESCE(SUM(je.debit), 0) as debit,
           COALESCE(SUM(je.credit), 0) as credit,
-          a.balance + COALESCE(SUM(je.debit - je.credit), 0) as balance
+          COALESCE(SUM(je.debit - je.credit), 0) as balance
         FROM accounts a
         LEFT JOIN journal_entries je ON je.account_id = a.id
           AND je.transaction_id IN (
-            SELECT id FROM transactions 
-            WHERE company_id = $1::uuid 
-            AND date <= $2 
+            SELECT id FROM transactions
+            WHERE company_id = $1::uuid
+            AND date <= $2
             AND status = 'posted'
           )
         WHERE a.company_id = $1::uuid
-        GROUP BY a.id, a.code, a.name_ar, a.name_en, a.type, a.nature, a.balance
+        GROUP BY a.id, a.code, a.name_ar, a.name_en, a.type, a.nature
         ORDER BY a.code`,
         [companyId, date]
       );
@@ -334,25 +341,25 @@ export class AccountingService extends BaseService {
       const date = asOfDate || new Date().toISOString().split('T')[0];
 
       const result = await this.query(
-        `SELECT 
+        `SELECT
           a.id,
           a.code,
           a.name_ar as name_ar,
           a.name_en as name_en,
           a.type,
           a.nature,
-          a.balance + COALESCE(SUM(je.debit - je.credit), 0) as balance
+          COALESCE(SUM(je.debit - je.credit), 0) as balance
         FROM accounts a
         LEFT JOIN journal_entries je ON je.account_id = a.id
           AND je.transaction_id IN (
-            SELECT id FROM transactions 
-            WHERE company_id = $1::uuid 
-            AND date <= $2 
+            SELECT id FROM transactions
+            WHERE company_id = $1::uuid
+            AND date <= $2
             AND status = 'posted'
           )
         WHERE a.company_id = $1::uuid
           AND a.type IN ('asset', 'liability', 'equity')
-        GROUP BY a.id, a.code, a.name_ar, a.name_en, a.type, a.nature, a.balance
+        GROUP BY a.id, a.code, a.name_ar, a.name_en, a.type, a.nature
         ORDER BY a.code`,
         [companyId, date]
       );

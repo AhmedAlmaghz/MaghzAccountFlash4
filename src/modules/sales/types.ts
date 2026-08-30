@@ -12,6 +12,8 @@ export interface Customer {
   /** Opening receivable balance (customer owes us) - posted via Opening Balance Equity. */
   openingBalance?: number;
   openingBalancePosted?: boolean;
+  /** YYYY-MM-DD — when the opening balance was posted (orders the statement/aging). */
+  openingDate?: string;
   isActive: boolean;
   createdBy?: string;
   updatedBy?: string;

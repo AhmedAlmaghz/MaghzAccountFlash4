@@ -155,3 +155,52 @@ describe('purchasesApi.getOrderById', () => {
     expect(linesQuery!.sql).toContain('l.order_id = $1::uuid');
   });
 });
+
+describe('purchasesApi.getSupplierStatement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('unified statement SQL includes the opening-balance branch and company scoping in every branch', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      captured.push({ sql, params });
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.getSupplierStatement(SUPPLIER_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(captured).toHaveLength(1);
+    const { sql, params } = captured[0];
+    // opening + invoices + payments in ONE query with a running balance
+    expect(sql).toMatch(/FROM suppliers s/);
+    expect(sql).toMatch(/s\.opening_balance <> 0/);
+    expect(sql).toMatch(/FROM purchase_invoices/);
+    expect(sql).toMatch(/FROM payment_vouchers/);
+    expect(sql).toMatch(/رصيد افتتاحي/);
+    expect(sql).toMatch(/SUM\(credit - debit\) OVER/);
+    // every UNION branch must scope to the caller's company
+    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(3);
+    expect(params).toEqual([SUPPLIER_ID, COMPANY_ID]);
+  });
+
+  it('maps rows to statement items and carries the opening balance into the closing balance', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [
+        { id: 'open-1', date: '1900-01-01', type: 'opening', document_number: 'OPENING', description: 'رصيد افتتاحي', debit: 0, credit: 5000, balance: 5000 },
+        { id: 'inv-1', date: '2026-06-01', type: 'invoice', document_number: 'PINV-001', description: 'فاتورة مشتريات', debit: 0, credit: 3000, balance: 8000 },
+        { id: 'pay-1', date: '2026-06-10', type: 'payment', document_number: 'PV-001', description: 'سند صرف', debit: 2000, credit: 0, balance: 6000 },
+      ],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.getSupplierStatement(SUPPLIER_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data).toHaveLength(3);
+    expect(res.data![0].type).toBe('opening');
+    // closing balance = opening + invoices - payments (FULL balance)
+    expect(res.data![2].balance).toBe(6000);
+  });
+});

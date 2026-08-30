@@ -23,13 +23,25 @@ export const accountingApi = {
         // numbers (for PG numeric columns) — but account codes are TEXT that
         // happens to look numeric ('11101'), and number codes crash string
         // methods (code.startsWith / code.includes). Coerce back to string.
+        // Financial balance comes from `running_balance` (SUM of ALL posted
+        // JEs — opening included, see AGENTS.md Phase 72); `balance` stays as
+        // the legacy display column for consumers that haven't migrated yet.
         const withStringCode = (rows: Account[]) =>
-          rows.map((a) => ({ ...a, code: String(a.code ?? '') }));
+          rows.map((a) => ({
+            ...a,
+            code: String(a.code ?? ''),
+            balance: (a as Account & { runningBalance?: number }).runningBalance !== undefined
+              ? Number((a as Account & { runningBalance?: number }).runningBalance) || 0
+              : Number(a.balance) || 0,
+          }));
         let accounts = withStringCode(mapRows<Account>(result.data));
 
         if (ownedByUserId) {
           const filterResult = await adapter.query(
-            `SELECT * FROM accounts WHERE company_id = $1 AND (created_by = $2 OR created_by IS NULL)`,
+            `SELECT a.*, COALESCE((SELECT SUM(je.debit - je.credit)
+               FROM journal_entries je JOIN transactions t ON je.transaction_id = t.id
+               WHERE je.account_id = a.id AND t.company_id = a.company_id AND t.status = 'posted'), 0) AS running_balance
+             FROM accounts a WHERE a.company_id = $1 AND (a.created_by = $2 OR a.created_by IS NULL)`,
             [companyId, ownedByUserId]
           );
           if (filterResult.success && filterResult.rows) {
@@ -1058,49 +1070,83 @@ export const accountingApi = {
       const cidValidation = validateInput(idCompanySchema, { companyId, id: accountId });
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
-      let sql = `
-      SELECT
-        t.id,
-        t.date,
-        t.reference,
-        t.description,
-        je.debit,
-        je.credit
-      FROM journal_entries je
-      JOIN transactions t ON je.transaction_id = t.id
-      WHERE je.account_id = $1 AND t.company_id = $2 AND t.status = 'posted'
-      `;
+      // Ledger with a leading OPENING row: everything posted BEFORE startDate
+      // collapses into it (so opening JEs are never lost when filtering), and
+      // the LAST row's balance always equals the account's FULL balance.
       const params: unknown[] = [accountId, companyId];
-      if (startDate) {
-        sql += ` AND t.date >= $${params.length + 1}`;
-        params.push(startDate);
-      }
-      if (endDate) {
-        sql += ` AND t.date <= $${params.length + 1}`;
-        params.push(endDate);
-      }
-      sql += ` ORDER BY t.date, t.created_at`;
+      let movementWhere = 'je.account_id = $1 AND t.company_id = $2 AND t.status = \'posted\'';
+      if (startDate) { params.push(startDate); movementWhere += ` AND t.date >= $${params.length}`; }
+      if (endDate) { params.push(endDate); movementWhere += ` AND t.date <= $${params.length}`; }
+      // prior: same filters EXCLUSIVE of the start boundary (< startDate).
+      const priorParams: unknown[] = [accountId, companyId];
+      let priorWhere = 'je.account_id = $1 AND t.company_id = $2 AND t.status = \'posted\'';
+      if (startDate) { priorParams.push(startDate); priorWhere += ` AND t.date < $${priorParams.length}`; }
+      if (endDate) { priorParams.push(endDate); priorWhere += ` AND t.date <= $${priorParams.length}`; }
 
-      const result = await adapter.query(sql, params);
+      const sql = `
+      WITH movement AS (
+        SELECT t.id, t.date, t.reference, t.description, je.debit, je.credit
+        FROM journal_entries je
+        JOIN transactions t ON je.transaction_id = t.id
+        WHERE ${movementWhere}
+      ),
+      prior AS (
+        SELECT COALESCE(SUM(je.debit - je.credit), 0) AS opening
+        FROM journal_entries je
+        JOIN transactions t ON je.transaction_id = t.id
+        WHERE ${priorWhere.replace(/\$(\d+)/g, (_m, n) => `$${Number(n) + priorParams.length}`)}
+      )
+      SELECT id::text AS id, date, reference, description, debit, credit, opening, sort_type
+      FROM (
+        SELECT $${priorParams.length + 1} AS id, NULL::date AS date, NULL AS reference,
+               'رصيد افتتاحي' AS description, 0 AS debit, 0 AS credit, 0 AS sort_type,
+               (SELECT opening FROM prior) AS opening
+        UNION ALL
+        SELECT m.id::text, m.date, m.reference, m.description, m.debit, m.credit, 1 AS sort_type,
+               NULL::numeric AS opening
+        FROM movement m
+      ) rows
+      ORDER BY sort_type, date, id`;
+      // Final param order: movement params ($1..) then the prior CTE's own
+      // shifted copies ($5..$8 = accountId, companyId, start, end) then the
+      // OPENING label — the prior WHERE references its own renumbered $N.
+      const finalParams: unknown[] = [...params, ...priorParams, 'OPENING'];
+
+      const result = await adapter.query(sql, finalParams);
       if (result.success && result.rows) {
         interface LedgerQueryRow {
           id: string;
-          date: string;
-          reference: string;
-          description: string;
+          date: string | null;
+          reference: string | null;
+          description: string | null;
           debit: number;
           credit: number;
+          opening: number | null;
+          sort_type: number;
         }
         let runningBalance = 0;
-        const rows = (result.rows as LedgerQueryRow[]).map(row => {
+        const rows: LedgerRow[] = (result.rows as LedgerQueryRow[]).map((row) => {
+          if (row.sort_type === 0) {
+            // Opening row: balance before the period (opening + prior JEs)
+            runningBalance = Number(row.opening) || 0;
+            return {
+              id: 'OPENING',
+              date: startDate || '',
+              reference: 'OPENING',
+              description: 'رصيد افتتاحي',
+              debit: 0,
+              credit: 0,
+              balance: runningBalance,
+            } as LedgerRow;
+          }
           const debit = Number(row.debit) || 0;
           const credit = Number(row.credit) || 0;
           runningBalance += debit - credit;
           return {
-            id: row.id,
-            date: row.date,
-            reference: row.reference,
-            description: row.description,
+            id: String(row.id),
+            date: row.date ? String(toDateString(row.date) ?? row.date) : '',
+            reference: row.reference || undefined,
+            description: row.description || undefined,
             debit,
             credit,
             balance: runningBalance,

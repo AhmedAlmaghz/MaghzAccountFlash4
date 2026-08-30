@@ -27,7 +27,8 @@ test.describe('Payment Allocation Flow (end-to-end)', () => {
     await page.goto('/accounting/receipt-vouchers');
     await expect(page.getByText(/سندات|سند|Voucher|Receipt/i).first()).toBeVisible({ timeout: 15_000 });
 
-    const createBtn = page.getByRole('button', { name: /سند قبض جديد|New Receipt/i });
+    // two buttons share the label (header CTA + empty-state CTA) — use the first
+    const createBtn = page.getByRole('button', { name: /سند قبض جديد|New Receipt/i }).first();
     await expect(createBtn).toBeVisible({ timeout: 10_000 });
     await createBtn.click();
 
@@ -48,7 +49,8 @@ test.describe('Payment Allocation Flow (end-to-end)', () => {
     await page.goto('/accounting/payment-vouchers');
     await expect(page.getByText(/سندات|سند|Voucher|Payment/i).first()).toBeVisible({ timeout: 15_000 });
 
-    const createBtn = page.getByRole('button', { name: /سند صرف جديد|New Payment/i });
+    // two buttons share the label (header CTA + empty-state CTA) — use the first
+    const createBtn = page.getByRole('button', { name: /سند صرف جديد|New Payment/i }).first();
     await expect(createBtn).toBeVisible({ timeout: 10_000 });
     await createBtn.click();
 

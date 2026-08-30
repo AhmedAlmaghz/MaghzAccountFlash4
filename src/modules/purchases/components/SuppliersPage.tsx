@@ -29,6 +29,7 @@ interface SupplierForm {
   address: string;
   taxNumber: string;
   openingBalance: string;
+  openingDate: string;
   isActive: boolean;
 }
 
@@ -43,6 +44,7 @@ const initialForm = (): SupplierForm => ({
   address: '',
   taxNumber: '',
   openingBalance: '',
+  openingDate: '',
   isActive: true,
 });
 
@@ -112,6 +114,7 @@ export const SuppliersPage: React.FC = () => {
       address: s.address || '',
       taxNumber: s.taxNumber || '',
       openingBalance: s.openingBalancePosted ? String(s.openingBalance || '') : '',
+      openingDate: s.openingDate ? String(s.openingDate).slice(0, 10) : '',
       isActive: s.isActive,
     });
     setFormErrors({});
@@ -172,6 +175,7 @@ export const SuppliersPage: React.FC = () => {
       taxNumber: form.taxNumber?.trim() || undefined,
       balance: 0,
       openingBalance: editingId ? undefined : (Number(form.openingBalance) || 0),
+      openingDate: editingId ? undefined : (form.openingDate?.trim() || undefined),
       isActive: form.isActive,
     };
     try {
@@ -670,6 +674,14 @@ export const SuppliersPage: React.FC = () => {
               helperText={editingId ? t('openingBalance.postedHint') : t('openingBalance.supplierHint')}
               leftIcon={<span className="text-[11px] font-bold text-slate-400">{activeCompany?.currency || 'YER'}</span>}
             />
+            <Input
+              label={t('openingBalance.dateLabel')}
+              type="date"
+              disabled={!!editingId}
+              value={form.openingDate}
+              onChange={(e) => setForm((prev) => ({ ...prev, openingDate: e.target.value }))}
+              helperText={t('openingBalance.dateHint')}
+            />
             <label className="mt-4 flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3.5 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition">
               <input type="checkbox" checked={form.isActive} onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
               <div>
@@ -751,6 +763,11 @@ export const SuppliersPage: React.FC = () => {
                     <p className={`mt-1 text-3xl font-bold tabular-nums ${Number(supplier.balance) > 0 ? 'text-amber-600 dark:text-amber-400' : Number(supplier.balance) < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-900 dark:text-slate-50'}`}>
                       {formatCurrency(Number(supplier.balance) || 0)} <span className="text-sm font-normal text-slate-500">YER</span>
                     </p>
+                    {Number(supplier.openingBalance) > 0 && (
+                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        {t('openingBalance.title')}: <span className="font-semibold tabular-nums">{formatCurrency(Number(supplier.openingBalance) || 0)}</span>
+                      </p>
+                    )}
                     {Number(supplier.balance) !== 0 && (
                       <span className={`inline-flex mt-2 text-xs px-2 py-1 rounded-full border ${Number(supplier.balance) > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>{Number(supplier.balance) > 0 ? 'ذمة مدينة للمورد' : 'رصيد دائن'}</span>
                     )}
@@ -797,10 +814,10 @@ export const SuppliersPage: React.FC = () => {
                         </thead>
                         <tbody>
                           {statement.map((r) => (
-                            <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <tr key={r.id} className={r.type === 'opening' ? 'bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700' : 'border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'}>
                               <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap">{r.date ? formatDate(r.date) : '-'}</td>
-                              <td className="px-3 py-2.5 font-mono text-xs">{r.documentNumber}</td>
-                              <td className="px-3 py-2.5 max-w-[180px] truncate" title={r.description}>{r.description || r.type}</td>
+                              <td className="px-3 py-2.5 font-mono text-xs">{r.type === 'opening' ? '—' : r.documentNumber}</td>
+                              <td className="px-3 py-2.5 max-w-[180px] truncate" title={r.description}>{r.type === 'opening' ? <span className="font-bold text-primary-700 dark:text-primary-300">{r.description}</span> : (r.description || r.type)}</td>
                               <td className="px-3 py-2.5 text-end tabular-nums">{Number(r.debit || 0) > 0 ? <span className="text-amber-700 font-medium">{formatCurrency(r.debit || 0)}</span> : <span className="text-slate-300">-</span>}</td>
                               <td className="px-3 py-2.5 text-end tabular-nums">{Number(r.credit || 0) > 0 ? <span className="text-emerald-700 font-medium">{formatCurrency(r.credit || 0)}</span> : <span className="text-slate-300">-</span>}</td>
                               <td className="px-3 py-2.5 text-end tabular-nums font-bold">{formatCurrency(r.balance || 0)}</td>

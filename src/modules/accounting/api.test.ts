@@ -682,4 +682,111 @@ describe('accountingApi.getAccounts', () => {
     expect(child?.code).toBe('11101');
     expect(typeof child?.code === 'string' && child.code.startsWith('1')).toBe(true);
   });
+
+  it('financial balance comes from running_balance (opening + movement), not the legacy column', async () => {
+    // running_balance = SUM of ALL posted JEs (opening included); the legacy
+    // `balance` column only carries the opening stamp — using it would hide
+    // all JE movement and double-count openings elsewhere.
+    const adapter = {
+      getAccounts: vi.fn(async () => ({
+        success: true,
+        data: [
+          { id: 'a1', company_id: 'c1', code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', balance: '0', is_group: true, parent_id: null, is_active: true, running_balance: '0' },
+          // legacy balance column says 1500 (opening only) but JEs total 8200
+          { id: 'a2', company_id: 'c1', code: '11101', name_ar: 'الصندوق', name_en: 'Cash', type: 'asset', nature: 'debit', balance: '1500.00', is_group: false, parent_id: 'a1', is_active: true, running_balance: '8200.00' },
+        ],
+      })),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.getAccounts('c1');
+    expect(res.success).toBe(true);
+    const child = res.data?.[0]?.children?.[0];
+    expect(Number(child?.balance)).toBe(8200);
+  });
+
+  it('falls back to the legacy balance column when running_balance is absent', async () => {
+    const adapter = {
+      getAccounts: vi.fn(async () => ({
+        success: true,
+        data: [
+          { id: 'a1', company_id: 'c1', code: '1', name_ar: 'الأصول', name_en: 'Assets', type: 'asset', nature: 'debit', balance: '0', is_group: true, parent_id: null, is_active: true },
+          { id: 'a2', company_id: 'c1', code: '11101', name_ar: 'الصندوق', name_en: 'Cash', type: 'asset', nature: 'debit', balance: '1500.00', is_group: false, parent_id: 'a1', is_active: true },
+        ],
+      })),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.getAccounts('c1');
+    const child = res.data?.[0]?.children?.[0];
+    expect(Number(child?.balance)).toBe(1500);
+  });
+});
+
+describe('accountingApi.getAccountLedger — opening balance integration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const ACCOUNT_ID = '11111111-1111-1111-1111-111111111111';
+  const COMPANY_ID = '22222222-2222-2222-2222-222222222222';
+
+  function makeLedgerAdapter(rows: unknown[]) {
+    return {
+      query: vi.fn(async () => ({ success: true, rows })),
+      transaction: vi.fn(async () => ({ success: true, results: [] })),
+    };
+  }
+
+  it('SQL builds movement + prior CTEs with correct param shifting', async () => {
+    const captured: Array<{ sql: string; params: unknown[] }> = [];
+    const adapter = {
+      query: vi.fn(async (sql: string, params: unknown[]) => {
+        captured.push({ sql, params });
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(async () => ({ success: true, results: [] })),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await accountingApi.getAccountLedger(ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31');
+    expect(captured).toHaveLength(1);
+    const { sql, params } = captured[0];
+    // movement window
+    expect(sql).toMatch(/WITH movement AS/);
+    expect(sql).toMatch(/t\.date >= \$3/);
+    expect(sql).toMatch(/t\.date <= \$4/);
+    // prior window: same account/company but BEFORE the start boundary,
+    // with params shifted by priorParams.length (4) → $1..$4 become $5..$8
+    expect(sql).toMatch(/prior AS/);
+    expect(sql).toMatch(/t\.date < \$7/);
+    expect(sql).toMatch(/t\.date <= \$8/);
+    // opening row first (sort_type 0) via the trailing OPENING label param
+    expect(sql).toMatch(/رصيد افتتاحي/);
+    expect(sql).toMatch(/ORDER BY sort_type, date, id/);
+    // param order: [accountId, companyId, start, end, accountId, companyId, start, end, 'OPENING']
+    expect(params).toEqual([ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31', ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31', 'OPENING']);
+  });
+
+  it('maps the opening row first and runs the balance from it', async () => {
+    const adapter = makeLedgerAdapter([
+      { id: 'OPENING', date: null, reference: null, description: 'رصيد افتتاحي', debit: 0, credit: 0, opening: 5000, sort_type: 0 },
+      { id: 'tx-1', date: '2026-08-05', reference: 'INV-1', description: 'فاتورة', debit: 1200, credit: 0, opening: null, sort_type: 1 },
+      { id: 'tx-2', date: '2026-08-20', reference: 'RV-1', description: 'سند قبض', debit: 0, credit: 700, opening: null, sort_type: 1 },
+    ]);
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.getAccountLedger(ACCOUNT_ID, COMPANY_ID, '2026-08-01');
+    expect(res.success).toBe(true);
+    const rows = res.data!;
+    expect(rows).toHaveLength(3);
+    // opening row: id OPENING, balance = prior sum (5000)
+    expect(rows[0].id).toBe('OPENING');
+    expect(rows[0].balance).toBe(5000);
+    // movements run from the opening balance: 5000+1200=6200, then 6200-700=5500
+    expect(rows[1].balance).toBe(6200);
+    expect(rows[2].balance).toBe(5500);
+    // closing balance = opening + movement (FULL balance)
+    expect(rows[rows.length - 1].balance).toBe(5500);
+  });
 });

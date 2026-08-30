@@ -317,6 +317,55 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
     if (id) codeToId.set(acc.code, id);
   }
 
+  // ─── 2b. Opening-Balance Journal Entry for seeded account balances ────────
+  // Seeded balances (main cash, paid-in capital, ...) must exist as REAL
+  // posted journal entries — every GL report computes balances from
+  // journal_entries only (single source of truth). The balanced JE pairs each
+  // debit-natured seeded balance against Opening Balance Equity (31201), and
+  // credit-natured ones the other way around, so Dr = Cr from day one.
+  console.log('[SEED] Posting opening balances for seeded accounts...');
+  {
+    const obeId = codeToId.get('31201');
+    const seedable = ACCOUNTS.filter((a) => !a.is_group && Number(a.balance) > 0);
+    if (obeId && seedable.length > 0) {
+      const already = await client.query(
+        `SELECT 1 FROM transactions WHERE company_id = $1::uuid AND reference = 'OPENING-SEED' LIMIT 1`,
+        [companyId]
+      );
+      if (already.rows.length === 0) {
+        const entriesRows = [];
+        for (const a of seedable) {
+          const accId = codeToId.get(a.code);
+          if (!accId) continue;
+          entriesRows.push([accId, Number(a.balance), a.nature === 'debit']);
+        }
+        const totalDebit = entriesRows.filter(([, , d]) => d).reduce((s, [, v]) => s + v, 0);
+        const totalCredit = entriesRows.filter(([, , d]) => !d).reduce((s, [, v]) => s + v, 0);
+        // Balance the JE through Opening Balance Equity so the seed never
+        // produces an unbalanced trial balance, whatever the seeded rows are.
+        if (totalDebit !== totalCredit) {
+          const diff = totalDebit - totalCredit;
+          if (diff > 0) entriesRows.push([obeId, diff, false]);
+          else if (diff < 0) entriesRows.push([obeId, -diff, true]);
+        }
+        const txRes = await client.query(
+          `INSERT INTO transactions (company_id, date, reference, description, total_amount, status)
+           VALUES ($1::uuid, CURRENT_DATE, 'OPENING-SEED', 'رصيد افتتاحي للحسابات الأولية', $2::numeric, 'posted')
+           RETURNING id`,
+          [companyId, Math.max(totalDebit, totalCredit)]
+        );
+        const txId = txRes.rows[0]?.id;
+        for (const [accId, value, isDebit] of entriesRows) {
+          await client.query(
+            `INSERT INTO journal_entries (transaction_id, account_id, debit, credit, memo, company_id)
+             VALUES ($1::uuid, $2::uuid, $3::numeric, $4::numeric, $5, $6::uuid)`,
+            [txId, accId, isDebit ? value : 0, isDebit ? 0 : value, 'رصيد افتتاحي', companyId]
+          );
+        }
+      }
+    }
+  }
+
   // ─── 3. Product Types ────────────────────────────────────────────────────
   console.log('[SEED] Inserting product types...');
   const typeCodeToId = new Map();

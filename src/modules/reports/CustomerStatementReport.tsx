@@ -39,9 +39,15 @@ export const CustomerStatementReport: React.FC = () => {
                          FROM sales_invoices
                         WHERE company_id = $1
                           AND status != 'cancelled'
-                          AND (total_amount - COALESCE(paid_amount, 0)) > 0`;
-      if (fromDate) { invQuery += ` AND date >= $${params.length + 1}`; params.push(fromDate); }
-      if (toDate) { invQuery += ` AND date <= $${params.length + 1}`; params.push(toDate); }
+                          AND (total_amount - COALESCE(paid_amount, 0)) > 0
+                        UNION ALL
+                        SELECT id AS customer_id, 'OPENING' AS invoice_number,
+                               COALESCE(opening_date, DATE '1900-01-01') AS date, NULL AS due_date,
+                               opening_balance AS outstanding
+                          FROM customers
+                         WHERE company_id = $1 AND opening_balance > 0`;
+      if (fromDate) { invQuery = `SELECT * FROM (${invQuery}) aged WHERE date >= $${params.length + 1}`; params.push(fromDate); }
+      if (toDate) { invQuery = `SELECT * FROM (${invQuery}) aged WHERE date <= $${params.length + 1}`; params.push(toDate); }
       const invResult = await adapter.query(invQuery, params);
       const rows = (invResult.rows || []) as Array<{ customer_id: string; invoice_number: string; date: string; due_date: string | null; outstanding: number }>;
       const aged = aggregateCustomerAging(

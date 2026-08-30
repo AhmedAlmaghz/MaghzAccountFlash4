@@ -8,10 +8,12 @@ email?: string;
 address?: string;
 taxNumber?: string;
 balance: number;
-/** Opening payable balance (we owe supplier) - posted via Opening Balance Equity. */
-openingBalance?: number;
-openingBalancePosted?: boolean;
-isActive: boolean;
+  /** Opening payable balance (we owe supplier) - posted via Opening Balance Equity. */
+  openingBalance?: number;
+  openingBalancePosted?: boolean;
+  /** YYYY-MM-DD — when the opening balance was posted (orders the statement/aging). */
+  openingDate?: string;
+  isActive: boolean;
 createdAt?: string;
 updatedAt?: string;
 createdBy?: string;

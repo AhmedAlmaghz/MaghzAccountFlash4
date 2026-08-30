@@ -4,6 +4,18 @@ import { loginAs } from './fixtures/auth';
 test.describe('Supplier', () => {
   test('create supplier and verify in table', async ({ page }) => {
     await loginAs(page);
+
+    // The duplicate guard (Phase 68) blocks re-creating a supplier that
+    // already exists — clean up any residue from previous runs first so the
+    // test stays repeatable against a shared dev database.
+    await page.evaluate(async () => {
+      await fetch('/__e2e/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: 'DELETE FROM suppliers WHERE name = $1', params: ['مورد اختبار e2e'] }),
+      });
+    });
+
     await page.goto('/purchases/suppliers');
     await expect(page.getByRole('heading', { name: /الموردين/i }).first()).toBeVisible({ timeout: 15_000 });
 

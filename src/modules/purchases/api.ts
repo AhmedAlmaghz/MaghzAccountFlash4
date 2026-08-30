@@ -289,7 +289,7 @@ export const purchasesApi = {
         const opening = Number(supplierData.openingBalance) || 0;
         if (opening > 0 && !supplierData.openingBalancePosted) {
           const { postSupplierOpening } = await import('@/core/utils/openingBalance');
-          await postSupplierOpening(data.companyId, { id: supplierId, name: supplierData.name, amount: opening });
+          await postSupplierOpening(data.companyId, { id: supplierId, name: supplierData.name, amount: opening, openingDate: supplierData.openingDate });
         }
         return { success: true, id: supplierId };
       }
@@ -355,69 +355,51 @@ export const purchasesApi = {
       const idValidation = validateInput(z.object({ supplierId: uuidSchema, companyId: companyIdSchema }), { supplierId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
-      const invoices = await adapter.query(
-        `SELECT id, date, invoice_number as doc_number, total_amount, paid_amount, status
-        FROM purchase_invoices WHERE supplier_id = $1 AND company_id = $2 AND status != 'cancelled'
-        ORDER BY date`,
+      // Unified statement (opening + invoices + payments) in ONE query with a
+      // running balance — the last row's balance is the supplier's FULL
+      // balance. For suppliers, credit = we owe them (purchases), debit = we
+      // paid / returned, mirroring the supplier (AP) account nature.
+      const result = await adapter.query(
+        `WITH entries AS (
+          SELECT gen_random_uuid() AS id, COALESCE(s.opening_date, DATE '1900-01-01') AS date,
+                 'opening' AS type, 'OPENING' AS doc_number, 'رصيد افتتاحي' AS description,
+                 CASE WHEN s.opening_balance < 0 THEN -s.opening_balance ELSE 0 END AS debit,
+                 CASE WHEN s.opening_balance >= 0 THEN s.opening_balance ELSE 0 END AS credit,
+                 0 AS sort_type
+          FROM suppliers s
+          WHERE s.id = $1::uuid AND s.company_id = $2::uuid AND s.opening_balance <> 0
+          UNION ALL
+          SELECT id, date, 'invoice' AS type, invoice_number AS doc_number, 'فاتورة مشتريات' AS description,
+                 0::numeric AS debit, total_amount AS credit, 1 AS sort_type
+          FROM purchase_invoices
+          WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status != 'cancelled'
+          UNION ALL
+          SELECT id, date, 'payment' AS type, voucher_number AS doc_number, 'سند صرف' AS description,
+                 amount AS debit, 0::numeric AS credit, 2 AS sort_type
+          FROM payment_vouchers
+          WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
+        )
+        SELECT id::text AS id, date, type, doc_number AS document_number, description, debit, credit,
+               SUM(credit - debit) OVER (ORDER BY date, sort_type, doc_number) AS balance
+        FROM entries
+        ORDER BY date, sort_type, doc_number`,
         [supplierId, companyId]
       );
-      const payments = await adapter.query(
-        `SELECT id, date, voucher_number as doc_number, amount
-        FROM payment_vouchers WHERE supplier_id = $1 AND company_id = $2
-        ORDER BY date`,
-        [supplierId, companyId]
-      );
 
-      if (!invoices.success || !payments.success) {
-        return { success: false, error: invoices.error || payments.error };
+      if (!result.success) {
+        return { success: false, error: result.error };
       }
 
-      const items: SupplierStatementItem[] = [];
-      let balance = 0;
-
-      for (const inv of invoices.rows || []) {
-        const amount = Number(inv.total_amount);
-        const paid = Number(inv.paid_amount || 0);
-        balance += amount;
-        items.push({
-          id: inv.id,
-          date: inv.date,
-          type: 'invoice',
-          documentNumber: inv.doc_number,
-          description: 'فاتورة مشتريات',
-          debit: 0,
-          credit: amount,
-          balance,
-        });
-        if (paid > 0) {
-          balance -= paid;
-          items.push({
-            id: `p-${inv.id}`,
-            date: inv.date,
-            type: 'payment',
-            documentNumber: inv.doc_number,
-            description: 'دفعة',
-            debit: paid,
-            credit: 0,
-            balance,
-          });
-        }
-      }
-
-      for (const pay of payments.rows || []) {
-        const amount = Number(pay.amount);
-        balance -= amount;
-        items.push({
-          id: pay.id,
-          date: pay.date,
-          type: 'payment',
-          documentNumber: pay.doc_number,
-          description: 'سند صرف',
-          debit: amount,
-          credit: 0,
-          balance,
-        });
-      }
+      const items: SupplierStatementItem[] = (result.rows || []).map((row) => ({
+        id: String(row.id),
+        date: toDateString(row.date) || String(row.date),
+        type: (row.type === 'opening' || row.type === 'invoice' || row.type === 'payment' ? row.type : 'invoice') as SupplierStatementItem['type'],
+        documentNumber: String(row.document_number || ''),
+        description: String(row.description || ''),
+        debit: Number(row.debit) || 0,
+        credit: Number(row.credit) || 0,
+        balance: Number(row.balance) || 0,
+      }));
 
       return { success: true, data: items };
     } catch (e) {
@@ -430,9 +412,17 @@ export const purchasesApi = {
       const idValidation = validateInput(z.object({ supplierId: uuidSchema, companyId: companyIdSchema }), { supplierId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Aging includes the supplier's opening balance: an undated opening is
+      // by definition the OLDEST debt → it always lands in the 91+ bucket.
       const result = await adapter.query(
-        `SELECT due_date, total_amount, paid_amount FROM purchase_invoices
-        WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid')`,
+        `SELECT due_date, date, total_amount, paid_amount, 0::numeric AS opening_balance
+        FROM purchase_invoices
+        WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid')
+        UNION ALL
+        SELECT NULL::date AS due_date, COALESCE(opening_date, DATE '1900-01-01') AS date,
+               0::numeric AS total_amount, 0::numeric AS paid_amount, opening_balance
+        FROM suppliers
+        WHERE id = $1 AND company_id = $2 AND opening_balance > 0`,
         [supplierId, companyId]
       );
       if (!result.success) return { success: false, error: result.error };
@@ -445,7 +435,7 @@ export const purchasesApi = {
         if (!dueRaw) continue; // skip rows without a date to avoid NaN buckets
         const due = new Date(dueRaw);
         if (isNaN(due.getTime())) continue; // skip invalid dates
-        const remaining = Number(row.total_amount) - Number(row.paid_amount || 0);
+        const remaining = Number(row.total_amount) - Number(row.paid_amount || 0) || Number(row.opening_balance);
         if (remaining <= 0) continue;
         const diffDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
         if (diffDays <= 30) buckets['0-30'] += remaining;
@@ -471,14 +461,23 @@ export const purchasesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
+      // Full AP outstanding = unpaid invoices + every supplier's opening balance.
       const result = await adapter.query(
-        `SELECT COALESCE(SUM(total_amount - paid_amount), 0) AS outstanding
+        `SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) AS outstanding
            FROM purchase_invoices
-          WHERE company_id = $1 AND status IN ('posted', 'partially_paid')`,
+          WHERE company_id = $1 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount, 0)) > 0`,
+        [companyId]
+      );
+      const openingsResult = await adapter.query(
+        `SELECT COALESCE(SUM(opening_balance), 0) AS openings
+           FROM suppliers
+          WHERE company_id = $1 AND opening_balance > 0`,
         [companyId]
       );
       if (!result.success) return { success: false, error: result.error };
-      return { success: true, total: Number(result.rows?.[0]?.outstanding || 0) };
+      const invoices = Number(result.rows?.[0]?.outstanding || 0);
+      const openings = openingsResult.success ? Number(openingsResult.rows?.[0]?.openings || 0) : 0;
+      return { success: true, total: invoices + openings };
     } catch (e) {
       return { success: false, error: String(e) };
     }

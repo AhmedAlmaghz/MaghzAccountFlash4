@@ -680,11 +680,18 @@ export function registerDatabaseHandlers() {
   };
 
   // accounting.getAccounts
+  // `running_balance` = SUM of ALL posted JEs (opening JEs included) — the
+  // single source of truth. `balance` stays as the legacy display column so
+  // existing consumers keep working, but every UI that shows a financial
+  // balance must read running_balance.
   registerRpc('accounting.getAccounts', {
     paramCount: 1,
     validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
     compose: (p) => ({
-      sql: 'SELECT * FROM accounts WHERE company_id = $1 ORDER BY code',
+      sql: `SELECT a.*, COALESCE((SELECT SUM(je.debit - je.credit)
+              FROM journal_entries je JOIN transactions t ON je.transaction_id = t.id
+              WHERE je.account_id = a.id AND t.company_id = a.company_id AND t.status = 'posted'), 0) AS running_balance
+            FROM accounts a WHERE a.company_id = $1 ORDER BY a.code`,
       params: [p.companyId],
     }),
   });
@@ -2616,9 +2623,12 @@ export function registerDatabaseHandlers() {
   });
 
   // sales.getCustomerStatement
+  // Includes the customer's opening balance as the first row so the running
+  // balance (and the last row's closing balance) always equals the FULL
+  // balance = opening + invoices - receipts.
   registerRpc('sales.getCustomerStatement', {
     compose: (p, session) => ({
-      sql: `WITH entries AS (SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number, total_amount as debit, 0::numeric as credit, notes, date as sort_date, 1 as sort_type FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' UNION ALL SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number, 0::numeric as debit, amount as credit, notes, date as sort_date, 2 as sort_type FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted') SELECT date, document_type, document_number, debit, credit, SUM(debit - credit) OVER (ORDER BY sort_date, sort_type, document_number) as balance, notes FROM entries ORDER BY sort_date, sort_type, document_number`,
+      sql: `WITH entries AS (SELECT COALESCE(c.opening_date, DATE '1900-01-01') AS date, 'رصيد افتتاحي'::varchar AS document_type, 'OPENING'::varchar AS document_number, CASE WHEN c.opening_balance >= 0 THEN c.opening_balance ELSE 0 END AS debit, CASE WHEN c.opening_balance < 0 THEN -c.opening_balance ELSE 0 END AS credit, NULL::text AS notes, 0 AS sort_type FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid AND c.opening_balance <> 0 UNION ALL SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number, total_amount as debit, 0::numeric as credit, notes, 1 as sort_type FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' UNION ALL SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number, 0::numeric as debit, amount as credit, notes, 2 as sort_type FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted') SELECT date, document_type, document_number, debit, credit, SUM(debit - credit) OVER (ORDER BY date, sort_type, document_number) as balance, notes FROM entries ORDER BY date, sort_type, document_number`,
       params: [String(p.customerId), session.user.companyId],
     }),
     paramCount: 2,
@@ -2628,9 +2638,11 @@ export function registerDatabaseHandlers() {
   });
 
   // sales.getCustomerArAging
+  // Includes each customer's opening balance as an undated (1900-01-01) row
+  // so it always lands in the oldest bucket (>90).
   registerRpc('sales.getCustomerArAging', {
     compose: (p, session) => ({
-      sql: `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date FROM customers c JOIN sales_invoices i ON i.customer_id = c.id WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0`,
+      sql: `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date FROM customers c JOIN sales_invoices i ON i.customer_id = c.id WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date FROM customers c WHERE c.company_id = $1 AND c.opening_balance > 0`,
       params: [session.user.companyId],
     }),
     paramCount: 1,
