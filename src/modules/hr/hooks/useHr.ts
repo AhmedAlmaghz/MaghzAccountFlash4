@@ -99,7 +99,7 @@ export function usePayrollRuns(companyId: string) {
     setIsLoading(false);
   }, [companyId]);
 
-  const create = useCallback(async (data: Omit<PayrollRun, 'id'>) => {
+  const create = useCallback(async (data: import('../api').CreatePayrollRunInput) => {
     const res = await hrApi.createPayrollRun(data, user?.id);
     if (res.success) await refresh();
     return res;
@@ -125,7 +125,7 @@ export function usePayrollRunsPaginated(companyId: string, filters?: PayrollFilt
     [companyId, filters?.status]
   );
 
-  const create = useCallback(async (data: Omit<PayrollRun, 'id'>) => {
+  const create = useCallback(async (data: import('../api').CreatePayrollRunInput) => {
     const res = await hrApi.createPayrollRun(data, user?.id);
     if (res.success) await reloadList();
     return res;
@@ -133,6 +133,12 @@ export function usePayrollRunsPaginated(companyId: string, filters?: PayrollFilt
 
   const post = useCallback(async (id: string) => {
     const res = await hrApi.postPayrollRun(id, companyId, user?.id);
+    if (res.success) await reloadList();
+    return res;
+  }, [reloadList, companyId, user?.id]);
+
+  const removeDraft = useCallback(async (id: string) => {
+    const res = await hrApi.deletePayrollRun(id, companyId, user?.id);
     if (res.success) await reloadList();
     return res;
   }, [reloadList, companyId, user?.id]);
@@ -147,6 +153,7 @@ export function usePayrollRunsPaginated(companyId: string, filters?: PayrollFilt
     changePageSize: list.changePageSize,
     create,
     post,
+    removeDraft,
     reload: reloadList,
   };
 }
@@ -175,7 +182,7 @@ export function useLeaves(companyId: string) {
     setIsLoading(false);
   }, [companyId]);
 
-  const create = useCallback(async (data: Omit<Leave, 'id'>) => {
+  const create = useCallback(async (data: import('../api').CreateLeaveInput) => {
     const res = await hrApi.createLeave(data, user?.id);
     if (res.success) await refresh();
     return res;
@@ -207,7 +214,7 @@ export function useLeavesPaginated(companyId: string, filters?: LeaveFilters) {
     [companyId, filters?.status]
   );
 
-  const create = useCallback(async (data: Omit<Leave, 'id'>) => {
+  const create = useCallback(async (data: import('../api').CreateLeaveInput) => {
     const res = await hrApi.createLeave(data, user?.id);
     if (res.success) await reloadList();
     return res;
@@ -264,7 +271,7 @@ export function useEndOfServices(companyId: string) {
     setIsLoading(false);
   }, [companyId]);
 
-  const create = useCallback(async (data: Omit<EndOfService, 'id'>) => {
+  const create = useCallback(async (data: import('../api').CreateEndOfServiceInput) => {
     const res = await hrApi.createEndOfService(data, user?.id);
     if (res.success) await refresh();
     return res;
@@ -296,7 +303,7 @@ export function useEndOfServicesPaginated(companyId: string, filters?: EndOfServ
     [companyId, filters?.status]
   );
 
-  const create = useCallback(async (data: Omit<EndOfService, 'id'>) => {
+  const create = useCallback(async (data: import('../api').CreateEndOfServiceInput) => {
     const res = await hrApi.createEndOfService(data, user?.id);
     if (res.success) await reloadList();
     return res;
@@ -304,6 +311,12 @@ export function useEndOfServicesPaginated(companyId: string, filters?: EndOfServ
 
   const updateStatus = useCallback(async (id: string, status: EndOfService['status']) => {
     const res = await hrApi.updateEndOfServiceStatus(id, companyId, status, user?.id);
+    if (res.success) await reloadList();
+    return res;
+  }, [reloadList, companyId, user?.id]);
+
+  const pay = useCallback(async (id: string, cashBoxId: string) => {
+    const res = await hrApi.payEndOfService(id, companyId, cashBoxId, user?.id);
     if (res.success) await reloadList();
     return res;
   }, [reloadList, companyId, user?.id]);
@@ -324,6 +337,7 @@ export function useEndOfServicesPaginated(companyId: string, filters?: EndOfServ
     changePageSize: list.changePageSize,
     create,
     updateStatus,
+    pay,
     remove,
     reload: reloadList,
   };
@@ -373,4 +387,50 @@ export function useEmployeesPaginated(companyId: string, filters?: EmployeeFilte
     remove,
     reload: reloadList,
   };
+}
+
+/** Leave balances per type for one employee (entitlement − used this year). */
+export function useLeaveBalances(companyId: string, employeeId: string) {
+  const [balances, setBalances] = useState<import('../payrollEngine').LeaveBalance[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!companyId || !employeeId) {
+      setBalances([]);
+      return;
+    }
+    setIsLoading(true);
+    const res = await hrApi.getLeaveBalances(companyId, employeeId);
+    if (res.success && res.data) setBalances(res.data);
+    setIsLoading(false);
+  }, [companyId, employeeId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { balances, isLoading, reload: load };
+}
+
+/** Departments lookup for the employee form select. */
+export function useDepartments(companyId: string) {
+  const [departments, setDepartments] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    async function load() {
+      setIsLoading(true);
+      const res = await hrApi.getDepartments(companyId);
+      if (!cancelled) {
+        if (res.success && res.data) setDepartments(res.data);
+        setIsLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [companyId]);
+
+  return { departments, isLoading };
 }

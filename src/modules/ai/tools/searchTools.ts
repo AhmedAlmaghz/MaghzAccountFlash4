@@ -316,7 +316,7 @@ export const searchTools: ToolDefinition[] = [
     name: 'search.employees',
     labelAr: 'بحث عن موظف',
     descriptionAr: 'يبحث عن موظف بالاسم أو رقم الموظف أو البريد ويعيد معرفه (id) وبياناته. استخدمه قبل hr.create_employee أو أي عملية HR.',
-    permission: 'inventory.view',
+    permission: 'hr.view',
     dangerLevel: 'read',
     parameters: searchParam('اسم الموظف أو رقمه أو بريده'),
     execute: async (args, ctx) => {
@@ -337,6 +337,7 @@ export const searchTools: ToolDefinition[] = [
           employeeNumber: m.item.employeeNumber,
           phone: m.item.phone,
           position: m.item.position,
+          departmentId: m.item.departmentId,
           isActive: m.item.isActive,
         })),
         totalMatches: matches.length,
@@ -816,30 +817,29 @@ export const searchTools: ToolDefinition[] = [
   {
     name: 'search.attendance',
     labelAr: 'بحث عن حضور',
-    descriptionAr: 'يبحث في سجلات الحضور حسب اسم الموظف ويعيد معرف السجل (id) وحالة الحضور.',
+    descriptionAr: 'يبحث في سجلات الحضور حسب اسم الموظف أو التاريخ أو حالة الحضور ويعيد معرف السجل (id).',
     permission: 'hr.view',
     dangerLevel: 'read',
-    parameters: searchParam('اسم الموظف'),
+    parameters: searchParam('اسم الموظف أو التاريخ (YYYY-MM-DD) أو الحالة (present/absent/late/on_leave)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const now = new Date();
       const res = await hrApi.getAttendance(ctx.companyId, now.getMonth() + 1, now.getFullYear());
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((a) =>
-          normalizeQuery(a.employeeName || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      const matches = fuzzySearch(
+        query,
+        res.data,
+        (a) => `${a.employeeName ?? ''} ${a.date ?? ''} ${a.status ?? ''}`,
+      ).slice(0, 8);
       return {
-        matches: matches.map((a) => ({
-          id: a.id,
-          employeeName: a.employeeName,
-          date: a.date,
-          status: a.status,
-          checkIn: a.checkIn,
-          checkOut: a.checkOut,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          employeeName: m.item.employeeName,
+          date: m.item.date,
+          status: m.item.status,
+          checkIn: m.item.checkIn,
+          checkOut: m.item.checkOut,
         })),
         totalMatches: matches.length,
       };
@@ -848,32 +848,30 @@ export const searchTools: ToolDefinition[] = [
   {
     name: 'search.leaves',
     labelAr: 'بحث عن إجازة',
-    descriptionAr: 'يبحث في طلبات الإجازات حسب اسم الموظف أو نوع الإجازة ويعيد معرف الطلب (id) وحالته.',
+    descriptionAr: 'يبحث في طلبات الإجازات حسب اسم الموظف أو نوع الإجازة أو الحالة أو التاريخ ويعيد معرف الطلب (id) وحالته.',
     permission: 'hr.view',
     dangerLevel: 'read',
-    parameters: searchParam('اسم الموظف أو نوع الإجازة (annual/sick/emergency/unpaid)'),
+    parameters: searchParam('اسم الموظف أو نوع الإجازة (annual/sick/emergency/unpaid) أو الحالة أو التاريخ'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
-      const res = await hrApi.getLeavesPaginated(ctx.companyId, 1, 8);
+      const res = await hrApi.getLeavesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
-      const matches = items
-        .filter((l) =>
-          normalizeQuery(l.employeeName || '').includes(cleanQuery) ||
-          l.leaveType.toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
+      const matches = fuzzySearch(
+        query,
+        items,
+        (l) => `${l.employeeName ?? ''} ${l.leaveType} ${l.status} ${l.startDate ?? ''} ${l.endDate ?? ''}`,
+      ).slice(0, 8);
       return {
-        matches: matches.map((l) => ({
-          id: l.id,
-          employeeName: l.employeeName,
-          leaveType: l.leaveType,
-          startDate: l.startDate,
-          endDate: l.endDate,
-          days: l.days,
-          status: l.status,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          employeeName: m.item.employeeName,
+          leaveType: m.item.leaveType,
+          startDate: m.item.startDate,
+          endDate: m.item.endDate,
+          days: m.item.days,
+          status: m.item.status,
         })),
         totalMatches: matches.length,
       };

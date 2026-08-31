@@ -1,14 +1,28 @@
-import React, { useState, useMemo } from 'react';
-import { Banknote, Plus, Calculator, Printer, Layers, FileText, CheckCircle2 } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Banknote, Plus, Calculator, Printer, Layers, FileText, CheckCircle2, Trash2, RefreshCw } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination, Can } from '@/core/ui/components';
+import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
-import { usePayrollRunsPaginated, useEmployees } from '../hooks/useHr';
+import { hrApi } from '../api';
+import { usePayrollRunsPaginated } from '../hooks/useHr';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
+import type { ComputedPayroll } from '../payrollEngine';
 import type { PayrollLine } from '../types';
+
+/** Editable preview line — user only tweaks allowances/deductions overrides. */
+interface PreviewLine {
+  employeeId: string;
+  employeeName: string;
+  baseSalary: number;
+  allowances: number;
+  deductions: number;
+  overtime: number;
+  netSalary: number;
+}
 
 export const PayrollPage: React.FC = () => {
   const { t } = useTranslation();
@@ -17,41 +31,60 @@ export const PayrollPage: React.FC = () => {
   const companyId = activeCompany?.id || '';
   const [statusFilter, setStatusFilter] = useState<string>('');
   const payrollFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
-  const { payrolls, total, page, pageSize, isLoading, goToPage, changePageSize, create, post } = usePayrollRunsPaginated(companyId, payrollFilters);
-  const { employees } = useEmployees(companyId);
+  const { payrolls, total, page, pageSize, isLoading, goToPage, changePageSize, create, post, removeDraft } = usePayrollRunsPaginated(companyId, payrollFilters);
   const { formatCurrency } = useFormatters(companyId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPayroll, setSelectedPayroll] = useState<string | null>(null);
+  const [confirmDeleteDraft, setConfirmDeleteDraft] = useState<string | null>(null);
   const [formData, setFormData] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
-  const [lines, setLines] = useState<PayrollLine[]>([]);
+  const [lines, setLines] = useState<PreviewLine[]>([]);
+  const [preview, setPreview] = useState<ComputedPayroll | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
-  const calculateNet = (base: number, allowances: number, deductions: number, overtime: number) => base + allowances + overtime - deductions;
+  /** Auto preview: the server computes every line from employee cards + components + attendance overtime. */
+  const runPreview = useCallback(async (overrides?: Array<{ employeeId: string; extraAllowances: number; extraDeductions: number }>) => {
+    if (!companyId) return;
+    setIsPreviewLoading(true);
+    try {
+      const res = await hrApi.previewPayrollRun(companyId, formData.month, formData.year, overrides);
+      if (res.success && res.data) {
+        setPreview(res.data);
+        setLines(res.data.lines.map((l) => ({
+          employeeId: l.employeeId,
+          employeeName: l.employeeName || '',
+          baseSalary: l.baseSalary,
+          allowances: l.allowances,
+          deductions: l.deductions,
+          overtime: l.overtime,
+          netSalary: l.netSalary,
+        })));
+      } else {
+        addToast('error', res.error || t('common.error'));
+      }
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  }, [companyId, formData.month, formData.year, addToast, t]);
 
-  const initLines = () => {
-    setLines(employees.map((emp) => ({
-      id: crypto.randomUUID(),
-      payrollRunId: '',
-      employeeId: emp.id,
-      employeeName: emp.fullName,
-      baseSalary: emp.baseSalary || 0,
-      allowances: 0,
-      deductions: 0,
-      overtime: 0,
-      netSalary: emp.baseSalary || 0,
+  const openModal = () => {
+    setLines([]);
+    setPreview(null);
+    setIsModalOpen(true);
+  };
+
+  /** Recalculate: re-run the preview with overrides built from the current editable table. */
+  const handleRecalculate = () => {
+    void runPreview(lines.map((l) => ({
+      employeeId: l.employeeId,
+      extraAllowances: Number(l.allowances) || 0,
+      extraDeductions: Number(l.deductions) || 0,
     })));
   };
 
-  const updateLine = (index: number, field: keyof PayrollLine, value: number) => {
-    setLines((prev) => prev.map((l, i) => {
-      if (i !== index) return l;
-      const updated = { ...l, [field]: value };
-      updated.netSalary = calculateNet(updated.baseSalary, updated.allowances, updated.deductions, updated.overtime);
-      return updated;
-    }));
+  const updateLine = (index: number, field: 'allowances' | 'deductions', value: number) => {
+    setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   };
-
-  const totalPayroll = useMemo(() => lines.reduce((sum, l) => sum + l.netSalary, 0), [lines]);
 
   const handleSave = async () => {
     if (!formData.month || formData.month < 1 || formData.month > 12) {
@@ -66,18 +99,23 @@ export const PayrollPage: React.FC = () => {
       addToast('error', t('hr.payroll.noEmployees') || t('common.error'));
       return;
     }
+    // Lines carry ONLY the per-employee overrides — the server recomputes net from them.
     const res = await create({
       companyId,
       month: formData.month,
       year: formData.year,
-      totalAmount: totalPayroll,
       status: 'draft',
-      lines: [...lines],
+      lines: lines.map((l) => ({
+        employeeId: l.employeeId,
+        allowances: Number(l.allowances) || 0,
+        deductions: Number(l.deductions) || 0,
+      })),
     });
     if (res.success) {
       addToast('success', t('hr.payroll.created'));
       setIsModalOpen(false);
       setLines([]);
+      setPreview(null);
     } else {
       addToast('error', res.error || t('common.error'));
     }
@@ -86,10 +124,21 @@ export const PayrollPage: React.FC = () => {
   const handlePost = async (id: string) => {
     const res = await post(id);
     if (res.success) {
-      addToast('success', t('hr.payroll.posted'));
+      addToast('success', t('hr.payroll.postedWithEntry'));
     } else {
       addToast('error', res.error || t('common.error'));
     }
+  };
+
+  const handleDeleteDraft = async () => {
+    if (!confirmDeleteDraft) return;
+    const res = await removeDraft(confirmDeleteDraft);
+    if (res.success) {
+      addToast('success', t('hr.payroll.deleteDraft'));
+    } else {
+      addToast('error', res.error || t('common.error'));
+    }
+    setConfirmDeleteDraft(null);
   };
 
   const selectedPayrollData = selectedPayroll ? payrolls.find((p) => p.id === selectedPayroll) || null : null;
@@ -101,6 +150,7 @@ export const PayrollPage: React.FC = () => {
   }), [payrolls]);
 
   const columns = [
+    { key: 'runNumber', header: t('hr.payroll.runNumberLabel'), render: (row: { runNumber?: string }) => row.runNumber || '—' },
     { key: 'month', header: t('hr.payroll.month'), render: (row: { month: number; year: number }) => `${row.month}/${row.year}` },
     { key: 'totalAmount', header: t('hr.payroll.total'), align: 'right' as const, render: (row: { totalAmount: number }) => formatCurrency(row.totalAmount) },
     { key: 'status', header: t('hr.payroll.status'), render: (row: { status: string }) => <StatusBadge status={row.status} /> },
@@ -109,6 +159,11 @@ export const PayrollPage: React.FC = () => {
         <button onClick={() => setSelectedPayroll(row.id)} className="text-sm text-primary-600 hover:underline">{t('hr.payroll.viewDetails')}</button>
         {row.status === 'draft' && (
           <button onClick={() => handlePost(row.id)} className="text-sm text-emerald-600 hover:underline mr-2">{t('hr.payroll.post')}</button>
+        )}
+        {row.status === 'draft' && (
+          <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDeleteDraft(row.id)} title={t('hr.payroll.deleteDraft')}>
+            <Trash2 size={16} />
+          </Button>
         )}
       </div>
     )},
@@ -132,7 +187,7 @@ export const PayrollPage: React.FC = () => {
               <p className="text-violet-100/80 text-base max-w-lg">{t('hr.payroll.subtitle')}</p>
             </div>
             <Can action="create" module="hr">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { initLines(); setIsModalOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.payroll.newPayroll')}</Button>
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openModal} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.payroll.newPayroll')}</Button>
             </Can>
           </div>
         </div>
@@ -190,7 +245,7 @@ export const PayrollPage: React.FC = () => {
           </div>
         ) : payrolls.length === 0 ? (
           <div className="py-8">
-            <EmptyState icon="file" title={t('hr.payroll.emptyTitle')} description={t('hr.payroll.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { initLines(); setIsModalOpen(true); }}>{t('hr.payroll.newPayroll')}</Button></Can>} />
+            <EmptyState icon="file" title={t('hr.payroll.emptyTitle')} description={t('hr.payroll.emptyDescription')} action={<Can action="create" module="hr"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={openModal}>{t('hr.payroll.newPayroll')}</Button></Can>} />
           </div>
         ) : (
           <>
@@ -240,7 +295,7 @@ export const PayrollPage: React.FC = () => {
         </Modal>
       )}
 
-      {/* Create Payroll Modal */}
+      {/* Create Payroll Modal — server-driven preview */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -249,49 +304,76 @@ export const PayrollPage: React.FC = () => {
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
             <Button variant="secondary" onClick={() => setIsModalOpen(false)}>{t('settings.common.cancel')}</Button>
-            <Button variant="primary" leftIcon={<Calculator size={16} />} onClick={handleSave}>{t('hr.payroll.calculateAndSave')}</Button>
+            <Button variant="primary" leftIcon={<Calculator size={16} />} onClick={handleSave} disabled={lines.length === 0}>{t('hr.payroll.calculateAndSave')}</Button>
           </div>
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4 items-end">
             <Input label={t('hr.payroll.month')} type="number" value={String(formData.month)} onChange={(e) => setFormData((prev) => ({ ...prev, month: Number(e.target.value) }))} />
             <Input label={t('hr.payroll.year')} type="number" value={String(formData.year)} onChange={(e) => setFormData((prev) => ({ ...prev, year: Number(e.target.value) }))} />
+            <Button variant="primary" leftIcon={<RefreshCw size={16} />} onClick={() => void runPreview()} isLoading={isPreviewLoading} disabled={!formData.month || !formData.year}>
+              {t('hr.payroll.autoPreview')}
+            </Button>
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('hr.payroll.previewHint')}</p>
 
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-slate-50 dark:bg-slate-800">
-                <tr>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right">{t('hr.payroll.employee')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-28">{t('hr.payroll.baseSalary')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-24">{t('hr.payroll.allowancesShort')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-24">{t('hr.payroll.deductionsShort')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-24">{t('hr.payroll.overtimeShort')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-28">{t('hr.payroll.netSalary')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, idx) => (
-                  <tr key={line.id} className="border-t border-slate-200 dark:border-slate-700">
-                    <td className="p-2 text-sm">{line.employeeName}</td>
-                    <td className="p-2"><Input type="number" value={String(line.baseSalary)} onChange={(e) => updateLine(idx, 'baseSalary', Number(e.target.value))} /></td>
-                    <td className="p-2"><Input type="number" value={String(line.allowances)} onChange={(e) => updateLine(idx, 'allowances', Number(e.target.value))} /></td>
-                    <td className="p-2"><Input type="number" value={String(line.deductions)} onChange={(e) => updateLine(idx, 'deductions', Number(e.target.value))} /></td>
-                    <td className="p-2"><Input type="number" value={String(line.overtime)} onChange={(e) => updateLine(idx, 'overtime', Number(e.target.value))} /></td>
-                    <td className="p-2 text-sm font-bold text-primary-600 text-right">{formatCurrency(line.netSalary)}</td>
+          {lines.length > 0 && (
+            <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-slate-50 dark:bg-slate-800">
+                  <tr>
+                    <th className="text-xs font-semibold text-slate-500 p-2 text-right">{t('hr.payroll.employee')}</th>
+                    <th className="text-xs font-semibold text-slate-500 p-2 text-right w-28">{t('hr.payroll.baseSalary')}</th>
+                    <th className="text-xs font-semibold text-slate-500 p-2 text-right w-24">{t('hr.payroll.allowancesShort')}</th>
+                    <th className="text-xs font-semibold text-slate-500 p-2 text-right w-24">{t('hr.payroll.deductionsShort')}</th>
+                    <th className="text-xs font-semibold text-slate-500 p-2 text-right w-24">{t('hr.payroll.overtimeShort')}</th>
+                    <th className="text-xs font-semibold text-slate-500 p-2 text-right w-28">{t('hr.payroll.netSalary')}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {lines.map((line, idx) => (
+                    <tr key={line.employeeId} className="border-t border-slate-200 dark:border-slate-700">
+                      <td className="p-2 text-sm">{line.employeeName}</td>
+                      <td className="p-2 text-sm tabular-nums text-right">{formatCurrency(line.baseSalary)}</td>
+                      <td className="p-2"><Input type="number" value={String(line.allowances)} onBlur={handleRecalculate} onChange={(e) => updateLine(idx, 'allowances', Number(e.target.value))} /></td>
+                      <td className="p-2"><Input type="number" value={String(line.deductions)} onBlur={handleRecalculate} onChange={(e) => updateLine(idx, 'deductions', Number(e.target.value))} /></td>
+                      <td className="p-2 text-sm tabular-nums text-right">{formatCurrency(line.overtime)}</td>
+                      <td className="p-2 text-sm font-bold text-primary-600 text-right">{formatCurrency(line.netSalary)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-          <div className="flex justify-between py-3 px-4 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
-            <span className="font-bold text-primary-700 dark:text-primary-300">{t('hr.payroll.grandTotal')}</span>
-            <span className="font-bold text-primary-700 dark:text-primary-300 text-xl">{formatCurrency(totalPayroll)} YER</span>
-          </div>
+          {preview && lines.length > 0 && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800 p-3 text-center">
+                <p className="text-[11px] font-semibold text-primary-700 dark:text-primary-300">{t('hr.payroll.grossTotal')}</p>
+                <p className="font-bold text-primary-700 dark:text-primary-300 tabular-nums">{formatCurrency(preview.totalGross)}</p>
+              </div>
+              <div className="bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-800 p-3 text-center">
+                <p className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">{t('hr.payroll.deductionsTotal')}</p>
+                <p className="font-bold text-rose-700 dark:text-rose-300 tabular-nums">{formatCurrency(preview.totalDeductions)}</p>
+              </div>
+              <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 p-3 text-center">
+                <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">{t('hr.payroll.netTotal')}</p>
+                <p className="font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(preview.totalNet)}</p>
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!confirmDeleteDraft}
+        onClose={() => setConfirmDeleteDraft(null)}
+        onConfirm={handleDeleteDraft}
+        title={t('hr.payroll.deleteDraft')}
+        message={t('hr.payroll.deleteDraftConfirm')}
+        variant="danger"
+      />
     </div>
   );
 };

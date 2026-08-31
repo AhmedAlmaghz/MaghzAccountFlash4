@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Users, UserCheck, Banknote, Calendar, LogOut, HeartHandshake, Sparkles } from 'lucide-react';
+import { Users, UserCheck, Banknote, Calendar, LogOut, HeartHandshake, Sparkles, Sliders } from 'lucide-react';
 import { cn } from '@/core/utils';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { Card } from '@/core/ui/components';
@@ -26,6 +26,7 @@ export const HrPage: React.FC = () => {
     { id: 'payroll', labelKey: 'hr.page.menu.payroll', desc: 'مسيرات الرواتب الشهرية والترحيل المحاسبي', icon: Banknote, path: '/hr/payroll', color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', count: payrollTotal },
     { id: 'leaves', labelKey: 'hr.page.menu.leaves', desc: 'طلبات الإجازات والموافقات والأرصدة', icon: Calendar, path: '/hr/leaves', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: pendingLeavesTotal },
     { id: 'end-of-service', labelKey: 'hr.page.menu.endOfService', desc: 'حسابات نهاية الخدمة والمكافآت', icon: LogOut, path: '/hr/end-of-service', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: eosTotal },
+    { id: 'hr-policies', labelKey: 'hr.policy.title', desc: 'أرصدة الإجازات وساعات العمل ومعاملات نهاية الخدمة', icon: Sliders, path: '/settings/hr-policies', color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', count: null },
   ];
 
   return (

@@ -3,6 +3,7 @@ import { readTools } from './readTools';
 import { searchTools } from './searchTools';
 import { navigationTools } from './navigationTools';
 import { writeTools } from './writeTools';
+import { hrTools } from './hrTools';
 import { wizardTools } from './wizardTools';
 import { reportTools } from './reportTools';
 import { detailedReportTools } from './detailedReportTools';
@@ -15,7 +16,7 @@ let registered = false;
 
 export function ensureToolsRegistered(): void {
   if (registered) return;
-  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...wizardTools, ...reportTools, ...detailedReportTools]);
+  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools]);
   registered = true;
 }
 

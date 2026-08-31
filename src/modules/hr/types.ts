@@ -74,7 +74,7 @@ leaveType: 'annual' | 'sick' | 'emergency' | 'unpaid';
 startDate: string;
 endDate: string;
 days: number;
-status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
 approvedBy?: string;
 approvedAt?: string;
 reason?: string;
@@ -83,17 +83,20 @@ updatedBy?: string;
 }
 
 export interface EndOfService {
-id: string;
-companyId: string;
-employeeId: string;
-employeeName?: string;
-terminationDate: string;
-serviceYears: number;
-lastSalary: number;
-eosAmount: number;
-reason: 'resignation' | 'termination' | 'contract_end' | 'retirement';
-status: 'draft' | 'approved' | 'paid';
-notes?: string;
-createdBy?: string;
-updatedBy?: string;
+  id: string;
+  companyId: string;
+  employeeId: string;
+  employeeName?: string;
+  terminationDate: string;
+  serviceYears: number;
+  lastSalary: number;
+  eosAmount: number;
+  reason: 'resignation' | 'termination' | 'contract_end' | 'retirement';
+  status: 'draft' | 'approved' | 'paid' | 'cancelled';
+  /** Cash box used to settle the payment (set at payEndOfService). */
+  cashBoxId?: string;
+  paidAt?: string;
+  notes?: string;
+  createdBy?: string;
+  updatedBy?: string;
 }

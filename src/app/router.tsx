@@ -95,6 +95,7 @@ const SettingsLayout = React.lazy(() => import('@/modules/core/components/Settin
 const CompanySetup = React.lazy(() => import('@/modules/settings/components/CompanySetupPage'));
 const CurrenciesPage = React.lazy(() => import('@/modules/settings/components/CurrenciesPage'));
 const VatSettingsPage = React.lazy(() => import('@/modules/settings/components/VatSettingsPage'));
+const HrSettingsPage = React.lazy(() => import('@/modules/settings/components/HrSettingsPage'));
 const BranchesPage = React.lazy(() => import('@/modules/settings/components/BranchesPage'));
 const BackupPage = React.lazy(() => import('@/modules/core/components/BackupPage'));
 const UsersSettingsPage = React.lazy(() => import('@/modules/settings/components/UsersPage'));
@@ -275,6 +276,7 @@ export const AppRouter: React.FC = () => {
                 <Route path="company" element={withSuspense(CompanySetup)} />
                 <Route path="currencies" element={withSuspense(CurrenciesPage)} />
                 <Route path="vat" element={withSuspense(VatSettingsPage)} />
+          <Route path="hr-policies" element={withSuspense(HrSettingsPage)} />
                 <Route path="branches" element={withSuspense(BranchesPage)} />
                 <Route path="backup" element={withSuspense(BackupPage)} />
                 <Route path="document-sequences" element={withSuspense(DocumentSequencesPage)} />

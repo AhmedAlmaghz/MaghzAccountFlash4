@@ -193,6 +193,7 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.settings.company', path: '/settings/company' },
       { labelKey: 'sidebar.settings.currencies', path: '/settings/currencies' },
       { labelKey: 'sidebar.settings.vat', path: '/settings/vat' },
+  { labelKey: 'sidebar.hrPolicy', path: '/settings/hr-policies' },
       { labelKey: 'sidebar.settings.branches', path: '/settings/branches' },
       { labelKey: 'sidebar.settings.documentSequences', path: '/settings/document-sequences' },
       { labelKey: 'sidebar.settings.defaultAccounts', path: '/settings/default-accounts' },

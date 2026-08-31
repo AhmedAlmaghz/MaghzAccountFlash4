@@ -111,6 +111,8 @@ export const endOfService = pgTable('end_of_service', {
   eosAmount: numeric('eos_amount', { precision: 18, scale: 4 }).notNull(),
   reason: varchar('reason', { length: 50 }).notNull(), // resignation, termination, contract_end, retirement
   status: varchar('status', { length: 20 }).notNull().default('draft'), // draft, approved, paid
+  cashBoxId: uuid('cash_box_id'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
   notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),

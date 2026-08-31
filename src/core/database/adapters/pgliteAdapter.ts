@@ -107,7 +107,8 @@ import missingUpdatedAt from '@root/drizzle/0009_missing_updated_at.sql?raw';
 import aiChatPerformance from '@root/drizzle/0010_ai_chat_performance.sql?raw';
 import crmAuditColumns from '@root/drizzle/0011_crm_audit_columns.sql?raw';
 import defaultAccountsExpansion from '@root/drizzle/0012_default_accounts_expansion.sql?raw';
-import openingBalanceDates from '@root/drizzle/0013_opening_balance_dates.sql?raw';
+import openingBalanceDates from '@root/drizzle/0013_opening_balance_dates.sql?raw'
+import hrProfessional from '@root/drizzle/0014_hr_professional.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -124,6 +125,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0011_crm_audit_columns', sql: crmAuditColumns },
   { name: '0012_default_accounts_expansion', sql: defaultAccountsExpansion },
   { name: '0013_opening_balance_dates', sql: openingBalanceDates },
+  { name: '0014_hr_professional', sql: hrProfessional },
 ];
 
 /**
@@ -267,6 +269,10 @@ const ACCOUNTS: Array<{
     { code: '21101', name_ar: 'الدائنون التجاريون', name_en: 'Trade Suppliers', type: 'liability', nature: 'credit', is_group: false, parent_code: '211' },
     { code: '213', name_ar: 'الضرائب', name_en: 'Taxes', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
     { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
+    { code: '215', name_ar: 'مستحقات الموظفين', name_en: 'Employee Benefits', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
+    { code: '21501', name_ar: 'رواتب مستحقة الدفع', name_en: 'Salaries Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
+    { code: '21502', name_ar: 'استقطاعات مستحقة', name_en: 'Payroll Deductions Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
+    { code: '21503', name_ar: 'مستحقات نهاية الخدمة', name_en: 'End-of-Service Gratuity Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
     // Equity
     { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
     { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
@@ -290,6 +296,7 @@ const ACCOUNTS: Array<{
     { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52301', name_ar: 'مصروفات متنوعة ونثريات', name_en: 'Miscellaneous Expenses', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52401', name_ar: 'مصروفات نقل وشحن', name_en: 'Shipping & Freight', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+    { code: '52501', name_ar: 'مصروف نهاية الخدمة', name_en: 'End-of-Service Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     // Production costs (capitalized into finished-goods cost on work-order completion)
     { code: '53', name_ar: 'تكاليف الإنتاج', name_en: 'Production Costs', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
     { code: '53101', name_ar: 'تكاليف إنتاج - أجور', name_en: 'Production Costs - Labor', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
@@ -356,6 +363,10 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_vat_output', account_code: '21301', required: true, description: 'ضريبة المخرجات' },
   { key: 'default_vat_input', account_code: '21301', required: true, description: 'ضريبة المدخلات' },
   { key: 'default_salaries', account_code: '52101', required: false, description: 'مصاريف الرواتب' },
+  { key: 'default_salaries_payable', account_code: '21501', required: false, description: 'حساب الرواتب المستحقة الدفع' },
+  { key: 'default_payroll_deductions', account_code: '21502', required: false, description: 'حساب الاستقطاعات المستحقة' },
+  { key: 'default_eos_payable', account_code: '21503', required: false, description: 'حساب مستحقات نهاية الخدمة' },
+  { key: 'default_eos_expense', account_code: '52501', required: false, description: 'حساب مصروف نهاية الخدمة' },
   { key: 'default_sales_returns', account_code: '41103', required: false, description: 'مردودات المبيعات' },
   { key: 'default_discount_allowed', account_code: '41101', required: false, description: 'الخصم الممنوح' },
   { key: 'default_discount_received', account_code: '21101', required: false, description: 'الخصم المكتسب' },

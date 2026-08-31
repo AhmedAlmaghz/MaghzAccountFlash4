@@ -3824,4 +3824,53 @@ npx drizzle-kit migrate
   - **عمود varchar لا يستقبل UUID من Select**: قبل ربط أي Select بحقل نصي افحص نوع العمود — `UnitSelect` يعيد الآن الاسم لأن العمود نصي. لو أردت FK فأضف عمود uuid migration كاملة
   - **الفاتورة النقدية قيدُها على الخزنة لا على الطرف**: `paymentType='cash'` ⇒ debit/credit حساب الخزنة + `paid_amount=total` + `status='paid'` + لا يلمس رصيد العميل/المورد — وإلا انفصل السجل عن القيد
 
-*آخر تحديث: 2026-08-30 | الإصدار: maghzaccount-pro v0.7.1*
+
+### المرحلة 74 (v0.8.0): وحدة HR الاحترافية — مصدر حقيقة واحد + قيود ذرية + أدوات AI
+- **المبدأ المركزي**: كل الحسابات المالية في `src/modules/hr/payrollEngine.ts` (pure functions) — الواجهة والـ API والوكيل الذكي يستوردون نفس الدوال. لا يوجد netSalary/eosAmount/days واحد يُخزَّن من قيمة العميل.
+- **Migration `0014_hr_professional.sql`** (idempotent):
+  - حسابات: 215 (مجموعة مستحقات الموظفين) + 21501 رواتب مستحقة + 21502 استقطاعات مستحقة + 21503 مستحقات نهاية الخدمة + 52501 مصروف نهاية الخدمة — لكل شركة
+  - مفاتيح default_accounts: default_salaries_payable / default_payroll_deductions / default_eos_payable / default_eos_expense (مربوطة بالحسابات الجديدة)
+  - أعمدة: end_of_service.cash_box_id + paid_at + payroll_lines.overtime_hours
+  - UNIQUE: uq_attendance_emp_date (مع dedupe آمن) + **uq_payroll_runs_period كـ PARTIAL UNIQUE INDEX** `WHERE status IN ('draft','posted')` — المسير الملغى يُحرر الفترة
+  - 9 سياسات HR في settings (hr.leave.*, hr.overtimeRate, hr.standardWorkHours, hr.lateGraceMinutes, hr.eos.*, hr.payroll.grossUpPosting)
+- **payrollEngine.ts** (25 test): computeLeaveDays (شاملة، ترفض المعكوس) / computeLeaveBalance (unpaid = غير محدود) / computePayrollLine (أساسي + مكونات fixed|percentage + أوفر تايم = ساعات × الأساسي/30/ساعات العمل × المعدل) / computeEos (نصف شهر×5 ثم شهر كامل — معامِلات قابلة للضبط) / deriveAttendance (late من officialStart+grace, OT = العمل−القياسية) / buildPolicy (من settings rows)
+- **API الموحد (hr/api.ts)** — الحراس server-side:
+  - createLeave: أيام محسوبة خدمياً + رفض التداخل (daterange &&) + status='pending' دائماً
+  - updateLeaveStatus: آلة حالات (pending→approved/rejected/cancelled، approved→cancelled فقط) + **فرض رصيد صارم** (المعتمد+المعلق − هذه الإجازة vs الرصيد) + رسائل عربية بالمتبقي
+  - deleteLeave: pending/rejected فقط؛ deleteEmployee: يرفض إذا له مسيرات/إجازات/حضور/EOS (CASCADE فقدان صامت)؛ deletePayrollRun (جديد): draft فقط
+  - createPayrollRun: **إعادة حساب كل سطر خدمياً** من بطاقات الموظفين + أوفر تايم الحضور + المكونات؛ totalAmount = Σnet؛ رفض تكرار الفترة (draft/posted)
+  - postPayrollRun: **قيد Gross-up ذري** مع تغيير الحالة في runTransaction واحدة — Dr 52101 بالإجمالي / Cr 21501 بالصافي / Cr 21502 بالاستقطاعات (سطر يُحذف إذا صفر). يرفض غير المسودة
+  - createEndOfService: الخادم يجلب الموظف ويحسب — قيم العميل (أصفار أداة AI القديمة) تُهمَل
+  - updateEndOfServiceStatus: draft→approved = **قيد استحقاق ذري** (Dr 52501/Cr 21503)؛ approved→paid مرفوض (الدفع عبر payEndOfService)
+  - payEndOfService (جديد): **قيد تسوية ذري** (Dr 21503/Cr حساب الخزنة عبر cash_box_id→account_id) + ختم cash_box_id/paid_at
+  - saveAttendance: اشتقاق isLate/overtime خدمياً من السياسة (يدوي يفوز إذا >0) + on_leave مسموح
+  - القراءة الجديدة: previewPayrollRun / previewEndOfService / getLeaveBalances / getDepartments — عبر adapter.query في البيئتين بلا RPC
+- **SQL_MODULE_TABLE_RULES**: قاعدة cross-module جديدة — transactions/journal_entries بصلاحيات كتابة hr.create/hr.edit (سابقة manufacturing على stock_movements). postPayrollRun/payEndOfService يعملون موحداً عبر db:internal-transaction في الإلكترون
+- **RPC جديد وحيد**: hr.deletePayrollRun (draft-only، للـ rollback) — dbHandler + preload.js/.cjs + e2e shim
+- **الواجهات**: PayrollPage (زر معاينة تلقائية → previewPayrollRun، تعديل بدلات/استقطاعات فقط، gross/deductions/net من الخادم، حذف المسودة، توست "القيد أُنشئ") | LeavesPage (بطاقة أرصدة 4 أنواع عند اختيار الموظف) | AttendancePage (حذف الاشتقاق المحلي + on_leave + تلميح تلقائي) | EndOfServicePage (معاينة 400ms debounce + زر دفع مع CashBoxSelect) | EmployeesPage (DepartmentSelect من جدول departments) | **HrSettingsPage جديدة** (/settings/hr-policies): سياسات HR عبر settings ON CONFLICT
+- **أدوات AI**:
+  - إصلاحات صلاحيات: hr.create_employee كان inventory.create→hr.create؛ search.employees كان inventory.view→hr.view؛ RBAC دقيق (create/edit/delete) في كل أدوات HR
+  - إصلاح الأصفار: hr.create_end_of_service يرسل المدخلات الخام فقط (employeeId/terminationDate/reason) والخادم يحسب
+  - أدوات جديدة 9: hr.preview_payroll, hr.generate_payroll_run (خطوط مشتقة تلقائياً مثل create_work_order من BOM), hr.get_leave_balances, hr.get_employee_details, hr.preview_end_of_service, hr.save_attendance, hr.pay_end_of_service, hr.delete_payroll_run, settings.get_payroll_components
+  - hr.process_payroll_flow مُعاد كتابته: {month, year} فقط → preview→create→post مع **rollback حقيقي** (deletePayrollRun عند فشل الترحيل)
+  - search.leaves/attendance: substring/8 سجلات → fuzzySearch/200
+  - prompt قواعد 29-31 (الرواتب عبر preview/generate فقط / فحص الرصيد قبل الاعتماد / EOS يحسبها النظام + الدفع بخزنة)
+  - TOOL_ROUTES دقيقة لكل صفحة HR + مفاتيح ai.actions.openLeaves/openAttendance/openEndOfService
+- **i18n**: hr.policy.* + hr.payroll.autoPreview وغيرها + 3 مفاتيح ai.actions — متوازن 2566 AR = 2566 EN
+- **التحقق**: tsc 0 | eslint src+e2e 0/0 | vitest **1231/1231** (82 ملف) | build 40s | db:check clean | e2e **78/78** + 13-hr الجديد **9/9** | live-DB داخل ROLLBACK: القيود تصيب 52101/21501/21502/52501/21503/الخزنة بدقة + رفض التكرار والتجاوز
+- **e2e flake fix**: فشل شامل (78) كان بسبب كلمة مرور admin القوية العشوائية في قاعدة التطوير — fixture تتوقع admin1234؛ أُعيد تعيين pbkdf2 hash (dev only)
+
+### قواعد ذهبية مضافة (Phase 74)
+- **المحرك النقي = مصدر الحقيقة الوحيد**: كل معادلة HR في payrollEngine.ts — pure بلا DB/IO. الـ API يعيد الحساب ويتجاهل قيم العميل المشتقة؛ أي أداة AI أو شاشة تجلب المعاينة من نفس الدالة
+- **القيد المحاسبي يُبنى مع تغيير الحالة في runTransaction واحدة**: status-flip بدون قيد = دين غير مرئي في الدفتر. Gross-up: Dr المصروف بالإجمالي / Cr المستحق بالصافي / Cr الاستقطاعات — سطر الاستقطاعات يُحذف إذا صفر
+- **partial unique index وليس ADD CONSTRAINT**: `ALTER TABLE ... ADD CONSTRAINT ... WHERE` غير مدعوم في PG — استخدم `CREATE UNIQUE INDEX ... WHERE` داخل DO $ guard على pg_indexes
+- **الفترة تُحرر بالإلغاء**: uq_payroll_runs_period بشرط draft/posted — المسير الملغى يسمح بمسير جديد (إعادة محاولة بعد reversal)
+- **EOS مرحلتان**: استحقاق عند الاعتماد (يظهر الالتزام في الميزانية) + تسوية عند الدفع عبر خزنة ذات حساب. approved→paid مباشرة مرفوض — cashBoxId إلزامي للقيد
+- **الرصيد الصارم يُفرض في الـ API لا الـ UI**: الاعتماد يحسب (المعتمد+المعلق − هذه) ضد الاستحقاق ويَرفض بالمتبقي. unpaid غير محدود
+- **آلة حالة لكل كيان HR**: leaves (pending→approved/rejected/cancelled، approved→cancelled)، payroll (draft→posted/cancelled)، EOS (draft→approved→paid أو cancelled). paid نهائي
+- **الاشتقاق خدمي مع تجاوز يدوي**: saveAttendance يحسب isLate/OT من السياسة؛ القيمة اليدوية (>0) تفوز. بطاقة الموظف هي الأساسي؛ المكونات من payroll_components؛ أوفر تايم الحضور من SUM(attendance.overtime_hours) للشهر
+- **أدوات AI ترسل المدخلات الخام فقط**: النموذج لا يحسب — preview_* (read) للعرض وgenerate_* (write) للإنشاء المشتق. أي حساب في الوكيل = خطر هلوسة
+- **deletePayrollRun = مسار الـ rollback**: wizard الترحيل الكامل يحذف المسودة عند فشل الترحيل — لا partialSuccess بلا حل
+- **PowerShell pipes تفشل تحت npm scripts**: vitest/eslint عبر `Start-Process -FilePath npx.cmd -RedirectStandardOutput` — الـ pipe المباشر يعلق أو يفسد. وأي "vitest forks worker timeout" متتالٍ = عمليات node عالقة — Stop-Process node ثم إعادة
+
+*آخر تحديث: 2026-08-31 | الإصدار: maghzaccount-pro v0.8.0*

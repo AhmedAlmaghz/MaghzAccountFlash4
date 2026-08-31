@@ -391,7 +391,7 @@ export const wizardTools: ToolDefinition[] = [
   {
     name: 'hr.process_payroll_flow',
     labelAr: 'معالجة مسير رواتب كامل',
-    descriptionAr: 'ينشئ مسير رواتب ويرحّله فوراً. يحسب الإجمالي تلقائياً من الخطوط. استخدم search.employees أولاً لإيجاد معرف كل موظف.',
+    descriptionAr: 'دورة كاملة بضغطة واحدة: يعاين مسير رواتب شهر/سنة (النظام يحسب الأساسي والبدلات والاستقطاعات والأوفر تايم من بطاقات الموظفين ومكونات الرواتب وحضور الشهر)، ينشئه مسودة، ثم يرحّله وينشئ القيد المحاسبي. عند فشل الترحيل يُحذف المسير تلقائياً (استرجاع كامل).',
     permission: 'hr.create',
     dangerLevel: 'write',
     parameters: {
@@ -399,93 +399,62 @@ export const wizardTools: ToolDefinition[] = [
       properties: {
         month: { type: 'number', description: 'الشهر (1-12)' },
         year: { type: 'number', description: 'السنة (مثال: 2026)' },
-        lines: {
-          type: 'array',
-          description: 'خطوط الرواتب. احصل على employeeId من search.employees',
-          items: {
-            type: 'object',
-            properties: {
-              employeeId: { type: 'string', description: 'معرف الموظف (من search.employees)' },
-              baseSalary: { type: 'number', description: 'الراتب الأساسي' },
-              allowances: { type: 'number', description: 'البدلات (اختياري، افتراضي 0)' },
-              deductions: { type: 'number', description: 'الخصومات (اختياري، افتراضي 0)' },
-              overtime: { type: 'number', description: 'الإضافي (اختياري، افتراضي 0)' },
-              netSalary: { type: 'number', description: 'صافي الراتب = base + allowances + overtime - deductions' },
-            },
-            required: ['employeeId', 'baseSalary', 'netSalary'],
-          },
-        },
       },
-      required: ['month', 'year', 'lines'],
+      required: ['month', 'year'],
     },
-    summarizeArgs: (a) => {
-      const count = Array.isArray(a.lines) ? a.lines.length : 0;
-      return `معالجة مسير رواتب — الشهر ${a.month}/${a.year} — ${count} موظف`;
-    },
+    summarizeArgs: (a) => `معالجة مسير رواتب — الشهر ${a.month}/${a.year}`,
     execute: async (args, ctx) => {
       const month = Number(args.month);
       const year = Number(args.year);
       if (month < 1 || month > 12) return { error: 'الشهر يجب أن يكون بين 1 و 12' };
       if (year < 2000 || year > 2100) return { error: 'السنة خارج النطاق (2000-2100)' };
 
-      const rawLines = args.lines;
-      if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير موظف واحد على الأقل في lines' };
-
-      const lines: Array<{ employeeId: string; baseSalary: number; allowances: number; deductions: number; overtime: number; netSalary: number }> = [];
-      for (const item of rawLines) {
-        const emp = (item as Record<string, unknown>);
-        const employeeId = typeof emp.employeeId === 'string' && emp.employeeId ? emp.employeeId.trim() : undefined;
-        if (!employeeId) return { error: 'كل موظف يحتاج employeeId — استخدم search.employees أولاً' };
-        const baseSalary = Number(emp.baseSalary) || 0;
-        const allowances = Number(emp.allowances) || 0;
-        const deductions = Number(emp.deductions) || 0;
-        const overtime = Number(emp.overtime) || 0;
-        const netSalary = Number(emp.netSalary) || 0;
-        if (baseSalary <= 0) return { error: 'الراتب الأساسي يجب أن يكون أكبر من صفر' };
-        if (netSalary <= 0) return { error: 'صافي الراتب يجب أن يكون أكبر من صفر' };
-        lines.push({ employeeId, baseSalary, allowances, deductions, overtime, netSalary });
-      }
-
-      const totalAmount = lines.reduce((s, l) => s + l.netSalary, 0);
-
       // Use dynamic import to get hrApi (to avoid circular deps)
       const { hrApi } = await import('@/modules/hr/api');
 
-      // Step 1: Create draft payroll
+      // Step 1: preview (server computes every line from employee cards +
+      // payroll components + attendance overtime)
+      const preview = await hrApi.previewPayrollRun(ctx.companyId, month, year);
+      if (!preview.success || !preview.data) return { error: preview.error || 'فشلت معاينة مسير الرواتب' };
+      const lines = preview.data.lines ?? [];
+      if (lines.length === 0) return { error: 'لا يوجد موظفون نشطون لهذه الفترة' };
+
+      // Step 2: create draft — server recomputes; only employeeId matters per line
       const createRes = await hrApi.createPayrollRun({
         companyId: ctx.companyId,
         month,
         year,
-        totalAmount,
         status: 'draft',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        lines: lines as any,
+        lines: lines.map((l) => ({ employeeId: l.employeeId })),
       });
       if (!createRes.success) return { error: createRes.error || 'فشل إنشاء مسير الرواتب' };
       const payrollId = createRes.id;
       if (!payrollId) return { error: 'تم إنشاء المسير لكن لم يُرجع معرف' };
 
-      // Step 2: Post the payroll
-      const postRes = await hrApi.postPayrollRun(payrollId, ctx.companyId);
+      // Step 3: post → books the gross-up JE atomically
+      const postRes = await hrApi.postPayrollRun(payrollId, ctx.companyId, ctx.userId);
       if (!postRes.success) {
-        // No delete API for payroll, warn user
-        return { 
-          error: `تم إنشاء المسير لكن فشل الترحيل: ${postRes.error}. المسير محفوظ كمسودة (id: ${payrollId}).`,
-          partialSuccess: true,
-          payrollId,
-          status: 'draft',
+        // REAL ROLLBACK: deletePayrollRun exists now (draft-only) — clean up
+        // the orphan draft instead of leaving a half-finished state behind.
+        await hrApi.deletePayrollRun(payrollId, ctx.companyId, ctx.userId);
+        return {
+          success: false,
+          error: `فشل ترحيل مسير الرواتب: ${postRes.error || 'سبب غير معروف'} — حُذف المسير المسودة تلقائياً (استرجاع كامل).`,
+          rolledBack: true,
         };
       }
 
       return {
         success: true,
-        payrollId,
-        month,
-        year,
-        totalAmount,
-        employeeCount: lines.length,
         status: 'posted',
-        message: `تم إنشاء وترحيل مسير رواتب شهر ${month}/${year} بنجاح (${lines.length} موظف، الإجمالي: ${totalAmount})`,
+        journalPosted: true,
+        payrollId,
+        runNumber: postRes.runNumber,
+        employeeCount: lines.length,
+        totalGross: preview.data.totalGross,
+        totalDeductions: preview.data.totalDeductions,
+        totalNet: preview.data.totalNet,
+        message: `تم إنشاء وترحيل مسير رواتب شهر ${month}/${year} بنجاح (${lines.length} موظف، الصافي: ${preview.data.totalNet}) وحُجز القيد المحاسبي${postRes.runNumber ? ` — رقم المسير: ${postRes.runNumber}` : ''}`,
       };
     },
   },

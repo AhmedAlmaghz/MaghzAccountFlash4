@@ -134,6 +134,22 @@ const TOOL_ROUTES: Array<{ prefixes: string[]; target: RouteTarget }> = [
     target: { path: '/hr/payroll', labelKey: 'ai.actions.openPayroll' },
   },
   {
+    prefixes: ['hr.create_leave', 'hr.update_leave', 'hr.get_leave_balances'],
+    target: { path: '/hr/leaves', labelKey: 'ai.actions.openLeaves' },
+  },
+  {
+    prefixes: ['hr.post_payroll_run', 'hr.process_payroll_flow', 'hr.generate_payroll_run', 'hr.preview_payroll', 'hr.delete_payroll_run'],
+    target: { path: '/hr/payroll', labelKey: 'ai.actions.openPayroll' },
+  },
+  {
+    prefixes: ['hr.save_attendance', 'search.attendance'],
+    target: { path: '/hr/attendance', labelKey: 'ai.actions.openAttendance' },
+  },
+  {
+    prefixes: ['hr.create_end_of_service', 'hr.pay_end_of_service', 'hr.preview_end_of_service', 'hr.update_end_of_service_status', 'hr.delete_end_of_service'],
+    target: { path: '/hr/end-of-service', labelKey: 'ai.actions.openEndOfService' },
+  },
+  {
     prefixes: ['crm.create_lead', 'crm.convert_lead_to_customer', 'crm.update_lead_status'],
     target: { path: '/crm/leads', labelKey: 'ai.actions.openLeads' },
   },

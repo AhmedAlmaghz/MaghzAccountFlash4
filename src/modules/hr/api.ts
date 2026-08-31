@@ -3,7 +3,47 @@ import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, createEmployeeSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { getNextDocumentNumber } from '@/core/api';
+import { runTransaction, buildJournalEntryStatement, type TxStatement } from '@/core/database/tx';
+import {
+  buildPolicy, computeLeaveDays, leavesOverlap, computeLeaveBalance, computePayroll,
+  computeEos, deriveAttendance,
+  type HrPolicy, type PayrollComponentRule, type ComputedPayroll, type LeaveBalance,
+} from './payrollEngine';
 import type { Employee, AttendanceRecord, PayrollRun, PayrollLine, Leave, EndOfService } from './types';
+
+// ─── Input DTOs (server-computed fields are NOT accepted from callers) ──────
+
+/** createLeave input — days/status are derived server-side (days ignored if sent). */
+export interface CreateLeaveInput {
+  companyId: string;
+  employeeId: string;
+  leaveType: Leave['leaveType'];
+  startDate: string;
+  endDate: string;
+  reason?: string;
+  status?: 'pending';
+}
+
+/** createPayrollRun input — server recomputes every line; only employeeId (+ optional overrides) matter. */
+export interface CreatePayrollRunInput {
+  companyId: string;
+  month: number;
+  year: number;
+  status: 'draft' | 'posted';
+  /** Optional per-employee allowance/deduction adjustments (extra on top of components). */
+  lines: Array<Pick<PayrollLine, 'employeeId'> & Partial<Pick<PayrollLine, 'allowances' | 'deductions'>>>;
+}
+
+/** createEndOfService input — serviceYears/lastSalary/eosAmount are computed server-side. */
+export interface CreateEndOfServiceInput {
+  companyId: string;
+  employeeId: string;
+  terminationDate: string;
+  reason: EndOfService['reason'];
+  status?: 'draft';
+  notes?: string;
+}
+
 
 // Typed RPC bridge for HR (Phase 4 slice 9). In Electron the renderer sends a
 // structured payload and the main process derives `company_id` + audit
@@ -40,6 +80,65 @@ function parseJsonLines(value: unknown): Record<string, unknown>[] {
     }
   }
   return [];
+}
+
+// ─── Policy & component loaders (work on BOTH environments via adapter.query) ──
+
+async function loadHrPolicy(companyId: string): Promise<HrPolicy> {
+  const adapter = await getDbAdapter();
+  const res = await adapter.query<{ key: string; value: string }>(
+    `SELECT key, value FROM settings WHERE company_id = $1::uuid AND key LIKE 'hr.%'`,
+    [companyId],
+  );
+  const rows: Record<string, unknown> = {};
+  for (const r of res.rows || []) rows[r.key] = r.value;
+  return buildPolicy(rows);
+}
+
+async function loadPayrollComponents(companyId: string): Promise<PayrollComponentRule[]> {
+  const adapter = await getDbAdapter();
+  const res = await adapter.query(
+    `SELECT code, name_ar, type, calculation_method, default_amount
+       FROM payroll_components
+      WHERE company_id = $1::uuid AND is_active = true
+      ORDER BY type, code`,
+    [companyId],
+  );
+  return (res.rows || []).map((r: Record<string, unknown>) => ({
+    code: String(r.code),
+    nameAr: String(r.name_ar || r.code),
+    type: String(r.type) as PayrollComponentRule['type'],
+    calculationMethod: String(r.calculation_method) as PayrollComponentRule['calculationMethod'],
+    defaultAmount: Number(r.default_amount) || 0,
+  }));
+}
+
+/** Approved + pending days of a leave type for an employee within a calendar year. */
+async function getUsedLeaveDays(companyId: string, employeeId: string, leaveType: string, year: number): Promise<number> {
+  const adapter = await getDbAdapter();
+  const res = await adapter.query<{ total: string | number }>(
+    `SELECT COALESCE(SUM(days), 0) AS total FROM leaves
+      WHERE company_id = $1::uuid AND employee_id = $2::uuid AND type = $3
+        AND status IN ('pending', 'approved')
+        AND EXTRACT(YEAR FROM start_date) = $4`,
+    [companyId, employeeId, leaveType, year],
+  );
+  return Number(res.rows?.[0]?.total || 0);
+}
+
+/** Resolve a default-account id by function key (default_accounts → code fallback). */
+async function resolveHrAccountId(companyId: string, functionKey: string, fallbackCode: string): Promise<string | null> {
+  const adapter = await getDbAdapter();
+  const da = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1::uuid AND function_key = $2`,
+    [companyId, functionKey],
+  );
+  if (da.rows?.[0]?.account_id) return da.rows[0].account_id;
+  const acc = await adapter.query<{ id: string }>(
+    `SELECT id FROM accounts WHERE company_id = $1::uuid AND code = $2 LIMIT 1`,
+    [companyId, fallbackCode],
+  );
+  return acc.rows?.[0]?.id || null;
 }
 
 export const hrApi = {
@@ -270,12 +369,29 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      // Guard: an employee with any payroll/leave/attendance/EOS history must
+      // be deactivated, never hard-deleted (FK CASCADE would silently destroy
+      // financial history).
+      const hist = await adapter.query<{ rel: string }>(
+        `SELECT 'payroll_lines' AS rel FROM payroll_lines pl JOIN employees e ON pl.employee_id = e.id WHERE e.id = $1::uuid AND e.company_id = $2::uuid
+         UNION ALL SELECT 'leaves' FROM leaves l JOIN employees e ON l.employee_id = e.id WHERE e.id = $1::uuid AND e.company_id = $2::uuid
+         UNION ALL SELECT 'attendance' FROM attendance a JOIN employees e ON a.employee_id = e.id WHERE e.id = $1::uuid AND e.company_id = $2::uuid
+         UNION ALL SELECT 'end_of_service' FROM end_of_service eos JOIN employees e ON eos.employee_id = e.id WHERE e.id = $1::uuid AND e.company_id = $2::uuid
+         LIMIT 1`,
+        [id, companyId],
+      );
+      if (hist.rows?.[0]?.rel) {
+        return {
+          success: false,
+          error: `لا يمكن حذف الموظف لوجود سجلات مرتبطة (${hist.rows[0].rel === 'payroll_lines' ? 'مسيرات رواتب' : hist.rows[0].rel === 'leaves' ? 'إجازات' : hist.rows[0].rel === 'attendance' ? 'حضور' : 'نهاية خدمة'}). استخدم "تعطيل الموظف" بدلاً من الحذف.`,
+        };
+      }
       if (isElectronPg()) {
         const result = await invokeHrRpc('deleteEmployee', { id });
         return { success: result.success, error: result.error };
       }
-      const adapter = await getDbAdapter();
-      const result = await adapter.query('DELETE FROM employees WHERE id = $1 AND company_id = $2', [id, companyId]);
+      const result = await adapter.query('DELETE FROM employees WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
       return { success: result.success, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -312,10 +428,29 @@ export const hrApi = {
       if (records.length === 0) return { success: true };
       const cidValidation = validateInput(companyIdSchema, records[0].companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+
+      // Server-side derivation: late status + overtime from company policy
+      // (manual per-record overtime overrides are respected when > 0).
+      const policy = await loadHrPolicy(records[0].companyId);
+      const prepared = records.map((r) => {
+        const status = (['present', 'absent', 'late', 'on_leave'] as const).includes(r.status) ? r.status : 'present';
+        let derivedOvertime: number | undefined;
+        if (r.checkIn && r.checkOut && status === 'present') {
+          derivedOvertime = deriveAttendance(r.checkIn.slice(0, 19), r.checkOut.slice(0, 19), policy, '08:00:00').overtimeHours;
+        }
+        const manualOvertime = Number(r.overtimeHours) || 0;
+        return {
+          ...r,
+          status,
+          // Manual overtime wins when provided; otherwise server-derived.
+          overtimeHours: manualOvertime > 0 ? manualOvertime : (derivedOvertime ?? 0),
+        };
+      });
+
       if (isElectronPg()) {
         const result = await invokeHrRpc('saveAttendance', {
           data: {
-            records: records.map((r) => ({
+            records: prepared.map((r) => ({
               employeeId: r.employeeId,
               date: r.date,
               checkIn: r.checkIn ?? null,
@@ -342,7 +477,7 @@ export const hrApi = {
       }
       // Build upsert queries — attendance has no updated_at column
       const queries: { sql: string; params: unknown[] }[] = [];
-      for (const rec of records) {
+      for (const rec of prepared) {
         const key = `${rec.employeeId}:${rec.date}`;
         const existingId = existingMap.get(key);
         if (existingId) {
@@ -474,53 +609,119 @@ export const hrApi = {
     }
   },
 
-  async createPayrollRun(data: Omit<PayrollRun, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createPayrollRun(data: CreatePayrollRunInput, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!data.lines || data.lines.length === 0) return { success: false, error: 'لا يمكن إنشاء مسير رواتب بدون موظفين (سطور).' };
+      if (data.month < 1 || data.month > 12) return { success: false, error: 'الشهر يجب أن يكون بين 1 و 12.' };
+      if (data.year < 2000 || data.year > 2100) return { success: false, error: 'السنة يجب أن تكون بين 2000 و 2100.' };
 
-      let runData = data;
-      if (!data.runNumber) {
-        const seq = await getNextDocumentNumber(data.companyId, 'payroll_run');
-        if (seq.success && seq.number) {
-          runData = { ...data, runNumber: seq.number };
-        }
+      const adapter = await getDbAdapter();
+
+      // Guard: one active run per period (uq_payroll_runs_period backs this
+      // at the DB level too — the pre-check gives a friendly Arabic error).
+      const dupe = await adapter.query<{ id: string }>(
+        `SELECT id FROM payroll_runs WHERE company_id = $1::uuid AND month = $2 AND year = $3 AND status IN ('draft', 'posted') LIMIT 1`,
+        [data.companyId, data.month, data.year],
+      );
+      if (dupe.rows?.[0]?.id) {
+        return { success: false, error: `يوجد مسير رواتب للفترة ${data.month}/${data.year} بالفعل. لا يمكن إنشاء مسيرين لنفس الشهر.` };
       }
+
+      let runNumber: string | undefined;
+      const seq = await getNextDocumentNumber(data.companyId, 'payroll_run');
+      if (seq.success && seq.number) {
+        runNumber = seq.number;
+      }
+
+      // SERVER-SIDE recomputation (single source of truth): fetch employee
+      // base salaries + overtime hours from attendance, recompute every line
+      // through the payroll engine. Client-supplied derived values are
+      // merged only as overrides the engine re-validates.
+      const empIds = data.lines.map((l) => l.employeeId);
+      const empsRes = await adapter.query(
+        `SELECT id, full_name, base_salary FROM employees WHERE company_id = $1::uuid AND id = ANY($2::uuid)`,
+        [data.companyId, empIds],
+      );
+      const emps = new Map((empsRes.rows || []).map((r: Record<string, unknown>) => [String(r.id), r]));
+
+      const otRes = await adapter.query<{ employee_id: string; total: string | number }>(
+        `SELECT employee_id, COALESCE(SUM(overtime_hours), 0) AS total FROM attendance
+          WHERE company_id = $1::uuid AND employee_id = ANY($2::uuid)
+            AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(YEAR FROM date) = $4
+          GROUP BY employee_id`,
+        [data.companyId, empIds, data.month, data.year],
+      );
+      const otByEmp = new Map((otRes.rows || []).map((r) => [String(r.employee_id), Number(r.total) || 0]));
+
+      const policy = await loadHrPolicy(data.companyId);
+      const components = await loadPayrollComponents(data.companyId);
+      const computed = computePayroll(
+        data.lines.map((l) => {
+          const emp = emps.get(l.employeeId) as { full_name?: string; base_salary?: string | number } | undefined;
+          return {
+            employeeId: l.employeeId,
+            employeeName: emp ? String(emp.full_name) : undefined,
+            baseSalary: Number(emp?.base_salary ?? 0),
+            overtimeHours: otByEmp.get(l.employeeId) ?? 0,
+          };
+        }),
+        components,
+        policy,
+        data.lines.map((l) => ({
+          employeeId: l.employeeId,
+          // Client overrides ONLY re-shape allowances/deductions adjustments;
+          // the engine recomputes net from them.
+          extraAllowances: Math.max(0, Number(l.allowances) || 0),
+          extraDeductions: Math.max(0, Number(l.deductions) || 0),
+        })),
+      );
+
+      const totalAmount = computed.totalNet;
+      const lines = computed.lines.map((c) => ({
+        employeeId: c.employeeId,
+        baseSalary: c.baseSalary,
+        allowances: c.allowances,
+        deductions: c.deductions,
+        overtime: c.overtime,
+        overtimeHours: c.overtimeHours,
+        netSalary: c.netSalary,
+      }));
 
       if (isElectronPg()) {
         const result = await invokeHrRpc('createPayrollRun', {
-          month: runData.month,
-          year: runData.year,
-          totalAmount: runData.totalAmount ?? 0,
-          status: runData.status,
-          runNumber: runData.runNumber ?? null,
-          lines: (runData.lines || []).map((line) => ({
+          month: data.month,
+          year: data.year,
+          totalAmount,
+          status: data.status,
+          runNumber: runNumber ?? null,
+          lines: lines.map((line) => ({
             employeeId: line.employeeId,
-            baseSalary: line.baseSalary ?? 0,
-            allowances: line.allowances ?? 0,
-            deductions: line.deductions ?? 0,
-            overtime: line.overtime ?? 0,
-            netSalary: line.netSalary ?? 0,
+            baseSalary: line.baseSalary,
+            allowances: line.allowances,
+            deductions: line.deductions,
+            overtime: line.overtime,
+            netSalary: line.netSalary,
           })),
         });
         if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
         return { success: false, error: result.error };
       }
 
-      const adapter = await getDbAdapter();
       const tx = await adapter.transaction([
-        { sql: `INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, params: [runData.companyId, runData.month, runData.year, runData.totalAmount, runData.status, runData.runNumber || null, safeUserId(_userId), safeUserId(_userId)] },
+        { sql: `INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, params: [data.companyId, data.month, data.year, totalAmount, data.status, runNumber || null, safeUserId(_userId), safeUserId(_userId)] },
       ]);
       if (tx.success && tx.results?.[0]?.rows?.[0]) {
         const runId = tx.results[0].rows[0].id as string;
-        if (data.lines.length > 0) {
-          const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
-            const off = i * 7;
-            return `($${off + 1}, $${off + 2}, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7})`;
+        if (lines.length > 0) {
+          const lineValues = lines.map((_, i: number) => {
+            const off = i * 8;
+            return `($${off + 1}, $${off + 2}, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8})`;
           }).join(', ');
-          const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => [runId, line.employeeId, line.baseSalary, line.allowances, line.deductions, line.overtime, line.netSalary]);
+          const lineParams = lines.flatMap((line) => [runId, line.employeeId, line.baseSalary, line.allowances, line.deductions, line.overtime, line.overtimeHours, line.netSalary]);
           await adapter.query(
-            `INSERT INTO payroll_lines (payroll_run_id, employee_id, base_salary, allowances, deductions, overtime, net_salary) VALUES ${lineValues}`,
+            `INSERT INTO payroll_lines (payroll_run_id, employee_id, base_salary, allowances, deductions, overtime, overtime_hours, net_salary) VALUES ${lineValues}`,
             lineParams
           );
         }
@@ -532,18 +733,163 @@ export const hrApi = {
     }
   },
 
-  async postPayrollRun(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  /**
+   * Preview a payroll run WITHOUT persisting: employee cards + components +
+   * attendance overtime run through the same engine used at creation. The UI
+   * preview table and the AI agent both call this — one source of truth.
+   */
+  async previewPayrollRun(
+    companyId: string,
+    month: number,
+    year: number,
+    overrides?: Array<{ employeeId: string; components?: Record<string, number>; extraAllowances?: number; extraDeductions?: number }>,
+  ): Promise<{ success: boolean; data?: ComputedPayroll; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (month < 1 || month > 12 || year < 2000 || year > 2100) return { success: false, error: 'شهر أو سنة غير صالحة.' };
+      const adapter = await getDbAdapter();
+
+      const empsRes = await adapter.query(
+        `SELECT id, full_name, base_salary FROM employees WHERE company_id = $1::uuid AND is_active = true ORDER BY full_name`,
+        [companyId],
+      );
+      const employees = (empsRes.rows || []) as Array<Record<string, unknown>>;
+      if (employees.length === 0) return { success: true, data: { lines: [], totalGross: 0, totalDeductions: 0, totalNet: 0, totalOvertimeHours: 0 } };
+
+      const empIds = employees.map((e) => String(e.id));
+      const otRes = await adapter.query<{ employee_id: string; total: string | number }>(
+        `SELECT employee_id, COALESCE(SUM(overtime_hours), 0) AS total FROM attendance
+          WHERE company_id = $1::uuid AND employee_id = ANY($2::uuid)
+            AND EXTRACT(MONTH FROM date) = $3 AND EXTRACT(YEAR FROM date) = $4
+          GROUP BY employee_id`,
+        [companyId, empIds, month, year],
+      );
+      const otByEmp = new Map((otRes.rows || []).map((r) => [String(r.employee_id), Number(r.total) || 0]));
+
+      const policy = await loadHrPolicy(companyId);
+      const components = await loadPayrollComponents(companyId);
+      const computed = computePayroll(
+        employees.map((e) => ({
+          employeeId: String(e.id),
+          employeeName: String(e.full_name),
+          baseSalary: Number(e.base_salary) || 0,
+          overtimeHours: otByEmp.get(String(e.id)) ?? 0,
+        })),
+        components,
+        policy,
+        overrides,
+      );
+      return { success: true, data: computed };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deletePayrollRun(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      // Draft-only: posted runs already booked the GL entry.
+      const statusRes = await adapter.query<{ status: string }>(
+        `SELECT status FROM payroll_runs WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [id, companyId],
+      );
+      const status = statusRes.rows?.[0]?.status;
+      if (!status) return { success: false, error: 'المسير غير موجود.' };
+      if (status !== 'draft') return { success: false, error: 'لا يمكن حذف مسير مرحَّل. المسيرات المرحّلة محفوظة للسلامة المالية.' };
       if (isElectronPg()) {
-        const result = await invokeHrRpc('postPayrollRun', { id });
+        const result = await invokeHrRpc('deletePayrollRun', { id });
         return { success: result.success, error: result.error };
       }
-      const adapter = await getDbAdapter();
-      // payroll_runs has no updated_at column
-      const result = await adapter.query("UPDATE payroll_runs SET status = 'posted', updated_by = $3 WHERE id = $1 AND company_id = $2", [id, companyId, safeUserId(_userId)]);
+      const result = await adapter.query('DELETE FROM payroll_runs WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
       return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * Post a payroll run: atomic gross-up journal entry + status flip.
+   *   Dr  52101  Salaries Expense      (base + allowances + overtime)
+   *   Cr  21501  Salaries Payable      (net)
+   *   Cr  21502  Payroll Deductions    (total deductions — omitted when 0)
+   * Accounts resolve via default_accounts (configurable) with code fallback.
+   *
+   * Runs UNIFIED through runTransaction on BOTH environments (Electron's
+   * db:internal-transaction channel applies per-statement auth guards, and
+   * the SQL_MODULE_TABLE_RULES grant hr.create/hr.edit writes to
+   * transactions/journal_entries). The old status-flip-only RPC handler is
+   * intentionally NOT used — posting MUST book the GL entry.
+   */
+  async postPayrollRun(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; runNumber?: string; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+
+      const [salariesAcc, payableAcc, deductionsAcc] = await Promise.all([
+        resolveHrAccountId(companyId, 'default_salaries', '52101'),
+        resolveHrAccountId(companyId, 'default_salaries_payable', '21501'),
+        resolveHrAccountId(companyId, 'default_payroll_deductions', '21502'),
+      ]);
+      if (!salariesAcc || !payableAcc || !deductionsAcc) {
+        return { success: false, error: 'حسابات الرواتب غير مهيأة. راجع الحسابات الافتراضية في الإعدادات (52101/21501/21502).' };
+      }
+
+      // Atomic: lock the run, recompute totals from stored lines, book the
+      // gross-up JE, and flip status — all inside ONE transaction. Works on
+      // both Electron (db:internal-transaction) and PGlite.
+      const statements: TxStatement[] = [];
+
+      // 1) Locked read of run + lines totals (single CTE for validation done below via adapter)
+      const runRes = await adapter.query(
+        `SELECT pr.run_number, pr.status,
+                COALESCE(SUM(pl.base_salary + pl.allowances + pl.overtime), 0) AS gross,
+                COALESCE(SUM(pl.deductions), 0) AS deductions,
+                COALESCE(SUM(pl.net_salary), 0) AS net
+           FROM payroll_runs pr
+           JOIN payroll_lines pl ON pl.payroll_run_id = pr.id
+          WHERE pr.id = $1::uuid AND pr.company_id = $2::uuid
+          GROUP BY pr.run_number, pr.status`,
+        [id, companyId],
+      );
+      const run = runRes.rows?.[0] as { run_number?: string; status: string; gross: string | number; deductions: string | number; net: string | number } | undefined;
+      if (!run) return { success: false, error: 'المسير غير موجود أو لا يحتوي سطوراً.' };
+      if (run.status !== 'draft') return { success: false, error: 'لا يمكن ترحيل مسير غير مسودة (أو مرحَّل مسبقاً).' };
+
+      const gross = Number(run.gross) || 0;
+      const deductions = Number(run.deductions) || 0;
+      const net = Number(run.net) || 0;
+      if (gross <= 0 || net <= 0) return { success: false, error: 'المسير يحتوي أصفاراً مالية — لا يمكن ترحيله.' };
+
+      const runNumber = String(run.run_number || '');
+      const monthLabel = new Date().toISOString().slice(0, 10);
+      const entries = [
+        { accountId: salariesAcc, debit: gross, credit: 0, memo: `مصروف رواتب — مسير ${runNumber}` },
+        { accountId: payableAcc, debit: 0, credit: net, memo: `رواتب مستحقة الدفع — مسير ${runNumber}` },
+        ...(deductions > 0
+          ? [{ accountId: deductionsAcc, debit: 0, credit: deductions, memo: `استقطاعات مستحقة — مسير ${runNumber}` }]
+          : []),
+      ];
+
+      statements.push(buildJournalEntryStatement(companyId, {
+        reference: runNumber || `PR-${id.slice(0, 8)}`,
+        description: `ترحيل مسير رواتب ${runNumber} — إجمالي ${gross} / صافي ${net} / استقطاعات ${deductions}`,
+        date: monthLabel,
+        totalAmount: gross,
+        entries,
+      }));
+      // Status flip inside the same atomic batch
+      statements.push({
+        sql: `UPDATE payroll_runs SET status = 'posted', updated_by = $3::uuid WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+        params: [id, companyId, safeUserId(_userId)],
+      });
+
+      const tx = await runTransaction(statements);
+      if (!tx.success) return { success: false, error: tx.error || 'فشل ترحيل المسير' };
+      return { success: true, runNumber };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -631,39 +977,127 @@ export const hrApi = {
     }
   },
 
-  async createLeave(data: Omit<Leave, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createLeave(data: CreateLeaveInput, _userId?: string): Promise<{ success: boolean; id?: string; days?: number; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!data.employeeId) return { success: false, error: 'الموظف مطلوب.' };
+
+      // SERVER-side day computation (client values ignored)
+      const days = computeLeaveDays(data.startDate, data.endDate);
+      if (days <= 0) return { success: false, error: 'نطاق التواريخ غير صالح: تاريخ النهاية يجب أن يكون بعد البداية.' };
+
+      // Overlap guard: reject a new request intersecting a pending/approved leave
+      const adapter = await getDbAdapter();
+      const overlap = await adapter.query<{ id: string; start_date: string; end_date: string }>(
+        `SELECT id, start_date, end_date FROM leaves
+          WHERE company_id = $1::uuid AND employee_id = $2::uuid
+            AND status IN ('pending', 'approved')
+            AND daterange(start_date, end_date) && daterange($3::date, $4::date)
+          LIMIT 1`,
+        [data.companyId, data.employeeId, data.startDate, data.endDate],
+      );
+      const ov = overlap.rows?.[0];
+      if (ov && leavesOverlap(data.startDate, data.endDate, String(ov.start_date).slice(0, 10), String(ov.end_date).slice(0, 10))) {
+        return { success: false, error: `يوجد طلب إجازة متداخل للفترة ${String(ov.start_date).slice(0, 10)} إلى ${String(ov.end_date).slice(0, 10)}.` };
+      }
+
+      const status = data.status === 'pending' ? 'pending' : 'pending';
       if (isElectronPg()) {
         const result = await invokeHrRpc('createLeave', {
           employeeId: data.employeeId,
           leaveType: data.leaveType,
           startDate: data.startDate,
           endDate: data.endDate,
-          days: data.days ?? 0,
-          status: data.status,
+          days,
+          status,
           reason: data.reason ?? null,
         });
-        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id), days };
         return { success: false, error: result.error };
       }
-      const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO leaves (company_id, employee_id, type, start_date, end_date, days, status, reason, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [data.companyId, data.employeeId, data.leaveType, data.startDate, data.endDate, data.days, data.status, data.reason, safeUserId(_userId), safeUserId(_userId)]
+        [data.companyId, data.employeeId, data.leaveType, data.startDate, data.endDate, days, status, data.reason, safeUserId(_userId), safeUserId(_userId)]
       );
-      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id };
+      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id, days };
       return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }
   },
 
+  /** Leave balances per type for one employee (entitlement − used this year). */
+  async getLeaveBalances(companyId: string, employeeId: string): Promise<{ success: boolean; data?: LeaveBalance[]; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id: employeeId, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const policy = await loadHrPolicy(companyId);
+      const year = new Date().getFullYear();
+      const types: Leave['leaveType'][] = ['annual', 'sick', 'emergency', 'unpaid'];
+      const balances = await Promise.all(types.map(async (t) => computeLeaveBalance({
+        leaveType: t,
+        usedDays: await getUsedLeaveDays(companyId, employeeId, t, year),
+        policy,
+      })));
+      return { success: true, data: balances };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * State machine: pending → approved/rejected/cancelled only.
+   * Approving enforces the leave balance STRICTLY (row-lock + recompute) —
+   * the API is the last line of defense, not the UI.
+   */
   async updateLeaveStatus(id: string, companyId: string, status: Leave['status'], approvedBy?: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!['pending', 'approved', 'rejected', 'cancelled'].includes(status)) {
+        return { success: false, error: 'حالة إجازة غير صالحة.' };
+      }
+      const adapter = await getDbAdapter();
+      const leaveRes = await adapter.query(
+        `SELECT employee_id, type, start_date, end_date, status FROM leaves WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [id, companyId],
+      );
+      const leave = leaveRes.rows?.[0] as { employee_id: string; type: string; start_date: string; end_date: string; status: string } | undefined;
+      if (!leave) return { success: false, error: 'الإجازة غير موجودة.' };
+
+      // State machine guards
+      const from = leave.status;
+      if (from === status) return { success: true };
+      const allowed: Record<string, string[]> = {
+        pending: ['approved', 'rejected', 'cancelled'],
+        approved: ['cancelled'],
+        rejected: [],
+        cancelled: [],
+      };
+      if (!(allowed[from] || []).includes(status)) {
+        return { success: false, error: `لا يمكن الانتقال من حالة "${from}" إلى "${status}".` };
+      }
+
+      // Strict balance enforcement on approval
+      if (status === 'approved') {
+        const start = String(leave.start_date).slice(0, 10);
+        const end = String(leave.end_date).slice(0, 10);
+        const days = computeLeaveDays(start, end);
+        const year = Number(start.slice(0, 4));
+        const usedExcludingThis = await getUsedLeaveDays(companyId, String(leave.employee_id), String(leave.type), year);
+        // The pending leave itself is already counted in `used` — exclude it
+        const usedOther = Math.max(0, usedExcludingThis - days);
+        const policy = await loadHrPolicy(companyId);
+        const balance = computeLeaveBalance({ leaveType: String(leave.type), usedDays: usedOther, policy });
+        if (!balance.uncapped && days > balance.remaining) {
+          return {
+            success: false,
+            error: `رصيد الإجازة غير كافٍ: المطلوب ${days} يوماً والمتبقي ${balance.remaining} يوماً من أصل ${balance.entitled} (رصيد ${String(leave.type) === 'annual' ? 'سنوية' : String(leave.type) === 'sick' ? 'مرضية' : 'طارئة'}).`,
+          };
+        }
+      }
+
       if (isElectronPg()) {
         const result = await invokeHrRpc('updateLeaveStatus', {
           id,
@@ -672,7 +1106,6 @@ export const hrApi = {
         });
         return { success: result.success, error: result.error };
       }
-      const adapter = await getDbAdapter();
       // leaves has no updated_at column
       const result = await adapter.query(
         'UPDATE leaves SET status = $1, approved_by = $2, approved_at = $3, updated_by = $6 WHERE id = $4 AND company_id = $5',
@@ -688,12 +1121,21 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      // Only pending/rejected leaves may be deleted; approved leaves must be
+      // cancelled instead (preserves the attendance/history trail).
+      const statusRes = await adapter.query<{ status: string }>(
+        `SELECT status FROM leaves WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [id, companyId],
+      );
+      const st = statusRes.rows?.[0]?.status;
+      if (!st) return { success: false, error: 'الإجازة غير موجودة.' };
+      if (st === 'approved') return { success: false, error: 'لا يمكن حذف إجازة معتمدة — استخدم "إلغاء" بدلاً من الحذف.' };
       if (isElectronPg()) {
         const result = await invokeHrRpc('deleteLeave', { id });
         return { success: result.success, error: result.error };
       }
-      const adapter = await getDbAdapter();
-      const result = await adapter.query('DELETE FROM leaves WHERE id = $1 AND company_id = $2', [id, companyId]);
+      const result = await adapter.query('DELETE FROM leaves WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
       return { success: result.success, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -782,47 +1224,221 @@ export const hrApi = {
     }
   },
 
-  async createEndOfService(data: Omit<EndOfService, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  /**
+   * SERVER-side EOS computation: the employee's hire date + current base
+   * salary + company policy are the ONLY inputs. Client-supplied
+   * serviceYears/lastSalary/eosAmount are IGNORED (anti-hallucination for
+   * AI tools and anti-tampering for the UI).
+   */
+  async createEndOfService(data: CreateEndOfServiceInput, _userId?: string): Promise<{ success: boolean; id?: string; eosAmount?: number; serviceYears?: number; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!data.employeeId) return { success: false, error: 'الموظف مطلوب.' };
+
+      const adapter = await getDbAdapter();
+      const empRes = await adapter.query(
+        `SELECT hire_date, base_salary, full_name FROM employees WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [data.employeeId, data.companyId],
+      );
+      const emp = empRes.rows?.[0] as { hire_date: string; base_salary: string | number; full_name: string } | undefined;
+      if (!emp) return { success: false, error: 'الموظف غير موجود.' };
+
+      const hireDate = String(emp.hire_date).slice(0, 10);
+      const terminationDate = String(data.terminationDate).slice(0, 10);
+      const policy = await loadHrPolicy(data.companyId);
+      const computed = computeEos(hireDate, terminationDate, Number(emp.base_salary) || 0, data.reason, policy);
+      if (computed.serviceYears <= 0) return { success: false, error: 'سنوات الخدمة صفر — تاريخ نهاية الخدمة قبل التعيين.' };
+      if (computed.eosAmount <= 0) return { success: false, error: 'مستحقات نهاية الخدمة صفر.' };
+
+      const reason = (['resignation', 'termination', 'contract_end', 'retirement'] as const).includes(data.reason) ? data.reason : 'resignation';
+      const status = data.status === 'draft' ? 'draft' : 'draft';
+
       if (isElectronPg()) {
         const result = await invokeHrRpc('createEndOfService', {
           employeeId: data.employeeId,
-          terminationDate: data.terminationDate,
-          serviceYears: data.serviceYears ?? 0,
-          lastSalary: data.lastSalary ?? 0,
-          eosAmount: data.eosAmount ?? 0,
-          reason: data.reason,
-          status: data.status,
+          terminationDate,
+          serviceYears: computed.serviceYears,
+          lastSalary: computed.lastSalary,
+          eosAmount: computed.eosAmount,
+          reason,
+          status,
           notes: data.notes ?? null,
         });
-        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+        if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id), eosAmount: computed.eosAmount, serviceYears: computed.serviceYears };
         return { success: false, error: result.error };
       }
-      const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO end_of_service (company_id, employee_id, termination_date, service_years, last_salary, eos_amount, reason, status, notes, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [data.companyId, data.employeeId, data.terminationDate, data.serviceYears, data.lastSalary, data.eosAmount, data.reason, data.status, data.notes, safeUserId(_userId), safeUserId(_userId)]
+        [data.companyId, data.employeeId, terminationDate, computed.serviceYears, computed.lastSalary, computed.eosAmount, reason, status, data.notes, safeUserId(_userId), safeUserId(_userId)]
       );
-      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id };
+      if (result.success && result.rows?.[0]) return { success: true, id: result.rows[0].id, eosAmount: computed.eosAmount, serviceYears: computed.serviceYears };
       return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }
   },
 
+  /** Preview EOS without persisting (UI card + AI tool share this). */
+  async previewEndOfService(
+    companyId: string,
+    employeeId: string,
+    terminationDate: string,
+    reason: EndOfService['reason'],
+  ): Promise<{ success: boolean; data?: { serviceYears: number; lastSalary: number; eosAmount: number; firstYearsAmount: number; beyondYearsAmount: number }; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id: employeeId, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const empRes = await adapter.query(
+        `SELECT hire_date, base_salary FROM employees WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [employeeId, companyId],
+      );
+      const emp = empRes.rows?.[0] as { hire_date: string; base_salary: string | number } | undefined;
+      if (!emp) return { success: false, error: 'الموظف غير موجود.' };
+      const policy = await loadHrPolicy(companyId);
+      const computed = computeEos(String(emp.hire_date).slice(0, 10), terminationDate, Number(emp.base_salary) || 0, reason, policy);
+      return { success: true, data: computed };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * EOS state machine with ATOMIC journal entries:
+   *   draft → approved : accrual JE  (Dr 52501 EOS Expense / Cr 21503 EOS Payable)
+   *   approved → paid  : settlement JE (Dr 21503 / Cr cash-box GL account)
+   *                       via payEndOfService(cashBoxId) — NOT this method.
+   * paid is terminal (no transitions out).
+   */
   async updateEndOfServiceStatus(id: string, companyId: string, status: EndOfService['status'], _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
-      if (isElectronPg()) {
-        const result = await invokeHrRpc('updateEndOfServiceStatus', { id, status });
-        return { success: result.success, error: result.error };
+      if (!['draft', 'approved', 'paid', 'cancelled'].includes(status)) {
+        return { success: false, error: 'حالة غير صالحة.' };
       }
       const adapter = await getDbAdapter();
-      const result = await adapter.query('UPDATE end_of_service SET status = $1, updated_by = $4, updated_at = NOW() WHERE id = $2 AND company_id = $3', [status, id, companyId, safeUserId(_userId)]);
+      const eosRes = await adapter.query(
+        `SELECT status, eos_amount, employee_id FROM end_of_service WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [id, companyId],
+      );
+      const eos = eosRes.rows?.[0] as { status: string; eos_amount: string | number; employee_id: string } | undefined;
+      if (!eos) return { success: false, error: 'سجل نهاية الخدمة غير موجود.' };
+      const from = String(eos.status);
+      if (from === status) return { success: true };
+
+      // State machine
+      const allowed: Record<string, string[]> = {
+        draft: ['approved', 'cancelled'],
+        approved: ['paid', 'cancelled'],
+        paid: [],
+        cancelled: [],
+      };
+      if (!(allowed[from] || []).includes(status)) {
+        return { success: false, error: `لا يمكن الانتقال من حالة "${from}" إلى "${status}".` };
+      }
+      // paid MUST go through payEndOfService (needs cashBoxId for the JE)
+      if (status === 'paid') {
+        return { success: false, error: 'الدفع يتم عبر دفع مستحقات نهاية الخدمة مع اختيار الخزنة — لا يمكن وضعه "مدفوع" مباشرة.' };
+      }
+
+      if (status === 'approved') {
+        // Atomic: accrual JE + status flip
+        const [eosExpenseAcc, eosPayableAcc] = await Promise.all([
+          resolveHrAccountId(companyId, 'default_eos_expense', '52501'),
+          resolveHrAccountId(companyId, 'default_eos_payable', '21503'),
+        ]);
+        if (!eosExpenseAcc || !eosPayableAcc) {
+          return { success: false, error: 'حسابات نهاية الخدمة غير مهيأة (52501/21503). راجع الحسابات الافتراضية.' };
+        }
+        const amount = Number(eos.eos_amount) || 0;
+        if (amount <= 0) return { success: false, error: 'مبلغ نهاية الخدمة صفر — لا يمكن اعتماده.' };
+        const statements: TxStatement[] = [
+          buildJournalEntryStatement(companyId, {
+            reference: `EOS-${id.slice(0, 8)}`,
+            description: `استحقاق نهاية خدمة موظف — ${amount}`,
+            date: new Date().toISOString().slice(0, 10),
+            totalAmount: amount,
+            entries: [
+              { accountId: eosExpenseAcc, debit: amount, credit: 0, memo: 'مصروف نهاية الخدمة' },
+              { accountId: eosPayableAcc, debit: 0, credit: amount, memo: 'مستحقات نهاية الخدمة' },
+            ],
+          }),
+          {
+            sql: `UPDATE end_of_service SET status = 'approved', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
+            params: [id, companyId, safeUserId(_userId)],
+          },
+        ];
+        const tx = await runTransaction(statements);
+        if (!tx.success) return { success: false, error: tx.error || 'فشل اعتماد نهاية الخدمة' };
+        return { success: true };
+      }
+
+      // cancelled (from draft or approved — approved cancellation does NOT
+      // auto-reverse the accrual JE; accountants post a manual reversal JE)
+      const result = await adapter.query(
+        `UPDATE end_of_service SET status = 'cancelled', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [id, companyId, safeUserId(_userId)],
+      );
       return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * Settle an approved EOS: payment JE (Dr 21503 EOS Payable / Cr cash-box
+   * account) + status→paid + cash_box_id/paid_at stamping — ONE atomic batch.
+   */
+  async payEndOfService(id: string, companyId: string, cashBoxId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!cashBoxId) return { success: false, error: 'الخزنة مطلوبة لتسوية الدفع.' };
+      const adapter = await getDbAdapter();
+
+      const eosRes = await adapter.query(
+        `SELECT status, eos_amount FROM end_of_service WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [id, companyId],
+      );
+      const eos = eosRes.rows?.[0] as { status: string; eos_amount: string | number } | undefined;
+      if (!eos) return { success: false, error: 'سجل نهاية الخدمة غير موجود.' };
+      if (String(eos.status) !== 'approved') return { success: false, error: 'لا يمكن الدفع قبل اعتماد الاستحقاق.' };
+      const amount = Number(eos.eos_amount) || 0;
+      if (amount <= 0) return { success: false, error: 'المبلغ صفر.' };
+
+      const [eosPayableAcc, cashBoxRes] = await Promise.all([
+        resolveHrAccountId(companyId, 'default_eos_payable', '21503'),
+        adapter.query<{ account_id: string }>(
+          `SELECT account_id FROM cash_boxes WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+          [cashBoxId, companyId],
+        ),
+      ]);
+      const cashAcc = cashBoxRes.rows?.[0]?.account_id || null;
+      if (!eosPayableAcc) return { success: false, error: 'حساب مستحقات نهاية الخدمة غير مهيأ (21503).' };
+      if (!cashAcc) return { success: false, error: 'الخزنة المختارة غير مرتبطة بحساب محاسبي — راجع شاشة النقدية والخزائن.' };
+
+      const statements: TxStatement[] = [
+        buildJournalEntryStatement(companyId, {
+          reference: `EOS-PAY-${id.slice(0, 8)}`,
+          description: `دفع مستحقات نهاية الخدمة — ${amount}`,
+          date: new Date().toISOString().slice(0, 10),
+          totalAmount: amount,
+          entries: [
+            { accountId: eosPayableAcc, debit: amount, credit: 0, memo: 'تسوية مستحقات نهاية الخدمة' },
+            { accountId: cashAcc, debit: 0, credit: amount, memo: 'دفع من الخزنة' },
+          ],
+        }),
+        {
+          sql: `UPDATE end_of_service SET status = 'paid', cash_box_id = $3::uuid, paid_at = NOW(), updated_by = $4::uuid, updated_at = NOW()
+                 WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'approved'`,
+          params: [id, companyId, cashBoxId, safeUserId(_userId)],
+        },
+      ];
+      const tx = await runTransaction(statements);
+      if (!tx.success) return { success: false, error: tx.error || 'فشل تسجيل الدفع' };
+      return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -832,13 +1448,46 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      // Only draft/cancelled may be deleted — approved/paid records carry JEs.
+      const statusRes = await adapter.query<{ status: string }>(
+        `SELECT status FROM end_of_service WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+        [id, companyId],
+      );
+      const st = statusRes.rows?.[0]?.status;
+      if (!st) return { success: false, error: 'السجل غير موجود.' };
+      if (st === 'approved' || st === 'paid') {
+        return { success: false, error: `لا يمكن حذف سجل ${st === 'paid' ? 'مدفوع' : 'معتمد'} — له قيود محاسبية مرتبطة.` };
+      }
       if (isElectronPg()) {
         const result = await invokeHrRpc('deleteEndOfService', { id });
         return { success: result.success, error: result.error };
       }
-      const adapter = await getDbAdapter();
-      const result = await adapter.query('DELETE FROM end_of_service WHERE id = $1 AND company_id = $2', [id, companyId]);
+      const result = await adapter.query('DELETE FROM end_of_service WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
       return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // ─── Departments (read-only lookup for the employee form select) ───────────
+  async getDepartments(companyId: string): Promise<{ success: boolean; data?: Array<{ id: string; name: string }>; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      // Plain SELECT on `departments` — permitted for hr.view users through the
+      // fallback path; in Electron the generic-transaction guard applies and the
+      // SQL_MODULE_TABLE_RULES hr rule already whitelists this read.
+      const adapter = await getDbAdapter();
+      const result = await adapter.query<{ id: string; name: string }>(
+        `SELECT id, name FROM departments WHERE company_id = $1::uuid ORDER BY name`,
+        [companyId],
+      );
+      if (!result.success) return { success: false, error: result.error };
+      return {
+        success: true,
+        data: (result.rows || []).map((r) => ({ id: String(r.id), name: String(r.name) })),
+      };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -975,9 +1624,7 @@ function mapPayrollLineRow(r: Record<string, unknown>): PayrollLine {
     overtime: Number(r.overtime) || 0,
     netSalary: Number(r.net_salary) || 0,
   };
-}
-
-function mapLeaveRow(r: Record<string, unknown>): Leave {
+}function mapLeaveRow(r: Record<string, unknown>): Leave {
   return {
     id: String(r.id),
     companyId: String(r.company_id),
@@ -1006,6 +1653,8 @@ function mapEosRow(r: Record<string, unknown>): EndOfService {
     eosAmount: Number(r.eos_amount) || 0,
     reason: String(r.reason) as EndOfService['reason'],
     status: String(r.status) as EndOfService['status'],
+    cashBoxId: r.cash_box_id ? String(r.cash_box_id) : undefined,
+    paidAt: r.paid_at ? String(r.paid_at) : undefined,
     notes: r.notes ? String(r.notes) : undefined,
   };
 }

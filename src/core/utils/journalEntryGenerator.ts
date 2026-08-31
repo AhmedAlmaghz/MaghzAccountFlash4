@@ -122,6 +122,10 @@ async function getDefaultAccountId(companyId: string, functionKey: string): Prom
     default_shipping: ACC.SHIPPING,
     default_rent: ACC.RENT_OFFICE,
     default_misc_expense: ACC.ELECTRICITY,
+    default_salaries_payable: '21501',
+    default_payroll_deductions: '21502',
+    default_eos_payable: '21503',
+    default_eos_expense: '52501',
   };
   const code = fallbackMap[functionKey];
   if (code) return findAccountByCode(companyId, code);

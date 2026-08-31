@@ -99,6 +99,13 @@
       "when": 1796700000000,
       "tag": "0013_opening_balance_dates",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1796800000000,
+      "tag": "0014_hr_professional",
+      "breakpoints": true
     }
   ]
 }

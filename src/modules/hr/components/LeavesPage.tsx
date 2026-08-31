@@ -6,7 +6,8 @@ import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { useAppStore } from '@/core/store';
-import { useLeavesPaginated, useEmployees } from '../hooks/useHr';
+import { useLeavesPaginated, useEmployees, useLeaveBalances } from '../hooks/useHr';
+import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { DEFAULT_LOCALE } from '@/core/utils/locale';
@@ -17,6 +18,7 @@ export const LeavesPage: React.FC = () => {
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
   const companyId = activeCompany?.id || '';
+  const user = useAuthStore((s) => s.user);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const leaveFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
   const { leaves, total, page, pageSize, isLoading, goToPage, changePageSize, create, updateStatus, remove } = useLeavesPaginated(companyId, leaveFilters);
@@ -25,11 +27,14 @@ export const LeavesPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [formData, setFormData] = useState({
-    employeeId: '', leaveType: 'annual' as Leave['leaveType'], startDate: '', endDate: '', days: '', reason: '',
+    employeeId: '', leaveType: 'annual' as Leave['leaveType'], startDate: '', endDate: '', reason: '',
   });
 
+  /** Live leave balances for the employee selected in the create form. */
+  const { balances, isLoading: balancesLoading } = useLeaveBalances(companyId, formData.employeeId);
+
   const resetForm = () => {
-    setFormData({ employeeId: '', leaveType: 'annual', startDate: '', endDate: '', days: '', reason: '' });
+    setFormData({ employeeId: '', leaveType: 'annual', startDate: '', endDate: '', reason: '' });
   };
 
   const handleSave = async () => {
@@ -43,14 +48,13 @@ export const LeavesPage: React.FC = () => {
       addToast('error', t('hr.leaves.invalidDates') || t('common.error'));
       return;
     }
-    const diffDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    // days are computed SERVER-side — the client no longer derives them.
     const res = await create({
       companyId,
       employeeId: formData.employeeId,
       leaveType: formData.leaveType,
       startDate: formData.startDate,
       endDate: formData.endDate,
-      days: diffDays,
       status: 'pending',
       reason: formData.reason || undefined,
     });
@@ -72,6 +76,19 @@ export const LeavesPage: React.FC = () => {
       addToast('error', res.error || t('common.error'));
     }
     setConfirmDelete(null);
+  };
+
+  const handleApprove = async (row: Leave) => {
+    // approvedBy = current user id; the server enforces the balance strictly.
+    const res = await updateStatus(row.id, 'approved', user?.id);
+    if (res.success) addToast('success', t('hr.leaves.approveSuccess'));
+    else addToast('error', res.error || t('hr.leaves.insufficient'));
+  };
+
+  const handleReject = async (row: Leave) => {
+    const res = await updateStatus(row.id, 'rejected', user?.id);
+    if (res.success) addToast('success', t('hr.leaves.updated'));
+    else addToast('error', res.error || t('common.error'));
   };
 
   const handleExportExcel = () => {
@@ -152,18 +169,10 @@ export const LeavesPage: React.FC = () => {
       <div className="flex items-center gap-1">
         {row.status === 'pending' && (
           <>
-            <Button variant="ghost" size="sm" className="text-emerald-600" onClick={async () => {
-              const res = await updateStatus(row.id, 'approved');
-              if (res.success) addToast('success', t('hr.leaves.updated'));
-              else addToast('error', res.error || t('common.error'));
-            }} title={t('hr.leaves.approve')}>
+            <Button variant="ghost" size="sm" className="text-emerald-600" onClick={() => void handleApprove(row)} title={t('hr.leaves.approve')}>
               <CheckCircle size={16} />
             </Button>
-            <Button variant="ghost" size="sm" className="text-rose-600" onClick={async () => {
-              const res = await updateStatus(row.id, 'rejected');
-              if (res.success) addToast('success', t('hr.leaves.updated'));
-              else addToast('error', res.error || t('common.error'));
-            }} title={t('hr.leaves.reject')}>
+            <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => void handleReject(row)} title={t('hr.leaves.reject')}>
               <XCircle size={16} />
             </Button>
           </>
@@ -294,6 +303,33 @@ export const LeavesPage: React.FC = () => {
               {employees.map((emp) => (<option key={emp.id} value={emp.id}>{emp.fullName}</option>))}
             </select>
           </div>
+          {formData.employeeId && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 p-3">
+              <p className="text-xs font-bold text-blue-700 dark:text-blue-300 mb-2">{t('hr.leaves.balanceTitle')}</p>
+              {balancesLoading ? (
+                <div className="h-8 bg-blue-100 dark:bg-blue-800/40 rounded animate-pulse" />
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {(['annual', 'sick', 'emergency', 'unpaid'] as const).map((type) => {
+                    const b = balances.find((x) => x.leaveType === type);
+                    const label = leaveBalanceLabel(type, t);
+                    return (
+                      <div key={type} className="bg-white dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 flex items-center justify-between">
+                        <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{label}</span>
+                        <span className={`text-xs font-bold tabular-nums ${b && !b.uncapped && b.remaining <= 0 ? 'text-rose-600' : 'text-blue-700 dark:text-blue-300'}`}>
+                          {b && b.uncapped
+                            ? `${t('hr.leaves.remaining')}: ${t('hr.leaves.uncapped')}`
+                            : b
+                              ? `${t('hr.leaves.remaining')} ${b.remaining} ${t('hr.leaves.entitled')} ${b.entitled}`
+                              : '—'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('hr.leaves.leaveType')}</label>
             <select value={formData.leaveType} onChange={(e) => setFormData((prev) => ({ ...prev, leaveType: e.target.value as Leave['leaveType'] }))} className="form-control">
@@ -325,6 +361,16 @@ export const LeavesPage: React.FC = () => {
 
 function leaveTypeLabel(type: Leave['leaveType'], t: (key: string) => string) {
   const labels: Record<string, string> = { annual: t('hr.leaves.annual'), sick: t('hr.leaves.sick'), emergency: t('hr.leaves.emergency'), unpaid: t('hr.leaves.unpaid') };
+  return labels[type] || type;
+}
+
+function leaveBalanceLabel(type: 'annual' | 'sick' | 'emergency' | 'unpaid', t: (key: string) => string) {
+  const labels: Record<string, string> = {
+    annual: t('hr.leaves.annualLabel'),
+    sick: t('hr.leaves.sickLabel'),
+    emergency: t('hr.leaves.emergencyLabel'),
+    unpaid: t('hr.leaves.unpaidLabel'),
+  };
   return labels[type] || type;
 }
 

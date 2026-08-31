@@ -7,7 +7,7 @@ import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { useFormatters } from '@/core/utils/useFormatters';
-import { useEmployeesPaginated } from '../hooks/useHr';
+import { useEmployeesPaginated, useDepartments } from '../hooks/useHr';
 import type { Employee } from '../types';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -28,6 +28,7 @@ export const EmployeesPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const employeeFilters = useMemo(() => ({ isActive: isActiveFilter, search: searchQuery || undefined }), [isActiveFilter, searchQuery]);
   const { employees, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useEmployeesPaginated(companyId, employeeFilters);
+  const { departments } = useDepartments(companyId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -380,7 +381,13 @@ export const EmployeesPage: React.FC = () => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('hr.employeesPage.position')} value={formData.position} onChange={(e) => setFormData((prev) => ({ ...prev, position: e.target.value }))} />
-            <Input label={t('hr.employeesPage.department')} value={formData.departmentId} onChange={(e) => setFormData((prev) => ({ ...prev, departmentId: e.target.value }))} />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('hr.employeesPage.department')}</label>
+              <select value={formData.departmentId} onChange={(e) => setFormData((prev) => ({ ...prev, departmentId: e.target.value }))} className="form-control">
+                <option value="">بدون قسم</option>
+                {departments.map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('hr.employeesPage.grade')} value={formData.grade} onChange={(e) => setFormData((prev) => ({ ...prev, grade: e.target.value }))} />

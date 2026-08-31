@@ -348,6 +348,17 @@ const SQL_MODULE_TABLE_RULES = [
     ],
   },
   { module: 'accounting', tables: ['accounts', 'transactions', 'journal_entries', 'cost_centers', 'receipt_vouchers', 'payment_vouchers'] },
+  // GL tables are ALSO written by cross-module posting flows: HR payroll runs
+  // (gross-up entry) and end-of-service accrual/settlement book through the
+  // same journal machinery — same precedent as manufacturing on stock_movements.
+  {
+    module: 'accounting',
+    tables: ['transactions', 'journal_entries'],
+    writePermissions: [
+      'accounting.create', 'accounting.edit', 'accounting.post',
+      'hr.create', 'hr.edit',
+    ],
+  },
   { module: 'inventory', tables: ['products', 'product_types', 'product_categories', 'product_product_categories', 'stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'] },
   // Warehouses & stock movements are touched by cross-module posting flows:
   // completing a work order books material consumption (out) and finished
@@ -2352,6 +2363,18 @@ export function registerDatabaseHandlers() {
       sql: `UPDATE payroll_runs SET status = 'posted', updated_by = $1::uuid
             WHERE id = $2::uuid AND company_id = $3::uuid RETURNING id`,
       params: [session.user.id, String(p.id), session.user.companyId],
+    }),
+  });
+
+  // hr.deletePayrollRun — draft-only delete (lines cascade via FK). Posted
+  // runs are financial history and can never be removed.
+  registerRpc('hr.deletePayrollRun', {
+    paramCount: 2,
+    compose: (p, session) => ({
+      sql: `DELETE FROM payroll_runs
+             WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'
+            RETURNING id`,
+      params: [String(p.id), session.user.companyId],
     }),
   });
 

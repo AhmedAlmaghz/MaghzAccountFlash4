@@ -53,6 +53,10 @@ const ACCOUNTS = [
   { code: '21101', name_ar: 'الدائنون التجاريون', name_en: 'Trade Suppliers', type: 'liability', nature: 'credit', is_group: false, parent_code: '211' },
   { code: '213', name_ar: 'الضرائب', name_en: 'Taxes', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
   { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
+  { code: '215', name_ar: 'مستحقات الموظفين', name_en: 'Employee Benefits', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
+  { code: '21501', name_ar: 'رواتب مستحقة الدفع', name_en: 'Salaries Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
+  { code: '21502', name_ar: 'استقطاعات مستحقة', name_en: 'Payroll Deductions Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
+  { code: '21503', name_ar: 'مستحقات نهاية الخدمة', name_en: 'End-of-Service Gratuity Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
   // Equity
   { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
   { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
@@ -76,6 +80,7 @@ const ACCOUNTS = [
   { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52301', name_ar: 'مصروفات متنوعة ونثريات', name_en: 'Miscellaneous Expenses', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52401', name_ar: 'مصروفات نقل وشحن', name_en: 'Shipping & Freight', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+  { code: '52501', name_ar: 'مصروف نهاية الخدمة', name_en: 'End-of-Service Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   // Production costs (capitalized into finished-goods cost on work-order completion)
   { code: '53', name_ar: 'تكاليف الإنتاج', name_en: 'Production Costs', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
   { code: '53101', name_ar: 'تكاليف إنتاج - أجور', name_en: 'Production Costs - Labor', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
@@ -134,10 +139,26 @@ const DEFAULT_ACCOUNTS = [
   { key: 'default_vat_output', code: '21301', required: true, desc: 'ضريبة القيمة المضافة على المبيعات' },
   { key: 'default_vat_input', code: '21301', required: true, desc: 'ضريبة القيمة المضافة على المشتريات' },
   { key: 'default_salaries', code: '52101', required: false, desc: 'حساب الرواتب' },
+  { key: 'default_salaries_payable', code: '21501', required: false, desc: 'حساب الرواتب المستحقة الدفع' },
+  { key: 'default_payroll_deductions', code: '21502', required: false, desc: 'حساب الاستقطاعات المستحقة' },
+  { key: 'default_eos_payable', code: '21503', required: false, desc: 'حساب مستحقات نهاية الخدمة' },
+  { key: 'default_eos_expense', code: '52501', required: false, desc: 'حساب مصروف نهاية الخدمة' },
   { key: 'default_sales_returns', code: '41103', required: false, desc: 'حساب مردودات المبيعات' },
   { key: 'default_discount_allowed', code: '41101', required: false, desc: 'خصم مسموح به' },
   { key: 'default_discount_received', code: '21101', required: false, desc: 'خصم مكتسب' },
   { key: 'default_purchase_returns', code: '21101', required: true, desc: 'مردودات المشتريات' },
+];
+
+const HR_POLICY_SETTINGS = [
+  { key: 'hr.leave.annualDays', value: '21' },
+  { key: 'hr.leave.sickDays', value: '30' },
+  { key: 'hr.leave.emergencyDays', value: '30' },
+  { key: 'hr.overtimeRate', value: '1.5' },
+  { key: 'hr.standardWorkHours', value: '8' },
+  { key: 'hr.lateGraceMinutes', value: '15' },
+  { key: 'hr.eos.firstYearsMultiplier', value: '0.5' },
+  { key: 'hr.eos.beyondYearsMultiplier', value: '1' },
+  { key: 'hr.payroll.grossUpPosting', value: 'true' },
 ];
 
 const BRANCHES = [
@@ -435,6 +456,17 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
        SELECT $1::uuid, $2::text, $3::uuid, $4::bool, $5::text
        WHERE NOT EXISTS (SELECT 1 FROM default_accounts WHERE company_id = $1::uuid AND function_key = $2::text);`,
       [companyId, da.key, accountId, da.required, da.desc]
+    );
+  }
+
+  // ─── 7b. HR Policy Settings ────────────────────────────────────────────────
+  console.log('[SEED] Seeding HR policy settings...');
+  for (const hp of HR_POLICY_SETTINGS) {
+    await client.query(
+      `INSERT INTO settings (company_id, key, value)
+       SELECT $1::uuid, $2::text, $3::text
+       WHERE NOT EXISTS (SELECT 1 FROM settings WHERE company_id = $1::uuid AND key = $2::text);`,
+      [companyId, hp.key, hp.value]
     );
   }
 

@@ -78,25 +78,19 @@ export const AttendancePage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    const payload: Omit<AttendanceRecord, 'id'>[] = Object.values(formRecords).map((rec) => {
-      const checkInH = rec.checkIn ? Number(rec.checkIn.split(':')[0]) : 0;
-      const checkOutH = rec.checkOut ? Number(rec.checkOut.split(':')[0]) : 0;
-      let overtimeHours = Number(rec.overtime) || 0;
-      if (!overtimeHours && rec.checkIn && rec.checkOut) {
-        const diff = (checkOutH + Number(rec.checkOut.split(':')[1] || 0) / 60) - (checkInH + Number(rec.checkIn.split(':')[1] || 0) / 60) - 8;
-        if (diff > 0) overtimeHours = Math.round(diff * 100) / 100;
-      }
-      return {
-        companyId,
-        employeeId: rec.employeeId,
-        date: selectedDate,
-        checkIn: rec.checkIn,
-        checkOut: rec.checkOut,
-        overtimeHours,
-        status: rec.status,
-        notes: undefined,
-      };
-    });
+    // Late status + overtime are DERIVED server-side from company policy —
+    // the client only sends the raw check-in/out times and the manual
+    // overtime override (kept only when > 0).
+    const payload: Omit<AttendanceRecord, 'id'>[] = Object.values(formRecords).map((rec) => ({
+      companyId,
+      employeeId: rec.employeeId,
+      date: selectedDate,
+      checkIn: rec.checkIn,
+      checkOut: rec.checkOut,
+      overtimeHours: Number(rec.overtime) || 0,
+      status: rec.status,
+      notes: undefined,
+    }));
     const res = await save(payload);
     if (res.success) {
       addToast('success', t('hr.attendancePage.created'));
@@ -239,6 +233,9 @@ export const AttendancePage: React.FC = () => {
             emptyMessage={t('hr.attendancePage.emptyMessage')}
           />
         )}
+        <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800">
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('hr.attendancePage.autoDeriveHint')}</p>
+        </div>
       </Card>
 
       {isOpen && (
@@ -268,6 +265,7 @@ export const AttendancePage: React.FC = () => {
                           <option value="present">{t('hr.attendancePage.status.present')}</option>
                           <option value="absent">{t('hr.attendancePage.status.absent')}</option>
                           <option value="late">{t('hr.attendancePage.status.late')}</option>
+                          <option value="on_leave">{t('hr.attendancePage.status.onLeave')}</option>
                         </select>
                       </td>
                       <td className="px-3 py-2"><Input type="time" value={rec.checkIn} onChange={(e) => updateRecord(rec.employeeId, 'checkIn', e.target.value)} className="w-28" /></td>

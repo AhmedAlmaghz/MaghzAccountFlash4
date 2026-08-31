@@ -103,6 +103,9 @@ export function useFormatters(companyId?: string): Formatters {
   }, []);
 
   const formatDate = useCallback((date: Date | string) => {
+    // Guard: null/undefined/empty inputs crash new Date()/getTime — return
+    // '-' instead (rows without a date column must not explode the table).
+    if (date === null || date === undefined || date === '') return '-';
     const d = typeof date === 'string' ? new Date(date) : date;
     if (isNaN(d.getTime())) return '-';
     try {
@@ -115,6 +118,7 @@ export function useFormatters(companyId?: string): Formatters {
   }, [normalizedFormat, calendar, formatParts, formatByPattern]);
 
   const formatDateTime = useCallback((date: Date | string) => {
+    if (date === null || date === undefined || date === '') return '-';
     const d = typeof date === 'string' ? new Date(date) : date;
     if (isNaN(d.getTime())) return '-';
     try {

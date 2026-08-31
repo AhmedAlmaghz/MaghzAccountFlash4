@@ -331,6 +331,8 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_sales_returns: '41103', default_purchase_returns: '21101',
       default_opening_balance: '31201', default_shipping: '52401',
       default_rent: '52201', default_misc_expense: '52301',
+      default_salaries_payable: '21501', default_payroll_deductions: '21502',
+      default_eos_payable: '21503', default_eos_expense: '52501',
     },
     manufacturing: {
       default_cash: '11101', default_sales: '41101', default_cogs: '51101',
@@ -343,6 +345,8 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_production_loss: '53501',
       default_opening_balance: '31201', default_shipping: '52401',
       default_rent: '52201', default_misc_expense: '52301',
+      default_salaries_payable: '21501', default_payroll_deductions: '21502',
+      default_eos_payable: '21503', default_eos_expense: '52501',
     },
     services: {
       default_cash: '11101', default_sales: '41102', default_cogs: '51101',
@@ -351,6 +355,8 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_sales_returns: '41103', default_purchase_returns: '21101',
       default_opening_balance: '31201', default_shipping: '52401',
       default_rent: '52201', default_misc_expense: '52301',
+      default_salaries_payable: '21501', default_payroll_deductions: '21502',
+      default_eos_payable: '21503', default_eos_expense: '52501',
     },
   };
   const adapter = await getDbAdapter();

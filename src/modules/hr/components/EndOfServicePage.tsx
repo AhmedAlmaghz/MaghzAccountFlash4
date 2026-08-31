@@ -1,16 +1,27 @@
-import React, { useState, useMemo } from 'react';
-import { LogOut, Plus, Printer, Calculator, Download, Layers, CheckCircle2, Wallet } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { LogOut, Plus, Printer, Calculator, Download, Layers, CheckCircle2, Wallet, Banknote } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination, Can } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
+import { CashBoxSelect } from '@/core/ui/components/smart/fields/CashBoxSelect';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { useAppStore } from '@/core/store';
+import { hrApi } from '../api';
 import { useEndOfServicesPaginated, useEmployees } from '../hooks/useHr';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import type { EndOfService } from '../types';
+
+/** Server-computed EOS preview shape (mirrors ComputedEos). */
+interface EosPreview {
+  serviceYears: number;
+  lastSalary: number;
+  eosAmount: number;
+  firstYearsAmount: number;
+  beyondYearsAmount: number;
+}
 
 export const EndOfServicePage: React.FC = () => {
   const { t } = useTranslation();
@@ -19,60 +30,60 @@ export const EndOfServicePage: React.FC = () => {
   const companyId = activeCompany?.id || '';
   const [statusFilter, setStatusFilter] = useState<string>('');
   const eosFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
-  const { items, total, page, pageSize, isLoading, goToPage, changePageSize, create, updateStatus, remove } = useEndOfServicesPaginated(companyId, eosFilters);
+  const { items, total, page, pageSize, isLoading, goToPage, changePageSize, create, updateStatus, pay, remove } = useEndOfServicesPaginated(companyId, eosFilters);
   const { employees } = useEmployees(companyId);
   const { formatCurrency } = useFormatters(companyId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<EndOfService | null>(null);
+  const [payTarget, setPayTarget] = useState<EndOfService | null>(null);
+  const [payCashBoxId, setPayCashBoxId] = useState('');
+  const [eosPreview, setEosPreview] = useState<EosPreview | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [formData, setFormData] = useState({
     employeeId: '', terminationDate: '', reason: 'resignation' as EndOfService['reason'], notes: '',
   });
 
   const resetForm = () => {
     setFormData({ employeeId: '', terminationDate: '', reason: 'resignation', notes: '' });
+    setEosPreview(null);
   };
 
   const selectedEmployee = useMemo(() => employees.find((e) => e.id === formData.employeeId), [employees, formData.employeeId]);
 
-  const serviceYears = useMemo(() => {
-    if (!selectedEmployee || !formData.terminationDate || !selectedEmployee.hireDate) return 0;
-    const start = new Date(selectedEmployee.hireDate);
-    const end = new Date(formData.terminationDate);
-    return Math.max(0, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365.25)));
-  }, [selectedEmployee, formData.terminationDate]);
-
-  const lastSalary = selectedEmployee?.baseSalary || 0;
-
-  const eosAmount = useMemo(() => {
-    // Simplified EOS formula: (lastSalary / 2) * serviceYears for first 5 years, full salary per year after
-    if (serviceYears <= 0 || lastSalary <= 0) return 0;
-    const firstFive = Math.min(serviceYears, 5);
-    const afterFive = Math.max(0, serviceYears - 5);
-    return Math.round((lastSalary / 2) * firstFive + lastSalary * afterFive);
-  }, [serviceYears, lastSalary]);
+  // Debounced server-side EOS preview — the formula lives in the engine, not here.
+  useEffect(() => {
+    if (!formData.employeeId || !formData.terminationDate) {
+      setEosPreview(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsPreviewLoading(true);
+      try {
+        const res = await hrApi.previewEndOfService(companyId, formData.employeeId, formData.terminationDate, formData.reason);
+        if (!cancelled) {
+          if (res.success && res.data) setEosPreview(res.data);
+          else setEosPreview(null);
+        }
+      } finally {
+        if (!cancelled) setIsPreviewLoading(false);
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [companyId, formData.employeeId, formData.terminationDate, formData.reason]);
 
   const handleSave = async () => {
     if (!formData.employeeId || !formData.terminationDate) {
       addToast('error', t('hr.eos.requiredFields') || t('common.error'));
       return;
     }
-    if (selectedEmployee?.hireDate && new Date(formData.terminationDate) < new Date(selectedEmployee.hireDate)) {
-      addToast('error', t('hr.eos.invalidDates') || t('common.error'));
-      return;
-    }
-    if (serviceYears <= 0) {
-      addToast('error', t('hr.eos.invalidServiceYears') || t('common.error'));
-      return;
-    }
+    // Server computes serviceYears/lastSalary/eosAmount — the client sends ONLY inputs.
     const res = await create({
       companyId,
       employeeId: formData.employeeId,
       terminationDate: formData.terminationDate,
-      serviceYears,
-      lastSalary,
-      eosAmount,
       reason: formData.reason,
       status: 'draft',
       notes: formData.notes || undefined,
@@ -95,6 +106,18 @@ export const EndOfServicePage: React.FC = () => {
       addToast('error', res.error || t('common.error'));
     }
     setConfirmDelete(null);
+  };
+
+  const handlePay = async () => {
+    if (!payTarget || !payCashBoxId) return;
+    const res = await pay(payTarget.id, payCashBoxId);
+    if (res.success) {
+      addToast('success', t('hr.eos.paidSuccess'));
+      setPayTarget(null);
+      setPayCashBoxId('');
+    } else {
+      addToast('error', res.error || t('common.error'));
+    }
   };
 
   const handlePrint = (item: EndOfService) => {
@@ -152,7 +175,7 @@ export const EndOfServicePage: React.FC = () => {
     { key: 'lastSalary', header: t('hr.eos.lastSalary'), align: 'right' as const, render: (row: EndOfService) => formatCurrency(row.lastSalary) },
     { key: 'eosAmount', header: t('hr.eos.eosAmount'), align: 'right' as const, render: (row: EndOfService) => <span className="font-bold text-primary-600">{formatCurrency(row.eosAmount)}</span> },
     { key: 'status', header: t('hr.eos.status'), width: '100px', render: (row: EndOfService) => <StatusBadge status={row.status} /> },
-    { key: 'actions', header: '', width: '140px', render: (row: EndOfService) => (
+    { key: 'actions', header: '', width: '180px', render: (row: EndOfService) => (
       <div className="flex items-center gap-1">
         <Button variant="ghost" size="sm" className="text-slate-600" onClick={() => setSelectedItem(row)} title={t('hr.eos.view')}>
           <Calculator size={16} />
@@ -165,8 +188,13 @@ export const EndOfServicePage: React.FC = () => {
             const res = await updateStatus(row.id, 'approved');
             if (res.success) addToast('success', t('hr.eos.updated'));
             else addToast('error', res.error || t('common.error'));
-          }} title={t('hr.eos.approve')}>
+          }} title={t('hr.eos.approveHint')}>
             <span className="text-xs">{t('hr.eos.approve')}</span>
+          </Button>
+        )}
+        {row.status === 'approved' && (
+          <Button variant="ghost" size="sm" className="text-primary-600" onClick={() => { setPayTarget(row); setPayCashBoxId(''); }} title={t('hr.eos.payAction')}>
+            <Banknote size={16} />
           </Button>
         )}
         <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)} title={t('settings.common.delete')}>
@@ -312,12 +340,23 @@ export const EndOfServicePage: React.FC = () => {
           {selectedEmployee && (
             <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4 space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.hireDate')}</span><span className="font-medium">{selectedEmployee.hireDate || '—'}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.lastSalaryLabel')}</span><span className="font-medium">{formatCurrency(lastSalary)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.serviceYearsLabel')}</span><span className="font-medium">{serviceYears.toFixed(1)}</span></div>
-              <div className="flex justify-between border-t border-slate-200 dark:border-slate-700 pt-2">
-                <span className="text-slate-500 font-bold">{t('hr.eos.eosAmountLabel')}</span>
-                <span className="font-bold text-primary-600 text-lg">{formatCurrency(eosAmount)} YER</span>
-              </div>
+              {isPreviewLoading && <div className="h-20 bg-slate-100 dark:bg-slate-700 rounded animate-pulse" />}
+              {eosPreview && (
+                <>
+                  <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.lastSalaryLabel')}</span><span className="font-medium">{formatCurrency(eosPreview.lastSalary)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.serviceYearsLabel')}</span><span className="font-medium">{eosPreview.serviceYears.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.firstYearsPart')}</span><span className="font-medium tabular-nums">{formatCurrency(eosPreview.firstYearsAmount)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">{t('hr.eos.beyondYearsPart')}</span><span className="font-medium tabular-nums">{formatCurrency(eosPreview.beyondYearsAmount)}</span></div>
+                  <div className="flex justify-between border-t border-slate-200 dark:border-slate-700 pt-2">
+                    <span className="text-slate-500 font-bold">{t('hr.eos.eosAmountLabel')}</span>
+                    <span className="font-bold text-primary-600 text-lg">{formatCurrency(eosPreview.eosAmount)} YER</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">{t('hr.eos.computedBySystem')}</p>
+                </>
+              )}
+              {!isPreviewLoading && !eosPreview && formData.terminationDate && (
+                <p className="text-xs text-amber-600">{t('hr.eos.invalidServiceYears') || t('common.error')}</p>
+              )}
             </div>
           )}
           <Input label={t('hr.eos.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} />
@@ -342,6 +381,38 @@ export const EndOfServicePage: React.FC = () => {
               <span className="text-slate-500 font-bold">{t('hr.eos.amountLabel')}</span>
               <span className="font-bold text-primary-600 text-lg">{formatCurrency(selectedItem.eosAmount)} YER</span>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Pay Modal (approved rows only) */}
+      {payTarget && (
+        <Modal
+          isOpen={!!payTarget}
+          onClose={() => { setPayTarget(null); setPayCashBoxId(''); }}
+          title={t('hr.eos.payTitle')}
+          size="sm"
+          footer={
+            <div className="flex items-center gap-2 justify-end w-full">
+              <Button variant="secondary" onClick={() => { setPayTarget(null); setPayCashBoxId(''); }}>{t('settings.common.cancel')}</Button>
+              <Button variant="primary" leftIcon={<Banknote size={16} />} onClick={() => void handlePay()} disabled={!payCashBoxId}>{t('hr.eos.payAction')}</Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="flex justify-between text-sm border-b border-slate-200 dark:border-slate-700 pb-2">
+              <span className="text-slate-500">{t('hr.eos.employeeLabel')}</span>
+              <span className="font-medium">{payTarget.employeeName || payTarget.employeeId}</span>
+            </div>
+            <div className="flex justify-between text-sm border-b border-slate-200 dark:border-slate-700 pb-2">
+              <span className="text-slate-500">{t('hr.eos.amountLabel')}</span>
+              <span className="font-bold text-primary-600">{formatCurrency(payTarget.eosAmount)} YER</span>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('hr.eos.cashBox')}</label>
+              <CashBoxSelect companyId={companyId} value={payCashBoxId} onChange={(v) => setPayCashBoxId(v || '')} />
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">{t('hr.eos.payConfirm')}</p>
           </div>
         </Modal>
       )}

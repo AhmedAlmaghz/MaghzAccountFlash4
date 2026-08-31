@@ -285,8 +285,7 @@ describe('Migration 0013: opening-balance dates (statements & aging completeness
 
   it('journal entry mirrors the migration files', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    const last = journal.entries[journal.entries.length - 1];
-    expect(last.tag).toBe('0013_opening_balance_dates');
+    expect(journal.entries.some((e) => e.tag === '0013_opening_balance_dates')).toBe(true);
     expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
   });
 
@@ -299,5 +298,76 @@ describe('Migration 0013: opening-balance dates (statements & aging completeness
     expect(purchases).toMatch(/openingDate: date\('opening_date'\)/);
     expect(hr).toMatch(/openingDate: date\('opening_date'\)/);
     expect(accounting).toMatch(/openingDate: date\('opening_date'\)/);
+  });
+});
+
+describe('Migration 0014: HR professional (payroll posting accounts & policies)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0014_hr_professional.sql'), 'utf-8');
+
+  it('creates payroll/EOS chart accounts for every company', () => {
+    // 215 group + children + 52501 expense
+    for (const code of ['215', '21501', '21502', '21503', '52501']) {
+      expect(migrationSql).toMatch(new RegExp(`'${code}'`));
+    }
+    // children post to group 215, expense posts to 52
+    expect(migrationSql).toMatch(/'215',\s*'مستحقات الموظفين'/);
+  });
+
+  it('links default_accounts keys for payroll/EOS posting', () => {
+    for (const key of ['default_salaries_payable', 'default_payroll_deductions', 'default_eos_payable', 'default_eos_expense']) {
+      expect(migrationSql).toMatch(new RegExp(key));
+    }
+  });
+
+  it('adds EOS payment columns and payroll overtime-hours traceability', () => {
+    expect(migrationSql).toMatch(/end_of_service ADD COLUMN IF NOT EXISTS cash_box_id uuid/);
+    expect(migrationSql).toMatch(/end_of_service ADD COLUMN IF NOT EXISTS paid_at timestamptz/);
+    expect(migrationSql).toMatch(/payroll_lines ADD COLUMN IF NOT EXISTS overtime_hours numeric\(5,2\) DEFAULT 0/);
+  });
+
+  it('adds unique constraints: attendance per employee/day + payroll period', () => {
+    expect(migrationSql).toMatch(/uq_attendance_emp_date/);
+    expect(migrationSql).toMatch(/uq_payroll_runs_period/);
+    // Attendance: constraint form; payroll: PARTIAL unique index (WHERE clause)
+    expect(migrationSql).toMatch(/ADD CONSTRAINT uq_attendance_emp_date\s+UNIQUE \(company_id, employee_id, date\)/);
+    expect(migrationSql).toMatch(/CREATE UNIQUE INDEX uq_payroll_runs_period[\s\S]*?WHERE status IN \('draft', 'posted'\)/);
+    // Both guarded by existence checks
+    expect(migrationSql.match(/IF NOT EXISTS \(\s*SELECT 1 FROM pg_(?:constraint|indexes) WHERE (?:conname|indexname) = /g)?.length).toBe(2);
+  });
+
+  it('dedupes attendance and cancels duplicate payroll periods before constraining', () => {
+    expect(migrationSql).toMatch(/DELETE FROM attendance a/);
+    expect(migrationSql).toMatch(/SET status = 'cancelled'/);
+  });
+
+  it('seeds HR policy settings for every company', () => {
+    for (const key of [
+      'hr.leave.annualDays', 'hr.leave.sickDays', 'hr.leave.emergencyDays',
+      'hr.overtimeRate', 'hr.standardWorkHours', 'hr.lateGraceMinutes',
+      'hr.eos.firstYearsMultiplier', 'hr.eos.beyondYearsMultiplier',
+      'hr.payroll.grossUpPosting',
+    ]) {
+      expect(migrationSql).toMatch(new RegExp(key.replace(/\./g, '\\.')));
+    }
+  });
+
+  it('is idempotent (WHERE NOT EXISTS / IF NOT EXISTS / DO guards)', () => {
+    expect(migrationSql.match(/ADD COLUMN IF NOT EXISTS/g)?.length).toBe(3);
+    expect(migrationSql.match(/WHERE NOT EXISTS/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(migrationSql).not.toMatch(/DROP TABLE/i);
+  });
+
+  it('journal mirrors the migration files (0014 is last)', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    const last = journal.entries[journal.entries.length - 1];
+    expect(last.tag).toBe('0014_hr_professional');
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('Drizzle schema exposes cashBoxId/paidAt/overtimeHours', () => {
+    const hr = readFileSync(join(process.cwd(), 'src/core/database/schema/hr.ts'), 'utf-8');
+    expect(hr).toMatch(/overtimeHours: numeric\('overtime_hours', \{ precision: 5, scale: 2 \}\)/);
+    expect(hr).toMatch(/cashBoxId: uuid\('cash_box_id'\)/);
+    expect(hr).toMatch(/paidAt: timestamp\('paid_at', \{ withTimezone: true \}\)/);
   });
 });

@@ -70,4 +70,30 @@ test.describe('HR Module', () => {
       await page.keyboard.press('Escape');
     }
   });
+
+  test('HR policies settings page loads with policy cards', async ({ page }) => {
+    await loginAs(page);
+    await page.goto('/settings/hr-policies');
+    await expect(page.getByRole('heading', { name: /سياسات الموارد البشرية/i }).first()).toBeVisible({ timeout: 20_000 });
+    // The three policy cards render
+    await expect(page.getByText(/أرصدة الإجازات/).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/الدوام والأوفر تايم/).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/نهاية الخدمة/).first()).toBeVisible({ timeout: 5_000 });
+    // Save button present (visible only with edit permission — admin has it)
+    const saveBtn = page.getByRole('button', { name: /حفظ السياسات/i }).first();
+    await expect(saveBtn).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('Payroll create modal shows auto preview button', async ({ page }) => {
+    await loginAs(page);
+    await page.goto('/hr/payroll');
+    await expect(page.getByRole('heading', { name: /مسير الرواتب/i }).first()).toBeVisible({ timeout: 20_000 });
+    const newRunBtn = page.getByText('مسير جديد').first();
+    if (await newRunBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await newRunBtn.click();
+      // The auto-preview button appears in the create modal
+      await expect(page.getByRole('button', { name: /معاينة تلقائية/i }).first()).toBeVisible({ timeout: 10_000 });
+      await page.keyboard.press('Escape');
+    }
+  });
 });

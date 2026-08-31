@@ -131,6 +131,7 @@ contextBridge.exposeInMainWorld('electronDB', {
     getPayrollRunsPaginated: (payload) => ipcRenderer.invoke('db:rpc:hr.getPayrollRunsPaginated', { ...payload, sessionToken }),
     createPayrollRun: (payload) => ipcRenderer.invoke('db:rpc:hr.createPayrollRun', { ...payload, sessionToken }),
     postPayrollRun: (payload) => ipcRenderer.invoke('db:rpc:hr.postPayrollRun', { ...payload, sessionToken }),
+    deletePayrollRun: (payload) => ipcRenderer.invoke('db:rpc:hr.deletePayrollRun', { ...payload, sessionToken }),
     getLeaves: (payload) => ipcRenderer.invoke('db:rpc:hr.getLeaves', { ...payload, sessionToken }),
     getLeavesPaginated: (payload) => ipcRenderer.invoke('db:rpc:hr.getLeavesPaginated', { ...payload, sessionToken }),
     createLeave: (payload) => ipcRenderer.invoke('db:rpc:hr.createLeave', { ...payload, sessionToken }),

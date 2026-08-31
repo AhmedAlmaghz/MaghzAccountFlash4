@@ -474,7 +474,7 @@ export const inventoryApi = {
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT sm.id, sm.company_id, sm.product_id, sm.warehouse_id, sm.type, sm.quantity,
-                sm.reference, sm.notes, sm.created_at,
+                sm.reference, sm.notes, sm.created_at, sm.created_at AS date,
                 p.name_ar AS product_name, p.code AS product_code,
                 w.name AS warehouse_name
            FROM stock_movements sm
@@ -529,7 +529,7 @@ export const inventoryApi = {
       const offsetIdx = params.length;
 
       const dataResult = await adapter.query(
-        `SELECT sm.*, p.name_ar as product_name, w.name as warehouse_name
+        `SELECT sm.*, sm.created_at AS date, p.name_ar as product_name, w.name as warehouse_name
          FROM stock_movements sm
          LEFT JOIN products p ON sm.product_id = p.id
          LEFT JOIN warehouses w ON sm.warehouse_id = w.id

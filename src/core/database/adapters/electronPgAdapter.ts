@@ -93,6 +93,7 @@ export interface ElectronDB extends PreloadDB {
     getPayrollRunsPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createPayrollRun(payload: { month: number; year: number; totalAmount?: number; status?: string; runNumber?: string | null; lines?: Array<{ employeeId: string; baseSalary?: number; allowances?: number; deductions?: number; overtime?: number; netSalary?: number }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     postPayrollRun(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deletePayrollRun(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getLeaves(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getLeavesPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createLeave(payload: { employeeId: string; leaveType?: string; startDate: string; endDate: string; days?: number; status?: string; reason?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;

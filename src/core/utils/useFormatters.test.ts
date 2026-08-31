@@ -114,6 +114,19 @@ describe('useFormatters - formatDate (Gregorian)', () => {
     expect(result.current.formatDate('invalid-date')).toBe('-');
   });
 
+  it('returns dash for null/undefined/empty date (undefined-field regression)', () => {
+    // Rows whose `date` column is absent (e.g. stock_movements has no date
+    // column) used to crash: `d.getTime()` on undefined threw
+    // "Cannot read properties of undefined (reading 'getTime')".
+    mockUseSettings.mockReturnValue(fullSettings());
+    const { result } = renderHook(() => useFormatters('comp-1'));
+    expect(result.current.formatDate(undefined as unknown as string)).toBe('-');
+    expect(result.current.formatDate(null as unknown as string)).toBe('-');
+    expect(result.current.formatDate('')).toBe('-');
+    expect(result.current.formatDateTime(undefined as unknown as string)).toBe('-');
+    expect(result.current.formatDateTime(null as unknown as string)).toBe('-');
+  });
+
   it('formats with decimal places 4', () => {
     mockUseSettings.mockReturnValue(fullSettings({ decimalPlaces: 4 }));
     const { result } = renderHook(() => useFormatters('comp-1'));
