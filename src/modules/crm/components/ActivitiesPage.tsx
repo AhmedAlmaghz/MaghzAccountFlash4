@@ -1,16 +1,23 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Plus, Phone, Mail, Users, MapPin, FileText, BarChart3, Search, FileSpreadsheet, Layers, Clock3 } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates } from '@/core/utils/duplicateDetection';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
-import { useActivitiesPaginated, type ActivityFilters } from '../hooks/useCrm';
+import { useActivitiesPaginated, useActivityKpis, type ActivityFilters } from '../hooks/useCrm';
 import type { Activity as ActivityType } from '../types';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { exportToExcel } from '@/core/utils/exportEngine';
+import { crmApi } from '../api';
+import { UserSelect } from '@/core/ui/components/smart/fields/UserSelect';
+import { LeadSelect } from '@/core/ui/components/smart/fields/LeadSelect';
+import { OpportunitySelect } from '@/core/ui/components/smart/fields/OpportunitySelect';
+import { CustomerSelect } from '@/core/ui/components/smart/fields/CustomerSelect';
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   call: <Phone size={14} />,
@@ -41,10 +48,12 @@ export const ActivitiesPage: React.FC = () => {
   const activityFilters = useMemo<ActivityFilters>(
     () => ({
       type: typeFilter || undefined,
+      search: search.trim() || undefined,
     }),
-    [typeFilter]
+    [typeFilter, search]
   );
   const { activities, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useActivitiesPaginated(companyId, activityFilters);
+  const { kpis: activityKpis } = useActivityKpis(companyId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<ActivityType | null>(null);
@@ -62,6 +71,12 @@ export const ActivitiesPage: React.FC = () => {
     opportunityId: '',
     customerId: '',
   });
+
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
 
   const resetForm = () => {
     setFormData({ type: 'call', subject: '', description: '', activityDate: new Date().toISOString().split('T')[0], durationMinutes: '', assignedTo: '', leadId: '', opportunityId: '', customerId: '' });
@@ -91,6 +106,36 @@ export const ActivitiesPage: React.FC = () => {
       addToast('error', t('crm.activity.subject') + ' ' + t('error'));
       return;
     }
+    const inputName = formData.subject.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await crmApi.getActivities(companyId);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as ActivityType[], (a) => a.subject, {
+            excludeId: editing?.id,
+            getId: (a) => a.id,
+            getCode: (a) => a.activityDate,
+          });
+          if (result.exactMatch) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact({ name: result.exactMatch.matchedName, code: result.exactMatch.matchedCode });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    duplicateConfirmedRef.current = false;
     const payload = {
       companyId,
       type: formData.type,
@@ -151,14 +196,8 @@ export const ActivitiesPage: React.FC = () => {
       durationMinutes: act.durationMinutes || 0,
       assignedName: act.assignedName || act.assignedTo || '-',
     }));
-    exportToExcel(data, cols, `activities_${new Date().toISOString().split('T')[0]}`);
+    void exportToExcel(data, cols, `activities_${new Date().toISOString().split('T')[0]}`);
   };
-
-  const filteredActivities = useMemo(() => {
-    if (!search.trim()) return activities;
-    const q = search.toLowerCase();
-    return activities.filter(a => a.subject.toLowerCase().includes(q) || (a.description || '').toLowerCase().includes(q));
-  }, [activities, search]);
 
   const columns = [
     {
@@ -198,21 +237,23 @@ export const ActivitiesPage: React.FC = () => {
     {
       key: 'actions',
       header: '',
-      width: '120px',
+      width: '140px',
       render: (row: ActivityType) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => openEdit(row)}>{t('settings.common.edit')}</Button>
-          <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)}>{t('settings.common.delete')}</Button>
+          <Can action="edit" module="crm">
+            <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => openEdit(row)}>{t('settings.common.edit')}</Button>
+          </Can>
+          <Can action="delete" module="crm">
+            <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)}>{t('settings.common.delete')}</Button>
+          </Can>
         </div>
       ),
     },
   ];
 
-  const kpis = useMemo(() => ({
-    calls: activities.filter((a) => a.type === 'call').length,
-    meetings: activities.filter((a) => a.type === 'meeting').length,
-    totalMinutes: activities.reduce((s, a) => s + (a.durationMinutes || 0), 0),
-  }), [activities]);
+  const kpiCalls = activityKpis?.calls ?? activities.filter((a) => a.type === 'call').length;
+  const kpiMeetings = activityKpis?.meetings ?? activities.filter((a) => a.type === 'meeting').length;
+  const kpiTotalMinutes = activityKpis?.totalMinutes ?? (activityKpis?.total_minutes as number) ?? activities.reduce((s, a) => s + (a.durationMinutes || 0), 0);
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -242,9 +283,9 @@ export const ActivitiesPage: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: t('crm.total'), value: String(total), icon: Layers, color: 'from-teal-600 to-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-900/10 dark:to-teal-800/5' },
-          { label: t('crm.activity.call'), value: String(kpis.calls), icon: Phone, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
-          { label: t('crm.activity.meeting'), value: String(kpis.meetings), icon: Users, color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-gradient-to-br from-fuchsia-50 to-fuchsia-100 dark:from-fuchsia-900/10 dark:to-fuchsia-800/5' },
-          { label: t('crm.activities.totalMinutes'), value: String(kpis.totalMinutes), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('crm.activity.call'), value: String(kpiCalls), icon: Phone, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('crm.activity.meeting'), value: String(kpiMeetings), icon: Users, color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-gradient-to-br from-fuchsia-50 to-fuchsia-100 dark:from-fuchsia-900/10 dark:to-fuchsia-800/5' },
+          { label: t('crm.activities.totalMinutes'), value: String(kpiTotalMinutes), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
         ].map((k) => (
           <Card key={k.label} className="p-0 overflow-hidden relative">
             <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
@@ -310,7 +351,7 @@ export const ActivitiesPage: React.FC = () => {
               <div key={i} className="h-14 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse" />
             ))}
           </div>
-        ) : filteredActivities.length === 0 ? (
+        ) : activities.length === 0 ? (
           <div className="py-8">
             <EmptyState
               icon="inbox"
@@ -328,8 +369,8 @@ export const ActivitiesPage: React.FC = () => {
         ) : (
           <>
             <Table<ActivityType>
-              data={filteredActivities}
-              columns={columns}
+              data={activities}
+              columns={columns as unknown as never}
               keyExtractor={(row) => row.id}
               emptyMessage={t('crm.activity.empty')}
             />
@@ -380,7 +421,24 @@ export const ActivitiesPage: React.FC = () => {
           <Input label={t('crm.activity.details')} value={formData.description} onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))} />
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('crm.activity.duration')} type="number" min={0} value={formData.durationMinutes} onChange={(e) => setFormData((prev) => ({ ...prev, durationMinutes: e.target.value }))} />
-            <Input label={t('crm.activity.assignedTo')} value={formData.assignedTo} onChange={(e) => setFormData((prev) => ({ ...prev, assignedTo: e.target.value }))} />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('crm.activity.assignedTo')}</label>
+              <UserSelect companyId={companyId} value={formData.assignedTo || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, assignedTo: String(v || '') }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل المحتمل</label>
+              <LeadSelect companyId={companyId} value={formData.leadId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, leadId: String(v || '') }))} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">الفرصة</label>
+              <OpportunitySelect companyId={companyId} value={formData.opportunityId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, opportunityId: String(v || '') }))} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل</label>
+              <CustomerSelect companyId={companyId} value={formData.customerId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, customerId: String(v || '') }))} />
+            </div>
           </div>
         </div>
       </Modal>
@@ -416,6 +474,21 @@ export const ActivitiesPage: React.FC = () => {
         title={t('crm.activity.deleteTitle')}
         message={t('crm.activity.deleteMessage')}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('crm.activity.subject')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editing}
       />
     </div>
   );

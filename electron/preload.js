@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('electronDB', {
     deleteLead: (payload) => ipcRenderer.invoke('db:rpc:crm.deleteLead', { ...payload, sessionToken }),
     convertLeadToCustomer: (payload) => ipcRenderer.invoke('db:rpc:crm.convertLeadToCustomer', { ...payload, sessionToken }),
     getOpportunities: (payload) => ipcRenderer.invoke('db:rpc:crm.getOpportunities', { ...payload, sessionToken }),
+    getOpportunityById: (payload) => ipcRenderer.invoke('db:rpc:crm.getOpportunityById', { ...payload, sessionToken }),
     getOpportunitiesPaginated: (payload) => ipcRenderer.invoke('db:rpc:crm.getOpportunitiesPaginated', { ...payload, sessionToken }),
     createOpportunity: (payload) => ipcRenderer.invoke('db:rpc:crm.createOpportunity', { ...payload, sessionToken }),
     updateOpportunity: (payload) => ipcRenderer.invoke('db:rpc:crm.updateOpportunity', { ...payload, sessionToken }),

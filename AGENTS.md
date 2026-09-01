@@ -3873,4 +3873,53 @@ npx drizzle-kit migrate
 - **deletePayrollRun = مسار الـ rollback**: wizard الترحيل الكامل يحذف المسودة عند فشل الترحيل — لا partialSuccess بلا حل
 - **PowerShell pipes تفشل تحت npm scripts**: vitest/eslint عبر `Start-Process -FilePath npx.cmd -RedirectStandardOutput` — الـ pipe المباشر يعلق أو يفسد. وأي "vitest forks worker timeout" متتالٍ = عمليات node عالقة — Stop-Process node ثم إعادة
 
-*آخر تحديث: 2026-08-31 | الإصدار: maghzaccount-pro v0.8.0*
+### المرحلة 75 (v0.9.0): وحدة CRM الاحترافية — مصدر حقيقة واحد + آلة حالات + وكيل ذكي
+- **الخطة المعتمدة**: `docs/CRM_PRO_PLAN.md` — كل القرارات المعمارية موثقة فيها (حذف الجداول الميتة، صرامة آلة الحالات، الفوز≠فاتورة، ترتيب A→B→C→D)
+- **Migration `0015_crm_professional.sql`** (idempotent، محقق ×2 على PG):
+  - حذف الجداول الميتة `crm_activities` + `calls` (لا كود يقرأها/يكتبها — الكود استقر على `activities` + `tasks`)
+  - Orphan cleanup ثم **8 FKs ON DELETE SET NULL**: `opportunities.lead_id/customer_id` + `tasks/opportunity_id/lead_id/customer_id` + `activities/*` — حذف الكيان لا يمحو التاريخ، يقطع الرابط فقط
+  - **6 فهارس أداء** (كانت الجداول بلا أي فهرس = full scans): `(company_id,status)` + `(company_id,created_at)` للـ leads، `(company_id,stage)` + `(company_id,expected_close_date)` للفرص، `(company_id,status,due_date)` للمهام، `(company_id,activity_date)` للأنشطة
+  - عمودان جديدان: `opportunities.close_date` (يُختم عند won/lost) + `leads.last_contacted_at` (تُختم تلقائياً عند تسجيل نشاط مرتبط)
+- **آلة حالات الفرص الصارمة** (`types.ts isValidStageTransition` — الحارس في API layer لا الـ UI):
+  - تقدمية أمامية فقط: `new→qualified→proposal→negotiation→{won|lost}` — الرجوع مرفوض، won/lost نهائية
+  - الانتقال النهائي يختم `close_date = CURRENT_DATE` + probability تلقائي (won→100، lost→0) في SQL CASE (RPC + fallback + shim متطابقة)
+  - Kanban يعرض القانوني فقط؛ السحب غير القانوني → toast برسالة `stageTransitionError` العربية
+- **توحيد `convertLeadToCustomer`** (كان 4 تطبيقات متضاربة): CTE ذرّية واحدة في المسارات الثلاثة — توليد الكود من `document_sequences` موحّداً (أُزيل `CUST-` regex وازدواجية توليد الـ AI)، `createOpportunity?` ينشئ فرصة أولى "فرصة [الاسم]" من estimated_value في نفس الـ transaction، حارس idempotent يرفض المحوَّل مسبقاً
+- **`createActivity` CTE ذرّية**: INSERT النشاط + ختم `leads.last_contacted_at = activity_date` في نفس الـ statement (المسارات الثلاثة) — أدوات المتابعة تقرأها مباشرة
+- **حمايات + Audit + Duplicate (API layer — الوكيل يرث الكل)**:
+  - `deleteLead` يرفض عند وجود فرص/مهام/أنشطة مرتبطة (CTE refs guard في RPC + fallback + shim) برسالة عربية تفصيلية
+  - `logAudit` على كل كتابة CRM (create/update/delete/convert) — fire-and-forget
+  - حارس تكرار الـ leads: `LOWER(name)` بعد normalizeArabic أو الهاتف المطابق → رفض مع `allowDuplicate` flag للاستثناء المتعمد (الـ UI يضيف تحذير التشابه ≥0.85 عبر DuplicateWarningDialog)
+  - توحيد بحث الأنشطة: `search` param في المسارات الثلاثة (كان drift — RPC فقط)
+  - **KPIs محسوبة في SQL** (`getLeadKpis/getOpportunityKpis/getTaskKpis/getActivityKpis` + hooks): `COUNT(*) FILTER` على كامل بيانات الشركة — إصلاح KPIs الصفحة الحالية
+- **الواجهة (B)**: UserSelect/LeadSelect/OpportunitySelect/CustomerSelect بدل الحقول النصية (كانت تتطلب لصق UUID!)، مودال تحويل كامل (prefilled + checkbox فرصة أولى)، KPIs من السيرفر، تصدير Excel للـ leads/opportunities، حوارس `<Can>` على التعديل/الحذف، إصلاح حقل `customerOrOpportunity` المكسور في TasksPage (3 selects منفصلة)، CrmPage activities count حقيقي
+- **أدوات الوكيل (C)**:
+  - **إصلاح bug حرك**: `purchases.delete_supplier` كان يستدعي `crmApi.deleteTask` (copy-paste!) → `purchasesApi.deleteSupplier`
+  - ترقية `search.tasks/search.activities` إلى fuzzy + paginated (كانتا substring + جلب كامل)
+  - أدوات جديدة: `crm.get_tasks/get_activities` (قراءة بفلاتر + overdue)، `crm.update_activity`، `crm.complete_task`، **`crm.win_opportunity`** (يقفل won + يرشد لسؤال المستخدم عن الفاتورة — لا إنشاء تلقائي)
+  - **`crm.follow_ups`**: يجمع تلقائياً المهام المتأخرة + المستحقة اليوم + الفرص المتجاوزة + العملاء بلا تواصل ≥N يوم — مرتبة بالأولوية مع hints قابلة للتنفيذ
+  - **`crm.rep_performance`**: لكل مندوب leads assigned/converted + won/lost + win-rate + قيمة المكسوب + الأنشطة (SQL aggregation واحد)
+  - **`crm.qualify_lead` wizard**: ذرّي بتسلسل تعويضي — تأهيل + فرصة (من estimated_value) + مهمة متابعة بعد 3 أيام؛ فشل خطوة = rollback للسابقة (نمط create_and_post)
+  - `crm.convert_lead_to_customer` wizard: يحذف توليد الكود اليدوي (الـ API الموحد يتكفل)
+  - **صلاحيات دقيقة**: update→`crm.edit`، delete→`crm.delete` (كانت كلها `crm.create`)
+  - entityResolver: searchers جديدة للـ `opportunity` + `task` (كان leads فقط)
+  - **مهارة `crmAssistant`**: دليل lifecycle كامل (الحالات ومعناها، خريطة المراحل القانونية، جدول الأدوات اليومية، أفضل ممارسات المندوب، "الفوز ≠ فاتورة") تُحقن عند نية CRM
+  - قواعد برومبت 32-34 + suggestion chips للأدوات الجديدة كلها
+- **التحقق النهائي**: tsc 0 | lint 0/0 | **vitest 1295/1295** (83 ملف، +64) | **e2e 80/80** | build 1m24s | db:check clean | **PG smoke داخل ROLLBACK**: كل السلوكيات الجديدة مثبتة على قاعدة حقيقية (26 assertions) — `smoke_crm_0015.cjs`
+
+### قواعد ذهبية مضافة (Phase 75)
+- **آلة الحالة تعيش في API layer دائماً**: الـ UI يعرض ويرفض بلطف، لكن الحارس الحقيقي في `updateOpportunity` (الـ 3 مسارات) — الوكيل والواجهة والـ e2e كلهم يخضعون لنفس القانون. القانون في `types.ts` (pure function قابلة للاختبار) والفرض في SQL CASE
+- **المراحل النهائية تُختم لا تُحدث**: الانتقال إلى won/lost يكتب `close_date` وprobability في نفس الـ UPDATE عبر CASE — لا UPDATE ثانٍ (atomicity + لا نافذة سباق)
+- **توليد الكود مسؤولية الـ API الموحد فقط**: أداة الوكيل أو الصفحة التي تولّد كوداً بنفسها (regex MAX أو sequence call يدوي) تخلق ازدواجية مسارات — `getNextDocumentNumber` يُستدعى مرة واحدة داخل الـ API
+- **`last_contacted_at` تُختم في نفس CTE النشاط**: INSERT نشاط + UPDATE الـ lead في statement واحد — أي فصل يخلق نافذة سباق ويجعل أدوات المتابعة تقرأ بيانات قديمة
+- **حارس الحذف CTE refs pattern**: `WITH refs AS (counts), del AS (DELETE WHERE refs=0)` في statement واحدة + `mapResult` يرمي خطأ عربياً عند deleted=0 — أرخص من transaction وأوضح من FK RESTRICT
+- **registerRpc يدعم `mapResult` الآن**: post-processing الصفوف لأحكام العمل التي لا يعبر عنها SQL كخطأ — مثل حارس الحذف
+- **الجداول الميتة تُحذف في migration موثقة**: أضفها لمجموعة RETIRED في اختبار "additive only" — الحذف الصامت عبر الأجيال يلوث الـ schema والـ whitelists
+- **أدوات الوكيل تصنّف صلاحياتها بدقة**: update→edit، delete→delete — `crm.create` للجميع يمنع أي RBAC حقيقي
+- **`crm.win_opportunity` يرشد ولا ينشئ**: القرار التجاري (فاتورة أم لا) للمستخدم — الـ wizard يرجع `nextStep` نصياً والبرومبت (قاعدة 34) يلزم السؤال أولاً
+- **wizard التأهيل بتسلسل تعويضي**: لا transaction عبر أدوات منفصلة — كل خطوة تُلغى بعكسها عند فشل التالية (qualify ← rollback status، opportunity ← delete، task ← delete+rollback)
+- **e2e ببيانات فريدة عبر الحوارس الجديدة**: حارس التكرار يمنع الهاتف الثابت في إعادة التشغيل — `+9679${Date.now().slice(-8)}` وليس هاتف ثابت
+- **KPIs في SQL `COUNT(*) FILTER` دائماً**: أي reduce على صفحة paginated خاطئ بالضرورة عند >pageSize صفوف
+- **`stray backticks: 0` + `new Function(code)`**: فحص الـ shim الإلزامي بعد كل تعديل — الـ template literal مع double-quoted JS strings لسلاسل SQL المحتوية على `'` (لا backslash escapes في أي طبقة)
+
+*آخر تحديث: 2026-09-01 | الإصدار: maghzaccount-pro v0.9.0*

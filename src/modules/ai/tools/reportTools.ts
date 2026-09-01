@@ -1460,6 +1460,150 @@ export const reportTools: ToolDefinition[] = [
     },
   },
 
+  {
+    name: 'crm.follow_ups',
+    labelAr: 'المتابعات المطلوبة',
+    descriptionAr: 'يجمع تلقائياً كل ما يحتاج متابعة الآن: مهام متأخرة، مهام تستحق اليوم، فرص تجاوزت تاريخ الإغلاق المتوقع، عملاء محتملون بلا تواصل منذ أكثر من 14 يوماً — مرتبة بالأولوية.',
+    permission: 'crm.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        staleDays: { type: 'number', description: 'عدد الأيام بلا تواصل ليُعد العميل المحتمل "متوقفاً" (افتراضي 14)' },
+      },
+    },
+    execute: async (args, ctx) => {
+      const staleDays = args.staleDays !== undefined ? Math.max(1, Math.round(num(args.staleDays))) : 14;
+
+      const [overdueTasksRes, dueTodayRes, overdueOppsRes, staleLeadsRes] = await Promise.all([
+        guardedQuery(
+          `SELECT t.id, t.title, t.due_date::text AS due_date, t.priority, t.assigned_to,
+                  u.full_name AS assigned_name, t.lead_id, t.opportunity_id
+             FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id
+            WHERE t.company_id = $1::uuid AND t.status = 'pending' AND t.due_date < CURRENT_DATE
+            ORDER BY t.due_date ASC LIMIT 20`,
+          [ctx.companyId]
+        ),
+        guardedQuery(
+          `SELECT t.id, t.title, t.due_date::text AS due_date, t.priority, t.assigned_to,
+                  u.full_name AS assigned_name, t.lead_id, t.opportunity_id
+             FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id
+            WHERE t.company_id = $1::uuid AND t.status = 'pending' AND t.due_date = CURRENT_DATE
+            ORDER BY t.priority DESC LIMIT 20`,
+          [ctx.companyId]
+        ),
+        guardedQuery(
+          `SELECT o.id, o.name, o.stage, o.value, o.expected_close_date::text AS expected_close_date,
+                  o.assigned_to, u.full_name AS assigned_name, o.customer_id
+             FROM opportunities o LEFT JOIN users u ON o.assigned_to = u.id
+            WHERE o.company_id = $1::uuid
+              AND o.stage NOT IN ('won', 'lost')
+              AND o.expected_close_date IS NOT NULL AND o.expected_close_date < CURRENT_DATE
+            ORDER BY o.expected_close_date ASC LIMIT 20`,
+          [ctx.companyId]
+        ),
+        guardedQuery(
+          `SELECT l.id, l.name, l.phone, l.status, l.rating, l.estimated_value,
+                  l.last_contacted_at::text AS last_contacted_at, l.assigned_to, u.full_name AS assigned_name
+             FROM leads l LEFT JOIN users u ON l.assigned_to = u.id
+            WHERE l.company_id = $1::uuid
+              AND l.status IN ('new', 'contacted', 'qualified')
+              AND (l.last_contacted_at IS NULL OR l.last_contacted_at < CURRENT_DATE - ($2::int * INTERVAL '1 day'))
+            ORDER BY l.rating = 'hot' DESC, l.estimated_value DESC NULLS LAST LIMIT 20`,
+          [ctx.companyId, staleDays]
+        ),
+      ]);
+
+      const priorityRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+      const overdueTasks = (overdueTasksRes.rows || []).map((r: Record<string, unknown>) => ({
+        kind: 'overdue_task', id: String(r.id), title: String(r.title), dueDate: r.due_date,
+        priority: String(r.priority), assignedTo: r.assigned_name,
+        leadId: r.lead_id, opportunityId: r.opportunity_id,
+      })).sort((a, b) => (priorityRank[b.priority] || 0) - (priorityRank[a.priority] || 0));
+      const dueToday = (dueTodayRes.rows || []).map((r: Record<string, unknown>) => ({
+        kind: 'due_today', id: String(r.id), title: String(r.title), dueDate: r.due_date,
+        priority: String(r.priority), assignedTo: r.assigned_name,
+        leadId: r.lead_id, opportunityId: r.opportunity_id,
+      }));
+      const overdueOpps = (overdueOppsRes.rows || []).map((r: Record<string, unknown>) => ({
+        kind: 'overdue_opportunity', id: String(r.id), name: String(r.name), stage: String(r.stage),
+        value: num(r.value), expectedCloseDate: r.expected_close_date, assignedTo: r.assigned_name,
+        customerId: r.customer_id,
+      }));
+      const staleLeads = (staleLeadsRes.rows || []).map((r: Record<string, unknown>) => ({
+        kind: 'stale_lead', id: String(r.id), name: String(r.name), phone: r.phone,
+        status: String(r.status), rating: String(r.rating), estimatedValue: num(r.estimated_value),
+        lastContactedAt: r.last_contacted_at, assignedTo: r.assigned_name,
+      }));
+
+      return {
+        summary: {
+          total: overdueTasks.length + dueToday.length + overdueOpps.length + staleLeads.length,
+          overdueTasks: overdueTasks.length,
+          dueToday: dueToday.length,
+          overdueOpportunities: overdueOpps.length,
+          staleLeads: staleLeads.length,
+        },
+        // Priority order: overdue tasks → overdue opportunities → due today → stale leads
+        actions: [...overdueTasks, ...overdueOpps, ...dueToday, ...staleLeads].slice(0, 40),
+        hints: [
+          'للمهام المتأخرة: أنجزها عبر crm.complete_task أو عدّل تاريخها عبر crm.update_task.',
+          'للفرص المتجاوزة: راجع المرحلة عبر crm.update_opportunity_stage (تقدّم للأمام فقط).',
+          'للعملاء المتوقفين: سجّل نشاط تواصل عبر crm.create_activity (يحدّث last_contacted_at تلقائياً).',
+        ],
+      };
+    },
+  },
+
+  {
+    name: 'crm.rep_performance',
+    labelAr: 'أداء مندوبي المبيعات',
+    descriptionAr: 'يحسب أداء كل مندوب: العملاء المحتملون المسندون، المحولون، الفرص المفتوحة/المكسوبة/الخاسرة، معدل الفوز، قيمة المكسوب، الأنشطة المسجلة.',
+    permission: 'crm.view',
+    dangerLevel: 'read',
+    parameters: EMPTY_PARAMS,
+    execute: async (_args, ctx) => {
+      const repsRes = await guardedQuery(
+        `SELECT u.id, u.full_name AS name,
+                (SELECT COUNT(*)::int FROM leads l WHERE l.company_id = $1::uuid AND l.assigned_to = u.id) AS leads_assigned,
+                (SELECT COUNT(*)::int FROM leads l WHERE l.company_id = $1::uuid AND l.assigned_to = u.id AND l.status = 'converted') AS leads_converted,
+                (SELECT COUNT(*)::int FROM opportunities o WHERE o.company_id = $1::uuid AND o.assigned_to = u.id AND o.stage NOT IN ('won','lost')) AS open_opps,
+                (SELECT COUNT(*)::int FROM opportunities o WHERE o.company_id = $1::uuid AND o.assigned_to = u.id AND o.stage = 'won') AS won_opps,
+                (SELECT COUNT(*)::int FROM opportunities o WHERE o.company_id = $1::uuid AND o.assigned_to = u.id AND o.stage = 'lost') AS lost_opps,
+                (SELECT COALESCE(SUM(o.value), 0) FROM opportunities o WHERE o.company_id = $1::uuid AND o.assigned_to = u.id AND o.stage = 'won') AS won_value,
+                (SELECT COUNT(*)::int FROM activities a WHERE a.company_id = $1::uuid AND a.assigned_to = u.id) AS activities_logged
+           FROM users u
+          WHERE u.company_id = $1::uuid
+          ORDER BY won_value DESC NULLS LAST`,
+        [ctx.companyId]
+      );
+
+      const reps = (repsRes.rows || []).map((r: Record<string, unknown>) => {
+        const won = num(r.won_opps);
+        const lost = num(r.lost_opps);
+        const closed = won + lost;
+        return {
+          id: String(r.id),
+          name: String(r.name),
+          leadsAssigned: num(r.leads_assigned),
+          leadsConverted: num(r.leads_converted),
+          openOpportunities: num(r.open_opps),
+          won: won,
+          lost: lost,
+          winRate: closed > 0 ? Math.round((won / closed) * 1000) / 10 : 0,
+          wonValue: Math.round(num(r.won_value) * 100) / 100,
+          activitiesLogged: num(r.activities_logged),
+        };
+      });
+
+      return {
+        totalReps: reps.length,
+        reps,
+        note: 'معدل الفوز = won / (won + lost) للفرص المقفلة فقط.',
+      };
+    },
+  },
+
   // ═══════════════════════════════════════════════════════════════════════════
   // لوحة المؤشرات — Dashboard
   // ═══════════════════════════════════════════════════════════════════════════

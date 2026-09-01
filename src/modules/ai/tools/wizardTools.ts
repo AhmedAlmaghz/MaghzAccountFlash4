@@ -244,43 +244,135 @@ export const wizardTools: ToolDefinition[] = [
     },
   },
 
-  // ─── CRM: Convert Lead → Customer ──────────────────────────────────────
+  // ─── CRM: Convert Lead → Customer (unified API — Phase A4) ──────────────
   {
     name: 'crm.convert_lead_to_customer',
     labelAr: 'تحويل عميل محتمل إلى عميل',
-    descriptionAr: 'يحوّل عميلاً محتملاً (lead) إلى عميل (customer) مع كامل بياناته، ويحدّث حالة العميل المحتمل إلى "تم التحويل". استخدم search.leads أولاً للحصول على معرف العميل المحتمل.',
+    descriptionAr: 'يحوّل عميلاً محتملاً (lead) إلى عميل (customer) في عملية ذرّية واحدة: ينشئ العميل (كود من التسلسل الموحد)، يحدّث حالة الـ lead إلى converted، ويمكنه إنشاء فرصة أولى بنفس العملية. استخدم search.leads أولاً.',
     permission: 'crm.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         leadId: { type: 'string', description: 'معرف العميل المحتمل (من search.leads)' },
-        address: { type: 'string', description: 'العنوان (اختياري — يُستخدم من بيانات الـ lead إن تُرك)' },
+        address: { type: 'string', description: 'العنوان (اختياري)' },
         taxNumber: { type: 'string', description: 'الرقم الضريبي (اختياري)' },
         creditLimit: { type: 'number', description: 'حد الائتمان (اختياري، افتراضي 0)' },
+        phone: { type: 'string', description: 'هاتف العميل (اختياري — يُستخدم من بيانات الـ lead)' },
+        email: { type: 'string', description: 'بريد العميل (اختياري — يُستخدم من بيانات الـ lead)' },
+        createOpportunity: { type: 'boolean', description: 'إنشاء فرصة أولى "فرصة [الاسم]" بنفس القيمة التقديرية (افتراضي false)' },
       },
       required: ['leadId'],
     },
-    summarizeArgs: (a) => `تحويل عميل محتمل إلى عميل (المعرف: ${String(a.leadId).slice(0, 8)}…)`,
+    summarizeArgs: (a) => `تحويل عميل محتمل إلى عميل${a.createOpportunity === true ? ' + فرصة أولى' : ''} (المعرف: ${String(a.leadId).slice(0, 8)}…)`,
     execute: async (args, ctx) => {
       const leadId = str(args.leadId);
       if (!leadId) return { error: 'leadId مطلوب — استخدم search.leads أولاً' };
 
-      const codeSeq = await getNextDocumentNumber(ctx.companyId, 'customer');
-      if (!codeSeq.success || !codeSeq.number) return { error: codeSeq.error || 'فشل توليد رقم العميل' };
-
+      // The unified API generates the customer code from document_sequences
+      // and performs everything in ONE atomic CTE (Phase A4) — no manual
+      // sequence call here anymore.
       const res = await crmApi.convertLeadToCustomer(leadId, ctx.companyId, {
-        code: codeSeq.number,
-        address: str(args.address) || '',
-        taxNumber: str(args.taxNumber) || '',
-        creditLimit: num(args.creditLimit),
+        address: str(args.address) || undefined,
+        taxNumber: str(args.taxNumber) || undefined,
+        creditLimit: args.creditLimit !== undefined ? num(args.creditLimit) : 0,
+        phone: str(args.phone) || undefined,
+        email: str(args.email) || undefined,
+        createOpportunity: args.createOpportunity === true,
       });
       if (!res.success) return { error: res.error || 'فشل تحويل العميل المحتمل' };
 
       return {
         success: true,
         customerId: res.id,
-        message: 'تم تحويل العميل المحتمل إلى عميل بنجاح',
+        customerCode: res.code,
+        opportunityId: res.opportunityId,
+        message: res.opportunityId
+          ? 'تم التحويل إلى عميل وإنشاء فرصة أولى في عملية ذرّية واحدة'
+          : 'تم تحويل العميل المحتمل إلى عميل بنجاح',
+      };
+    },
+  },
+
+  // ─── CRM: Qualify Lead → Opportunity + Follow-up Task (Phase C3) ─────────
+  {
+    name: 'crm.qualify_lead',
+    labelAr: 'تأهيل عميل محتمل',
+    descriptionAr: 'يزامن تأهيل عميل محتمل في سلسلة واحدة: يحدّث حالته إلى qualified، ينشئ فرصة بيعية من قيمته التقديرية، وينشئ مهمة متابعة بعد 3 أيام. عند فشل أي خطوة يتراجع عن السابقة (compensating rollback). استخدم search.leads أولاً.',
+    permission: 'crm.create',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        leadId: { type: 'string', description: 'معرف العميل المحتمل (من search.leads)' },
+        opportunityName: { type: 'string', description: 'اسم الفرصة (افتراضي: "فرصة [اسم الـ lead]")' },
+        value: { type: 'number', description: 'قيمة الفرصة (افتراضي: القيمة التقديرية للـ lead أو 0)' },
+        probability: { type: 'number', description: 'نسبة النجاح 0-100 (افتراضي 50)' },
+        followUpDays: { type: 'number', description: 'مهمة المتابعة بعد كم يوم (افتراضي 3)' },
+        notes: { type: 'string', description: 'ملاحظات تُرفق بالفرصة والمهمة' },
+      },
+      required: ['leadId'],
+    },
+    summarizeArgs: (a) => `تأهيل عميل محتمل + إنشاء فرصة ومهمة متابعة (المعرف: ${String(a.leadId).slice(0, 8)}…)`,
+    execute: async (args, ctx) => {
+      const leadId = str(args.leadId);
+      if (!leadId) return { error: 'leadId مطلوب — استخدم search.leads أولاً' };
+
+      // Load the lead first (source of truth for name/value).
+      const leadRes = await crmApi.getLeadById(leadId, ctx.companyId);
+      if (!leadRes.success || !leadRes.data) return { error: leadRes.error || 'العميل المحتمل غير موجود' };
+      const lead = leadRes.data;
+      if (lead.status === 'converted') return { error: 'هذا العميل المحتمل محوَّل بالفعل — لا يمكن تأهيله' };
+
+      // Step 1: qualify the lead.
+      const qualifyRes = await crmApi.updateLead(leadId, ctx.companyId, { status: 'qualified' });
+      if (!qualifyRes.success) return { error: qualifyRes.error || 'فشل تحديث حالة العميل المحتمل', step: 'qualify' };
+
+      // Step 2: create the opportunity (rolled back on failure).
+      const oppName = str(args.opportunityName) || `فرصة ${lead.name}`;
+      const value = args.value !== undefined ? num(args.value) : (lead.estimatedValue || 0);
+      const oppRes = await crmApi.createOpportunity({
+        companyId: ctx.companyId,
+        name: oppName,
+        value,
+        stage: 'new',
+        probability: args.probability !== undefined ? num(args.probability) : 50,
+        leadId,
+        notes: str(args.notes) || undefined,
+      });
+      if (!oppRes.success) {
+        // Compensating rollback: restore the lead's previous status.
+        await crmApi.updateLead(leadId, ctx.companyId, { status: lead.status });
+        return { error: oppRes.error || 'فشل إنشاء الفرصة — تم التراجع عن التأهيل', step: 'opportunity', rolledBack: true };
+      }
+
+      // Step 3: follow-up task due in N days (rolled back on failure).
+      const followUpDays = args.followUpDays !== undefined ? Math.max(1, Math.round(num(args.followUpDays))) : 3;
+      const due = new Date();
+      due.setDate(due.getDate() + followUpDays);
+      const taskRes = await crmApi.createTask({
+        companyId: ctx.companyId,
+        title: `متابعة: ${oppName}`,
+        description: str(args.notes) || `متابعة العميل المحتمل ${lead.name} بعد التأهيل`,
+        dueDate: due.toISOString().split('T')[0],
+        priority: 'medium',
+        status: 'pending',
+        leadId,
+        opportunityId: oppRes.id,
+      });
+      if (!taskRes.success) {
+        if (oppRes.id) await crmApi.deleteOpportunity(oppRes.id, ctx.companyId);
+        await crmApi.updateLead(leadId, ctx.companyId, { status: lead.status });
+        return { error: taskRes.error || 'فشل إنشاء مهمة المتابعة — تم التراجع الكامل', step: 'task', rolledBack: true };
+      }
+
+      return {
+        success: true,
+        leadId,
+        opportunityId: oppRes.id,
+        taskId: taskRes.id,
+        value,
+        message: `تم التأهيل: الفرصة "${oppName}" أُنشئت مع مهمة متابعة بعد ${followUpDays} أيام`,
       };
     },
   },

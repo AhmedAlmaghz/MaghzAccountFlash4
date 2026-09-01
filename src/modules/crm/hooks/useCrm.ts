@@ -338,13 +338,14 @@ export function useTasksPaginated(companyId: string, filters?: TaskFilters) {
 export interface ActivityFilters {
   type?: string;
   assignedTo?: string;
+  search?: string;
 }
 
 export function useActivitiesPaginated(companyId: string, filters?: ActivityFilters) {
   const user = useAuthStore((s) => s.user);
   const { reload: reloadList, ...list } = usePaginatedList<Activity>(
     (page, pageSize) => crmApi.getActivitiesPaginated(companyId, page, pageSize, filters),
-    [companyId, filters?.type, filters?.assignedTo]
+    [companyId, filters?.type, filters?.assignedTo, filters?.search]
   );
 
   const create = useCallback(async (data: Omit<Activity, 'id' | 'createdAt'>) => {
@@ -378,4 +379,60 @@ export function useActivitiesPaginated(companyId: string, filters?: ActivityFilt
     remove,
     reload: reloadList,
   };
+}
+
+export function useLeadKpis(companyId: string) {
+  const [kpis, setKpis] = useState<Record<string, number> | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const reload = useCallback(async () => {
+    if (!companyId) return;
+    setIsLoading(true);
+    const res = await crmApi.getLeadKpis(companyId);
+    if (res.success && res.data) setKpis(res.data);
+    setIsLoading(false);
+  }, [companyId]);
+  useEffect(() => { void reload(); }, [reload]);
+  return { kpis, isLoading, reload };
+}
+
+export function useOpportunityKpis(companyId: string) {
+  const [kpis, setKpis] = useState<Record<string, number> | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const reload = useCallback(async () => {
+    if (!companyId) return;
+    setIsLoading(true);
+    const res = await crmApi.getOpportunityKpis(companyId);
+    if (res.success && res.data) setKpis(res.data);
+    setIsLoading(false);
+  }, [companyId]);
+  useEffect(() => { void reload(); }, [reload]);
+  return { kpis, isLoading, reload };
+}
+
+export function useTaskKpis(companyId: string) {
+  const [kpis, setKpis] = useState<Record<string, number> | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const reload = useCallback(async () => {
+    if (!companyId) return;
+    setIsLoading(true);
+    const res = await crmApi.getTaskKpis(companyId);
+    if (res.success && res.data) setKpis(res.data);
+    setIsLoading(false);
+  }, [companyId]);
+  useEffect(() => { void reload(); }, [reload]);
+  return { kpis, isLoading, reload };
+}
+
+export function useActivityKpis(companyId: string) {
+  const [kpis, setKpis] = useState<Record<string, number> | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const reload = useCallback(async () => {
+    if (!companyId) return;
+    setIsLoading(true);
+    const res = await crmApi.getActivityKpis(companyId);
+    if (res.success && res.data) setKpis(res.data);
+    setIsLoading(false);
+  }, [companyId]);
+  useEffect(() => { void reload(); }, [reload]);
+  return { kpis, isLoading, reload };
 }

@@ -1686,7 +1686,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.update_lead_status',
     labelAr: 'تحديث حالة عميل محتمل',
     descriptionAr: 'يُحدّث حالة عميل محتمل (مثلاً إلى contacted/qualified/lost). استخدم crm.get_leads أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -1720,7 +1720,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.update_opportunity_stage',
     labelAr: 'تحديث مرحلة فرصة بيعية',
     descriptionAr: 'يُحدّث مرحلة فرصة بيعية (مثلاً إلى won/lost/proposal). استخدم crm.get_opportunities أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -1749,6 +1749,119 @@ export const writeTools: ToolDefinition[] = [
       const res = await crmApi.updateOpportunity(opportunityId, ctx.companyId, data);
       if (!res.success) return { error: res.error || 'فشل تحديث المرحلة' };
       return { updated: true, opportunityId, stage };
+    },
+  },
+
+  // ─── CRM: Update Activity (Phase C2 — completes the CRUD triad) ────────
+  {
+    name: 'crm.update_activity',
+    labelAr: 'تعديل نشاط',
+    descriptionAr: 'يُعدّل نشاطاً مسجلاً (النوع، العنوان، الوصف، التاريخ، المدة). استخدم search.activities أولاً لإيجاد activityId.',
+    permission: 'crm.edit',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        activityId: { type: 'string', description: 'معرف النشاط (من search.activities)' },
+        type: { type: 'string', enum: ['call', 'meeting', 'email', 'visit', 'note'], description: 'نوع النشاط' },
+        subject: { type: 'string', description: 'عنوان النشاط' },
+        description: { type: 'string', description: 'وصف النشاط' },
+        activityDate: { type: 'string', description: 'تاريخ النشاط YYYY-MM-DD' },
+        durationMinutes: { type: 'number', description: 'المدة بالدقائق' },
+      },
+      required: ['activityId'],
+    },
+    summarizeArgs: (a) => `تعديل نشاط ${a.activityId}${a.subject ? `: ${a.subject}` : ''}`,
+    execute: async (args, ctx) => {
+      const activityId = str(args.activityId);
+      if (!activityId) return { error: 'activityId مطلوب' };
+      const data: Record<string, unknown> = {};
+      const type = str(args.type);
+      if (type) {
+        if (!['call', 'meeting', 'email', 'visit', 'note'].includes(type)) return { error: 'نوع نشاط غير صحيح' };
+        data.type = type;
+      }
+      if (args.subject !== undefined) {
+        const subject = str(args.subject);
+        if (!subject) return { error: 'عنوان النشاط لا يمكن أن يكون فارغاً' };
+        data.subject = subject;
+      }
+      if (args.description !== undefined) data.description = str(args.description);
+      if (args.activityDate !== undefined) data.activityDate = str(args.activityDate);
+      if (args.durationMinutes !== undefined) data.durationMinutes = num(args.durationMinutes);
+      if (Object.keys(data).length === 0) return { error: 'لا توجد حقول للتعديل' };
+
+      const res = await crmApi.updateActivity(activityId, ctx.companyId, data);
+      if (!res.success) return { error: res.error || 'فشل تعديل النشاط' };
+      return { updated: true, activityId };
+    },
+  },
+
+  // ─── CRM: Complete Task (Phase C2 — ergonomic shortcut) ────────────────
+  {
+    name: 'crm.complete_task',
+    labelAr: 'إكمال مهمة',
+    descriptionAr: 'يضع مهمة كمنجزة (status=completed). اختصار مهني لإنجاز مهام المتابعة. استخدم search.tasks أولاً لإيجاد taskId.',
+    permission: 'crm.edit',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: 'معرف المهمة (من search.tasks)' },
+        notes: { type: 'string', description: 'ملاحظات الإنجاز (اختياري)' },
+      },
+      required: ['taskId'],
+    },
+    summarizeArgs: (a) => `إكمال المهمة ${a.taskId}`,
+    execute: async (args, ctx) => {
+      const taskId = str(args.taskId);
+      if (!taskId) return { error: 'taskId مطلوب' };
+      const data: Record<string, unknown> = { status: 'completed' };
+      if (args.notes !== undefined) data.description = str(args.notes);
+
+      const res = await crmApi.updateTask(taskId, ctx.companyId, data);
+      if (!res.success) return { error: res.error || 'فشل إكمال المهمة' };
+      return { updated: true, taskId, status: 'completed' };
+    },
+  },
+
+  // ─── CRM: Win Opportunity (Phase C2 — guided close, no auto-invoice) ────
+  {
+    name: 'crm.win_opportunity',
+    labelAr: 'الفوز بفرصة بيعية',
+    descriptionAr: 'يقفل فرصة كـ won (يختم close_date واحتمالية 100%) ثم يرشد لخطوة الفاتورة. لا ينشئ فاتورة تلقائياً — اسأل المستخدم أولاً. استخدم crm.get_opportunities أولاً.',
+    permission: 'crm.edit',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        opportunityId: { type: 'string', description: 'معرف الفرصة (من crm.get_opportunities)' },
+        notes: { type: 'string', description: 'ملاحظات الإغلاق (اختياري)' },
+      },
+      required: ['opportunityId'],
+    },
+    summarizeArgs: (a) => `الفوز بالفرصة ${a.opportunityId} (قفل won)`,
+    execute: async (args, ctx) => {
+      const opportunityId = str(args.opportunityId);
+      if (!opportunityId) return { error: 'opportunityId مطلوب' };
+
+      const data: Record<string, unknown> = { stage: 'won' };
+      if (args.notes !== undefined) data.notes = str(args.notes);
+      const res = await crmApi.updateOpportunity(opportunityId, ctx.companyId, data);
+      if (!res.success) return { error: res.error || 'فشل إقفال الفرصة' };
+
+      // Guidance, not automation — the invoice decision belongs to the user.
+      const oppRes = await crmApi.getOpportunityById(opportunityId, ctx.companyId);
+      const opp = oppRes.success ? oppRes.data : undefined;
+      return {
+        updated: true,
+        opportunityId,
+        stage: 'won',
+        closeDate: opp?.closeDate,
+        value: opp?.value,
+        customerId: opp?.customerId,
+        nextStep: 'تم الفوز بالفرصة. اسأل المستخدم: "هل تريد إنشاء فاتورة مبيعات لهذه الفرصة؟" — عند الموافقة استخدم sales.create_invoice مع customerId وقيمة الفرصة.',
+      };
     },
   },
 
@@ -1976,7 +2089,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.update_lead',
     labelAr: 'تعديل عميل محتمل',
     descriptionAr: 'يُعدّل بيانات عميل محتمل (lead): الاسم، الهاتف، البريد، القيمة المتوقعة، الملاحظات، التقييم، الحالة، المسؤول. استخدم search.leads أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -2016,7 +2129,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.update_opportunity',
     labelAr: 'تعديل فرصة بيعية',
     descriptionAr: 'يُعدّل بيانات فرصة بيعية (الاسم، القيمة، المرحلة، نسبة النجاح، الملاحظات، المسؤول). استخدم search.opportunities أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -2056,7 +2169,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.update_task',
     labelAr: 'تعديل مهمة',
     descriptionAr: 'يُعدّل بيانات مهمة (title, dueDate, priority, status, assignedTo).',
-    permission: 'crm.create',
+    permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -2092,7 +2205,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.delete_task',
     labelAr: 'حذف مهمة',
     descriptionAr: 'يحذف مهمة من نظام CRM.',
-    permission: 'crm.create',
+    permission: 'crm.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3596,11 +3709,11 @@ export const writeTools: ToolDefinition[] = [
     },
     summarizeArgs: (a) => `حذف مورد ${a.supplierId}`,
     execute: async (args, ctx) => {
-      const taskId = str(args.taskId);
-      if (!taskId) return { error: 'taskId مطلوب' };
-      const res = await crmApi.deleteTask(taskId, ctx.companyId);
-      if (!res.success) return { error: res.error || 'فشل حذف المهمة' };
-      return { deleted: true, taskId };
+      const supplierId = str(args.supplierId);
+      if (!supplierId) return { error: 'supplierId مطلوب' };
+      const res = await purchasesApi.deleteSupplier(supplierId, ctx.companyId);
+      if (!res.success) return { error: res.error || 'فشل حذف المورد' };
+      return { deleted: true, supplierId };
     },
   },
 
@@ -3773,7 +3886,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.delete_lead',
     labelAr: 'حذف عميل محتمل',
     descriptionAr: 'يحذف عميلاً محتملاً (lead) من نظام CRM. استخدم crm.get_leads أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3797,7 +3910,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.delete_opportunity',
     labelAr: 'حذف فرصة بيعية',
     descriptionAr: 'يحذف فرصة بيعية من نظام CRM. استخدم crm.get_opportunities أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3821,7 +3934,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'crm.delete_activity',
     labelAr: 'حذف نشاط',
     descriptionAr: 'يحذف نشاطاً من نظام CRM. استخدم crm.get_activities أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

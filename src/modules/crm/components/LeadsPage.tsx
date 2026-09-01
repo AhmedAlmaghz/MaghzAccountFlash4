@@ -1,17 +1,22 @@
-import React, { useState, useMemo } from 'react';
-import { Plus, UserCheck, Search, Layers, Flame, ThumbsUp, Handshake } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Plus, UserCheck, Search, Layers, Flame, ThumbsUp, Handshake, FileSpreadsheet } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates } from '@/core/utils/duplicateDetection';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
-import { useLeadsPaginated, useActivitiesPaginated } from '../hooks/useCrm';
+import { useLeadsPaginated, useActivitiesPaginated, useLeadKpis } from '../hooks/useCrm';
 import type { Lead, Activity } from '../types';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { crmApi } from '../api';
+import { exportToExcel } from '@/core/utils/exportEngine';
+import { UserSelect } from '@/core/ui/components/smart/fields/UserSelect';
 
 export const LeadsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -30,6 +35,7 @@ export const LeadsPage: React.FC = () => {
   );
   const { leads, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, convertToCustomer, reload } = useLeadsPaginated(companyId, leadFilters);
   const { create: createActivity } = useActivitiesPaginated(companyId);
+  const { kpis: leadKpis, reload: reloadKpis } = useLeadKpis(companyId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isActivityOpen, setIsActivityOpen] = useState(false);
@@ -56,6 +62,21 @@ export const LeadsPage: React.FC = () => {
     description: '',
     activityDate: new Date().toISOString().split('T')[0],
   });
+  const [convertForm, setConvertForm] = useState({
+    address: '',
+    taxNumber: '',
+    creditLimit: '',
+    phone: '',
+    email: '',
+    createOpportunity: false,
+  });
+
+  // duplicate guard
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
 
   const resetForm = () => {
     setFormData({ name: '', phone: '', email: '', company: '', source: '', estimatedValue: '', rating: 'warm', status: 'new', assignedTo: '', notes: '' });
@@ -84,11 +105,55 @@ export const LeadsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  const openConvert = (lead: Lead) => {
+    setSelectedLead(lead);
+    setConvertForm({
+      address: '',
+      taxNumber: '',
+      creditLimit: '',
+      phone: lead.phone || '',
+      email: lead.email || '',
+      createOpportunity: false,
+    });
+    setIsConvertOpen(true);
+  };
+
   const handleSave = async () => {
     if (!formData.name) {
       addToast('error', t('crm.lead.name') + ' ' + t('error'));
       return;
     }
+    const inputName = formData.name.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await crmApi.getLeads(companyId);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as Lead[], (c) => c.name, {
+            excludeId: editing?.id,
+            getId: (c) => c.id,
+            getCode: (c) => c.phone,
+          });
+          if (result.exactMatch) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact({ name: result.exactMatch.matchedName, code: result.exactMatch.matchedCode });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const wasConfirmed = duplicateConfirmedRef.current;
+    duplicateConfirmedRef.current = false;
     const payload = {
       companyId,
       name: formData.name,
@@ -101,12 +166,23 @@ export const LeadsPage: React.FC = () => {
       estimatedValue: Number(formData.estimatedValue) || undefined,
       assignedTo: formData.assignedTo || undefined,
       notes: formData.notes || undefined,
-    };
-    const res = editing ? await update(editing.id, payload) : await create(payload);
+    } as unknown as Omit<Lead, 'id' | 'createdAt'>;
+    let res: { success: boolean; error?: string; duplicate?: unknown; opportunityId?: string } | undefined;
+    if (editing) {
+      res = await update(editing.id, payload);
+    } else {
+      if (wasConfirmed) {
+        res = await crmApi.createLead(payload, undefined, { allowDuplicate: true });
+        if (res?.success) await reload();
+      } else {
+        res = await create(payload);
+      }
+    }
     if (res?.success) {
       setIsModalOpen(false);
       resetForm();
       addToast('success', t(editing ? 'crm.lead.updated' : 'crm.lead.created'));
+      void reloadKpis();
     } else {
       addToast('error', res?.error || t('error'));
     }
@@ -118,6 +194,7 @@ export const LeadsPage: React.FC = () => {
     if (res?.success) {
       setConfirmDelete(null);
       addToast('success', t('crm.lead.deleted'));
+      void reloadKpis();
     } else {
       addToast('error', res?.error || t('error'));
     }
@@ -149,15 +226,47 @@ export const LeadsPage: React.FC = () => {
 
   const handleConvert = async () => {
     if (!selectedLead) return;
-    const res = await convertToCustomer(selectedLead.id, { address: '', taxNumber: '', creditLimit: 0 });
+    const payload: Record<string, unknown> = {
+      address: convertForm.address || undefined,
+      taxNumber: convertForm.taxNumber || undefined,
+      creditLimit: convertForm.creditLimit ? Number(convertForm.creditLimit) : undefined,
+      phone: convertForm.phone || undefined,
+      email: convertForm.email || undefined,
+      createOpportunity: convertForm.createOpportunity,
+    };
+    const res = await convertToCustomer(selectedLead.id, payload);
     if (res?.success) {
       setIsConvertOpen(false);
+      const msg = (res as { opportunityId?: string }).opportunityId ? `${t('crm.lead.updated')} — ${t('crm.opportunity.created')}` : t('crm.lead.updated');
+      addToast('success', msg);
       setSelectedLead(null);
-      addToast('success', t('crm.lead.updated'));
       await reload();
+      void reloadKpis();
     } else {
       addToast('error', res?.error || t('error'));
     }
+  };
+
+  const handleExport = () => {
+    const cols = [
+      { key: 'name', header: t('crm.lead.name') },
+      { key: 'company', header: t('crm.lead.company') },
+      { key: 'phone', header: t('crm.lead.phone') },
+      { key: 'email', header: t('crm.lead.email') },
+      { key: 'rating', header: t('crm.lead.rating') },
+      { key: 'status', header: t('crm.lead.status') },
+      { key: 'estimatedValue', header: t('crm.lead.estimatedValue') },
+    ];
+    const data = leads.map((l) => ({
+      name: l.name,
+      company: l.company || '',
+      phone: l.phone || '',
+      email: l.email || '',
+      rating: t(`crm.rating.${l.rating}`),
+      status: t(`crm.status.${l.status}`),
+      estimatedValue: l.estimatedValue || 0,
+    }));
+    void exportToExcel(data, cols, `leads_${new Date().toISOString().split('T')[0]}`);
   };
 
   const ratingColor = (rating: Lead['rating']) => {
@@ -197,35 +306,36 @@ export const LeadsPage: React.FC = () => {
               setSelectedLead(row);
               setIsActivityOpen(true);
             }}
-            onEdit={() => openEdit(row)}
+            onEdit={() => {
+              // Can wrapper will handle permission, but we still expose
+              openEdit(row);
+            }}
             onDelete={() => setConfirmDelete(row.id)}
             showPrint={false}
           />
           {row.status !== 'converted' && row.status !== 'lost' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-emerald-600"
-              onClick={() => {
-                setSelectedLead(row);
-                setIsConvertOpen(true);
-              }}
-              title={t('crm.lead.convertToCustomer')}
-              aria-label={t('crm.lead.convertToCustomer')}
-            >
-              <UserCheck size={14} />
-            </Button>
+            <Can action="create" module="crm">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-emerald-600"
+                onClick={() => openConvert(row)}
+                title={t('crm.lead.convertToCustomer')}
+                aria-label={t('crm.lead.convertToCustomer')}
+              >
+                <UserCheck size={14} />
+              </Button>
+            </Can>
           )}
         </div>
       ),
     },
   ];
 
-  const kpis = useMemo(() => ({
-    newCount: leads.filter((l) => l.status === 'new').length,
-    qualified: leads.filter((l) => l.status === 'qualified').length,
-    converted: leads.filter((l) => l.status === 'converted').length,
-  }), [leads]);
+  const kpiTotal = leadKpis?.total ?? total;
+  const kpiNew = leadKpis?.new ?? leads.filter((l) => l.status === 'new').length;
+  const kpiQualified = leadKpis?.qualified ?? leads.filter((l) => l.status === 'qualified').length;
+  const kpiConverted = leadKpis?.converted ?? leads.filter((l) => l.status === 'converted').length;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -254,10 +364,10 @@ export const LeadsPage: React.FC = () => {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: t('crm.leadsPage.total'), value: String(total), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
-          { label: t('crm.status.new'), value: String(kpis.newCount), icon: Flame, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
-          { label: t('crm.status.qualified'), value: String(kpis.qualified), icon: ThumbsUp, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('crm.status.converted'), value: String(kpis.converted), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('crm.leadsPage.total'), value: String(kpiTotal), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+          { label: t('crm.status.new'), value: String(kpiNew), icon: Flame, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('crm.status.qualified'), value: String(kpiQualified), icon: ThumbsUp, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('crm.status.converted'), value: String(kpiConverted), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
         ].map((k) => (
           <Card key={k.label} className="p-0 overflow-hidden relative">
             <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
@@ -293,6 +403,9 @@ export const LeadsPage: React.FC = () => {
               <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
             )}
           </div>
+          <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
+            <FileSpreadsheet size={16} className="text-emerald-600" />
+          </Button>
           <span className="text-xs text-slate-500 font-medium tabular-nums mr-auto">{total}</span>
         </div>
         <div className="mt-3 flex items-center gap-2 flex-wrap">
@@ -340,7 +453,7 @@ export const LeadsPage: React.FC = () => {
           <>
             <Table<Lead>
               data={leads}
-              columns={columns}
+              columns={columns as unknown as never}
               keyExtractor={(row) => row.id}
               emptyMessage={t('crm.lead.empty')}
             />
@@ -404,7 +517,10 @@ export const LeadsPage: React.FC = () => {
               </select>
             </div>
           </div>
-          <Input label={t('crm.form.assignedTo')} value={formData.assignedTo} onChange={(e) => setFormData((prev) => ({ ...prev, assignedTo: e.target.value }))} />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('crm.form.assignedTo')}</label>
+            <UserSelect companyId={companyId} value={formData.assignedTo || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, assignedTo: String(v || '') }))} />
+          </div>
           <Input label={t('crm.form.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} />
         </div>
       </Modal>
@@ -452,14 +568,36 @@ export const LeadsPage: React.FC = () => {
       </Modal>
 
       {/* Convert Modal */}
-      <ConfirmDialog
+      <Modal
         isOpen={isConvertOpen}
         onClose={() => setIsConvertOpen(false)}
-        onConfirm={handleConvert}
         title={t('crm.lead.convertTitle')}
-        message={t('crm.lead.convertMessage')}
-        variant="info"
-      />
+        size="md"
+        footer={
+          <div className="flex items-center gap-2 justify-end w-full">
+            <Button variant="secondary" onClick={() => setIsConvertOpen(false)}>{t('settings.common.cancel')}</Button>
+            <Button variant="primary" onClick={handleConvert}>{t('crm.lead.convertToCustomer')}</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">{t('crm.lead.convertMessage')}</p>
+          <Input label={t('sales.customer.address')} value={convertForm.address} onChange={(e) => setConvertForm((p) => ({ ...p, address: e.target.value }))} placeholder={t('sales.customer.address')} />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label={t('sales.customer.taxNumber')} value={convertForm.taxNumber} onChange={(e) => setConvertForm((p) => ({ ...p, taxNumber: e.target.value }))} />
+            <Input label={t('sales.customer.creditLimit')} type="number" value={convertForm.creditLimit} onChange={(e) => setConvertForm((p) => ({ ...p, creditLimit: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Input label={t('sales.customer.phone')} value={convertForm.phone} onChange={(e) => setConvertForm((p) => ({ ...p, phone: e.target.value }))} />
+            <Input label={t('sales.customer.email')} type="email" value={convertForm.email} onChange={(e) => setConvertForm((p) => ({ ...p, email: e.target.value }))} />
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={convertForm.createOpportunity} onChange={(e) => setConvertForm((p) => ({ ...p, createOpportunity: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">إنشاء فرصة أولى</span>
+          </label>
+          <p className="text-xs text-slate-500">عند التفعيل سيتم إنشاء فرصة باسم &quot;فرصة {selectedLead?.name}&quot; بنفس القيمة التقديرية.</p>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         isOpen={!!confirmDelete}
@@ -468,6 +606,21 @@ export const LeadsPage: React.FC = () => {
         title={t('crm.lead.deleteTitle')}
         message={t('crm.lead.deleteMessage')}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('crm.lead.name')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editing}
       />
     </div>
   );

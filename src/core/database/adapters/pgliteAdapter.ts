@@ -109,6 +109,7 @@ import crmAuditColumns from '@root/drizzle/0011_crm_audit_columns.sql?raw';
 import defaultAccountsExpansion from '@root/drizzle/0012_default_accounts_expansion.sql?raw';
 import openingBalanceDates from '@root/drizzle/0013_opening_balance_dates.sql?raw'
 import hrProfessional from '@root/drizzle/0014_hr_professional.sql?raw';
+import crmProfessional from '@root/drizzle/0015_crm_professional.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -126,6 +127,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0012_default_accounts_expansion', sql: defaultAccountsExpansion },
   { name: '0013_opening_balance_dates', sql: openingBalanceDates },
   { name: '0014_hr_professional', sql: hrProfessional },
+  { name: '0015_crm_professional', sql: crmProfessional },
 ];
 
 /**
@@ -1326,7 +1328,6 @@ export const pgliteAdapter: DbAdapter = {
         'default_accounts',
         'cost_centers',
         'cash_boxes',
-        'banks',
         'payroll_lines',
         'payroll_runs',
         'payroll_components',
@@ -1334,7 +1335,6 @@ export const pgliteAdapter: DbAdapter = {
         'departments',
         'leads',
         'opportunities',
-        'crm_activities',
         'tasks',
         'activities',
         'receipt_vouchers',

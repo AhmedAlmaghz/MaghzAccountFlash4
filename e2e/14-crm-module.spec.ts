@@ -47,7 +47,9 @@ test.describe('Leads', () => {
 
     const uniqueName = `اختبار e2e ${Date.now()}`;
     await modalPanel.getByLabel(/الاسم|Name/i).first().fill(uniqueName);
-    await modalPanel.getByLabel(/الهاتف|Phone/i).first().fill('+967999000000');
+    // Unique phone too — the API duplicate guard blocks exact name/phone matches
+    // across runs (Phase A5), so a fixed phone would be rejected on re-runs.
+    await modalPanel.getByLabel(/الهاتف|Phone/i).first().fill(`+9679${String(Date.now()).slice(-8)}`);
 
     const saveBtn = page.getByRole('button', { name: /حفظ|Save/i });
     await expect(saveBtn).toBeEnabled({ timeout: 5_000 });

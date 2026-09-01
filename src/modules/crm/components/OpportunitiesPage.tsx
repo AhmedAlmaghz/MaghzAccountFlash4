@@ -1,16 +1,24 @@
-import React, { useState, useMemo } from 'react';
-import { Plus, TrendingUp, MoveHorizontal, Search, Layers, Handshake, Trash2 } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { Plus, TrendingUp, MoveHorizontal, Search, Layers, Handshake, Trash2, Lock, FileSpreadsheet } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates } from '@/core/utils/duplicateDetection';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
-import { useOpportunitiesPaginated } from '../hooks/useCrm';
+import { useOpportunitiesPaginated, useOpportunityKpis } from '../hooks/useCrm';
 import type { Opportunity } from '../types';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { crmApi } from '../api';
+import { exportToExcel } from '@/core/utils/exportEngine';
+import { UserSelect } from '@/core/ui/components/smart/fields/UserSelect';
+import { LeadSelect } from '@/core/ui/components/smart/fields/LeadSelect';
+import { CustomerSelect } from '@/core/ui/components/smart/fields/CustomerSelect';
+import { isValidStageTransition, stageTransitionError } from '../types';
 
 const STAGES: Opportunity['stage'][] = ['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
 
@@ -37,7 +45,7 @@ export const OpportunitiesPage: React.FC = () => {
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
   const companyId = activeCompany?.id || '';
-  const { formatCurrency } = useFormatters(companyId);
+  const { formatCurrency, formatDate } = useFormatters(companyId);
   const [stageFilter, setStageFilter] = useState<string>('');
   const [search, setSearch] = useState<string>('');
   const opportunityFilters = useMemo(
@@ -48,6 +56,7 @@ export const OpportunitiesPage: React.FC = () => {
     [stageFilter, search]
   );
   const { opportunities, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useOpportunitiesPaginated(companyId, opportunityFilters);
+  const { kpis: oppKpis } = useOpportunityKpis(companyId);
 
   const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'funnel'>('kanban');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -55,10 +64,16 @@ export const OpportunitiesPage: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
 
-  const [formData, setFormData] = useState({ name: '', value: '', stage: 'new' as Opportunity['stage'], probability: '50', expectedCloseDate: '', assignedTo: '', notes: '' });
+  const [formData, setFormData] = useState({ name: '', value: '', stage: 'new' as Opportunity['stage'], probability: '50', expectedCloseDate: '', assignedTo: '', leadId: '', customerId: '', notes: '' });
+
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
 
   const resetForm = () => {
-    setFormData({ name: '', value: '', stage: 'new', probability: '50', expectedCloseDate: '', assignedTo: '', notes: '' });
+    setFormData({ name: '', value: '', stage: 'new', probability: '50', expectedCloseDate: '', assignedTo: '', leadId: '', customerId: '', notes: '' });
     setEditing(null);
   };
 
@@ -72,6 +87,8 @@ export const OpportunitiesPage: React.FC = () => {
       probability: String(opp.probability ?? 50),
       expectedCloseDate: opp.expectedCloseDate || '',
       assignedTo: opp.assignedTo || '',
+      leadId: opp.leadId || '',
+      customerId: opp.customerId || '',
       notes: opp.notes || '',
     });
     setIsModalOpen(true);
@@ -82,6 +99,35 @@ export const OpportunitiesPage: React.FC = () => {
       addToast('error', t('crm.opportunity.name') + ' ' + t('error'));
       return;
     }
+    const inputName = formData.name.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await crmApi.getOpportunities(companyId);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as Opportunity[], (o) => o.name, {
+            excludeId: editing?.id,
+            getId: (o) => o.id,
+          });
+          if (result.exactMatch) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact({ name: result.exactMatch.matchedName });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    duplicateConfirmedRef.current = false;
     const payload = {
       companyId,
       name: formData.name,
@@ -90,6 +136,8 @@ export const OpportunitiesPage: React.FC = () => {
       probability: Number(formData.probability) || 0,
       expectedCloseDate: formData.expectedCloseDate || undefined,
       assignedTo: formData.assignedTo || undefined,
+      leadId: formData.leadId || undefined,
+      customerId: formData.customerId || undefined,
       notes: formData.notes || undefined,
     };
     const res = editing ? await update(editing.id, payload) : await create(payload);
@@ -119,6 +167,11 @@ export const OpportunitiesPage: React.FC = () => {
     if (!draggedId) return;
     const opp = opportunities.find((o) => o.id === draggedId);
     if (opp && opp.stage !== stage) {
+      if (!isValidStageTransition(opp.stage, stage)) {
+        addToast('error', stageTransitionError(opp.stage, stage));
+        setDraggedId(null);
+        return;
+      }
       const res = await update(draggedId, { stage });
       if (res?.success) {
         addToast('success', t('crm.opportunity.updated'));
@@ -129,8 +182,29 @@ export const OpportunitiesPage: React.FC = () => {
     setDraggedId(null);
   };
 
-  const totalValue = useMemo(() => opportunities.reduce((sum, o) => sum + (o.value || 0), 0), [opportunities]);
-  const weightedValue = useMemo(() => opportunities.reduce((sum, o) => sum + (o.value || 0) * ((o.probability || 0) / 100), 0), [opportunities]);
+  const handleExport = () => {
+    const cols = [
+      { key: 'name', header: t('crm.opportunity.name') },
+      { key: 'value', header: t('crm.opportunity.value') },
+      { key: 'stage', header: t('crm.opportunity.stage') },
+      { key: 'probability', header: t('crm.opportunity.probability') },
+      { key: 'expectedCloseDate', header: t('crm.opportunity.expectedCloseDate') },
+      { key: 'assignedName', header: t('crm.opportunity.assignedTo') },
+    ];
+    const data = opportunities.map((o) => ({
+      name: o.name,
+      value: o.value,
+      stage: t(STAGE_KEYS[o.stage] || o.stage),
+      probability: `${o.probability || 0}%`,
+      expectedCloseDate: o.expectedCloseDate || '',
+      assignedName: (o as unknown as { assignedName?: string }).assignedName || o.assignedTo || '',
+    }));
+    void exportToExcel(data, cols, `opportunities_${new Date().toISOString().split('T')[0]}`);
+  };
+
+  const totalValue = oppKpis?.pipelineValue ?? opportunities.reduce((sum, o) => sum + (o.value || 0), 0);
+  const weightedValue = oppKpis?.weightedValue ?? opportunities.reduce((sum, o) => sum + (o.value || 0) * ((o.probability || 0) / 100), 0);
+  const displayedCount = oppKpis?.total ?? opportunities.length;
 
   const funnelData = useMemo(() => {
     return STAGES.map((stage) => {
@@ -144,15 +218,19 @@ export const OpportunitiesPage: React.FC = () => {
     { key: 'value', header: t('crm.opportunity.value'), align: 'right' as const, render: (row: Opportunity) => formatCurrency(row.value) },
     { key: 'stage', header: t('crm.opportunity.stage'), render: (row: Opportunity) => <StatusBadge status={row.stage} /> },
     { key: 'probability', header: t('crm.opportunity.probability'), render: (row: Opportunity) => `${row.probability || 0}%` },
-    { key: 'expectedCloseDate', header: t('crm.opportunity.expectedCloseDate'), width: '160px' },
+    { key: 'expectedCloseDate', header: t('crm.opportunity.expectedCloseDate'), width: '160px', render: (row: Opportunity) => row.expectedCloseDate ? formatDate(row.expectedCloseDate) : '—' },
     {
       key: 'actions',
       header: '',
-      width: '120px',
+      width: '160px',
       render: (row: Opportunity) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => openEdit(row)}>{t('settings.common.edit')}</Button>
-          <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)}>{t('settings.common.delete')}</Button>
+          <Can action="edit" module="crm">
+            <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => openEdit(row)}>{t('settings.common.edit')}</Button>
+          </Can>
+          <Can action="delete" module="crm">
+            <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)}>{t('settings.common.delete')}</Button>
+          </Can>
         </div>
       ),
     },
@@ -183,7 +261,7 @@ export const OpportunitiesPage: React.FC = () => {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {[
-          { label: t('crm.opportunity.displayed'), value: String(opportunities.length), icon: Layers, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
+          { label: t('crm.opportunity.displayed'), value: String(displayedCount), icon: Layers, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
           { label: t('crm.opportunity.totalValue'), value: formatCurrency(totalValue), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
           { label: t('crm.opportunity.weightedValue'), value: formatCurrency(Math.round(weightedValue)), icon: TrendingUp, color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-gradient-to-br from-fuchsia-50 to-fuchsia-100 dark:from-fuchsia-900/10 dark:to-fuchsia-800/5' },
         ].map((k) => (
@@ -226,6 +304,9 @@ export const OpportunitiesPage: React.FC = () => {
               <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
             )}
           </div>
+          <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
+            <FileSpreadsheet size={16} className="text-emerald-600" />
+          </Button>
           <span className="text-xs text-slate-500 font-medium tabular-nums mr-auto">{total}</span>
         </div>
         <div className="mt-3 flex items-center gap-2 flex-wrap">
@@ -260,15 +341,20 @@ export const OpportunitiesPage: React.FC = () => {
         </Card>
       ) : viewMode === 'kanban' ? (
         <div className="flex gap-4 overflow-x-auto pb-4">
-          {STAGES.map((stage) => (
+          {STAGES.map((stage) => {
+            const isFinal = stage === 'won' || stage === 'lost';
+            return (
             <div
               key={stage}
-              className={`min-w-[260px] max-w-[320px] flex-1 rounded-lg border border-slate-200 dark:border-slate-700 ${STAGE_COLORS[stage]}`}
+              className={`min-w-[260px] max-w-[320px] flex-1 rounded-lg border ${isFinal ? 'border-slate-300 dark:border-slate-600 ring-1 ring-slate-200 dark:ring-slate-700' : 'border-slate-200 dark:border-slate-700'} ${STAGE_COLORS[stage]}`}
               onDragOver={onDragOver}
               onDrop={() => onDrop(stage)}
             >
               <div className="p-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                <span className="font-semibold text-sm">{t(STAGE_KEYS[stage])}</span>
+                <span className="font-semibold text-sm flex items-center gap-1.5">
+                  {isFinal && <Lock size={12} className={stage === 'won' ? 'text-emerald-600' : 'text-rose-600'} />}
+                  {t(STAGE_KEYS[stage])}
+                </span>
                 <span className="text-xs bg-white dark:bg-slate-800 px-2 py-0.5 rounded-full">{opportunities.filter((o) => o.stage === stage).length}</span>
               </div>
               <div className="p-3 space-y-3">
@@ -280,15 +366,28 @@ export const OpportunitiesPage: React.FC = () => {
                     className="bg-white dark:bg-slate-900 rounded-md p-3 shadow-sm border border-slate-200 dark:border-slate-700 cursor-move hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <p className="font-medium text-sm">{opp.name}</p>
+                      <p className="font-medium text-sm flex items-center gap-1">
+                        {opp.name}
+                        {(opp.stage === 'won' || opp.stage === 'lost') && <Lock size={10} className="text-slate-400" />}
+                      </p>
                       <p className="text-xs text-slate-500">{opp.probability || 0}%</p>
                     </div>
                     <p className="text-primary-600 font-bold text-sm mb-2">{formatCurrency(opp.value)}</p>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-slate-400">{opp.expectedCloseDate || '—'}</span>
+                      <span className="text-xs text-slate-400">
+                        {opp.closeDate ? (
+                          <span className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">
+                            <Lock size={10} /> {formatDate(opp.closeDate)}
+                          </span>
+                        ) : opp.expectedCloseDate ? formatDate(opp.expectedCloseDate) : '—'}
+                      </span>
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="sm" className="text-amber-600 p-1" onClick={() => openEdit(opp)} title={t('settings.common.edit')} aria-label={t('settings.common.edit')}><MoveHorizontal size={12} /></Button>
-                        <Button variant="ghost" size="sm" className="text-rose-600 p-1" onClick={() => setConfirmDelete(opp.id)} title={t('settings.common.delete')} aria-label={t('settings.common.delete')}><Trash2 size={12} /></Button>
+                        <Can action="edit" module="crm">
+                          <Button variant="ghost" size="sm" className="text-amber-600 p-1" onClick={() => openEdit(opp)} title={t('settings.common.edit')} aria-label={t('settings.common.edit')}><MoveHorizontal size={12} /></Button>
+                        </Can>
+                        <Can action="delete" module="crm">
+                          <Button variant="ghost" size="sm" className="text-rose-600 p-1" onClick={() => setConfirmDelete(opp.id)} title={t('settings.common.delete')} aria-label={t('settings.common.delete')}><Trash2 size={12} /></Button>
+                        </Can>
                       </div>
                     </div>
                   </div>
@@ -298,13 +397,14 @@ export const OpportunitiesPage: React.FC = () => {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : viewMode === 'list' ? (
         <Card>
           <Table<Opportunity>
             data={opportunities}
-            columns={listColumns}
+            columns={listColumns as unknown as never}
             keyExtractor={(row) => row.id}
             emptyMessage={t('crm.opportunity.empty')}
           />
@@ -367,7 +467,20 @@ export const OpportunitiesPage: React.FC = () => {
             <Input label={t('crm.opportunity.probability')} type="number" min={0} max={100} value={formData.probability} onChange={(e) => setFormData((prev) => ({ ...prev, probability: e.target.value }))} />
             <Input label={t('crm.opportunity.expectedCloseDate')} type="date" value={formData.expectedCloseDate} onChange={(e) => setFormData((prev) => ({ ...prev, expectedCloseDate: e.target.value }))} />
           </div>
-          <Input label={t('crm.opportunity.assignedTo')} value={formData.assignedTo} onChange={(e) => setFormData((prev) => ({ ...prev, assignedTo: e.target.value }))} />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('crm.opportunity.assignedTo')}</label>
+              <UserSelect companyId={companyId} value={formData.assignedTo || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, assignedTo: String(v || '') }))} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل المحتمل</label>
+              <LeadSelect companyId={companyId} value={formData.leadId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, leadId: String(v || '') }))} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل</label>
+            <CustomerSelect companyId={companyId} value={formData.customerId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, customerId: String(v || '') }))} />
+          </div>
           <Input label={t('crm.form.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} />
         </div>
       </Modal>
@@ -379,6 +492,21 @@ export const OpportunitiesPage: React.FC = () => {
         title={t('crm.opportunity.deleteTitle')}
         message={t('crm.opportunity.deleteMessage')}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('crm.opportunity.name')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editing}
       />
     </div>
   );

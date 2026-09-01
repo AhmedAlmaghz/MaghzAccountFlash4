@@ -372,7 +372,7 @@ const SQL_MODULE_TABLE_RULES = [
   { module: 'sales', tables: ['sales_invoices', 'sales_invoice_lines', 'sales_returns', 'sales_return_lines', 'quotations', 'quotation_lines', 'customers'] },
   { module: 'purchases', tables: ['purchase_invoices', 'purchase_invoice_lines', 'purchase_orders', 'purchase_order_lines', 'purchase_returns', 'purchase_return_lines', 'suppliers'] },
   { module: 'hr', tables: ['employees', 'payroll_runs', 'payroll_lines', 'payroll_components', 'departments', 'attendance', 'leaves', 'end_of_service'] },
-  { module: 'crm', tables: ['leads', 'opportunities', 'tasks', 'activities', 'crm_activities', 'calls'] },
+  { module: 'crm', tables: ['leads', 'opportunities', 'tasks', 'activities'] },
   { module: 'manufacturing', tables: ['boms', 'bom_lines', 'work_orders', 'work_order_consumptions'] },
   { module: 'ai', tables: ['ai_chat_sessions', 'ai_chat_messages'] },
 ];
@@ -662,7 +662,7 @@ export function registerDatabaseHandlers() {
   // TypeScript) and the main process composes the SQL — so SQL strings
   // never travel the wire. All existing module/table authorization,
   // cross-company checks, and SQL-pattern guards apply automatically.
-  const registerRpc = (name, { compose, paramCount, validate }) => {
+  const registerRpc = (name, { compose, paramCount, validate, mapResult }) => {
     ipcMain.handle(`db:rpc:${name}`, async (event, payload = {}) => {
       const session = getSession(event.sender.id, payload.sessionToken);
       if (!session) return { success: false, error: 'Authentication required' };
@@ -683,7 +683,10 @@ export function registerDatabaseHandlers() {
         if (!isSqlAllowed(sql)) return { success: false, error: 'SQL operation not permitted' };
         assertSqlAuthorized(session, sql, params);
         const result = await execQueryWithSelfHeal(pool, sql, params);
-        return { success: true, rows: result.rows, rowCount: result.rowCount };
+        // mapResult: post-process the rows for business-rule failures that
+        // SQL alone can't express as errors (e.g. delete-guard references).
+        const rows = mapResult ? mapResult(result.rows) : result.rows;
+        return { success: true, rows, rowCount: result.rowCount };
       } catch (err) {
         return { success: false, error: err.message };
       }
@@ -1266,45 +1269,85 @@ export function registerDatabaseHandlers() {
     },
   });
 
-  // crm.deleteLead
+  // crm.deleteLead — protected: rejects when the lead still has opportunities,
+  // tasks or activities referencing it (accidental history loss guard).
   registerRpc('crm.deleteLead', {
     paramCount: 2,
     compose: (p, session) => ({
-      sql: 'DELETE FROM leads WHERE id = $1::uuid AND company_id = $2::uuid',
+      sql: `WITH refs AS (
+              SELECT
+                (SELECT COUNT(*)::int FROM opportunities WHERE lead_id = $1::uuid AND company_id = $2::uuid) AS opps,
+                (SELECT COUNT(*)::int FROM tasks WHERE lead_id = $1::uuid AND company_id = $2::uuid) AS tasks,
+                (SELECT COUNT(*)::int FROM activities WHERE lead_id = $1::uuid AND company_id = $2::uuid) AS acts
+            ),
+            del AS (
+              DELETE FROM leads
+               WHERE id = $1::uuid AND company_id = $2::uuid
+                 AND (SELECT opps FROM refs) = 0
+                 AND (SELECT tasks FROM refs) = 0
+                 AND (SELECT acts FROM refs) = 0
+              RETURNING id
+            )
+            SELECT (SELECT opps FROM refs) AS opps,
+                   (SELECT tasks FROM refs) AS tasks,
+                   (SELECT acts FROM refs) AS acts,
+                   (SELECT COUNT(*)::int FROM del) AS deleted`,
       params: [String(p.id), session.user.companyId],
     }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) {
+        throw new Error(
+          `لا يمكن حذف العميل المحتمل: لديه ${r.opps} فرصة و ${r.tasks} مهمة و ${r.acts} نشاط مرتبطة. احذف المراجع أولاً.`
+        );
+      }
+      return rows;
+    },
   });
 
-  // crm.convertLeadToCustomer — single atomic CTE. The renderer passes the
-  // lead's contact fields (name/phone/email) it already loaded from the
-  // getLeadById response. The CTE INSERTs a customer referencing them,
-  // then UPDATEs the lead status to 'converted'. Both writes succeed or
-  // neither does.
+  // crm.convertLeadToCustomer — single atomic CTE. The renderer generates the
+  // customer code via document_sequences (unified mechanism across UI/AI)
+  // and passes the lead's contact fields it already loaded from getLeadById.
+  // The CTE INSERTs a customer referencing them, then UPDATEs the lead status
+  // to 'converted', and (optionally) creates a first opportunity — all or
+  // nothing.
   registerRpc('crm.convertLeadToCustomer', {
-    paramCount: 10,
+    paramCount: 12,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
       if (!p.name) throw new Error('name required');
     },
     compose: (p, session) => ({
       sql: `WITH lead_check AS (
-              SELECT id FROM leads WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1
+              SELECT id, name, phone, email, estimated_value, assigned_to
+                FROM leads
+               WHERE id = $1::uuid AND company_id = $2::uuid AND status <> 'converted'
+               LIMIT 1
             ),
             new_customer AS (
               INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, credit_limit, balance, is_active, created_by, updated_by)
-              SELECT $2::uuid,
-                     COALESCE($3, 'CUST-' || LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING(code FROM '^CUST-([0-9]+)$') AS integer)), 0) + 1 FROM customers WHERE company_id = $2::uuid AND code ~ '^CUST-[0-9]+$')::text, 4, '0')),
-                     $4, $5, $6, $7, $8, $9, 0, true, $10::uuid, $10::uuid
+              SELECT $2::uuid, $3, $4, $5, $6, $7, $8, $9, 0, true, $12::uuid, $12::uuid
                 FROM lead_check
               RETURNING id
             ),
             updated_lead AS (
-              UPDATE leads SET status = 'converted', updated_by = $10::uuid, updated_at = NOW()
+              UPDATE leads SET status = 'converted', updated_by = $12::uuid, updated_at = NOW()
                WHERE id = $1::uuid AND company_id = $2::uuid
                  AND EXISTS (SELECT 1 FROM lead_check)
               RETURNING id
+            ),
+            new_opportunity AS (
+              INSERT INTO opportunities (company_id, lead_id, customer_id, name, value, stage, probability, assigned_to, created_at, created_by, updated_by)
+              SELECT $2::uuid, $1::uuid, nc.id,
+                     'فرصة ' || lc.name,
+                     COALESCE(lc.estimated_value, 0),
+                     'new', 50, lc.assigned_to, NOW(), $12::uuid, $12::uuid
+                FROM lead_check lc CROSS JOIN new_customer nc
+               WHERE $11::boolean
+              RETURNING id
             )
-            SELECT id FROM new_customer`,
+            SELECT nc.id, (SELECT id FROM new_opportunity) AS opportunity_id
+              FROM new_customer nc, updated_lead`,
       params: [
         String(p.id),
         session.user.companyId,
@@ -1315,12 +1358,26 @@ export function registerDatabaseHandlers() {
         p.address || null,
         p.taxNumber || null,
         p.creditLimit != null ? Number(p.creditLimit) : 0,
+        null,
+        p.createOpportunity === true,
         session.user.id,
       ],
     }),
   });
 
   // ── Opportunities ──
+
+  // crm.getOpportunityById — used by the stage-machine guard + AI tools.
+  registerRpc('crm.getOpportunityById', {
+    paramCount: 2,
+    compose: (p, session) => ({
+      sql: `SELECT o.*, u.full_name as assigned_name
+              FROM opportunities o LEFT JOIN users u ON o.assigned_to = u.id
+             WHERE o.id = $1::uuid AND o.company_id = $2::uuid
+             LIMIT 1`,
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
 
   // crm.getOpportunities
   registerRpc('crm.getOpportunities', {
@@ -1382,7 +1439,12 @@ export function registerDatabaseHandlers() {
     }),
   });
 
-  // crm.updateOpportunity — dynamic SET
+  // crm.updateOpportunity — dynamic SET. The stage-machine legality check
+  // happens in the renderer API layer (crm/api.ts) via getOpportunityById
+  // BEFORE the RPC call — same rule for UI and AI. The SQL below only
+  // implements the mechanical side-effects: reaching won/lost stamps
+  // close_date + probability (100/0). Defense-in-depth: terminal stages
+  // can never move (the CASE keeps the old stage when the request tries).
   registerRpc('crm.updateOpportunity', {
     paramCount: null,
     validate: (p) => { if (!p.id) throw new Error('id required'); },
@@ -1392,18 +1454,44 @@ export function registerDatabaseHandlers() {
       let idx = 1;
       if (p.name !== undefined) { fields.push(`name = $${idx++}`); values.push(p.name); }
       if (p.value !== undefined) { fields.push(`value = $${idx++}`); values.push(Number(p.value)); }
-      if (p.stage !== undefined) { fields.push(`stage = $${idx++}`); values.push(p.stage); }
-      if (p.probability !== undefined) { fields.push(`probability = $${idx++}`); values.push(p.probability != null ? Number(p.probability) : null); }
+      if (p.stage !== undefined) {
+        const stageIdx = idx++;
+        fields.push(`stage = CASE
+            WHEN o.stage IN ('won', 'lost') THEN o.stage
+            WHEN $${stageIdx}::text = 'won' OR $${stageIdx}::text = 'lost' THEN $${stageIdx}::text
+            ELSE $${stageIdx}::text
+          END`);
+        values.push(String(p.stage));
+        fields.push(`close_date = CASE
+            WHEN o.stage IN ('won', 'lost') THEN o.close_date
+            WHEN $${stageIdx}::text IN ('won', 'lost') THEN CURRENT_DATE
+            ELSE o.close_date
+          END`);
+        fields.push(`probability = CASE
+            WHEN o.stage IN ('won', 'lost') THEN o.probability
+            WHEN $${stageIdx}::text = 'won' THEN 100
+            WHEN $${stageIdx}::text = 'lost' THEN 0
+            WHEN o.stage = $${stageIdx}::text AND $${idx}::int IS NOT NULL THEN $${idx}::int
+            WHEN o.stage = $${stageIdx}::text THEN o.probability
+            ELSE $${idx}::int
+          END`);
+        values.push(p.probability != null ? Number(p.probability) : null);
+      } else if (p.probability !== undefined) {
+        fields.push(`probability = $${idx++}::int`);
+        values.push(p.probability != null ? Number(p.probability) : null);
+      }
       if (p.expectedCloseDate !== undefined) { fields.push(`expected_close_date = $${idx++}`); values.push(p.expectedCloseDate || null); }
       if (p.leadId !== undefined) { fields.push(`lead_id = $${idx++}`); values.push(UUID_FILTER(p.leadId)); }
       if (p.customerId !== undefined) { fields.push(`customer_id = $${idx++}`); values.push(UUID_FILTER(p.customerId)); }
       if (p.assignedTo !== undefined) { fields.push(`assigned_to = $${idx++}`); values.push(UUID_FILTER(p.assignedTo)); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes || null); }
-      fields.push(`updated_by = $${idx++}`); values.push(session.user.id);
+      fields.push(`updated_by = $${idx++}::uuid`); values.push(session.user.id);
       fields.push(`updated_at = NOW()`);
       const whereIdx = idx; values.push(String(p.id));
       const cidIdx = idx + 1; values.push(session.user.companyId);
-      const sql = `UPDATE opportunities SET ${fields.join(', ')} WHERE id = $${whereIdx}::uuid AND company_id = $${cidIdx}::uuid`;
+      const sql = `UPDATE opportunities o SET ${fields.join(', ')}
+                     WHERE o.id = $${whereIdx}::uuid AND o.company_id = $${cidIdx}::uuid
+                RETURNING o.stage, o.close_date`;
       return { sql, params: values };
     },
   });
@@ -1552,7 +1640,7 @@ export function registerDatabaseHandlers() {
     },
   });
 
-  // crm.createActivity — 12 cols
+  // crm.createActivity — CTE: INSERT activity + atomically stamp lead last_contacted_at
   registerRpc('crm.createActivity', {
     paramCount: 11,
     validate: (p) => {
@@ -1560,9 +1648,17 @@ export function registerDatabaseHandlers() {
       if (!p.subject) throw new Error('subject required');
     },
     compose: (p, session) => ({
-      sql: `INSERT INTO activities (company_id, lead_id, opportunity_id, customer_id, type, subject, description, activity_date, duration_minutes, assigned_to, created_at, created_by, updated_by)
-            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8::date, $9, $10::uuid, NOW(), $11::uuid, $11::uuid)
-            RETURNING id`,
+      sql: `WITH new_activity AS (
+              INSERT INTO activities (company_id, lead_id, opportunity_id, customer_id, type, subject, description, activity_date, duration_minutes, assigned_to, created_at, created_by, updated_by)
+              VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10::uuid, NOW(), $11::uuid, $11::uuid)
+              RETURNING id
+            ),
+            touched_lead AS (
+              UPDATE leads SET last_contacted_at = $8, updated_at = NOW()
+               WHERE id = $2::uuid AND company_id = $1::uuid
+              RETURNING id
+            )
+            SELECT id FROM new_activity`,
       params: [
         session.user.companyId,
         UUID_FILTER(p.leadId),

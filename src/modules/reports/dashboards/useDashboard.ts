@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { getDbAdapter } from '@/core/database/adapters';
 import type { DbAdapter } from '@/core/database/adapters/types';
 import { aggregateCustomerAging, parseOutstandingRows, type CustomerAging } from '@/core/utils/aging';
+import { crmApi } from '@/modules/crm/api';
 
 export type PeriodFilter = 'today' | 'week' | 'month' | 'year' | 'custom';
 
@@ -218,53 +219,25 @@ async function fetchDashboardData(adapter: DbAdapter, companyId: string, range: 
   const overdueInvoicesCount = toNum(overdueResult.rows?.[0]?.cnt);
   const lowStockCount = toNum(lowStockResult.rows?.[0]?.cnt);
 
-  // CRM KPIs
-  const crmLeadsResult = await adapter.query<{ cnt: string | number }>(
-    `SELECT COUNT(*)::int AS cnt FROM leads WHERE company_id = $1`, [companyId]
-  );
-  const crmOppsResult = await adapter.query<{ total_value: string | number; cnt: string | number }>(
-    `SELECT COALESCE(SUM(COALESCE(value, 0)), 0) AS total_value,
-            COUNT(*)::int AS cnt
-       FROM opportunities
-      WHERE company_id = $1 AND stage NOT IN ('won', 'lost')`, [companyId]
-  );
-  const crmLeadsCount = toNum(crmLeadsResult.rows?.[0]?.cnt);
-  const crmOpportunitiesCount = toNum(crmOppsResult.rows?.[0]?.cnt);
-  const crmPipelineValue = toNum(crmOppsResult.rows?.[0]?.total_value);
+  // CRM KPIs — single source of truth via crmApi (Phase A6: unified API)
+  const crmDashRes = await crmApi.getCrmDashboardKpis(companyId);
+  const crmDash = (crmDashRes.success && crmDashRes.data) ? (crmDashRes.data as Record<string, unknown>) : {};
+  const crmLeadsCount = toNum(crmDash.leads_total);
+  const crmOpportunitiesCount = toNum(crmDash.open_opportunities);
+  const crmPipelineValue = toNum(crmDash.pipeline_value);
   const crmConversionRate = crmLeadsCount > 0 ? Math.round((crmOpportunitiesCount / crmLeadsCount) * 100) : 0;
+  const crmWonDealsCount = toNum(crmDash.won_count);
+  const crmLostDealsCount = toNum(crmDash.lost_count);
+  const crmAvgDealValue = toNum(crmDash.avg_won_value);
 
-  const [crmWonResult, crmLostResult, crmAvgResult] = await Promise.all([
-    adapter.query<{ cnt: string | number }>(
-      `SELECT COUNT(*)::int AS cnt FROM opportunities WHERE company_id = $1 AND stage = 'won'`, [companyId]
-    ),
-    adapter.query<{ cnt: string | number }>(
-      `SELECT COUNT(*)::int AS cnt FROM opportunities WHERE company_id = $1 AND stage = 'lost'`, [companyId]
-    ),
-    adapter.query<{ avg: string | number }>(
-      `SELECT COALESCE(AVG(value), 0) AS avg FROM opportunities WHERE company_id = $1 AND stage = 'won'`, [companyId]
-    ),
-  ]);
-  const crmWonDealsCount = toNum(crmWonResult.rows?.[0]?.cnt);
-  const crmLostDealsCount = toNum(crmLostResult.rows?.[0]?.cnt);
-  const crmAvgDealValue = toNum(crmAvgResult.rows?.[0]?.avg);
-
-  const stageResult = await adapter.query<{ stage: string; value: string | number; cnt: string | number }>(
-    `SELECT stage, COALESCE(SUM(value), 0) AS value, COUNT(*)::int AS cnt
-       FROM opportunities
-      WHERE company_id = $1
-      GROUP BY stage
-      ORDER BY MIN(CASE stage
-        WHEN 'new' THEN 1 WHEN 'qualified' THEN 2
-        WHEN 'proposal' THEN 3 WHEN 'negotiation' THEN 4
-        WHEN 'won' THEN 5 WHEN 'lost' THEN 6 ELSE 7
-      END)`,
-    [companyId],
-  );
-  const pipelineByStage: DashboardData['pipelineByStage'] = (stageResult.rows || []).map((r) => ({
-    stage: String(r.stage),
-    value: toNum(r.value),
-    count: toNum(r.cnt),
-  }));
+  const stageBreakdownRes = await crmApi.getOpportunityStageBreakdown(companyId);
+  const pipelineByStage: DashboardData['pipelineByStage'] = (stageBreakdownRes.success && stageBreakdownRes.data
+    ? (stageBreakdownRes.data as Record<string, unknown>[]).map((r) => ({
+        stage: String(r.stage),
+        value: toNum(r.value),
+        count: toNum(r.cnt),
+      }))
+    : []);
 
   // 3. Monthly revenue (only when period spans >60 days, otherwise daily)
   const showMonthly = days > 60;

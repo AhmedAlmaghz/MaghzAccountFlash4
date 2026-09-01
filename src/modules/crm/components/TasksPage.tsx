@@ -1,16 +1,23 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Plus, User, AlertTriangle, Search, Calendar, FileText, Layers, Clock3, CheckCircle2 } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
+import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
+import { detectDuplicates } from '@/core/utils/duplicateDetection';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
-import { useTasksPaginated, type TaskFilters } from '../hooks/useCrm';
+import { useTasksPaginated, useTaskKpis, type TaskFilters } from '../hooks/useCrm';
 import type { Task } from '../types';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { exportToExcel } from '@/core/utils/exportEngine';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { crmApi } from '../api';
+import { UserSelect } from '@/core/ui/components/smart/fields/UserSelect';
+import { OpportunitySelect } from '@/core/ui/components/smart/fields/OpportunitySelect';
+import { LeadSelect } from '@/core/ui/components/smart/fields/LeadSelect';
+import { CustomerSelect } from '@/core/ui/components/smart/fields/CustomerSelect';
 
 export const TasksPage: React.FC = () => {
   const { t } = useTranslation();
@@ -30,6 +37,7 @@ export const TasksPage: React.FC = () => {
     [statusFilter, priorityFilter, search]
   );
   const { tasks, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useTasksPaginated(companyId, taskFilters);
+  const { kpis: taskKpis } = useTaskKpis(companyId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -46,6 +54,12 @@ export const TasksPage: React.FC = () => {
     opportunityId: '',
     customerId: '',
   });
+
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateInputName, setDuplicateInputName] = useState('');
+  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
+  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
+  const duplicateConfirmedRef = useRef(false);
 
   const resetForm = () => {
     setFormData({ title: '', description: '', dueDate: new Date().toISOString().split('T')[0], priority: 'medium', status: 'pending', assignedTo: '', leadId: '', opportunityId: '', customerId: '' });
@@ -74,6 +88,36 @@ export const TasksPage: React.FC = () => {
       addToast('error', t('crm.form.title') + ' ' + t('error'));
       return;
     }
+    const inputName = formData.title.trim();
+    if (!duplicateConfirmedRef.current && inputName) {
+      try {
+        const allRes = await crmApi.getTasks(companyId);
+        if (allRes.success && allRes.data) {
+          const result = detectDuplicates(inputName, allRes.data as Task[], (x) => x.title, {
+            excludeId: editing?.id,
+            getId: (x) => x.id,
+            getCode: (x) => x.dueDate,
+          });
+          if (result.exactMatch) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact({ name: result.exactMatch.matchedName, code: result.exactMatch.matchedCode });
+            setDuplicateNear([]);
+            setDuplicateOpen(true);
+            return;
+          }
+          if (result.nearMatches.length > 0) {
+            setDuplicateInputName(inputName);
+            setDuplicateExact(null);
+            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
+            setDuplicateOpen(true);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    duplicateConfirmedRef.current = false;
     const payload = {
       companyId,
       title: formData.title,
@@ -137,7 +181,7 @@ export const TasksPage: React.FC = () => {
       dueDate: tk.dueDate || '',
       assignedName: tk.assignedName || tk.assignedTo || '-',
     }));
-    exportToExcel(data, cols, `tasks_${new Date().toISOString().split('T')[0]}`);
+    void exportToExcel(data, cols, `tasks_${new Date().toISOString().split('T')[0]}`);
   };
 
   const columns = [
@@ -205,21 +249,23 @@ export const TasksPage: React.FC = () => {
     {
       key: 'actions',
       header: '',
-      width: '110px',
+      width: '140px',
       render: (row: Task) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => openEdit(row)}>{t('settings.common.edit')}</Button>
-          <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)}>{t('settings.common.delete')}</Button>
+          <Can action="edit" module="crm">
+            <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => openEdit(row)}>{t('settings.common.edit')}</Button>
+          </Can>
+          <Can action="delete" module="crm">
+            <Button variant="ghost" size="sm" className="text-rose-600" onClick={() => setConfirmDelete(row.id)}>{t('settings.common.delete')}</Button>
+          </Can>
         </div>
       ),
     },
   ];
 
-  const kpis = useMemo(() => ({
-    pending: tasks.filter((tk) => tk.status === 'pending').length,
-    completed: tasks.filter((tk) => tk.status === 'completed').length,
-    overdue: tasks.filter((tk) => isOverdue(tk)).length,
-  }), [tasks]);
+  const kpiPending = taskKpis?.pending ?? tasks.filter((tk) => tk.status === 'pending').length;
+  const kpiCompleted = taskKpis?.completed ?? tasks.filter((tk) => tk.status === 'completed').length;
+  const kpiOverdue = taskKpis?.overdue ?? tasks.filter((tk) => isOverdue(tk)).length;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -249,9 +295,9 @@ export const TasksPage: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: t('crm.total'), value: String(total), icon: Layers, color: 'from-sky-600 to-sky-700', bg: 'bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-900/10 dark:to-sky-800/5' },
-          { label: t('crm.tasksPage.filter.pending'), value: String(kpis.pending), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('crm.tasksPage.filter.completed'), value: String(kpis.completed), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-          { label: t('crm.task.overdue'), value: String(kpis.overdue), icon: AlertTriangle, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
+          { label: t('crm.tasksPage.filter.pending'), value: String(kpiPending), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
+          { label: t('crm.tasksPage.filter.completed'), value: String(kpiCompleted), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
+          { label: t('crm.task.overdue'), value: String(kpiOverdue), icon: AlertTriangle, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
         ].map((k) => (
           <Card key={k.label} className="p-0 overflow-hidden relative">
             <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
@@ -348,7 +394,7 @@ export const TasksPage: React.FC = () => {
           <>
             <Table<Task>
               data={tasks}
-              columns={columns}
+              columns={columns as unknown as never}
               keyExtractor={(row) => row.id}
               emptyMessage={t('crm.task.empty')}
             />
@@ -401,8 +447,24 @@ export const TasksPage: React.FC = () => {
               </select>
             </div>
           )}
-          <Input label={t('crm.form.assignedTo')} value={formData.assignedTo} onChange={(e) => setFormData((prev) => ({ ...prev, assignedTo: e.target.value }))} />
-          <Input label={t('crm.form.customerOrOpportunity')} value={formData.opportunityId || formData.leadId || formData.customerId} onChange={(e) => setFormData((prev) => ({ ...prev, opportunityId: e.target.value }))} />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('crm.form.assignedTo')}</label>
+            <UserSelect companyId={companyId} value={formData.assignedTo || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, assignedTo: String(v || '') }))} />
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">الفرصة</label>
+              <OpportunitySelect companyId={companyId} value={formData.opportunityId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, opportunityId: String(v || '') }))} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل المحتمل</label>
+              <LeadSelect companyId={companyId} value={formData.leadId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, leadId: String(v || '') }))} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل</label>
+              <CustomerSelect companyId={companyId} value={formData.customerId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, customerId: String(v || '') }))} />
+            </div>
+          </div>
         </div>
       </Modal>
 
@@ -413,6 +475,21 @@ export const TasksPage: React.FC = () => {
         title={t('crm.task.deleteTitle')}
         message={t('crm.task.deleteMessage')}
         variant="danger"
+      />
+
+      <DuplicateWarningDialog
+        isOpen={duplicateOpen}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={() => {
+          duplicateConfirmedRef.current = true;
+          setDuplicateOpen(false);
+          void handleSave();
+        }}
+        inputName={duplicateInputName}
+        entityLabel={t('crm.task.title')}
+        exactMatch={duplicateExact}
+        nearMatches={duplicateNear}
+        isEdit={!!editing}
       />
     </div>
   );

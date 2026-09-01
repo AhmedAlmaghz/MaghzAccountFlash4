@@ -646,30 +646,29 @@ export const searchTools: ToolDefinition[] = [
   {
     name: 'search.tasks',
     labelAr: 'بحث عن مهمة',
-    descriptionAr: 'يبحث عن مهمة بالعنوان أو اسم المسؤول ويعيد معرفها (id) وحالتها وأولويتها.',
+    descriptionAr: 'يبحث عن مهمة بالعنوان أو اسم المسؤول (بحث ضبابي يتحمل أخطاء الإملاء) ويعيد معرفها (id) وحالتها وأولويتها.',
     permission: 'crm.view',
     dangerLevel: 'read',
     parameters: searchParam('عنوان المهمة أو اسم المسؤول'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
-      const res = await crmApi.getTasks(ctx.companyId);
+      const res = await crmApi.getTasksPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((t) =>
-          normalizeQuery(t.title).includes(cleanQuery) ||
-          normalizeQuery(t.assignedName || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      const matches = findAllFuzzyMatches(
+        query,
+        res.data.items,
+        (t) => `${t.title} ${t.assignedName ?? ''}`,
+        0.35,
+      ).slice(0, 8);
       return {
-        matches: matches.map((t) => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-          priority: t.priority,
-          dueDate: t.dueDate,
-          assignedName: t.assignedName,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          title: m.item.title,
+          status: m.item.status,
+          priority: m.item.priority,
+          dueDate: m.item.dueDate,
+          assignedName: m.item.assignedName,
         })),
         totalMatches: matches.length,
       };
@@ -678,30 +677,28 @@ export const searchTools: ToolDefinition[] = [
   {
     name: 'search.activities',
     labelAr: 'بحث عن نشاط',
-    descriptionAr: 'يبحث عن نشاط حسب الموضوع أو النوع ويعيد معرفه (id) وتاريخه.',
+    descriptionAr: 'يبحث عن نشاط حسب الموضوع أو نوعه (بحث ضبابي يتحمل أخطاء الإملاء) ويعيد معرفه (id) وتاريخه.',
     permission: 'crm.view',
     dangerLevel: 'read',
     parameters: searchParam('موضوع النشاط أو نوعه (call/meeting/email/visit/note)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
-      const res = await crmApi.getActivities(ctx.companyId);
+      const res = await crmApi.getActivitiesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((a) =>
-          normalizeQuery(a.subject).includes(cleanQuery) ||
-          a.type.toLowerCase().includes(cleanQuery) ||
-          normalizeQuery(a.assignedName || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      const matches = findAllFuzzyMatches(
+        query,
+        res.data.items,
+        (a) => `${a.subject} ${a.type} ${a.assignedName ?? ''}`,
+        0.35,
+      ).slice(0, 8);
       return {
-        matches: matches.map((a) => ({
-          id: a.id,
-          subject: a.subject,
-          type: a.type,
-          activityDate: a.activityDate,
-          assignedName: a.assignedName,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          subject: m.item.subject,
+          type: m.item.type,
+          activityDate: m.item.activityDate,
+          assignedName: m.item.assignedName,
         })),
         totalMatches: matches.length,
       };

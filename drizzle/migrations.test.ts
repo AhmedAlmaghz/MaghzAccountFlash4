@@ -27,10 +27,13 @@ describe('Migration layout: baseline + additive migrations', () => {
     expect(files).toContain('0001_invoice_payment_columns.sql');
   });
 
-  it('later migrations are additive except the documented banks retirement', () => {
+  it('later migrations are additive except the documented retirements', () => {
     // 0002 is a deliberate, documented removal: banks unify into cash boxes
-    // ("النقدية والخزائن"). Nothing ELSE may be dropped.
-    const RETIRED = new Set(['banks']);
+    // ("النقدية والخزائن"). 0015 retires the dead CRM tables (crm_activities +
+    // calls — no application code reads or writes them; the codebase settled
+    // on `activities` for the event log and `tasks` for work items).
+    // Nothing ELSE may be dropped.
+    const RETIRED = new Set(['banks', 'crm_activities', 'calls']);
     for (const f of files.filter((f) => f !== baselineFile)) {
       const content = readFileSync(join(MIGRATIONS_DIR, f), 'utf-8');
       // No table drops outside the retired set
@@ -357,10 +360,10 @@ describe('Migration 0014: HR professional (payroll posting accounts & policies)'
     expect(migrationSql).not.toMatch(/DROP TABLE/i);
   });
 
-  it('journal mirrors the migration files (0014 is last)', () => {
+  it('journal mirrors the migration files (0015 is last)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
     const last = journal.entries[journal.entries.length - 1];
-    expect(last.tag).toBe('0014_hr_professional');
+    expect(last.tag).toBe('0015_crm_professional');
     expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
   });
 
@@ -369,5 +372,88 @@ describe('Migration 0014: HR professional (payroll posting accounts & policies)'
     expect(hr).toMatch(/overtimeHours: numeric\('overtime_hours', \{ precision: 5, scale: 2 \}\)/);
     expect(hr).toMatch(/cashBoxId: uuid\('cash_box_id'\)/);
     expect(hr).toMatch(/paidAt: timestamp\('paid_at', \{ withTimezone: true \}\)/);
+  });
+});
+
+describe('Migration 0015: CRM professional (integrity + performance + stage machine)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0015_crm_professional.sql'), 'utf-8');
+
+  it('drops the dead CRM tables (crm_activities + calls)', () => {
+    expect(migrationSql).toMatch(/DROP TABLE IF EXISTS "crm_activities"/);
+    expect(migrationSql).toMatch(/DROP TABLE IF EXISTS "calls"/);
+  });
+
+  it('cleans orphans BEFORE adding FKs (SET NULL dangling references)', () => {
+    const orphanUpdates = migrationSql.match(/^UPDATE "(?:opportunities|tasks|activities)"/gm) ?? [];
+    expect(orphanUpdates.length).toBe(8);
+    // every cleanup statement nulls the reference only when the target row is missing
+    expect(migrationSql).toMatch(/UPDATE "opportunities" o SET "lead_id" = NULL[\s\S]*?NOT EXISTS \(SELECT 1 FROM "leads" l WHERE l\."id" = o\."lead_id"\)/);
+  });
+
+  it('adds FKs ON DELETE SET NULL for all 8 cross-entity references', () => {
+    const fks: Array<[string, string, string]> = [
+      ['opportunities', 'fk_opportunities_lead', 'leads'],
+      ['opportunities', 'fk_opportunities_customer', 'customers'],
+      ['tasks', 'fk_tasks_opportunity', 'opportunities'],
+      ['tasks', 'fk_tasks_lead', 'leads'],
+      ['tasks', 'fk_tasks_customer', 'customers'],
+      ['activities', 'fk_activities_opportunity', 'opportunities'],
+      ['activities', 'fk_activities_lead', 'leads'],
+      ['activities', 'fk_activities_customer', 'customers'],
+    ];
+    for (const [table, conname, ref] of fks) {
+      expect(migrationSql).toMatch(
+        new RegExp(`ALTER TABLE "${table}" ADD CONSTRAINT "${conname}"[\\s\\S]*?FOREIGN KEY \\("[a-z_]+"\\) REFERENCES "${ref}"\\("id"\\) ON DELETE SET NULL`)
+      );
+    }
+    // all guarded by pg_constraint existence checks
+    expect(migrationSql.match(/SELECT 1 FROM pg_constraint WHERE conname = /g)?.length).toBe(8);
+  });
+
+  it('creates the 6 performance indexes (company_id composite)', () => {
+    for (const idx of [
+      'idx_leads_company_status', 'idx_leads_company_created',
+      'idx_opportunities_company_stage', 'idx_opportunities_company_close',
+      'idx_tasks_company_status_due', 'idx_activities_company_date',
+    ]) {
+      expect(migrationSql).toMatch(new RegExp(`CREATE INDEX IF NOT EXISTS "${idx}"`));
+    }
+  });
+
+  it('adds close_date (opportunities) and last_contacted_at (leads)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE "opportunities" ADD COLUMN IF NOT EXISTS "close_date" date/);
+    expect(migrationSql).toMatch(/ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "last_contacted_at" timestamp with time zone/);
+  });
+
+  it('is idempotent (IF NOT EXISTS everywhere, FKs in DO guards)', () => {
+    expect(migrationSql.match(/ADD COLUMN IF NOT EXISTS/g)?.length).toBe(2);
+    expect(migrationSql.match(/CREATE INDEX IF NOT EXISTS/g)?.length).toBe(6);
+    expect(migrationSql.match(/IF NOT EXISTS \(\s*SELECT 1 FROM pg_constraint/g)?.length).toBe(8);
+  });
+
+  it('journal entry mirrors the migration files (0015 last)', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    const last = journal.entries[journal.entries.length - 1];
+    expect(last.tag).toBe('0015_crm_professional');
+    expect(last.idx).toBe(15);
+  });
+
+  it('Drizzle schema no longer exports the dead tables and exposes the new columns', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/crm.ts'), 'utf-8');
+    expect(schema).not.toMatch(/export const crmActivities/);
+    expect(schema).not.toMatch(/export const calls/);
+    expect(schema).toMatch(/closeDate: date\('close_date'\)/);
+    expect(schema).toMatch(/lastContactedAt: timestamp\('last_contacted_at', \{ withTimezone: true \}\)/);
+  });
+
+  it('whitelists no longer reference the dead tables', () => {
+    const dbHandler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    const sqlGuard = readFileSync(join(process.cwd(), 'src/modules/ai/security/sqlGuard.ts'), 'utf-8');
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    const reset = readFileSync(join(process.cwd(), 'electron/resetDatabase.js'), 'utf-8');
+    for (const f of [dbHandler, sqlGuard, pglite, reset]) {
+      expect(f).not.toMatch(/['"]crm_activities['"]/);
+      expect(f).not.toMatch(/['"]calls['"]/);
+    }
   });
 });

@@ -395,6 +395,79 @@ export const readTools: ToolDefinition[] = [
       };
     },
   },
+  {
+    name: 'crm.get_tasks',
+    labelAr: 'مهام المتابعة',
+    descriptionAr: 'يعرض قائمة مهام المتابعة (العنوان، الأولوية، الحالة، تاريخ الاستحقاق، هل متأخرة). يمكن الفلترة بالحالة والأولوية.',
+    permission: 'crm.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['pending', 'completed', 'cancelled'] },
+        priority: { type: 'string', enum: ['low', 'medium', 'high'] },
+      },
+    },
+    execute: async (args, ctx) => {
+      const res = await crmApi.getTasks(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المهام' };
+      const status = typeof args.status === 'string' && args.status ? args.status : undefined;
+      const priority = typeof args.priority === 'string' && args.priority ? args.priority : undefined;
+      let filtered = res.data;
+      if (status) filtered = filtered.filter((t) => t.status === status);
+      if (priority) filtered = filtered.filter((t) => t.priority === priority);
+      const todayStr = new Date(new Date().toDateString());
+      return {
+        total: filtered.length,
+        overdue: filtered.filter((t) => t.status === 'pending' && t.dueDate && new Date(t.dueDate) < todayStr).length,
+        tasks: filtered.slice(0, 20).map((t) => ({
+          id: t.id,
+          title: t.title,
+          status: t.status,
+          priority: t.priority,
+          dueDate: t.dueDate,
+          overdue: t.status === 'pending' && !!t.dueDate && new Date(t.dueDate) < todayStr,
+          assignedTo: t.assignedName,
+          leadId: t.leadId,
+          opportunityId: t.opportunityId,
+          customerId: t.customerId,
+        })),
+      };
+    },
+  },
+  {
+    name: 'crm.get_activities',
+    labelAr: 'سجل الأنشطة',
+    descriptionAr: 'يعرض سجل أنشطة التواصل (اتصالات، اجتماعات، زيارات). يمكن الفلترة بالنوع.',
+    permission: 'crm.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['call', 'meeting', 'email', 'visit', 'note'] },
+      },
+    },
+    execute: async (args, ctx) => {
+      const res = await crmApi.getActivities(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأنشطة' };
+      const type = typeof args.type === 'string' && args.type ? args.type : undefined;
+      const filtered = type ? res.data.filter((a) => a.type === type) : res.data;
+      return {
+        total: filtered.length,
+        activities: filtered.slice(0, 20).map((a) => ({
+          id: a.id,
+          type: a.type,
+          subject: a.subject,
+          activityDate: a.activityDate,
+          durationMinutes: a.durationMinutes,
+          assignedTo: a.assignedName,
+          leadId: a.leadId,
+          opportunityId: a.opportunityId,
+          customerId: a.customerId,
+        })),
+      };
+    },
+  },
 
   // ─── HR ──────────────────────────────────────────────────────────────────
   {

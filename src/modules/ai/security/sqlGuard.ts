@@ -34,7 +34,7 @@ const AI_ALLOWED_TABLES = [
   // hr
   'employees', 'payroll_runs', 'payroll_lines', 'payroll_components', 'departments', 'attendance', 'leaves', 'end_of_service',
   // crm
-  'leads', 'opportunities', 'tasks', 'activities', 'crm_activities', 'calls',
+  'leads', 'opportunities', 'tasks', 'activities',
   ];
 
 export const AI_ALLOWED_TABLES_SET = new Set(AI_ALLOWED_TABLES);

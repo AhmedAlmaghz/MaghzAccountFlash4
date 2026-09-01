@@ -150,19 +150,19 @@ const TOOL_ROUTES: Array<{ prefixes: string[]; target: RouteTarget }> = [
     target: { path: '/hr/end-of-service', labelKey: 'ai.actions.openEndOfService' },
   },
   {
-    prefixes: ['crm.create_lead', 'crm.convert_lead_to_customer', 'crm.update_lead_status'],
+    prefixes: ['crm.create_lead', 'crm.convert_lead_to_customer', 'crm.update_lead_status', 'crm.qualify_lead', 'crm.update_lead', 'crm.delete_lead', 'crm.get_leads'],
     target: { path: '/crm/leads', labelKey: 'ai.actions.openLeads' },
   },
   {
-    prefixes: ['crm.create_opportunity'],
+    prefixes: ['crm.create_opportunity', 'crm.update_opportunity', 'crm.update_opportunity_stage', 'crm.win_opportunity', 'crm.delete_opportunity', 'crm.opportunity_pipeline', 'crm.get_opportunities'],
     target: { path: '/crm/opportunities', labelKey: 'ai.actions.openOpportunities' },
   },
   {
-    prefixes: ['crm.create_task'],
+    prefixes: ['crm.create_task', 'crm.update_task', 'crm.complete_task', 'crm.delete_task', 'crm.follow_ups', 'crm.get_tasks'],
     target: { path: '/crm/tasks', labelKey: 'ai.actions.openTasks' },
   },
   {
-    prefixes: ['crm.create_activity'],
+    prefixes: ['crm.create_activity', 'crm.update_activity', 'crm.delete_activity', 'crm.rep_performance', 'crm.get_activities', 'crm.sales_funnel', 'crm.lead_conversion'],
     target: { path: '/crm/activities', labelKey: 'ai.actions.openActivities' },
   },
 ];

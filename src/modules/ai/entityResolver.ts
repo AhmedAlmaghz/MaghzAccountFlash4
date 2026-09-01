@@ -390,6 +390,30 @@ async function searchLeads(query: string, companyId: string): Promise<EntityMatc
   return rankMatches(query, cached);
 }
 
+async function searchOpportunities(query: string, companyId: string): Promise<EntityMatch[]> {
+  const key = `opportunities:${companyId}`;
+  let cached = cacheGet(key);
+  if (!cached) {
+    const res = await crmApi.getOpportunitiesPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
+    if (!res.success || !res.data) return [];
+    cached = res.data.items.map((o) => toMatch(o, 'opportunity', 'فرصة بيعية', { stage: 'stage' }));
+    cacheSet(key, cached);
+  }
+  return rankMatches(query, cached);
+}
+
+async function searchTasks(query: string, companyId: string): Promise<EntityMatch[]> {
+  const key = `tasks:${companyId}`;
+  let cached = cacheGet(key);
+  if (!cached) {
+    const res = await crmApi.getTasksPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
+    if (!res.success || !res.data) return [];
+    cached = res.data.items.map((t) => toMatch(t, 'task', 'مهمة', { priority: 'priority', status: 'status' }));
+    cacheSet(key, cached);
+  }
+  return rankMatches(query, cached);
+}
+
 // ─── Registry ────────────────────────────────────────────────────────────────
 
 interface EntitySearcherDef {
@@ -414,6 +438,8 @@ const ENTITY_SEARCHERS: EntitySearcherDef[] = [
   { type: 'workOrder', labelAr: 'أمر تشغيل', searcher: searchWorkOrders },
   { type: 'bom', labelAr: 'شجرة منتج', searcher: searchBoms },
   { type: 'lead', labelAr: 'عميل محتمل', searcher: searchLeads },
+  { type: 'opportunity', labelAr: 'فرصة بيعية', searcher: searchOpportunities },
+  { type: 'task', labelAr: 'مهمة', searcher: searchTasks },
 ];
 
 // ─── Ranking ─────────────────────────────────────────────────────────────────

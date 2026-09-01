@@ -5,7 +5,7 @@ import { cn } from '@/core/utils';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { Card } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
-import { useLeadsPaginated, useOpportunitiesPaginated, useTasksPaginated } from '../hooks/useCrm';
+import { useLeadsPaginated, useOpportunitiesPaginated, useTasksPaginated, useActivitiesPaginated } from '../hooks/useCrm';
 
 export const CrmPage: React.FC = () => {
   const { t } = useTranslation();
@@ -17,12 +17,13 @@ export const CrmPage: React.FC = () => {
   const { total: leadsTotal } = useLeadsPaginated(companyId, {});
   const { total: opportunitiesTotal } = useOpportunitiesPaginated(companyId, {});
   const { total: tasksTotal } = useTasksPaginated(companyId, {});
+  const { total: activitiesTotal } = useActivitiesPaginated(companyId, {});
 
   const crmMenu: Array<{ id: string; label: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
     { id: 'leads', label: t('crm.tabs.leads'), desc: 'العملاء المحتملون والتقييم والتحويل إلى عملاء', icon: Target, path: '/crm/leads', color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', count: leadsTotal },
     { id: 'opportunities', label: t('crm.tabs.opportunities'), desc: 'الفرص البيعية ومراحل التفاوض والإغلاق', icon: Handshake, path: '/crm/opportunities', color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-fuchsia-50 dark:bg-fuchsia-900/20', count: opportunitiesTotal },
     { id: 'tasks', label: t('crm.tabs.tasks'), desc: 'مهام المتابعة والأولويات وتواريخ الاستحقاق', icon: ListTodo, path: '/crm/tasks', color: 'from-sky-600 to-sky-700', bg: 'bg-sky-50 dark:bg-sky-900/20', count: tasksTotal },
-    { id: 'activities', label: t('crm.tabs.activities'), desc: 'سجل المكالمات والاجتماعات والزيارات', icon: Activity, path: '/crm/activities', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: null },
+    { id: 'activities', label: t('crm.tabs.activities'), desc: 'سجل المكالمات والاجتماعات والزيارات', icon: Activity, path: '/crm/activities', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: activitiesTotal },
   ];
 
   return (
@@ -73,7 +74,7 @@ export const CrmPage: React.FC = () => {
             <Card className="p-4 flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('crm.tabs.activities')}</p>
-                <p className="text-2xl font-bold text-teal-600 tabular-nums">—</p>
+                <p className="text-2xl font-bold text-teal-600 tabular-nums">{activitiesTotal}</p>
                 <p className="text-xs text-slate-500">سجل التواصل مع العملاء</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-900/20 flex items-center justify-center">

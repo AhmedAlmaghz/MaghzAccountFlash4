@@ -40,6 +40,33 @@ vi.mock('@/core/utils/pagination', () => ({
   })),
 }));
 
+vi.mock('@/core/api', () => ({
+  getNextDocumentNumber: vi.fn(async () => ({ success: true, number: 'CUST-0001' })),
+}));
+
+vi.mock('@/core/utils/auditLogger', () => ({
+  logAudit: vi.fn(async () => {}),
+}));
+
+vi.mock('@/modules/auth/store', () => ({
+  useAuthStore: { getState: () => ({ user: { id: '00000000-0000-0000-0000-000000000099', username: 'tester' } }) },
+}));
+
+vi.mock('@/core/utils/userIdValidator', () => ({
+  safeUserId: vi.fn((v: unknown) => {
+    if (!v || typeof v !== 'string') return null;
+    const t = v.trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t) ? t.toLowerCase() : null;
+  }),
+}));
+
+vi.mock('@/core/utils/normalizeArabic', () => ({
+  normalizeArabic: vi.fn((s: string) => s.toLowerCase().trim()),
+  fuzzyMatchScore: vi.fn(() => 0.5),
+  findAllFuzzyMatches: vi.fn(() => []),
+  bestFuzzyMatch: vi.fn(() => null),
+}));
+
 import { crmApi } from './api';
 import { getDbAdapter } from '@/core/database/adapters';
 
@@ -87,9 +114,13 @@ describe('crmApi - Leads', () => {
   });
 
   it('createLead sends null for empty optional fields (PG-friendly)', async () => {
-    let capturedParams: unknown[] | null = null;
-    const adapter = makeMockAdapter(async (_sql, params) => {
-      capturedParams = params;
+    let capturedInsertParams: unknown[] | null = null;
+    const adapter = makeMockAdapter(async (sql, params) => {
+      // First query is duplicate guard — return no duplicate
+      if (sql.includes('LOWER(name)')) {
+        return { success: true, rows: [] };
+      }
+      capturedInsertParams = params;
       return { success: true, rows: [{ id: 'new-lead' }] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
@@ -108,9 +139,30 @@ describe('crmApi - Leads', () => {
       notes: undefined,
     });
     expect(res.success).toBe(true);
-    expect(capturedParams).toEqual([
+    expect(capturedInsertParams).toEqual([
       COMPANY_ID, 'New Lead', null, null, null, null, 'new', 'warm', null, null, null, expect.any(String), null, null,
     ]);
+  });
+
+  it('createLead blocks exact duplicate (API guard)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('LOWER(name)')) {
+        return { success: true, rows: [{ id: 'dup-id', name: 'New Lead' }] };
+      }
+      return { success: true, rows: [{ id: 'new-lead' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.createLead({
+      companyId: COMPANY_ID,
+      name: 'New Lead',
+      phone: '+967700000000',
+      status: 'new',
+      rating: 'warm',
+    } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مكررة|مطابق/);
+    expect(res.duplicate).toBeDefined();
   });
 
   it('updateLead with empty data returns success without DB call', async () => {
@@ -122,7 +174,7 @@ describe('crmApi - Leads', () => {
     expect(adapter.query).not.toHaveBeenCalled();
   });
 
-  it('updateLead with status change builds correct SET clause', async () => {
+  it('updateLead with status change builds correct SET clause (with updated_by)', async () => {
     let capturedSql: string | null = null;
     let capturedParams: unknown[] | null = null;
     const adapter = makeMockAdapter(async (sql, params) => {
@@ -136,25 +188,28 @@ describe('crmApi - Leads', () => {
     expect(res.success).toBe(true);
     expect(capturedSql).toMatch(/status = \$1/);
     expect(capturedSql).toMatch(/rating = \$2/);
-    expect(capturedSql).toMatch(/WHERE id = \$3 AND company_id = \$4/);
-    expect(capturedParams).toEqual(['qualified', 'hot', LEAD_ID, COMPANY_ID]);
+    // updated_by is always stamped now (Phase A2)
+    expect(capturedSql).toMatch(/updated_by/);
+    expect(capturedSql).toMatch(/WHERE id = \$\d+::uuid AND company_id = \$\d+::uuid/);
+    // params: status, rating, updated_by(null for undefined userId), id, companyId
+    expect(capturedParams?.[0]).toBe('qualified');
+    expect(capturedParams?.[1]).toBe('hot');
   });
 
-  it('convertLeadToCustomer creates customer and updates lead status to converted', async () => {
-    const callOrder: string[] = [];
+  it('convertLeadToCustomer creates customer and updates lead status to converted (atomic CTE)', async () => {
     const adapter = makeMockAdapter(async (sql, _params) => {
-      if (sql.startsWith('SELECT * FROM leads')) {
-        callOrder.push('select_lead');
-        return { success: true, rows: [{ id: LEAD_ID, company_id: COMPANY_ID, name: 'L', email: 'e', phone: 'p' }] };
+      // Atomic CTE must be checked before the generic getLeadById pattern
+      if (sql.includes('lead_check') && sql.includes('new_customer')) {
+        return { success: true, rows: [{ id: 'new-customer', opportunity_id: null }] };
       }
-      if (sql.startsWith('INSERT INTO customers')) {
-        callOrder.push('insert_customer');
-        return { success: true, rows: [{ id: 'new-customer' }] };
+      // getLeadById
+      if (sql.includes('FROM leads') && sql.includes('WHERE id = $1::uuid AND company_id = $2::uuid')) {
+        return { success: true, rows: [{ id: LEAD_ID, company_id: COMPANY_ID, name: 'L', email: 'e@test.com', phone: '700000', status: 'new', rating: 'warm', estimated_value: 50000, assigned_to: null }] };
       }
-      if (sql.startsWith("UPDATE leads SET status = 'converted'")) {
-        callOrder.push('update_lead');
-        return { success: true, rows: [] };
-      }
+      // duplicate guard for leads (not in convert path) — but handle
+      if (sql.includes('LOWER(name)')) return { success: true, rows: [] };
+      // deleteLead guard check (not in convert)
+      if (sql.includes('FROM opportunities WHERE lead_id')) return { success: true, rows: [{ opps: 0, tasks: 0, acts: 0 }] };
       return { success: true, rows: [] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
@@ -162,13 +217,46 @@ describe('crmApi - Leads', () => {
     const res = await crmApi.convertLeadToCustomer(LEAD_ID, COMPANY_ID, { address: 'Addr', taxNumber: 'TX', creditLimit: 5000 });
     expect(res.success).toBe(true);
     expect(res.id).toBe('new-customer');
-    expect(callOrder).toEqual(['select_lead', 'insert_customer', 'update_lead']);
+    expect(res.code).toBe('CUST-0001');
+  });
+
+  it('convertLeadToCustomer rejects already-converted lead', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM leads') && sql.includes('WHERE id = $1::uuid')) {
+        return { success: true, rows: [{ id: LEAD_ID, company_id: COMPANY_ID, name: 'L', status: 'converted', rating: 'warm' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.convertLeadToCustomer(LEAD_ID, COMPANY_ID, {});
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/محوَّل|converted/i);
+  });
+
+  it('convertLeadToCustomer with createOpportunity returns opportunityId', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('lead_check') && sql.includes('new_customer')) {
+        return { success: true, rows: [{ id: 'new-customer', opportunity_id: 'new-opp-id' }] };
+      }
+      if (sql.includes('FROM leads') && sql.includes('WHERE id = $1::uuid')) {
+        return { success: true, rows: [{ id: LEAD_ID, company_id: COMPANY_ID, name: 'Al-Amal', status: 'new', rating: 'warm', estimated_value: 100000, assigned_to: null }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.convertLeadToCustomer(LEAD_ID, COMPANY_ID, { createOpportunity: true });
+    expect(res.success).toBe(true);
+    expect(res.opportunityId).toBe('new-opp-id');
   });
 
   it('getLeadsPaginated builds search ILIKE filter correctly', async () => {
     let capturedSql: string | null = null;
     let capturedParams: unknown[] | null = null;
     const adapter = makeMockAdapter(async (sql, params) => {
+      // COUNT query
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 0 }] };
       capturedSql = sql;
       capturedParams = params;
       return { success: true, rows: [] };
@@ -181,6 +269,34 @@ describe('crmApi - Leads', () => {
     expect(capturedSql).toMatch(/l\.email ILIKE \$2/);
     expect(capturedSql).toMatch(/l\.phone ILIKE \$2/);
     expect(capturedParams?.[1]).toBe('%ahmed%');
+  });
+
+  it('deleteLead blocks when lead has referencing opportunities', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities WHERE lead_id')) {
+        return { success: true, rows: [{ opps: 1, tasks: 0, acts: 0 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.deleteLead(LEAD_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/لا يمكن حذف/);
+  });
+
+  it('deleteLead succeeds when no references exist', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities WHERE lead_id')) {
+        return { success: true, rows: [{ opps: 0, tasks: 0, acts: 0 }] };
+      }
+      if (sql.includes('DELETE FROM leads')) return { success: true, rows: [] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.deleteLead(LEAD_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
   });
 });
 
@@ -227,29 +343,97 @@ describe('crmApi - Opportunities', () => {
   });
 
   it('updateOpportunity includes notes in SET clause (fixes silent data loss)', async () => {
-    let capturedSql: string | null = null;
     const adapter = makeMockAdapter(async (sql) => {
-      capturedSql = sql;
+      // getOpportunityById for stage-machine guard
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 50000, stage: 'new', probability: 50, expected_close_date: null, assigned_to: null, notes: 'old' }] };
+      }
+      if (sql.includes('UPDATE opportunities')) {
+        return { success: true, rows: [] };
+      }
       return { success: true, rows: [] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    let capturedSql = '';
+    const spyAdapter = makeMockAdapter(async (sql, _params) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 50000, stage: 'new', probability: 50, expected_close_date: null, assigned_to: null, notes: 'old' }] };
+      }
+      capturedSql = sql;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(spyAdapter as never);
 
     const res = await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { notes: 'Updated notes' });
     expect(res.success).toBe(true);
     expect(capturedSql).toMatch(/notes = \$1/);
-    expect(capturedSql).toMatch(/WHERE id = \$2 AND company_id = \$3/);
   });
 
-  it('updateOpportunity can update stage and probability together', async () => {
-    let capturedParams: unknown[] | null = null;
-    const adapter = makeMockAdapter(async (_sql, params) => {
-      capturedParams = params;
+  it('updateOpportunity with stage won auto-stamps close_date and probability', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 50000, stage: 'negotiation', probability: 80, expected_close_date: null, assigned_to: null, notes: '' }] };
+      }
       return { success: true, rows: [] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-    await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { stage: 'won', probability: 100 });
-    expect(capturedParams).toEqual(['won', 100, OPPORTUNITY_ID, COMPANY_ID]);
+    let capturedSql = '';
+    const spy = makeMockAdapter(async (sql, _params) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 50000, stage: 'negotiation', probability: 80, expected_close_date: null, assigned_to: null, notes: '' }] };
+      }
+      capturedSql = sql;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(spy as never);
+
+    const res = await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { stage: 'won' });
+    expect(res.success).toBe(true);
+    expect(capturedSql).toMatch(/close_date = CURRENT_DATE/);
+    expect(capturedSql).toMatch(/probability/);
+  });
+
+  it('updateOpportunity blocks illegal backward transition', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 50000, stage: 'proposal', probability: 60, expected_close_date: null, assigned_to: null, notes: '' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { stage: 'qualified' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/غير قانوني|انتقال/);
+  });
+
+  it('updateOpportunity blocks modification of won opportunity', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 50000, stage: 'won', probability: 100, expected_close_date: null, assigned_to: null, notes: '' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { stage: 'negotiation' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مقفلة|won/i);
+  });
+
+  it('getOpportunityById returns mapped opportunity with closeDate', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp 1', value: 100000, stage: 'won', probability: 100, close_date: '2026-08-20', expected_close_date: '2026-08-15', assigned_to: null }],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.getOpportunityById(OPPORTUNITY_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data?.stage).toBe('won');
+    expect(res.data?.closeDate).toBe('2026-08-20');
   });
 });
 
@@ -314,6 +498,7 @@ describe('crmApi - Tasks', () => {
   it('getTasksPaginated supports search filter on title and description', async () => {
     let capturedSql: string | null = null;
     const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 0 }] };
       capturedSql = sql;
       return { success: true, rows: [] };
     });
@@ -349,6 +534,7 @@ describe('crmApi - Activities', () => {
   it('createActivity sends null for empty durationMinutes', async () => {
     let capturedParams: unknown[] | null = null;
     const adapter = makeMockAdapter(async (_sql, params) => {
+      // CTE: INSERT + UPDATE in one statement — params: company, lead, opp, cust, type, subject, desc, date, duration, assigned, created_at, created_by, updated_by
       capturedParams = params;
       return { success: true, rows: [{ id: 'new-act' }] };
     });
@@ -364,6 +550,26 @@ describe('crmApi - Activities', () => {
     });
     expect(res.success).toBe(true);
     expect(capturedParams?.[8]).toBeNull();
+  });
+
+  it('createActivity uses CTE to stamp lead last_contacted_at atomically', async () => {
+    let capturedSql = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      capturedSql = sql;
+      return { success: true, rows: [{ id: 'new-act' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await crmApi.createActivity({
+      companyId: COMPANY_ID,
+      type: 'call',
+      subject: 'Follow-up',
+      activityDate: '2026-06-15',
+      leadId: LEAD_ID,
+    });
+    expect(capturedSql).toMatch(/new_activity/);
+    expect(capturedSql).toMatch(/touched_lead/);
+    expect(capturedSql).toMatch(/last_contacted_at/);
   });
 
   it('mapActivityRow falls back to NOW when activity_date is null (defensive)', async () => {
@@ -388,7 +594,8 @@ describe('crmApi - Activities', () => {
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     await crmApi.updateActivity(ACTIVITY_ID, COMPANY_ID, { subject: 'New Subject', activityDate: '2026-07-01' });
-    expect(capturedParams).toEqual(['New Subject', '2026-07-01', ACTIVITY_ID, COMPANY_ID]);
+    expect(capturedParams?.[0]).toBe('New Subject');
+    expect(capturedParams?.[1]).toBe('2026-07-01');
   });
 });
 
@@ -398,7 +605,10 @@ describe('crmApi - Pagination edge cases', () => {
   });
 
   it('getLeadsPaginated returns total 0 when no results match', async () => {
-    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 0 }] };
+      return { success: true, rows: [] };
+    });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await crmApi.getLeadsPaginated(COMPANY_ID, 1, 25, { status: 'lost' });
@@ -408,7 +618,10 @@ describe('crmApi - Pagination edge cases', () => {
   });
 
   it('getOpportunitiesPaginated clamps page args via clampPageArgs', async () => {
-    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 0 }] };
+      return { success: true, rows: [] };
+    });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await crmApi.getOpportunitiesPaginated(COMPANY_ID, 1, 50, { stage: 'new' });
@@ -416,9 +629,24 @@ describe('crmApi - Pagination edge cases', () => {
     expect(res.data?.pageSize).toBe(50);
   });
 
-  it('getActivitiesPaginated filters by type only (no search param)', async () => {
+  it('getActivitiesPaginated supports search filter', async () => {
     let capturedSql: string | null = null;
     const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 0 }] };
+      capturedSql = sql;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await crmApi.getActivitiesPaginated(COMPANY_ID, 1, 25, { type: 'call', search: 'ahmed' });
+    expect(capturedSql).toMatch(/a\.type = \$2/);
+    expect(capturedSql).toMatch(/a\.subject ILIKE \$3/);
+  });
+
+  it('getActivitiesPaginated filters by type only', async () => {
+    let capturedSql: string | null = null;
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 0 }] };
       capturedSql = sql;
       return { success: true, rows: [] };
     });
@@ -426,6 +654,95 @@ describe('crmApi - Pagination edge cases', () => {
 
     await crmApi.getActivitiesPaginated(COMPANY_ID, 1, 25, { type: 'call' });
     expect(capturedSql).toMatch(/a\.type = \$2/);
-    expect(capturedSql).not.toMatch(/search/);
+    expect(capturedSql).not.toMatch(/a\.subject ILIKE/);
+  });
+});
+
+describe('crmApi - Stage machine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('allows forward transition new -> qualified', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp', value: 10000, stage: 'new', probability: 10 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { stage: 'qualified' });
+    expect(res.success).toBe(true);
+  });
+
+  it('allows open -> won transition', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM opportunities o') && sql.includes('WHERE o.id = $1::uuid')) {
+        return { success: true, rows: [{ id: OPPORTUNITY_ID, company_id: COMPANY_ID, name: 'Opp', value: 10000, stage: 'negotiation', probability: 80 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.updateOpportunity(OPPORTUNITY_ID, COMPANY_ID, { stage: 'won' });
+    expect(res.success).toBe(true);
+  });
+});
+
+describe('crmApi - KPIs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('getLeadKpis returns aggregated counts', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [{ total: 10, new_leads: 3, contacted: 2, qualified: 2, converted: 2, lost: 1, pipeline_value: 50000 }],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.getLeadKpis(COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data?.total).toBe(10);
+    expect(res.data?.converted).toBe(2);
+  });
+
+  it('getOpportunityKpis returns pipeline and weighted values', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [{ total: 5, open_count: 3, won: 1, lost: 1, pipeline_value: 300000, weighted_value: 150000, won_value: 100000 }],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.getOpportunityKpis(COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data?.pipelineValue).toBe(300000);
+    expect(res.data?.weightedValue).toBe(150000);
+  });
+
+  it('getTaskKpis returns overdue count', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [{ total: 8, pending: 4, completed: 3, cancelled: 1, overdue: 2 }],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.getTaskKpis(COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data?.overdue).toBe(2);
+  });
+
+  it('getActivityKpis returns type breakdown', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [{ total: 20, calls: 10, meetings: 5, total_minutes: 600 }],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await crmApi.getActivityKpis(COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data?.calls).toBe(10);
+    expect(res.data?.totalMinutes).toBe(600);
   });
 });

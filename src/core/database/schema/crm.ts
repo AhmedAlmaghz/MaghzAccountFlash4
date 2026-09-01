@@ -15,6 +15,7 @@ export const leads = pgTable('leads', {
   estimatedValue: numeric('estimated_value', { precision: 18, scale: 4 }),
   assignedTo: uuid('assigned_to').references(() => users.id),
   notes: text('notes'),
+  lastContactedAt: timestamp('last_contacted_at', { withTimezone: true }),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -32,44 +33,13 @@ export const opportunities = pgTable('opportunities', {
   stage: varchar('stage', { length: 50 }).default('new').notNull(), // new, qualified, proposal, negotiation, won, lost
   probability: integer('probability').default(50), // 0-100
   expectedCloseDate: date('expected_close_date'),
+  closeDate: date('close_date'), // stamped when stage becomes won/lost (final)
   assignedTo: uuid('assigned_to').references(() => users.id),
   notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-});
-
-// ─── CRM Activities ───────────────────────────────────────────────────────────
-export const crmActivities = pgTable('crm_activities', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
-  opportunityId: uuid('opportunity_id'),
-  leadId: uuid('lead_id'),
-  title: varchar('title', { length: 255 }).notNull(),
-  description: text('description'),
-  dueDate: date('due_date').notNull(),
-  priority: varchar('priority', { length: 20 }).default('medium').notNull(), // low, medium, high
-  status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, completed, cancelled
-  assignedTo: uuid('assigned_to').references(() => users.id),
-  createdBy: uuid('created_by'),
-  updatedBy: uuid('updated_by'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-});
-
-// ─── Calls ────────────────────────────────────────────────────────────────────
-export const calls = pgTable('calls', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
-  leadId: uuid('lead_id'),
-  opportunityId: uuid('opportunity_id'),
-  customerId: uuid('customer_id'),
-  type: varchar('type', { length: 20 }).notNull(), // incoming, outgoing
-  duration: integer('duration'), // seconds
-  notes: text('notes'),
-  createdBy: uuid('created_by'),
-  updatedBy: uuid('updated_by'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
