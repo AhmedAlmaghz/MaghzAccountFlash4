@@ -492,7 +492,12 @@ export const hrApi = {
         return { success: result.success, error: result.error };
       }
       const adapter = await getDbAdapter();
-      // Pre-fetch existing attendance records in one query
+      // Pre-fetch existing attendance records in one query.
+      // CRITICAL: `date` comes back as a pg Date object — building the map
+      // key with String(row.date) yields locale text ("Mon Aug 31 2026…")
+      // that NEVER matches the "YYYY-MM-DD" lookup key → the upsert always
+      // took the INSERT branch → duplicate-key on uq_attendance_emp_date.
+      // toDateString() on both sides makes the keys comparable.
       const placeholders = records.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(',');
       const empParams = records.flatMap(r => [r.employeeId, r.date, r.companyId]);
       const existingRes = await adapter.query<{ employee_id: string; date: string; id: string }>(
@@ -501,12 +506,12 @@ export const hrApi = {
       );
       const existingMap = new Map<string, string>();
       for (const row of (existingRes.rows || [])) {
-        existingMap.set(`${row.employee_id}:${row.date}`, row.id);
+        existingMap.set(`${row.employee_id}:${toDateString(row.date) ?? String(row.date).slice(0, 10)}`, row.id);
       }
       // Build upsert queries — attendance has no updated_at column
       const queries: { sql: string; params: unknown[] }[] = [];
       for (const rec of prepared) {
-        const key = `${rec.employeeId}:${rec.date}`;
+        const key = `${rec.employeeId}:${String(rec.date).slice(0, 10)}`;
         const existingId = existingMap.get(key);
         if (existingId) {
           queries.push({ sql: 'UPDATE attendance SET check_in = $1::timestamptz, check_out = $2::timestamptz, overtime_hours = $3, status = $4, notes = $5, updated_by = $8 WHERE id = $6 AND company_id = $7', params: [rec.checkIn ?? null, rec.checkOut ?? null, rec.overtimeHours, rec.status, rec.notes ?? null, existingId, rec.companyId, safeUserId(_userId)] });

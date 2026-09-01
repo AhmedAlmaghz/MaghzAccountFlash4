@@ -1351,7 +1351,7 @@ export const writeTools: ToolDefinition[] = [
         email: { type: 'string' },
         address: { type: 'string', description: 'العنوان' },
         position: { type: 'string', description: 'المسمى الوظيفي' },
-        departmentId: { type: 'string', description: 'معرف القسم (اختياري — من hr.get_departments لاحقاً)' },
+        departmentId: { type: 'string', description: 'معرف القسم (اختياري — من search.departments)' },
         hireDate: { type: 'string', description: 'تاريخ التوظيف YYYY-MM-DD (إلزامي)' },
         baseSalary: { type: 'number', description: 'الراتب الأساسي (إلزامي)' },
       },
@@ -4086,9 +4086,9 @@ export const writeTools: ToolDefinition[] = [
 
   // ─── HR: Update Employee ──────────────────────────────────────────
   {
-    name: 'hr.update_employee',
+    name:     'hr.update_employee',
     labelAr: 'تعديل موظف',
-    descriptionAr: 'يُعدّل بيانات موظف موجود (الاسم، الهاتف، البريد، القسم، الراتب، الحالة). استخدم search.employees أولاً.',
+    descriptionAr: 'يُعدّل بيانات موظف موجود (الاسم، الهاتف، البريد، القسم، المسمى الوظيفي، الراتب الأساسي، الحالة). لربط القسم استخدم departmentId من search.departments. استخدم search.employees أولاً.',
     permission: 'hr.edit',
     dangerLevel: 'write',
     parameters: {
@@ -4098,11 +4098,14 @@ export const writeTools: ToolDefinition[] = [
         fullName: { type: 'string', description: 'الاسم الكامل' },
         phone: { type: 'string' },
         email: { type: 'string' },
-        isActive: { type: 'boolean' },
+        position: { type: 'string', description: 'المسمى الوظيفي' },
+        departmentId: { type: 'string', description: 'معرف القسم (من search.departments)' },
+        baseSalary: { type: 'number', description: 'الراتب الأساسي الشهري' },
+        isActive: { type: 'boolean', description: 'نشط/معطّل — التعطيل هو البديل الآمن للحذف' },
       },
       required: ['employeeId'],
     },
-    summarizeArgs: (a) => `تعديل موظف: ${String(a.employeeId).slice(0, 8)}…${a.fullName ? ` — ${a.fullName}` : ''}`,
+    summarizeArgs: (a) => `تعديل موظف: ${String(a.employeeId).slice(0, 8)}…${a.fullName ? ` — ${a.fullName}` : ''}${a.departmentId ? ' (ربط بقسم)' : ''}`,
     execute: async (args, ctx) => {
       const employeeId = str(args.employeeId);
       if (!employeeId) return { error: 'employeeId مطلوب — استخدم search.employees أولاً' };
@@ -4110,6 +4113,13 @@ export const writeTools: ToolDefinition[] = [
       if (args.fullName !== undefined) data.fullName = str(args.fullName);
       if (args.phone !== undefined) data.phone = str(args.phone);
       if (args.email !== undefined) data.email = str(args.email);
+      if (args.position !== undefined) data.position = str(args.position);
+      if (args.departmentId !== undefined) data.departmentId = str(args.departmentId) || undefined;
+      if (args.baseSalary !== undefined) {
+        const salary = num(args.baseSalary);
+        if (salary <= 0) return { error: 'الراتب يجب أن يكون أكبر من صفر' };
+        data.baseSalary = salary;
+      }
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
       const res = await hrApi.updateEmployee(employeeId, ctx.companyId, data);

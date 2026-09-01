@@ -1119,6 +1119,37 @@ describe('hrApi.saveAttendance — server-side punch normalization', () => {
     expect(insert?.params).toContain(null);
     expect(insert?.params).not.toContain('');
   });
+
+  it('UPSERTS (UPDATE branch) when the record already exists — pg Date objects must not break the lookup key (uq_attendance_emp_date regression)', async () => {
+    // Regression: the pre-fetch returned `date` as a pg Date object; building
+    // the map key with the raw value produced locale text ("Mon Aug 31...")
+    // that never matched "2026-08-31" → the upsert ALWAYS inserted →
+    // duplicate key on uq_attendance_emp_date.
+    const txQueries: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('SELECT employee_id, date, id FROM attendance')) {
+        // Simulate pg: `date` column comes back as a REAL Date object.
+        return { success: true, rows: [{ employee_id: EMP_ID, date: new Date('2026-08-31T00:00:00'), id: 'att-existing' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    adapter.transaction = vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      txQueries.push(...queries);
+      return { success: true, results: queries.map(() => ({ rows: [] })) };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await hrApi.saveAttendance([{
+      companyId: COMPANY_ID, employeeId: EMP_ID, date: '2026-08-31',
+      checkIn: '08:00', checkOut: '17:00', overtimeHours: 0, status: 'present',
+    } as never]);
+
+    // The EXISTING record must be UPDATED — never re-inserted (which would
+    // blow the unique constraint in production).
+    expect(txQueries).toHaveLength(1);
+    expect(txQueries[0].sql).toContain('UPDATE attendance');
+    expect(txQueries[0].sql).not.toContain('INSERT INTO attendance');
+  });
 });
 
 describe('hrApi.mapAttendanceRow — date/time mapping (Phase 45 guard)', () => {
