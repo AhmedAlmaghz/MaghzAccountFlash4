@@ -16,6 +16,21 @@ import { setDbMode } from './core/database/adapters';
 document.documentElement.dir = 'rtl';
 document.documentElement.lang = 'ar';
 
+// ─── Stale-deploy recovery ─────────────────────────────────────────────────
+// After a NEW deploy, a browser holding the OLD index.html lazy-loads chunk
+// names that no longer exist ("Failed to fetch dynamically imported module:
+// .../assets/SomePage-<oldHash>.js"). Vite fires `vite:preloadError` for
+// exactly this case. Recover ONCE by hard-reloading — the fresh index.html
+// references the new hashed assets and the user keeps their session
+// (localStorage/sessionStorage survive a reload).
+let staleDeployReloaded = false;
+window.addEventListener('vite:preloadError', (event) => {
+  if (staleDeployReloaded) return; // reload already attempted — let it surface
+  staleDeployReloaded = true;
+  event.preventDefault();
+  window.location.reload();
+});
+
 /* eslint-disable react-refresh/only-export-components */
 
 // Initialize auth from localStorage

@@ -3946,4 +3946,11 @@ npx drizzle-kit migrate
 - **PowerShell WriteAllText يفسد UTF-8**: إلحاق نص عربي عبر `[IO.File]::WriteAllText` كتب بترميز خاطئ وكسر 18 اختباراً — استخدم أداة Edit دائماً للملفات العربية، و`git checkout --` للاستعادة
 - **اختبارات journal "الأخير" هشة**: أي migration جديدة تكسر `last.tag === X` — اكتب `some(e => e.tag === X)` + length = files
 
+
+
+### إصلاح v0.9.2: stale-deploy recovery على Vercel
+- **الجذر**: بعد كل نشر جديد، متصفح يحتفظ بـ index.html قديم يشير لأسماء chunks بـ hashes قديمة — lazy-load الصفحات يفشل بـ 'Failed to fetch dynamically imported module'. الحل المزدوج:
+  1. **vercel.json headers**: '/assets/*' → 'Cache-Control: public, max-age=31536000, immutable' (الـ hash في الاسم يجعل كل ملف جديد فعلياً) — وكل ما عدا assets → 'no-cache, must-revalidate' (index.html دائماً طازج)
+  2. **vite:preloadError handler في main.tsx**: عند فشل تحميل chunk بعد نشر جديد → preventDefault + reload واحد (staleDeployReloaded guard) — الجلسة تبقى (localStorage ينجو من reload) و index.html الجديد يحمل الأسماء الصحيحة
+- **القاعدة الذهبية**: SPA منشور على Vercel بلا cache headers + بلا preloadError handler = شاشة بيضاء مؤكدة لأي مستخدم عائد بعد كل نشر. الاثنان معاً إلزاميان — headers تمنع وقوع المشكلة، والـ handler يشفي الحالات العالقة بين النشرين
 *آخر تحديث: 2026-09-01 | الإصدار: maghzaccount-pro v0.9.1*
