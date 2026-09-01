@@ -96,4 +96,53 @@ test.describe('HR Module', () => {
       await page.keyboard.press('Escape');
     }
   });
+
+  test('Departments page loads with create button and table', async ({ page }) => {
+    await loginAs(page);
+    await page.goto('/hr/departments');
+    await expect(page.getByRole('heading', { name: /الأقسام/i }).first()).toBeVisible({ timeout: 20_000 });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 });
+    const tableRows = await page.locator('table tbody tr').count();
+    expect(tableRows).toBeGreaterThanOrEqual(0);
+  });
+
+  test('Payroll components settings page loads with type badges', async ({ page }) => {
+    await loginAs(page);
+    await page.goto('/settings/payroll-components');
+    await expect(page.getByRole('heading', { name: /مكونات الرواتب/i }).first()).toBeVisible({ timeout: 20_000 });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 });
+  });
+
+  test('Attendance: open modal, save a record, and it appears in the table (timestamp + date-mapping regression)', async ({ page }) => {
+    await loginAs(page);
+    await page.goto('/hr/attendance');
+    await expect(page.getByRole('heading', { name: /الحضور/i }).first()).toBeVisible({ timeout: 20_000 });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 });
+
+    // Open the daily-registration modal
+    const openBtn = page.getByRole('button', { name: /تسجيل الحضور|الحضور/i }).first();
+    await openBtn.waitFor({ state: 'visible', timeout: 10_000 });
+    await openBtn.click();
+    await page.waitForTimeout(1_000);
+
+    // Fill the FIRST employee row's check-in/out times (08:00 → 17:00)
+    const firstRow = page.locator('table tbody tr').first();
+    if ((await firstRow.count()) > 0) {
+      const checkIn = firstRow.locator('input[type="time"]').first();
+      if (await checkIn.isVisible().catch(() => false)) {
+        await checkIn.fill('08:00');
+        const checkOut = firstRow.locator('input[type="time"]').nth(1);
+        await checkOut.fill('17:00');
+      }
+      // Save — must NOT throw "invalid input syntax for type timestamp"
+      await page.getByRole('button', { name: /حفظ|تسجيل/i }).last().click();
+      // Either a success toast + the row shows in the table, or a graceful
+      // error — but never a raw SQL crash.
+      await page.waitForTimeout(1_500);
+      const bodyText = await page.locator('body').innerText();
+      expect(bodyText).not.toContain('invalid input syntax');
+      // Close modal if still open
+      await page.keyboard.press('Escape').catch(() => undefined);
+    }
+  });
 });

@@ -168,6 +168,7 @@
     "hr": {
       "title": "HR",
       "employees": "Employees",
+      "departments": "Departments",
       "attendance": "Attendance",
       "payroll": "Payroll",
       "leaves": "Leaves",
@@ -208,6 +209,7 @@
       "units": "Units",
       "cashBoxes": "Cash & Treasuries",
       "costCenters": "Cost Centers",
+      "payrollComponents": "Payroll Components",
       "users": "Users",
       "roles": "Roles",
       "auditLogs": "Audit Log",
@@ -292,6 +294,7 @@
       "openStockValuation": "Open stock valuation",
       "openSalesAnalysis": "Open sales analysis",
       "openInventoryAnalysis": "Open inventory analysis",
+      "openDepartments": "Open Departments",
       "createAnother": "Create another one",
       "comparePrevious": "Compare with the previous period"
     },
@@ -1555,7 +1558,31 @@
       "invalidDates": "End date must be after start date"
     },
     "endOfService": "End of Service",
-    "departments": "Departments",
+    "departments": {
+      "title": "Departments",
+      "subtitle": "Manage employee departments, their managers, and headcount per department",
+      "name": "Department Name",
+      "manager": "Manager",
+      "employeeCount": "Employees",
+      "totalDepartments": "Total Departments",
+      "linkedEmployees": "Linked Employees",
+      "required": "is required",
+      "new": "New Department",
+      "edit": "Edit Department",
+      "delete": "Delete",
+      "deleteTitle": "Delete Department",
+      "deleteMessage": "Are you sure you want to delete this department?",
+      "created": "Department created successfully",
+      "updated": "Department updated successfully",
+      "deleted": "Department deleted successfully",
+      "emptyTitle": "No departments",
+      "emptyDescription": "You can add a new department",
+      "table": {
+        "name": "Department Name",
+        "manager": "Manager",
+        "employeeCount": "Employees"
+      }
+    },
     "salary": "Salary",
     "page": {
       "title": "Employees",
@@ -2356,7 +2383,43 @@
       "showVat": "Show VAT",
       "showVatDesc": "Show VAT column and calculate VAT on invoice total",
       "invoiceSettingsSaved": "Invoice display settings saved",
-      "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — ideal for exempt businesses or simplified billing."
+      "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — suited for exempt companies or simplified invoicing."
+    },
+    "payrollComponents": {
+      "title": "Payroll Components",
+      "subtitle": "Manage salary allowances and deductions used automatically by the payroll engine",
+      "nameAr": "Name (Arabic)",
+      "nameEn": "Name (English)",
+      "code": "Code",
+      "type": "Type",
+      "method": "Calculation Method",
+      "amount": "Amount",
+      "amountFixed": "Fixed amount",
+      "amountPercent": "Percent of base salary",
+      "active": "Active",
+      "inactive": "Inactive",
+      "required": "is required",
+      "new": "New Component",
+      "edit": "Edit",
+      "deactivate": "Deactivate",
+      "deactivateConfirm": "Deactivate this component? The payroll engine will stop using it in future calculations; past runs stay unchanged.",
+      "deactivated": "Component deactivated — the payroll engine will not use it in future calculations",
+      "created": "Component created successfully",
+      "updated": "Component updated successfully",
+      "emptyTitle": "No payroll components",
+      "engineHint": "The payroll engine consumes these components automatically on preview and creation — allowances are added and deductions are subtracted",
+      "types": {
+        "earning": "Allowance / Earning",
+        "deduction": "Deduction",
+        "tax": "Tax",
+        "insurance": "Insurance",
+        "net": "Net"
+      },
+      "methods": {
+        "fixed": "Fixed",
+        "percentage": "Percentage",
+        "formula": "Formula"
+      }
     },
     "users": {
       "title": "Users",

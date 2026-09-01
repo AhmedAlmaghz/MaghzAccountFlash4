@@ -924,3 +924,231 @@ describe('hrApi.payEndOfService — settlement JE against the cash box', () => {
     expect(res.error).toContain('قبل اعتماد');
   });
 });
+
+// ─── Departments CRUD (v0.8.1) ───────────────────────────────────────────────
+
+describe('hrApi.createDepartment', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('rejects an empty department name', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.createDepartment({ companyId: COMPANY_ID, name: '  ' });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('اسم القسم مطلوب');
+  });
+
+  it('inserts with manager and audit columns', async () => {
+    let capturedParams: unknown[] = [];
+    const adapter = makeMockAdapter(async (_sql, params) => {
+      capturedParams = params;
+      return { success: true, rows: [{ id: 'dep-1' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.createDepartment({ companyId: COMPANY_ID, name: 'المبيعات', managerId: 'u-1' }, 'u-1');
+    expect(res.success).toBe(true);
+    expect(res.id).toBe('dep-1');
+    expect(capturedParams).toContain('المبيعات');
+  });
+});
+
+describe('hrApi.deleteDepartment — linked-employees guard', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('refuses deletion when employees are linked (count in the message)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('SELECT COUNT(*)::int AS cnt FROM employees WHERE department_id')) {
+        return { success: true, rows: [{ cnt: 3 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.deleteDepartment('dep-1', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('لا يمكن حذف القسم');
+    expect(res.error).toContain('3');
+  });
+
+  it('deletes when no employees are linked', async () => {
+    let deleted = false;
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('SELECT COUNT(*)::int AS cnt FROM employees WHERE department_id')) {
+        return { success: true, rows: [{ cnt: 0 }] };
+      }
+      if (sql.startsWith('DELETE FROM departments')) deleted = true;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.deleteDepartment('dep-1', COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(deleted).toBe(true);
+  });
+});
+
+// ─── Payroll components CRUD (v0.8.1) ───────────────────────────────────────
+
+describe('hrApi.createPayrollComponent', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('rejects an empty Arabic name', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.createPayrollComponent({ companyId: COMPANY_ID, nameAr: '', type: 'earning' } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('مطلوب');
+  });
+
+  it('rejects an invalid type', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.createPayrollComponent({ companyId: COMPANY_ID, nameAr: 'بدل', type: 'bonus' as never } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('نوع المكوّن غير صالح');
+  });
+
+  it('inserts a valid earning with sensible flags (affectsGross=true)', async () => {
+    let capturedParams: unknown[] = [];
+    const adapter = makeMockAdapter(async (_sql, params) => {
+      capturedParams = params;
+      return { success: true, rows: [{ id: 'pc-1' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.createPayrollComponent({
+      companyId: COMPANY_ID, nameAr: 'بدل سكن', type: 'earning',
+      calculationMethod: 'fixed', defaultAmount: 150000,
+    } as never);
+    expect(res.success).toBe(true);
+    expect(capturedParams).toContain('بدل سكن');
+    expect(capturedParams).toContain(150000);
+  });
+});
+
+describe('hrApi.updatePayrollComponent', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('builds a dynamic SET from provided fields only', async () => {
+    let capturedSql = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      capturedSql = sql;
+      return { success: true };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.updatePayrollComponent('pc-1', COMPANY_ID, { defaultAmount: 200000, isActive: false });
+    expect(res.success).toBe(true);
+    expect(capturedSql).toContain('default_amount = $1');
+    expect(capturedSql).toContain('is_active = $2');
+    expect(capturedSql).not.toContain('name_ar');
+    expect(capturedSql).toContain('updated_at = NOW()');
+  });
+});
+
+describe('hrApi.deactivatePayrollComponent — soft delete only', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('sets is_active=false and never hard-deletes', async () => {
+    let capturedSql = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      capturedSql = sql;
+      return { success: true };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.deactivatePayrollComponent('pc-1', COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(capturedSql).toContain('is_active = false');
+    expect(capturedSql).not.toContain('DELETE FROM payroll_components');
+  });
+});
+
+// ─── Attendance normalization (v0.8.1 — the "08:00" timestamptz bug) ────────
+
+describe('hrApi.saveAttendance — server-side punch normalization', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  function attendanceAdapter() {
+    const txQueries: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    adapter.transaction = vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      txQueries.push(...queries);
+      return { success: true, results: queries.map(() => ({ rows: [] })) };
+    });
+    return { adapter, txQueries };
+  }
+
+  it('combines time-only punches with the record date ("08:00" → "YYYY-MM-DD 08:00:00")', async () => {
+    const { adapter, txQueries } = attendanceAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await hrApi.saveAttendance([{
+      companyId: COMPANY_ID, employeeId: EMP_ID, date: '2026-08-31',
+      checkIn: '08:00', checkOut: '17:00', overtimeHours: 0, status: 'present',
+    } as never]);
+    expect(res.success).toBe(true);
+    const insert = txQueries.find((q) => q.sql.includes('INSERT INTO attendance'));
+    expect(insert).toBeDefined();
+    // The exact bug fix: NO bare "08:00" ever reaches a timestamptz column
+    expect(insert?.params).not.toContain('08:00');
+    expect(insert?.params).toContain('2026-08-31 08:00:00');
+    expect(insert?.params).toContain('2026-08-31 17:00:00');
+    expect(insert?.sql).toContain('::timestamptz');
+  });
+
+  it('keeps full datetimes from the AI tool and derives overtime server-side', async () => {
+    const { adapter, txQueries } = attendanceAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await hrApi.saveAttendance([{
+      companyId: COMPANY_ID, employeeId: EMP_ID, date: '2026-08-31',
+      checkIn: '2026-08-31 08:00', checkOut: '2026-08-31 18:30', overtimeHours: 0, status: 'present',
+    } as never]);
+    const insert = txQueries.find((q) => q.sql.includes('INSERT INTO attendance'));
+    expect(insert?.params).toContain('2026-08-31 08:00:00');
+    expect(insert?.params).toContain('2026-08-31 18:30:00');
+    // 10.5h worked − 8h standard = 2.5h overtime (server-derived, not client)
+    expect(insert?.params).toContain(2.5);
+  });
+
+  it('stores NULL punches for absent records (check_in nullable since 0016)', async () => {
+    const { adapter, txQueries } = attendanceAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await hrApi.saveAttendance([{
+      companyId: COMPANY_ID, employeeId: EMP_ID, date: '2026-08-31',
+      checkIn: '', checkOut: undefined, overtimeHours: 0, status: 'absent',
+    } as never]);
+    const insert = txQueries.find((q) => q.sql.includes('INSERT INTO attendance'));
+    expect(insert?.params).toContain(null);
+    expect(insert?.params).not.toContain('');
+  });
+});
+
+describe('hrApi.mapAttendanceRow — date/time mapping (Phase 45 guard)', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns YYYY-MM-DD dates and HH:mm punches from raw pg Date values', async () => {
+    // pg returns Date objects for date/timestamptz columns — String(date) is
+    // locale text ("Mon Aug 31 2026...") that never matches a date filter.
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM attendance a JOIN employees')) {
+        return {
+          success: true,
+          rows: [{
+            id: 'att-1', company_id: COMPANY_ID, employee_id: EMP_ID, employee_name: 'Ahmed',
+            date: new Date('2026-08-31T00:00:00'),           // local midnight
+            check_in: new Date('2026-08-31T08:05:00'),        // 08:05 local
+            check_out: new Date('2026-08-31T17:00:00'),       // 17:00 local
+            overtime_hours: '2.5', status: 'present',
+          }],
+        };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await hrApi.getAttendance(COMPANY_ID, 8, 2026);
+    expect(res.success).toBe(true);
+    const rec = res.data?.[0];
+    expect(rec?.date).toBe('2026-08-31');
+    expect(rec?.checkIn).toMatch(/^\d{2}:\d{2}$/);
+    expect(rec?.overtimeHours).toBe(2.5);
+  });
+});

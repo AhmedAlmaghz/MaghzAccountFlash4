@@ -24,16 +24,29 @@ export const AttendancePage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
 
-  const today = new Date().toISOString().split('T')[0];
+  // LOCAL today (toISOString() is UTC — after 21:00 local it flips to the
+  // next day and the page opens on an empty date).
+  const localToday = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const today = localToday();
   const [selectedDate, setSelectedDate] = useState(today);
-  const now = new Date();
   const [isOpen, setIsOpen] = useState(false);
 
-  const { employees } = useEmployees(companyId);
-  const { records, isLoading, save } = useAttendance(companyId, now.getMonth() + 1, now.getFullYear());
-  void now;
+  // Load the MONTH the selected date belongs to — records for other days stay
+  // available when the user browses within the same month, and switching the
+  // month re-fetches (the hook keys on month/year).
+  const selectedMonth = Number(selectedDate.slice(5, 7)) || new Date().getMonth() + 1;
+  const selectedYear = Number(selectedDate.slice(0, 4)) || new Date().getFullYear();
 
-  const filteredRecords = useMemo(() => records.filter((r) => r.date === selectedDate), [records, selectedDate]);
+  const { employees } = useEmployees(companyId);
+  const { records, isLoading, save } = useAttendance(companyId, selectedMonth, selectedYear);
+
+  const filteredRecords = useMemo(
+    () => records.filter((r) => String(r.date).slice(0, 10) === selectedDate),
+    [records, selectedDate]
+  );
 
   const presentCount = filteredRecords.filter((r) => r.status === 'present').length;
   const absentCount = filteredRecords.filter((r) => r.status === 'absent').length;
@@ -239,42 +252,62 @@ export const AttendancePage: React.FC = () => {
       </Card>
 
       {isOpen && (
-        <Modal isOpen={isOpen} title={t('hr.attendancePage.title') + ' - ' + selectedDate} onClose={() => setIsOpen(false)} size="xl">
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-            <div className="flex gap-2 items-center">
-              <span className="text-sm text-slate-500">{t('hr.attendancePage.recordingDate')}</span>
-              <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-40" />
+        <Modal isOpen={isOpen} title={t('hr.attendancePage.title') + ' - ' + selectedDate} onClose={() => setIsOpen(false)} size="4xl">
+          <div className="space-y-4">
+            <div className="flex gap-2 items-center justify-between flex-wrap">
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-slate-500">{t('hr.attendancePage.recordingDate')}</span>
+                <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-40" />
+              </div>
+              <span className="text-[11px] text-slate-400">{t('hr.attendancePage.autoDeriveHint')}</span>
             </div>
-            <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-800">
-                  <tr>
-                    <th className="px-3 py-2 text-right">{t('hr.attendancePage.table.employee')}</th>
-                    <th className="px-3 py-2">{t('hr.attendancePage.table.status')}</th>
-                    <th className="px-3 py-2">{t('hr.attendancePage.table.checkIn')}</th>
-                    <th className="px-3 py-2">{t('hr.attendancePage.table.checkOut')}</th>
-                    <th className="px-3 py-2">{t('hr.attendancePage.table.overtimeShort')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.values(formRecords).map((rec) => (
-                    <tr key={rec.employeeId} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="px-3 py-2 font-medium">{rec.employeeName}</td>
-                      <td className="px-3 py-2">
-                        <select value={rec.status} onChange={(e) => updateRecord(rec.employeeId, 'status', e.target.value)} className="border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-900 text-sm">
-                          <option value="present">{t('hr.attendancePage.status.present')}</option>
-                          <option value="absent">{t('hr.attendancePage.status.absent')}</option>
-                          <option value="late">{t('hr.attendancePage.status.late')}</option>
-                          <option value="on_leave">{t('hr.attendancePage.status.onLeave')}</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2"><Input type="time" value={rec.checkIn} onChange={(e) => updateRecord(rec.employeeId, 'checkIn', e.target.value)} className="w-28" /></td>
-                      <td className="px-3 py-2"><Input type="time" value={rec.checkOut} onChange={(e) => updateRecord(rec.employeeId, 'checkOut', e.target.value)} className="w-28" /></td>
-                      <td className="px-3 py-2"><Input type="number" value={rec.overtime} onChange={(e) => updateRecord(rec.employeeId, 'overtime', e.target.value)} className="w-20" /></td>
+            <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+              <div className="max-h-[58vh] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-800 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.06)]">
+                    <tr>
+                      <th className="px-3 py-2.5 text-right font-semibold text-slate-600 dark:text-slate-300">{t('hr.attendancePage.table.employee')}</th>
+                      <th className="px-3 py-2.5 font-semibold text-slate-600 dark:text-slate-300 w-36">{t('hr.attendancePage.table.status')}</th>
+                      <th className="px-3 py-2.5 font-semibold text-slate-600 dark:text-slate-300 w-32">{t('hr.attendancePage.table.checkIn')}</th>
+                      <th className="px-3 py-2.5 font-semibold text-slate-600 dark:text-slate-300 w-32">{t('hr.attendancePage.table.checkOut')}</th>
+                      <th className="px-3 py-2.5 font-semibold text-slate-600 dark:text-slate-300 w-28">{t('hr.attendancePage.table.overtimeShort')}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {Object.values(formRecords).map((rec) => (
+                      <tr key={rec.employeeId} className={`border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 ${rowTone[rec.status]}`}>
+                        <td className="px-3 py-2 font-medium whitespace-nowrap">{rec.employeeName}</td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={rec.status}
+                            onChange={(e) => updateRecord(rec.employeeId, 'status', e.target.value)}
+                            aria-label={t('hr.attendancePage.table.status')}
+                            title={t('hr.attendancePage.table.status')}
+                            className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-900 text-sm w-full"
+                          >
+                            <option value="present">{t('hr.attendancePage.status.present')}</option>
+                            <option value="absent">{t('hr.attendancePage.status.absent')}</option>
+                            <option value="late">{t('hr.attendancePage.status.late')}</option>
+                            <option value="on_leave">{t('hr.attendancePage.status.onLeave')}</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2"><Input type="time" value={rec.checkIn} onChange={(e) => updateRecord(rec.employeeId, 'checkIn', e.target.value)} className="w-full" /></td>
+                        <td className="px-3 py-2"><Input type="time" value={rec.checkOut} onChange={(e) => updateRecord(rec.employeeId, 'checkOut', e.target.value)} className="w-full" /></td>
+                        <td className="px-3 py-2"><Input type="number" value={rec.overtime} onChange={(e) => updateRecord(rec.employeeId, 'overtime', e.target.value)} className="w-full" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-700 text-xs">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{t('hr.attendancePage.status.present')}: {Object.values(formRecords).filter((r) => r.status === 'present').length}</span>
+                  <span className="text-rose-700 dark:text-rose-400 font-semibold">{t('hr.attendancePage.status.absent')}: {Object.values(formRecords).filter((r) => r.status === 'absent').length}</span>
+                  <span className="text-amber-700 dark:text-amber-400 font-semibold">{t('hr.attendancePage.status.late')}: {Object.values(formRecords).filter((r) => r.status === 'late').length}</span>
+                  <span className="text-blue-700 dark:text-blue-400 font-semibold">{t('hr.attendancePage.status.onLeave')}: {Object.values(formRecords).filter((r) => r.status === 'on_leave').length}</span>
+                </div>
+                <span className="text-slate-500 dark:text-slate-400">{Object.keys(formRecords).length} {t('hr.employeesPage.title')}</span>
+              </div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setIsOpen(false)}>{t('settings.common.cancel')}</Button>
@@ -285,6 +318,13 @@ export const AttendancePage: React.FC = () => {
       )}
     </div>
   );
+};
+
+const rowTone: Record<string, string> = {
+  present: '',
+  absent: 'bg-rose-50/60 dark:bg-rose-900/10',
+  late: 'bg-amber-50/60 dark:bg-amber-900/10',
+  on_leave: 'bg-blue-50/60 dark:bg-blue-900/10',
 };
 
 const statusLabel = (status: string, t: (key: string) => string) => {

@@ -4,12 +4,13 @@ import { validateInput, idCompanySchema, companyIdSchema, createEmployeeSchema }
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { getNextDocumentNumber } from '@/core/api';
 import { runTransaction, buildJournalEntryStatement, type TxStatement } from '@/core/database/tx';
+import { toDateString } from '@/core/utils/mapPgRow';
 import {
   buildPolicy, computeLeaveDays, leavesOverlap, computeLeaveBalance, computePayroll,
   computeEos, deriveAttendance,
   type HrPolicy, type PayrollComponentRule, type ComputedPayroll, type LeaveBalance,
 } from './payrollEngine';
-import type { Employee, AttendanceRecord, PayrollRun, PayrollLine, Leave, EndOfService } from './types';
+import type { Employee, AttendanceRecord, PayrollRun, PayrollLine, Leave, EndOfService, Department, PayrollComponent } from './types';
 
 // ─── Input DTOs (server-computed fields are NOT accepted from callers) ──────
 
@@ -30,6 +31,8 @@ export interface CreatePayrollRunInput {
   month: number;
   year: number;
   status: 'draft' | 'posted';
+  /** Free-text note stored on the run (payroll_runs.notes — migration 0016). */
+  notes?: string;
   /** Optional per-employee allowance/deduction adjustments (extra on top of components). */
   lines: Array<Pick<PayrollLine, 'employeeId'> & Partial<Pick<PayrollLine, 'allowances' | 'deductions'>>>;
 }
@@ -429,18 +432,43 @@ export const hrApi = {
       const cidValidation = validateInput(companyIdSchema, records[0].companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
 
-      // Server-side derivation: late status + overtime from company policy
-      // (manual per-record overtime overrides are respected when > 0).
+      // Server-side normalization + derivation.
+      //
+      // NORMALIZATION (bug fix "invalid input syntax for type timestamp: 08:00"):
+      // `attendance.check_in/check_out` are timestamptz columns, but callers
+      // send one of three shapes — time-only ("08:00" from the UI time input),
+      // full datetime ("2026-08-31 08:00" from the AI tool), or empty. We
+      // normalize to "YYYY-MM-DD HH:mm:ss" (or NULL) BEFORE any branch so both
+      // the RPC and the fallback receive identical, valid values.
+      const normalizePunch = (punch: string | undefined, date: string): string | null => {
+        const raw = String(punch || '').trim();
+        if (!raw) return null;
+        // Full datetime already? Keep the date part + time part.
+        const dt = /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}:\d{2})(:\d{2})?/.exec(raw);
+        if (dt) return `${dt[1]} ${dt[2]}:00${dt[3] || ''}`.replace(/:00(\d\d)$/, ':00');
+        // Time-only "HH:mm(:ss)" — combine with the record's date.
+        const tm = /^(\d{1,2}):(\d{2})(:(\d{2}))?$/.exec(raw);
+        if (tm) {
+          const hh = tm[1].padStart(2, '0');
+          return `${date} ${hh}:${tm[2]}:${tm[4] || '00'}`;
+        }
+        return null; // unparseable → NULL (never send a bare time to a timestamp column)
+      };
+
       const policy = await loadHrPolicy(records[0].companyId);
       const prepared = records.map((r) => {
         const status = (['present', 'absent', 'late', 'on_leave'] as const).includes(r.status) ? r.status : 'present';
+        const normIn = normalizePunch(r.checkIn, r.date);
+        const normOut = normalizePunch(r.checkOut, r.date);
         let derivedOvertime: number | undefined;
-        if (r.checkIn && r.checkOut && status === 'present') {
-          derivedOvertime = deriveAttendance(r.checkIn.slice(0, 19), r.checkOut.slice(0, 19), policy, '08:00:00').overtimeHours;
+        if (normIn && normOut && status === 'present') {
+          derivedOvertime = deriveAttendance(normIn, normOut, policy, '08:00:00').overtimeHours;
         }
         const manualOvertime = Number(r.overtimeHours) || 0;
         return {
           ...r,
+          checkIn: normIn ?? undefined,
+          checkOut: normOut ?? undefined,
           status,
           // Manual overtime wins when provided; otherwise server-derived.
           overtimeHours: manualOvertime > 0 ? manualOvertime : (derivedOvertime ?? 0),
@@ -481,9 +509,9 @@ export const hrApi = {
         const key = `${rec.employeeId}:${rec.date}`;
         const existingId = existingMap.get(key);
         if (existingId) {
-          queries.push({ sql: 'UPDATE attendance SET check_in = $1, check_out = $2, overtime_hours = $3, status = $4, notes = $5, updated_by = $8 WHERE id = $6 AND company_id = $7', params: [rec.checkIn, rec.checkOut, rec.overtimeHours, rec.status, rec.notes, existingId, rec.companyId, safeUserId(_userId)] });
+          queries.push({ sql: 'UPDATE attendance SET check_in = $1::timestamptz, check_out = $2::timestamptz, overtime_hours = $3, status = $4, notes = $5, updated_by = $8 WHERE id = $6 AND company_id = $7', params: [rec.checkIn ?? null, rec.checkOut ?? null, rec.overtimeHours, rec.status, rec.notes ?? null, existingId, rec.companyId, safeUserId(_userId)] });
         } else {
-          queries.push({ sql: 'INSERT INTO attendance (company_id, employee_id, date, check_in, check_out, overtime_hours, status, notes, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', params: [rec.companyId, rec.employeeId, rec.date, rec.checkIn, rec.checkOut, rec.overtimeHours, rec.status, rec.notes, safeUserId(_userId), safeUserId(_userId)] });
+          queries.push({ sql: 'INSERT INTO attendance (company_id, employee_id, date, check_in, check_out, overtime_hours, status, notes, created_by, updated_by) VALUES ($1,$2,$3,$4::timestamptz,$5::timestamptz,$6,$7,$8,$9,$10)', params: [rec.companyId, rec.employeeId, rec.date, rec.checkIn ?? null, rec.checkOut ?? null, rec.overtimeHours, rec.status, rec.notes ?? null, safeUserId(_userId), safeUserId(_userId)] });
         }
       }
       const result = await adapter.transaction(queries);
@@ -696,6 +724,7 @@ export const hrApi = {
           totalAmount,
           status: data.status,
           runNumber: runNumber ?? null,
+          notes: data.notes ?? null,
           lines: lines.map((line) => ({
             employeeId: line.employeeId,
             baseSalary: line.baseSalary,
@@ -710,7 +739,7 @@ export const hrApi = {
       }
 
       const tx = await adapter.transaction([
-        { sql: `INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, params: [data.companyId, data.month, data.year, totalAmount, data.status, runNumber || null, safeUserId(_userId), safeUserId(_userId)] },
+        { sql: `INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, notes, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, params: [data.companyId, data.month, data.year, totalAmount, data.status, runNumber || null, data.notes ?? null, safeUserId(_userId), safeUserId(_userId)] },
       ]);
       if (tx.success && tx.results?.[0]?.rows?.[0]) {
         const runId = tx.results[0].rows[0].id as string;
@@ -1470,24 +1499,209 @@ export const hrApi = {
     }
   },
 
-  // ─── Departments (read-only lookup for the employee form select) ───────────
-  async getDepartments(companyId: string): Promise<{ success: boolean; data?: Array<{ id: string; name: string }>; error?: string }> {
+  // ─── Departments ───────────────────────────────────────────────────────────
+  // NOTE: no dedicated `db:rpc:hr.*` handlers exist for departments — these
+  // methods run through `adapter.query` on BOTH environments. In Electron the
+  // `db:internal-query` channel applies assertSqlAuthorized and the
+  // SQL_MODULE_TABLE_RULES hr rule covers the `departments` table.
+  async getDepartments(companyId: string): Promise<{ success: boolean; data?: Department[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      // Plain SELECT on `departments` — permitted for hr.view users through the
-      // fallback path; in Electron the generic-transaction guard applies and the
-      // SQL_MODULE_TABLE_RULES hr rule already whitelists this read.
       const adapter = await getDbAdapter();
-      const result = await adapter.query<{ id: string; name: string }>(
-        `SELECT id, name FROM departments WHERE company_id = $1::uuid ORDER BY name`,
+      const result = await adapter.query(
+        `SELECT d.id, d.company_id, d.name, d.manager_id, mu.full_name AS manager_name,
+                (SELECT COUNT(*)::int FROM employees e WHERE e.department_id = d.id AND e.company_id = d.company_id) AS employee_count
+           FROM departments d
+           LEFT JOIN users mu ON d.manager_id = mu.id
+          WHERE d.company_id = $1::uuid
+          ORDER BY d.name`,
         [companyId],
       );
       if (!result.success) return { success: false, error: result.error };
       return {
         success: true,
-        data: (result.rows || []).map((r) => ({ id: String(r.id), name: String(r.name) })),
+        data: (result.rows || []).map((r: Record<string, unknown>) => mapDepartmentRow(r)),
       };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createDepartment(data: { companyId: string; name: string; managerId?: string }, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, data.companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!data.name || !data.name.trim()) return { success: false, error: 'اسم القسم مطلوب.' };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `INSERT INTO departments (company_id, name, manager_id, created_by, updated_by)
+         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::uuid) RETURNING id`,
+        [data.companyId, data.name.trim(), data.managerId || null, safeUserId(_userId), safeUserId(_userId)],
+      );
+      if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateDepartment(id: string, companyId: string, data: { name?: string; managerId?: string | null }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (data.name !== undefined && !data.name.trim()) return { success: false, error: 'اسم القسم مطلوب.' };
+      if (data.name === undefined && data.managerId === undefined) return { success: true };
+      const adapter = await getDbAdapter();
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (data.name !== undefined) { fields.push(`name = $${idx++}`); values.push(data.name.trim()); }
+      if (data.managerId !== undefined) { fields.push(`manager_id = $${idx++}::uuid`); values.push(data.managerId || null); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(safeUserId(_userId));
+      values.push(id);
+      values.push(companyId);
+      const result = await adapter.query(
+        `UPDATE departments SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`,
+        values,
+      );
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deleteDepartment(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      // Guard: a department with linked employees must not be deleted —
+      // moving the employees first is the user's job.
+      const count = await adapter.query<{ cnt: string | number }>(
+        `SELECT COUNT(*)::int AS cnt FROM employees WHERE department_id = $1::uuid AND company_id = $2::uuid`,
+        [id, companyId],
+      );
+      const linked = Number(count.rows?.[0]?.cnt || 0);
+      if (linked > 0) {
+        return { success: false, error: `لا يمكن حذف القسم لوجود ${linked} موظف مرتبط به — انقل الموظفين إلى قسم آخر أولاً.` };
+      }
+      const result = await adapter.query('DELETE FROM departments WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // ─── Payroll Components (unified API — the engine + AI + UI all call these) ──
+  async getPayrollComponentsList(companyId: string): Promise<{ success: boolean; data?: PayrollComponent[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `SELECT * FROM payroll_components WHERE company_id = $1::uuid ORDER BY type, name_ar`,
+        [companyId],
+      );
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapPayrollComponentRow(r)) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createPayrollComponent(data: {
+    companyId: string;
+    nameAr: string;
+    nameEn?: string;
+    code?: string;
+    type: PayrollComponent['type'];
+    calculationMethod?: PayrollComponent['calculationMethod'];
+    defaultAmount?: number;
+    isActive?: boolean;
+  }, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, data.companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!data.nameAr || !data.nameAr.trim()) return { success: false, error: 'اسم المكوّن بالعربية مطلوب.' };
+      const validTypes = ['earning', 'deduction', 'tax', 'insurance', 'net'] as const;
+      const validMethods = ['fixed', 'percentage', 'formula'] as const;
+      const type = validTypes.includes(data.type) ? data.type : null;
+      if (!type) return { success: false, error: 'نوع المكوّن غير صالح (earning/deduction/tax/insurance/net).' };
+      const method = (data.calculationMethod && validMethods.includes(data.calculationMethod)) ? data.calculationMethod : 'fixed';
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `INSERT INTO payroll_components (company_id, name_ar, name_en, code, type, calculation_method, default_amount, affects_gross_salary, affects_tax, affects_social_insurance, is_active, created_by, updated_by)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $13::uuid) RETURNING id`,
+        [data.companyId, data.nameAr.trim(), data.nameEn || null, data.code || null, type, method, data.defaultAmount ?? 0, type === 'earning', type === 'tax', type === 'insurance', data.isActive ?? true, safeUserId(_userId), safeUserId(_userId)],
+      );
+      if (result.success && result.rows?.[0]) return { success: true, id: String(result.rows[0].id) };
+      return { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updatePayrollComponent(id: string, companyId: string, data: {
+    nameAr?: string;
+    nameEn?: string;
+    code?: string;
+    type?: PayrollComponent['type'];
+    calculationMethod?: PayrollComponent['calculationMethod'];
+    defaultAmount?: number;
+    isActive?: boolean;
+  }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (data.nameAr !== undefined && !data.nameAr.trim()) return { success: false, error: 'اسم المكوّن بالعربية مطلوب.' };
+      const validTypes = ['earning', 'deduction', 'tax', 'insurance', 'net'] as const;
+      const validMethods = ['fixed', 'percentage', 'formula'] as const;
+      if (data.type !== undefined && !validTypes.includes(data.type)) return { success: false, error: 'نوع المكوّن غير صالح.' };
+      if (data.calculationMethod !== undefined && !validMethods.includes(data.calculationMethod)) return { success: false, error: 'طريقة الحساب غير صالحة.' };
+      const adapter = await getDbAdapter();
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (data.nameAr !== undefined) { fields.push(`name_ar = $${idx++}`); values.push(data.nameAr.trim()); }
+      if (data.nameEn !== undefined) { fields.push(`name_en = $${idx++}`); values.push(data.nameEn || null); }
+      if (data.code !== undefined) { fields.push(`code = $${idx++}`); values.push(data.code || null); }
+      if (data.type !== undefined) { fields.push(`type = $${idx++}`); values.push(data.type); }
+      if (data.calculationMethod !== undefined) { fields.push(`calculation_method = $${idx++}`); values.push(data.calculationMethod); }
+      if (data.defaultAmount !== undefined) { fields.push(`default_amount = $${idx++}`); values.push(data.defaultAmount); }
+      if (data.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(data.isActive); }
+      if (fields.length === 0) return { success: true };
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(safeUserId(_userId));
+      fields.push('updated_at = NOW()');
+      values.push(id);
+      values.push(companyId);
+      const result = await adapter.query(
+        `UPDATE payroll_components SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`,
+        values,
+      );
+      return { success: result.success, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * Soft delete only — components may be referenced by past payroll runs so a
+   * HARD delete is unsafe; deactivation keeps history intact.
+   */
+  async deactivatePayrollComponent(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `UPDATE payroll_components SET is_active = false, updated_by = $3::uuid, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [id, companyId, safeUserId(_userId)],
+      );
+      return { success: result.success, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -1584,15 +1798,27 @@ function mapEmployeeRow(r: Record<string, unknown>): Employee {
   };
 }
 
+/** Local "HH:mm" from a timestamptz/Date value (page tables split on ':'). */
+function punchTime(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const d = value instanceof Date ? value : new Date(String(value));
+  if (isNaN(d.getTime())) return undefined;
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 function mapAttendanceRow(r: Record<string, unknown>): AttendanceRecord {
   return {
     id: String(r.id),
     companyId: String(r.company_id),
     employeeId: String(r.employee_id),
     employeeName: r.employee_name ? String(r.employee_name) : undefined,
-    date: String(r.date),
-    checkIn: r.check_in ? String(r.check_in) : undefined,
-    checkOut: r.check_out ? String(r.check_out) : undefined,
+    // toDateString (Phase 45 guard): pg returns Date objects for date columns —
+    // String(date) yields locale text that never matches a "YYYY-MM-DD" filter.
+    date: toDateString(r.date) ?? String(r.date),
+    checkIn: punchTime(r.check_in),
+    checkOut: punchTime(r.check_out),
     overtimeHours: r.overtime_hours ? Number(r.overtime_hours) : undefined,
     status: String(r.status) as AttendanceRecord['status'],
     notes: r.notes ? String(r.notes) : undefined,
@@ -1608,6 +1834,7 @@ function mapPayrollRunRow(r: Record<string, unknown>): PayrollRun {
     totalAmount: Number(r.total_amount) || 0,
     status: String(r.status) as PayrollRun['status'],
     runNumber: r.run_number ? String(r.run_number) : undefined,
+    notes: r.notes ? String(r.notes) : undefined,
     lines: [],
   };
 }
@@ -1656,5 +1883,36 @@ function mapEosRow(r: Record<string, unknown>): EndOfService {
     cashBoxId: r.cash_box_id ? String(r.cash_box_id) : undefined,
     paidAt: r.paid_at ? String(r.paid_at) : undefined,
     notes: r.notes ? String(r.notes) : undefined,
+  };
+}
+
+function mapDepartmentRow(r: Record<string, unknown>): Department {
+  return {
+    id: String(r.id),
+    companyId: String(r.company_id),
+    name: String(r.name),
+    managerId: r.manager_id ? String(r.manager_id) : undefined,
+    managerName: r.manager_name ? String(r.manager_name) : undefined,
+    employeeCount: Number(r.employee_count) || 0,
+    createdAt: r.created_at ? String(r.created_at) : undefined,
+  };
+}
+
+function mapPayrollComponentRow(r: Record<string, unknown>): PayrollComponent {
+  return {
+    id: String(r.id),
+    companyId: String(r.company_id),
+    nameAr: String(r.name_ar),
+    nameEn: r.name_en ? String(r.name_en) : undefined,
+    code: r.code ? String(r.code) : undefined,
+    type: String(r.type) as PayrollComponent['type'],
+    calculationMethod: String(r.calculation_method || 'fixed') as PayrollComponent['calculationMethod'],
+    defaultAmount: Number(r.default_amount) || 0,
+    affectsGrossSalary: r.affects_gross_salary === true,
+    affectsTax: r.affects_tax === true,
+    affectsSocialInsurance: r.affects_social_insurance === true,
+    isActive: r.is_active === true,
+    defaultAccountId: r.default_account_id ? String(r.default_account_id) : undefined,
+    createdAt: r.created_at ? String(r.created_at) : undefined,
   };
 }

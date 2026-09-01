@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { hrApi } from '@/modules/hr/api';
-import { getPayrollComponents } from '@/core/api';
+import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
 
 /**
  * HR professional tools — built on the professionalized hrApi surface where
@@ -18,6 +18,37 @@ function num(v: unknown): number {
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * Token-aware fuzzy search (same pattern as searchTools.fuzzySearch): the full
+ * query or any individual token (≥2 chars) must score ≥ threshold against the
+ * item's key — multi-word Arabic requests match per-token while exact hits rank
+ * highest. Returns best-first matches capped at `limit`.
+ */
+function fuzzySearch<T>(
+  query: string,
+  items: T[],
+  keyFn: (item: T) => string,
+  limit = 8,
+  threshold = 0.35,
+): Array<{ item: T; score: number }> {
+  const nq = normalizeArabic(query);
+  if (!nq) return [];
+  const tokens = [...new Set(nq.split(/\s+/).filter((tk) => tk.length >= 2))];
+  return items
+    .map((item) => {
+      const key = normalizeArabic(keyFn(item));
+      let best = fuzzyMatchScore(nq, key);
+      for (const tk of tokens) {
+        const s = fuzzyMatchScore(tk, key);
+        if (s > best) best = s;
+      }
+      return { item, score: best };
+    })
+    .filter((m) => m.score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 /**
@@ -174,7 +205,7 @@ export const hrTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: { type: 'object', properties: {} },
     execute: async (_args, ctx) => {
-      const res = await getPayrollComponents(ctx.companyId);
+      const res = await hrApi.getPayrollComponentsList(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب مكونات الرواتب' };
       return {
         components: res.data.map((c) => ({
@@ -370,6 +401,126 @@ export const hrTools: ToolDefinition[] = [
       const res = await hrApi.deletePayrollRun(id, ctx.companyId, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل حذف المسير (المسيرات المرحّلة لا تُحذف)' };
       return { deleted: true, payrollRunId: id };
+    },
+  },
+
+  // ─── READ: Search departments ──────────────────────────────────────────
+  {
+    name: 'search.departments',
+    labelAr: 'البحث في الأقسام',
+    descriptionAr: 'يبحث في أقسام الشركة بالاسم أو اسم المدير — يرجع المعرف وعدد الموظفين المرتبطين. استخدمه قبل أي عملية على قسم.',
+    permission: 'hr.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'اسم القسم أو المدير (نص حر)' },
+      },
+      required: ['query'],
+    },
+    execute: async (args, ctx) => {
+      const query = str(args.query);
+      if (!query) return { error: 'query مطلوب — اكتب اسم القسم أو المدير' };
+      const res = await hrApi.getDepartments(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأقسام' };
+      const matches = fuzzySearch(query, res.data, (d) => `${d.name} ${d.managerName ?? ''}`);
+      if (matches.length === 0) {
+        return { departments: [], note: 'لا توجد أقسام مطابقة — جرّب اسماً أدق أو أضف القسم عبر hr.create_department' };
+      }
+      return {
+        departments: matches.map((m) => ({
+          id: m.item.id,
+          name: m.item.name,
+          managerName: m.item.managerName,
+          employeeCount: m.item.employeeCount,
+        })),
+      };
+    },
+  },
+
+  // ─── WRITE: Create department ───────────────────────────────────────────
+  {
+    name: 'hr.create_department',
+    labelAr: 'إنشاء قسم',
+    descriptionAr: 'ينشئ قسماً جديداً باسمه ومديره (اختياري). استخدم search.departments أولاً للتأكد من عدم التكرار.',
+    permission: 'hr.create',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'اسم القسم (إلزامي)' },
+        managerId: { type: 'string', description: 'معرف المدير من المستخدمين (اختياري)' },
+      },
+      required: ['name'],
+    },
+    summarizeArgs: (a) => `إنشاء قسم: ${String((a as Record<string, unknown>).name || '').slice(0, 30)}`,
+    execute: async (args, ctx) => {
+      const name = str(args.name);
+      if (!name) return { error: 'name مطلوب — اسم القسم إلزامي' };
+      const managerId = str(args.managerId);
+      const res = await hrApi.createDepartment({ companyId: ctx.companyId, name, managerId }, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل إنشاء القسم' };
+      return { created: true, id: res.id, name };
+    },
+  },
+
+  // ─── WRITE: Update department ────────────────────────────────────────────
+  {
+    name: 'hr.update_department',
+    labelAr: 'تعديل قسم',
+    descriptionAr: 'يُعدّل اسم قسم أو مديره. استخدم search.departments أولاً للحصول على المعرف.',
+    permission: 'hr.edit',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'معرف القسم (من search.departments) — إلزامي' },
+        name: { type: 'string', description: 'الاسم الجديد (اختياري)' },
+        managerId: { type: 'string', description: 'معرف المدير الجديد — أرسل null لإزالة المدير (اختياري)' },
+      },
+      required: ['id'],
+    },
+    summarizeArgs: (a) => `تعديل قسم: ${String(a.id).slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const id = str(args.id);
+      if (!id) return { error: 'id مطلوب — استخدم search.departments أولاً' };
+      const data: { name?: string; managerId?: string | null } = {};
+      if (args.name !== undefined) {
+        const name = str(args.name);
+        if (!name) return { error: 'name لا يمكن أن يكون فارغاً' };
+        data.name = name;
+      }
+      if (args.managerId !== undefined) {
+        data.managerId = str(args.managerId) ?? null;
+      }
+      if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل (name أو managerId)' };
+      const res = await hrApi.updateDepartment(id, ctx.companyId, data, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل تعديل القسم' };
+      return { updated: true, departmentId: id };
+    },
+  },
+
+  // ─── WRITE: Delete department ────────────────────────────────────────────
+  {
+    name: 'hr.delete_department',
+    labelAr: 'حذف قسم',
+    descriptionAr: 'يحذف قسماً — يرفض النظام حذف قسم به موظفون مرتبطون ويطالب بنقلهم أولاً. استخدم search.departments أولاً.',
+    permission: 'hr.delete',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'معرف القسم (من search.departments) — إلزامي' },
+      },
+      required: ['id'],
+    },
+    summarizeArgs: (a) => `حذف قسم: ${String(a.id).slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const id = str(args.id);
+      if (!id) return { error: 'id مطلوب — استخدم search.departments أولاً' };
+      const res = await hrApi.deleteDepartment(id, ctx.companyId);
+      if (!res.success) return { error: res.error || 'فشل حذف القسم' };
+      return { deleted: true, departmentId: id };
     },
   },
 ];

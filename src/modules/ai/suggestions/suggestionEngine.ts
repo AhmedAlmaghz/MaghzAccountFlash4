@@ -150,6 +150,10 @@ const TOOL_ROUTES: Array<{ prefixes: string[]; target: RouteTarget }> = [
     target: { path: '/hr/end-of-service', labelKey: 'ai.actions.openEndOfService' },
   },
   {
+    prefixes: ['search.departments', 'hr.create_department', 'hr.update_department', 'hr.delete_department'],
+    target: { path: '/hr/departments', labelKey: 'ai.actions.openDepartments' },
+  },
+  {
     prefixes: ['crm.create_lead', 'crm.convert_lead_to_customer', 'crm.update_lead_status', 'crm.qualify_lead', 'crm.update_lead', 'crm.delete_lead', 'crm.get_leads'],
     target: { path: '/crm/leads', labelKey: 'ai.actions.openLeads' },
   },

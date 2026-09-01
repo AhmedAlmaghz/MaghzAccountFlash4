@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Users, UserCheck, Banknote, Calendar, LogOut, HeartHandshake, Sparkles, Sliders } from 'lucide-react';
+import { Users, UserCheck, Banknote, Calendar, LogOut, HeartHandshake, Sparkles, Sliders, Building2 } from 'lucide-react';
 import { cn } from '@/core/utils';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { Card } from '@/core/ui/components';
@@ -22,6 +22,7 @@ export const HrPage: React.FC = () => {
 
   const hrMenu: Array<{ id: string; labelKey: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
     { id: 'employees', labelKey: 'hr.page.menu.employees', desc: 'ملفات الموظفين والرواتب الأساسية والأقسام', icon: Users, path: '/hr/employees', color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', count: employeesTotal },
+    { id: 'departments', labelKey: 'sidebar.hr.departments', desc: 'إدارة أقسام الموظفين ومديريها', icon: Building2, path: '/hr/departments', color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', count: null },
     { id: 'attendance', labelKey: 'hr.page.menu.attendance', desc: 'تسجيل الحضور اليومي والساعات الإضافية', icon: UserCheck, path: '/hr/attendance', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: null },
     { id: 'payroll', labelKey: 'hr.page.menu.payroll', desc: 'مسيرات الرواتب الشهرية والترحيل المحاسبي', icon: Banknote, path: '/hr/payroll', color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', count: payrollTotal },
     { id: 'leaves', labelKey: 'hr.page.menu.leaves', desc: 'طلبات الإجازات والموافقات والأرصدة', icon: Calendar, path: '/hr/leaves', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: pendingLeavesTotal },

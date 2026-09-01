@@ -225,4 +225,27 @@ describe('deriveAttendance', () => {
     expect(deriveAttendance('08:30', '17:00', custom, '08:00').isLate).toBe(false);
     expect(deriveAttendance('08:00', '17:00', custom, '08:00').overtimeHours).toBe(0); // 9h − 9h
   });
+
+  it('accepts FULL datetime punches ("2026-08-31 08:00") — the AI-tool format', () => {
+    // Regression: the old ^(\d{1,2}):(\d{2}) anchor never matched a datetime
+    // prefix, so AI-issued attendance derived 0 overtime silently.
+    const res = deriveAttendance('2026-08-31 08:00', '2026-08-31 17:00', policy, '08:00');
+    expect(res.workedHours).toBe(9);
+    expect(res.overtimeHours).toBe(1);
+    expect(res.isLate).toBe(false);
+
+    const late = deriveAttendance('2026-08-31T09:30:00', '2026-08-31T17:00:00', policy, '08:00');
+    expect(late.isLate).toBe(true);
+    expect(late.overtimeHours).toBe(0); // 7.5h − 8h → 0
+  });
+
+  it('still accepts time-only punches ("08:00") — the UI format', () => {
+    expect(deriveAttendance('08:00', '17:00', policy, '08:00').workedHours).toBe(9);
+    expect(deriveAttendance('08:00:00', '17:00:00', policy, '08:00:00').workedHours).toBe(9);
+  });
+
+  it('rejects impossible times out of the 24h clock', () => {
+    expect(deriveAttendance('25:00', '26:00', policy).workedHours).toBe(0);
+    expect(deriveAttendance('08:99', '17:00', policy).workedHours).toBe(0);
+  });
 });

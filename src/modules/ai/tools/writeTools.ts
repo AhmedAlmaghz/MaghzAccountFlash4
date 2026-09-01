@@ -26,8 +26,6 @@ import {
   createCostCenter,
   updateCostCenter,
   deleteCostCenter,
-  createPayrollComponent,
-  updatePayrollComponent,
   updateDefaultAccount,
   applyDefaultTemplate,
 } from '@/core/api';
@@ -3390,7 +3388,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.create_payroll_component',
     labelAr: 'إضافة عنصر راتب',
     descriptionAr: 'يُضيف عنصر راتب جديد — الاسم، النوع (إضافة/خصم)، طريقة الحساب، القيمة.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3405,17 +3403,22 @@ export const writeTools: ToolDefinition[] = [
       required: ['nameAr', 'type'],
     },
     summarizeArgs: (a) => `إضافة عنصر راتب: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       if (!nameAr) return { error: 'nameAr مطلوب' };
-      const type = str(args.type);
-      if (!type) return { error: 'type مطلوب — allowance أو deduction' };
-      const data: Record<string, unknown> = { nameAr, type };
-      if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      if (args.calculationMethod !== undefined) data.calculationMethod = str(args.calculationMethod);
-      if (args.value !== undefined) data.value = num(args.value);
-      data.isActive = args.isActive !== undefined ? Boolean(args.isActive) : true;
-      const res = await createPayrollComponent(data as Parameters<typeof createPayrollComponent>[0]);
+      const rawType = str(args.type);
+      if (!rawType) return { error: 'type مطلوب — allowance أو deduction' };
+      // Map legacy tool vocabulary to the payroll_components enum
+      const type = rawType === 'deduction' ? 'deduction' as const : 'earning' as const;
+      const res = await hrApi.createPayrollComponent({
+        companyId: ctx.companyId,
+        nameAr,
+        nameEn: str(args.nameEn),
+        type,
+        calculationMethod: str(args.calculationMethod) as 'fixed' | 'percentage' | undefined,
+        defaultAmount: args.value !== undefined ? num(args.value) : 0,
+        isActive: args.isActive !== undefined ? Boolean(args.isActive) : true,
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إضافة عنصر الراتب' };
       return { created: true, id: res.id };
     },
@@ -3426,7 +3429,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_payroll_component',
     labelAr: 'تعديل عنصر راتب',
     descriptionAr: 'يُحدّث عنصر راتب — الاسم، النوع، طريقة الحساب، القيمة، التفعيل. استخدم settings.get_payroll_components أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3445,17 +3448,44 @@ export const writeTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const componentId = str(args.componentId);
       if (!componentId) return { error: 'componentId مطلوب — استخدم settings.get_payroll_components أولاً' };
-      const data: Record<string, unknown> = {};
+      const data: Parameters<typeof hrApi.updatePayrollComponent>[2] = {};
       if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      if (args.type !== undefined) data.type = str(args.type);
-      if (args.calculationMethod !== undefined) data.calculationMethod = str(args.calculationMethod);
-      if (args.value !== undefined) data.value = num(args.value);
+      if (args.type !== undefined) {
+        const rawType = str(args.type);
+        data.type = rawType === 'deduction' ? 'deduction' : 'earning';
+      }
+      if (args.calculationMethod !== undefined) data.calculationMethod = str(args.calculationMethod) as 'fixed' | 'percentage' | 'formula';
+      if (args.value !== undefined) data.defaultAmount = num(args.value);
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
-      const res = await updatePayrollComponent(componentId, data, ctx.companyId);
+      const res = await hrApi.updatePayrollComponent(componentId, ctx.companyId, data, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل تعديل عنصر الراتب' };
       return { updated: true, componentId };
+    },
+  },
+
+  // ─── Settings: Deactivate Payroll Component ──────────────────────────
+  {
+    name: 'settings.deactivate_payroll_component',
+    labelAr: 'تعطيل عنصر راتب',
+    descriptionAr: 'يعطّل عنصر راتب (بدون حذف — العناصر المرتبطة بمسيرات سابقة تبقى سليمة). لن يستخدمه محرك الرواتب في الحسابات القادمة. استخدم settings.get_payroll_components أولاً.',
+    permission: 'settings.edit',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        componentId: { type: 'string', description: 'معرف العنصر (UUID)' },
+      },
+      required: ['componentId'],
+    },
+    summarizeArgs: (a) => `تعطيل عنصر راتب: ${String((a as Record<string, unknown>).componentId || '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const componentId = str(args.componentId);
+      if (!componentId) return { error: 'componentId مطلوب — استخدم settings.get_payroll_components أولاً' };
+      const res = await hrApi.deactivatePayrollComponent(componentId, ctx.companyId, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل تعطيل عنصر الراتب' };
+      return { deactivated: true, componentId, note: 'لن يستخدمه محرك الرواتب في الحسابات القادمة — المسيرات السابقة كما هي' };
     },
   },
 

@@ -1,7 +1,34 @@
+export interface Department {
+  id: string;
+  companyId: string;
+  name: string;
+  managerId?: string;
+  managerName?: string;
+  employeeCount: number;
+  createdAt?: string;
+}
+
+export interface PayrollComponent {
+  id: string;
+  companyId: string;
+  nameAr: string;
+  nameEn?: string;
+  code?: string;
+  type: 'earning' | 'deduction' | 'tax' | 'insurance' | 'net';
+  calculationMethod: 'fixed' | 'percentage' | 'formula';
+  defaultAmount: number;
+  affectsGrossSalary: boolean;
+  affectsTax: boolean;
+  affectsSocialInsurance: boolean;
+  isActive: boolean;
+  defaultAccountId?: string;
+  createdAt?: string;
+}
+
 export interface Employee {
-id: string;
-companyId: string;
-employeeNumber: string;
+  id: string;
+  companyId: string;
+  employeeNumber: string;
 fullName: string;
 nationalId?: string;
 phone?: string;

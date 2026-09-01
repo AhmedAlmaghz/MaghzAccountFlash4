@@ -318,9 +318,10 @@ export interface DerivedAttendance {
 }
 
 /**
- * Derive late/overtime from punches + policy. `officialStart` is the
- * work-day start "HH:MM" (defaults 08:00 when empty so API callers can pass
- * policy values; the API uses settings when present).
+ * Derive late/overtime from punches + policy. Accepts BOTH punch formats:
+ *   - time-only:      "08:00" / "08:00:00"        (UI <input type="time">)
+ *   - full timestamp: "2026-08-31 08:00" / "...T08:00:00"  (AI tool / API)
+ * `officialStart` is the work-day start "HH:MM" (defaults 08:00 when empty).
  */
 export function deriveAttendance(
   checkIn: string,
@@ -328,10 +329,16 @@ export function deriveAttendance(
   policy: HrPolicy,
   officialStart = '08:00',
 ): DerivedAttendance {
+  // Extract the TIME part from either format: "HH:mm[:ss]" possibly preceded
+  // by a date ("YYYY-MM-DD HH:mm" or "YYYY-MM-DDTHH:mm"). Anchored at the end
+  // so the date digits are never mistaken for hours.
   const toMin = (t: string): number => {
-    const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '').trim());
+    const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*$/.exec(String(t || '').trim());
     if (!m) return NaN;
-    return Number(m[1]) * 60 + Number(m[2]);
+    const h = Number(m[1]);
+    const mm = Number(m[2]);
+    if (h > 23 || mm > 59) return NaN;
+    return h * 60 + mm;
   };
   const inMin = toMin(checkIn);
   const outMin = toMin(checkOut);

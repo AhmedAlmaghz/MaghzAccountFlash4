@@ -434,3 +434,81 @@ export function useDepartments(companyId: string) {
 
   return { departments, isLoading };
 }
+
+/** Full departments CRUD (in-memory list + reload-after-mutation). */
+export function useDepartmentsCrud(companyId: string) {
+  const [items, setItems] = useState<import('../types').Department[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const user = useAuthStore((s) => s.user);
+
+  const load = useCallback(async () => {
+    if (!companyId) return;
+    setIsLoading(true);
+    const res = await hrApi.getDepartments(companyId);
+    if (res.success && res.data) setItems(res.data);
+    setIsLoading(false);
+  }, [companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const create = useCallback(async (data: { companyId: string; name: string; managerId?: string }) => {
+    const res = await hrApi.createDepartment(data, user?.id);
+    if (res.success) await load();
+    return res;
+  }, [load, user?.id]);
+
+  const update = useCallback(async (id: string, data: { name?: string; managerId?: string | null }) => {
+    const res = await hrApi.updateDepartment(id, companyId, data, user?.id);
+    if (res.success) await load();
+    return res;
+  }, [load, companyId, user?.id]);
+
+  const remove = useCallback(async (id: string) => {
+    const res = await hrApi.deleteDepartment(id, companyId);
+    if (res.success) await load();
+    return res;
+  }, [load, companyId]);
+
+  return { items, isLoading, create, update, remove, reload: load };
+}
+
+/** Payroll components CRUD (in-memory list + reload-after-mutation). */
+export function usePayrollComponentsCrud(companyId: string) {
+  const [items, setItems] = useState<import('../types').PayrollComponent[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const user = useAuthStore((s) => s.user);
+
+  const load = useCallback(async () => {
+    if (!companyId) return;
+    setIsLoading(true);
+    const res = await hrApi.getPayrollComponentsList(companyId);
+    if (res.success && res.data) setItems(res.data);
+    setIsLoading(false);
+  }, [companyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const create = useCallback(async (data: Parameters<typeof hrApi.createPayrollComponent>[0]) => {
+    const res = await hrApi.createPayrollComponent(data, user?.id);
+    if (res.success) await load();
+    return res;
+  }, [load, user?.id]);
+
+  const update = useCallback(async (id: string, data: Parameters<typeof hrApi.updatePayrollComponent>[2]) => {
+    const res = await hrApi.updatePayrollComponent(id, companyId, data, user?.id);
+    if (res.success) await load();
+    return res;
+  }, [load, companyId, user?.id]);
+
+  const deactivate = useCallback(async (id: string) => {
+    const res = await hrApi.deactivatePayrollComponent(id, companyId, user?.id);
+    if (res.success) await load();
+    return res;
+  }, [load, companyId, user?.id]);
+
+  return { items, isLoading, create, update, deactivate, reload: load };
+}

@@ -46,7 +46,8 @@ export const attendance = pgTable('attendance', {
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   employeeId: uuid('employee_id').notNull().references(() => employees.id, { onDelete: 'cascade' }),
   date: date('date').notNull(),
-  checkIn: timestamp('check_in').notNull(),
+  // Nullable since 0016 — absent/on_leave days carry no check-in punch.
+  checkIn: timestamp('check_in'),
   checkOut: timestamp('check_out'),
   overtimeHours: numeric('overtime_hours', { precision: 5, scale: 2 }).default('0'),
   status: varchar('status', { length: 20 }).default('present').notNull(),
@@ -83,6 +84,7 @@ export const payrollRuns = pgTable('payroll_runs', {
   year: integer('year').notNull(),
   totalAmount: numeric('total_amount', { precision: 18, scale: 4 }).notNull().default('0'),
   status: varchar('status', { length: 20 }).default('draft').notNull(),
+  notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

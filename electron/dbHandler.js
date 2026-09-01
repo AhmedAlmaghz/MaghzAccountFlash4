@@ -2328,7 +2328,7 @@ export function registerDatabaseHandlers() {
         const key = `${rec.employeeId}:${String(rec.date).slice(0, 10)}`;
         const existingId = existingMap.get(key);
         if (existingId) {
-          const sql = `UPDATE attendance SET check_in = $1, check_out = $2, overtime_hours = $3, status = $4, notes = $5, updated_by = $6
+          const sql = `UPDATE attendance SET check_in = $1::timestamptz, check_out = $2::timestamptz, overtime_hours = $3, status = $4, notes = $5, updated_by = $6
                        WHERE id = $7::uuid AND company_id = $8::uuid`;
           const params = [
             rec.checkIn || null, rec.checkOut || null,
@@ -2340,7 +2340,7 @@ export function registerDatabaseHandlers() {
           await execQuery(client, sql, params);
         } else {
           const sql = `INSERT INTO attendance (company_id, employee_id, date, check_in, check_out, overtime_hours, status, notes, created_by, updated_by)
-                       VALUES ($1::uuid, $2::uuid, $3::date, $4, $5, $6, $7, $8, $9::uuid, $9::uuid)`;
+                       VALUES ($1::uuid, $2::uuid, $3::date, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9::uuid, $9::uuid)`;
           const params = [
             session.user.companyId, String(rec.employeeId), String(rec.date),
             rec.checkIn || null, rec.checkOut || null,
@@ -2424,10 +2424,11 @@ export function registerDatabaseHandlers() {
         Number(p.totalAmount || 0),
         status,
         p.runNumber || null,
+        p.notes || null,
         session.user.id,
       ];
       const rowValues = [];
-      let idx = 8;
+      let idx = 9;
       for (const line of lines) {
         rowValues.push(`($${idx}::uuid, $${idx + 1}::numeric, $${idx + 2}::numeric, $${idx + 3}::numeric, $${idx + 4}::numeric, $${idx + 5}::numeric)`);
         params.push(
@@ -2441,8 +2442,8 @@ export function registerDatabaseHandlers() {
         idx += 6;
       }
       const sql = `WITH run AS (
-        INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, created_by, updated_by)
-        VALUES ($1::uuid, $2, $3, $4::numeric, $5, $6, $7::uuid, $7::uuid) RETURNING id
+        INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, notes, created_by, updated_by)
+        VALUES ($1::uuid, $2, $3, $4::numeric, $5, $6, $7, $8::uuid, $8::uuid) RETURNING id
       ), ins AS (
         INSERT INTO payroll_lines (payroll_run_id, employee_id, base_salary, allowances, deductions, overtime, net_salary)
         SELECT run.id, v.employee_id, v.base_salary, v.allowances, v.deductions, v.overtime, v.net_salary

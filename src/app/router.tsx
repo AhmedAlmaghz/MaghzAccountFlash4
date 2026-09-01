@@ -79,6 +79,7 @@ const AttendancePage = React.lazy(() => import('@/modules/hr/components/Attendan
 const PayrollPage = React.lazy(() => import('@/modules/hr/components/PayrollPage'));
 const LeavesPage = React.lazy(() => import('@/modules/hr/components/LeavesPage'));
 const EndOfServicePage = React.lazy(() => import('@/modules/hr/components/EndOfServicePage'));
+const DepartmentsPage = React.lazy(() => import('@/modules/hr/components/DepartmentsPage'));
 
 // CRM sub-pages
 const LeadsPage = React.lazy(() => import('@/modules/crm/components/LeadsPage'));
@@ -96,6 +97,7 @@ const CompanySetup = React.lazy(() => import('@/modules/settings/components/Comp
 const CurrenciesPage = React.lazy(() => import('@/modules/settings/components/CurrenciesPage'));
 const VatSettingsPage = React.lazy(() => import('@/modules/settings/components/VatSettingsPage'));
 const HrSettingsPage = React.lazy(() => import('@/modules/settings/components/HrSettingsPage'));
+const PayrollComponentsPage = React.lazy(() => import('@/modules/settings/components/PayrollComponentsPage'));
 const BranchesPage = React.lazy(() => import('@/modules/settings/components/BranchesPage'));
 const BackupPage = React.lazy(() => import('@/modules/core/components/BackupPage'));
 const UsersSettingsPage = React.lazy(() => import('@/modules/settings/components/UsersPage'));
@@ -235,6 +237,7 @@ export const AppRouter: React.FC = () => {
                 <Route path="payroll" element={withSuspense(PayrollPage)} />
                 <Route path="leaves" element={withSuspense(LeavesPage)} />
                 <Route path="end-of-service" element={withSuspense(EndOfServicePage)} />
+                <Route path="departments" element={withSuspense(DepartmentsPage)} />
               </Route>
             </Route>
 
@@ -277,6 +280,7 @@ export const AppRouter: React.FC = () => {
                 <Route path="currencies" element={withSuspense(CurrenciesPage)} />
                 <Route path="vat" element={withSuspense(VatSettingsPage)} />
           <Route path="hr-policies" element={withSuspense(HrSettingsPage)} />
+                <Route path="payroll-components" element={withSuspense(PayrollComponentsPage)} />
                 <Route path="branches" element={withSuspense(BranchesPage)} />
                 <Route path="backup" element={withSuspense(BackupPage)} />
                 <Route path="document-sequences" element={withSuspense(DocumentSequencesPage)} />

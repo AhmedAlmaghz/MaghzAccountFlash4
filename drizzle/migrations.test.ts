@@ -363,7 +363,7 @@ describe('Migration 0014: HR professional (payroll posting accounts & policies)'
   it('journal mirrors the migration files (0015 is last)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
     const last = journal.entries[journal.entries.length - 1];
-    expect(last.tag).toBe('0015_crm_professional');
+    expect(journal.entries.some((e) => e.tag === '0015_crm_professional')).toBe(true);
     expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
   });
 
@@ -433,9 +433,9 @@ describe('Migration 0015: CRM professional (integrity + performance + stage mach
 
   it('journal entry mirrors the migration files (0015 last)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    const last = journal.entries[journal.entries.length - 1];
-    expect(last.tag).toBe('0015_crm_professional');
-    expect(last.idx).toBe(15);
+    const entry = journal.entries.find((e) => e.tag === '0015_crm_professional');
+    expect(entry?.idx).toBe(15);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
   });
 
   it('Drizzle schema no longer exports the dead tables and exposes the new columns', () => {
@@ -455,5 +455,47 @@ describe('Migration 0015: CRM professional (integrity + performance + stage mach
       expect(f).not.toMatch(/['"]crm_activities['"]/);
       expect(f).not.toMatch(/['"]calls['"]/);
     }
+  });
+});
+
+describe('Migration 0016: HR attendance & payroll notes (v0.8.1)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0016_hr_attendance_notes.sql'), 'utf-8');
+
+  it('makes attendance.check_in nullable (absent/on_leave days carry no punch)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE attendance ALTER COLUMN check_in DROP NOT NULL/);
+    // Guarded on is_nullable — idempotent re-runs are safe
+    expect(migrationSql).toMatch(/is_nullable = 'NO'/);
+  });
+
+  it('adds payroll_runs.notes', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE payroll_runs ADD COLUMN IF NOT EXISTS notes text/);
+  });
+
+  it('is purely additive/idempotent (no DROP TABLE, guards on both steps)', () => {
+    expect(migrationSql).not.toMatch(/DROP TABLE/i);
+    expect(migrationSql.match(/IF NOT EXISTS|is_nullable/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Drizzle schema exposes nullable checkIn + payroll notes', () => {
+    const hr = readFileSync(join(process.cwd(), 'src/core/database/schema/hr.ts'), 'utf-8');
+    // Nullable checkIn: no .notNull() on the checkIn column line
+    const checkInLine = hr.split('\n').find((l) => l.includes("timestamp('check_in')"));
+    expect(checkInLine).toBeDefined();
+    expect(checkInLine).not.toContain('.notNull()');
+    expect(hr).toMatch(/notes: text\('notes'\)/);
+  });
+
+  it('journal registers 0016 as the last entry', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    const last = journal.entries[journal.entries.length - 1];
+    expect(last.tag).toBe('0016_hr_attendance_notes');
+    expect(last.idx).toBe(16);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0016 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0016_hr_attendance_notes\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0016_hr_attendance_notes', sql: hrAttendanceNotes \}/);
   });
 });

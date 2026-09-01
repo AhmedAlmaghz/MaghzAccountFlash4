@@ -1252,7 +1252,7 @@ export const reportTools: ToolDefinition[] = [
       
 
       const res = await guardedQuery(`
-        SELECT l.status, COUNT(*)::int AS count, COALESCE(SUM(l.days_count), 0) AS total_days
+        SELECT l.status, COUNT(*)::int AS count, COALESCE(SUM(l.days), 0) AS total_days
         FROM leaves l
         WHERE l.company_id = $1::uuid AND l.created_at::date BETWEEN $2 AND $3
         GROUP BY l.status

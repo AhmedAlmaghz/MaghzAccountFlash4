@@ -136,6 +136,7 @@ const menuItems: MenuItem[] = [
     module: 'hr',
     children: [
       { labelKey: 'sidebar.hr.employees', path: '/hr/employees' },
+      { labelKey: 'sidebar.hr.departments', path: '/hr/departments' },
       { labelKey: 'sidebar.hr.attendance', path: '/hr/attendance' },
       { labelKey: 'sidebar.hr.payroll', path: '/hr/payroll' },
       { labelKey: 'sidebar.hr.leaves', path: '/hr/leaves' },
@@ -194,6 +195,7 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.settings.currencies', path: '/settings/currencies' },
       { labelKey: 'sidebar.settings.vat', path: '/settings/vat' },
   { labelKey: 'sidebar.hrPolicy', path: '/settings/hr-policies' },
+      { labelKey: 'sidebar.settings.payrollComponents', path: '/settings/payroll-components' },
       { labelKey: 'sidebar.settings.branches', path: '/settings/branches' },
       { labelKey: 'sidebar.settings.documentSequences', path: '/settings/document-sequences' },
       { labelKey: 'sidebar.settings.defaultAccounts', path: '/settings/default-accounts' },

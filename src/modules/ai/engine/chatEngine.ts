@@ -195,6 +195,31 @@ class ChatEngine {
    */
   private successfulWritesThisSend = new Set<string>();
   private fabricationRetries = 0;
+  /**
+   * Identical-retry guard: a model that keeps re-issing the SAME write call
+   * with the SAME arguments after repeated failures (e.g. an API guard
+   * rejecting bad input) must not spawn confirmation cards forever — the
+   * user approves, it fails, the model retries verbatim, on and on.
+   * Key = toolName + stable-stringified args; value = failures so far.
+   */
+  private failedWriteAttempts = new Map<string, number>();
+  private static readonly WRITE_RETRY_LIMIT = 2;
+
+  /** Stable key for a (toolName, args) pair — key order must not matter. */
+  private static writeAttemptKey(toolName: string, args: unknown): string {
+    const stable = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(stable);
+      if (v && typeof v === 'object') {
+        return Object.fromEntries(
+          Object.keys(v as Record<string, unknown>)
+            .sort()
+            .map((k) => [k, stable((v as Record<string, unknown>)[k])]),
+        );
+      }
+      return v;
+    };
+    return `${toolName}::${JSON.stringify(stable(args))}`;
+  }
 
   private get ctx(): ToolContext {
     const company = useAppStore.getState().activeCompany;
@@ -298,6 +323,7 @@ class ChatEngine {
       this.iterationCount = 0;
       this.successfulWritesThisSend.clear();
       this.fabricationRetries = 0;
+      this.failedWriteAttempts.clear();
 
       await this.runLoop();
     } catch (e) {
@@ -350,6 +376,11 @@ class ChatEngine {
             status: 'error',
             resultSummary: outcome.error ?? 'خطأ غير معروف',
           });
+
+          // Identical-retry guard bookkeeping: remember this exact call failed
+          // so runLoop stops re-issuing confirmation cards for it forever.
+          const key = ChatEngine.writeAttemptKey(pending.toolName, pending.args);
+          this.failedWriteAttempts.set(key, (this.failedWriteAttempts.get(key) ?? 0) + 1);
 
           this.history.push({
             role: 'tool',
@@ -788,11 +819,49 @@ class ChatEngine {
         });
       }
 
-      // Handle write tools → emit confirmation cards and STOP loop
+      // Handle write tools → emit confirmation cards and STOP loop.
+      // IDENTICAL-RETRY GUARD: a write that already failed this send with the
+      // SAME arguments gets no more confirmation cards — the model is stuck in
+      // a loop (approve → fail → re-issue verbatim). Surface honest errors and
+      // stop instead of asking the user to approve the doomed call again.
       if (writeCalls.length > 0) {
         this.pendingWriteCalls = [];
+        const exhausted: Array<{ name: string; error: string }> = [];
+        const confirmable: typeof writeCalls = [];
 
         for (const tc of writeCalls) {
+          const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
+          const failures = this.failedWriteAttempts.get(key) ?? 0;
+          if (failures >= ChatEngine.WRITE_RETRY_LIMIT) {
+            exhausted.push({
+              name: tc.name,
+              error: `توقف تلقائي: استدعاء ${tc.name} بنفس المعطيات فشل ${failures} مرات — لن يُطلب موافقتك مجدداً على نفس العملية. عدّل المعطيات أو نفّذها من الشاشة مباشرة.`,
+            });
+          } else {
+            confirmable.push(tc);
+          }
+        }
+
+        for (const ex of exhausted) {
+          this.history.push({
+            role: 'tool',
+            content: `خطأ: ${ex.error}`,
+            tool_call_id: `exhausted-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          });
+          this.store().addMessage({
+            role: 'assistant',
+            kind: 'error',
+            content: ex.error,
+          });
+        }
+
+        if (confirmable.length === 0) {
+          // Every write is a verbatim retry of a failed call — stop here with
+          // an honest summary instead of looping back into the LLM.
+          return;
+        }
+
+        for (const tc of confirmable) {
           const tool = resolveTool(tc.name);
           const pending: PendingToolCall = {
             callId: tc.id,

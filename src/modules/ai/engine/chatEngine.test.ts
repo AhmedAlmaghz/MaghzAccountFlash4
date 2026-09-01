@@ -207,6 +207,113 @@ describe('ChatEngine', () => {
     expect(messages[2].content).toBe('تم إلغاء العملية');
   });
 
+  it('stops re-issuing confirmation cards after the SAME write call fails twice (identical-retry guard)', async () => {
+    // Regression: a model stuck in approve→fail→retry-verbatim loop spawned
+    // confirmation cards forever. The guard caps identical retries at 2 —
+    // the 3rd identical call gets an honest error message, no more cards.
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    // 1st issuance → confirmation → execution FAILS
+    // 2nd issuance → confirmation → execution FAILS again
+    // 3rd issuance → NO CARD, honest stop
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'retry-1', name: 'test.write', arguments: { employeeId: 'e1' } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'retry-2', name: 'test.write', arguments: { employeeId: 'e1' } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'retry-3', name: 'test.write', arguments: { employeeId: 'e1' } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      });
+    mocks.executeToolCall
+      .mockResolvedValueOnce({ ok: false, error: 'invalid input syntax for type timestamp: "08:00"' })
+      .mockResolvedValueOnce({ ok: false, error: 'invalid input syntax for type timestamp: "08:00"' });
+
+    const engine = getChatEngine();
+
+    // Round 1: card issued, user approves, execution fails
+    await engine.send('سجّل الحضور');
+    let messages = useAiStore.getState().messages;
+    expect(messages[1].toolCall?.status).toBe('pending-confirmation');
+    await engine.resolveConfirmation('retry-1', true);
+
+    // Round 2: model retries verbatim → card again, user approves, fails again
+    messages = useAiStore.getState().messages;
+    const secondCard = messages.find((m) => m.toolCall?.callId === 'retry-2');
+    expect(secondCard?.toolCall?.status).toBe('pending-confirmation');
+    await engine.resolveConfirmation('retry-2', true);
+    expect(mocks.executeToolCall).toHaveBeenCalledTimes(2);
+
+    // Round 3: model retries verbatim AGAIN → NO confirmation card, honest error + stop
+    messages = useAiStore.getState().messages;
+    const thirdCard = messages.find((m) => m.toolCall?.callId === 'retry-3');
+    expect(thirdCard).toBeUndefined();
+    const stopMsg = messages.find((m) => m.kind === 'error' && m.content.includes('توقف تلقائي'));
+    expect(stopMsg).toBeDefined();
+    expect(stopMsg?.content).toContain('test.write');
+    // The doomed call was NEVER executed a 3rd time
+    expect(mocks.executeToolCall).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows retrying a write after arguments CHANGE (guard keys on the exact args)', async () => {
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'fix-1', name: 'test.write', arguments: { amount: -5 } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'fix-2', name: 'test.write', arguments: { amount: 10 } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'تم التنفيذ بالمعطيات المصححة', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+    mocks.executeToolCall
+      .mockResolvedValueOnce({ ok: false, error: 'المبلغ يجب أن يكون موجباً' })
+      .mockResolvedValueOnce({ ok: true, result: { id: 'doc-9' } });
+
+    const engine = getChatEngine();
+    await engine.send('أنشئ العملية');
+    await engine.resolveConfirmation('fix-1', true);
+
+    // Different args → NEW confirmation card (not blocked by the guard)
+    const messages = useAiStore.getState().messages;
+    const secondCard = messages.find((m) => m.toolCall?.callId === 'fix-2');
+    expect(secondCard?.toolCall?.status).toBe('pending-confirmation');
+    await engine.resolveConfirmation('fix-2', true);
+    expect(mocks.executeToolCall).toHaveBeenCalledTimes(2);
+  });
+
   it('treats UNKNOWN tool names as write (fail-closed) — confirmation card, never silent execution', async () => {
     // Regression: `tool?.dangerLevel === 'write' ? write : read` sent any
     // unregistered name (model hallucination, e.g. "sales.craete_invoice")

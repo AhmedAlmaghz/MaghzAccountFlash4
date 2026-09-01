@@ -3922,4 +3922,28 @@ npx drizzle-kit migrate
 - **KPIs في SQL `COUNT(*) FILTER` دائماً**: أي reduce على صفحة paginated خاطئ بالضرورة عند >pageSize صفوف
 - **`stray backticks: 0` + `new Function(code)`**: فحص الـ shim الإلزامي بعد كل تعديل — الـ template literal مع double-quoted JS strings لسلاسل SQL المحتوية على `'` (لا backslash escapes في أي طبقة)
 
-*آخر تحديث: 2026-09-01 | الإصدار: maghzaccount-pro v0.9.0*
+
+### المرحلة 75 (v0.8.1): إصلاحات HR من الاستخدام الفعلي + CRUD الأقسام والمكونات + حارس تكرار الوكيل
+- **إصلاح "invalid input syntax for type timestamp: 08:00"**: `saveAttendance` يطبَّع الخُرم خدمياً قبل أي مسار — "HH:mm" وحيد يُدمج مع تاريخ السجل → "YYYY-MM-DD HH:mm:ss"، datetime كامل يمر، الفارغ/غير القابل للتحليل → NULL. `::timestamptz` casts في fallback + dbHandler RPC + e2e shim
+- **Migration 0016** (بعد 0015_crm_professional الموجودة): `attendance.check_in DROP NOT NULL` (يوم الغياب/الإجازة بلا دخول — guard على is_nullable) + `payroll_runs.notes` + journal idx=16 + pglite MIGRATIONS + Drizzle (checkIn بلا notNull + notes)
+- **إصلاح "السجلات لا تظهر"**: `mapAttendanceRow` — `toDateString(r.date)` (فخ Phase 45: String(Date) = locale لا يطابق أبداً فلتر YYYY-MM-DD) + الخُرم تُرد كـ "HH:mm" محلية (punchTime helper). AttendancePage: today محلي (toISOString كان UTC يتخطى يوماً بعد 21:00) + الهوك يحمّل شهر/سنة `selectedDate` (يُعيد الجلب عند تصفح شهر آخر) + الفلتر يقارن `String(r.date).slice(0,10)`
+- **deriveAttendance**: regex مرساة النهاية `/(\d{1,2}):(\d{2})(?::\d{2})?\s*$/` يقبل "08:00" (UI) **و** "2026-08-31 08:00" (أداة AI — كان يشتق أصفاراً بصمت) + رفض >23:59
+- **نموذج الحضور موسّع**: Modal 4xl، جدول أعمدة أعرض، sticky header، صف ملوّن حسب الحالة (غائب/متأخر/إجازة)، footer ملخّص أعداد + إجمالي، `::timestamptz` في SQL
+- **حارس التكرار في chatEngine (البق: موافقات بلا نهاية)**: `failedWriteAttempts: Map<toolName::stableJSON(args), count>` — المفتاح بترتيب keys مستقر. فشل كتابة في resolveConfirmation يزيد العداد؛ نفس الاستدعاء فشل ≥2 → **لا بطاقة موافقة**: رسالة خطأ صادقة "توقف تلقائي..." + رجوع tool-result في التاريخ + إيقاف الحلقة (confirmable=0 → return). تغيير المعطيات = مفتاح جديد = بطاقة جديدة. يُصفَّر في send()
+- **الأقسام CRUD** (`/hr/departments` — داخل HR لأن مدير الموظفين يملك hr.* وليس settings.*): `createDepartment/updateDepartment/deleteDepartment` (الحذف **يرفض** عند موظفين مرتبطين بعدد في الرسالة — سابقة الحذار المدمّر) + `getDepartments` موسّع (managerName + employeeCount) + DepartmentsPage (UserSelect للمدير) + بطاقة/رابط/مسار + أدوات AI (search.departments fuzzy + hr.create/update/delete_department) + TOOL_ROUTES
+- **مكونات الرواتب CRUD** (`/settings/payroll-components`): API موحّد (getPayrollComponentsList/create/update/**deactivate** — حذف ناعم فقط لأن المسيرات السابقة ترجع إليها) + صفحة بbadges ملوّنة للنوع/الطريقة + banner "المحرك يستهلكها تلقائياً" + ربط أدوات AI الموجودة بالـ API الموحّد + settings.deactivate_payroll_component + إصلاح صلاحية أداة الإنشاء (settings.view→edit)
+- **days_count → days** في reportTools (عمود غير موجود — hr.leaves_report كان يفشل)
+- **التحقق**: tsc 0 | eslint src+e2e 0/0 | vitest **1319/1319** (83 ملفاً) | build 32.7s | db:check clean | e2e **83/83** (13:00) — منها 13-hr **12/12** (اختبار regression للحضور + الصفحتان الجديدتان)
+
+### قواعد ذهبية مضافة (Phase 75)
+- **تطبيع الخُرم في طبقة API قبل أي مسار**: أعمدة timestamptz لا تقبل "HH:mm" — الدمج مع تاريخ السجل يحدث مرة واحدة في saveAttendance (لا في RPC ولا في UI) والـ `::timestamptz` cast خط دفاع أخير
+- **فحص الموت الصامت للـ mappers**: كل `String(r.date)` على عمود date/timestamp هو فخ Phase 45 — استخدم `toDateString()` وقارن الفلاتر بـ `.slice(0,10)`. وكشفها دائماً بفحص "الفلتر لا يطابق أبداً"
+- **حارس تكرار حتمي لا برومبت**: النموذج العالق في approve→fail→retry-verbatim يولّد بطاقات بلا نهاية مهما نصحته القاعدة 10 — العدّاد على (toolName + stable-args-hash) في المحرك يقطع الدورة عند المحاولة الثالثة برسالة صادقة
+- **المفتاح المستقر للـ args**: ترتيب الـ object keys مختلف = نفس الاستدعاء — عمّق بالفرز العودي قبل JSON.stringify
+- **today محلياً لا UTC**: `toISOString().split('T')[0]` يتخطى يوماً بعد 21:00 محلياً — ابنِ التاريخ من getFullYear/getMonth/getDate
+- **إدارة القسم داخل HR**: بيانات تشغيلية يملكها مدير الموظفين (hr.*) لا الإعدادات (settings.*) — مثل المستودعات داخل المخازن
+- **الحذف الناعم للمكونات المرجعية**: مكونات الرواتب ترجع إليها مسيرات سابقة — is_active=false أبداً، لا DELETE
+- **PowerShell WriteAllText يفسد UTF-8**: إلحاق نص عربي عبر `[IO.File]::WriteAllText` كتب بترميز خاطئ وكسر 18 اختباراً — استخدم أداة Edit دائماً للملفات العربية، و`git checkout --` للاستعادة
+- **اختبارات journal "الأخير" هشة**: أي migration جديدة تكسر `last.tag === X` — اكتب `some(e => e.tag === X)` + length = files
+
+*آخر تحديث: 2026-09-01 | الإصدار: maghzaccount-pro v0.9.1*
