@@ -2746,7 +2746,8 @@
     "error": "Error",
     "close": "Close",
     "usePglite": "Use PGlite local (no server)",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "back": "Back"
   },
   "pagination": {
     "first": "First",

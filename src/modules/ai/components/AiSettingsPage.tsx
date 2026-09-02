@@ -120,7 +120,7 @@ export default function AiSettingsPage() {
 
   if (!canConfigure) {
     return (
-      <div className="h-full flex items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+      <div className="h-full flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
         {t('ai.noPermission')}
       </div>
     );
@@ -129,24 +129,25 @@ export default function AiSettingsPage() {
   if (loading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-primary-600" />
+        <Loader2 size={32} className="animate-spin text-primary-600 dark:text-primary-400" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-6 space-y-6">
+    <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}
-          className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+          className="p-2.5 rounded-xl text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          aria-label={t('common.back')}
         >
           <ArrowRight size={20} />
         </button>
         <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-50">{t('ai.settings.title')}</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{t('ai.settings.subtitle')}</p>
+          <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-50">{t('ai.settings.title')}</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('ai.settings.subtitle')}</p>
         </div>
       </div>
 
@@ -160,10 +161,10 @@ export default function AiSettingsPage() {
               key={p.id}
               onClick={() => handleProviderChange(p.id)}
               className={cn(
-                'px-3 py-2 text-xs font-medium rounded-lg border transition-colors',
+                'px-3 py-2.5 min-h-10 text-xs font-semibold rounded-xl border transition-all active:scale-95',
                 provider === p.id
-                  ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  ? 'bg-primary-50 dark:bg-primary-950/50 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 shadow-card'
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-primary-200 dark:hover:border-primary-800'
               )}
             >
               {t(p.label)}
@@ -203,7 +204,8 @@ export default function AiSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowKey(!showKey)}
-                  className="pointer-events-auto cursor-pointer text-slate-400 hover:text-slate-600"
+                  className="pointer-events-auto cursor-pointer text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                  aria-label={showKey ? t('ai.settings.apiKey') : t('ai.settings.apiKey')}
                 >
                   {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -211,7 +213,7 @@ export default function AiSettingsPage() {
             />
             {/* Current key status */}
             {config?.hasApiKey && !apiKey && (
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                 {config.keySource === 'env'
                   ? t('ai.settings.apiKeyEnv')
                   : t('ai.settings.apiKeySet', { key: config.maskedKey || '****' })}
@@ -220,32 +222,39 @@ export default function AiSettingsPage() {
           </div>
 
           {/* Enabled toggle */}
-          <label className="flex items-center gap-3 cursor-pointer">
+          <label
+            className="flex items-center gap-3 cursor-pointer select-none"
+            onClick={(e) => {
+              e.preventDefault();
+              setEnabled(!enabled);
+            }}
+          >
             <div
+              role="switch"
+              aria-checked={enabled}
               className={cn(
-                'relative w-10 h-6 rounded-full transition-colors',
-                enabled ? 'bg-primary-600' : 'bg-slate-300 dark:bg-slate-600'
+                'relative w-11 h-6 rounded-full transition-colors shrink-0',
+                enabled ? 'bg-primary-600' : 'bg-zinc-300 dark:bg-zinc-700'
               )}
-              onClick={() => setEnabled(!enabled)}
             >
               <div
                 className={cn(
-                  'absolute top-1 w-4 h-4 rounded-full bg-white transition-transform',
-                  enabled ? 'right-1' : 'left-1'
+                  'absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all',
+                  enabled ? 'start-6' : 'start-1'
                 )}
               />
             </div>
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('ai.settings.enabled')}</span>
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.enabled')}</span>
           </label>
 
           {/* Security note */}
-          <p className="text-xs text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 leading-relaxed">
             🔒 {t('ai.settings.securityNote')}
           </p>
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
+        <div className="flex flex-wrap items-center gap-3 mt-6 pt-4 border-t border-zinc-200/70 dark:border-zinc-800">
           <Button
             variant="primary"
             onClick={handleSave}
@@ -268,13 +277,13 @@ export default function AiSettingsPage() {
         {testResult && (
           <div
             className={cn(
-              'mt-3 px-4 py-2.5 rounded-lg text-sm',
+              'mt-3 px-4 py-2.5 rounded-xl text-sm',
               testResult.ok
                 ? 'bg-success-50 dark:bg-success-900/20 text-success-700 dark:text-success-300 border border-success-200 dark:border-success-800'
                 : 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800'
             )}
           >
-            {testResult.ok ? <Wifi size={14} className="inline ml-1" /> : <WifiOff size={14} className="inline ml-1" />}
+            {testResult.ok ? <Wifi size={14} className="inline ms-1 -mt-0.5" /> : <WifiOff size={14} className="inline ms-1 -mt-0.5" />}
             {testResult.message}
           </div>
         )}

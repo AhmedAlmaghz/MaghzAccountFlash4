@@ -35,7 +35,7 @@ const ENTITY_TYPE_CONFIG: Record<EntityType, EntityTypeConfig> = {
   bom:           { icon: GitBranch,   color: 'text-stone-600',      bgColor: 'bg-stone-50 dark:bg-stone-900/20' },
   lead:          { icon: Target,      color: 'text-yellow-600',     bgColor: 'bg-yellow-50 dark:bg-yellow-900/20' },
   opportunity:   { icon: Diamond,     color: 'text-sky-600',        bgColor: 'bg-sky-50 dark:bg-sky-900/20' },
-  task:          { icon: FileCheck,   color: 'text-slate-600',      bgColor: 'bg-slate-50 dark:bg-slate-900/20' },
+  task:          { icon: FileCheck,   color: 'text-zinc-600 dark:text-zinc-300', bgColor: 'bg-zinc-100 dark:bg-zinc-800' },
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -82,11 +82,10 @@ export const AutoCompleteDropdown = memo(function AutoCompleteDropdown({
 
   return (
     <div
-      dir="rtl"
       className={cn(
-        'absolute bottom-full left-3 right-3 z-50 mb-1',
-        'max-h-56 overflow-y-auto rounded-lg border shadow-lg',
-        'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700',
+        'absolute bottom-full inset-x-3 z-50 mb-1',
+        'max-h-56 overflow-y-auto rounded-xl border shadow-float',
+        'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700',
       )}
     >
       <div className="py-1">
@@ -101,10 +100,10 @@ export const AutoCompleteDropdown = memo(function AutoCompleteDropdown({
               type="button"
               onClick={() => onSelect(match)}
               className={cn(
-                'w-full text-right px-3 py-2 flex items-start gap-2.5 text-sm transition-colors',
+                'w-full text-start px-3 py-2 flex items-start gap-2.5 text-sm transition-colors',
                 idx === selectedIndex
-                  ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50',
+                  ? 'bg-primary-50 dark:bg-primary-950/50 text-primary-700 dark:text-primary-300'
+                  : 'text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/50',
               )}
             >
               {/* Type icon */}
@@ -117,11 +116,11 @@ export const AutoCompleteDropdown = memo(function AutoCompleteDropdown({
               </div>
 
               {/* Entity info */}
-              <div className="min-w-0 flex-1 text-right">
+              <div className="min-w-0 flex-1 text-start">
                 <div className="font-semibold truncate">
                   {match.name || t('ai.entity.unnamed')}
                 </div>
-                <div className="flex items-center gap-2 text-[11px] text-slate-400 dark:text-slate-500">
+                <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
                   <span className="font-medium">{match.labelAr}</span>
                   {match.code && <span dir="ltr">#{match.code}</span>}
                   {secondary && <span className="truncate">— {secondary}</span>}
@@ -130,7 +129,7 @@ export const AutoCompleteDropdown = memo(function AutoCompleteDropdown({
 
               {/* Confidence badge */}
               {match.confidence < 0.75 && match.confidence >= 0.4 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400 flex-shrink-0">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gold-100 text-gold-700 dark:bg-gold-900/30 dark:text-gold-300 flex-shrink-0">
                   {t('ai.entity.fuzzy')}
                 </span>
               )}

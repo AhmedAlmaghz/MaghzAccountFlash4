@@ -22,14 +22,14 @@ interface ToolCallCardProps {
 const statusConfig = {
   'pending-confirmation': {
     icon: AlertTriangle,
-    color: 'text-amber-600 dark:text-amber-400',
-    bg: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800',
+    color: 'text-gold-700 dark:text-gold-300',
+    bg: 'bg-gold-50 dark:bg-gold-900/20 border-gold-300 dark:border-gold-800',
     labelKey: 'ai.confirmTitle',
   },
   executing: {
     icon: Loader2,
-    color: 'text-blue-600 dark:text-blue-400',
-    bg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+    color: 'text-info-600 dark:text-info-400',
+    bg: 'bg-info-50 dark:bg-info-900/20 border-info-200 dark:border-info-800',
     labelKey: 'ai.executingTool',
   },
   success: {
@@ -46,8 +46,8 @@ const statusConfig = {
   },
   rejected: {
     icon: XCircle,
-    color: 'text-slate-500 dark:text-slate-400',
-    bg: 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700',
+    color: 'text-zinc-500 dark:text-zinc-400',
+    bg: 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700',
     labelKey: 'ai.rejected',
   },
 };
@@ -91,16 +91,23 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
           size={14}
           className={cn(config.color, isExecuting && 'animate-spin')}
         />
-        <span className="font-semibold text-slate-700 dark:text-slate-300">
+        <span className="font-semibold text-zinc-800 dark:text-zinc-200">
           {toolCall.label}
         </span>
 
-        <div className="mr-auto flex items-center gap-1">
+        <div className="ms-auto flex items-center gap-1">
           {/* Copy button */}
           <button
             onClick={handleCopy}
-            className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-white/50"
+            className={cn(
+              'p-1.5 rounded-lg transition-colors',
+              copied
+                ? 'text-success-600 dark:text-success-400'
+                : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100',
+              'hover:bg-white/60 dark:hover:bg-white/10'
+            )}
             title="نسخ"
+            aria-label="نسخ"
           >
             {copied ? <Check size={12} /> : <Copy size={12} />}
           </button>
@@ -108,7 +115,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
           {/* Expand/collapse */}
           <button
             onClick={() => setExpanded(!expanded)}
-            className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-white/50"
+            className={cn(
+              'p-1.5 rounded-lg transition-colors',
+              'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100',
+              'hover:bg-white/60 dark:hover:bg-white/10'
+            )}
+            aria-label={expanded ? 'إغلاق التفاصيل' : 'عرض التفاصيل'}
           >
             {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
@@ -122,24 +134,24 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
 
       {/* Expanded details */}
       {expanded && (
-        <div className="px-3 pb-2 border-t border-black/5 dark:border-white/5">
+        <div className="px-3 pb-2 border-t border-black/10 dark:border-white/10">
           <div className="mt-2 space-y-1">
             <div>
-              <span className="font-medium text-slate-600 dark:text-slate-400">الأداة: </span>
-              <span className="text-slate-700 dark:text-slate-300 font-mono">{toolCall.toolName}</span>
+              <span className="font-medium text-zinc-600 dark:text-zinc-400">الأداة: </span>
+              <span className="text-zinc-800 dark:text-zinc-200 font-mono">{toolCall.toolName}</span>
             </div>
             {Object.keys(toolCall.args).length > 0 && (
               <div>
-                <span className="font-medium text-slate-600 dark:text-slate-400">المعاملات: </span>
-                <pre className="mt-1 p-2 rounded bg-black/5 dark:bg-white/5 text-[11px] font-mono overflow-x-auto">
+                <span className="font-medium text-zinc-600 dark:text-zinc-400">المعاملات: </span>
+                <pre className="mt-1 p-2 rounded-lg bg-zinc-950/5 dark:bg-white/10 text-[11px] font-mono overflow-x-auto text-zinc-800 dark:text-zinc-200">
                   {JSON.stringify(toolCall.args, null, 2)}
                 </pre>
               </div>
             )}
             {toolCall.resultSummary && (
               <div>
-                <span className="font-medium text-slate-600 dark:text-slate-400">النتيجة: </span>
-                <div className="mt-1 text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed">
+                <span className="font-medium text-zinc-600 dark:text-zinc-400">النتيجة: </span>
+                <div className="mt-1 text-zinc-800 dark:text-zinc-200 text-[11px] leading-relaxed">
                   {formattedResult}
                 </div>
               </div>
@@ -242,7 +254,7 @@ function renderTableFromLines(lines: string[]): React.ReactNode {
             {headers.map((h, idx) => (
               <th
                 key={idx}
-                className="border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 px-2 py-1 text-right font-semibold"
+                className="border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-700 px-2 py-1 text-start font-semibold text-zinc-700 dark:text-zinc-200"
               >
                 {renderInlineText(h)}
               </th>
@@ -251,11 +263,11 @@ function renderTableFromLines(lines: string[]): React.ReactNode {
         </thead>
         <tbody>
           {rows.map((row, ri) => (
-            <tr key={ri} className={ri % 2 === 0 ? 'bg-white dark:bg-slate-800/50' : 'bg-transparent'}>
+            <tr key={ri} className={ri % 2 === 0 ? 'bg-white/60 dark:bg-zinc-800/40' : 'bg-transparent'}>
               {row.map((cell, ci) => (
                 <td
                   key={ci}
-                  className="border border-slate-300 dark:border-slate-600 px-2 py-1 text-right"
+                  className="border border-zinc-300 dark:border-zinc-600 px-2 py-1 text-start text-zinc-700 dark:text-zinc-300"
                 >
                   {renderInlineText(cell)}
                 </td>

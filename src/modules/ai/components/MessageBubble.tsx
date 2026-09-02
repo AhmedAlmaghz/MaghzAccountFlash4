@@ -134,7 +134,7 @@ export const MessageBubble = memo(function MessageBubble({
     !!speakableText && typeof window !== 'undefined' && !!window.speechSynthesis;
 
   const actionBtn =
-    'p-2 rounded-xl transition-colors text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800';
+    'p-2 rounded-xl transition-colors text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800';
 
   return (
     <div className={cn('group flex gap-2.5 sm:gap-3', isUser ? 'flex-row-reverse' : 'flex-row')}>

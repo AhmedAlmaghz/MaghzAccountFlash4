@@ -2746,7 +2746,8 @@
     "error": "خطأ",
     "close": "إغلاق",
     "usePglite": "استخدام PGlite محلي (دون خادم)",
-    "confirm": "تأكيد"
+    "confirm": "تأكيد",
+    "back": "رجوع"
   },
   "pagination": {
     "first": "الأولى",

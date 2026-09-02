@@ -35,7 +35,7 @@ function renderInline(content: string, keyPrefix: string) {
       nodes.push(
         <code
           key={`${keyPrefix}-code-${ci}`}
-          className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10 text-[0.85em] font-mono"
+          className="px-1 py-0.5 rounded bg-zinc-950/10 dark:bg-white/15 text-[0.85em] font-mono text-zinc-800 dark:text-zinc-100"
         >
           {part.slice(1, -1)}
         </code>
@@ -187,10 +187,10 @@ export const RichText = memo(function RichText({ text, className }: RichTextProp
           case 'heading': {
             const headingClass =
               block.level === 2
-                ? 'text-base font-bold mt-1'
+                ? 'text-base font-bold mt-1 text-zinc-900 dark:text-zinc-50'
                 : block.level === 3
-                  ? 'text-sm font-bold'
-                  : 'text-sm font-semibold text-slate-600 dark:text-slate-400';
+                  ? 'text-sm font-bold text-zinc-900 dark:text-zinc-100'
+                  : 'text-sm font-semibold text-zinc-600 dark:text-zinc-300';
             const Tag = block.level === 2 ? 'h3' : block.level === 3 ? 'h4' : 'h5';
             return (
               <Tag key={idx} className={headingClass}>
@@ -230,7 +230,7 @@ export const RichText = memo(function RichText({ text, className }: RichTextProp
                       {block.headers.map((h, hi) => (
                         <th
                           key={hi}
-                          className="border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 px-2 py-1 text-right font-semibold"
+                          className="border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-700 px-2 py-1 text-start font-semibold text-zinc-700 dark:text-zinc-200"
                         >
                           {renderInline(h, `th${idx}-${hi}`)}
                         </th>
@@ -239,11 +239,11 @@ export const RichText = memo(function RichText({ text, className }: RichTextProp
                   </thead>
                   <tbody>
                     {block.rows.map((row, ri) => (
-                      <tr key={ri} className={ri % 2 === 0 ? 'bg-white dark:bg-slate-800/50' : 'bg-transparent'}>
+                      <tr key={ri} className={ri % 2 === 0 ? 'bg-white/60 dark:bg-zinc-800/40' : 'bg-transparent'}>
                         {row.map((cell, ci) => (
                           <td
                             key={ci}
-                            className="border border-slate-300 dark:border-slate-600 px-2 py-1 text-right"
+                            className="border border-zinc-300 dark:border-zinc-600 px-2 py-1 text-start text-zinc-700 dark:text-zinc-300"
                           >
                             {renderInline(cell, `td${idx}-${ri}-${ci}`)}
                           </td>
@@ -258,7 +258,7 @@ export const RichText = memo(function RichText({ text, className }: RichTextProp
             return (
               <pre
                 key={idx}
-                className="p-2 rounded bg-black/5 dark:bg-white/5 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap"
+                className="p-2 rounded-lg bg-zinc-950/5 dark:bg-white/10 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap"
               >
                 {block.content}
               </pre>
@@ -267,7 +267,7 @@ export const RichText = memo(function RichText({ text, className }: RichTextProp
             return (
               <blockquote
                 key={idx}
-                className="border-s-2 border-slate-300 dark:border-slate-600 ps-3 text-slate-600 dark:text-slate-400 italic"
+                className="border-s-2 border-primary-300 dark:border-primary-700 ps-3 text-zinc-600 dark:text-zinc-300 italic"
               >
                 {renderInline(block.content, `q${idx}`)}
               </blockquote>

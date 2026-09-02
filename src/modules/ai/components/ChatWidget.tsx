@@ -120,24 +120,25 @@ export function ChatWidget() {
                 'bg-white dark:bg-zinc-900 rounded-none animate-fade-in'
               )}
             >
-              {/* Widget toolbar — close (X) + expand to full page (Maximize2) */}
-              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-200/70 dark:border-zinc-800 shrink-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shrink-0">
+              {/* Widget toolbar — gradient identity matching the /ai page header */}
+              <div className="relative flex items-center justify-between gap-2 px-3 py-2.5 bg-gradient-to-l from-primary-600 via-primary-700 to-primary-800 text-white shrink-0 overflow-hidden">
+                <div className="absolute -top-10 start-1/3 w-32 h-32 rounded-full bg-primary-400/30 blur-2xl pointer-events-none" aria-hidden="true" />
+                <div className="relative flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-xl bg-white/15 backdrop-blur border border-white/20 flex items-center justify-center shrink-0">
                     <Bot size={14} className="text-white" />
                   </div>
-                  <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">
+                  <span className="text-xs font-bold text-white truncate">
                     {t('ai.title')}
                   </span>
                 </div>
-                <div className="flex items-center gap-0.5 shrink-0">
+                <div className="relative flex items-center gap-0.5 shrink-0">
                   {/* Expand → full AI chat page */}
                   <button
                     onClick={() => {
                       setIsOpen(false);
                       navigate('/ai');
                     }}
-                    className="p-2 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/15 transition-colors"
                     title={t('ai.widget.expand')}
                     aria-label={t('ai.widget.expand')}
                   >
@@ -145,7 +146,7 @@ export function ChatWidget() {
                   </button>
                   <button
                     onClick={() => setIsOpen(false)}
-                    className="p-2 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/15 transition-colors"
                     title={t('ai.widget.close')}
                     aria-label={t('ai.widget.close')}
                   >
