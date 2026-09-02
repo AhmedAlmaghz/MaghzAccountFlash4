@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Hash, RotateCcw, Save, Eye, ToggleLeft, ToggleRight } from 'lucide-react';
-import { Card, Button, Table, Input, Can } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Table, Input, Can, PageHeader } from '@/core/ui/components';
 import { useDocumentSequences } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -84,7 +83,7 @@ export const DocumentSequencesPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'documentType', header: t('settings.sequences.documentType'), width: '160px', render: (row: DocumentSequence) => (
+    { key: 'documentType', header: t('settings.sequences.documentType'), width: '160px', mobile: 'title' as const, render: (row: DocumentSequence) => (
       <div className="flex items-center gap-2">
         <Hash size={14} className="text-primary-500" />
         <span className="font-medium">{TYPE_LABELS[row.documentType] || row.documentType}</span>
@@ -93,22 +92,22 @@ export const DocumentSequencesPage: React.FC = () => {
     { key: 'prefix', header: t('settings.sequences.prefix'), width: '100px', render: (row: DocumentSequence) => (
       <Input size="sm" value={editing[row.id]?.prefix ?? row.prefix} onChange={e => handleEdit(row.id, 'prefix', e.target.value)} className="w-24" />
     )},
-    { key: 'suffix', header: t('settings.sequences.suffix'), width: '80px', render: (row: DocumentSequence) => (
+    { key: 'suffix', header: t('settings.sequences.suffix'), width: '80px', mobile: 'hidden' as const, render: (row: DocumentSequence) => (
       <Input size="sm" value={editing[row.id]?.suffix ?? row.suffix} onChange={e => handleEdit(row.id, 'suffix', e.target.value)} className="w-20" />
     )},
-    { key: 'startNumber', header: t('settings.sequences.startNumber'), width: '100px', render: (row: DocumentSequence) => (
+    { key: 'startNumber', header: t('settings.sequences.startNumber'), width: '100px', mobile: 'hidden' as const, render: (row: DocumentSequence) => (
       <Input size="sm" type="number" value={String(editing[row.id]?.startingNumber ?? row.startingNumber)} onChange={e => handleEdit(row.id, 'startingNumber', Number(e.target.value))} className="w-24" />
     )},
     { key: 'currentNumber', header: t('settings.sequences.currentNumber'), width: '100px', render: (row: DocumentSequence) => (
       <Input size="sm" type="number" value={String(editing[row.id]?.currentNumber ?? row.currentNumber)} onChange={e => handleEdit(row.id, 'currentNumber', Number(e.target.value))} className="w-24" />
     )},
-    { key: 'incrementStep', header: t('settings.sequences.incrementStep'), width: '100px', render: (row: DocumentSequence) => (
+    { key: 'incrementStep', header: t('settings.sequences.incrementStep'), width: '100px', mobile: 'hidden' as const, render: (row: DocumentSequence) => (
       <Input size="sm" type="number" value={String(editing[row.id]?.incrementStep ?? row.incrementStep)} onChange={e => handleEdit(row.id, 'incrementStep', Number(e.target.value))} className="w-20" />
     )},
-    { key: 'paddingLength', header: t('settings.sequences.paddingLength'), width: '80px', render: (row: DocumentSequence) => (
+    { key: 'paddingLength', header: t('settings.sequences.paddingLength'), width: '80px', mobile: 'hidden' as const, render: (row: DocumentSequence) => (
       <Input size="sm" type="number" value={String(editing[row.id]?.paddingLength ?? row.paddingLength)} onChange={e => handleEdit(row.id, 'paddingLength', Number(e.target.value))} className="w-16" />
     )},
-    { key: 'yearReset', header: t('settings.sequences.yearReset'), width: '90px', render: (row: DocumentSequence) => (
+    { key: 'yearReset', header: t('settings.sequences.yearReset'), width: '90px', mobile: 'hidden' as const, render: (row: DocumentSequence) => (
       <input
         type="checkbox"
         checked={editing[row.id]?.yearReset ?? row.yearReset}
@@ -116,7 +115,7 @@ export const DocumentSequencesPage: React.FC = () => {
         className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
       />
     )},
-    { key: 'isActive', header: t('settings.sequences.active'), width: '80px', render: (row: DocumentSequence) => (
+    { key: 'isActive', header: t('settings.sequences.active'), width: '80px', mobile: 'status' as const, render: (row: DocumentSequence) => (
       <Can action="edit" module="settings">
         <button onClick={() => toggleActive(row)} className="focus:outline-none" title={row.isActive ? t('settings.sequences.deactivate') : t('settings.sequences.activate')}>
           {row.isActive ? (
@@ -135,7 +134,7 @@ export const DocumentSequencesPage: React.FC = () => {
         <Button size="sm" variant="ghost" onClick={() => handlePreview(row)} leftIcon={<Eye size={12} />}>{t('settings.sequences.preview')}</Button>
       </div>
     )},
-    { key: 'actions', header: '', width: '80px', render: (row: DocumentSequence) => (
+    { key: 'actions', header: '', width: '80px', mobile: 'actions' as const, render: (row: DocumentSequence) => (
       editing[row.id] ? (
         <Can action="edit" module="settings">
           <Button size="sm" variant="secondary" onClick={() => handleSave(row)} isLoading={savingId === row.id} leftIcon={<Save size={12} />}>{t('settings.common.save')}</Button>
@@ -150,11 +149,10 @@ export const DocumentSequencesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.sequences.title')}
         subtitle={t('settings.sequences.subtitle')}
-        icon={Hash}
-        color="from-slate-600 via-slate-500 to-gray-600"
+        icon={<Hash size={22} />}
       />
       <Card>
         <Table<DocumentSequence> data={sequences} columns={columns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} emptyMessage={t('settings.sequences.emptyMessage')} />

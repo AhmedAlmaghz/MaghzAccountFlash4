@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { GitBranch, Plus, Pencil, Trash2, Save } from 'lucide-react';
-import { Card, Button, Input, Table, ConfirmDialog } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Input, Table, ConfirmDialog, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -119,14 +118,14 @@ export const BranchesPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'name', header: t('settings.branches.name') },
-    { key: 'code', header: t('settings.branches.code'), width: '100px' },
-    { key: 'city', header: t('settings.branches.city'), width: '120px' },
-    { key: 'phone', header: t('settings.branches.phone'), width: '140px' },
-    { key: 'isActive', header: t('settings.branches.status'), render: (row: Branch) => (
+    { key: 'name', header: t('settings.branches.name'), mobile: 'title' as const },
+    { key: 'code', header: t('settings.branches.code'), width: '100px', mobile: 'subtitle' as const },
+    { key: 'city', header: t('settings.branches.city'), width: '120px', mobile: 'hidden' as const },
+    { key: 'phone', header: t('settings.branches.phone'), width: '140px', mobile: 'hidden' as const },
+    { key: 'isActive', header: t('settings.branches.status'), mobile: 'status' as const, render: (row: Branch) => (
       <span className={row.isActive ? 'badge-posted' : 'badge-draft'}>{row.isActive ? t('settings.common.active') : t('settings.common.disabled')}</span>
     )},
-    { key: 'actions', header: '', render: (row: Branch) => (
+    { key: 'actions', header: '', mobile: 'actions' as const, render: (row: Branch) => (
       <div className="flex items-center gap-1">
         <Can action="edit" module="settings">
           <Button size="sm" variant="ghost" onClick={() => { setEditingId(row.id); setFormData(row); }}>
@@ -144,14 +143,13 @@ export const BranchesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.branches.title')}
         subtitle={t('settings.branches.subtitle')}
-        icon={GitBranch}
-        color="from-blue-600 via-blue-500 to-indigo-600"
-        action={
+        icon={<GitBranch size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', code: '', city: '', phone: '', isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', code: '', city: '', phone: '', isActive: true }); }}>
               {t('settings.branches.newBranch')}
             </Button>
           </Can>

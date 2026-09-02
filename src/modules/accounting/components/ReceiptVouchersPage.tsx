@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Banknote, Plus, CheckSquare, Users, Hash, Search, X, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle } from 'lucide-react';
+import { Plus, CheckSquare, Users, Hash, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
-import { Card, Button, Modal, Input, Table, Badge } from '@/core/ui/components';
+import { Card, Button, Modal, Input, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { receiptVoucherFingerprint, paymentVoucherFingerprint, journalEntryFingerprint, detectDocumentDuplicates, detectVoucherDuplicate, detectJournalDuplicate } from '@/core/utils/documentDuplicate';
@@ -317,6 +317,7 @@ export const ReceiptVouchersPage: React.FC = () => {
         key: 'voucherNumber',
         header: t('accounting.voucherNumber'),
         width: '145px',
+        mobile: 'title' as const,
         render: (row: ReceiptVoucher) => (
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 flex items-center gap-1">
@@ -331,11 +332,13 @@ export const ReceiptVouchersPage: React.FC = () => {
         key: 'date',
         header: t('accounting.date'),
         width: '120px',
+        mobile: 'meta' as const,
         render: (row: ReceiptVoucher) => <span className="tabular-nums text-xs text-slate-700 dark:text-slate-300">{row.date ? formatDate(row.date) : '-'}</span>,
       },
       {
         key: 'customerName',
         header: t('accounting.customer'),
+        mobile: 'subtitle' as const,
         render: (row: ReceiptVoucher) => (
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
@@ -381,18 +384,21 @@ export const ReceiptVouchersPage: React.FC = () => {
         key: 'status',
         header: t('sales.status.label'),
         width: '110px',
+        mobile: 'status' as const,
         render: (row: ReceiptVoucher) => <StatusBadge status={row.status} size="sm" />,
       },
       {
         key: 'createdBy',
         header: t('accounting.createdBy'),
         width: '110px',
+        mobile: 'hidden' as const,
         render: (row: ReceiptVoucher) => <span className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[100px] inline-block">{getUserName(row.createdBy)}</span>,
       },
       {
         key: 'actions',
         header: t('edit'),
         width: '170px',
+        mobile: 'actions' as const,
         render: (row: ReceiptVoucher) => (
           <div className="flex items-center gap-1.5">
             <ActionButtons
@@ -424,94 +430,69 @@ export const ReceiptVouchersPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 dark:from-emerald-600 dark:to-emerald-700 flex items-center justify-center shadow-sm">
-              <Banknote size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('accounting.receiptVouchers')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">سندات القبض — تحصيلات العملاء نقداً / بنكاً / شيكات</p>
-            </div>
-          </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Receipt size={22} />}
+        title={t('accounting.receiptVouchers')}
+        subtitle="سندات القبض — تحصيلات العملاء نقداً / بنكاً / شيكات"
+        actions={
           <Can action="create" module="accounting">
-            <Button leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }} className="shadow-sm self-start sm:self-auto">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }} className="shadow-sm">
               {t('accounting.newReceiptVoucher')}
             </Button>
           </Can>
-        </div>
+        }
+      />
 
-        <Card className="p-3 sm:p-4">
-          <div className="flex flex-col xl:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={`${t('search')} — ${t('accounting.voucherNumber')} / ${t('accounting.customer')}`}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
-                  <X size={14} />
+      {/* Filter Bar: search + status pills + method pills + exports */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={`${t('search')} — ${t('accounting.voucherNumber')} / ${t('accounting.customer')}`}
+        filterOptions={[
+          { key: '', label: t('accounting.all') },
+          { key: 'draft', label: t('accounting.draft') },
+          { key: 'posted', label: t('accounting.posted') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key)}
+        actions={
+          <>
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+              {[
+                { v: '', l: 'الكل' },
+                { v: 'cash', l: t('accounting.cash') },
+                { v: 'bank', l: t('accounting.bank') },
+                { v: 'check', l: t('accounting.check') },
+              ].map((o) => (
+                <button
+                  key={o.v}
+                  onClick={() => setMethodFilter(o.v)}
+                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition ${methodFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'}`}
+                >
+                  {o.l}
                 </button>
-              )}
+              ))}
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {[
-                  { v: '', l: t('accounting.all') },
-                  { v: 'draft', l: t('accounting.draft') },
-                  { v: 'posted', l: t('accounting.posted') },
-                ].map((o) => (
-                  <button
-                    key={o.v}
-                    onClick={() => setStatusFilter(o.v)}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${statusFilter === o.v ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {[
-                  { v: '', l: 'الكل' },
-                  { v: 'cash', l: t('accounting.cash') },
-                  { v: 'bank', l: t('accounting.bank') },
-                  { v: 'check', l: t('accounting.check') },
-                ].map((o) => (
-                  <button
-                    key={o.v}
-                    onClick={() => setMethodFilter(o.v)}
-                    className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition ${methodFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
-              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-                <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
-                <Receipt size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
-              </Button>
-            </div>
-          </div>
-          {hasActiveFilter && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-              <span>
-                {total} سند • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter}` : ''} {methodFilter ? `• ${methodFilter}` : ''}
-              </span>
-              <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
-                مسح الفلترة
-              </button>
-            </div>
-          )}
-        </Card>
-      </div>
+            <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
+              <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
+              <Receipt size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
+            </Button>
+          </>
+        }
+      />
+      {hasActiveFilter && (
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span>
+            {total} سند • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter}` : ''} {methodFilter ? `• ${methodFilter}` : ''}
+          </span>
+          <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
+            مسح الفلترة
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="relative overflow-hidden">

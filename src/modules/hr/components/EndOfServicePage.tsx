@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { LogOut, Plus, Printer, Calculator, Download, Layers, CheckCircle2, Wallet, Banknote } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Pagination, Can } from '@/core/ui/components';
+import { LogOut, Plus, Printer, Calculator, Download, CheckCircle2, Wallet, Banknote } from 'lucide-react';
+import { Card, Button, Input, Modal, Table, Pagination, Can, PageHeader, StatsGrid } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -169,13 +169,13 @@ export const EndOfServicePage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'employeeName', header: t('hr.eos.employee'), render: (row: EndOfService) => row.employeeName || row.employeeId },
-    { key: 'terminationDate', header: t('hr.eos.terminationDate'), width: '140px' },
+    { key: 'employeeName', header: t('hr.eos.employee'), mobile: 'title' as const, render: (row: EndOfService) => row.employeeName || row.employeeId },
+    { key: 'terminationDate', header: t('hr.eos.terminationDate'), width: '140px', mobile: 'subtitle' as const },
     { key: 'serviceYears', header: t('hr.eos.serviceYears'), width: '110px' },
     { key: 'lastSalary', header: t('hr.eos.lastSalary'), align: 'right' as const, render: (row: EndOfService) => formatCurrency(row.lastSalary) },
     { key: 'eosAmount', header: t('hr.eos.eosAmount'), align: 'right' as const, render: (row: EndOfService) => <span className="font-bold text-primary-600">{formatCurrency(row.eosAmount)}</span> },
-    { key: 'status', header: t('hr.eos.status'), width: '100px', render: (row: EndOfService) => <StatusBadge status={row.status} /> },
-    { key: 'actions', header: '', width: '180px', render: (row: EndOfService) => (
+    { key: 'status', header: t('hr.eos.status'), width: '100px', mobile: 'status' as const, render: (row: EndOfService) => <StatusBadge status={row.status} /> },
+    { key: 'actions', header: '', width: '180px', mobile: 'actions' as const, render: (row: EndOfService) => (
       <div className="flex items-center gap-1">
         <Button variant="ghost" size="sm" className="text-slate-600" onClick={() => setSelectedItem(row)} title={t('hr.eos.view')}>
           <Calculator size={16} />
@@ -206,52 +206,27 @@ export const EndOfServicePage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-orange-700 via-orange-600 to-amber-600 shadow-xl shadow-orange-900/10 dark:shadow-orange-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-orange-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('hr.eos.title')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('hr.eos.title')}</h2>
-              <p className="text-orange-100/80 text-base max-w-lg">{t('hr.eos.subtitle')}</p>
-            </div>
-            <Can action="create" module="hr">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.eos.newCalculation')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<LogOut size={22} />}
+        title={t('hr.eos.title')}
+        subtitle={t('hr.eos.subtitle')}
+        actions={
+          <Can action="create" module="hr">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)} className="shadow-sm">{t('hr.eos.newCalculation')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('settings.common.all'), value: String(total), icon: Layers, color: 'from-orange-600 to-orange-700', bg: 'bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/10 dark:to-orange-800/5' },
-          { label: t('hr.eos.draft'), value: String(items.filter((i) => i.status === 'draft').length), icon: Calculator, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
-          { label: t('hr.eos.approved'), value: String(items.filter((i) => i.status === 'approved').length), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-          { label: t('hr.eos.totalAmount') || 'إجمالي المستحقات', value: formatCurrency(items.reduce((s, i) => s + Number(i.eosAmount || 0), 0)), icon: Wallet, color: 'from-violet-600 to-violet-700', bg: 'bg-gradient-to-br from-violet-50 to-violet-100 dark:from-violet-900/10 dark:to-violet-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-lg md:text-xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        items={[
+          { label: t('settings.common.all'), value: String(total), icon: <LogOut size={18} />, tone: 'primary' },
+          { label: t('hr.eos.draft'), value: String(items.filter((i) => i.status === 'draft').length), icon: <Calculator size={18} />, tone: 'warning' },
+          { label: t('hr.eos.approved'), value: String(items.filter((i) => i.status === 'approved').length), icon: <CheckCircle2 size={18} />, tone: 'success' },
+          { label: t('hr.eos.totalAmount') || 'إجمالي المستحقات', value: formatCurrency(items.reduce((s, i) => s + Number(i.eosAmount || 0), 0)), icon: <Wallet size={18} />, tone: 'info' },
+        ]}
+      />
 
       {/* Toolbar */}
       <Card noPadding className="p-4 sm:p-5 border-t-2 border-orange-500/30">

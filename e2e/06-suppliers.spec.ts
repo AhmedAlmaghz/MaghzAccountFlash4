@@ -35,6 +35,7 @@ test.describe('Supplier', () => {
     await saveBtn.click();
 
     await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText('مورد اختبار e2e').first()).toBeVisible({ timeout: 15_000 });
+    // Scope to the visible desktop table — mobile cards render first in DOM
+    await expect(page.locator('table').getByText('مورد اختبار e2e').first()).toBeVisible({ timeout: 15_000 });
   });
 });

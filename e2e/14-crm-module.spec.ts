@@ -56,7 +56,8 @@ test.describe('Leads', () => {
     await saveBtn.click();
 
     await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(uniqueName).first()).toBeVisible({ timeout: 15_000 });
+    // Scope to the visible desktop table — the mobile card list (md:hidden) renders first in DOM
+    await expect(page.locator('table').getByText(uniqueName).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('search filter works on leads list', async ({ page }) => {
@@ -151,7 +152,8 @@ test.describe('Tasks', () => {
     await saveBtn.click();
 
     await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 15_000 });
+    // Scope to the visible desktop table — mobile cards render first in DOM
+    await expect(page.locator('table').getByText(uniqueTitle).first()).toBeVisible({ timeout: 15_000 });
   });
 });
 
@@ -185,7 +187,8 @@ test.describe('Activities', () => {
     await saveBtn.click();
 
     await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(uniqueSubject).first()).toBeVisible({ timeout: 15_000 });
+    // Scope to the visible desktop table — mobile cards render first in DOM
+    await expect(page.locator('table').getByText(uniqueSubject).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('activities page has export button', async ({ page }) => {

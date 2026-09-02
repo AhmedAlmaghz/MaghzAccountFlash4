@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { AlertTriangle, Package, FileDown, Search, ShoppingCart } from 'lucide-react';
-import { Card, Button, Table } from '@/core/ui/components';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
 import { exportToExcel } from '@/core/utils/exportEngine';
@@ -188,28 +188,24 @@ export const LowStockAlertReport: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Package size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">
-              {t('reports.lowStockAlert')}
-            </h1>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button
-            variant="secondary"
-            leftIcon={<ShoppingCart size={16} />}
-            onClick={() => window.location.href = '/purchases/orders'}
-          >
-            {t('reports.purchaseOrder')}
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            {t('reports.exportExcel')}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<AlertTriangle size={22} />}
+        title={t('reports.lowStockAlert')}
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              leftIcon={<ShoppingCart size={16} />}
+              onClick={() => window.location.href = '/purchases/orders'}
+            >
+              {t('reports.purchaseOrder')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              {t('reports.exportExcel')}
+            </Button>
+          </>
+        }
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -253,7 +249,7 @@ export const LowStockAlertReport: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('reports.searchProduct')}
-                className="w-full px-3 py-2 pr-9 text-sm border rounded-lg dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+                className="w-full min-h-11 px-3 py-2 pr-9 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
               />
             </div>
           </div>
@@ -264,7 +260,7 @@ export const LowStockAlertReport: React.FC = () => {
             <select
               value={warehouseFilter}
               onChange={(e) => setWarehouseFilter(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
+              className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 outline-none"
             >
               <option value="">{t('reports.allWarehouses')}</option>
               {warehouses.map((wh) => (
@@ -284,12 +280,12 @@ export const LowStockAlertReport: React.FC = () => {
           <Table
             data={filteredItems}
             columns={[
-              { key: 'productName', header: t('reports.product') },
-              { key: 'sku', header: t('reports.sku') },
+              { key: 'productName', header: t('reports.product'), mobile: 'title' as const },
+              { key: 'sku', header: t('reports.sku'), mobile: 'subtitle' as const },
               { key: 'warehouseName', header: t('reports.warehouse') },
-              { key: 'quantity', header: t('reports.quantity'), align: 'right' },
-              { key: 'minStockAlert', header: t('reports.minStock'), align: 'right' },
-              { key: 'deficit', header: t('reports.deficit'), align: 'right' },
+              { key: 'quantity', header: t('reports.quantity'), align: 'right', mobile: 'meta' as const },
+              { key: 'minStockAlert', header: t('reports.minStock'), align: 'right', mobile: 'hidden' as const },
+              { key: 'deficit', header: t('reports.deficit'), align: 'right', mobile: 'hidden' as const },
               {
                 key: 'stockStatus',
                 header: t('reports.status'),

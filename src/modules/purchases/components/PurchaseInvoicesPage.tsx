@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart, TrendingUp } from 'lucide-react';
+import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart, TrendingUp, Store, Receipt } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
@@ -7,13 +7,12 @@ import { useSettings } from '@/core/utils/useSettings';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useUserMap } from '@/core/utils/useUserMap';
 import { logAudit } from '@/core/utils/auditLogger';
-import { Card, Button, Modal, Input, Pagination, Can } from '@/core/ui/components';
+import { Card, Button, Modal, Input, Pagination, Can, Table, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { purchaseInvoiceFingerprint, detectDocumentDuplicates, genericNearScore } from '@/core/utils/documentDuplicate';
-import { DataTablePro } from '@/core/ui/components/DataTablePro';
 import { SupplierSelect, ProductSelect, CurrencySelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseInvoicesPaginated } from '../hooks/usePurchases';
@@ -29,7 +28,6 @@ import { purchasesApi } from '../api';
 import { useToastStore } from '@/core/store/toastStore';
 import type { PurchaseInvoice } from '../types';
 import type { Product } from '@/modules/inventory/types';
-import type { ColumnDef } from '@tanstack/react-table';
 
 interface InvoiceFormLine {
   productId: string;
@@ -80,6 +78,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const user = useAuthStore(state => state.user);
   const { showToggle: showOwnerToggle, isOwnOnly, toggleOwnOnly } = useOwnerFilter([], 'purchases');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [search, setSearch] = useState('');
   const invoiceFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
   const {
     invoices,
@@ -508,55 +507,65 @@ export const PurchaseInvoicesPage: React.FC = () => {
     });
   }, [t, activeCompany, invoices, currencySymbol]);
 
-  const columns = useMemo<ColumnDef<PurchaseInvoice>[]>(() => [
+  const columns = useMemo(() => [
     {
-      accessorKey: 'invoiceNumber',
+      key: 'invoiceNumber',
       header: t('purchases.invoiceNumber'),
-      cell: ({ row }) => <span className="font-medium text-slate-900 dark:text-slate-100">{row.original.invoiceNumber}</span>,
+      mobile: 'title' as const,
+      render: (row: PurchaseInvoice) => <span className="font-medium text-zinc-900 dark:text-zinc-100">{row.invoiceNumber}</span>,
     },
     {
-      accessorKey: 'supplier',
+      key: 'supplier',
       header: t('purchases.supplier'),
-      cell: ({ row }) => <span>{row.original.supplier?.name || row.original.supplierId}</span>,
+      mobile: 'subtitle' as const,
+      render: (row: PurchaseInvoice) => <span>{row.supplier?.name || row.supplierId}</span>,
     },
     {
-      accessorKey: 'date',
+      key: 'date',
       header: t('purchases.date'),
-      cell: ({ row }) => <span>{row.original.date ? formatDate(row.original.date) : '-'}</span>,
+      render: (row: PurchaseInvoice) => <span>{row.date ? formatDate(row.date) : '-'}</span>,
     },
     {
-      accessorKey: 'totalAmount',
+      key: 'dueDate',
+      header: t('purchases.dueDate'),
+      render: (row: PurchaseInvoice) => <span>{row.dueDate ? formatDate(row.dueDate) : '-'}</span>,
+    },
+    {
+      key: 'totalAmount',
       header: t('purchases.total'),
-      cell: ({ row }) => <span className="text-slate-900 dark:text-slate-100 font-medium">{formatCurrency(row.original.totalAmount)}</span>,
+      render: (row: PurchaseInvoice) => <span className="text-zinc-900 dark:text-zinc-100 font-medium">{formatCurrency(row.totalAmount)}</span>,
     },
     {
-      accessorKey: 'status',
+      key: 'status',
       header: t('purchases.status'),
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      mobile: 'status' as const,
+      render: (row: PurchaseInvoice) => <StatusBadge status={row.status} />,
     },
     {
-      accessorKey: 'paymentType',
+      key: 'paymentType',
       header: t('purchases.invoice.paymentType'),
-      cell: ({ row }) => {
-        const pt = row.original.paymentType;
+      render: (row: PurchaseInvoice) => {
+        const pt = row.paymentType;
         return pt === 'cash'
           ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">{t('purchases.invoice.cash')}</span>
           : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">{t('purchases.invoice.credit')}</span>;
       },
     },
     {
-      accessorKey: 'createdBy',
+      key: 'createdBy',
       header: t('common.createdBy'),
-      size: 110,
-      cell: ({ row }) => (
-        <span className="text-xs text-slate-600 dark:text-slate-400">{getUserName(row.original.createdBy)}</span>
+      width: '110px',
+      mobile: 'hidden' as const,
+      render: (row: PurchaseInvoice) => (
+        <span className="text-xs text-zinc-600 dark:text-zinc-400">{getUserName(row.createdBy)}</span>
       ),
     },
     {
-      accessorKey: 'actions',
+      key: 'actions',
       header: t('purchases.actions'),
-      cell: ({ row }) => {
-        const inv = row.original;
+      mobile: 'actions' as const,
+      render: (row: PurchaseInvoice) => {
+        const inv = row;
         const isPosting = postingId === inv.id;
         return (
           <div className="flex items-center gap-1">
@@ -586,7 +595,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
               </Button>
             )}
             {inv.status !== 'draft' && (
-              <span className="text-xs text-slate-400 flex items-center gap-1 mr-2">
+              <span className="text-xs text-zinc-400 flex items-center gap-1 mr-2">
                 <BookOpen size={12} /> {t('accounting.posted')}
               </span>
             )}
@@ -607,92 +616,81 @@ export const PurchaseInvoicesPage: React.FC = () => {
     return { drafts, totalPosted, outstanding };
   }, [invoices]);
 
+  const visibleInvoices = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return invoices;
+    return invoices.filter((i) =>
+      i.invoiceNumber?.toLowerCase().includes(q) ||
+      (i.supplier?.name || '').toLowerCase().includes(q) ||
+      i.status?.toLowerCase().includes(q) ||
+      String(i.totalAmount || '').includes(q)
+    );
+  }, [invoices, search]);
+
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-600 shadow-xl shadow-indigo-900/10 dark:shadow-indigo-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-indigo-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('purchases.invoices')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('purchases.invoices')}</h2>
-              <p className="text-indigo-100/80 text-base max-w-lg">{t('purchases.invoicesSubtitle')}</p>
-            </div>
-            <Can action="create" module="purchases">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('purchases.invoice.create')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Store size={22} />}
+        title={t('purchases.invoices')}
+        subtitle={t('purchases.invoicesSubtitle')}
+        actions={
+          <Can action="create" module="purchases">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('purchases.invoice.create')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('purchases.invoice.totalInvoices'), value: String(total), icon: FileText, color: 'from-indigo-600 to-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/10 dark:to-indigo-800/5' },
-          { label: t('purchases.return.postedTotal'), value: formatCurrency(kpis.totalPosted), icon: ShoppingCart, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
-          { label: t('purchases.return.drafts'), value: String(kpis.drafts), icon: Layers, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('purchases.invoice.outstanding'), value: formatCurrency(kpis.outstanding), icon: Wallet, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-lg md:text-xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        columns={4}
+        items={[
+          { label: t('purchases.invoice.totalInvoices'), value: String(total), icon: <FileText size={18} />, tone: 'primary' },
+          { label: t('purchases.return.postedTotal'), value: formatCurrency(kpis.totalPosted), icon: <ShoppingCart size={18} />, tone: 'info' },
+          { label: t('purchases.return.drafts'), value: String(kpis.drafts), icon: <Layers size={18} />, tone: 'warning' },
+          { label: t('purchases.invoice.outstanding'), value: formatCurrency(kpis.outstanding), icon: <Wallet size={18} />, tone: 'success' },
+        ]}
+      />
 
-      {/* Toolbar */}
-      <Card noPadding className="p-4 sm:p-5 border-t-2 border-indigo-500/30">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-slate-500 font-medium">{t('purchases.status')}:</span>
-            {[
-              { v: '', l: t('purchases.filter.all') },
-              { v: 'draft', l: t('purchases.filter.draft') },
-              { v: 'posted', l: t('purchases.filter.posted') },
-              { v: 'partially_paid', l: t('sales.status.partially_paid') },
-              { v: 'paid', l: t('sales.status.paid') },
-              { v: 'cancelled', l: t('purchases.filter.cancelled') },
-            ].map((o) => (
-              <button
-                key={o.v || 'all'}
-                onClick={() => setStatusFilter(o.v)}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-300'}`}
-              >{o.l}</button>
-            ))}
-          </div>
-          <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
-        </div>
-      </Card>
+      {/* Filter Bar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t('search') + '...'}
+        filterOptions={[
+          { key: '', label: t('purchases.filter.all') },
+          { key: 'draft', label: t('purchases.filter.draft') },
+          { key: 'posted', label: t('purchases.filter.posted') },
+          { key: 'partially_paid', label: t('sales.status.partially_paid') },
+          { key: 'paid', label: t('sales.status.paid') },
+          { key: 'cancelled', label: t('purchases.filter.cancelled') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key)}
+        actions={
+          <>
+            <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
+            <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
+              <FileText size={15} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
+              <Receipt size={15} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
+            </Button>
+          </>
+        }
+      />
 
       <Card noPadding>
-        <DataTablePro<PurchaseInvoice>
-          data={invoices}
-          columns={columns}
-          keyExtractor={(row) => row.id}
-          isLoading={isLoading}
-          emptyMessage={t('purchases.invoice.emptyTitle')}
-          onExportExcel={handleExportExcel}
-          onExportPdf={handleExportPdf}
-          searchable
-          searchPlaceholder={t('search') + '...'}
-        />
-        <div className="border-t border-slate-200 dark:border-slate-800">
+        <div className="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800">
+          <Table<PurchaseInvoice>
+            data={visibleInvoices}
+            columns={columns as never}
+            keyExtractor={(row) => row.id}
+            isLoading={isLoading}
+            emptyMessage={t('purchases.invoice.emptyTitle')}
+          />
+        </div>
+        <div className="border-t border-zinc-200 dark:border-zinc-800">
           <Pagination
             page={page}
             pageSize={pageSize}
@@ -812,7 +810,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('purchases.invoice.addLine')}</Button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
@@ -854,6 +852,39 @@ export const PurchaseInvoicesPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+            {/* Mobile line-items cards */}
+            <div className="md:hidden space-y-3 p-3">
+              {form.lines.map((line, idx) => {
+                const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                const lineTotal = lineNet;
+                return (
+                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
+                    <ProductSelect
+                      companyId={activeCompany?.id || ''}
+                      value={line.productId}
+                      onChange={v => updateLine(idx, { productId: Array.isArray(v) ? (v[0] || '') : (v || '') })}
+                      onProductChange={(p) => handleProductChange(idx, p)}
+                      showStock
+                      showBarcode
+                      size="sm"
+                      module="purchases"
+                    />
+                    <Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} size="sm" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} size="sm" />
+                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, { unitPrice: Number(e.target.value) })} size="sm" />
+                    </div>
+                    {showDiscount && (
+                      <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, { discountPercent: Number(e.target.value) })} size="sm" />
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             {form.lines.length === 0 && (
               <div className="py-12 text-center text-slate-400">

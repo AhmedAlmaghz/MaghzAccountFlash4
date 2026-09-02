@@ -1,4 +1,4 @@
-export { Button } from './Button';
+﻿export { Button } from './Button';
 export { Input } from './Input';
 export { Modal } from './Modal';
 export { Card, CardTitle, CardDescription } from './Card';
@@ -15,3 +15,8 @@ export { PermissionGate, Can } from './PermissionGate';
 export { ToastContainer } from './Toast';
 export { PageLoader } from './PageLoader';
 export { DuplicateWarningDialog } from './DuplicateWarningDialog';
+export { PageHeader } from './patterns/PageHeader';
+export { StatsGrid } from './patterns/StatsGrid';
+export { FilterBar } from './patterns/FilterBar';
+export { ChartCard } from './patterns/ChartCard';
+export { getChartColors, getChartTheme } from './patterns/chartTheme';

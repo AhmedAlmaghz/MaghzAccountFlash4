@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Scale, Plus, CheckSquare, BookOpen, Printer, Download, Pencil, Search, X, TrendingUp, TrendingDown, Layers, Package, ClipboardList, ArrowUpCircle, ArrowDownCircle, Clock } from 'lucide-react';
-import { Card, Button, Modal, Input, Table } from '@/core/ui/components';
+import { Plus, CheckSquare, BookOpen, Printer, Download, Pencil, Search, X, TrendingUp, TrendingDown, Layers, Package, ClipboardList, ArrowUpCircle, ArrowDownCircle, Clock } from 'lucide-react';
+import { Card, Button, Modal, Input, Table, PageHeader } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -258,34 +258,30 @@ export const StockAdjustmentPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-sm">
-              <Scale size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('inventory.adjustments')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('inventory.page.subtitle')}</p>
-            </div>
-          </div>
-          <Can action="create" module="inventory">
-            <Button
-              variant="primary"
-              leftIcon={<Plus size={16} />}
-              onClick={async () => {
-                resetForm();
-                if (activeCompany) {
-                  const seq = await getNextNumber('stock_adjustment', activeCompany.id);
-                  if (seq?.number) setForm((prev) => ({ ...prev, adjustmentNumber: seq.number }));
-                }
-                setIsOpen(true);
-              }}
-              className="shadow-sm"
-            >
-              {t('inventory.newAdjustment')}
-            </Button>
-          </Can>
-        </div>
+        <PageHeader
+          icon={<ClipboardList size={22} />}
+          title={t('inventory.adjustments')}
+          subtitle={t('inventory.page.subtitle')}
+          actions={
+            <Can action="create" module="inventory">
+              <Button
+                variant="primary"
+                leftIcon={<Plus size={16} />}
+                onClick={async () => {
+                  resetForm();
+                  if (activeCompany) {
+                    const seq = await getNextNumber('stock_adjustment', activeCompany.id);
+                    if (seq?.number) setForm((prev) => ({ ...prev, adjustmentNumber: seq.number }));
+                  }
+                  setIsOpen(true);
+                }}
+                className="shadow-sm"
+              >
+                {t('inventory.newAdjustment')}
+              </Button>
+            </Can>
+          }
+        />
 
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Card className="p-4 flex items-center justify-between">
@@ -408,22 +404,25 @@ export const StockAdjustmentPage: React.FC = () => {
                 key: 'date',
                 header: t('inventory.date'),
                 width: '110px',
-                render: (row: StockAdjustment) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{new Date(row.date).toLocaleDateString('ar-EG')}</span>,
+                mobile: 'subtitle' as const,
+                render: (row: StockAdjustment) => <span className="font-mono text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded border tabular-nums">{new Date(row.date).toLocaleDateString('ar-EG')}</span>,
               },
               {
                 key: 'adjustmentNumber',
                 header: t('inventory.adjustment.number'),
                 width: '125px',
-                render: (row: StockAdjustment) => row.adjustmentNumber ? <span className="font-mono text-xs font-semibold bg-primary-50 dark:bg-primary-900/20 px-2 py-1 rounded border border-primary-200 dark:border-primary-800">{row.adjustmentNumber}</span> : <span className="text-slate-400 text-xs">—</span>,
+                mobile: 'hidden' as const,
+                render: (row: StockAdjustment) => row.adjustmentNumber ? <span className="font-mono text-xs font-semibold bg-primary-50 dark:bg-primary-900/20 px-2 py-1 rounded border border-primary-200 dark:border-primary-800">{row.adjustmentNumber}</span> : <span className="text-zinc-400 text-xs">—</span>,
               },
               {
                 key: 'productName',
                 header: t('inventory.productName'),
+                mobile: 'title' as const,
                 render: (row: StockAdjustment) => (
                   <div className="min-w-0">
-                    <p className="font-medium truncate flex items-center gap-1.5"><Package size={12} className="text-slate-400 shrink-0" />{row.productName || row.productId}</p>
-                    {row.productCode ? <p className="text-xs text-slate-500 font-mono">{row.productCode}</p> : null}
-                    <p className="text-xs text-slate-500 truncate">{row.warehouseName || ''}</p>
+                    <p className="font-medium truncate flex items-center gap-1.5"><Package size={12} className="text-zinc-400 shrink-0" />{row.productName || row.productId}</p>
+                    {row.productCode ? <p className="text-xs text-zinc-500 font-mono">{row.productCode}</p> : null}
+                    <p className="text-xs text-zinc-500 truncate">{row.warehouseName || ''}</p>
                   </div>
                 ),
               },
@@ -447,7 +446,7 @@ export const StockAdjustmentPage: React.FC = () => {
                 align: 'right' as const,
                 width: '100px',
                 render: (row: StockAdjustment) => (
-                  <span className={`inline-flex items-center gap-1 font-bold tabular-nums px-2 py-1 rounded-full text-xs border ${row.difference > 0 ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200' : row.difference < 0 ? 'bg-rose-100 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border-rose-200' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 border-slate-200'}`}>
+                  <span className={`inline-flex items-center gap-1 font-bold tabular-nums px-2 py-1 rounded-full text-xs border ${row.difference > 0 ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200' : row.difference < 0 ? 'bg-rose-100 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 border-rose-200' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 border-zinc-200'}`}>
                     {row.difference > 0 ? <TrendingUp size={12} /> : row.difference < 0 ? <TrendingDown size={12} /> : null}
                     {row.difference > 0 ? '+' : ''}{row.difference}
                   </span>
@@ -457,12 +456,14 @@ export const StockAdjustmentPage: React.FC = () => {
                 key: 'status',
                 header: t('inventory.status'),
                 width: '110px',
+                mobile: 'status' as const,
                 render: (row: StockAdjustment) => <StatusBadge status={row.status} />,
               },
               {
                 key: 'actions',
                 header: '',
                 width: '150px',
+                mobile: 'actions' as const,
                 render: (row: StockAdjustment) => (
                   <div className="flex items-center gap-1">
                     {row.status === 'draft' && (

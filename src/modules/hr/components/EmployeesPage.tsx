@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { Users, Plus, User, Search, Wallet, CheckSquare, XCircle, Layers } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
+import { Users, Plus, User, Search, Wallet, CheckSquare, XCircle } from 'lucide-react';
+import { Card, Button, Input, Modal, Table, Pagination, PageHeader, StatsGrid } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
@@ -191,13 +191,13 @@ export const EmployeesPage: React.FC = () => {
   };
 
   const columns = useMemo(() => [
-    { key: 'employeeNumber', header: t('hr.employeesPage.employeeNumber'), width: '120px', render: (row: Employee) => (
+    { key: 'employeeNumber', header: t('hr.employeesPage.employeeNumber'), width: '120px', mobile: 'hidden' as const, render: (row: Employee) => (
       <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
         {row.employeeNumber}
       </span>
     )},
-    { key: 'fullName', header: t('hr.employeesPage.name'), render: (row: Employee) => (
+    { key: 'fullName', header: t('hr.employeesPage.name'), mobile: 'title' as const, render: (row: Employee) => (
       <div className="flex items-center gap-2 min-w-0">
         {row.photoUrl
           ? <img src={row.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
@@ -205,11 +205,11 @@ export const EmployeesPage: React.FC = () => {
         <span className="font-medium truncate">{row.fullName}</span>
       </div>
     )},
-    { key: 'position', header: t('hr.employeesPage.position') },
+    { key: 'position', header: t('hr.employeesPage.position'), mobile: 'subtitle' as const },
     { key: 'departmentName', header: t('hr.employeesPage.department'), render: (row: Employee) => row.departmentName || row.departmentId || '—' },
     { key: 'baseSalary', header: t('hr.employeesPage.baseSalary'), align: 'right' as const, render: (row: Employee) => <span className="tabular-nums font-medium">{formatCurrency(row.baseSalary || 0)}</span> },
-    { key: 'isActive', header: t('hr.employeesPage.status'), width: '110px', render: (row: Employee) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
-    { key: 'actions', header: '', width: '140px', render: (row: Employee) => (
+    { key: 'isActive', header: t('hr.employeesPage.status'), width: '110px', mobile: 'status' as const, render: (row: Employee) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
+    { key: 'actions', header: '', width: '140px', mobile: 'actions' as const, render: (row: Employee) => (
       <ActionButtons onView={() => openView(row)} onEdit={() => openEdit(row)} onDelete={() => setConfirmDelete(row.id)} showPrint={false} />
     )},
   ], [t, formatCurrency, openView, openEdit]);
@@ -223,52 +223,27 @@ export const EmployeesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-indigo-600 to-violet-600 shadow-xl shadow-indigo-900/10 dark:shadow-indigo-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-indigo-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('hr.employeesPage.title')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('hr.employeesPage.title')}</h2>
-              <p className="text-indigo-100/80 text-base max-w-lg">{t('hr.employeesPage.subtitle')}</p>
-            </div>
-            <Can action="create" module="hr">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.employeesPage.new')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Users size={22} />}
+        title={t('hr.employeesPage.title')}
+        subtitle={t('hr.employeesPage.subtitle')}
+        actions={
+          <Can action="create" module="hr">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('hr.employeesPage.new')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('hr.employeesPage.total'), value: String(total), icon: Users, color: 'from-indigo-600 to-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/10 dark:to-indigo-800/5' },
-          { label: t('settings.common.active'), value: String(kpis.active), icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-          { label: t('settings.common.inactive'), value: String(kpis.inactive), icon: XCircle, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
-          { label: t('hr.employeesPage.payrollMass'), value: formatCurrency(kpis.payrollMass), icon: Wallet, color: 'from-violet-600 to-violet-700', bg: 'bg-gradient-to-br from-violet-50 to-violet-100 dark:from-violet-900/10 dark:to-violet-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-lg md:text-xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        items={[
+          { label: t('hr.employeesPage.total'), value: String(total), icon: <Users size={18} />, tone: 'primary' },
+          { label: t('settings.common.active'), value: String(kpis.active), icon: <CheckSquare size={18} />, tone: 'success' },
+          { label: t('settings.common.inactive'), value: String(kpis.inactive), icon: <XCircle size={18} />, tone: 'danger' },
+          { label: t('hr.employeesPage.payrollMass'), value: formatCurrency(kpis.payrollMass), icon: <Wallet size={18} />, tone: 'info' },
+        ]}
+      />
 
       {/* Toolbar */}
       <Card noPadding className="p-4 sm:p-5 border-t-2 border-indigo-500/30">

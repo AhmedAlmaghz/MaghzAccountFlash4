@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Receipt, Plus, Pencil, Trash2, Save } from 'lucide-react';
-import { Card, Button, Input, Table, ConfirmDialog, Can } from '@/core/ui/components';
+import { Card, Button, Input, Table, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { AccountSelect } from '@/core/ui/components/smart';
-import { SettingsHeader } from './SettingsHeader';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -179,14 +178,14 @@ export const VatSettingsPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'name', header: t('settings.vat.name') },
+    { key: 'name', header: t('settings.vat.name'), mobile: 'title' as const },
     { key: 'rate', header: t('settings.vat.rate'), render: (row: VatType) => `${row.rate}%` },
-    { key: 'isActive', header: t('settings.vat.status'), render: (row: VatType) => (
+    { key: 'isActive', header: t('settings.vat.status'), mobile: 'status' as const, render: (row: VatType) => (
       <span className={row.isActive ? 'badge-posted' : 'badge-draft'}>
         {row.isActive ? t('settings.common.active') : t('settings.common.inactive')}
       </span>
     )},
-    { key: 'actions', header: '', render: (row: VatType) => (
+    { key: 'actions', header: '', mobile: 'actions' as const, render: (row: VatType) => (
       <div className="flex items-center gap-1">
         <Can action="edit" module="settings"><Button size="sm" variant="ghost" onClick={() => { setEditingId(row.id); setFormData(row); }}>
           <Pencil size={14} className="text-amber-600" />
@@ -200,14 +199,13 @@ export const VatSettingsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.vat.title')}
         subtitle={t('settings.vat.subtitle')}
-        icon={Receipt}
-        color="from-rose-600 via-rose-500 to-pink-600"
-        action={
+        icon={<Receipt size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', rate: 15, isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ name: '', rate: 15, isActive: true }); }}>
               {t('settings.vat.new')}
             </Button>
           </Can>

@@ -3,7 +3,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { getDbAdapter } from '@/core/database/adapters';
 import { useAppStore } from '@/core/store';
-import { Card, Button, Table } from '@/core/ui/components';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { exportToExcel } from '@/core/utils/exportEngine';
 import { Package, Layers, Warehouse, FileDown } from 'lucide-react';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
@@ -245,19 +245,15 @@ export const StockValuationReport = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Package size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.stockValuation')}</h1>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
+      <PageHeader
+        icon={<Package size={22} />}
+        title={t('reports.stockValuation')}
+        actions={
           <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
             {t('reports.exportExcel')}
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="flex gap-2 flex-wrap">
         {([
@@ -268,7 +264,7 @@ export const StockValuationReport = () => {
           <button
             key={tab.key}
             onClick={() => setViewMode(tab.key)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-full transition-colors ${
               viewMode === tab.key
                 ? 'bg-primary-600 text-white'
                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
@@ -320,14 +316,14 @@ export const StockValuationReport = () => {
             <Table
               data={products}
               columns={[
-                { key: 'nameAr', header: t('reports.product') },
-                { key: 'sku', header: t('reports.sku') },
-                { key: 'categoryName', header: t('reports.category') },
-                { key: 'totalQty', header: t('reports.quantity'), align: 'right', render: (row: ProductValuation) => row.totalQty.toLocaleString() },
-                { key: 'costPrice', header: t('reports.cost'), align: 'right', render: (row: ProductValuation) => formatCurrency(row.costPrice) },
-                { key: 'salePrice', header: t('reports.revenue'), align: 'right', render: (row: ProductValuation) => formatCurrency(row.salePrice) },
+                { key: 'nameAr', header: t('reports.product'), mobile: 'title' as const },
+                { key: 'sku', header: t('reports.sku'), mobile: 'subtitle' as const },
+                { key: 'categoryName', header: t('reports.category'), mobile: 'hidden' as const },
+                { key: 'totalQty', header: t('reports.quantity'), align: 'right', mobile: 'meta' as const, render: (row: ProductValuation) => row.totalQty.toLocaleString() },
+                { key: 'costPrice', header: t('reports.cost'), align: 'right', mobile: 'hidden' as const, render: (row: ProductValuation) => formatCurrency(row.costPrice) },
+                { key: 'salePrice', header: t('reports.revenue'), align: 'right', mobile: 'hidden' as const, render: (row: ProductValuation) => formatCurrency(row.salePrice) },
                 { key: 'totalCostValue', header: t('reports.total'), align: 'right', render: (row: ProductValuation) => formatCurrency(row.totalCostValue) },
-                { key: 'totalSaleValue', header: t('reports.revenue'), align: 'right', render: (row: ProductValuation) => formatCurrency(row.totalSaleValue) },
+                { key: 'totalSaleValue', header: t('reports.revenue'), align: 'right', mobile: 'hidden' as const, render: (row: ProductValuation) => formatCurrency(row.totalSaleValue) },
                 {
                   key: 'potentialProfit',
                   header: t('reports.profit'),
@@ -347,10 +343,10 @@ export const StockValuationReport = () => {
             <Table
               data={categories}
               columns={[
-                { key: 'categoryName', header: t('reports.category') },
-                { key: 'productCount', header: t('reports.count'), align: 'right' },
-                { key: 'totalQty', header: t('reports.quantity'), align: 'right', render: (row: CategoryValuation) => row.totalQty.toLocaleString() },
-                { key: 'totalValue', header: t('reports.total'), align: 'right', render: (row: CategoryValuation) => formatCurrency(row.totalValue) },
+                { key: 'categoryName', header: t('reports.category'), mobile: 'title' as const },
+                { key: 'productCount', header: t('reports.count'), align: 'right', mobile: 'hidden' as const },
+                { key: 'totalQty', header: t('reports.quantity'), align: 'right', mobile: 'meta' as const, render: (row: CategoryValuation) => row.totalQty.toLocaleString() },
+                { key: 'totalValue', header: t('reports.total'), align: 'right', mobile: 'subtitle' as const, render: (row: CategoryValuation) => formatCurrency(row.totalValue) },
               ]}
               keyExtractor={(_row: CategoryValuation, i: number) => `cat-${i}`}
             />
@@ -360,10 +356,10 @@ export const StockValuationReport = () => {
             <Table
               data={warehouses}
               columns={[
-                { key: 'warehouseName', header: t('reports.warehouse') },
-                { key: 'productCount', header: t('reports.count'), align: 'right' },
-                { key: 'totalQty', header: t('reports.quantity'), align: 'right', render: (row: WarehouseValuation) => row.totalQty.toLocaleString() },
-                { key: 'totalValue', header: t('reports.total'), align: 'right', render: (row: WarehouseValuation) => formatCurrency(row.totalValue) },
+                { key: 'warehouseName', header: t('reports.warehouse'), mobile: 'title' as const },
+                { key: 'productCount', header: t('reports.count'), align: 'right', mobile: 'hidden' as const },
+                { key: 'totalQty', header: t('reports.quantity'), align: 'right', mobile: 'meta' as const, render: (row: WarehouseValuation) => row.totalQty.toLocaleString() },
+                { key: 'totalValue', header: t('reports.total'), align: 'right', mobile: 'subtitle' as const, render: (row: WarehouseValuation) => formatCurrency(row.totalValue) },
               ]}
               keyExtractor={(_row: WarehouseValuation, i: number) => `wh-${i}`}
             />

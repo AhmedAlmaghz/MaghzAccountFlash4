@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Package, ArrowUp, ArrowDown, ArrowLeftRight, FileDown, RefreshCw } from 'lucide-react';
-import { Card, Button } from '@/core/ui/components';
+import { Card, Button, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
 import { mapRows } from '@/core/utils/mapPgRow';
@@ -243,22 +243,20 @@ export const StockMovementReport: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Package size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.stockMovement')}</h1>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            {t('reports.exportExcel')}
-          </Button>
-          <Button variant="secondary" leftIcon={<RefreshCw size={16} />} onClick={loadData}>
-            {t('reports.refresh')}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Package size={22} />}
+        title={t('reports.stockMovement')}
+        actions={
+          <>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              {t('reports.exportExcel')}
+            </Button>
+            <Button variant="secondary" leftIcon={<RefreshCw size={16} />} onClick={loadData}>
+              {t('reports.refresh')}
+            </Button>
+          </>
+        }
+      />
 
       {/* Filters */}
       <Card>
@@ -269,7 +267,7 @@ export const StockMovementReport: React.FC = () => {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-slate-900 dark:border-slate-600 text-slate-900 dark:text-slate-50"
+              className="min-h-11 px-3 py-2 text-sm border rounded-xl bg-white dark:bg-slate-900 dark:border-slate-600 text-slate-900 dark:text-slate-50"
             />
           </div>
           <div>
@@ -278,7 +276,7 @@ export const StockMovementReport: React.FC = () => {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-slate-900 dark:border-slate-600 text-slate-900 dark:text-slate-50"
+              className="min-h-11 px-3 py-2 text-sm border rounded-xl bg-white dark:bg-slate-900 dark:border-slate-600 text-slate-900 dark:text-slate-50"
             />
           </div>
           <div>
@@ -286,7 +284,7 @@ export const StockMovementReport: React.FC = () => {
             <select
               value={productFilter}
               onChange={(e) => setProductFilter(e.target.value)}
-              className="px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-slate-900 dark:border-slate-600 text-slate-900 dark:text-slate-50"
+              className="min-h-11 px-3 py-2 text-sm border rounded-xl bg-white dark:bg-slate-900 dark:border-slate-600 text-slate-900 dark:text-slate-50"
             >
               <option value="">{t('reports.all')}</option>
               {products.map((p) => (

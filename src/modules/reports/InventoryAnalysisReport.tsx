@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Package, AlertTriangle, FileDown, Filter, RotateCcw, TrendingDown } from 'lucide-react';
-import { Card, Button, Table } from '@/core/ui/components';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
@@ -210,25 +210,23 @@ export const InventoryAnalysisReport: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Package size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.inventoryAnalysis')}</h1>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
-            {t('reports.filter')}
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            {t('reports.exportExcel')}
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-            {t('reports.exportPdf')}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Package size={22} />}
+        title={t('reports.inventoryAnalysis')}
+        actions={
+          <>
+            <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
+              {t('reports.filter')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              {t('reports.exportExcel')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              {t('reports.exportPdf')}
+            </Button>
+          </>
+        }
+      />
 
       {/* View Tabs */}
       <div className="flex gap-2 flex-wrap">
@@ -241,7 +239,7 @@ export const InventoryAnalysisReport: React.FC = () => {
           <button
             key={tab.key}
             onClick={() => setView(tab.key)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+            className={`px-4 py-2 text-sm font-medium rounded-full transition-colors ${
               view === tab.key
                 ? 'bg-primary-600 text-white'
                 : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
@@ -258,7 +256,7 @@ export const InventoryAnalysisReport: React.FC = () => {
           <div className="p-4 flex flex-wrap gap-4 items-end">
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('reports.status')}</label>
-              <select className="px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}>
+              <select className="min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}>
                 <option value="all">{t('reports.all')}</option>
                 <option value="good">{t('reports.good')}</option>
                 <option value="low">{t('reports.low')}</option>
@@ -354,11 +352,11 @@ export const InventoryAnalysisReport: React.FC = () => {
             <Table
               data={abcData}
               columns={[
-                { key: 'product', header: t('reports.product') },
-                { key: 'sku', header: t('reports.sku') },
-                { key: 'quantity', header: t('reports.quantity'), align: 'right' },
-                { key: 'stockValue', header: t('reports.amount'), align: 'right', render: (row) => formatCurrency(row.stockValue) },
-                { key: 'cumPct', header: t('reports.abcAnalysis.cumulativePercent'), align: 'right', render: (row) => `${row.cumPct}%` },
+                { key: 'product', header: t('reports.product'), mobile: 'title' as const },
+                { key: 'sku', header: t('reports.sku'), mobile: 'subtitle' as const },
+                { key: 'quantity', header: t('reports.quantity'), align: 'right', mobile: 'meta' as const },
+                { key: 'stockValue', header: t('reports.amount'), align: 'right', mobile: 'hidden' as const, render: (row) => formatCurrency(row.stockValue) },
+                { key: 'cumPct', header: t('reports.abcAnalysis.cumulativePercent'), align: 'right', mobile: 'hidden' as const, render: (row) => `${row.cumPct}%` },
                 { key: 'grade', header: t('reports.abcAnalysis.grade'), align: 'center', render: (row) => (
                   <span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${
                     row.grade === 'A' ? 'bg-emerald-100 text-emerald-700' :
@@ -373,12 +371,12 @@ export const InventoryAnalysisReport: React.FC = () => {
             <Table
               data={filteredItems}
               columns={[
-                { key: 'product', header: t('reports.product') },
-                { key: 'sku', header: t('reports.sku') },
+                { key: 'product', header: t('reports.product'), mobile: 'title' as const },
+                { key: 'sku', header: t('reports.sku'), mobile: 'subtitle' as const },
                 { key: 'warehouse', header: t('reports.warehouse') },
-                { key: 'quantity', header: t('reports.quantity'), align: 'right' },
-                { key: 'minStock', header: t('reports.minStock'), align: 'right' },
-                { key: 'status', header: t('reports.status'), render: (row) => (
+                { key: 'quantity', header: t('reports.quantity'), align: 'right', mobile: 'meta' as const },
+                { key: 'minStock', header: t('reports.minStock'), align: 'right', mobile: 'hidden' as const },
+                { key: 'status', header: t('reports.status'), mobile: 'status' as const, render: (row) => (
                   <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
                     row.status === 'good' ? 'bg-emerald-100 text-emerald-700' :
                     row.status === 'low' ? 'bg-amber-100 text-amber-700' :

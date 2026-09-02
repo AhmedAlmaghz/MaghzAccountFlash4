@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Plus, TrendingUp, MoveHorizontal, Search, Layers, Handshake, Trash2, Lock, FileSpreadsheet } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
+import { Plus, TrendingUp, MoveHorizontal, Target, Search, Layers, Handshake, Trash2, Lock, FileSpreadsheet } from 'lucide-react';
+import { Card, Button, Input, Modal, Table, Pagination, PageHeader, StatsGrid } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates } from '@/core/utils/duplicateDetection';
@@ -214,15 +214,16 @@ export const OpportunitiesPage: React.FC = () => {
   }, [opportunities, t]);
 
   const listColumns = [
-    { key: 'name', header: t('crm.opportunity.name') },
+    { key: 'name', header: t('crm.opportunity.name'), mobile: 'title' as const },
     { key: 'value', header: t('crm.opportunity.value'), align: 'right' as const, render: (row: Opportunity) => formatCurrency(row.value) },
-    { key: 'stage', header: t('crm.opportunity.stage'), render: (row: Opportunity) => <StatusBadge status={row.stage} /> },
-    { key: 'probability', header: t('crm.opportunity.probability'), render: (row: Opportunity) => `${row.probability || 0}%` },
-    { key: 'expectedCloseDate', header: t('crm.opportunity.expectedCloseDate'), width: '160px', render: (row: Opportunity) => row.expectedCloseDate ? formatDate(row.expectedCloseDate) : '—' },
+    { key: 'stage', header: t('crm.opportunity.stage'), mobile: 'status' as const, render: (row: Opportunity) => <StatusBadge status={row.stage} /> },
+    { key: 'probability', header: t('crm.opportunity.probability'), mobile: 'hidden' as const, render: (row: Opportunity) => `${row.probability || 0}%` },
+    { key: 'expectedCloseDate', header: t('crm.opportunity.expectedCloseDate'), width: '160px', mobile: 'hidden' as const, render: (row: Opportunity) => row.expectedCloseDate ? formatDate(row.expectedCloseDate) : '—' },
     {
       key: 'actions',
       header: '',
       width: '160px',
+      mobile: 'actions' as const,
       render: (row: Opportunity) => (
         <div className="flex items-center gap-1">
           <Can action="edit" module="crm">
@@ -238,49 +239,27 @@ export const OpportunitiesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-fuchsia-700 via-fuchsia-600 to-purple-600 shadow-xl shadow-fuchsia-900/10 dark:shadow-fuchsia-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-fuchsia-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('crm.opportunitiesPage.title')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('crm.opportunitiesPage.title')}</h2>
-              <p className="text-fuchsia-100/80 text-base max-w-lg">{t('crm.opportunitiesPage.description')}</p>
-            </div>
-            <Can action="create" module="crm"><Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('crm.opportunity.new')}</Button></Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Target size={22} />}
+        title={t('crm.opportunitiesPage.title')}
+        subtitle={t('crm.opportunitiesPage.description')}
+        actions={
+          <Can action="create" module="crm">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('crm.opportunity.new')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {[
-          { label: t('crm.opportunity.displayed'), value: String(displayedCount), icon: Layers, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
-          { label: t('crm.opportunity.totalValue'), value: formatCurrency(totalValue), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-          { label: t('crm.opportunity.weightedValue'), value: formatCurrency(Math.round(weightedValue)), icon: TrendingUp, color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-gradient-to-br from-fuchsia-50 to-fuchsia-100 dark:from-fuchsia-900/10 dark:to-fuchsia-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        columns={3}
+        items={[
+          { label: t('crm.opportunity.displayed'), value: String(displayedCount), icon: <Layers size={18} />, tone: 'info' },
+          { label: t('crm.opportunity.totalValue'), value: formatCurrency(totalValue), icon: <Handshake size={18} />, tone: 'success' },
+          { label: t('crm.opportunity.weightedValue'), value: formatCurrency(Math.round(weightedValue)), icon: <TrendingUp size={18} />, tone: 'primary' },
+        ]}
+      />
 
       {/* Toolbar */}
       <Card noPadding className="p-4 sm:p-5 border-t-2 border-fuchsia-500/30">

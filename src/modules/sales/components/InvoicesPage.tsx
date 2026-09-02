@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Search, Wallet, TrendingUp, Layers } from 'lucide-react';
-import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
+import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Wallet, TrendingUp, Layers, ShoppingCart, CheckCircle2, Clock } from 'lucide-react';
+import { Card, Button, Table, Input, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectSalesInvoiceDuplicate } from '@/core/utils/documentDuplicate';
@@ -538,6 +538,7 @@ export const InvoicesPage: React.FC = () => {
       key: 'invoiceNumber',
       header: t('sales.invoiceNumber'),
       width: '135px',
+      mobile: 'title' as const,
       render: (row: SalesInvoice) => (
         <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
           <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
@@ -548,6 +549,7 @@ export const InvoicesPage: React.FC = () => {
     {
       key: 'customerName',
       header: t('sales.customer.title'),
+      mobile: 'subtitle' as const,
       render: (row: SalesInvoice) => (
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
@@ -585,11 +587,11 @@ export const InvoicesPage: React.FC = () => {
         </span>
       ),
     },
-    { key: 'status', header: t('sales.status.label'), width: '110px', render: (row: SalesInvoice) => <StatusBadge status={row.status} /> },
-    { key: 'createdBy', header: t('common.createdBy'), width: '110px', render: (row: SalesInvoice) => (
+    { key: 'status', header: t('sales.status.label'), width: '110px', mobile: 'status' as const, render: (row: SalesInvoice) => <StatusBadge status={row.status} /> },
+    { key: 'createdBy', header: t('common.createdBy'), width: '110px', mobile: 'hidden' as const, render: (row: SalesInvoice) => (
       <span className="text-xs text-slate-600 dark:text-slate-400">{getUserName(row.createdBy)}</span>
     ) },
-    { key: 'actions', header: t('sales.actions'), width: '180px', render: (row: SalesInvoice) => (
+    { key: 'actions', header: t('sales.actions'), width: '180px', mobile: 'actions' as const, render: (row: SalesInvoice) => (
       <div className="flex items-center gap-1">
         <ActionButtons
           onView={async () => {
@@ -642,119 +644,64 @@ export const InvoicesPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
-              <FileText size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('sales.invoices')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.invoicesSubtitle')}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
-            <Can action="create" module="sales">
-              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">
-                {t('sales.invoice.create')}
-              </Button>
-            </Can>
-          </div>
-        </div>
+        <PageHeader
+          icon={<ShoppingCart size={22} />}
+          title={t('sales.invoices')}
+          subtitle={t('sales.invoicesSubtitle')}
+          actions={
+            <>
+              <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
+              <Can action="create" module="sales">
+                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">
+                  {t('sales.invoice.create')}
+                </Button>
+              </Can>
+            </>
+          }
+        />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Card className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.invoice.totalInvoices')}</p>
-              <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
-              <p className="text-xs text-slate-500">{stats.postedCount} مرحل • {stats.draftCount} مسودة</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
-              <FileText size={18} className="text-primary-600" />
-            </div>
-          </Card>
-          <Card className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.total')}</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{formatCurrency(stats.total)}</p>
-              <p className="text-xs text-slate-500">{currencySymbol} • إجمالي</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-              <Wallet size={18} className="text-slate-600" />
-            </div>
-          </Card>
-          <Card className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.paid')}</p>
-              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(stats.paid)}</p>
-              <p className="text-xs text-slate-500">{currencySymbol} • محصل</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
-              <TrendingUp size={18} className="text-emerald-600" />
-            </div>
-          </Card>
-          <Card className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.invoice.drafts')}</p>
-              <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{stats.draftCount}</p>
-              <p className="text-xs text-slate-500">بانتظار الترحيل</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
-              <Layers size={18} className="text-amber-600" />
-            </div>
-          </Card>
-        </div>
+        <StatsGrid
+          columns={4}
+          items={[
+            { label: t('sales.invoice.totalInvoices'), value: String(total), hint: `${stats.postedCount} مرحل • ${stats.draftCount} مسودة`, icon: <FileText size={18} /> },
+            { label: t('sales.total'), value: formatCurrency(stats.total), hint: `${currencySymbol} • إجمالي`, icon: <Wallet size={18} />, tone: 'info' },
+            { label: t('sales.paid'), value: formatCurrency(stats.paid), hint: `${currencySymbol} • محصل`, icon: <CheckCircle2 size={18} />, tone: 'success' },
+            { label: t('sales.invoice.drafts'), value: String(stats.draftCount), hint: 'بانتظار الترحيل', icon: <Clock size={18} />, tone: 'warning' },
+          ]}
+        />
 
-        <Card className="p-3 sm:p-4">
-          <div className="flex flex-col xl:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t('search')}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {[
-                  { v: '', l: t('sales.filter.all') },
-                  { v: 'draft', l: t('sales.status.draft') },
-                  { v: 'posted', l: t('sales.status.posted') },
-                  { v: 'paid', l: t('sales.status.paid') },
-                  { v: 'cancelled', l: t('sales.status.cancelled') },
-                ].map((o) => (
-                  <button
-                    key={o.v}
-                    onClick={() => setStatusFilter(o.v)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${statusFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
-              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-                <Download size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleExportPDF} className="gap-1.5">
-                <Printer size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
-              </Button>
-            </div>
-          </div>
+        <div>
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder={t('search')}
+            filterOptions={[
+              { key: '', label: t('sales.filter.all') },
+              { key: 'draft', label: t('sales.status.draft') },
+              { key: 'posted', label: t('sales.status.posted') },
+              { key: 'paid', label: t('sales.status.paid') },
+              { key: 'cancelled', label: t('sales.status.cancelled') },
+            ]}
+            activeFilter={statusFilter}
+            onFilterChange={(key) => setStatusFilter(key)}
+            actions={
+              <>
+                <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
+                  <Download size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+                </Button>
+                <Button size="sm" variant="ghost" onClick={handleExportPDF} className="gap-1.5">
+                  <Printer size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
+                </Button>
+              </>
+            }
+          />
           {hasFilters && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
               <span>{filteredInvoices.length} من {invoices.length} • {search ? `"${search}"` : ''} {statusFilter ? `• ${t('sales.status.' + statusFilter)}` : ''}</span>
               <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
             </div>
           )}
-        </Card>
+        </div>
       </div>
 
       <Card noPadding>
@@ -875,7 +822,7 @@ export const InvoicesPage: React.FC = () => {
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
@@ -916,6 +863,36 @@ export const InvoicesPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {/* Mobile line-items cards */}
+            <div className="md:hidden space-y-3 p-3">
+              {lines.map((line, idx) => {
+                const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                const lineTotal = lineNet;
+                return (
+                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
+                    <ProductSelect
+                      companyId={activeCompany?.id || ''}
+                      value={line.productId}
+                      onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))}
+                      onProductChange={(p) => handleProductChange(idx, p)}
+                      showStock
+                      showBarcode
+                      size="sm"
+                      module="sales"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
+                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
+                    </div>
+                    {showDiscount && <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" />}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
             {lines.length === 0 && (
               <div className="py-12 text-center text-slate-400">
                 <Layers size={32} className="mx-auto mb-2 opacity-30" />
@@ -930,7 +907,7 @@ export const InvoicesPage: React.FC = () => {
               <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(prev => ({ ...prev, notes: e.target.value }))} placeholder={t('sales.notesPlaceholder') || 'ملاحظات إضافية للفاتورة...'} />
               <p className="text-xs text-slate-400 mt-2 flex items-center gap-1"><Paperclip size={12} /> {t('sales.invoice.notesHint') || 'ستظهر الملاحظات في الطباعة وكشف الحساب'}</p>
             </div>
-            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
+            <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
               <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
                 <span className="text-sm font-semibold flex items-center gap-2"><Wallet size={16} /> {t('sales.invoice.summary')}</span>
                 <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} {t('sales.itemsCount')}</span>

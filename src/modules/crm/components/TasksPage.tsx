@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Plus, User, AlertTriangle, Search, Calendar, FileText, Layers, Clock3, CheckCircle2 } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
+import { Plus, User, AlertTriangle, ListTodo, Search, Calendar, FileText, Layers, Clock3, CheckCircle2 } from 'lucide-react';
+import { Card, Button, Input, Modal, Table, Pagination, PageHeader, StatsGrid } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates } from '@/core/utils/duplicateDetection';
@@ -188,6 +188,7 @@ export const TasksPage: React.FC = () => {
     {
       key: 'title',
       header: t('crm.task.title'),
+      mobile: 'title' as const,
       render: (row: Task) => (
         <div className="flex items-center gap-2">
           {isOverdue(row) && <AlertTriangle size={14} className="text-rose-500" aria-label={t('crm.task.overdue')} />}
@@ -213,6 +214,7 @@ export const TasksPage: React.FC = () => {
       key: 'dueDate',
       header: t('crm.task.dueDate'),
       width: '130px',
+      mobile: 'subtitle' as const,
       render: (row: Task) => {
         if (!row.dueDate) return '—';
         const overdue = isOverdue(row);
@@ -227,6 +229,7 @@ export const TasksPage: React.FC = () => {
       key: 'priority',
       header: t('crm.task.priority'),
       width: '100px',
+      mobile: 'meta' as const,
       render: (row: Task) => (
         <span className={`px-2 py-0.5 rounded-full text-xs ${priorityColor(row.priority)}`}>{t(`crm.priority.${row.priority}`)}</span>
       ),
@@ -235,6 +238,7 @@ export const TasksPage: React.FC = () => {
       key: 'status',
       header: t('crm.task.title'),
       width: '100px',
+      mobile: 'status' as const,
       render: (row: Task) => (
         <Button
           variant="ghost"
@@ -250,6 +254,7 @@ export const TasksPage: React.FC = () => {
       key: 'actions',
       header: '',
       width: '140px',
+      mobile: 'actions' as const,
       render: (row: Task) => (
         <div className="flex items-center gap-1">
           <Can action="edit" module="crm">
@@ -269,52 +274,27 @@ export const TasksPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-700 via-sky-600 to-cyan-600 shadow-xl shadow-sky-900/10 dark:shadow-sky-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-sky-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('crm.tasksPage.title')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('crm.tasksPage.title')}</h2>
-              <p className="text-sky-100/80 text-base max-w-lg">{t('crm.tasksPage.description')}</p>
-            </div>
-            <Can action="create" module="crm">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('crm.task.new')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<ListTodo size={22} />}
+        title={t('crm.tasksPage.title')}
+        subtitle={t('crm.tasksPage.description')}
+        actions={
+          <Can action="create" module="crm">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('crm.task.new')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('crm.total'), value: String(total), icon: Layers, color: 'from-sky-600 to-sky-700', bg: 'bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-900/10 dark:to-sky-800/5' },
-          { label: t('crm.tasksPage.filter.pending'), value: String(kpiPending), icon: Clock3, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('crm.tasksPage.filter.completed'), value: String(kpiCompleted), icon: CheckCircle2, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-          { label: t('crm.task.overdue'), value: String(kpiOverdue), icon: AlertTriangle, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        items={[
+          { label: t('crm.total'), value: String(total), icon: <Layers size={18} />, tone: 'primary' },
+          { label: t('crm.tasksPage.filter.pending'), value: String(kpiPending), icon: <Clock3 size={18} />, tone: 'warning' },
+          { label: t('crm.tasksPage.filter.completed'), value: String(kpiCompleted), icon: <CheckCircle2 size={18} />, tone: 'success' },
+          { label: t('crm.task.overdue'), value: String(kpiOverdue), icon: <AlertTriangle size={18} />, tone: 'danger' },
+        ]}
+      />
 
       {/* Toolbar */}
       <Card noPadding className="p-4 sm:p-5 border-t-2 border-sky-500/30">

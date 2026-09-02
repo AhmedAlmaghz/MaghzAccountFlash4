@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { Package, Plus, Upload, Camera, X, Search, Hash, RefreshCw, FileText, Receipt, Layers, Tag, TrendingUp, CheckCircle2, AlertCircle } from 'lucide-react';
-import { Card, Button, Modal, Table, Pagination, Can, Badge } from '@/core/ui/components';
+import { Package, Plus, Upload, Camera, X, Hash, RefreshCw, FileText, Receipt, Layers, Tag, TrendingUp, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Card, Button, Modal, Table, Pagination, Can, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -411,11 +411,12 @@ export const ProductsPage: React.FC = () => {
       key: 'image',
       header: '',
       width: '56px',
+      mobile: 'hidden' as const,
       render: (row: Product) => row.image ? (
-        <img src={row.image} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shadow-sm" />
+        <img src={row.image} alt="" className="w-10 h-10 rounded-lg object-cover border border-zinc-200 dark:border-zinc-700 shadow-sm" />
       ) : (
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center border border-slate-200 dark:border-slate-700">
-          <Package size={16} className="text-slate-400" />
+        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-800 dark:to-zinc-700 flex items-center justify-center border border-zinc-200 dark:border-zinc-700">
+          <Package size={16} className="text-zinc-400" />
         </div>
       ),
     },
@@ -423,15 +424,17 @@ export const ProductsPage: React.FC = () => {
       key: 'code',
       header: t('inventory.productCode'),
       width: '115px',
-      render: (row: Product) => <span className="font-mono text-xs font-semibold bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">{row.code}</span>,
+      mobile: 'subtitle' as const,
+      render: (row: Product) => <span className="font-mono text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700">{row.code}</span>,
     },
     {
       key: 'nameAr',
       header: t('inventory.productName'),
+      mobile: 'title' as const,
       render: (row: Product) => (
         <div className="min-w-0">
-          <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">{row.nameAr}</div>
-          {row.nameEn ? <div className="text-xs text-slate-500 truncate" dir="ltr">{row.nameEn}</div> : null}
+          <div className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{row.nameAr}</div>
+          {row.nameEn ? <div className="text-xs text-zinc-500 truncate" dir="ltr">{row.nameEn}</div> : null}
           <div className="flex items-center gap-1 mt-1">
             {row.productTypeName ? <Badge className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[10px]">{row.productTypeName}</Badge> : null}
           </div>
@@ -442,13 +445,13 @@ export const ProductsPage: React.FC = () => {
       key: 'barcode',
       header: t('inventory.barcode'),
       width: '125px',
-      render: (row: Product) => row.barcode ? <span className="font-mono text-xs bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded border border-amber-200 dark:border-amber-800">{row.barcode}</span> : <span className="text-slate-400 text-xs">—</span>,
+      render: (row: Product) => row.barcode ? <span className="font-mono text-xs bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded border border-amber-200 dark:border-amber-800">{row.barcode}</span> : <span className="text-zinc-400 text-xs">—</span>,
     },
     {
       key: 'unit',
       header: t('inventory.unitName'),
       width: '90px',
-      render: (row: Product) => row.unitName ? <span className="text-sm">{row.unitName}</span> : <span className="text-xs text-slate-400 font-mono">{row.unit || '-'}</span>,
+      render: (row: Product) => row.unitName ? <span className="text-sm">{row.unitName}</span> : <span className="text-xs text-zinc-400 font-mono">{row.unit || '-'}</span>,
     },
     {
       key: 'categories',
@@ -459,16 +462,16 @@ export const ProductsPage: React.FC = () => {
           {row.categoryNames.slice(0, 2).map((c) => (
             <span key={c.id} className="px-2 py-0.5 rounded-full bg-primary-50 dark:bg-primary-900/20 text-xs text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800">{c.name}</span>
           ))}
-          {row.categoryNames.length > 2 && <span className="text-xs text-slate-500">+{row.categoryNames.length - 2}</span>}
+          {row.categoryNames.length > 2 && <span className="text-xs text-zinc-500">+{row.categoryNames.length - 2}</span>}
         </div>
-      ) : <span className="text-xs text-slate-400">-</span>,
+      ) : <span className="text-xs text-zinc-400">-</span>,
     },
     {
       key: 'costPrice',
       header: t('inventory.costPrice'),
       align: 'right' as const,
       width: '110px',
-      render: (row: Product) => <span className="tabular-nums text-sm text-slate-600 dark:text-slate-300">{formatCurrency(row.costPrice)}</span>,
+      render: (row: Product) => <span className="tabular-nums text-sm text-zinc-600 dark:text-zinc-300">{formatCurrency(row.costPrice)}</span>,
     },
     {
       key: 'salePrice',
@@ -481,12 +484,14 @@ export const ProductsPage: React.FC = () => {
       key: 'isActive',
       header: t('inventory.status'),
       width: '90px',
+      mobile: 'status' as const,
       render: (row: Product) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} />,
     },
     {
       key: 'actions',
       header: '',
       width: '110px',
+      mobile: 'actions' as const,
       render: (row: Product) => (
         <ActionButtons
           onView={() => handleViewDetail(row)}
@@ -501,24 +506,19 @@ export const ProductsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
-              <Package size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('inventory.products')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('inventory.page.subtitle')}</p>
-            </div>
-          </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Package size={22} />}
+        title={t('inventory.products')}
+        subtitle={t('inventory.page.subtitle')}
+        actions={
           <Can action="create" module="inventory">
             <Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate} className="shadow-sm">
               {t('inventory.newProduct')}
             </Button>
           </Can>
-        </div>
+        }
+      />
 
         {/* KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -564,28 +564,17 @@ export const ProductsPage: React.FC = () => {
         </div>
 
         {/* Toolbar */}
-        <Card className="p-3 sm:p-4">
-          <div className="flex flex-col xl:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                type="text"
-                placeholder={`${t('search')} — كود / اسم / باركود`}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-              />
-              {searchTerm && (
-                <button onClick={() => setSearchTerm('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
+        <FilterBar
+          search={searchTerm}
+          onSearchChange={setSearchTerm}
+          searchPlaceholder={`${t('search')} — كود / اسم / باركود`}
+          actions={
+            <>
               <select
                 value={filterCategoryId}
                 onChange={(e) => setFilterCategoryId(e.target.value)}
-                className="h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                aria-label={t('inventory.categories')}
+                className="h-9 px-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20"
               >
                 <option value="">{t('inventory.allCategories')}</option>
                 {categories.map((cat) => (
@@ -595,30 +584,29 @@ export const ProductsPage: React.FC = () => {
               <select
                 value={filterTypeId}
                 onChange={(e) => setFilterTypeId(e.target.value)}
-                className="h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                aria-label={t('inventory.productType')}
+                className="h-9 px-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20"
               >
                 <option value="">{t('inventory.allTypes')}</option>
                 {productTypes.map((tp: ProductType) => (
                   <option key={tp.id} value={tp.id}>{tp.nameAr}</option>
                 ))}
               </select>
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
               <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
                 <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
               </Button>
               <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
                 <Receipt size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
               </Button>
-            </div>
+            </>
+          }
+        />
+        {hasFilters && (
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>{total} منتج • {searchTerm ? `"${searchTerm}"` : ''} {filterCategoryId ? '• تصفية تصنيف (صفحة)' : ''}</span>
+            <button onClick={() => { setSearchTerm(''); setFilterTypeId(''); setFilterCategoryId(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
           </div>
-          {hasFilters && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-              <span>{total} منتج • {searchTerm ? `"${searchTerm}"` : ''} {filterCategoryId ? '• تصفية تصنيف (صفحة)' : ''}</span>
-              <button onClick={() => { setSearchTerm(''); setFilterTypeId(''); setFilterCategoryId(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
-            </div>
-          )}
-        </Card>
-      </div>
+        )}
 
       <Card noPadding>
         {filteredProducts.length === 0 && !isLoading ? (

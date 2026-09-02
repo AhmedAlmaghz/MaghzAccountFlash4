@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Tag, Plus, FileText, CheckSquare, Trash2, Printer, ArrowRightLeft, Search, X, Layers, Sparkles, Download } from 'lucide-react';
-import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
+import { Tag, Plus, FileText, CheckSquare, Trash2, Printer, ArrowRightLeft, Layers, Sparkles, Download } from 'lucide-react';
+import { Card, Button, Table, Input, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { salesQuotationFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
@@ -435,6 +435,7 @@ export const QuotationsPage: React.FC = () => {
       key: 'quotationNumber',
       header: t('sales.quotation.number'),
       width: '135px',
+      mobile: 'title' as const,
       render: (row: Quotation) => (
         <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
           <Tag size={12} className="text-primary-500" />
@@ -445,6 +446,7 @@ export const QuotationsPage: React.FC = () => {
     {
       key: 'customerName',
       header: t('sales.customer.title'),
+      mobile: 'subtitle' as const,
       render: (row: Quotation) => (
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
@@ -469,8 +471,8 @@ export const QuotationsPage: React.FC = () => {
        </span>
       ),
     },
-    { key: 'status', header: t('sales.status.label'), width: '110px', render: (row: Quotation) => <StatusBadge status={row.status} /> },
-    { key: 'actions', header: t('sales.actions'), width: '220px', render: (row: Quotation) => (
+    { key: 'status', header: t('sales.status.label'), width: '110px', mobile: 'status' as const, render: (row: Quotation) => <StatusBadge status={row.status} /> },
+    { key: 'actions', header: t('sales.actions'), width: '220px', mobile: 'actions' as const, render: (row: Quotation) => (
       <div className="flex items-center gap-1">
         <ActionButtons
           onView={async () => {
@@ -499,89 +501,51 @@ export const QuotationsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-700 via-violet-600 to-fuchsia-600 shadow-xl shadow-violet-900/10 dark:shadow-violet-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-violet-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('sales.quotations')}
-            </span>
-            <span className="inline-flex items-center gap-1 text-xs font-medium tracking-wide text-violet-100/60">{activeCompany?.name || ''}</span>
-          </div>
-          <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sales.quotations')}</h2>
-          <p className="text-violet-100/80 text-base max-w-lg">{t('sales.quotationsSubtitle')}</p>
-        </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('sales.quotation.total'), value: quotations.length, icon: Sparkles, color: 'from-violet-600 to-violet-700', bg: 'bg-gradient-to-br from-violet-50 to-violet-100 dark:from-violet-900/10 dark:to-violet-800/5' },
-          { label: t('sales.quotation.accepted'), value: kpis.accepted, icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-          { label: t('sales.quotation.convertedCount'), value: kpis.converted, icon: ArrowRightLeft, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('sales.quotation.drafts'), value: kpis.draft, icon: FileText, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`flex items-start gap-3 p-4 ${k.bg} dark:text-white`}>
-              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700">
-                <k.icon size={20} className="text-slate-700 dark:text-slate-200" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight">{k.label}</p>
-                <p className="text-2xl font-extrabold tabular-nums leading-tight mt-1">{k.value}</p>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      {/* Toolbar */}
-      <Card noPadding className="p-4 sm:p-5 border-t-2 border-violet-500/30">
-        <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-          <div className="relative flex-1 min-w-0">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder={t('search')}
-              className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-colors placeholder:text-slate-400"
-              aria-label={t('search')}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="Clear"><X size={14} /></button>
-            )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-slate-500 font-medium">{t('sales.status.label')}:</span>
-            {[
-              { value: '', label: t('sales.filter.all') },
-              { value: 'draft', label: t('sales.status.draft') },
-              { value: 'sent', label: t('sales.status.sent') },
-              { value: 'accepted', label: t('sales.status.accepted') },
-              { value: 'rejected', label: t('sales.status.rejected') },
-              { value: 'converted', label: t('sales.status.converted') },
-            ].map((opt) => (
-              <button
-                key={opt.value || 'all'}
-                onClick={() => setStatusFilter(opt.value)}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === opt.value ? 'bg-violet-600 text-white border-violet-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-violet-300'}`}
-              >{opt.label}</button>
-            ))}
-          </div>
-          <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
+      <PageHeader
+        icon={<FileText size={22} />}
+        title={t('sales.quotations')}
+        subtitle={t('sales.quotationsSubtitle')}
+        actions={
           <Can action="create" module="sales">
             <Button size="sm" variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>{t('sales.quotation.create')}</Button>
           </Can>
-          <div className="flex items-center gap-2 ml-auto shrink-0">
+        }
+      />
+
+      {/* KPI Cards */}
+      <StatsGrid
+        columns={4}
+        items={[
+          { label: t('sales.quotation.total'), value: String(quotations.length), icon: <Sparkles size={18} /> },
+          { label: t('sales.quotation.accepted'), value: String(kpis.accepted), icon: <CheckSquare size={18} />, tone: 'success' },
+          { label: t('sales.quotation.convertedCount'), value: String(kpis.converted), icon: <ArrowRightLeft size={18} />, tone: 'warning' },
+          { label: t('sales.quotation.drafts'), value: String(kpis.draft), icon: <FileText size={18} />, tone: 'danger' },
+        ]}
+      />
+
+      {/* Toolbar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t('search')}
+        filterOptions={[
+          { key: '', label: t('sales.filter.all') },
+          { key: 'draft', label: t('sales.status.draft') },
+          { key: 'sent', label: t('sales.status.sent') },
+          { key: 'accepted', label: t('sales.status.accepted') },
+          { key: 'rejected', label: t('sales.status.rejected') },
+          { key: 'converted', label: t('sales.status.converted') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key)}
+        actions={
+          <>
+            <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
             <Button size="sm" variant="secondary" onClick={handleExportExcel} leftIcon={<Download size={15} className="text-emerald-600" />}>Excel</Button>
             <Button size="sm" variant="secondary" onClick={handleExportPdf} leftIcon={<Printer size={15} />}>PDF</Button>
-          </div>
-        </div>
-      </Card>
+          </>
+        }
+      />
 
       {/* Filter result count */}
       {hasFilters && (
@@ -697,7 +661,7 @@ export const QuotationsPage: React.FC = () => {
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
@@ -726,13 +690,42 @@ export const QuotationsPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {/* Mobile line-items cards */}
+            <div className="md:hidden space-y-3 p-3">
+              {lines.map((line, idx) => {
+                const lineTotal = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                return (
+                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
+                    <ProductSelect
+                      companyId={activeCompany?.id || ''}
+                      value={line.productId}
+                      onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))}
+                      onProductChange={(p) => handleProductChange(idx, p)}
+                      showBarcode
+                      showStock
+                      size="sm"
+                      module="sales"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
+                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
+                    </div>
+                    {showDiscount && <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" />}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-3">
               <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder="ملاحظات العرض..." />
             </div>
-            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
+            <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
               <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
                 <span className="text-sm font-semibold">الملخص</span>
                 <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} صنف</span>

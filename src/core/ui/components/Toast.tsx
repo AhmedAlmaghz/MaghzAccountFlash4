@@ -39,17 +39,18 @@ function ToastItem({ id, type, message, duration }: { id: string; type: ToastTyp
   return (
     <div
       role="alert"
-      className={`flex items-start gap-3 px-4 py-3 rounded-lg border shadow-lg
+      className={`flex items-start gap-3 px-4 py-3 rounded-xl border shadow-float
         ${BG_CLASSES[type]}
-        ${exiting ? 'animate-slide-out' : 'animate-slide-in'}
-        max-w-sm w-full pointer-events-auto`}
+        ${exiting ? 'animate-toast-down lg:animate-slide-out' : 'animate-toast-up lg:animate-slide-in'}
+        max-w-sm w-full pointer-events-auto backdrop-blur-md`}
     >
       <span className="shrink-0 mt-0.5">{ICONS[type]}</span>
-      <p className="flex-1 text-sm text-slate-800 dark:text-slate-100 leading-relaxed">{message}</p>
+      <p className="flex-1 text-sm text-zinc-800 dark:text-zinc-100 leading-relaxed">{message}</p>
       <button
         onClick={handleClose}
         title={t('common.close')}
-        className="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+        aria-label={t('common.close')}
+        className="shrink-0 -mt-1 -me-1 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-white/40 dark:hover:bg-black/20 transition-colors"
       >
         <X size={16} />
       </button>
@@ -63,7 +64,11 @@ export const ToastContainer: React.FC = () => {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+    // Mobile: above bottom nav (with safe-area) / Desktop: top-center
+    <div
+      className="fixed z-[9999] flex flex-col gap-2 pointer-events-none items-center px-3
+        bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-auto lg:top-4 lg:inset-x-0 lg:px-0"
+    >
       {toasts.map((t) => (
         <ToastItem key={t.id} id={t.id} type={t.type} message={t.message} duration={t.duration} />
       ))}

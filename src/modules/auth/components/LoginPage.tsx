@@ -44,15 +44,15 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-4 relative overflow-hidden">
       {/* Animated background elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-secondary-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gold-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-600/5 rounded-full blur-3xl" />
         {/* Floating shapes */}
         <div className="absolute top-20 left-20 w-8 h-8 bg-primary-500/20 rounded-lg rotate-45 animate-bounce" style={{ animationDuration: '3s' }} />
-        <div className="absolute bottom-32 right-24 w-6 h-6 bg-secondary-500/20 rounded-full animate-bounce" style={{ animationDuration: '4s', animationDelay: '1s' }} />
+        <div className="absolute bottom-32 right-24 w-6 h-6 bg-gold-500/20 rounded-full animate-bounce" style={{ animationDuration: '4s', animationDelay: '1s' }} />
         <div className="absolute top-1/3 right-16 w-10 h-10 border-2 border-primary-500/20 rounded-xl rotate-12 animate-pulse" />
       </div>
 
@@ -62,15 +62,15 @@ export const LoginPage: React.FC = () => {
           <div className="w-20 h-20 bg-primary-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-600/30 animate-scale-in">
             <Building2 size={40} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('appName')}</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{t('appSubtitle')}</p>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">{t('appName')}</h1>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">{t('appSubtitle')}</p>
         </div>
 
         {/* Login Form */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-8 backdrop-blur-sm">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 sm:p-8 backdrop-blur-sm">
           <div className="flex items-center gap-2 mb-6">
             <ShieldCheck size={20} className="text-primary-600" />
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">{t('auth.login')}</h2>
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">{t('auth.login')}</h2>
           </div>
 
           {error && (
@@ -81,7 +81,7 @@ export const LoginPage: React.FC = () => {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="relative">
-              <User size={18} className="absolute right-3 top-[2.6rem] text-slate-400 pointer-events-none" />
+              <User size={18} className="absolute right-3 top-[2.6rem] text-zinc-400 pointer-events-none" />
               <Input
                 label={t('auth.username')}
                 value={credentials.username}
@@ -93,7 +93,7 @@ export const LoginPage: React.FC = () => {
             </div>
 
             <div className="relative">
-              <Lock size={18} className="absolute right-3 top-[2.6rem] text-slate-400 pointer-events-none" />
+              <Lock size={18} className="absolute right-3 top-[2.6rem] text-zinc-400 pointer-events-none" />
               <Input
                 label={t('auth.password')}
                 type={showPassword ? 'text' : 'password'}
@@ -105,7 +105,7 @@ export const LoginPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute left-3 top-[2.6rem] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                className="absolute left-3 top-[2.6rem] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
@@ -117,9 +117,9 @@ export const LoginPage: React.FC = () => {
                   type="checkbox"
                   checked={credentials.rememberMe}
                   onChange={(e) => setCredentials((prev) => ({ ...prev, rememberMe: e.target.checked }))}
-                  className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                  className="w-4 h-4 rounded border-zinc-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span className="text-sm text-slate-600 dark:text-slate-300 group-hover:text-slate-800 dark:group-hover:text-slate-200 transition-colors">
+                <span className="text-sm text-zinc-600 dark:text-zinc-300 group-hover:text-zinc-800 dark:group-hover:text-zinc-200 transition-colors">
                   {t('auth.rememberMe')}
                 </span>
               </label>
@@ -138,7 +138,7 @@ export const LoginPage: React.FC = () => {
 
         </div>
 
-        <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-6">
+        <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 mt-6">
           © {new Date().getFullYear()} maghzaccount-pro — v0.3.7
         </p>
       </div>

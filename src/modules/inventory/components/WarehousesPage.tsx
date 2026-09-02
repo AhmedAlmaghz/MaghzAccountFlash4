@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Warehouse, Plus, Building2, Search, X, Wallet, CheckCircle2, FileText, Receipt } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Badge } from '@/core/ui/components';
+import { Card, Button, Input, Modal, Table, Badge, PageHeader } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -171,19 +171,21 @@ export const WarehousesPage: React.FC = () => {
       key: 'code',
       header: t('inventory.productCode'),
       width: '120px',
-      render: (row: WarehouseType) => row.code ? <span className="font-mono text-xs font-semibold bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border">{row.code}</span> : <span className="text-slate-400 text-xs">—</span>,
+      mobile: 'hidden' as const,
+      render: (row: WarehouseType) => row.code ? <span className="font-mono text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded border">{row.code}</span> : <span className="text-zinc-400 text-xs">—</span>,
     },
     {
       key: 'name',
       header: t('inventory.warehouse'),
+      mobile: 'title' as const,
       render: (row: WarehouseType) => (
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center text-white shadow-sm shrink-0">
             <Warehouse size={16} />
           </div>
           <div className="min-w-0">
-            <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">{row.name}</p>
-            <p className="text-xs text-slate-500 truncate">{row.code ? `كود: ${row.code}` : ''}</p>
+            <p className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{row.name}</p>
+            <p className="text-xs text-zinc-500 truncate">{row.code ? `كود: ${row.code}` : ''}</p>
           </div>
         </div>
       ),
@@ -192,11 +194,12 @@ export const WarehousesPage: React.FC = () => {
       key: 'branch',
       header: t('inventory.branch'),
       width: '160px',
+      mobile: 'subtitle' as const,
       render: (row: WarehouseType) => row.branchId ? (
         <span className="inline-flex items-center gap-1.5 text-sm bg-blue-50 dark:bg-blue-900/20 px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-800">
           <Building2 size={13} className="text-blue-600" /> <span className="font-mono text-xs">{row.branchId.slice(0, 8)}</span>
         </span>
-      ) : <span className="text-slate-400 text-xs">—</span>,
+      ) : <span className="text-zinc-400 text-xs">—</span>,
     },
     {
       key: 'stockInfo',
@@ -205,11 +208,11 @@ export const WarehousesPage: React.FC = () => {
       render: (row: WarehouseType) => {
         const count = stock.filter((s) => s.warehouseId === row.id).length;
         const value = stock.filter((s) => s.warehouseId === row.id).reduce((s, it) => s + Number(it.quantity) * Number(it.costPrice || 0), 0);
-        if (!count) return <span className="text-xs text-slate-400">—</span>;
+        if (!count) return <span className="text-xs text-zinc-400">—</span>;
         return (
           <div className="text-xs">
-            <p className="font-medium text-slate-900 dark:text-slate-100">{count} صنف</p>
-            <p className="text-slate-500 tabular-nums">{formatCurrency(value)}</p>
+            <p className="font-medium text-zinc-900 dark:text-zinc-100">{count} صنف</p>
+            <p className="text-zinc-500 tabular-nums">{formatCurrency(value)}</p>
           </div>
         );
       },
@@ -218,12 +221,14 @@ export const WarehousesPage: React.FC = () => {
       key: 'isActive',
       header: t('inventory.status'),
       width: '100px',
+      mobile: 'status' as const,
       render: (row: WarehouseType) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} />,
     },
     {
       key: 'actions',
       header: '',
       width: '150px',
+      mobile: 'actions' as const,
       render: (row: WarehouseType) => (
         <ActionButtons
           onView={() => handleViewStock(row)}
@@ -239,22 +244,18 @@ export const WarehousesPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
-              <Warehouse size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('inventory.warehouses')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('inventory.page.subtitle')}</p>
-            </div>
-          </div>
-          <Can action="create" module="inventory">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate} className="shadow-sm">
-              {t('inventory.newWarehouse')}
-            </Button>
-          </Can>
-        </div>
+        <PageHeader
+          icon={<Warehouse size={22} />}
+          title={t('inventory.warehouses')}
+          subtitle={t('inventory.page.subtitle')}
+          actions={
+            <Can action="create" module="inventory">
+              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate} className="shadow-sm">
+                {t('inventory.newWarehouse')}
+              </Button>
+            </Can>
+          }
+        />
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-4 flex items-center justify-between">

@@ -13,19 +13,19 @@ export const Card = memo(React.forwardRef<HTMLDivElement, CardProps>(
       <div
         ref={ref}
         className={cn(
-          'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md',
+          'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-card transition-all duration-200 hover:shadow-lift',
           className
         )}
         {...props}
       >
         {header && (
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-zinc-200/70 dark:border-zinc-800">
             {header}
           </div>
         )}
-        <div className={cn(!noPadding && 'p-5')}>{children}</div>
+        <div className={cn(!noPadding && 'p-4 sm:p-5')}>{children}</div>
         {footer && (
-          <div className="px-5 py-4 border-t border-slate-200 dark:border-slate-800">
+          <div className="px-4 sm:px-5 py-4 border-t border-zinc-200/70 dark:border-zinc-800">
             {footer}
           </div>
         )}
@@ -37,13 +37,13 @@ export const Card = memo(React.forwardRef<HTMLDivElement, CardProps>(
 Card.displayName = 'Card';
 
 export const CardTitle: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = memo(({ className, children, ...props }) => (
-  <h3 className={cn('text-base font-semibold text-slate-900 dark:text-slate-50', className)} {...props}>
+  <h3 className={cn('text-base font-bold text-zinc-900 dark:text-zinc-50', className)} {...props}>
     {children}
   </h3>
 ));
 
 export const CardDescription: React.FC<React.HTMLAttributes<HTMLParagraphElement>> = memo(({ className, children, ...props }) => (
-  <p className={cn('text-sm text-slate-500 dark:text-slate-400 mt-1', className)} {...props}>
+  <p className={cn('text-sm text-zinc-500 dark:text-zinc-400 mt-1', className)} {...props}>
     {children}
   </p>
 ));

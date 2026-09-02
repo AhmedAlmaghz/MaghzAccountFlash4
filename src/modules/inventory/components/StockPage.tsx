@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Boxes, ArrowRightLeft, Plus, Scale, AlertTriangle, CheckCircle, Search, X, Package, Warehouse, Layers, TrendingUp, FileText, Receipt, Wallet, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Button, Input, Modal, Table, Can, Badge } from '@/core/ui/components';
+import { Card, Button, Input, Modal, Table, Can, Badge, PageHeader } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -204,11 +204,13 @@ export const StockPage: React.FC = () => {
       key: 'productCode',
       header: t('inventory.productCode'),
       width: '115px',
-      render: (row: StockItem) => <span className="font-mono text-xs font-semibold bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border">{row.productCode || '-'}</span>,
+      mobile: 'hidden' as const,
+      render: (row: StockItem) => <span className="font-mono text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded border">{row.productCode || '-'}</span>,
     },
     {
       key: 'productName',
       header: t('inventory.productName'),
+      mobile: 'title' as const,
       render: (row: StockItem) => (
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-50 to-primary-100 dark:from-primary-900/20 dark:to-primary-800/20 flex items-center justify-center border border-primary-200 dark:border-primary-800 shrink-0">
@@ -222,6 +224,7 @@ export const StockPage: React.FC = () => {
       key: 'warehouseName',
       header: t('inventory.warehouse'),
       width: '150px',
+      mobile: 'subtitle' as const,
       render: (row: StockItem) => row.warehouseName ? (
         <span className="inline-flex items-center gap-1.5 text-xs bg-blue-50 dark:bg-blue-900/20 px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-800">
           <Warehouse size={12} className="text-blue-600" /> {row.warehouseName}
@@ -236,24 +239,25 @@ export const StockPage: React.FC = () => {
       render: (row: StockItem) => {
         const isLow = row.minStockAlert !== undefined && row.minStockAlert !== null && Number(row.quantity) < Number(row.minStockAlert);
         return (
-          <span className={`font-bold tabular-nums px-2.5 py-1 rounded-full text-xs border ${isLow ? 'bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}>
+          <span className={`font-bold tabular-nums px-2.5 py-1 rounded-full text-xs border ${isLow ? 'bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'}`}>
             {row.quantity}
           </span>
         );
       },
     },
-    { key: 'unit', header: t('inventory.unitPrice'), width: '80px', render: (row: StockItem) => <span className="text-xs text-slate-500">{row.unit || '-'}</span> },
+    { key: 'unit', header: t('inventory.unitPrice'), width: '80px', mobile: 'hidden' as const, render: (row: StockItem) => <span className="text-xs text-zinc-500">{row.unit || '-'}</span> },
     {
       key: 'minStockAlert',
       header: t('inventory.minStock'),
       align: 'right' as const,
       width: '100px',
-      render: (row: StockItem) => row.minStockAlert !== undefined && row.minStockAlert !== null ? <span className="text-xs tabular-nums">{row.minStockAlert}</span> : <span className="text-slate-400 text-xs">—</span>,
+      render: (row: StockItem) => row.minStockAlert !== undefined && row.minStockAlert !== null ? <span className="text-xs tabular-nums">{row.minStockAlert}</span> : <span className="text-zinc-400 text-xs">—</span>,
     },
     {
       key: 'alert',
       header: '',
       width: '50px',
+      mobile: 'hidden' as const,
       render: (row: StockItem) => {
         if (row.minStockAlert !== undefined && row.minStockAlert !== null && Number(row.quantity) < Number(row.minStockAlert)) {
           return <span className="inline-flex items-center gap-1 text-amber-600" title={t('inventory.lowStock')}><AlertTriangle size={14} /></span>;
@@ -328,39 +332,35 @@ export const StockPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
-              <Boxes size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('inventory.stock')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('inventory.stockByWarehouse')}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-            <Button variant="secondary" leftIcon={<Scale size={16} />} onClick={() => navigate('/inventory/adjustments')}>
-              {t('inventory.adjustments')}
-            </Button>
-            <Can action="create" module="inventory">
-              <Button
-                variant="primary"
-                leftIcon={<Plus size={16} />}
-                onClick={async () => {
-                  resetForm();
-                  if (activeCompany) {
-                    const seq = await getNextNumber('inventory_transfer', activeCompany.id);
-                    if (seq?.number) setTransferForm((prev) => ({ ...prev, transferNumber: seq.number || '' }));
-                  }
-                  setIsTransferOpen(true);
-                }}
-                className="shadow-sm"
-              >
-                {t('inventory.newTransfer')}
+        <PageHeader
+          icon={<Boxes size={22} />}
+          title={t('inventory.stock')}
+          subtitle={t('inventory.stockByWarehouse')}
+          actions={
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="secondary" leftIcon={<Scale size={16} />} onClick={() => navigate('/inventory/adjustments')}>
+                {t('inventory.adjustments')}
               </Button>
-            </Can>
-          </div>
-        </div>
+              <Can action="create" module="inventory">
+                <Button
+                  variant="primary"
+                  leftIcon={<Plus size={16} />}
+                  onClick={async () => {
+                    resetForm();
+                    if (activeCompany) {
+                      const seq = await getNextNumber('inventory_transfer', activeCompany.id);
+                      if (seq?.number) setTransferForm((prev) => ({ ...prev, transferNumber: seq.number || '' }));
+                    }
+                    setIsTransferOpen(true);
+                  }}
+                  className="shadow-sm"
+                >
+                  {t('inventory.newTransfer')}
+                </Button>
+              </Can>
+            </div>
+          }
+        />
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-4 flex items-center justify-between">

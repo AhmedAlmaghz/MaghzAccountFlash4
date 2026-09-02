@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Check, ChevronDown, X, Plus, Search, Loader2 } from 'lucide-react';
 import { Button, Modal, Input } from '@/core/ui/components';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import { useIsMobile, useBodyScrollLock } from '@/core/hooks/useResponsive';
+import { cn } from '@/core/utils';
 
 export interface SmartSelectItem {
   id: string;
@@ -71,6 +73,10 @@ export function SmartSelect<T extends SmartSelectItem>({
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const isMobile = useIsMobile();
+  const sheetMode = isMobile; // full-screen picker sheet below lg breakpoint
+
+  useBodyScrollLock(open && sheetMode);
 
   const selectedValues = useMemo(() => {
     if (multiple) return Array.isArray(value) ? value : [];
@@ -123,8 +129,13 @@ export function SmartSelect<T extends SmartSelectItem>({
     onChange(multiple ? [] : null);
   };
 
+  const closeSheet = () => {
+    setOpen(false);
+    setSearch('');
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!open) return;
+    if (!open || sheetMode) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setHighlightedIndex(prev => Math.min(prev + 1, filteredOptions.length - 1));
@@ -153,8 +164,9 @@ export function SmartSelect<T extends SmartSelectItem>({
     }
   };
 
-  // Close on click outside
+  // Close on click outside (desktop dropdown only)
   useEffect(() => {
+    if (sheetMode) return;
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -162,19 +174,19 @@ export function SmartSelect<T extends SmartSelectItem>({
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [sheetMode]);
 
-  // Scroll highlighted into view
+  // Scroll highlighted into view (desktop dropdown only)
   useEffect(() => {
-    if (listRef.current && open) {
+    if (listRef.current && open && !sheetMode) {
       const el = listRef.current.children[highlightedIndex] as HTMLElement;
       if (el) el.scrollIntoView({ block: 'nearest' });
     }
-  }, [highlightedIndex, open]);
+  }, [highlightedIndex, open, sheetMode]);
 
   const sizeClasses = {
-    sm: 'h-8 text-sm px-2',
-    md: 'h-10 text-sm px-3',
+    sm: 'h-8 text-sm px-2 md:min-h-8',
+    md: 'h-11 md:h-10 text-sm px-3',
     lg: 'h-12 text-base px-4',
   };
 
@@ -187,7 +199,7 @@ export function SmartSelect<T extends SmartSelectItem>({
         <div className="flex items-center gap-2 min-w-0">
           <span className="truncate">{singleSelected.label}</span>
           {singleSelected.sublabel && (
-            <span className="text-slate-400 text-xs truncate">{singleSelected.sublabel}</span>
+            <span className="text-zinc-400 text-xs truncate">{singleSelected.sublabel}</span>
           )}
         </div>
       );
@@ -196,41 +208,90 @@ export function SmartSelect<T extends SmartSelectItem>({
       return (
         <div className="flex items-center gap-1 flex-wrap">
           {selectedItems.slice(0, 3).map(item => (
-            <span key={item.id} className="bg-primary-100 text-primary-700 text-xs px-1.5 py-0.5 rounded-md">
+            <span key={item.id} className="bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-xs px-1.5 py-0.5 rounded-md">
               {item.label}
             </span>
           ))}
           {selectedItems.length > 3 && (
-            <span className="text-slate-500 text-xs">+{selectedItems.length - 3}</span>
+            <span className="text-zinc-500 text-xs">+{selectedItems.length - 3}</span>
           )}
         </div>
       );
     }
-    return <span className="text-slate-400">{resolvedPlaceholder}</span>;
+    return <span className="text-zinc-400">{resolvedPlaceholder}</span>;
+  };
+
+  /* Shared option row renderer (dropdown + sheet) */
+  const renderOption = (item: T, idx: number) => {
+    const isSelected = selectedValues.includes(item.id);
+    const isDisabled = item.disabled ?? false;
+    const isHighlighted = idx === highlightedIndex;
+    return (
+      <div
+        key={item.id}
+        onMouseEnter={() => !sheetMode && setHighlightedIndex(idx)}
+        onClick={() => !isDisabled && handleSelect(item.id)}
+        className={cn(
+          'flex items-center gap-2 text-start select-none',
+          sheetMode ? 'px-4 py-3.5 min-h-14 border-b border-zinc-100 dark:border-zinc-800/60 last:border-b-0' : 'px-3 py-2 rounded-lg',
+          isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+          !sheetMode && isHighlighted && 'bg-zinc-100 dark:bg-zinc-800',
+          isSelected
+            ? 'bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300'
+            : 'text-zinc-700 dark:text-zinc-200',
+          sheetMode && 'active:bg-zinc-100 dark:active:bg-zinc-800'
+        )}
+      >
+        {multiple && (
+          <div className={cn('w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0', isSelected ? 'bg-primary-500 border-primary-500' : 'border-zinc-300 dark:border-zinc-600')}>
+            {isSelected && <Check size={12} className="text-white" />}
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          {renderItem ? renderItem(item, isSelected) : (
+            <div className="space-y-0.5">
+              <div className={cn('truncate font-medium', sheetMode && 'text-sm')}>{item.label}</div>
+              {item.sublabel && <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{item.sublabel}</div>}
+              {item.meta && item.meta.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap text-[10px] text-zinc-500 dark:text-zinc-400 pt-0.5">
+                  {item.meta.map((m, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-md px-1.5 py-0.5">
+                      <span className="text-zinc-400">{m.label}:</span>
+                      <span className="font-medium text-zinc-700 dark:text-zinc-200">{m.value}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {!multiple && isSelected && <Check size={16} className="text-primary-500 shrink-0" />}
+      </div>
+    );
   };
 
   return (
-    <div ref={containerRef} className={`relative ${className}`} dir="rtl" onKeyDown={handleKeyDown}>
+    <div ref={containerRef} className={cn('relative', className)} onKeyDown={handleKeyDown}>
       {/* Trigger */}
       <button
         type="button"
         onClick={() => !disabled && setOpen(!open)}
         disabled={disabled}
-        className={`
-          w-full flex items-center justify-between gap-2 rounded-lg border border-slate-300 dark:border-slate-600
-          bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100
-          hover:border-primary-400 dark:hover:border-primary-500
-          focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500
-          transition-colors
-          ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
-          ${sizeClasses[size]}
-        `}
+        className={cn(
+          'w-full flex items-center justify-between gap-2 rounded-xl border border-zinc-300 dark:border-zinc-700',
+          'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100',
+          'hover:border-primary-400 dark:hover:border-primary-500',
+          'focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500',
+          'transition-colors',
+          disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+          sizeClasses[size]
+        )}
       >
-        <span className="flex-1 min-w-0 text-right truncate">
+        <span className="flex-1 min-w-0 text-start truncate">
           {displayLabel()}
         </span>
         <div className="flex items-center gap-1 shrink-0">
-          {isLoading && <Loader2 size={14} className="animate-spin text-slate-400" />}
+          {isLoading && <Loader2 size={14} className="animate-spin text-zinc-400" />}
           {clearable && selectedValues.length > 0 && !disabled && (
             <span
               role="button"
@@ -238,33 +299,33 @@ export function SmartSelect<T extends SmartSelectItem>({
               title={t('common.clear')}
               onClick={(e) => { e.stopPropagation(); handleClear(e as unknown as React.MouseEvent); }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleClear(e as unknown as React.MouseEvent); } }}
-              className="p-0.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+              className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-rose-500 transition-colors cursor-pointer"
             >
               <X size={14} />
             </span>
           )}
-          <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={16} className={cn('text-zinc-400 transition-transform', open && 'rotate-180')} />
         </div>
       </button>
 
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
+      {/* Desktop dropdown */}
+      {open && !sheetMode && (
+        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-float overflow-hidden animate-scale-in">
           {/* Search bar */}
-          <div className="flex items-center border-b border-slate-200 dark:border-slate-700 px-3 py-2 gap-2">
-            <Search size={14} className="text-slate-400 shrink-0" />
+          <div className="flex items-center border-b border-zinc-200 dark:border-zinc-700 px-3 py-2 gap-2">
+            <Search size={14} className="text-zinc-400 shrink-0" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder={resolvedSearchPlaceholder}
-              className="flex-1 bg-transparent border-none outline-none text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
+              className="flex-1 bg-transparent border-none outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
               autoFocus
             />
             {creatable && (
               <button
                 type="button"
                 onClick={() => setCreating(true)}
-                className="p-1 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-md text-primary-600 transition-colors"
+                className="p-1 hover:bg-primary-50 dark:hover:bg-primary-950/40 rounded-lg text-primary-600 transition-colors"
                 title={resolvedCreatableLabel}
               >
                 <Plus size={14} />
@@ -275,7 +336,7 @@ export function SmartSelect<T extends SmartSelectItem>({
           {/* Options list */}
           <div ref={listRef} className="max-h-60 overflow-y-auto p-1">
             {filteredOptions.length === 0 && !isLoading ? (
-              <div className="py-6 text-center text-sm text-slate-400">
+              <div className="py-6 text-center text-sm text-zinc-400">
                 {search && creatable ? (
                   <button
                     type="button"
@@ -291,49 +352,84 @@ export function SmartSelect<T extends SmartSelectItem>({
               </div>
             ) : (
               <div className="space-y-0.5">
-                {filteredOptions.map((item, idx) => {
-                  const isSelected = selectedValues.includes(item.id);
-                  const isDisabled = item.disabled ?? false;
-                  const isHighlighted = idx === highlightedIndex;
-                  return (
-                    <div
-                      key={item.id}
-                      onMouseEnter={() => setHighlightedIndex(idx)}
-                      onClick={() => !isDisabled && handleSelect(item.id)}
-                      className={`
-                        flex items-center gap-2 px-3 py-2 rounded-md text-sm select-none
-                        ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
-                        ${isHighlighted ? 'bg-slate-100 dark:bg-slate-800' : ''}
-                        ${isSelected ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'}
-                      `}
+                {filteredOptions.map(renderOption)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile bottom-sheet picker */}
+      {open && sheetMode && (
+        <div className="fixed inset-0 z-[60] flex items-end">
+          <div className="absolute inset-0 bg-zinc-950/50 backdrop-blur-sm" onClick={closeSheet} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={resolvedPlaceholder}
+            className="relative w-full max-h-[85dvh] bg-white dark:bg-zinc-900 rounded-t-3xl shadow-float flex flex-col animate-sheet-up pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+          >
+            {/* Handle + header */}
+            <div className="flex justify-center pt-2.5 pb-1 shrink-0">
+              <div className="w-10 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+            </div>
+            <div className="flex items-center gap-2 px-4 pb-2 shrink-0">
+              <div className="flex-1 flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 rounded-xl px-3 py-2.5 min-h-11">
+                <Search size={16} className="text-zinc-400 shrink-0" />
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={resolvedSearchPlaceholder}
+                  className="flex-1 bg-transparent border-none outline-none text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                />
+                {creatable && (
+                  <button
+                    type="button"
+                    onClick={() => setCreating(true)}
+                    className="p-1.5 text-primary-600"
+                    title={resolvedCreatableLabel}
+                  >
+                    <Plus size={16} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={closeSheet}
+                className="p-2.5 rounded-xl text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                aria-label={t('common.close')}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Options list — large touch rows */}
+            <div className="flex-1 overflow-y-auto">
+              {filteredOptions.length === 0 && !isLoading ? (
+                <div className="py-10 text-center text-sm text-zinc-400">
+                  {search && creatable ? (
+                    <button
+                      type="button"
+                      onClick={() => { setNewValue(search); setCreating(true); }}
+                      className="flex items-center justify-center gap-2 w-full text-primary-600"
                     >
-                      {multiple && (
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${isSelected ? 'bg-primary-500 border-primary-500' : 'border-slate-300 dark:border-slate-600'}`}>
-                          {isSelected && <Check size={10} className="text-white" />}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0 text-right">
-                        {renderItem ? renderItem(item, isSelected) : (
-                          <div className="space-y-0.5">
-                            <div className="truncate font-medium">{item.label}</div>
-                            {item.sublabel && <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{item.sublabel}</div>}
-                            {item.meta && item.meta.length > 0 && (
-                              <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-                                {item.meta.map((m, i) => (
-                                  <span key={i} className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">
-                                    <span className="text-slate-400">{m.label}:</span>
-                                    <span className="font-medium text-slate-700 dark:text-slate-200">{m.value}</span>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      {!multiple && isSelected && <Check size={14} className="text-primary-500 shrink-0" />}
-                    </div>
-                  );
-                })}
+                      <Plus size={16} />
+                      {resolvedCreatableLabel} &quot;{search}&quot;
+                    </button>
+                  ) : (
+                    resolvedEmptyMessage
+                  )}
+                </div>
+              ) : (
+                filteredOptions.map(renderOption)
+              )}
+            </div>
+
+            {multiple && (
+              <div className="px-4 pt-3 shrink-0 border-t border-zinc-100 dark:border-zinc-800">
+                <Button variant="primary" block onClick={closeSheet}>
+                  {t('common.confirm')}
+                </Button>
               </div>
             )}
           </div>

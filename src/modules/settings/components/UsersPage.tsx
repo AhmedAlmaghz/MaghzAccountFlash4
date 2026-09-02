@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Pencil, Trash2, Save, KeyRound } from 'lucide-react';
-import { Card, Button, Input, Table, ConfirmDialog, Modal } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Input, Table, ConfirmDialog, Modal, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { authApi } from '@/modules/auth/api';
@@ -172,13 +171,13 @@ export const UsersPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'username', header: t('settings.users.username') },
-    { key: 'email', header: t('settings.users.email'), render: (row: User) => row.email || '-' },
-    { key: 'role', header: t('settings.users.role'), render: (row: User) => roleLabels[row.role] || row.role },
-    { key: 'isActive', header: t('settings.users.status'), render: (row: User) => (
+    { key: 'username', header: t('settings.users.username'), mobile: 'title' as const },
+    { key: 'email', header: t('settings.users.email'), mobile: 'subtitle' as const, render: (row: User) => row.email || '-' },
+    { key: 'role', header: t('settings.users.role'), mobile: 'hidden' as const, render: (row: User) => roleLabels[row.role] || row.role },
+    { key: 'isActive', header: t('settings.users.status'), mobile: 'status' as const, render: (row: User) => (
       <span className={row.isActive ? 'badge-posted' : 'badge-draft'}>{row.isActive ? t('settings.common.active') : t('settings.common.disabled')}</span>
     )},
-    { key: 'actions', header: '', render: (row: User) => (
+    { key: 'actions', header: '', mobile: 'actions' as const, render: (row: User) => (
       <div className="flex items-center gap-1">
         <Can action="edit" module="settings">
           <Button size="sm" variant="ghost" onClick={() => setShowResetPassword(row.id)} title={t('settings.users.changePassword')}>
@@ -203,14 +202,13 @@ export const UsersPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.users.title')}
         subtitle={t('settings.users.subtitle')}
-        icon={Users}
-        color="from-indigo-600 via-indigo-500 to-violet-600"
-        action={
+        icon={<Users size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ username: '', email: '', role: 'accountant', isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ username: '', email: '', role: 'accountant', isActive: true }); }}>
               {t('settings.users.newUser')}
             </Button>
           </Can>

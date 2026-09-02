@@ -32,13 +32,14 @@ describe('Card', () => {
 
   it('applies padding by default', () => {
     const { container } = render(<Card>Content</Card>);
-    const contentDiv = container.querySelector('.p-5');
+    // responsive padding: p-4 on mobile, p-5 on sm+
+    const contentDiv = container.querySelector('.p-4.sm\\:p-5');
     expect(contentDiv).toBeInTheDocument();
   });
 
   it('removes padding when noPadding is true', () => {
     const { container } = render(<Card noPadding>Content</Card>);
-    const contentDiv = container.querySelector('.p-5');
+    const contentDiv = container.querySelector('.p-4');
     expect(contentDiv).not.toBeInTheDocument();
   });
 

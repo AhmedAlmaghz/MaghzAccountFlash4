@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { BookOpen, Plus, Save, Send, X } from 'lucide-react';
-import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
+import { Card, Button, Input, Modal, Table, PageHeader } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { receiptVoucherFingerprint, paymentVoucherFingerprint, journalEntryFingerprint, detectDocumentDuplicates, detectVoucherDuplicate, detectJournalDuplicate } from '@/core/utils/documentDuplicate';
@@ -241,19 +241,19 @@ export const JournalEntriesPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'date', header: t('accounting.date'), render: (row: Transaction) => row.date ? formatDate(row.date) : '-' },
-    { key: 'reference', header: t('accounting.reference'), render: (row: Transaction) => row.reference || '-' },
-    { key: 'description', header: t('accounting.description'), render: (row: Transaction) => row.description || '-' },
-    { key: 'totalAmount', header: t('accounting.amount'), align: 'right' as const, render: (row: Transaction) => 
+    { key: 'date', header: t('accounting.date'), mobile: 'meta' as const, render: (row: Transaction) => row.date ? formatDate(row.date) : '-' },
+    { key: 'reference', header: t('accounting.reference'), mobile: 'title' as const, render: (row: Transaction) => row.reference || '-' },
+    { key: 'description', header: t('accounting.description'), mobile: 'subtitle' as const, render: (row: Transaction) => row.description || '-' },
+    { key: 'totalAmount', header: t('accounting.amount'), align: 'right' as const, render: (row: Transaction) =>
       formatCurrency(row.totalAmount)
     },
-    { key: 'status', header: t('sales.status.label'), render: (row: Transaction) => (
+    { key: 'status', header: t('sales.status.label'), mobile: 'status' as const, render: (row: Transaction) => (
       <StatusBadge status={row.status} size="sm" />
     )},
-    { key: 'createdBy', header: t('accounting.createdBy'), width: '110px', render: (row: Transaction) => (
+    { key: 'createdBy', header: t('accounting.createdBy'), width: '110px', mobile: 'hidden' as const, render: (row: Transaction) => (
       <span className="text-xs text-slate-600 dark:text-slate-400">{getUserName(row.createdBy)}</span>
     ) },
-    { key: 'actions', header: t('edit'), render: (row: Transaction) => (
+    { key: 'actions', header: t('edit'), mobile: 'actions' as const, render: (row: Transaction) => (
       <ActionButtons
         size="sm"
         onView={async () => {
@@ -284,32 +284,31 @@ export const JournalEntriesPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <BookOpen size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('accounting.journalEntries')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('accounting.journalEntriesSubtitle')}</p>
-          </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <select
-          className="input text-sm"
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          title={t('accounting.status')}
-        >
-          <option value="">{t('accounting.all')}</option>
-          <option value="draft">{t('accounting.draft')}</option>
-          <option value="posted">{t('accounting.posted')}</option>
-        </select>
-        <Can action="create" module="accounting">
-          <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsModalOpen(true); }}>
-            {t('accounting.newJournalEntry')}
-          </Button>
-        </Can>
-      </div>
-    </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<BookOpen size={22} />}
+        title={t('accounting.journalEntries')}
+        subtitle={t('accounting.journalEntriesSubtitle')}
+        actions={
+          <>
+            <select
+              className="input text-sm"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              title={t('accounting.status')}
+            >
+              <option value="">{t('accounting.all')}</option>
+              <option value="draft">{t('accounting.draft')}</option>
+              <option value="posted">{t('accounting.posted')}</option>
+            </select>
+            <Can action="create" module="accounting">
+              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsModalOpen(true); }}>
+                {t('accounting.newJournalEntry')}
+              </Button>
+            </Can>
+          </>
+        }
+      />
 
       <Card>
         <Table<Transaction>

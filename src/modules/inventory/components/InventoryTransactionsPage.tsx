@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { ArrowRightLeft, Plus, Printer, Download, CheckSquare, Search, X, TrendingUp, TrendingDown, Layers, Package } from 'lucide-react';
-import { Card, Button, Modal, Input, Table, Badge, Can } from '@/core/ui/components';
+import { ArrowRightLeft, Plus, Printer, Download, CheckSquare, TrendingUp, TrendingDown, Layers, Package } from 'lucide-react';
+import { Card, Button, Modal, Input, Table, Badge, Can, PageHeader, FilterBar } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { EmptyState } from '@/core/ui/components/EmptyState';
@@ -152,22 +152,18 @@ export const InventoryTransactionsPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center shadow-sm">
-              <ArrowRightLeft size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('inventory.transactions')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('inventory.page.subtitle')}</p>
-            </div>
-          </div>
-          <Can action="create" module="inventory">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsOpen(true)} className="shadow-sm">
-              {t('inventory.newTransaction')}
-            </Button>
-          </Can>
-        </div>
+        <PageHeader
+          icon={<ArrowRightLeft size={22} />}
+          title={t('inventory.transactions')}
+          subtitle={t('inventory.page.subtitle')}
+          actions={
+            <Can action="create" module="inventory">
+              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsOpen(true)} className="shadow-sm">
+                {t('inventory.newTransaction')}
+              </Button>
+            </Can>
+          }
+        />
 
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Card className="p-4 flex items-center justify-between">
@@ -218,42 +214,21 @@ export const InventoryTransactionsPage: React.FC = () => {
           </Card>
         </div>
 
-        <Card className="p-3 sm:p-4">
-          <div className="flex flex-col xl:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                type="text"
-                placeholder={`${t('search')} — منتج / مستودع / مرجع`}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400">
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {[
-                  { v: '', l: t('all') },
-                  { v: 'in', l: t('inventory.in') },
-                  { v: 'out', l: t('inventory.out') },
-                  { v: 'adjustment', l: 'تسوية' },
-                  { v: 'transfer', l: t('inventory.transfer') },
-                ].map((o) => (
-                  <button
-                    key={o.v}
-                    onClick={() => setTypeFilter(o.v)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${typeFilter === o.v ? 'bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600' : 'text-slate-600 dark:text-slate-400'}`}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+        <FilterBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder={`${t('search')} — منتج / مستودع / مرجع`}
+          filterOptions={[
+            { key: '', label: t('all') },
+            { key: 'in', label: t('inventory.in') },
+            { key: 'out', label: t('inventory.out') },
+            { key: 'adjustment', label: 'تسوية' },
+            { key: 'transfer', label: t('inventory.transfer') },
+          ]}
+          activeFilter={typeFilter}
+          onFilterChange={(key) => setTypeFilter(key)}
+          actions={
+            <>
               <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={handlePrint} className="gap-1.5">
                 {t('print')}
               </Button>
@@ -263,15 +238,15 @@ export const InventoryTransactionsPage: React.FC = () => {
               <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={handleExportPDF} className="gap-1.5">
                 PDF
               </Button>
-            </div>
+            </>
+          }
+        />
+        {hasFilters && (
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span>{filtered.length} من {transactions.length} • {search ? `"${search}"` : ''} {typeFilter ? `• ${typeFilter}` : ''}</span>
+            <button onClick={() => { setSearch(''); setTypeFilter(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
           </div>
-          {hasFilters && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-              <span>{filtered.length} من {transactions.length} • {search ? `"${search}"` : ''} {typeFilter ? `• ${typeFilter}` : ''}</span>
-              <button onClick={() => { setSearch(''); setTypeFilter(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
-            </div>
-          )}
-        </Card>
+        )}
       </div>
 
       <Card noPadding>
@@ -288,12 +263,14 @@ export const InventoryTransactionsPage: React.FC = () => {
                   key: 'date',
                   header: t('inventory.date'),
                   width: '115px',
-                  render: (row: InventoryTransaction) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span>,
+                  mobile: 'hidden' as const,
+                  render: (row: InventoryTransaction) => <span className="font-mono text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span>,
                 },
                 {
                   key: 'type',
                   header: t('inventory.type'),
                   width: '110px',
+                  mobile: 'status' as const,
                   render: (row: InventoryTransaction) => {
                     const cfg = TYPE_CONFIG[row.type] || TYPE_CONFIG.in;
                     const Icon = cfg.icon;
@@ -307,10 +284,11 @@ export const InventoryTransactionsPage: React.FC = () => {
                 {
                   key: 'productName',
                   header: t('inventory.productName'),
+                  mobile: 'title' as const,
                   render: (row: InventoryTransaction) => row.productName ? (
                     <div className="min-w-0">
                       <p className="font-medium truncate">{row.productName}</p>
-                      <p className="text-xs text-slate-500 font-mono">{row.productCode || ''}</p>
+                      <p className="text-xs text-zinc-500 font-mono">{row.productCode || ''}</p>
                     </div>
                   ) : <span className="font-mono text-xs">{row.productId.slice(0, 8)}</span>,
                 },
@@ -318,6 +296,7 @@ export const InventoryTransactionsPage: React.FC = () => {
                   key: 'warehouseName',
                   header: t('inventory.warehouse'),
                   width: '150px',
+                  mobile: 'hidden' as const,
                   render: (row: InventoryTransaction) => row.warehouseName ? (
                     <span className="text-xs bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-full border border-blue-200 dark:border-blue-800">{row.warehouseName}</span>
                   ) : <span className="font-mono text-xs">{row.warehouseId.slice(0, 8)}</span>,
@@ -333,12 +312,14 @@ export const InventoryTransactionsPage: React.FC = () => {
                   key: 'reference',
                   header: t('inventory.reference'),
                   width: '130px',
-                  render: (row: InventoryTransaction) => row.reference ? <span className="text-xs truncate max-w-[130px] inline-block">{row.reference}</span> : <span className="text-slate-400 text-xs">—</span>,
+                  mobile: 'subtitle' as const,
+                  render: (row: InventoryTransaction) => row.reference ? <span className="text-xs truncate max-w-[130px] inline-block">{row.reference}</span> : <span className="text-zinc-400 text-xs">—</span>,
                 },
                 {
                   key: 'actions',
                   header: '',
                   width: '80px',
+                  mobile: 'actions' as const,
                   render: (row: InventoryTransaction) => (
                     <ActionButtons onView={undefined} onEdit={undefined} onDelete={() => setConfirmDelete(row.id)} showView={false} showEdit={false} showPrint={false} showExport={false} />
                   ),

@@ -54,7 +54,7 @@ describe('Sidebar', () => {
     );
 
     const aside = container.querySelector('aside');
-    expect(aside).toHaveClass('w-16');
+    expect(aside).toHaveClass('w-[4.5rem]');
   });
 
   it('toggles sidebar on button click', () => {
@@ -220,7 +220,8 @@ describe('AppLayout', () => {
       </BrowserRouter>
     );
 
-    expect(screen.getByText('appSubtitle')).toBeInTheDocument();
+    // Sidebar (desktop) + MobileDrawer (closed but rendered) both carry the logo title
+    expect(screen.getAllByText('appSubtitle').length).toBeGreaterThan(0);
     expect(screen.getByText('admin')).toBeInTheDocument();
   });
 

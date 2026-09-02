@@ -1,17 +1,16 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { ClipboardList, Plus, CheckSquare, Trash2, Printer, ArrowRightLeft, Layers, Clock, PackageCheck, Wallet, TrendingUp } from 'lucide-react';
+import { ClipboardList, Plus, CheckSquare, Trash2, Printer, ArrowRightLeft, Layers, Clock, PackageCheck, Wallet, TrendingUp, ShoppingCart } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { useSettings } from '@/core/utils/useSettings';
-import { Card, Button, Modal, Input, Pagination, Can } from '@/core/ui/components';
+import { Card, Button, Modal, Input, Pagination, Can, Table, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { purchaseOrderFingerprint, detectDocumentDuplicates, genericNearScore } from '@/core/utils/documentDuplicate';
-import { DataTablePro } from '@/core/ui/components/DataTablePro';
 import { SupplierSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseOrdersPaginated } from '../hooks/usePurchases';
@@ -19,7 +18,6 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import type { PurchaseOrder } from '../types';
 import type { Product } from '@/modules/inventory/types';
-import type { ColumnDef } from '@tanstack/react-table';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { purchasesApi } from '../api';
@@ -69,6 +67,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   const activeCompany = useAppStore(state => state.activeCompany);
   const user = useAuthStore(state => state.user);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [search, setSearch] = useState('');
   const orderFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
   const { orders, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, convertToInvoice } = usePurchaseOrdersPaginated(activeCompany?.id || '', orderFilters);
   const { getNextNumber } = useDocumentSequence();
@@ -348,28 +347,29 @@ export const PurchaseOrdersPage: React.FC = () => {
     });
   }, [activeCompany, t, currencySymbol]);
 
-  const columns = useMemo<ColumnDef<PurchaseOrder>[]>(() => [
-    { accessorKey: 'orderNumber', header: t('purchases.orderNumber'), cell: ({ row }) => <span className="font-medium text-slate-900 dark:text-slate-100">{row.original.orderNumber}</span> },
-    { accessorKey: 'supplier', header: t('purchases.supplier'), cell: ({ row }) => <span>{row.original.supplier?.name || row.original.supplierId}</span> },
-    { accessorKey: 'date', header: t('purchases.date') },
-    { accessorKey: 'expectedDate', header: t('purchases.order.expectedDate'), cell: ({ row }) => <span>{row.original.expectedDate ? formatDate(row.original.expectedDate) : '-'}</span> },
-    { accessorKey: 'totalAmount', header: t('purchases.total'), cell: ({ row }) => <span className="font-medium">{formatCurrency(row.original.totalAmount)}</span> },
-    { accessorKey: 'status', header: t('purchases.status'), cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  const columns = useMemo(() => [
+    { key: 'orderNumber', header: t('purchases.orderNumber'), mobile: 'title' as const, render: (row: PurchaseOrder) => <span className="font-medium text-zinc-900 dark:text-zinc-100">{row.orderNumber}</span> },
+    { key: 'supplier', header: t('purchases.supplier'), mobile: 'subtitle' as const, render: (row: PurchaseOrder) => <span>{row.supplier?.name || row.supplierId}</span> },
+    { key: 'date', header: t('purchases.date'), render: (row: PurchaseOrder) => <span>{row.date ? formatDate(row.date) : '-'}</span> },
+    { key: 'expectedDate', header: t('purchases.order.expectedDate'), render: (row: PurchaseOrder) => <span>{row.expectedDate ? formatDate(row.expectedDate) : '-'}</span> },
+    { key: 'totalAmount', header: t('purchases.total'), render: (row: PurchaseOrder) => <span className="font-medium">{formatCurrency(row.totalAmount)}</span> },
+    { key: 'status', header: t('purchases.status'), mobile: 'status' as const, render: (row: PurchaseOrder) => <StatusBadge status={row.status} /> },
     {
-      accessorKey: 'paymentType',
+      key: 'paymentType',
       header: t('purchases.order.paymentType'),
-      cell: ({ row }) => {
-        const pt = row.original.paymentType;
+      render: (row: PurchaseOrder) => {
+        const pt = row.paymentType;
         return pt === 'cash'
           ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">{t('purchases.order.cash')}</span>
           : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">{t('purchases.order.credit')}</span>;
       },
     },
     {
-      accessorKey: 'actions',
+      key: 'actions',
       header: t('purchases.actions'),
-      cell: ({ row }) => {
-        const order = row.original;
+      mobile: 'actions' as const,
+      render: (row: PurchaseOrder) => {
+        const order = row;
         const isConverting = convertingId === order.id;
         return (
           <div className="flex items-center gap-1">
@@ -410,90 +410,71 @@ export const PurchaseOrdersPage: React.FC = () => {
     return { drafts, pending, invoiced };
   }, [orders]);
 
+  const visibleOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter((o) =>
+      o.orderNumber?.toLowerCase().includes(q) ||
+      (o.supplier?.name || '').toLowerCase().includes(q) ||
+      o.status?.toLowerCase().includes(q) ||
+      String(o.totalAmount || '').includes(q)
+    );
+  }, [orders, search]);
+
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-700 via-blue-600 to-cyan-600 shadow-xl shadow-blue-900/10 dark:shadow-blue-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-blue-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('purchases.orders')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('purchases.orders')}</h2>
-              <p className="text-blue-100/80 text-base max-w-lg">{t('purchases.ordersSubtitle')}</p>
-            </div>
-            <Can action="create" module="purchases">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('purchases.order.create')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<ShoppingCart size={22} />}
+        title={t('purchases.orders')}
+        subtitle={t('purchases.ordersSubtitle')}
+        actions={
+          <Can action="create" module="purchases">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('purchases.order.create')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('purchases.order.totalOrders'), value: String(total), icon: ClipboardList, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
-          { label: t('purchases.return.drafts'), value: String(kpis.drafts), icon: Layers, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
-          { label: t('purchases.order.pending'), value: String(kpis.pending), icon: Clock, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('purchases.filter.invoiced'), value: String(kpis.invoiced), icon: PackageCheck, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        columns={4}
+        items={[
+          { label: t('purchases.order.totalOrders'), value: String(total), icon: <ClipboardList size={18} />, tone: 'primary' },
+          { label: t('purchases.return.drafts'), value: String(kpis.drafts), icon: <Layers size={18} />, tone: 'warning' },
+          { label: t('purchases.order.pending'), value: String(kpis.pending), icon: <Clock size={18} />, tone: 'warning' },
+          { label: t('purchases.filter.invoiced'), value: String(kpis.invoiced), icon: <PackageCheck size={18} />, tone: 'success' },
+        ]}
+      />
 
-      {/* Toolbar */}
-      <Card noPadding className="p-4 sm:p-5 border-t-2 border-blue-500/30">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-          <span className="text-xs text-slate-500 font-medium">{t('purchases.status')}:</span>
-          <div className="flex items-center gap-2 flex-wrap">
-            {[
-              { v: '', l: t('purchases.filter.all') },
-              { v: 'draft', l: t('purchases.filter.draft') },
-              { v: 'sent', l: t('purchases.order.sent') },
-              { v: 'partially_received', l: t('purchases.order.partiallyReceived') },
-              { v: 'received', l: t('purchases.order.received') },
-              { v: 'invoiced', l: t('purchases.filter.invoiced') },
-              { v: 'cancelled', l: t('purchases.filter.cancelled') },
-            ].map((o) => (
-              <button
-                key={o.v || 'all'}
-                onClick={() => setStatusFilter(o.v)}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-300'}`}
-              >{o.l}</button>
-            ))}
-          </div>
-        </div>
-      </Card>
+      {/* Filter Bar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t('search') + '...'}
+        filterOptions={[
+          { key: '', label: t('purchases.filter.all') },
+          { key: 'draft', label: t('purchases.filter.draft') },
+          { key: 'sent', label: t('purchases.order.sent') },
+          { key: 'partially_received', label: t('purchases.order.partiallyReceived') },
+          { key: 'received', label: t('purchases.order.received') },
+          { key: 'invoiced', label: t('purchases.filter.invoiced') },
+          { key: 'cancelled', label: t('purchases.filter.cancelled') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key)}
+      />
 
       <Card noPadding>
-        <DataTablePro<PurchaseOrder>
-          data={orders}
-          columns={columns}
-          keyExtractor={(row) => row.id}
-          isLoading={isLoading}
-          emptyMessage={t('purchases.order.emptyTitle')}
-          searchable
-          searchPlaceholder={t('search') + '...'}
-        />
-        <div className="border-t border-slate-200 dark:border-slate-800">
+        <div className="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800">
+          <Table<PurchaseOrder>
+            data={visibleOrders}
+            columns={columns as never}
+            keyExtractor={(row) => row.id}
+            isLoading={isLoading}
+            emptyMessage={t('purchases.order.emptyTitle')}
+          />
+        </div>
+        <div className="border-t border-zinc-200 dark:border-zinc-800">
           <Pagination
             page={page}
             pageSize={pageSize}
@@ -577,7 +558,7 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('purchases.order.addLine')}</Button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
@@ -619,6 +600,39 @@ export const PurchaseOrdersPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+            {/* Mobile line-items cards */}
+            <div className="md:hidden space-y-3 p-3">
+              {form.lines.map((line, idx) => {
+                const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                const lineTotal = lineNet;
+                return (
+                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
+                    <ProductSelect
+                      companyId={activeCompany?.id || ''}
+                      value={line.productId}
+                      onChange={v => updateLine(idx, { productId: Array.isArray(v) ? (v[0] || '') : (v || '') })}
+                      onProductChange={(p) => handleProductChange(idx, p)}
+                      showStock
+                      showBarcode
+                      size="sm"
+                      module="purchases"
+                    />
+                    <Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} size="sm" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} size="sm" />
+                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, { unitPrice: Number(e.target.value) })} size="sm" />
+                    </div>
+                    {showDiscount && (
+                      <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, { discountPercent: Number(e.target.value) })} size="sm" />
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             {form.lines.length === 0 && (
               <div className="py-12 text-center text-slate-400">

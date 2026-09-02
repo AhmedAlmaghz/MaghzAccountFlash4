@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Coins, Plus, Pencil, Trash2, Save, Star } from 'lucide-react';
-import { Card, Button, Input, Table, ConfirmDialog, Can } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Input, Table, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useAuthStore } from '@/modules/auth/store';
@@ -151,12 +150,12 @@ export const CurrenciesPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'code', header: t('settings.currencies.code'), width: '80px' },
-    { key: 'name', header: t('settings.currencies.name') },
+    { key: 'code', header: t('settings.currencies.code'), width: '80px', mobile: 'subtitle' as const },
+    { key: 'name', header: t('settings.currencies.name'), mobile: 'title' as const },
     { key: 'symbol', header: t('settings.currencies.symbol'), width: '80px' },
     { key: 'exchangeRate', header: t('settings.currencies.exchangeRate'), render: (row: Currency) => formatCurrency(row.exchangeRate) },
     { key: 'isDefault', header: t('settings.currencies.default'), render: (row: Currency) => row.isDefault ? <Star size={16} className="text-gold-500 fill-gold-500" /> : null },
-    { key: 'actions', header: '', render: (row: Currency) => (
+    { key: 'actions', header: '', mobile: 'actions' as const, render: (row: Currency) => (
       <div className="flex items-center gap-1">
         {!row.isDefault && (
           <Button size="sm" variant="ghost" onClick={() => handleSetDefault(row.id)} title={t('settings.currencies.setDefault')}>
@@ -179,14 +178,13 @@ export const CurrenciesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.currencies.title')}
         subtitle={t('settings.currencies.subtitle')}
-        icon={Coins}
-        color="from-amber-600 via-amber-500 to-yellow-600"
-        action={
+        icon={<Coins size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ code: '', name: '', symbol: '', exchangeRate: 1, isActive: true }); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { setEditingId(null); setFormData({ code: '', name: '', symbol: '', exchangeRate: 1, isActive: true }); }}>
               {t('settings.currencies.new')}
             </Button>
           </Can>

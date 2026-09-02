@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Vault, Plus, Pencil, Trash2, CheckSquare } from 'lucide-react';
-import { Card, Button, Table, Modal, Input, ConfirmDialog, Can } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Table, Modal, Input, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { BranchSelect, UserSelect, AccountSelect } from '@/core/ui/components/smart';
 import { useCashBoxes } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
@@ -62,11 +61,11 @@ export const CashBoxesPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'name', header: t('settings.cashBoxes.name'), render: (row: CashBox) => <span className="font-medium">{row.name}</span> },
-    { key: 'code', header: t('settings.cashBoxes.code'), width: '100px', render: (row: CashBox) => <span className="font-mono text-xs">{row.code}</span> },
+    { key: 'name', header: t('settings.cashBoxes.name'), mobile: 'title' as const, render: (row: CashBox) => <span className="font-medium">{row.name}</span> },
+    { key: 'code', header: t('settings.cashBoxes.code'), width: '100px', mobile: 'subtitle' as const, render: (row: CashBox) => <span className="font-mono text-xs">{row.code}</span> },
     { key: 'currentBalance', header: t('settings.cashBoxes.balance'), width: '140px', align: 'right' as const, render: (row: CashBox) => <span>{formatCurrency(row.currentBalance)}</span> },
-    { key: 'isActive', header: t('settings.common.active'), width: '80px', render: (row: CashBox) => <span className={row.isActive ? 'text-emerald-600' : 'text-slate-400'}>{row.isActive ? t('settings.common.yes') : t('settings.common.no')}</span> },
-    { key: 'actions', header: '', width: '130px', render: (row: CashBox) => (
+    { key: 'isActive', header: t('settings.common.active'), width: '80px', mobile: 'status' as const, render: (row: CashBox) => <span className={row.isActive ? 'text-emerald-600' : 'text-slate-400'}>{row.isActive ? t('settings.common.yes') : t('settings.common.no')}</span> },
+    { key: 'actions', header: '', width: '130px', mobile: 'actions' as const, render: (row: CashBox) => (
       <div className="flex gap-1">
         <Can action="edit" module="settings"><Button size="sm" variant="ghost" onClick={() => openEdit(row)} leftIcon={<Pencil size={14} />} /></Can>
         <Can action="delete" module="settings"><Button size="sm" variant="ghost" onClick={() => setDeleteId(row.id)} leftIcon={<Trash2 size={14} className="text-rose-500" />} /></Can>
@@ -76,14 +75,13 @@ export const CashBoxesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.cashBoxes.title')}
         subtitle={t('settings.cashBoxes.subtitle')}
-        icon={Vault}
-        color="from-emerald-600 via-emerald-500 to-teal-600"
-        action={
+        icon={<Vault size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { reset(); setIsOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.cashBoxes.new')}</Button>
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { reset(); setIsOpen(true); }}>{t('settings.cashBoxes.new')}</Button>
           </Can>
         }
       />
@@ -95,7 +93,7 @@ export const CashBoxesPage: React.FC = () => {
       {isOpen && (
         <Modal isOpen={isOpen} title={editingId ? t('settings.cashBoxes.editTitle') : t('settings.cashBoxes.newTitle')} onClose={() => setIsOpen(false)} size="md">
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label={t('settings.cashBoxes.name')} value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} />
               <Input label={t('settings.cashBoxes.code')} value={form.code || ''} onChange={e => setForm({ ...form, code: e.target.value })} />
               <Input label={t('settings.cashBoxes.openingBalance')} type="number" value={String(form.currentBalance || 0)} onChange={e => setForm({ ...form, currentBalance: Number(e.target.value) })} />

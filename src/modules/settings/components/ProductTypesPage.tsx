@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Layers, Plus, Pencil, Trash2, CheckSquare } from 'lucide-react';
-import { Card, Button, Table, Modal, Input, Badge, ConfirmDialog, Can } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Table, Modal, Input, Badge, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { AccountSelect } from '@/core/ui/components/smart';
 import { useProductTypes } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
@@ -71,18 +70,18 @@ export const ProductTypesPage: React.FC = () => {
   );
 
   const columns = [
-    { key: 'nameAr', header: t('settings.productTypes.name'), render: (row: ProductType) => <span className="font-medium">{row.nameAr}</span> },
-    { key: 'code', header: t('settings.productTypes.code'), width: '80px', render: (row: ProductType) => <span className="font-mono text-xs text-slate-500">{row.code}</span> },
-    { key: 'sales', header: t('settings.productTypes.sales'), width: '70px', render: (row: ProductType) => boolBadge(row.appearsInSales) },
-    { key: 'purchases', header: t('settings.productTypes.purchases'), width: '80px', render: (row: ProductType) => boolBadge(row.appearsInPurchases) },
-    { key: 'inventory', header: t('settings.productTypes.inventory'), width: '70px', render: (row: ProductType) => boolBadge(row.appearsInInventory) },
-    { key: 'manufacturing', header: t('settings.productTypes.manufacturing'), width: '70px', render: (row: ProductType) => boolBadge(row.appearsInManufacturing) },
-    { key: 'stock', header: t('settings.productTypes.stockTracking'), width: '70px', render: (row: ProductType) => boolBadge(row.hasStockTracking) },
-    { key: 'bom', header: 'BOM', width: '60px', render: (row: ProductType) => boolBadge(row.hasBOM) },
-    { key: 'isActive', header: t('settings.common.active'), width: '60px', render: (row: ProductType) => (
+    { key: 'nameAr', header: t('settings.productTypes.name'), mobile: 'title' as const, render: (row: ProductType) => <span className="font-medium">{row.nameAr}</span> },
+    { key: 'code', header: t('settings.productTypes.code'), width: '80px', mobile: 'subtitle' as const, render: (row: ProductType) => <span className="font-mono text-xs text-slate-500">{row.code}</span> },
+    { key: 'sales', header: t('settings.productTypes.sales'), width: '70px', mobile: 'hidden' as const, render: (row: ProductType) => boolBadge(row.appearsInSales) },
+    { key: 'purchases', header: t('settings.productTypes.purchases'), width: '80px', mobile: 'hidden' as const, render: (row: ProductType) => boolBadge(row.appearsInPurchases) },
+    { key: 'inventory', header: t('settings.productTypes.inventory'), width: '70px', mobile: 'hidden' as const, render: (row: ProductType) => boolBadge(row.appearsInInventory) },
+    { key: 'manufacturing', header: t('settings.productTypes.manufacturing'), width: '70px', mobile: 'hidden' as const, render: (row: ProductType) => boolBadge(row.appearsInManufacturing) },
+    { key: 'stock', header: t('settings.productTypes.stockTracking'), width: '70px', mobile: 'hidden' as const, render: (row: ProductType) => boolBadge(row.hasStockTracking) },
+    { key: 'bom', header: 'BOM', width: '60px', mobile: 'hidden' as const, render: (row: ProductType) => boolBadge(row.hasBOM) },
+    { key: 'isActive', header: t('settings.common.active'), width: '60px', mobile: 'status' as const, render: (row: ProductType) => (
       <span className={row.isActive ? 'text-emerald-600' : 'text-slate-400'}>{row.isActive ? t('settings.common.yes') : t('settings.common.no')}</span>
     )},
-    { key: 'actions', header: '', width: '100px', render: (row: ProductType) => (
+    { key: 'actions', header: '', width: '100px', mobile: 'actions' as const, render: (row: ProductType) => (
       <div className="flex gap-1">
         <Can action="edit" module="settings"><Button size="sm" variant="ghost" onClick={() => openEdit(row)} leftIcon={<Pencil size={14} />} /></Can>
         <Can action="delete" module="settings"><Button size="sm" variant="ghost" onClick={() => setDeleteId(row.id)} leftIcon={<Trash2 size={14} className="text-rose-500" />} /></Can>
@@ -92,14 +91,13 @@ export const ProductTypesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.productTypes.title')}
         subtitle={t('settings.productTypes.subtitle')}
-        icon={Layers}
-        color="from-teal-600 via-teal-500 to-emerald-600"
-        action={
+        icon={<Layers size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setEditingId(null); setIsOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.productTypes.new')}</Button>
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setEditingId(null); setIsOpen(true); }}>{t('settings.productTypes.new')}</Button>
           </Can>
         }
       />
@@ -113,7 +111,7 @@ export const ProductTypesPage: React.FC = () => {
       {isOpen && (
         <Modal isOpen={isOpen} title={editingId ? t('settings.productTypes.editTitle') : t('settings.productTypes.newTitle')} onClose={() => setIsOpen(false)} size="lg">
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label={t('settings.productTypes.nameAr')} value={form.nameAr || ''} onChange={e => setForm({ ...form, nameAr: e.target.value })} />
               <Input label={t('settings.productTypes.nameEn')} value={form.nameEn || ''} onChange={e => setForm({ ...form, nameEn: e.target.value })} />
               <Input label={t('settings.productTypes.code')} value={form.code || ''} onChange={e => setForm({ ...form, code: e.target.value })} />
@@ -130,7 +128,7 @@ export const ProductTypesPage: React.FC = () => {
             </div>
             <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4 space-y-3">
               <h4 className="font-semibold text-sm">{t('settings.productTypes.appearanceRules')}</h4>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { key: 'appearsInSales', label: t('settings.productTypes.appearsInSales') },
                   { key: 'appearsInPurchases', label: t('settings.productTypes.appearsInPurchases') },

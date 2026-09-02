@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { TrendingUp, FileDown, Filter, RotateCcw, Calendar } from 'lucide-react';
-import { Card, Button, Table } from '@/core/ui/components';
+import { TrendingUp, BarChart3, FileDown, Filter, RotateCcw, Calendar } from 'lucide-react';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { CurrencyBreakdown } from '@/core/ui/components/CurrencyBreakdown';
 import { useAppStore } from '@/core/store';
@@ -297,26 +297,24 @@ export const SalesAnalysisReport: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <TrendingUp size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.salesAnalysis')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('reports.salesAnalysis.subtitle')}</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
-            {t('reports.filter')}
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            Excel
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-            PDF
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<BarChart3 size={22} />}
+        title={t('reports.salesAnalysis')}
+        subtitle={t('reports.salesAnalysis.subtitle')}
+        actions={
+          <>
+            <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
+              {t('reports.filter')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              Excel
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              PDF
+            </Button>
+          </>
+        }
+      />
 
       {/* Filters */}
       {showFilters && (
@@ -325,11 +323,11 @@ export const SalesAnalysisReport: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">{t('reports.fromDate')}</label>
-                <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-1">{t('reports.toDate')}</label>
-                <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={toDate} onChange={(e) => setToDate(e.target.value)} />
               </div>
               <div className="flex items-end gap-1 flex-wrap">
                 <Button size="sm" variant="ghost" leftIcon={<Calendar size={14} />} onClick={() => applyPreset('30')}>{t('reports.preset.last30')}</Button>
@@ -346,15 +344,15 @@ export const SalesAnalysisReport: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">{t('reports.customer')}</label>
-                <input type="text" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" placeholder={t('reports.placeholder.customerName')} value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} />
+                <input type="text" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" placeholder={t('reports.placeholder.customerName')} value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-1">{t('reports.product')}</label>
-                <input type="text" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" placeholder={t('reports.placeholder.productName')} value={productFilter} onChange={(e) => setProductFilter(e.target.value)} />
+                <input type="text" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" placeholder={t('reports.placeholder.productName')} value={productFilter} onChange={(e) => setProductFilter(e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-1">{t('reports.pivotTable')}</label>
-                <select className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={pivotBy} onChange={(e) => setPivotBy(e.target.value as 'none' | 'customer' | 'product' | 'month')}>
+                <select className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={pivotBy} onChange={(e) => setPivotBy(e.target.value as 'none' | 'customer' | 'product' | 'month')}>
                   <option value="none">{t('reports.pivotNone')}</option>
                   <option value="customer">{t('reports.pivotByCustomer')}</option>
                   <option value="product">{t('reports.pivotByProduct')}</option>
@@ -436,8 +434,8 @@ export const SalesAnalysisReport: React.FC = () => {
             <Table
               data={pivotData}
               columns={[
-                { key: 'dimension', header: pivotBy === 'customer' ? t('reports.customer') : pivotBy === 'product' ? t('reports.product') : t('reports.month') },
-                { key: 'revenue', header: t('reports.revenue'), align: 'right', render: (row) => formatCurrency(row.revenue) },
+                { key: 'dimension', header: pivotBy === 'customer' ? t('reports.customer') : pivotBy === 'product' ? t('reports.product') : t('reports.month'), mobile: 'title' as const },
+                { key: 'revenue', header: t('reports.revenue'), align: 'right', mobile: 'subtitle' as const, render: (row) => formatCurrency(row.revenue) },
                 { key: 'invoiceCount', header: t('reports.invoicesCount'), align: 'right' },
                 { key: 'avgValue', header: t('reports.average'), align: 'right', render: (row) => formatCurrency(row.avgValue) },
               ]}
@@ -447,9 +445,9 @@ export const SalesAnalysisReport: React.FC = () => {
             <Table
               data={filteredData.slice(0, 200)}
               columns={[
-                { key: 'date', header: t('reports.date') },
-                { key: 'customerName', header: t('reports.customer') },
-                { key: 'productName', header: t('reports.product') },
+                { key: 'date', header: t('reports.date'), mobile: 'hidden' as const },
+                { key: 'customerName', header: t('reports.customer'), mobile: 'title' as const },
+                { key: 'productName', header: t('reports.product'), mobile: 'subtitle' as const },
                 { key: 'currencyCode', header: t('reports.currency'), align: 'right', render: (row) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{row.currencyCode}</span> },
                 { key: 'revenue', header: t('reports.revenue'), align: 'right', render: (row) => formatCurrency(row.revenue) },
               ]}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Building2, Users, Pencil, XCircle } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Can } from '@/core/ui/components';
+import { Plus, Building2, Building, Users, Pencil, XCircle } from 'lucide-react';
+import { Card, Button, Input, Modal, Table, Can, PageHeader, StatsGrid } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { UserSelect } from '@/core/ui/components/smart';
@@ -69,14 +69,14 @@ export const DepartmentsPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'name', header: t('hr.departments.table.name') },
-    { key: 'managerName', header: t('hr.departments.table.manager'), render: (row: Department) => row.managerName || '—' },
+    { key: 'name', header: t('hr.departments.table.name'), mobile: 'title' as const },
+    { key: 'managerName', header: t('hr.departments.table.manager'), mobile: 'subtitle' as const, render: (row: Department) => row.managerName || '—' },
     { key: 'employeeCount', header: t('hr.departments.table.employeeCount'), width: '120px', render: (row: Department) => (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold tabular-nums text-slate-700 dark:text-slate-300">
         <Users size={12} /> {row.employeeCount}
       </span>
     )},
-    { key: 'actions', header: '', width: '120px', render: (row: Department) => (
+    { key: 'actions', header: '', width: '120px', mobile: 'actions' as const, render: (row: Department) => (
       <div className="flex items-center gap-1">
         <Can action="edit" module="hr">
           <Button variant="ghost" size="sm" onClick={() => openEdit(row)} title={t('hr.departments.edit')}>
@@ -96,50 +96,26 @@ export const DepartmentsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-700 via-indigo-600 to-slate-700 shadow-xl shadow-indigo-900/10 dark:shadow-indigo-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-indigo-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Building2 size={12} /> {t('hr.departments.title')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('hr.departments.title')}</h2>
-              <p className="text-indigo-100/80 text-base max-w-lg">{t('hr.departments.subtitle')}</p>
-            </div>
-            <Can action="create" module="hr">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('hr.departments.new')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Building size={22} />}
+        title={t('hr.departments.title')}
+        subtitle={t('hr.departments.subtitle')}
+        actions={
+          <Can action="create" module="hr">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('hr.departments.new')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('hr.departments.totalDepartments'), value: String(departments.length), icon: Building2, color: 'from-indigo-600 to-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/10 dark:to-indigo-800/5' },
-          { label: t('hr.departments.linkedEmployees'), value: String(totalEmployees), icon: Users, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        columns={2}
+        items={[
+          { label: t('hr.departments.totalDepartments'), value: String(departments.length), icon: <Building2 size={18} />, tone: 'primary' },
+          { label: t('hr.departments.linkedEmployees'), value: String(totalEmployees), icon: <Users size={18} />, tone: 'info' },
+        ]}
+      />
 
       {/* Table */}
       <Card noPadding>

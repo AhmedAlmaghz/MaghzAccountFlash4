@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Users, FileDown, Filter, RotateCcw } from 'lucide-react';
-import { Card, Button, Table } from '@/core/ui/components';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -137,41 +137,39 @@ export const CustomerStatementReport: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Users size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.customerStatement')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('reports.customerStatement.subtitle')}</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
-            {t('reports.filter')}
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            Excel
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-            PDF
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Users size={22} />}
+        title={t('reports.customerStatement')}
+        subtitle={t('reports.customerStatement.subtitle')}
+        actions={
+          <>
+            <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
+              {t('reports.filter')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              Excel
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              PDF
+            </Button>
+          </>
+        }
+      />
 
       {showFilters && (
         <Card>
           <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('reports.fromDate')}</label>
-              <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+              <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
             </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('reports.toDate')}</label>
-              <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+              <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('reports.referenceDueDate')}</label>
-              <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value || todayIso())} />
+              <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value || todayIso())} />
             </div>
             <div className="flex items-end">
               <Button variant="ghost" size="sm" leftIcon={<RotateCcw size={14} />} onClick={clearFilters}>
@@ -182,7 +180,7 @@ export const CustomerStatementReport: React.FC = () => {
         </Card>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <div className="p-4 text-center">
             <p className="text-sm text-slate-500 dark:text-slate-400">{t('reports.totalOutstanding')}</p>
@@ -213,13 +211,13 @@ export const CustomerStatementReport: React.FC = () => {
           <Table
             data={customers}
             columns={[
-              { key: 'customer', header: t('reports.customer') },
-              { key: 'phone', header: t('reports.phone') },
-              { key: 'bucket0to30', header: '0-30', align: 'right', render: (row) => formatCurrency(row.bucket0to30) },
-              { key: 'bucket31to60', header: '31-60', align: 'right', render: (row) => formatCurrency(row.bucket31to60) },
-              { key: 'bucket61to90', header: '61-90', align: 'right', render: (row) => formatCurrency(row.bucket61to90) },
-              { key: 'bucket90plus', header: '90+', align: 'right', render: (row) => formatCurrency(row.bucket90plus) },
-              { key: 'totalOutstanding', header: t('reports.total'), align: 'right', render: (row) => <span className="font-semibold text-rose-600 dark:text-rose-400">{formatCurrency(row.totalOutstanding)}</span> },
+              { key: 'customer', header: t('reports.customer'), mobile: 'title' as const },
+              { key: 'phone', header: t('reports.phone'), mobile: 'hidden' as const },
+              { key: 'bucket0to30', header: '0-30', align: 'right', mobile: 'hidden' as const, render: (row) => formatCurrency(row.bucket0to30) },
+              { key: 'bucket31to60', header: '31-60', align: 'right', mobile: 'hidden' as const, render: (row) => formatCurrency(row.bucket31to60) },
+              { key: 'bucket61to90', header: '61-90', align: 'right', mobile: 'hidden' as const, render: (row) => formatCurrency(row.bucket61to90) },
+              { key: 'bucket90plus', header: '90+', align: 'right', mobile: 'hidden' as const, render: (row) => formatCurrency(row.bucket90plus) },
+              { key: 'totalOutstanding', header: t('reports.total'), align: 'right', mobile: 'subtitle' as const, render: (row) => <span className="font-semibold text-rose-600 dark:text-rose-400">{formatCurrency(row.totalOutstanding)}</span> },
               { key: 'invoiceCount', header: t('reports.invoicesCount'), align: 'right' },
             ]}
             keyExtractor={(row) => row.customerId}

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, Package, BookOpen, Search, X, Wallet, Layers, Sparkles, Download } from 'lucide-react';
-import { Card, Button, Table, Input, Modal, Pagination, Can } from '@/core/ui/components';
+import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, Package, BookOpen, Wallet, Layers, Download, RotateCcw } from 'lucide-react';
+import { Card, Button, Table, Input, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { salesReturnFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
@@ -391,6 +391,7 @@ export const SalesReturnsPage: React.FC = () => {
       key: 'returnNumber',
       header: t('sales.return.number'),
       width: '135px',
+      mobile: 'title' as const,
       render: (row: SalesReturn) => (
         <span className="font-mono text-xs font-semibold bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 flex items-center gap-1 w-fit">
           <Undo2 size={12} className="text-rose-500" />
@@ -404,6 +405,7 @@ export const SalesReturnsPage: React.FC = () => {
     {
       key: 'customerName',
       header: t('sales.customer.title'),
+      mobile: 'subtitle' as const,
       render: (row: SalesReturn) => (
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-rose-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
@@ -428,8 +430,8 @@ export const SalesReturnsPage: React.FC = () => {
         </span>
       ),
     },
-    { key: 'status', header: t('sales.status.label'), width: '110px', render: (row: SalesReturn) => <StatusBadge status={row.status} /> },
-    { key: 'actions', header: t('sales.actions'), width: '200px', render: (row: SalesReturn) => (
+    { key: 'status', header: t('sales.status.label'), width: '110px', mobile: 'status' as const, render: (row: SalesReturn) => <StatusBadge status={row.status} /> },
+    { key: 'actions', header: t('sales.actions'), width: '200px', mobile: 'actions' as const, render: (row: SalesReturn) => (
       <div className="flex items-center gap-1">
         <ActionButtons
           onView={async () => {
@@ -469,97 +471,57 @@ export const SalesReturnsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-700 via-rose-600 to-orange-600 shadow-xl shadow-rose-900/10 dark:shadow-rose-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-rose-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('sales.returns')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sales.returns')}</h2>
-              <p className="text-rose-100/80 text-base max-w-lg">{t('sales.returnsSubtitle')}</p>
-            </div>
-            <Can action="create" module="sales">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setFormOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('sales.return.create')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        icon={<RotateCcw size={22} />}
+        title={t('sales.returns')}
+        subtitle={t('sales.returnsSubtitle')}
+        actions={
+          <Can action="create" module="sales">
+            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setFormOpen(true); }} className="shadow-sm">{t('sales.return.create')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('sales.return.total'), value: String(total), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
-          { label: t('sales.return.postedTotal'), value: formatCurrency(stats.total), icon: Wallet, color: 'from-orange-600 to-orange-700', bg: 'bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/10 dark:to-orange-800/5' },
-          { label: t('sales.return.drafts'), value: String(stats.draftCount), icon: FileText, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('sales.status.posted'), value: String(stats.postedCount), icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        columns={4}
+        items={[
+          { label: t('sales.return.total'), value: String(total), icon: <Layers size={18} /> },
+          { label: t('sales.return.postedTotal'), value: formatCurrency(stats.total), icon: <Wallet size={18} />, tone: 'info' },
+          { label: t('sales.return.drafts'), value: String(stats.draftCount), icon: <FileText size={18} />, tone: 'warning' },
+          { label: t('sales.status.posted'), value: String(stats.postedCount), icon: <CheckSquare size={18} />, tone: 'success' },
+        ]}
+      />
 
       {/* Toolbar */}
-      <Card noPadding className="p-4 sm:p-5 border-t-2 border-rose-500/30">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-          <div className="relative flex-1 min-w-0">
-            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder={t('search')}
-              className="w-full pr-9 pl-9 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-colors placeholder:text-slate-400"
-              aria-label={t('search')}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><X size={14} /></button>
-            )}
-            {!search && <span className="absolute left-3 top-1/2 -translate-y-1/2"><Sparkles size={14} className="text-slate-300" /></span>}
-          </div>
-          <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
-          <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')}><Download size={16} className="text-emerald-600" /></Button>
-          <Button size="sm" variant="ghost" onClick={handleExportPdf} title="PDF"><Printer size={16} className="text-rose-600" /></Button>
-        </div>
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 font-medium">{t('sales.status.label')}:</span>
-          {[
-            { value: '', label: t('sales.filter.all') },
-            { value: 'draft', label: t('sales.status.draft') },
-            { value: 'posted', label: t('sales.status.posted') },
-            { value: 'cancelled', label: t('sales.status.cancelled') },
-          ].map((opt) => (
-            <button
-              key={opt.value || 'all'}
-              onClick={() => setStatusFilter(opt.value)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === opt.value ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-300'}`}
-            >{opt.label}</button>
-          ))}
-        </div>
+      <div>
+        <FilterBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder={t('search')}
+          filterOptions={[
+            { key: '', label: t('sales.filter.all') },
+            { key: 'draft', label: t('sales.status.draft') },
+            { key: 'posted', label: t('sales.status.posted') },
+            { key: 'cancelled', label: t('sales.status.cancelled') },
+          ]}
+          activeFilter={statusFilter}
+          onFilterChange={(key) => setStatusFilter(key)}
+          actions={
+            <>
+              <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
+              <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')}><Download size={16} className="text-emerald-600" /></Button>
+              <Button size="sm" variant="ghost" onClick={handleExportPdf} title="PDF"><Printer size={16} className="text-rose-600" /></Button>
+            </>
+          }
+        />
         {hasFilters && (
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
             <span>{filteredReturns.length} من {returns.length} {search ? `• "${search}"` : ''} {statusFilter ? `• ${t('sales.status.' + statusFilter)}` : ''}</span>
             <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-rose-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
           </div>
         )}
-      </Card>
+      </div>
 
       <Card noPadding>
         {returnsLoading ? (
@@ -671,7 +633,7 @@ export const SalesReturnsPage: React.FC = () => {
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
@@ -698,6 +660,34 @@ export const SalesReturnsPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {/* Mobile line-items cards */}
+            <div className="md:hidden space-y-3 p-3">
+              {lines.map((line, idx) => {
+                const lineTotal = line.quantity * line.unitPrice;
+                return (
+                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
+                    <ProductSelect
+                      companyId={activeCompany?.id || ''}
+                      value={line.productId}
+                      onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))}
+                      onProductChange={(p) => handleProductChange(idx, p)}
+                      showBarcode
+                      showStock
+                      size="sm"
+                      module="sales"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
+                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -705,7 +695,7 @@ export const SalesReturnsPage: React.FC = () => {
               <Input label={t('sales.return.reason')} value={header.reason} onChange={e => setHeader(p => ({ ...p, reason: e.target.value }))} placeholder="سبب الإرجاع..." />
               <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder="ملاحظات إضافية..." />
             </div>
-            <div className="lg:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
+            <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
               <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
                 <span className="text-sm font-semibold flex items-center gap-2"><Wallet size={16} /> {t('sales.invoice.summary')}</span>
                 <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} {t('sales.itemsCount')}</span>

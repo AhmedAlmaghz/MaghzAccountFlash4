@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Plus, UserCheck, Search, Layers, Flame, ThumbsUp, Handshake, FileSpreadsheet } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, Pagination } from '@/core/ui/components';
+import { Plus, UserCheck, UserPlus, Layers, Flame, ThumbsUp, Handshake, FileSpreadsheet } from 'lucide-react';
+import { Card, Button, Input, Modal, Table, Pagination, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates } from '@/core/utils/duplicateDetection';
@@ -276,7 +276,7 @@ export const LeadsPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'name', header: t('crm.lead.name'), render: (row: Lead) => (
+    { key: 'name', header: t('crm.lead.name'), mobile: 'title' as const, render: (row: Lead) => (
       <div className="flex items-center gap-2 min-w-0">
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-rose-500 to-fuchsia-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
           {(row.name || '?').charAt(0).toUpperCase()}
@@ -284,8 +284,8 @@ export const LeadsPage: React.FC = () => {
         <span className="font-medium truncate">{row.name}</span>
       </div>
     )},
-    { key: 'company', header: t('crm.lead.company') },
-    { key: 'phone', header: t('crm.lead.phone'), render: (row: Lead) => <span className="font-mono text-xs tabular-nums">{row.phone || '—'}</span> },
+    { key: 'company', header: t('crm.lead.company'), mobile: 'subtitle' as const },
+    { key: 'phone', header: t('crm.lead.phone'), mobile: 'subtitle' as const, render: (row: Lead) => <span className="font-mono text-xs tabular-nums">{row.phone || '—'}</span> },
     {
       key: 'rating',
       header: t('crm.lead.rating'),
@@ -294,11 +294,12 @@ export const LeadsPage: React.FC = () => {
       ),
     },
     { key: 'value', header: t('crm.lead.estimatedValue'), align: 'right' as const, render: (row: Lead) => <span className="tabular-nums font-medium">{formatCurrency(row.estimatedValue || 0)}</span> },
-    { key: 'status', header: t('crm.lead.status'), render: (row: Lead) => <StatusBadge status={row.status} /> },
+    { key: 'status', header: t('crm.lead.status'), mobile: 'status' as const, render: (row: Lead) => <StatusBadge status={row.status} /> },
     {
       key: 'actions',
       header: '',
       width: '200px',
+      mobile: 'actions' as const,
       render: (row: Lead) => (
         <div className="flex items-center gap-1">
           <ActionButtons
@@ -339,93 +340,52 @@ export const LeadsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-700 via-rose-600 to-fuchsia-600 shadow-xl shadow-rose-900/10 dark:shadow-rose-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-rose-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('crm.leadsPage.title')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('crm.leadsPage.title')}</h2>
-              <p className="text-rose-100/80 text-base max-w-lg">{t('crm.leadsPage.description')}</p>
-            </div>
-            <Can action="create" module="crm">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('crm.lead.new')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<UserPlus size={22} />}
+        title={t('crm.leadsPage.title')}
+        subtitle={t('crm.leadsPage.description')}
+        actions={
+          <Can action="create" module="crm">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('crm.lead.new')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('crm.leadsPage.total'), value: String(kpiTotal), icon: Layers, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
-          { label: t('crm.status.new'), value: String(kpiNew), icon: Flame, color: 'from-blue-600 to-blue-700', bg: 'bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/10 dark:to-blue-800/5' },
-          { label: t('crm.status.qualified'), value: String(kpiQualified), icon: ThumbsUp, color: 'from-amber-600 to-amber-700', bg: 'bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/10 dark:to-amber-800/5' },
-          { label: t('crm.status.converted'), value: String(kpiConverted), icon: Handshake, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-xl md:text-2xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        items={[
+          { label: t('crm.leadsPage.total'), value: String(kpiTotal), icon: <Layers size={18} />, tone: 'primary' },
+          { label: t('crm.status.new'), value: String(kpiNew), icon: <Flame size={18} />, tone: 'info' },
+          { label: t('crm.status.qualified'), value: String(kpiQualified), icon: <ThumbsUp size={18} />, tone: 'warning' },
+          { label: t('crm.status.converted'), value: String(kpiConverted), icon: <Handshake size={18} />, tone: 'success' },
+        ]}
+      />
 
-      {/* Toolbar */}
-      <Card noPadding className="p-4 sm:p-5 border-t-2 border-rose-500/30">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
-          <div className="relative flex-1 min-w-0 max-w-md">
-            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              placeholder={t('crm.leadsPage.search')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label={t('crm.leadsPage.searchLabel')}
-              className="w-full pr-9 pl-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-colors"
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
-            )}
-          </div>
-          <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
-            <FileSpreadsheet size={16} className="text-emerald-600" />
-          </Button>
-          <span className="text-xs text-slate-500 font-medium tabular-nums mr-auto">{total}</span>
-        </div>
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 font-medium">{t('crm.lead.statusFilter')}:</span>
-          {[
-            { v: '', l: t('settings.common.all') },
-            { v: 'new', l: t('crm.status.new') },
-            { v: 'contacted', l: t('crm.status.contacted') },
-            { v: 'qualified', l: t('crm.status.qualified') },
-            { v: 'converted', l: t('crm.status.converted') },
-            { v: 'lost', l: t('crm.status.lost') },
-          ].map((o) => (
-            <button
-              key={o.v || 'all'}
-              onClick={() => setStatusFilter(o.v)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-rose-300'}`}
-            >{o.l}</button>
-          ))}
-        </div>
-      </Card>
+      {/* Filter Bar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t('crm.leadsPage.search')}
+        filterOptions={[
+          { key: '', label: t('settings.common.all') },
+          { key: 'new', label: t('crm.status.new') },
+          { key: 'contacted', label: t('crm.status.contacted') },
+          { key: 'qualified', label: t('crm.status.qualified') },
+          { key: 'converted', label: t('crm.status.converted') },
+          { key: 'lost', label: t('crm.status.lost') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key)}
+        actions={
+          <>
+            <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
+              <FileSpreadsheet size={16} className="text-emerald-600" />
+            </Button>
+            <span className="text-xs text-slate-500 font-medium tabular-nums">{total}</span>
+          </>
+        }
+      />
 
       <Card noPadding>
         {isLoading ? (

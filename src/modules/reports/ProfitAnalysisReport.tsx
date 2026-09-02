@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, FileDown, Filter, RotateCcw } from 'lucide-react';
-import { Card, Button, Table } from '@/core/ui/components';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { CurrencyBreakdown } from '@/core/ui/components/CurrencyBreakdown';
 import { useAppStore } from '@/core/store';
@@ -415,37 +415,35 @@ export const ProfitAnalysisReport: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <PieChart size={28} className="text-primary-600 dark:text-primary-400" />
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.profitAnalysis')}</h1>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">{t('reports.profitAnalysis.subtitle')}</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
-            {t('reports.filter')}
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            Excel
-          </Button>
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-            PDF
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={<PieChart size={22} />}
+        title={t('reports.profitAnalysis')}
+        subtitle={t('reports.profitAnalysis.subtitle')}
+        actions={
+          <>
+            <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
+              {t('reports.filter')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              Excel
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              PDF
+            </Button>
+          </>
+        }
+      />
 
       {showFilters && (
         <Card>
           <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('reports.fromDate')}</label>
-              <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+              <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
             </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('reports.toDate')}</label>
-              <input type="date" className="w-full px-2 py-1.5 text-sm border rounded-md dark:bg-slate-900 dark:border-slate-600" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+              <input type="date" className="w-full min-h-11 px-3 py-2 text-sm border rounded-xl dark:bg-slate-900 dark:border-slate-600" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
             <div className="flex items-end">
               <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer select-none">
@@ -559,8 +557,8 @@ export const ProfitAnalysisReport: React.FC = () => {
             <Table
               data={currentPeriod.expenses}
               columns={[
-                { key: 'category', header: t('reports.expenseItem') },
-                { key: 'amount', header: t('reports.amount'), align: 'right', render: (row) => formatCurrency(row.amount) },
+                { key: 'category', header: t('reports.expenseItem'), mobile: 'title' as const },
+                { key: 'amount', header: t('reports.amount'), align: 'right', mobile: 'subtitle' as const, render: (row) => formatCurrency(row.amount) },
                 { key: 'percent', header: t('reports.percentage'), align: 'right', render: (row) => `${row.percent}%` },
               ]}
               keyExtractor={(row) => row.category}
@@ -575,9 +573,9 @@ export const ProfitAnalysisReport: React.FC = () => {
           <Table
             data={currentPeriod.products}
             columns={[
-              { key: 'product', header: t('reports.product') },
-              { key: 'revenue', header: t('reports.revenue'), align: 'right', render: (row) => formatCurrency(row.revenue) },
-              { key: 'cost', header: t('reports.cost'), align: 'right', render: (row) => formatCurrency(row.cost) },
+              { key: 'product', header: t('reports.product'), mobile: 'title' as const },
+              { key: 'revenue', header: t('reports.revenue'), align: 'right', mobile: 'subtitle' as const, render: (row) => formatCurrency(row.revenue) },
+              { key: 'cost', header: t('reports.cost'), align: 'right', mobile: 'hidden' as const, render: (row) => formatCurrency(row.cost) },
               { key: 'profit', header: t('reports.profit'), align: 'right', render: (row) => formatCurrency(row.profit) },
               { key: 'margin', header: t('reports.margin'), align: 'right', render: (row) => (
                 <span className={`font-medium ${row.margin >= 30 ? 'text-emerald-600' : row.margin >= 15 ? 'text-amber-600' : 'text-rose-600'}`}>

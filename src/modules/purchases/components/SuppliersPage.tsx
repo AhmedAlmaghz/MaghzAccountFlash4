@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Store, Plus, FileText, Phone, Mail, MapPin, Hash, Search, X, Info, Clock, Wallet, Truck, UserCheck, Receipt, AlertCircle } from 'lucide-react';
+import { Plus, FileText, Phone, Mail, MapPin, Hash, Info, Clock, Wallet, Truck, UserCheck, Receipt, AlertCircle } from 'lucide-react';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { logAudit } from '@/core/utils/auditLogger';
-import { Card, Button, Modal, Input, Pagination, Table, Badge } from '@/core/ui/components';
+import { Card, Button, Modal, Input, Pagination, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates } from '@/core/utils/duplicateDetection';
@@ -306,9 +306,10 @@ export const SuppliersPage: React.FC = () => {
         key: 'code',
         header: t('purchases.supplier.code'),
         width: '110px',
+        mobile: 'hidden' as const,
         render: (row: Supplier) => (
-          <span className="inline-flex items-center gap-1.5 font-mono text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">
-            <Hash size={12} className="text-slate-400" />
+          <span className="inline-flex items-center gap-1.5 font-mono text-xs font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700">
+            <Hash size={12} className="text-zinc-400" />
             {row.code || '-'}
           </span>
         ),
@@ -316,14 +317,15 @@ export const SuppliersPage: React.FC = () => {
       {
         key: 'name',
         header: t('purchases.supplier.name'),
+        mobile: 'title' as const,
         render: (row: Supplier) => (
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 dark:from-amber-600 dark:to-orange-700 flex items-center justify-center text-white font-bold text-sm shadow-sm shrink-0">
               {row.name.charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">{row.name}</p>
-              {row.taxNumber && <p className="text-xs text-slate-500 truncate">{row.taxNumber}</p>}
+              <p className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{row.name}</p>
+              {row.taxNumber && <p className="text-xs text-zinc-500 truncate">{row.taxNumber}</p>}
             </div>
           </div>
         ),
@@ -331,9 +333,10 @@ export const SuppliersPage: React.FC = () => {
       {
         key: 'phone',
         header: t('purchases.supplier.phone'),
+        mobile: 'subtitle' as const,
         render: (row: Supplier) =>
           row.phone ? (
-            <span className="inline-flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+            <span className="inline-flex items-center gap-1.5 text-sm text-zinc-700 dark:text-zinc-300">
               <span className="w-7 h-7 rounded-full bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center shrink-0">
                 <Phone size={13} className="text-emerald-600 dark:text-emerald-400" />
               </span>
@@ -342,7 +345,7 @@ export const SuppliersPage: React.FC = () => {
               </span>
             </span>
           ) : (
-            <span className="text-slate-400 text-sm">-</span>
+            <span className="text-zinc-400 text-sm">-</span>
           ),
       },
       {
@@ -350,12 +353,12 @@ export const SuppliersPage: React.FC = () => {
         header: t('purchases.supplier.email'),
         render: (row: Supplier) =>
           row.email ? (
-            <span className="inline-flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300 max-w-[180px]">
-              <Mail size={13} className="text-slate-400 shrink-0" />
+            <span className="inline-flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300 max-w-[180px]">
+              <Mail size={13} className="text-zinc-400 shrink-0" />
               <span className="truncate">{row.email}</span>
             </span>
           ) : (
-            <span className="text-slate-400 text-sm">-</span>
+            <span className="text-zinc-400 text-sm">-</span>
           ),
       },
       {
@@ -374,7 +377,7 @@ export const SuppliersPage: React.FC = () => {
                     ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                     : isCredit
                       ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                      : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
                 }`}
               >
                 {formatCurrency(bal)}
@@ -394,6 +397,7 @@ export const SuppliersPage: React.FC = () => {
         key: 'actions',
         header: t('purchases.actions'),
         width: '150px',
+        mobile: 'actions' as const,
         render: (row: Supplier) => (
           <ActionButtons
             onView={() => openCard(row)}
@@ -431,90 +435,55 @@ export const SuppliersPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 dark:from-amber-600 dark:to-orange-700 flex items-center justify-center shadow-sm">
-              <Store size={22} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('purchases.suppliers')}</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t('purchases.suppliersSubtitle')}</p>
-            </div>
-          </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<Truck size={22} />}
+        title={t('purchases.suppliers')}
+        subtitle={t('purchases.suppliersSubtitle')}
+        actions={
           <Can action="create" module="purchases">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm self-start sm:self-auto">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">
               {t('purchases.supplier.new')}
             </Button>
           </Can>
-        </div>
+        }
+      />
 
-        <Card className="p-3 sm:p-4">
-          <div className="flex flex-col lg:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={`${t('search')} — ${t('purchases.supplier.name')} / ${t('purchases.supplier.phone')} / ${t('purchases.supplier.code')}`}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition"
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch('')}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-400 hover:text-slate-600 transition"
-                  aria-label="clear search"
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {(
-                  [
-                    { v: 'all', label: t('purchases.filter.all') || 'الكل' },
-                    { v: 'active', label: t('settings.common.active') },
-                    { v: 'inactive', label: t('settings.common.inactive') },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.v}
-                    onClick={() => setStatusFilter(opt.v)}
-                    className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition ${
-                      statusFilter === opt.v
-                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm border border-slate-200 dark:border-slate-600'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
-              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-                <FileText size={15} className="text-emerald-600" />
-                <span className="hidden sm:inline text-xs">Excel</span>
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
-                <Receipt size={15} className="text-rose-600" />
-                <span className="hidden sm:inline text-xs">PDF</span>
-              </Button>
-            </div>
-          </div>
-          {hasActiveFilter && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-              <span>
-                {total} {t('purchases.supplier.invoices')} • {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `• ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
-              </span>
-              <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
-                مسح الفلترة
-              </button>
-            </div>
-          )}
-        </Card>
-      </div>
+      {/* Filter Bar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={`${t('search')} — ${t('purchases.supplier.name')} / ${t('purchases.supplier.phone')} / ${t('purchases.supplier.code')}`}
+        filterOptions={[
+          { key: 'all', label: t('purchases.filter.all') || 'الكل' },
+          { key: 'active', label: t('settings.common.active') },
+          { key: 'inactive', label: t('settings.common.inactive') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key as 'all' | 'active' | 'inactive')}
+        actions={
+          <>
+            <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
+              <FileText size={15} className="text-emerald-600" />
+              <span className="hidden sm:inline text-xs">Excel</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
+              <Receipt size={15} className="text-rose-600" />
+              <span className="hidden sm:inline text-xs">PDF</span>
+            </Button>
+          </>
+        }
+      />
+      {hasActiveFilter && (
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <span>
+            {total} {t('purchases.supplier.invoices')} • {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `• ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
+          </span>
+          <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
+            مسح الفلترة
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="relative overflow-hidden">

@@ -219,6 +219,10 @@
     },
     "hrPolicy": "HR Policies"
   },
+  "nav": {
+    "more": "More",
+    "menu": "Menu"
+  },
   "ai": {
     "title": "AI Assistant",
     "you": "You",
@@ -2738,7 +2742,8 @@
     "totalInBase": "Total in Base",
     "error": "Error",
     "close": "Close",
-    "usePglite": "Use PGlite local (no server)"
+    "usePglite": "Use PGlite local (no server)",
+    "confirm": "Confirm"
   },
   "pagination": {
     "first": "First",

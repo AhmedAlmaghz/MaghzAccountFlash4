@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Scale, Plus, Pencil, Trash2, CheckSquare } from 'lucide-react';
-import { Card, Button, Table, Modal, Input, ConfirmDialog, Can } from '@/core/ui/components';
-import { SettingsHeader } from './SettingsHeader';
+import { Card, Button, Table, Modal, Input, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { useUnits } from '@/core/hooks/useSettings';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -59,11 +58,11 @@ export const UnitsPage: React.FC = () => {
   };
 
   const columns = [
-    { key: 'nameAr', header: t('settings.units.nameHeader'), render: (row: Unit) => <span className="font-medium">{row.nameAr}</span> },
-    { key: 'nameEn', header: t('settings.units.nameEnHeader'), render: (row: Unit) => <span className="text-slate-500 text-sm">{row.nameEn}</span> },
-    { key: 'code', header: t('settings.units.codeHeader'), width: '100px', render: (row: Unit) => <span className="font-mono text-xs">{row.code}</span> },
+    { key: 'nameAr', header: t('settings.units.nameHeader'), mobile: 'title' as const, render: (row: Unit) => <span className="font-medium">{row.nameAr}</span> },
+    { key: 'nameEn', header: t('settings.units.nameEnHeader'), mobile: 'subtitle' as const, render: (row: Unit) => <span className="text-slate-500 text-sm">{row.nameEn}</span> },
+    { key: 'code', header: t('settings.units.codeHeader'), width: '100px', mobile: 'hidden' as const, render: (row: Unit) => <span className="font-mono text-xs">{row.code}</span> },
     { key: 'conversionFactor', header: t('settings.units.conversionFactor'), width: '120px', render: (row: Unit) => <span>{row.conversionFactor}</span> },
-    { key: 'actions', header: '', width: '100px', render: (row: Unit) => (
+    { key: 'actions', header: '', width: '100px', mobile: 'actions' as const, render: (row: Unit) => (
       <div className="flex gap-1">
         <Can action="edit" module="settings"><Button size="sm" variant="ghost" onClick={() => openEdit(row)} leftIcon={<Pencil size={14} />} /></Can>
         <Can action="delete" module="settings"><Button size="sm" variant="ghost" onClick={() => setDeleteId(row.id)} leftIcon={<Trash2 size={14} className="text-rose-500" />} /></Can>
@@ -73,14 +72,13 @@ export const UnitsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <SettingsHeader
+      <PageHeader
         title={t('settings.units.title')}
         subtitle={t('settings.units.subtitle')}
-        icon={Scale}
-        color="from-sky-600 via-sky-500 to-cyan-600"
-        action={
+        icon={<Scale size={22} />}
+        actions={
           <Can action="create" module="settings">
-            <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => { reset(); setIsOpen(true); }} className="bg-white/10 hover:bg-white/20 text-white border-white/20">{t('settings.units.newUnit')}</Button>
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { reset(); setIsOpen(true); }}>{t('settings.units.newUnit')}</Button>
           </Can>
         }
       />
@@ -92,7 +90,7 @@ export const UnitsPage: React.FC = () => {
       {isOpen && (
         <Modal isOpen={isOpen} title={editingId ? t('settings.units.editUnit') : t('settings.units.newUnit')} onClose={() => setIsOpen(false)} size="md">
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label={t('settings.units.nameAr')} value={form.nameAr || ''} onChange={e => setForm({ ...form, nameAr: e.target.value })} />
               <Input label={t('settings.units.nameEn')} value={form.nameEn || ''} onChange={e => setForm({ ...form, nameEn: e.target.value })} />
               <Input label={t('settings.units.code')} value={form.code || ''} onChange={e => setForm({ ...form, code: e.target.value })} />

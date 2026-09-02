@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { Settings, FileDown, RotateCcw, ChevronRight, ChevronLeft } from 'lucide-react';
-import { Card, Button, Table } from '@/core/ui/components';
+import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -253,13 +253,11 @@ export const CustomReportBuilder: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <Settings size={28} className="text-primary-600 dark:text-primary-400" />
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{t('reports.customReportBuilder')}</h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm">{t('reports.customReportBuilder.subtitle')}</p>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Settings size={22} />}
+        title={t('reports.customReportBuilder')}
+        subtitle={t('reports.customReportBuilder.subtitle')}
+      />
 
       {/* Steps */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2">
@@ -268,7 +266,7 @@ export const CustomReportBuilder: React.FC = () => {
             <button
               onClick={() => setStep(s.key)}
               className={cn(
-                'px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap',
+                'px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap min-h-9',
                 step === s.key
                   ? 'bg-primary-600 text-white'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -425,13 +423,14 @@ export const CustomReportBuilder: React.FC = () => {
                 <div className="overflow-x-auto">
                   <Table
                     data={previewData.slice(0, 100)}
-                    columns={(selectedColumns.length ? selectedColumns : selectedTable!.columns.map((c) => ({ key: c.key, label: c.label }))).map((c) => {
+                    columns={(selectedColumns.length ? selectedColumns : selectedTable!.columns.map((c) => ({ key: c.key, label: c.label }))).map((c, ci) => {
                       const colDef = selectedTable!.columns.find((tc) => tc.key === c.key);
                       const isCurrency = colDef?.type === 'number';
                       return {
                         key: c.key,
                         header: c.label,
-                        align: isCurrency ? 'right' : 'left',
+                        align: isCurrency ? 'right' as const : 'left' as const,
+                        mobile: (ci === 0 ? 'title' : ci === 1 ? 'subtitle' : 'hidden') as 'title' | 'subtitle' | 'hidden',
                         render: (row: Record<string, unknown>) => {
                           const val = row[c.key];
                           if (val === null || val === undefined) return '-';

@@ -25,17 +25,18 @@ describe('Table', () => {
       />
     );
 
-    expect(screen.getByText('Name')).toBeInTheDocument();
-    expect(screen.getByText('Age')).toBeInTheDocument();
-    expect(screen.getByText('John Doe')).toBeInTheDocument();
-    expect(screen.getByText('Jane Smith')).toBeInTheDocument();
-    expect(screen.getByText('Bob Johnson')).toBeInTheDocument();
-    expect(screen.getByText('30')).toBeInTheDocument();
-    expect(screen.getByText('25')).toBeInTheDocument();
-    expect(screen.getByText('35')).toBeInTheDocument();
+    // Both desktop table and mobile card list render in DOM (CSS controls visibility)
+    expect(screen.getAllByText('Name').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Age').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('John Doe').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Jane Smith').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Bob Johnson').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('30').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('25').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('35').length).toBeGreaterThan(0);
   });
 
-  it('renders loading state', () => {
+  it('renders loading state as skeleton', () => {
     render(
       <Table
         data={[]}
@@ -45,8 +46,8 @@ describe('Table', () => {
       />
     );
 
-    const spinner = document.querySelector('.animate-spin');
-    expect(spinner).toBeInTheDocument();
+    const skeleton = document.querySelector('.skeleton');
+    expect(skeleton).toBeInTheDocument();
   });
 
   it('renders empty state when no data', () => {
@@ -85,12 +86,31 @@ describe('Table', () => {
       />
     );
 
-    const row = screen.getByText('John Doe').closest('tr');
+    // Desktop table row — select the row that contains the cell with John Doe
+    const row = screen
+      .getAllByRole('row')
+      .find((r) => r.textContent?.includes('John Doe'));
     if (row) {
       fireEvent.click(row);
     }
 
     expect(onRowClick).toHaveBeenCalledWith(mockData[0]);
+  });
+
+  it('mobile card click triggers onRowClick', () => {
+    const onRowClick = vi.fn();
+    render(
+      <Table
+        data={mockData}
+        columns={[{ key: 'name', header: 'Name', mobile: 'title' }, { key: 'age', header: 'Age' }]}
+        keyExtractor={keyExtractor}
+        onRowClick={onRowClick}
+      />
+    );
+
+    const card = screen.getAllByText('John Doe')[0].closest('div.cursor-pointer');
+    if (card) fireEvent.click(card);
+    expect(onRowClick).toHaveBeenCalled();
   });
 
   it('renders with custom render function', () => {
@@ -111,9 +131,9 @@ describe('Table', () => {
       />
     );
 
-    expect(screen.getByText('30 years')).toBeInTheDocument();
-    expect(screen.getByText('25 years')).toBeInTheDocument();
-    expect(screen.getByText('35 years')).toBeInTheDocument();
+    expect(screen.getAllByText('30 years').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('25 years').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('35 years').length).toBeGreaterThan(0);
   });
 
   it('renders with column alignment', () => {
@@ -193,7 +213,7 @@ describe('Table', () => {
       />
     );
 
-    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getAllByText(expected).length).toBeGreaterThan(0);
   });
 
   it('applies custom className', () => {
@@ -206,8 +226,8 @@ describe('Table', () => {
       />
     );
 
-    const container = document.querySelector('.custom-table');
-    expect(container).toBeInTheDocument();
+    const container = document.querySelectorAll('.custom-table');
+    expect(container.length).toBeGreaterThan(0);
   });
 
   it('renders correct number of rows', () => {
@@ -234,5 +254,25 @@ describe('Table', () => {
 
     const headers = screen.getAllByRole('columnheader');
     expect(headers).toHaveLength(columns.length);
+  });
+
+  it('mobile card mode maps roles correctly', () => {
+    render(
+      <Table
+        data={mockData}
+        columns={[
+          { key: 'name', header: 'Name', mobile: 'title' },
+          { key: 'age', header: 'Age', mobile: 'subtitle' },
+          { key: 'id', header: 'ID', mobile: 'hidden' },
+        ]}
+        keyExtractor={keyExtractor}
+      />
+    );
+
+    // hidden column appears only in the desktop table header — not in card meta grid
+    const cardLabels = screen.getAllByText('ID');
+    expect(cardLabels.length).toBe(1);
+    // Age appears in subtitle (card) + header + cells (desktop)
+    expect(screen.getAllByText('Age').length).toBeGreaterThanOrEqual(1);
   });
 });

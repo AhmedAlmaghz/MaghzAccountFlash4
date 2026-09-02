@@ -1,14 +1,13 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, BookOpen, Wallet, Layers, TrendingUp } from 'lucide-react';
+import { Undo2, Plus, CheckSquare, Trash2, Printer, FileText, BookOpen, Wallet, Layers, TrendingUp, RotateCcw } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { logAudit } from '@/core/utils/auditLogger';
-import { Card, Button, Modal, Input, Pagination, Can } from '@/core/ui/components';
+import { Card, Button, Modal, Input, Pagination, Can, Table, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { purchaseReturnFingerprint, detectDocumentDuplicates, genericNearScore } from '@/core/utils/documentDuplicate';
-import { DataTablePro } from '@/core/ui/components/DataTablePro';
 import { SupplierSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseReturnsPaginated, usePurchaseInvoices } from '../hooks/usePurchases';
@@ -16,7 +15,6 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import type { PurchaseReturn } from '../types';
 import type { Product } from '@/modules/inventory/types';
-import type { ColumnDef } from '@tanstack/react-table';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { purchasesApi } from '../api';
@@ -74,10 +72,11 @@ export const PurchaseReturnsPage: React.FC = () => {
   const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const { settings } = useSettings(activeCompany?.id || '');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [search, setSearch] = useState('');
   const returnFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
   const { returns, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, post } = usePurchaseReturnsPaginated(activeCompany?.id || '', returnFilters);
   const { invoices } = usePurchaseInvoices(activeCompany?.id || '');
-  const { formatCurrency } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -373,28 +372,40 @@ export const PurchaseReturnsPage: React.FC = () => {
 
   const totalPosted = useMemo(() => returns.filter(r => r.status === 'posted').reduce((s, r) => s + r.totalAmount, 0), [returns]);
 
-  const columns = useMemo<ColumnDef<PurchaseReturn>[]>(() => [
-    { accessorKey: 'returnNumber', header: t('purchases.return.number'), cell: ({ row }) => <span className="font-medium text-slate-900 dark:text-slate-100">{row.original.returnNumber}</span> },
-    { accessorKey: 'invoiceNumber', header: t('purchases.return.originalInvoice'), cell: ({ row }) => <span className="flex items-center gap-1 text-blue-600"><FileText size={14} /> {row.original.invoiceNumber || '-'}</span> },
-    { accessorKey: 'supplier', header: t('purchases.supplier'), cell: ({ row }) => <span>{row.original.supplier?.name || row.original.supplierId}</span> },
-    { accessorKey: 'date', header: t('purchases.date') },
-    { accessorKey: 'totalAmount', header: t('purchases.total'), cell: ({ row }) => <span className="font-medium">{formatCurrency(row.original.totalAmount)}</span> },
-    { accessorKey: 'status', header: t('purchases.status'), cell: ({ row }) => <StatusBadge status={row.original.status} /> },
+  const visibleReturns = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return returns;
+    return returns.filter((r) =>
+      r.returnNumber?.toLowerCase().includes(q) ||
+      (r.supplier?.name || '').toLowerCase().includes(q) ||
+      r.status?.toLowerCase().includes(q) ||
+      String(r.totalAmount || '').includes(q)
+    );
+  }, [returns, search]);
+
+  const columns = useMemo(() => [
+    { key: 'returnNumber', header: t('purchases.return.number'), mobile: 'title' as const, render: (row: PurchaseReturn) => <span className="font-medium text-zinc-900 dark:text-zinc-100">{row.returnNumber}</span> },
+    { key: 'invoiceNumber', header: t('purchases.return.originalInvoice'), mobile: 'hidden' as const, render: (row: PurchaseReturn) => <span className="flex items-center gap-1 text-blue-600"><FileText size={14} /> {row.invoiceNumber || '-'}</span> },
+    { key: 'supplier', header: t('purchases.supplier'), mobile: 'subtitle' as const, render: (row: PurchaseReturn) => <span>{row.supplier?.name || row.supplierId}</span> },
+    { key: 'date', header: t('purchases.date'), render: (row: PurchaseReturn) => <span>{row.date ? formatDate(row.date) : '-'}</span> },
+    { key: 'totalAmount', header: t('purchases.total'), render: (row: PurchaseReturn) => <span className="font-medium">{formatCurrency(row.totalAmount)}</span> },
+    { key: 'status', header: t('purchases.status'), mobile: 'status' as const, render: (row: PurchaseReturn) => <StatusBadge status={row.status} /> },
     {
-      accessorKey: 'paymentType',
+      key: 'paymentType',
       header: t('purchases.return.paymentType'),
-      cell: ({ row }) => {
-        const pt = row.original.paymentType;
+      render: (row: PurchaseReturn) => {
+        const pt = row.paymentType;
         return pt === 'cash'
           ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">{t('purchases.return.cash')}</span>
           : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">{t('purchases.return.credit')}</span>;
       },
     },
     {
-      accessorKey: 'actions',
+      key: 'actions',
       header: t('purchases.actions'),
-      cell: ({ row }) => {
-        const ret = row.original;
+      mobile: 'actions' as const,
+      render: (row: PurchaseReturn) => {
+        const ret = row;
         const isPosting = postingId === ret.id;
         return (
           <div className="flex items-center gap-1">
@@ -422,7 +433,7 @@ export const PurchaseReturnsPage: React.FC = () => {
               </Button>
             )}
             {ret.status !== 'draft' && (
-              <span className="text-xs text-slate-400 flex items-center gap-1 mr-2">
+              <span className="text-xs text-zinc-400 flex items-center gap-1 mr-2">
                 <BookOpen size={12} /> {t('accounting.posted')}
               </span>
             )}
@@ -430,89 +441,61 @@ export const PurchaseReturnsPage: React.FC = () => {
         );
       },
     },
-  ], [t, postingId, openView, openEdit, handleDelete, handlePrint, handlePost, formatCurrency]);
+  ], [t, postingId, openView, openEdit, handleDelete, handlePrint, handlePost, formatCurrency, formatDate]);
 
   const canSave = form.supplierId && form.lines.length > 0 && form.lines.every(l => l.productId && l.quantity > 0);
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Gradient Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-orange-700 via-amber-600 to-rose-600 shadow-xl shadow-orange-900/10 dark:shadow-orange-900/20">
-        <div className="absolute top-0 right-0 w-48 h-48 opacity-15 bg-white rounded-full -translate-y-1/3 translate-x-1/4" />
-        <div className="absolute bottom-0 left-0 w-24 h-24 opacity-10 bg-white rounded-full translate-y-1/3 -translate-x-1/4" />
-        <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
-          <div className="flex items-center gap-3 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-orange-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <Layers size={12} /> {t('purchases.returns')}
-            </span>
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('purchases.returns')}</h2>
-              <p className="text-orange-100/80 text-base max-w-lg">{t('purchases.returnsSubtitle')}</p>
-            </div>
-            <Can action="create" module="purchases">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('purchases.return.create')}</Button>
-            </Can>
-          </div>
-        </div>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        icon={<RotateCcw size={22} />}
+        title={t('purchases.returns')}
+        subtitle={t('purchases.returnsSubtitle')}
+        actions={
+          <Can action="create" module="purchases">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate} className="shadow-sm">{t('purchases.return.create')}</Button>
+          </Can>
+        }
+      />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: t('purchases.return.total'), value: String(total), icon: Undo2, color: 'from-orange-600 to-orange-700', bg: 'bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/10 dark:to-orange-800/5' },
-          { label: t('purchases.return.postedTotal'), value: formatCurrency(totalPosted), icon: Wallet, color: 'from-rose-600 to-rose-700', bg: 'bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/10 dark:to-rose-800/5' },
-          { label: t('purchases.return.drafts'), value: String(returns.filter(r => r.status === 'draft').length), icon: FileText, color: 'from-slate-600 to-slate-700', bg: 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/10 dark:to-slate-800/5' },
-          { label: t('sales.status.posted'), value: String(returns.filter(r => r.status === 'posted').length), icon: CheckSquare, color: 'from-emerald-600 to-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/10 dark:to-emerald-800/5' },
-        ].map((k) => (
-          <Card key={k.label} className="p-0 overflow-hidden relative">
-            <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${k.color}`} />
-            <div className={`p-4 ${k.bg}`}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-tight truncate">{k.label}</p>
-                  <p className="text-lg md:text-xl font-extrabold tabular-nums leading-tight mt-1 truncate">{k.value}</p>
-                </div>
-                <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-100 dark:border-slate-700 shrink-0">
-                  <k.icon size={18} className="text-slate-600 dark:text-slate-300" />
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <StatsGrid
+        columns={4}
+        items={[
+          { label: t('purchases.return.total'), value: String(total), icon: <Undo2 size={18} />, tone: 'primary' },
+          { label: t('purchases.return.postedTotal'), value: formatCurrency(totalPosted), icon: <FileText size={18} />, tone: 'danger' },
+          { label: t('purchases.return.drafts'), value: String(returns.filter(r => r.status === 'draft').length), icon: <Layers size={18} />, tone: 'warning' },
+          { label: t('sales.status.posted'), value: String(returns.filter(r => r.status === 'posted').length), icon: <CheckSquare size={18} />, tone: 'success' },
+        ]}
+      />
 
-      {/* Toolbar */}
-      <Card noPadding className="p-4 sm:p-5 border-t-2 border-orange-500/30">
-        <span className="text-xs text-slate-500 font-medium">{t('purchases.status')}:</span>
-        <div className="mt-2 flex items-center gap-2 flex-wrap">
-          {[
-            { v: '', l: t('purchases.filter.all') },
-            { v: 'draft', l: t('purchases.filter.draft') },
-            { v: 'posted', l: t('purchases.filter.posted') },
-            { v: 'cancelled', l: t('purchases.filter.cancelled') },
-          ].map((o) => (
-            <button
-              key={o.v || 'all'}
-              onClick={() => setStatusFilter(o.v)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === o.v ? 'bg-orange-600 text-white border-orange-600 shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-orange-300'}`}
-            >{o.l}</button>
-          ))}
-        </div>
-      </Card>
+      {/* Filter Bar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder={t('search') + '...'}
+        filterOptions={[
+          { key: '', label: t('purchases.filter.all') },
+          { key: 'draft', label: t('purchases.filter.draft') },
+          { key: 'posted', label: t('purchases.filter.posted') },
+          { key: 'cancelled', label: t('purchases.filter.cancelled') },
+        ]}
+        activeFilter={statusFilter}
+        onFilterChange={(key) => setStatusFilter(key)}
+      />
 
       <Card noPadding>
-        <DataTablePro<PurchaseReturn>
-          data={returns}
-          columns={columns}
-          keyExtractor={(row) => row.id}
-          isLoading={isLoading}
-          emptyMessage={t('purchases.return.emptyTitle')}
-          searchable
-          searchPlaceholder={t('search') + '...'}
-        />
-        <div className="border-t border-slate-200 dark:border-slate-800">
+        <div className="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800">
+          <Table<PurchaseReturn>
+            data={visibleReturns}
+            columns={columns as never}
+            keyExtractor={(row) => row.id}
+            isLoading={isLoading}
+            emptyMessage={t('purchases.return.emptyTitle')}
+          />
+        </div>
+        <div className="border-t border-zinc-200 dark:border-zinc-800">
           <Pagination
             page={page}
             pageSize={pageSize}
@@ -609,7 +592,7 @@ export const PurchaseReturnsPage: React.FC = () => {
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('purchases.invoice.addLine')}</Button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
@@ -651,6 +634,39 @@ export const PurchaseReturnsPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+            {/* Mobile line-items cards */}
+            <div className="md:hidden space-y-3 p-3">
+              {form.lines.map((line, idx) => {
+                const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
+                const lineTotal = lineNet;
+                return (
+                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
+                    <ProductSelect
+                      companyId={activeCompany?.id || ''}
+                      value={line.productId}
+                      onChange={v => updateLine(idx, { productId: Array.isArray(v) ? (v[0] || '') : (v || '') })}
+                      onProductChange={(p) => handleProductChange(idx, p)}
+                      showStock
+                      showBarcode
+                      size="sm"
+                      module="purchases"
+                    />
+                    <Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} size="sm" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} size="sm" />
+                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, { unitPrice: Number(e.target.value) })} size="sm" />
+                    </div>
+                    {showDiscount && (
+                      <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, { discountPercent: Number(e.target.value) })} size="sm" />
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
+                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             {form.lines.length === 0 && (
               <div className="py-12 text-center text-slate-400">
