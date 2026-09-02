@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Bot, Settings, X } from 'lucide-react';
+import { Bot, Settings, X, Maximize2 } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
@@ -81,21 +81,23 @@ export function ChatWidget() {
 
   return (
     <>
-      {/* FAB Button — sits above the mobile bottom nav with safe-area */}
-      <button
-        onClick={toggle}
-        className={cn(
-          'fixed z-50 w-14 h-14 rounded-full shadow-float flex items-center justify-center transition-all duration-200 active:scale-90',
-          'bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-6 left-4 lg:left-6',
-          isOpen
-            ? 'bg-zinc-800 dark:bg-zinc-700 text-white rotate-0'
-            : 'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift hover:scale-105'
-        )}
-        title={isOpen ? t('ai.widget.close') : t('ai.widget.open') + ' (Ctrl+K)'}
-        aria-label={isOpen ? t('ai.widget.close') : t('ai.widget.open')}
-      >
-        {isOpen ? <X size={24} /> : <Bot size={24} />}
-      </button>
+      {/* FAB Button — launcher (hidden while the panel is open; the panel
+          toolbar carries its own close/expand controls). Sits above the
+          mobile bottom nav with safe-area. */}
+      {!isOpen && (
+        <button
+          onClick={toggle}
+          className={cn(
+            'fixed z-50 w-14 h-14 rounded-full shadow-float flex items-center justify-center transition-all duration-200 active:scale-90',
+            'bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-6 left-4 lg:left-6',
+            'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift hover:scale-105'
+          )}
+          title={t('ai.widget.open') + ' (Ctrl+K)'}
+          aria-label={t('ai.widget.open')}
+        >
+          <Bot size={24} />
+        </button>
+      )}
 
       {/* Chat panel — full-screen sheet on mobile, floating card on desktop */}
       {isOpen &&
@@ -115,21 +117,56 @@ export function ChatWidget() {
                 // Desktop: floating card
                 'lg:bottom-24 lg:left-6 lg:w-[400px] lg:h-[600px] lg:max-h-[80vh]',
                 'lg:rounded-2xl lg:shadow-float lg:border lg:border-zinc-200 lg:dark:border-zinc-700',
-                'bg-white dark:bg-zinc-900 rounded-none animate-fade-in pb-[env(safe-area-inset-bottom)] lg:pb-0'
+                'bg-white dark:bg-zinc-900 rounded-none animate-fade-in'
               )}
             >
-              {isConfigured ? (
-                <ChatPanel />
-              ) : (
-                <AiSetupPanel
-                  onClose={() => setIsOpen(false)}
-                  canConfigure={canConfigure}
-                  onOpenSettings={() => {
-                    setIsOpen(false);
-                    navigate('/settings/ai');
-                  }}
-                />
-              )}
+              {/* Widget toolbar — close (X) + expand to full page (Maximize2) */}
+              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-200/70 dark:border-zinc-800 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shrink-0">
+                    <Bot size={14} className="text-white" />
+                  </div>
+                  <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">
+                    {t('ai.title')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  {/* Expand → full AI chat page */}
+                  <button
+                    onClick={() => {
+                      setIsOpen(false);
+                      navigate('/ai');
+                    }}
+                    className="p-2 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    title={t('ai.widget.expand')}
+                    aria-label={t('ai.widget.expand')}
+                  >
+                    <Maximize2 size={16} />
+                  </button>
+                  <button
+                    onClick={() => setIsOpen(false)}
+                    className="p-2 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    title={t('ai.widget.close')}
+                    aria-label={t('ai.widget.close')}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 flex flex-col">
+                {isConfigured ? (
+                  <ChatPanel />
+                ) : (
+                  <AiSetupPanel
+                    onClose={() => setIsOpen(false)}
+                    canConfigure={canConfigure}
+                    onOpenSettings={() => {
+                      setIsOpen(false);
+                      navigate('/settings/ai');
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </>,
           document.body
@@ -138,43 +175,26 @@ export function ChatWidget() {
   );
 }
 
-/** Panel shown inside the chat popup before the AI assistant is configured. */
-function AiSetupPanel({ onClose, canConfigure, onOpenSettings }: {
+/** Panel shown inside the chat popup before the AI assistant is configured.
+ *  (The widget toolbar above already provides the close button.) */
+function AiSetupPanel({ canConfigure, onOpenSettings }: {
   onClose: () => void;
   canConfigure: boolean;
   onOpenSettings: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200/70 dark:border-zinc-800 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
-            <Bot size={16} className="text-white" />
-          </div>
-          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{t('ai.title')}</span>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-2 rounded-xl text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-          title={t('ai.widget.close')}
-          aria-label={t('ai.widget.close')}
-        >
-          <X size={18} />
-        </button>
+    <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-primary-50 dark:bg-primary-950/50 flex items-center justify-center mb-4">
+        <Bot size={26} className="text-primary-600 dark:text-primary-400" />
       </div>
-      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-primary-50 dark:bg-primary-950/50 flex items-center justify-center mb-4">
-          <Bot size={26} className="text-primary-600 dark:text-primary-400" />
-        </div>
-        <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50 mb-1">{t('ai.notConfigured')}</h2>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 max-w-xs leading-relaxed">{t('ai.notConfiguredDesc')}</p>
-        {canConfigure ? (
-          <Button size="sm" leftIcon={<Settings size={14} />} onClick={onOpenSettings}>
-            {t('ai.goToSettings')}
-          </Button>
-        ) : null}
-      </div>
+      <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50 mb-1">{t('ai.notConfigured')}</h2>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 max-w-xs leading-relaxed">{t('ai.notConfiguredDesc')}</p>
+      {canConfigure ? (
+        <Button size="sm" leftIcon={<Settings size={14} />} onClick={onOpenSettings}>
+          {t('ai.goToSettings')}
+        </Button>
+      ) : null}
     </div>
   );
 }

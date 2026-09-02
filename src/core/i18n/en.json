@@ -360,7 +360,8 @@
     },
     "widget": {
       "open": "AI Assistant",
-      "close": "Close"
+      "close": "Close",
+      "expand": "Expand to full page"
     },
     "voice": {
       "start": "Voice input",

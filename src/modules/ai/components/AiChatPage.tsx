@@ -282,7 +282,7 @@ export default function AiChatPage() {
 
   // ── Main chat view ─────────────────────────────────────────────────────────
   return (
-    <div className="h-full flex flex-col bg-zinc-50/50 dark:bg-zinc-900 -m-3 sm:-m-4 lg:-m-6">
+    <div className="h-full flex flex-col bg-zinc-50/50 dark:bg-zinc-900">
       {/* Header — professional gradient bar */}
       <div className="relative shrink-0 bg-gradient-to-l from-primary-600 via-primary-700 to-primary-800 text-white overflow-hidden">
         {/* Decorative glow */}

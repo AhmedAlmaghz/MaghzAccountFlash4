@@ -681,9 +681,13 @@ export const AppLayout = () => {
   const recordActivity = useAuthStore((state) => state.recordActivity);
   const checkSession = useAuthStore((state) => state.checkSession);
   const navigate = useNavigate();
+  const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isMobile = useIsMobile();
+  // The AI chat page renders as a full-screen app (its own bottom nav in
+  // mobile) — strip the main padding and hide the global bottom tabs there.
+  const isAiChatRoute = location.pathname === '/ai';
 
   const entitySources = useMemo<EntitySource[]>(
     () => [
@@ -802,11 +806,17 @@ export const AppLayout = () => {
       <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Header onOpenSearch={() => setPaletteOpen(true)} onOpenMenu={() => setDrawerOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 pb-24 lg:pb-6">
+        <main
+          className={
+            isAiChatRoute
+              ? 'flex-1 overflow-hidden p-0!'
+              : 'flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 pb-24 lg:pb-6'
+          }
+        >
           <Outlet />
         </main>
       </div>
-      <BottomTabs onOpenMore={() => setDrawerOpen(true)} />
+      {!isAiChatRoute && <BottomTabs onOpenMore={() => setDrawerOpen(true)} />}
       <CommandPalette
         open={paletteOpen}
         onOpen={() => setPaletteOpen(true)}
