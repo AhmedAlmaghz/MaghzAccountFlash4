@@ -57,12 +57,27 @@ export interface UseSpeechRecognition {
  * Thin, framework-agnostic wrapper over the Web Speech API.
  * A fresh recognition instance is created per session (most reliable pattern);
  * the transcript callback is kept in a ref so re-renders never stale-capture it.
+ *
+ * Continuous-listening hardening: Chrome ends the session on silence/timeout
+ * even with `continuous = true`, dropping the trailing words. While the user
+ * hasn't pressed stop, we transparently restart the engine; `onresult` uses
+ * absolute `event.results` indexing so finalized segments are never re-fired,
+ * which is what previously caused duplicated words.
  */
 export function useSpeechRecognition(lang: string): UseSpeechRecognition {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionHandle | null>(null);
   const transcriptRef = useRef<(text: string, isFinal: boolean) => void>(() => {});
+  /** True while the user wants to keep listening (until explicit stop). */
+  const wantListeningRef = useRef(false);
+  /**
+   * Result indices already emitted as FINAL. Interim hypotheses are
+   * re-emitted freely (they're display-only); a finalized segment is
+   * emitted exactly once — across engine restarts too — which is what
+   * previously caused duplicated words.
+   */
+  const finalizedIdxRef = useRef<Set<number>>(new Set());
 
   const isSupported = getSpeechRecognitionCtor() !== null;
 
@@ -72,6 +87,8 @@ export function useSpeechRecognition(lang: string): UseSpeechRecognition {
       if (!Ctor || recognitionRef.current) return false;
       transcriptRef.current = onTranscript;
       setError(null);
+      wantListeningRef.current = true;
+      finalizedIdxRef.current = new Set();
 
       const rec = new Ctor();
       rec.lang = lang;
@@ -82,12 +99,20 @@ export function useSpeechRecognition(lang: string): UseSpeechRecognition {
       rec.onresult = (event) => {
         let interim = '';
         let finalText = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
+        for (let i = 0; i < event.results.length; i++) {
           const result = event.results[i];
           const text = result?.[0]?.transcript ?? '';
           if (!text) continue;
-          if (result.isFinal) finalText += text;
-          else interim += text;
+          if (result.isFinal) {
+            // Emit each finalized segment exactly once — a restart quirk
+            // or an interim→final evolution must never double-fire.
+            if (!finalizedIdxRef.current.has(i)) {
+              finalizedIdxRef.current.add(i);
+              finalText = finalText ? `${finalText} ${text}` : text;
+            }
+          } else {
+            interim = interim ? `${interim} ${text}` : text;
+          }
         }
         if (finalText) transcriptRef.current(finalText.trim(), true);
         if (interim) transcriptRef.current(interim.trim(), false);
@@ -100,6 +125,35 @@ export function useSpeechRecognition(lang: string): UseSpeechRecognition {
       };
       rec.onend = () => {
         recognitionRef.current = null;
+        if (wantListeningRef.current) {
+          // Chrome stopped on silence — restart transparently. A fresh
+          // instance keeps the mic open; the absolute index guard above
+          // prevents duplicate emissions across the restart.
+          const Next = getSpeechRecognitionCtor();
+          if (!Next) {
+            wantListeningRef.current = false;
+            setIsListening(false);
+            return;
+          }
+          try {
+            const restart = new Next();
+            restart.lang = lang;
+            restart.continuous = true;
+            restart.interimResults = true;
+            restart.maxAlternatives = 1;
+            restart.onresult = rec.onresult;
+            restart.onerror = rec.onerror;
+            restart.onend = rec.onend;
+            recognitionRef.current = restart;
+            restart.start();
+            // Engine restart resets interim results — a new interim session
+            // begins; nothing to flush since finals already went through.
+          } catch {
+            wantListeningRef.current = false;
+            setIsListening(false);
+          }
+          return;
+        }
         setIsListening(false);
       };
 
@@ -110,6 +164,7 @@ export function useSpeechRecognition(lang: string): UseSpeechRecognition {
         return true;
       } catch {
         recognitionRef.current = null;
+        wantListeningRef.current = false;
         return false;
       }
     },
@@ -117,12 +172,14 @@ export function useSpeechRecognition(lang: string): UseSpeechRecognition {
   );
 
   const stop = useCallback(() => {
+    wantListeningRef.current = false;
     recognitionRef.current?.stop();
   }, []);
 
   // Never leak a live microphone session across unmounts.
   useEffect(() => {
     return () => {
+      wantListeningRef.current = false;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
     };

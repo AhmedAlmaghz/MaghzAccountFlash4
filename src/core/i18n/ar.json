@@ -341,7 +341,9 @@
       "regenerate": "إعادة إنشاء",
       "exportAs": "تصدير",
       "exportJson": "JSON",
-      "exportMarkdown": "Markdown"
+      "exportMarkdown": "Markdown",
+      "speak": "قراءة صوتية",
+      "stopSpeaking": "إيقاف القراءة"
     },
     "sessions": {
       "title": "سجل المحادثات",

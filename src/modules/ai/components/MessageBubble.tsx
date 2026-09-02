@@ -1,11 +1,49 @@
-import { memo, useState, useCallback } from 'react';
-import { Bot, User, AlertCircle, Clipboard, Check, RefreshCw, Navigation, Wand2 } from 'lucide-react';
+import { memo, useState, useCallback, useEffect } from 'react';
+import {
+  Bot,
+  User,
+  AlertCircle,
+  Clipboard,
+  Check,
+  RefreshCw,
+  Navigation,
+  Wand2,
+  Volume2,
+  Square,
+} from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 import type { ChatMessage } from '../types';
 import type { Suggestion } from '../suggestions/suggestionEngine';
 import { ToolCallCard } from './ToolCallCard';
 import { RichText } from './RichText';
+
+/**
+ * Detect the dominant script of a text chunk for speech synthesis.
+ * Arabic (incl. digits/punct) → 'ar', Latin → 'en', fallback → null (no TTS).
+ */
+function detectSpeechLang(text: string): string | null {
+  const arabic = (text.match(/[\u0600-\u06FF]/g) ?? []).length;
+  const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+  if (arabic === 0 && latin === 0) return null;
+  return arabic >= latin ? 'ar' : 'en';
+}
+
+/** Strip markdown artifacts so the synthesizer reads clean prose. */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/\|/g, ' ')
+    .replace(/^>\s*/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -28,12 +66,75 @@ export const MessageBubble = memo(function MessageBubble({
   const isUser = message.role === 'user';
   const isAssistant = !isUser;
   const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+
+  const speakableText = stripMarkdown(message.content || '');
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [message.content]);
+
+  const stopSpeaking = useCallback(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }, []);
+
+  const handleSpeak = useCallback(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      return;
+    }
+    // Toggle: speaking → stop
+    if (speaking) {
+      stopSpeaking();
+      return;
+    }
+    if (!speakableText) return;
+
+    // Cancel anything queued globally, pick a matching voice for the
+    // auto-detected language, and speak at a clear, professional pace.
+    window.speechSynthesis.cancel();
+
+    const lang = detectSpeechLang(speakableText) ?? 'ar';
+    const utter = new SpeechSynthesisUtterance(speakableText);
+    utter.lang = lang === 'ar' ? 'ar-SA' : 'en-US';
+    utter.rate = 1.0;
+    utter.pitch = 1.0;
+
+    // Prefer a native voice for the detected language when available.
+    const voices = window.speechSynthesis.getVoices();
+    const match =
+      voices.find((v) => v.lang?.toLowerCase().startsWith(lang) && v.localService) ??
+      voices.find((v) => v.lang?.toLowerCase().startsWith(lang));
+    if (match) utter.voice = match;
+
+    utter.onend = () => {
+      setSpeaking(false);
+    };
+    utter.onerror = () => {
+      setSpeaking(false);
+    };
+
+    setSpeaking(true);
+    window.speechSynthesis.speak(utter);
+  }, [speakableText, speaking, stopSpeaking]);
+
+  // Stop audio when the bubble unmounts (session switch, clear, etc.).
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const canSpeak =
+    !!speakableText && typeof window !== 'undefined' && !!window.speechSynthesis;
+
+  const actionBtn =
+    'p-2 rounded-xl transition-colors text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800';
 
   return (
     <div className={cn('group flex gap-2.5 sm:gap-3', isUser ? 'flex-row-reverse' : 'flex-row')}>
@@ -72,19 +173,32 @@ export const MessageBubble = memo(function MessageBubble({
               )}
             </div>
 
-            {/* Copy button — visible on hover / always in reach on touch */}
-            <button
-              onClick={handleCopy}
+            {/* Message actions — copy + speak, always visible (touch friendly) */}
+            <div
               className={cn(
-                'absolute -top-2 end-0 p-1.5 rounded-lg transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-                'bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-card',
-                'text-zinc-400 dark:text-zinc-300 hover:text-primary-600 dark:hover:text-primary-400'
+                'flex items-center gap-0.5 mt-1',
+                isUser ? 'flex-row-reverse' : 'flex-row'
               )}
-              title={t('ai.messageActions.copy')}
-              aria-label={t('ai.messageActions.copy')}
             >
-              {copied ? <Check size={13} /> : <Clipboard size={13} />}
-            </button>
+              <button
+                onClick={handleCopy}
+                className={cn(actionBtn, copied && 'text-success-600 dark:text-success-400')}
+                title={copied ? t('ai.messageActions.copied') : t('ai.messageActions.copy')}
+                aria-label={t('ai.messageActions.copy')}
+              >
+                {copied ? <Check size={14} /> : <Clipboard size={14} />}
+              </button>
+              {canSpeak && (
+                <button
+                  onClick={handleSpeak}
+                  className={cn(actionBtn, speaking && 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950/40')}
+                  title={speaking ? t('ai.messageActions.stopSpeaking') : t('ai.messageActions.speak')}
+                  aria-label={speaking ? t('ai.messageActions.stopSpeaking') : t('ai.messageActions.speak')}
+                >
+                  {speaking ? <Square size={13} className="fill-current" /> : <Volume2 size={15} />}
+                </button>
+              )}
+            </div>
           </div>
         )}
 

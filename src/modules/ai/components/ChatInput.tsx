@@ -31,6 +31,8 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
   // Text present before recording started + finalized transcript segments.
   const speechBaseRef = useRef('');
   const speechFinalRef = useRef('');
+  /** Last interim hypothesis — used to dedupe when it later finalizes. */
+  const speechInterimRef = useRef('');
 
   const composeFromSpeech = useCallback((finalText: string, interim: string) => {
     const joiner = speechBaseRef.current && !speechBaseRef.current.endsWith(' ') ? ' ' : '';
@@ -46,12 +48,31 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
     const current = value.trim();
     speechBaseRef.current = current;
     speechFinalRef.current = '';
+    speechInterimRef.current = '';
     const started = speech.start((text, isFinal) => {
       if (isFinal) {
-        speechFinalRef.current = speechFinalRef.current ? `${speechFinalRef.current} ${text}` : text;
+        // A finalized segment usually arrives after its own interim was
+        // already shown. Trim the overlap so words never duplicate: if the
+        // final text starts with (or contains) the shown interim, drop the
+        // interim part; otherwise treat the whole final as new.
+        const shown = speechInterimRef.current.trim();
+        let segment = text.trim();
+        if (shown && segment.startsWith(shown)) {
+          segment = segment.slice(shown.length).trim();
+        } else if (shown && shown.startsWith(segment)) {
+          segment = ''; // final is a subset of the interim — nothing new
+        }
+        speechInterimRef.current = '';
+        if (segment) {
+          speechFinalRef.current = speechFinalRef.current
+            ? `${speechFinalRef.current} ${segment}`
+            : segment;
+        }
         composeFromSpeech(speechFinalRef.current, '');
       } else {
-        composeFromSpeech(speechFinalRef.current, text);
+        // Live hypothesis — shown as the tail; finalization will dedupe.
+        speechInterimRef.current = text;
+        composeFromSpeech(speechFinalRef.current, text.trim());
       }
     });
     if (!started) {
@@ -69,11 +90,17 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
   }, [speech.error, t]);
 
   // Keep the textarea auto-sized when the transcript updates it programmatically.
+  // Single-line look by default (one row height), grows only past one line,
+  // capped at 5 lines (~120px).
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    const oneLine = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    const paddingY = parseFloat(getComputedStyle(el).paddingTop) + parseFloat(getComputedStyle(el).paddingBottom) || 24;
+    const minHeight = Math.ceil(oneLine + paddingY);
+    const needed = Math.min(el.scrollHeight, 120);
+    el.style.height = `${Math.max(minHeight, needed)}px`;
   }, [value]);
 
   // ── Autocomplete state ─────────────────────────────────────────────────────
@@ -142,11 +169,15 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
     const newVal = e.target.value;
     setValue(newVal);
     triggerSearch(newVal);
-    // Auto-resize
+    // Auto-resize — single-line default, grow past one line only
     const el = textareaRef.current;
     if (el) {
       el.style.height = 'auto';
-      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+      const oneLine = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      const paddingY = parseFloat(getComputedStyle(el).paddingTop) + parseFloat(getComputedStyle(el).paddingBottom) || 24;
+      const minHeight = Math.ceil(oneLine + paddingY);
+      const needed = Math.min(el.scrollHeight, 120);
+      el.style.height = `${Math.max(minHeight, needed)}px`;
     }
   }, [triggerSearch]);
 
@@ -285,7 +316,7 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
         disabled={disabled || isProcessing}
         placeholder={speech.isListening ? t('ai.voice.listening') : t('ai.inputPlaceholder')}
         className={cn(
-          'flex-1 resize-none rounded-2xl border px-4 py-3 text-base sm:text-sm transition-colors min-h-12',
+          'flex-1 resize-none rounded-2xl border px-4 py-2.5 text-base sm:text-sm transition-colors overflow-hidden leading-normal',
           'bg-zinc-100/80 dark:bg-zinc-800/70 text-zinc-900 dark:text-zinc-100',
           speech.isListening
             ? 'border-red-300 dark:border-red-700 focus:ring-2 focus:ring-red-500/20'

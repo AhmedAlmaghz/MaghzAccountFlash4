@@ -9,7 +9,7 @@ import { registerNavigator, unregisterNavigator, navigateTo } from '../engine/na
 import { useNavigate } from 'react-router-dom';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
-import { Navigation, Wand2, Bot, Sparkles } from 'lucide-react';
+import { Bot, Sparkles } from 'lucide-react';
 import { extractSuggestions, type Suggestion } from '../suggestions/suggestionEngine';
 import { cn } from '@/core/utils';
 
@@ -207,40 +207,6 @@ export function ChatPanel() {
                   <span className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                   <span className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Auto-suggestions — contextual actions after the last assistant reply */}
-          {lastAssistantSuggestions.length > 0 && !isProcessing && (
-            <div className="flex items-center gap-2 pt-1 ps-12">
-              <Navigation size={13} className="text-zinc-400 dark:text-zinc-500 shrink-0" aria-hidden="true" />
-              <div className="flex flex-wrap gap-1.5">
-                {lastAssistantSuggestions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => handleSuggestion(s)}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 px-3 py-2 min-h-9 text-xs font-medium rounded-full border transition-all active:scale-95',
-                      'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/80',
-                      'text-zinc-600 dark:text-zinc-300',
-                      'hover:bg-primary-50 dark:hover:bg-primary-950/40 hover:border-primary-300 dark:hover:border-primary-700 hover:text-primary-700 dark:hover:text-primary-300',
-                      'cursor-pointer shadow-card'
-                    )}
-                    title={
-                      s.type === 'navigate'
-                        ? t('ai.suggestions.navigateChip')
-                        : t('ai.suggestions.promptChip')
-                    }
-                  >
-                    {s.type === 'navigate' ? (
-                      <Navigation size={12} className="flex-shrink-0" />
-                    ) : (
-                      <Wand2 size={12} className="flex-shrink-0" />
-                    )}
-                    <span>{t(s.labelKey)}</span>
-                  </button>
-                ))}
               </div>
             </div>
           )}

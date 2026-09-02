@@ -341,7 +341,9 @@
       "regenerate": "Regenerate",
       "exportAs": "Export",
       "exportJson": "JSON",
-      "exportMarkdown": "Markdown"
+      "exportMarkdown": "Markdown",
+      "speak": "Read aloud",
+      "stopSpeaking": "Stop reading"
     },
     "sessions": {
       "title": "Conversation History",

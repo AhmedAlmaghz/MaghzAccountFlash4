@@ -64,7 +64,7 @@ describe('useSpeechRecognition', () => {
     expect(rec.interimResults).toBe(true);
   });
 
-  it('emits interim and final transcript segments', () => {
+  it('emits interim then final segments without re-emitting visited results', () => {
     const onTranscript = vi.fn();
     const { result } = renderHook(() => useSpeechRecognition('ar-SA'));
     act(() => {
@@ -72,15 +72,32 @@ describe('useSpeechRecognition', () => {
     });
     const rec = MockRecognition.instances[0];
 
+    // Interim hypothesis
     act(() => {
       rec.onresult?.({ resultIndex: 0, results: [makeResult('مرحبا', false)] });
     });
     expect(onTranscript).toHaveBeenLastCalledWith('مرحبا', false);
 
+    // Same result index now finalized — must be emitted exactly once
     act(() => {
       rec.onresult?.({ resultIndex: 0, results: [makeResult('مرحبا بك', true)] });
     });
     expect(onTranscript).toHaveBeenLastCalledWith('مرحبا بك', true);
+
+    // A re-fired event with an already-visited index (engine restart quirk)
+    // must NOT re-emit — this is the duplicate-words guard.
+    const callsBefore = onTranscript.mock.calls.length;
+    act(() => {
+      rec.onresult?.({ resultIndex: 0, results: [makeResult('مرحبا بك', true)] });
+    });
+    expect(onTranscript.mock.calls.length).toBe(callsBefore);
+
+    // A genuinely new segment still flows through — all live interims of
+    // the event are composed into a single hypothesis call.
+    act(() => {
+      rec.onresult?.({ resultIndex: 1, results: [makeResult('مرحبا', false), makeResult('كيف حالك', false)] });
+    });
+    expect(onTranscript).toHaveBeenLastCalledWith('مرحبا كيف حالك', false);
   });
 
   it('stops listening when recognition ends', () => {
@@ -117,7 +134,7 @@ describe('useSpeechRecognition', () => {
     expect(result.current.error).toBe('not-allowed');
   });
 
-  it('clears the previous error when starting a new session', () => {
+  it('clears the previous error when starting a new session after stop', () => {
     const { result } = renderHook(() => useSpeechRecognition('ar-SA'));
     act(() => {
       result.current.start(vi.fn());
@@ -125,6 +142,10 @@ describe('useSpeechRecognition', () => {
     const first = MockRecognition.instances[0];
     act(() => {
       first.onerror?.({ error: 'network' });
+    });
+    // Explicit stop disables auto-restart, then end finishes the session
+    act(() => {
+      result.current.stop();
       first.onend?.();
     });
     expect(result.current.error).toBe('network');
@@ -132,6 +153,25 @@ describe('useSpeechRecognition', () => {
       result.current.start(vi.fn());
     });
     expect(result.current.error).toBeNull();
+  });
+
+  it('auto-restarts on silence while the user keeps listening', () => {
+    const { result } = renderHook(() => useSpeechRecognition('ar-SA'));
+    act(() => {
+      result.current.start(vi.fn());
+    });
+    const first = MockRecognition.instances[0];
+    // Chrome ends the session on silence — without an explicit stop we
+    // transparently create a fresh engine and keep listening.
+    act(() => {
+      first.onend?.();
+    });
+    expect(result.current.isListening).toBe(true);
+    expect(MockRecognition.instances.length).toBe(2);
+    expect(MockRecognition.instances[1].start).toHaveBeenCalledTimes(1);
+    expect(MockRecognition.instances[1].continuous).toBe(true);
+    // The restarted engine shares the result handler (guarded, no dupes)
+    expect(typeof MockRecognition.instances[1].onresult).toBe('function');
   });
 
   it('aborts any live session on unmount', () => {
