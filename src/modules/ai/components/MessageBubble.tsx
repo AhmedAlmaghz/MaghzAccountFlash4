@@ -36,35 +36,35 @@ export const MessageBubble = memo(function MessageBubble({
   }, [message.content]);
 
   return (
-    <div className={cn('group flex gap-3', isUser ? 'flex-row-reverse' : 'flex-row')}>
-      {/* Avatar */}
+    <div className={cn('group flex gap-2.5 sm:gap-3', isUser ? 'flex-row-reverse' : 'flex-row')}>
+      {/* Avatar — gradient for assistant, soft for user */}
       <div
         className={cn(
-          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
+          'flex-shrink-0 w-9 h-9 rounded-2xl flex items-center justify-center',
           isUser
-            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
+            : 'bg-gradient-to-br from-primary-500 to-primary-700 text-white shadow-lift'
         )}
       >
         {isUser ? <User size={16} /> : <Bot size={16} />}
       </div>
 
       {/* Content */}
-      <div className={cn('flex flex-col gap-1 max-w-[75%]', isUser ? 'items-end' : 'items-start')}>
+      <div className={cn('flex flex-col gap-1.5 max-w-[85%] sm:max-w-[75%]', isUser ? 'items-end' : 'items-start')}>
         {/* Text content */}
         {message.content && (
           <div className="relative">
             <div
               className={cn(
-                'px-4 py-2.5 rounded-2xl text-sm leading-relaxed',
+                'px-4 py-3 rounded-2xl text-sm leading-relaxed',
                 isUser
-                  ? 'bg-primary-600 text-white rounded-br-md'
+                  ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white rounded-br-md shadow-lift'
                   : message.kind === 'error'
                     ? 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800 rounded-bl-md'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-md'
+                    : 'bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200/70 dark:border-zinc-700 shadow-card rounded-bl-md'
               )}
             >
-              {message.kind === 'error' && <AlertCircle size={14} className="inline ml-1 -mt-0.5" />}
+              {message.kind === 'error' && <AlertCircle size={14} className="inline ms-1 -mt-0.5" />}
               {isAssistant && message.kind !== 'error' ? (
                 <RichText text={message.content} />
               ) : (
@@ -72,17 +72,18 @@ export const MessageBubble = memo(function MessageBubble({
               )}
             </div>
 
-            {/* Copy button — visible on hover */}
+            {/* Copy button — visible on hover / always in reach on touch */}
             <button
               onClick={handleCopy}
               className={cn(
-                'absolute -top-2 end-0 p-1 rounded-md transition-opacity opacity-0 group-hover:opacity-100',
-                'bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-sm',
-                'text-slate-400 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400'
+                'absolute -top-2 end-0 p-1.5 rounded-lg transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                'bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-card',
+                'text-zinc-400 dark:text-zinc-300 hover:text-primary-600 dark:hover:text-primary-400'
               )}
               title={t('ai.messageActions.copy')}
+              aria-label={t('ai.messageActions.copy')}
             >
-              {copied ? <Check size={14} /> : <Clipboard size={14} />}
+              {copied ? <Check size={13} /> : <Clipboard size={13} />}
             </button>
           </div>
         )}
@@ -92,7 +93,9 @@ export const MessageBubble = memo(function MessageBubble({
           <ToolCallCard toolCall={message.toolCall} onConfirm={onConfirm} />
         )}
 
-        {/* Interactive suggestion chips — under assistant messages */}
+        {/* Interactive suggestion chips — under assistant messages
+            (ChatPanel renders contextual ones after the last reply too; these
+            keep per-message support for tests + widget usage) */}
         {isAssistant && suggestions && suggestions.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-0.5">
             {suggestions.map((s) => (
@@ -100,10 +103,10 @@ export const MessageBubble = memo(function MessageBubble({
                 key={s.id}
                 onClick={() => onSuggestion?.(s)}
                 className={cn(
-                  'inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full border transition-colors',
-                  'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800',
-                  'text-slate-600 dark:text-slate-300',
-                  'hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 hover:text-primary-700 dark:hover:text-primary-300',
+                  'inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-full border transition-all active:scale-95',
+                  'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/80',
+                  'text-zinc-600 dark:text-zinc-300',
+                  'hover:bg-primary-50 dark:hover:bg-primary-950/40 hover:border-primary-300 dark:hover:border-primary-700 hover:text-primary-700 dark:hover:text-primary-300',
                   'cursor-pointer'
                 )}
                 title={
@@ -127,7 +130,7 @@ export const MessageBubble = memo(function MessageBubble({
         {isLastAssistant && !isUser && message.kind !== 'error' && onRegenerate && (
           <button
             onClick={onRegenerate}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400 dark:text-slate-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
             title={t('ai.messageActions.regenerate')}
           >
             <RefreshCw size={12} />

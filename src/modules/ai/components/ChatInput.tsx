@@ -1,5 +1,5 @@
 import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Loader2, Plus, Mic, Square } from 'lucide-react';
+import { Send, Loader2, Mic, Square } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { useToastStore } from '@/core/store/toastStore';
@@ -11,15 +11,6 @@ import type { EntityMatch } from '../entityResolver';
 
 // TEMPORARY: autocomplete disabled (2026-07-31). Set back to true to re-enable.
 const AUTOCOMPLETE_ENABLED = false;
-
-/** Quick-action prompts shown as chips above the input (complement autocomplete). */
-const QUICK_ACTIONS = [
-  { key: 'invoice', labelKey: 'ai.suggestions.invoice' },
-  { key: 'sales', labelKey: 'ai.suggestions.sales' },
-  { key: 'stock', labelKey: 'ai.suggestions.stock' },
-  { key: 'report', labelKey: 'ai.suggestions.report' },
-  { key: 'navigate', labelKey: 'ai.suggestions.navigate' },
-] as const;
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -271,26 +262,8 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
   }, []);
 
   return (
-    <div className="flex flex-col border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-      {/* Quick-action chips — visible when idle, complement autocomplete */}
-      {!isProcessing && (
-        <div className="flex items-center gap-1.5 px-3 pt-2 pb-0.5 overflow-x-auto">
-          <Plus size={12} className="flex-shrink-0 text-slate-400 dark:text-slate-500" />
-          {QUICK_ACTIONS.map((qa) => (
-            <button
-              key={qa.key}
-              onClick={() => onSend(t(qa.labelKey))}
-              disabled={disabled || isProcessing}
-              className="flex-shrink-0 px-2.5 py-1 text-[11px] font-medium rounded-full border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:border-primary-300 dark:hover:border-primary-700 hover:text-primary-700 dark:hover:text-primary-300 transition-colors disabled:opacity-50"
-              title={t(qa.labelKey)}
-            >
-              {t(qa.labelKey)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="relative flex items-end gap-2 p-3">
+    <div className="flex flex-col border-t border-zinc-200/70 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
+      <div className="relative flex items-end gap-2 p-3 max-w-3xl w-full mx-auto px-3 sm:px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
       {/* Autocomplete dropdown — positioned above the input */}
       {AUTOCOMPLETE_ENABLED && (
         <AutoCompleteDropdown
@@ -312,69 +285,68 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
         disabled={disabled || isProcessing}
         placeholder={speech.isListening ? t('ai.voice.listening') : t('ai.inputPlaceholder')}
         className={cn(
-          'flex-1 resize-none rounded-lg border px-3 py-2 text-sm transition-colors',
-          'bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100',
+          'flex-1 resize-none rounded-2xl border px-4 py-3 text-base sm:text-sm transition-colors min-h-12',
+          'bg-zinc-100/80 dark:bg-zinc-800/70 text-zinc-900 dark:text-zinc-100',
           speech.isListening
             ? 'border-red-300 dark:border-red-700 focus:ring-2 focus:ring-red-500/20'
-            : 'border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500',
+            : 'border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 dark:focus:border-primary-400',
           'focus:outline-none',
           'disabled:opacity-50 disabled:cursor-not-allowed',
-          'placeholder:text-slate-400 dark:placeholder:text-slate-500'
+          'placeholder:text-zinc-400 dark:placeholder:text-zinc-500'
         )}
       />
       {/* Alternating action button: mic (empty input) ⇄ send (has text). */}
       {isProcessing ? (
         <div
-          className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 animate-scale-in"
+          className="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 animate-scale-in"
           title={t('ai.send')}
         >
-          <Loader2 size={18} className="animate-spin" />
+          <Loader2 size={20} className="animate-spin" />
         </div>
       ) : value.trim() ? (
         <button
           onClick={handleSend}
           disabled={disabled}
           className={cn(
-            'flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg transition-all animate-scale-in',
-            'bg-primary-600 text-white hover:bg-primary-700 active:scale-95',
-            'shadow-sm shadow-primary-600/30',
+            'flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl transition-all animate-scale-in active:scale-90',
+            'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift',
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
           title={t('ai.send')}
           aria-label={t('ai.send')}
         >
-          <Send size={18} className="rtl:-scale-x-100" />
+          <Send size={19} className="rtl:-scale-x-100" />
         </button>
       ) : speech.isSupported ? (
         <button
           onClick={handleMicClick}
           disabled={disabled}
           className={cn(
-            'relative flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg transition-all animate-scale-in active:scale-95',
+            'relative flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl transition-all animate-scale-in active:scale-90',
             speech.isListening
-              ? 'bg-red-500 text-white hover:bg-red-600 shadow-sm shadow-red-500/40'
-              : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 hover:text-primary-600 dark:hover:text-primary-400',
+              ? 'bg-danger-500 text-white hover:bg-danger-600 shadow-lift'
+              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-primary-50 dark:hover:bg-primary-950/40 hover:text-primary-600 dark:hover:text-primary-400',
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
           title={speech.isListening ? t('ai.voice.stop') : t('ai.voice.start')}
           aria-label={speech.isListening ? t('ai.voice.stop') : t('ai.voice.start')}
         >
           {speech.isListening && (
-            <span className="absolute inset-0 rounded-lg bg-red-400 opacity-30 animate-ping" aria-hidden="true" />
+            <span className="absolute inset-0 rounded-2xl bg-red-400 opacity-30 animate-ping" aria-hidden="true" />
           )}
-          {speech.isListening ? <Square size={14} className="relative fill-current" /> : <Mic size={18} className="relative" />}
+          {speech.isListening ? <Square size={15} className="relative fill-current" /> : <Mic size={19} className="relative" />}
         </button>
       ) : (
         <button
           onClick={handleSend}
           disabled={!value.trim() || disabled || isProcessing}
           className={cn(
-            'flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg transition-colors',
-            'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+            'flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl transition-colors',
+            'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
           )}
           title={t('ai.send')}
         >
-          <Send size={18} />
+          <Send size={19} />
         </button>
       )}
       </div>

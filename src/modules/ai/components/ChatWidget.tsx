@@ -81,37 +81,57 @@ export function ChatWidget() {
 
   return (
     <>
-      {/* FAB Button */}
+      {/* FAB Button — sits above the mobile bottom nav with safe-area */}
       <button
         onClick={toggle}
         className={cn(
-          'fixed bottom-6 left-6 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-200',
+          'fixed z-50 w-14 h-14 rounded-full shadow-float flex items-center justify-center transition-all duration-200 active:scale-90',
+          'bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-6 left-4 lg:left-6',
           isOpen
-            ? 'bg-slate-800 dark:bg-slate-700 text-white rotate-0'
-            : 'bg-primary-600 text-white hover:bg-primary-700 hover:scale-105'
+            ? 'bg-zinc-800 dark:bg-zinc-700 text-white rotate-0'
+            : 'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift hover:scale-105'
         )}
         title={isOpen ? t('ai.widget.close') : t('ai.widget.open') + ' (Ctrl+K)'}
+        aria-label={isOpen ? t('ai.widget.close') : t('ai.widget.open')}
       >
         {isOpen ? <X size={24} /> : <Bot size={24} />}
       </button>
 
-      {/* Chat panel */}
+      {/* Chat panel — full-screen sheet on mobile, floating card on desktop */}
       {isOpen &&
         createPortal(
-          <div className="fixed bottom-24 left-4 sm:left-6 z-50 w-[calc(100vw-2rem)] sm:w-[400px] h-[600px] max-h-[80vh] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex flex-col overflow-hidden animate-fade-in">
-            {isConfigured ? (
-              <ChatPanel />
-            ) : (
-              <AiSetupPanel
-                onClose={() => setIsOpen(false)}
-                canConfigure={canConfigure}
-                onOpenSettings={() => {
-                  setIsOpen(false);
-                  navigate('/settings/ai');
-                }}
-              />
-            )}
-          </div>,
+          <>
+            {/* Mobile backdrop */}
+            <div
+              className="fixed inset-0 z-50 bg-zinc-950/50 backdrop-blur-sm lg:hidden"
+              onClick={toggle}
+              aria-hidden="true"
+            />
+            <div
+              className={cn(
+                'fixed z-50 flex flex-col overflow-hidden',
+                // Mobile: full-screen sheet above bottom nav
+                'inset-x-0 bottom-0 top-0 lg:inset-auto',
+                // Desktop: floating card
+                'lg:bottom-24 lg:left-6 lg:w-[400px] lg:h-[600px] lg:max-h-[80vh]',
+                'lg:rounded-2xl lg:shadow-float lg:border lg:border-zinc-200 lg:dark:border-zinc-700',
+                'bg-white dark:bg-zinc-900 rounded-none animate-fade-in pb-[env(safe-area-inset-bottom)] lg:pb-0'
+              )}
+            >
+              {isConfigured ? (
+                <ChatPanel />
+              ) : (
+                <AiSetupPanel
+                  onClose={() => setIsOpen(false)}
+                  canConfigure={canConfigure}
+                  onOpenSettings={() => {
+                    setIsOpen(false);
+                    navigate('/settings/ai');
+                  }}
+                />
+              )}
+            </div>
+          </>,
           document.body
         )}
     </>
@@ -127,25 +147,28 @@ function AiSetupPanel({ onClose, canConfigure, onOpenSettings }: {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-700 shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200/70 dark:border-zinc-800 shrink-0">
         <div className="flex items-center gap-2">
-          <Bot size={16} className="text-primary-600 dark:text-primary-400" />
-          <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{t('ai.title')}</span>
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
+            <Bot size={16} className="text-white" />
+          </div>
+          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{t('ai.title')}</span>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="p-2 rounded-xl text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           title={t('ai.widget.close')}
+          aria-label={t('ai.widget.close')}
         >
-          <X size={16} />
+          <X size={18} />
         </button>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mb-4">
+        <div className="w-14 h-14 rounded-2xl bg-primary-50 dark:bg-primary-950/50 flex items-center justify-center mb-4">
           <Bot size={26} className="text-primary-600 dark:text-primary-400" />
         </div>
-        <h2 className="text-sm font-bold text-slate-900 dark:text-slate-50 mb-1">{t('ai.notConfigured')}</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 max-w-xs">{t('ai.notConfiguredDesc')}</p>
+        <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50 mb-1">{t('ai.notConfigured')}</h2>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 max-w-xs leading-relaxed">{t('ai.notConfiguredDesc')}</p>
         {canConfigure ? (
           <Button size="sm" leftIcon={<Settings size={14} />} onClick={onOpenSettings}>
             {t('ai.goToSettings')}
