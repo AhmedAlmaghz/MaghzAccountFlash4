@@ -27,7 +27,9 @@ export const ChatInput = memo(function ChatInput({ onSend, disabled, isProcessin
   const language = useAppStore((s) => s.language);
 
   // ── Voice input (Web Speech API) ────────────────────────────────────────────
-  const speech = useSpeechRecognition(language === 'en' ? 'en-US' : 'ar-SA');
+  // ar-YE matches the app's DEFAULT_LOCALE (locale.ts) — Gulf/Saudi voices
+  // mispronounce Yemeni brand terms and number formats.
+  const speech = useSpeechRecognition(language === 'en' ? 'en-US' : 'ar-YE');
   // Text present before recording started + finalized transcript segments.
   const speechBaseRef = useRef('');
   const speechFinalRef = useRef('');

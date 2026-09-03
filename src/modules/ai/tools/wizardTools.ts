@@ -100,25 +100,35 @@ export const wizardTools: ToolDefinition[] = [
   {
     name: 'sales.create_and_post_invoice',
     labelAr: 'إنشاء وترحيل فاتورة مبيعات',
-    descriptionAr: 'ينشئ فاتورة مبيعات ويرحّلها فوراً (مسودة ← مرحّلة) في خطوة واحدة. الإجمالي والضريبة يُحتسبان تلقائياً. استخدم search.customers و search.products أولاً.',
+    descriptionAr: 'ينشئ فاتورة مبيعات ويرحّلها فوراً (مسودة ← مرحّلة) في خطوة واحدة. الإجمالي والضريبة يُحتسبان تلقائياً. استخدم search.customers و search.products أولاً. إذا قال المستخدم "نقدي/فوري/دفع حالاً" مرّر paymentType="cash" + cashBoxId (من search.cash_boxes) — النقدية تُقيَّد على الخزنة ولا يُسجَّل دين على العميل.',
     permission: 'sales.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
-        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري)' },
+        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري — للآجل)' },
+        paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُقيَّد على الخزنة عند الترحيل ولا يُسجَّل دين على العميل)، credit = آجل (افتراضي)' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
       },
       required: ['customerId', 'lines'],
     },
-    summarizeArgs: (a) => summarizeDocLines('إنشاء وترحيل فاتورة مبيعات', a.lines),
+    summarizeArgs: (a) => {
+      const base = summarizeDocLines('إنشاء وترحيل فاتورة مبيعات', a.lines);
+      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+    },
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
       if (!customerId) return { error: 'customerId مطلوب — استخدم search.customers أولاً' };
       const parsed = parseLines(args.lines);
       if ('error' in parsed) return { error: parsed.error };
+      const paymentType = str(args.paymentType) === 'cash' ? 'cash' : 'credit';
+      const cashBoxId = str(args.cashBoxId);
+      if (paymentType === 'cash' && !cashBoxId) {
+        return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
+      }
 
       const vatRate = await getVatRate(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_invoice');
@@ -145,6 +155,10 @@ export const wizardTools: ToolDefinition[] = [
         totalAmount,
         paidAmount: 0,
         status: 'draft',
+        // CASH invoice: the invoice itself is the payment — paidAmount is set
+        // at posting time (Dr treasury / Cr sales), the customer owes nothing.
+        paymentType,
+        cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
         notes: str(args.notes),
         lines,
       });
@@ -165,36 +179,50 @@ export const wizardTools: ToolDefinition[] = [
         invoiceId,
         invoiceNumber: docNumber.number,
         status: 'posted',
+        paymentType,
         subtotal,
         vatAmount,
         totalAmount,
+        note: paymentType === 'cash'
+          ? 'فاتورة نقدية مرحّلة — المبلغ مُقيَّد على الخزنة ولا يوجد دين على العميل'
+          : undefined,
       };
     },
   },
 
-  // ─── CRM: Convert Lead → Customer ──────────────────────────────────────
+  // ─── Purchases: Create + Post Invoice ─────────────────────────────────
   {
     name: 'purchases.create_and_post_invoice',
     labelAr: 'إنشاء وترحيل فاتورة مشتريات',
-    descriptionAr: 'ينشئ فاتورة مشتريات ويرحّلها فوراً (مسودة ← مرحّلة) في خطوة واحدة. الإجمالي والضريبة يُحتسبان تلقائياً. استخدم search.suppliers و search.products أولاً.',
+    descriptionAr: 'ينشئ فاتورة مشتريات ويرحّلها فوراً (مسودة ← مرحّلة) في خطوة واحدة. الإجمالي والضريبة يُحتسبان تلقائياً. استخدم search.suppliers و search.products أولاً (سعر التكلفة costPrice). إذا قال المستخدم "نقدي/دفعت حالاً من الخزنة" مرّر paymentType="cash" + cashBoxId (من search.cash_boxes) — النقدية تُخصم من الخزنة ولا يُسجَّل دين للمورد.',
     permission: 'purchases.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
-        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري)' },
+        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري — للآجل)' },
+        paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُخصم من الخزنة عند الترحيل ولا يُسجَّل دين للمورد)، credit = آجل (افتراضي)' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
       },
       required: ['supplierId', 'lines'],
     },
-    summarizeArgs: (a) => summarizeDocLines('إنشاء وترحيل فاتورة مشتريات', a.lines),
+    summarizeArgs: (a) => {
+      const base = summarizeDocLines('إنشاء وترحيل فاتورة مشتريات', a.lines);
+      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+    },
     execute: async (args, ctx) => {
       const supplierId = str(args.supplierId);
       if (!supplierId) return { error: 'supplierId مطلوب — استخدم search.suppliers أولاً' };
       const parsed = parseLines(args.lines);
       if ('error' in parsed) return { error: parsed.error };
+      const paymentType = str(args.paymentType) === 'cash' ? 'cash' : 'credit';
+      const cashBoxId = str(args.cashBoxId);
+      if (paymentType === 'cash' && !cashBoxId) {
+        return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
+      }
 
       const vatRate = await getVatRate(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_invoice');
@@ -221,6 +249,10 @@ export const wizardTools: ToolDefinition[] = [
         totalAmount,
         paidAmount: 0,
         status: 'draft',
+        // CASH purchase: paid at purchase time — Cr treasury at posting,
+        // the supplier is never owed.
+        paymentType,
+        cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
         notes: str(args.notes),
         lines,
       });
@@ -240,9 +272,13 @@ export const wizardTools: ToolDefinition[] = [
         invoiceId,
         invoiceNumber: docNumber.number,
         status: 'posted',
+        paymentType,
         subtotal,
         vatAmount,
         totalAmount,
+        note: paymentType === 'cash'
+          ? 'فاتورة مشتريات نقدية مرحّلة — المبلغ مُخصم من الخزنة ولا توجد ذمة للمورد'
+          : undefined,
       };
     },
   },

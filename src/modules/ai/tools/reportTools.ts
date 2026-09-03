@@ -310,15 +310,18 @@ export const reportTools: ToolDefinition[] = [
       const txIds = rows.map((r: Record<string, unknown>) => r.id).filter(Boolean);
       let entries: Record<string, unknown>[] = [];
       if (txIds.length > 0) {
+        // Defense-in-depth: the ids come from a company-scoped query, but the
+        // golden rule still applies — every statement filters company_id.
         const placeholders = txIds.map((_, i) => `$${i + 1}::uuid`).join(',');
         const eRes = await guardedQuery(
           `SELECT je.transaction_id, a.code AS account_code, a.name_ar AS account_name,
                   je.debit, je.credit
            FROM journal_entries je
            LEFT JOIN accounts a ON je.account_id = a.id
-           WHERE je.transaction_id IN (${placeholders})
+           WHERE je.company_id = $${txIds.length + 1}::uuid
+             AND je.transaction_id IN (${placeholders})
            ORDER BY je.transaction_id`,
-          txIds
+          [...txIds, ctx.companyId]
         );
         if (eRes.success) entries = eRes.rows || [];
       }

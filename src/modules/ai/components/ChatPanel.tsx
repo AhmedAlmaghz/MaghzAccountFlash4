@@ -34,6 +34,13 @@ export function ChatPanel() {
     if (companyId) prefetchEntityCache(companyId);
   }, [companyId]);
 
+  // Tenant guard: discard the engine's LLM history when the ACTIVE company
+  // changes — the singleton otherwise leaks the previous tenant's context
+  // (documents, VAT rate, entities) into the new company's requests.
+  useEffect(() => {
+    if (companyId) getChatEngine().ensureCompanyScope(companyId);
+  }, [companyId]);
+
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     const el = scrollRef.current;

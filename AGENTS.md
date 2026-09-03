@@ -4057,4 +4057,31 @@ npx drizzle-kit migrate
 
 
 
-*آخر تحديث: 2026-09-03 | الإصدار: maghzaccount-pro v0.12.0 (سلسلة package.json)*
+
+### المرحلة 76د (v0.12.1): إصلاحات P1 الوظيفية + تشغيلية — النقدي في الـ wizards + سجل تدقيق صادق + حارس مستندات موسّع
+- **الهدف**: إغلاق البنود الخمسة P1 المتبقية من تقرير الفحص الشامل + 3 بنود تشغيلية سريعة
+- **P1-1 — أدوات create_and_post تدعم النقدي (محاسبي حرج)**:
+  - `sales.create_and_post_invoice` و `purchases.create_and_post_invoice` كانت **بلا paymentType/cashBoxId** — المستخدم يقول "أنشئ ورحّل فاتورة نقدية" فتُنشأ **آجلة** وتُرحَّل على المدينين/الدائنين — خطأ محاسبي صامت يخالف قاعدة النظام 28
+  - الإصلاح: نفس عقد أداة الإنشاء العادية — paymentType + cashBoxId، رفض نقدي بلا خزنة، تمريرهما للـ API، والملاحظة في الناتج ("المبلغ مُقيَّد على الخزنة ولا يوجد دين على الطرف")
+- **P1-2 — إزالة type-cast كاذب**: `accounting.create_expense_voucher` كان يستخدم `as unknown as Parameters<...>` رغم أن الـ DTO والـ zod schema يدعمان `expenseAccountId` رسمياً — أُزيل الـ cast (أي تعارض DTO مستقبلاً سيرمي خطأ ترجمة بدل الصمت)
+- **P1-3 — defense-in-depth في journal_register**: استعلام أطراف القيود الثاني كان `WHERE je.transaction_id IN (...)` فقط — أُضيف `AND je.company_id = $N::uuid` (القاعدة الذهبية: كل statement يفلتر company_id صراحة حتى لو الـ ids من استعلام scoped)
+- **P1-4 — حارس الادعاءات يغطي كل أرقام المستندات**: DOC_NUMBER_RE كان يعرف INV/PINV/QTN/RV/PV/JE/SRT/PRT فقط — ادعاء هلوسة "أنشأت أمر التشغيل WO-0005" أو "EMP-0012" كان يمرّ للحارس ويصل المستخدم. أُضيف: **WO/PRD/EMP/CUST/LEAD/OPP/DEP/POS**
+- **P1-5 — سجل تدقيق صادق**: كل أدوات الكتابة كانت تُسجَّل `action: 'create'` — حذف خزنة يظهر "create" في سجل التدقيق (مضلل للمحاسب). **`auditActionFor(toolName)`**: يستنتج الفعل من اسم الأداة — create_/generate_ → create، delete_/deactivate_ → delete، post_/pay_/apply_ → post، update_/convert_/win_/complete_/save_/start_ → update، process_ → post، والباقي fallback إلى update (**لا يدّعي create أبداً بلا سبب**)
+- **P2-8 — توحيد MAX_COMPLETION_TOKENS**: كانت المسارات الثلاثة تختلف (streaming 4096 / fallback 10240) — التقارير الطويلة تُقصّ على streaming وتنجح على fallback. ثابت واحد 10240 في الثلاثة
+- **P3-13 — voice locale**: `'ar-SA'` → `'ar-YE'` (يطابق DEFAULT_LOCALE في locale.ts — الأصوات السعودية تحرف النطق اليمني)
+- **P3-15 — حارس تبديل الشركة (tenant-switch guard)**:
+  - المحرك singleton لكن history يخص **شركة واحدة** — تبديل الشركة mid-session كان يرسل سياق الشركة القديمة (مستنداتها/VAT/كياناتها) لطلبات الجديدة = تسريب cross-tenant صامت
+  - **`ensureCompanyScope(companyId)`**: يسجل الـ tenant في أول استدعاء؛ عند التبديل يصفّر history + pendingWriteCalls (بطاقات تأكيد قديمة تموت) + الكاشات. `reset()` يصفر scopedCompanyId أيضاً. موصول في `send()` + `ChatPanel useEffect([companyId])`
+- **اختبارات (+27 → AI 311/311، المشروع 1476/1476)**:
+  - `wizardTools.cash.test.ts` (7): السكيمات تعرض paymentType/cashBoxId، رفض نقدي بلا خزنة، تمرير صحيح للـ API، default=credit بلا cashBoxId، rollback عند فشل الترحيل
+  - `toolExecutor.audit.test.ts` (6): كل عائلة أفعال + fallback "لا create كاذب"
+  - `antiFabrication.test.ts` (10): البادئات القديمة + الجديدة + فصل "مرحّل" عن رقم المستند الضعيف + لا إطلاق على أسئلة/تأكيدات بلا رقم
+  - `companyScope.test.ts` (4): أول استدعاء يسجل، التبديل يقتل البطاقات المعلقة، نفس الشركة no-op، وsend بعد التبديل يبدأ history فارغاً (لا تسريب)
+- **النتيجة النهائية**: tsc 0 ✓ | eslint 0/0 ✓ | **vitest 1476/1476 (99 ملفاً)** ✓ | build 27s ✓ | e2e 7/7 ✓
+- **قواعد ذهبية مضافة**:
+  - **أدوات wizard يجب أن تحمل عقد نظيرتها أحادي الخطوة**: أي قدرة محاسبية (نقدي/آجل/عملة) في الأداة العادية تلزم نسختها المركّبة — وإلا "أنشئ ورحّل X نقدية" يقع على الافتراضي الآجل بصمت
+  - **الـ audit action يُستنتج من فعل الأداة لا يُثبَّت**: 'create' الجامع يجعل سجل التدقيق كاذباً للتعديل/الحذف — والاحتياطي للفعل المجهول هو update لا create (لا يُدّعى إنشاء لم يحدث)
+  - **حارس الادعاءات يغطي كل prefixes يولّدها التسلسل الموحد**: عند إضافة document_type جديد (بادئة جديدة) حدّث DOC_NUMBER_RE معه — وإلا ادعاء الهلوسة على النوع الجديد يمرّ
+  - **singleton محرك الدردشة يملك tenant**: أي state بين الرسائل (history/pending/cache) يلزم حراسة companyId — reset يصفر الارتباط وensureCompanyScope يفرضه عند البدء
+  - **اختبار الحارس بمعزل عن محفزاته المستقلة**: "مرحّل" وحده يطلق الحارس — لاختبار قاعدة الأرقام استخدم جملة بلا كلمة مرحّل وإلا تختبر الشرطين معاً
+*آخر تحديث: 2026-09-03 | الإصدار: maghzaccount-pro v0.12.1 (سلسلة package.json)*

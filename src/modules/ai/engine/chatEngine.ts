@@ -117,6 +117,14 @@ function reconstructResponseFromChunks(chunks: LlmStreamChunk[]): LlmCompletionD
 const MAX_ITERATIONS = 10;
 
 /**
+ * Unified completion budget. The three call sites (streaming, empty-stream
+ * fallback, streaming-failure fallback) previously disagreed — 4096 vs
+ * 10240 — so long reports were silently truncated on the streaming path but
+ * not the fallback. One constant, one behaviour.
+ */
+const MAX_COMPLETION_TOKENS = 10240;
+
+/**
  * Remove fake tool-execution blocks that some models imitate from the
  * flattened-history format (e.g. `[تم تنفيذ: search.accounts] {...}` or
  * `[TOOL_RESULT: search.accounts] {...}`). A model writing one of these
@@ -153,7 +161,7 @@ let engineInstance: ChatEngine | null = null;
  * numbers (RV-000002…), "مرحّل Posted" status lines, even account codes —
  * while NOTHING was written to the DB.
  */
-const DOC_NUMBER_RE = /\b(?:INV|PINV|QTN|RV|PV|JE|SRT|PRT)-?\s?\d{2,}\b/i;
+const DOC_NUMBER_RE = /\b(?:INV|PINV|QTN|RV|PV|JE|SRT|PRT|WO|PRD|EMP|CUST|LEAD|OPP|DEP|POS)-?\s?\d{2,}\b/i;
 const ACTION_CLAIM_RE =
   /(قمت\s+ب?\s*(إنشاء|تسجيل|ترحيل|إصدار|صرف|قبض|سداد|دفع))|(تم\s+(الآن\s+)?(إنشاء|تسجيل|ترحيل|إصدار|صرف|قبض|سداد))|(أنشأت|سجّلت|سجلت|رحّلت|رحلت|أصدرت|صرفت|قبضت|سدّدت|سددت|دفعت)/;
 
@@ -189,6 +197,8 @@ class ChatEngine {
   private pendingWriteCalls: PendingToolCall[] = [];
   private iterationCount = 0;
   private store = useAiStore.getState;
+  /** The tenant this engine's history currently belongs to (company-switch guard). */
+  private scopedCompanyId: string | null = null;
 
   /**
    * Anti-fabrication state (per `send()` invocation):
@@ -282,6 +292,10 @@ class ChatEngine {
     const store = this.store();
 
     if (store.isProcessing) return;
+
+    // Tenant guard: a company switch since the last send discards the old
+    // tenant's LLM history before anything reads it.
+    this.ensureCompanyScope(this.ctx.companyId);
 
     store.setProcessing(true);
 
@@ -475,7 +489,36 @@ class ChatEngine {
     this.history = [];
     this.pendingWriteCalls = [];
     this.iterationCount = 0;
+    this.successfulWritesThisSend.clear();
+    this.failedWriteAttempts.clear();
+    this.liveContextCache = null;
+    this.scopedCompanyId = null;
     this.store().clearMessages();
+  }
+
+  /**
+   * Company-switch guard: the engine is a singleton, but its history belongs
+   * to ONE tenant. When the active company changes mid-session, the old
+   * conversation's context (entities, documents, VAT rate) silently leaks into
+   * the new company's requests — a cross-tenant data-hygiene bug. UI mounts
+   * call this on companyId change; it preserves the on-screen messages unless
+   * asked to wipe them (the LLM history is always discarded).
+   */
+  ensureCompanyScope(companyId: string): void {
+    if (this.scopedCompanyId === null) {
+      this.scopedCompanyId = companyId;
+      return;
+    }
+    if (this.scopedCompanyId === companyId) return;
+    // Different tenant — drop LLM history + caches; keep the UI transcript
+    // (it is already persisted per-company) but the model starts clean.
+    this.scopedCompanyId = companyId;
+    this.history = [];
+    this.pendingWriteCalls = [];
+    this.iterationCount = 0;
+    this.successfulWritesThisSend.clear();
+    this.failedWriteAttempts.clear();
+    this.liveContextCache = null;
   }
 
   /**
@@ -680,7 +723,7 @@ class ChatEngine {
           messages: this.buildMessages(),
           tools: llmTools.length > 0 ? llmTools : undefined,
           temperature: 0.2,
-          maxTokens: 4096,
+          maxTokens: MAX_COMPLETION_TOKENS,
         });
 
         // Add a streaming placeholder so the user sees content appear
@@ -727,7 +770,7 @@ class ChatEngine {
             messages: this.buildMessages(),
             tools: llmTools.length > 0 ? llmTools : undefined,
             temperature: 0.2,
-            maxTokens: 4096,
+            maxTokens: MAX_COMPLETION_TOKENS,
           });
         }
       } catch {
@@ -740,7 +783,7 @@ class ChatEngine {
           messages: this.buildMessages(),
           tools: llmTools.length > 0 ? llmTools : undefined,
           temperature: 0.2,
-          maxTokens: 10240,
+          maxTokens: MAX_COMPLETION_TOKENS,
         });
       }
 

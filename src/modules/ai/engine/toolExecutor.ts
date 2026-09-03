@@ -160,7 +160,7 @@ export async function executeToolCall(
       void logAudit({
         userId: ctx.userId,
         username: user?.username,
-        action: 'create',
+        action: auditActionFor(name),
         tableName: 'ai_tool_calls',
         recordId: name,
         recordLabel: tool.labelAr,
@@ -186,6 +186,30 @@ function summarizeForAudit(result: unknown): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * Derive the honest audit action from the tool name — an audit log that says
+ * "create" for a delete is a misleading trail (the P1 audit finding). Falls
+ * back to 'update' for ambiguous verbs so the log never claims a create that
+ * didn't happen.
+ */
+export function auditActionFor(toolName: string): 'create' | 'update' | 'delete' | 'post' {
+  const action = toolName.split('.')[1] ?? '';
+  if (action.startsWith('create_') || action.startsWith('generate_')) return 'create';
+  if (action.startsWith('delete_') || action.startsWith('deactivate_')) return 'delete';
+  if (action.startsWith('post_') || action.startsWith('pay_') || action.startsWith('apply_')) return 'post';
+  if (
+    action.startsWith('update_') ||
+    action.startsWith('convert_') ||
+    action.startsWith('win_') ||
+    action.startsWith('complete_') ||
+    action.startsWith('save_') ||
+    action.startsWith('start_')
+  ) return 'update';
+  // Wizards chain multiple ops — the dominant effect is a new posted document.
+  if (action.startsWith('process_')) return 'post';
+  return 'update';
 }
 
 /**

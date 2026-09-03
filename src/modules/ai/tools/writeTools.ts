@@ -592,6 +592,7 @@ export const writeTools: ToolDefinition[] = [
           companyId: ctx.companyId,
           voucherNumber: docNumber.number,
           date: str(args.date) || today(),
+          supplierId: undefined,
           expenseAccountId,
           amount,
           amountApplied: 0,
@@ -599,7 +600,7 @@ export const writeTools: ToolDefinition[] = [
           cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
           status: 'posted',
-        } as unknown as Parameters<typeof accountingApi.createPaymentVoucher>[0],
+        },
         ctx.userId
       );
       if (!res.success) return { error: res.error || 'فشل إنشاء سند المصروف' };
