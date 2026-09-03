@@ -1,6 +1,8 @@
 import type { ToolDefinition } from '../types';
 import { getDbAdapter } from '@/core/database/adapters';
 import { guardSqlQuery } from '../security/sqlGuard';
+import { localToday, localTodayOr, localMonthStart } from '../engine/dateUtils';
+import { toDateString } from '@/core/utils/mapPgRow';
 import { accountingApi } from '@/modules/accounting/api';
 import { accountingService } from '@/modules/accounting/services';
 import { salesApi } from '@/modules/sales/api';
@@ -21,10 +23,10 @@ function pct(part: number, total: number): number {
 }
 
 function dateRange(from?: string, to?: string): { from: string; to: string } {
-  const now = new Date();
+  // LOCAL calendar bounds — a UTC "to" excludes tonight's rows from reports
   return {
-    from: typeof from === 'string' && from ? from : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`,
-    to: typeof to === 'string' && to ? to : now.toISOString().split('T')[0],
+    from: typeof from === 'string' && from ? from : localMonthStart(),
+    to: localTodayOr(to),
   };
 }
 
@@ -210,7 +212,7 @@ export const reportTools: ToolDefinition[] = [
       const prevFrom = new Date(prevTo);
       prevFrom.setDate(prevFrom.getDate() - Math.max(Math.round(daysDiff), 1));
       const prevRes = await accountingService.getProfitLoss(
-        prevFrom.toISOString().split('T')[0], prevTo.toISOString().split('T')[0]);
+        toDateString(prevFrom) ?? localToday(), toDateString(prevTo) ?? localToday());
 
       let prevRevenue = 0;
       let prevExpenses = 0;
@@ -1206,7 +1208,7 @@ export const reportTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
-      const dateStr = typeof args.date === 'string' && args.date ? args.date : new Date().toISOString().split('T')[0];
+      const dateStr = typeof args.date === 'string' && args.date ? args.date : localToday();
       const target = new Date(dateStr);
       const month = target.getMonth() + 1;
       const year = target.getFullYear();
@@ -1623,9 +1625,11 @@ export const reportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const period = typeof args.period === 'string' ? args.period : 'month';
       const comparePrevious = args.comparePrevious === true;
-      
+
       const now = new Date();
-      const today = now.toISOString().split('T')[0];
+      // LOCAL calendar day — UTC midnight shifts GMT+3 "today" back a day
+      const today = localToday();
+      const localDate = (d: Date) => toDateString(d) ?? today;
 
       let fromDate: string;
       let prevFromDate: string;
@@ -1634,13 +1638,13 @@ export const reportTools: ToolDefinition[] = [
       switch (period) {
         case 'today':
           fromDate = today;
-          prevFromDate = new Date(now.getTime() - 86400000).toISOString().split('T')[0];
+          prevFromDate = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
           prevToDate = prevFromDate;
           break;
         case 'week':
-          fromDate = new Date(now.getTime() - 6 * 86400000).toISOString().split('T')[0];
-          prevFromDate = new Date(now.getTime() - 13 * 86400000).toISOString().split('T')[0];
-          prevToDate = new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0];
+          fromDate = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
+          prevFromDate = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 13));
+          prevToDate = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
           break;
         case 'year':
           fromDate = `${now.getFullYear()}-01-01`;
@@ -1653,9 +1657,8 @@ export const reportTools: ToolDefinition[] = [
             prevFromDate = `${now.getFullYear() - 1}-12-01`;
             prevToDate = `${now.getFullYear() - 1}-12-31`;
           } else {
-            const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            prevFromDate = prevMonth.toISOString().split('T')[0];
-            prevToDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+            prevFromDate = localDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+            prevToDate = localDate(new Date(now.getFullYear(), now.getMonth(), 0));
           }
           break;
       }

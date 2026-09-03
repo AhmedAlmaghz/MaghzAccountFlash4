@@ -57,10 +57,113 @@ const AR_MONTH_LOOKUP: Record<string, number> = {};
     ['مايو', 5], ['يونيو', 6], ['يوليو', 7], ['يوليه', 7],
     ['أغسطس', 8], ['اغسطس', 8], ['سبتمبر', 9],
     ['أكتوبر', 10], ['اكتوبر', 10], ['نوفمبر', 11], ['ديسمبر', 12],
+    // Levantine/Egyptian month names — same months, different words
+    ['كانون الثاني', 1], ['شباط', 2], ['آذار', 3], ['اذار', 3], ['نيسان', 4],
+    ['أيار', 5], ['ايار', 5], ['حزيران', 6], ['تموز', 7], ['آب', 8], ['اب', 8],
+    ['أيلول', 9], ['ايلول', 9], ['تشرين الأول', 10], ['تشرين الاول', 10],
+    ['تشرين الثاني', 11], ['كانون الأول', 12], ['كانون الاول', 12],
   ] as Array<[string, number]>
 ).forEach(([name, num]) => {
   AR_MONTH_LOOKUP[foldArabic(name)] = num;
 });
+
+/**
+ * HIJRI month names (folded). Used by normalizeHijriDateArg to accept
+ * "15 محرم 1448" / "١ رمضان" and convert to the Gregorian calendar day the
+ * system stores. Conversion is the standard Umm al-Qura-approximating
+ * arithmetic (civil): Hijri epoch JD 1948439.5, year length 354.367068….
+ */
+const HIJRI_MONTHS: Record<string, number> = {};
+(
+  [
+    ['محرم', 1], ['صفر', 2], ['ربيع الأول', 3], ['ربيع الاول', 3], ['ربيع الثاني', 4],
+    ['جمادى الأولى', 5], ['جمادى الاولى', 5], ['جمادى الآخرة', 6], ['جمادى الاخره', 6], ['جمادى', 6],
+    ['رجب', 7], ['شعبان', 8], ['رمضان', 9], ['شوال', 10],
+    ['ذو القعدة', 11], ['ذو القعده', 11], ['القعدة', 11],
+    ['ذو الحجة', 12], ['ذو الحجه', 12], ['الحجة', 12], ['ذي الحجة', 12], ['ذي الحجه', 12],
+  ] as Array<[string, number]>
+).forEach(([name, num]) => {
+  HIJRI_MONTHS[foldArabic(name)] = num;
+});
+
+/** Gregorian → Julian Day Number (civil calendar arithmetic). */
+function gregorianToJdn(y: number, m: number, d: number): number {
+  const a = Math.floor((14 - m) / 12);
+  const yy = y + 4800 - a;
+  const mm = m + 12 * a - 3;
+  return d + Math.floor((153 * mm + 2) / 5) + 365 * yy + Math.floor(yy / 4) - Math.floor(yy / 100) + Math.floor(yy / 400) - 32045;
+}
+
+/** Julian Day Number → Gregorian Y/M/D (standard Fliegel–Van Flandern). */
+function jdnToGregorian(jdn: number): { y: number; m: number; d: number } {
+  const a = jdn + 32044;
+  const b = Math.floor((4 * a + 3) / 146097);
+  const c = a - Math.floor((146097 * b) / 4);
+  const d2 = Math.floor((4 * c + 3) / 1461);
+  const e = c - Math.floor((1461 * d2) / 4);
+  const m2 = Math.floor((5 * e + 2) / 153);
+  const day = e - Math.floor((153 * m2 + 2) / 5) + 1;
+  const month = m2 + 3 - 12 * Math.floor(m2 / 10);
+  const year = 100 * b + d2 - 4800 + Math.floor(m2 / 10);
+  return { y: year, m: month, d: day };
+}
+
+/**
+ * Convert a Hijri date to Gregorian YYYY-MM-DD using the tabular civil
+ * (Kuwaiti-style) algorithm: year length alternates via the standard leap
+ * cycle, months alternate 30/29. Deterministic, no external library.
+ *
+ * Accuracy: ±1-2 days versus local moon-sighting calendars (Umm al-Qura) —
+ * the caller MUST surface the converted Gregorian date to the user when a
+ * critical document depends on it, so they can confirm/adjust.
+ */
+export function hijriToGregorian(hy: number, hm: number, hd: number): string | null {
+  if (hy < 1300 || hy > 1600) return null;
+  if (hm < 1 || hm > 12 || hd < 1 || hd > 30) return null;
+
+  // Leap-day count for completed years: floor((3 + 11*(hy-1)) / 30) gives the
+  // number of leap years passed (Kuwaiti cycle — matches islamic-civil).
+  const completedYears = hy - 1;
+  const leapDays = Math.floor((3 + 11 * completedYears) / 30);
+  let days = 354 * completedYears + leapDays;
+  // Months within the current year: odd months 30 days, even months 29.
+  for (let m = 1; m < hm; m++) {
+    days += m % 2 === 1 ? 30 : 29;
+  }
+  days += hd - 1;
+
+  const hijriEpochJdn = 1948440; // 1 Muharram 1 AH ≈ 622-07-19 (civil)
+  const g = jdnToGregorian(hijriEpochJdn + days);
+  return `${g.y}-${String(g.m).padStart(2, '0')}-${String(g.d).padStart(2, '0')}`;
+}
+
+/**
+ * Try parsing a HIJRI date expression: "15 محرم 1448", "١ رمضان",
+ * "10 ذو القعدة". Year absent → assume the CURRENT Hijri year (derived from
+ * today). Returns Gregorian YYYY-MM-DD or null when not a Hijri form.
+ */
+export function normalizeHijriDateArg(value: string, today = new Date()): string | null {
+  const s = toLatinDigits(value.trim());
+  if (!s) return null;
+
+  // Day + month-name (+ optional year). "15 محرم 1448" / "١ رمضان" / "3 رمضان"
+  const m1 = s.match(/^(\d{1,2})\s+([^\s\d]+(?:\s+[^\s\d]+)?)\s*(?:(\d{4})|سنه\s*(\d{4}))?$/);
+  if (!m1) return null;
+
+  const day = Number(m1[1]);
+  const monthToken = foldArabic(m1[2].trim());
+  const yearStr = m1[3] || m1[4] || m1[5];
+  let hy = yearStr ? Number(yearStr) : 0;
+  if (!hy) {
+    // Approximate current Hijri year from today (inverse of the same math)
+    const jdn = gregorianToJdn(today.getFullYear(), today.getMonth() + 1, today.getDate());
+    hy = Math.floor((jdn - 1948440) / 354.367068) + 1;
+  }
+
+  const hm = HIJRI_MONTHS[monthToken];
+  if (!hm) return null;
+  return hijriToGregorian(hy, hm, day);
+}
 
 function monthFromName(token: string): number | null {
   return AR_MONTH_LOOKUP[foldArabic(token)] ?? null;
@@ -88,6 +191,12 @@ export function normalizeDateArg(value: unknown, today = new Date()): string | n
 
   const y = today.getFullYear();
 
+  // ── Hijri month-name forms FIRST (distinct names — no Gregorian clash) ──
+  // "15 محرم 1448" / "١ رمضان" → converted to the Gregorian date the system
+  // stores. Returns null for non-Hijri input so we fall through safely.
+  const hijri = normalizeHijriDateArg(s, today);
+  if (hijri) return hijri;
+
   // Day-Month without year: "12-8", "12/8", "12.8"
   const dm = s.match(/^(\d{1,2})[-/.](\d{1,2})$/);
   if (dm) {
@@ -100,9 +209,10 @@ export function normalizeDateArg(value: unknown, today = new Date()): string | n
     return null;
   }
 
-  // Month-name forms: "15 أغسطس 2026" أو "أغسطس 15 2026"
-  const mdY = s.match(/^(\d{1,2})\s+([^\s\d]+)(?:\s+(\d{4}))?$/);
-  const mDy = s.match(/^([^\s\d]+)\s+(\d{1,2})(?:\s+(\d{4}))?$/);
+  // Month-name forms: "15 أغسطس 2026" / "أغسطس 15 2026" — also two-word
+  // Levantine months like "كانون الثاني" and "تشرين الأول".
+  const mdY = s.match(/^(\d{1,2})\s+([^\s\d]+(?:\s+[^\s\d]+)?)(?:\s+(\d{4}))?$/);
+  const mDy = s.match(/^([^\s\d]+(?:\s+[^\s\d]+)?)\s+(\d{1,2})(?:\s+(\d{4}))?$/);
   const fromName = (day: number, nameToken: string, yearStr?: string): string | null => {
     const m = monthFromName(nameToken);
     if (!m || day < 1 || day > 31) return null;

@@ -18,6 +18,7 @@ import { usePermission } from '@/modules/auth/hooks/usePermission';
 import { aiApi } from '../api';
 import { aiPersistence } from '../api/persistence';
 import { getChatEngine } from '../engine/chatEngine';
+import { localToday } from '../engine/dateUtils';
 import { useAiStore } from '../store';
 import { ChatPanel } from './ChatPanel';
 import { SessionsDrawer } from './SessionsDrawer';
@@ -106,7 +107,7 @@ export default function AiChatPage() {
     const loaded = await aiPersistence.loadSession(sid);
     if (!loaded) return;
     // Rebuild LLM history from persisted messages so the model has context
-    getChatEngine().restoreHistory(useAiStore.getState().messages);
+    getChatEngine().restoreHistorySync(useAiStore.getState().messages);
   };
 
   const handleRenameSession = async (sid: string, newTitle: string) => {
@@ -128,7 +129,7 @@ export default function AiChatPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ai-chat-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `ai-chat-${localToday()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [messages]);
@@ -150,7 +151,7 @@ export default function AiChatPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ai-chat-${new Date().toISOString().split('T')[0]}.md`;
+    a.download = `ai-chat-${localToday()}.md`;
     a.click();
     URL.revokeObjectURL(url);
   }, [messages, t]);

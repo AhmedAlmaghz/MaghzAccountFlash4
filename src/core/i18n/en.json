@@ -300,7 +300,21 @@
       "openInventoryAnalysis": "Open inventory analysis",
       "openDepartments": "Open Departments",
       "createAnother": "Create another one",
-      "comparePrevious": "Compare with the previous period"
+      "comparePrevious": "Compare with the previous period",
+      "postLatestInvoice": "Post this invoice now",
+      "postLatestPurchase": "Post the purchase invoice",
+      "receiptForLatestInvoice": "Record a receipt voucher for it",
+      "payLatestPurchase": "Record a payment voucher to the supplier",
+      "invoiceLatestCustomer": "Create an invoice for this customer",
+      "invoiceLatestSupplier": "Create a purchase invoice for this supplier",
+      "quoteWonOpportunity": "Create a sales invoice for the opportunity",
+      "followUpConvertedCustomer": "Add a follow-up task for the new customer",
+      "checkLeaveBalances": "Show leave balances",
+      "postLatestPayroll": "Post the payroll run",
+      "startLatestWorkOrder": "Start the work order",
+      "productionFollowUp": "Show production orders status",
+      "showLatestPosting": "Show the resulting journal entry",
+      "summarizeLatestDocument": "Show the latest document details"
     },
     "settings": {
       "title": "AI Settings",

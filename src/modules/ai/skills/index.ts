@@ -5,6 +5,7 @@ import { reportSmartAssistantSkill } from './reportSmartAssistant';
 import { businessAnalystSkill } from './businessAnalyst';
 import { searchExpertiseSkill } from './searchExpertise';
 import { crmAssistantSkill } from './crmAssistant';
+import { regionalFluencySkill } from './regionalFluency';
 
 /**
  * All built-in skills. Import this module once (side effect) before the chat
@@ -23,6 +24,7 @@ export function ensureSkillsRegistered(): void {
     businessAnalystSkill,
     searchExpertiseSkill,
     crmAssistantSkill,
+    regionalFluencySkill,
   ]);
   registered = true;
 }

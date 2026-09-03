@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { getDbAdapter } from '@/core/database/adapters';
 import { guardSqlQuery } from '../security/sqlGuard';
+import { localTodayOr, localMonthStart } from '../engine/dateUtils';
 import { salesApi } from '@/modules/sales/api';
 
 async function guardedQuery(sql: string, params: unknown[]) {
@@ -12,10 +13,10 @@ async function guardedQuery(sql: string, params: unknown[]) {
 
 function num(v: unknown): number { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function dateRange(from?: string, to?: string): { from: string; to: string } {
-  const now = new Date();
+  // LOCAL calendar bounds — a UTC "to" excludes tonight's rows from reports
   return {
-    from: typeof from === 'string' && from ? from : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`,
-    to: typeof to === 'string' && to ? to : now.toISOString().split('T')[0],
+    from: typeof from === 'string' && from ? from : localMonthStart(),
+    to: localTodayOr(to),
   };
 }
 function paymentLabel(): string {
@@ -102,7 +103,7 @@ export const detailedReportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
-      const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, limit, {
+      const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, limit, {
         status: typeof args.status === 'string' ? args.status : undefined,
         customerId: typeof args.customerId === 'string' ? args.customerId : undefined,
       });
@@ -113,8 +114,8 @@ export const detailedReportTools: ToolDefinition[] = [
         period: { from, to }, totalDatabase: res.data.total, filteredCount: filtered.length,
         totalValue: Math.round(totalVal * 100) / 100,
         quotations: filtered.map((q) => ({
-          number: String(q.invoiceNumber), customer: String(q.customer?.name || ''),
-          date: String(q.date), expiryDate: String(q.dueDate || ''), total: num(q.totalAmount), status: String(q.status),
+          number: String(q.quotationNumber), customer: String(q.customer?.name || ''),
+          date: String(q.date), expiryDate: String(q.expiryDate || ''), total: num(q.totalAmount), status: String(q.status),
         })),
       };
     },
@@ -150,7 +151,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
         returnNumber: r.return_number, customer: r.customer_name,
         date: r.date, total: num(r.total_amount), status: r.status,
-        originalInvoice: r.invoice_invoice, reason: r.reason || '', createdBy: r.created_by_name || '',
+        originalInvoice: r.orig, reason: r.reason || '', createdBy: r.created_by_name || '',
       }));
       const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {

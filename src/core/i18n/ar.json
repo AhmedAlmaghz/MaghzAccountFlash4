@@ -300,7 +300,21 @@
       "openInventoryAnalysis": "فتح تحليل المخزون",
       "openDepartments": "فتح الأقسام",
       "createAnother": "أنشئ واحدة أخرى",
-      "comparePrevious": "قارن مع الفترة السابقة"
+      "comparePrevious": "قارن مع الفترة السابقة",
+      "postLatestInvoice": "رحّل هذه الفاتورة الآن",
+      "postLatestPurchase": "رحّل فاتورة المشتريات",
+      "receiptForLatestInvoice": "سجّل سند قبض للفاتورة",
+      "payLatestPurchase": "سجّل سند صرف للمورد",
+      "invoiceLatestCustomer": "أنشئ فاتورة لهذا العميل",
+      "invoiceLatestSupplier": "أنشئ فاتورة مشتريات لهذا المورد",
+      "quoteWonOpportunity": "أنشئ فاتورة مبيعات للفرصة",
+      "followUpConvertedCustomer": "أضف مهمة متابعة للعميل الجديد",
+      "checkLeaveBalances": "اعرض أرصدة الإجازات",
+      "postLatestPayroll": "رحّل مسير الرواتب",
+      "startLatestWorkOrder": "ابدأ تنفيذ أمر التشغيل",
+      "productionFollowUp": "اعرض حالة أوامر الإنتاج",
+      "showLatestPosting": "اعرض القيد المحاسبي الناتج",
+      "summarizeLatestDocument": "اعرض تفاصيل آخر مستند"
     },
     "settings": {
       "title": "إعدادات الذكاء الاصطناعي",

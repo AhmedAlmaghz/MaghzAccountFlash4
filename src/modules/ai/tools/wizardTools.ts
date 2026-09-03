@@ -1,5 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { parseFlexibleNumber } from '../engine/argNormalizers';
+import { localToday } from '../engine/dateUtils';
+import { toDateString } from '@/core/utils/mapPgRow';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { crmApi } from '@/modules/crm/api';
@@ -19,7 +21,8 @@ function str(v: unknown): string | undefined {
 }
 
 function today(): string {
-  return new Date().toISOString().split('T')[0];
+  // LOCAL calendar day — UTC "today" is yesterday for GMT+3 between 00:00-03:00
+  return localToday();
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
@@ -354,7 +357,7 @@ export const wizardTools: ToolDefinition[] = [
         companyId: ctx.companyId,
         title: `متابعة: ${oppName}`,
         description: str(args.notes) || `متابعة العميل المحتمل ${lead.name} بعد التأهيل`,
-        dueDate: due.toISOString().split('T')[0],
+        dueDate: toDateString(due) ?? today(),
         priority: 'medium',
         status: 'pending',
         leadId,
@@ -623,7 +626,7 @@ export const wizardTools: ToolDefinition[] = [
       const entries = lines.map(l => ({ accountId: l.accountId, debit: l.debit, credit: l.credit }));
       const createRes = await accountingApi.createTransaction({
         companyId: ctx.companyId,
-        date: typeof args.date === 'string' && args.date ? args.date : new Date().toISOString().split('T')[0],
+        date: typeof args.date === 'string' && args.date ? args.date : today(),
         description: typeof args.description === 'string' ? args.description : '',
         reference,
         totalAmount: totalDebit,
@@ -645,7 +648,7 @@ export const wizardTools: ToolDefinition[] = [
       return {
         success: true,
         transactionId,
-        date: typeof args.date === 'string' && args.date ? args.date : new Date().toISOString().split('T')[0],
+        date: typeof args.date === 'string' && args.date ? args.date : today(),
         description: typeof args.description === 'string' ? args.description : '',
         linesCount: lines.length,
         totalDebit,

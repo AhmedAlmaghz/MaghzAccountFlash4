@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../types';
+import { localToday, localMonthStart } from '../engine/dateUtils';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { accountingApi } from '@/modules/accounting/api';
@@ -58,10 +59,8 @@ export const readTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
-      const now = new Date();
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const from = typeof args.fromDate === 'string' ? args.fromDate : monthStart;
-      const to = typeof args.toDate === 'string' ? args.toDate : now.toISOString().split('T')[0];
+      const from = typeof args.fromDate === 'string' ? args.fromDate : localMonthStart();
+      const to = typeof args.toDate === 'string' ? args.toDate : localToday();
 
       const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, 500, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الفواتير' };
@@ -562,10 +561,8 @@ export const readTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const limit = Math.min(Math.max(num(args.limit) || 10, 1), 25);
-      const now = new Date();
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-      const from = typeof args.fromDate === 'string' ? args.fromDate : monthStart;
-      const to = typeof args.toDate === 'string' ? args.toDate : now.toISOString().split('T')[0];
+      const from = typeof args.fromDate === 'string' ? args.fromDate : localMonthStart();
+      const to = typeof args.toDate === 'string' ? args.toDate : localToday();
       const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, 200, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب المبيعات' };
       const inRange = res.data.items.filter((i) => i.status !== 'cancelled' && i.date >= from && i.date <= to);
@@ -825,7 +822,7 @@ export const readTools: ToolDefinition[] = [
       const liabilities = res.data.filter((a) => a.type === 'liability') || [];
       const equity = res.data.filter((a) => a.type === 'equity') || [];
       return {
-        asOfDate: args.asOfDate || new Date().toISOString().split('T')[0],
+        asOfDate: args.asOfDate || localToday(),
         totalAssets: Math.round(assets.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100,
         totalLiabilities: Math.round(liabilities.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100,
         totalEquity: Math.round(equity.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100,

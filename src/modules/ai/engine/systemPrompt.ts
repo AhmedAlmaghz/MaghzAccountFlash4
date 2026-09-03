@@ -3,6 +3,7 @@ import { useAuthStore } from '@/modules/auth/store';
 import type { ToolDefinition } from '../types';
 import type { Skill } from '../skills/types';
 import { renderSkillsBlock } from '../skills/registry';
+import { localToday } from './dateUtils';
 
 /**
  * Builds the Arabic system prompt for the assistant, injecting live context:
@@ -124,6 +125,8 @@ const RULES = `
   32. مراحل الفرص البيعية تقدّم فقط للأمام (new→qualified→proposal→negotiation→won/lost) وwon/lost نهائية — النظام يرفض أي انتقال غير قانوني برسالة عربية؛ لا تحاول إعادة فتح فرصة مقفلة.
   33. تأهيل عميل محتمل = crm.qualify_lead (سلسلة ذرّية: تأهيل + فرصة + مهمة متابعة). تحويله إلى عميل = crm.convert_lead_to_customer (لا تمرر كود عميل — النظام يولّده من التسلسل الموحد ويرفض العميل المحوَّل مسبقاً).
   34. الفوز بفرصة عبر crm.win_opportunity يقفلها ولا ينشئ فاتورة — بعد الفوز اسأل المستخدم "هل تريد فاتورة مبيعات؟" ونفّذ sales.create_invoice عند موافقته فقط.
+  35. عند فشل أي عملية كتابة، اقرأ كتلة [تصنيف الخطأ] المرفقة مع رسالة الخطأ: اشرح للمستخدم **السبب** بلغة بسيطة واعرض **الإجراء المقترح** من الحقل "الإجراء المقترح" — لا تكرر الخطأ خاماً ولا تعتذر فقط. إن كان الخطأ غير قابل لإعادة المحاولة (retryable=false) فلا تكرر نفس الاستدعاء؛ اقترح البديل.
+  36. أدوات التشخيص: قبل ترحيل فاتورة فاشلة أو عند أي شك في سلامة الدفاتر استخدم diagnose.posting_blockers (تحديد أسباب فشل الترحيل بالضبط) و diagnose.unbalanced_entries (فحص توازن القيود) — ثم اعرض النتائج كتشخيص: هذه هي الأسباب وهذا هو الحل.
 `.trim();
 
 export interface SystemPromptContext {
@@ -134,6 +137,12 @@ export interface SystemPromptContext {
    * last message. Default: empty array (no skills).
    */
   activeSkills?: Skill[];
+  /**
+   * Live financial context the engine fetched for THIS request (VAT rate…).
+   * Optional for backwards compatibility — when absent the prompt states
+   * the VAT is unset and instructs the model to ASK instead of assuming 15%.
+   */
+  liveContext?: LiveCompanyContext;
 }
 
 /**
@@ -155,10 +164,42 @@ function renderToolInventory(tools: ToolDefinition[]): string {
     .join('\n');
 }
 
-export function buildSystemPrompt({ tools, activeSkills = [] }: SystemPromptContext): string {
+/**
+ * Live financial context shape (fetched by the chat engine per request and
+ * passed into buildSystemPrompt — see SystemPromptContext.liveContext).
+ * The engine fetches the VAT rate from the company settings; the calendar and
+ * fiscal-year already travel on the company object from the app store.
+ */
+export interface LiveCompanyContext {
+  vatRate?: number;
+}
+
+function renderCompanyContext(
+  company: { name?: string; currency?: string; fiscalYearStart?: string; calendar?: 'gregorian' | 'hijri' } | null,
+  live: LiveCompanyContext,
+  today: string,
+  userLine: string,
+): string {
+  const fiscal = company?.fiscalYearStart;
+  const calendar = company?.calendar ?? 'gregorian';
+  const vat = live.vatRate;
+  return [
+    `السياق الحالي:`,
+    `- الشركة: ${company?.name ?? 'غير محددة'}`,
+    `- العملة الافتراضية: ${company?.currency ?? 'YER'}`,
+    `- ضريبة القيمة المضافة للشركة: ${vat !== undefined ? `${vat}%` : 'غير محددة — إن ذكرها المستخدم أو احتجتها اسأله عنها، ولا تفترض 15%'}`,
+    `- بداية السنة المالية للشركة: ${fiscal ? fiscal : '1 يناير (افتراضي)'} — عند قول المستخدم "السنة/هذا العام" فسّرها بهذه البداية`,
+    `- التقويم المعتمد: ${calendar === 'hijri' ? 'هجري (يقبل النظام التواريخ الهجرية مثل "15 محرم 1448" ويحوّلها تلقائياً إلى ميلادية — أكّد التاريخ الميلادي المحوّل على المستخدم)' : 'ميلادي (مع دعم دخول التواريخ الهجرية وتحويلها تلقائياً)'}`,
+    `- تاريخ اليوم (ميلادي): ${today}`,
+    userLine,
+  ].join('\n');
+}
+
+export function buildSystemPrompt({ tools, activeSkills = [], liveContext = {} }: SystemPromptContext): string {
   const company = useAppStore.getState().activeCompany;
   const user = useAuthStore.getState().user;
-  const today = new Date().toISOString().split('T')[0];
+  // LOCAL today — a UTC date is yesterday for GMT+3 users between 00:00-03:00
+  const today = localToday();
 
   const toolList = renderToolInventory(tools);
 
@@ -168,11 +209,7 @@ export function buildSystemPrompt({ tools, activeSkills = [] }: SystemPromptCont
     `أنت "مغزى" — المساعد الذكي لنظام maghzaccount-pro، نظام ERP محاسبي متكامل - من تطوير المهندس /أحمد المغز  - شركة Maghz AI.`,
     `تساعد المستخدم في الاستعلام عن البيانات، إنشاء المستندات، التنقل في النظام، وتحليل التقارير.`,
     ``,
-    `السياق الحالي:`,
-    `- الشركة: ${company?.name ?? 'غير محددة'}`,
-    `- العملة الافتراضية: ${company?.currency ?? 'YER'}`,
-    `- تاريخ اليوم: ${today}`,
-    `- المستخدم: ${user?.fullName || user?.username || 'غير معروف'} (الدور: ${user?.role ?? 'غير معروف'})`,
+    renderCompanyContext(company, liveContext, today, `- المستخدم: ${user?.fullName || user?.username || 'غير معروف'} (الدور: ${user?.role ?? 'غير معروف'})`),
     ``,
     TERMINOLOGY_GLOSSARY,
     ``,

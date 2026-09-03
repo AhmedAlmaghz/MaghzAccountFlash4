@@ -2,6 +2,7 @@ import { getTool } from '../tools/registry';
 import { useAuthStore } from '@/modules/auth/store';
 import { logAudit } from '@/core/utils/auditLogger';
 import { sanitizeToolArgs } from './argNormalizers';
+import { classifyToolError, type ToolErrorClassification } from './errorTaxonomy';
 import type { ToolContext, ToolDefinition } from '../types';
 
 /**
@@ -44,6 +45,11 @@ export function invalidateToolCache(): void {
   toolResultCache.clear();
 }
 
+/** Test helper — clears the read-result cache between test runs. */
+export function clearToolResultCache(): void {
+  toolResultCache.clear();
+}
+
 /**
  * Tool executor — the single gate every LLM-requested tool call passes through:
  *   1. tool exists in the registry
@@ -56,6 +62,8 @@ export interface ExecutionOutcome {
   ok: boolean;
   result?: unknown;
   error?: string;
+  /** Structured classification of `error` — present whenever ok === false. */
+  errorClass?: ToolErrorClassification;
 }
 
 export function resolveTool(name: string): ToolDefinition | undefined {
@@ -101,16 +109,28 @@ export function resetToolRateLimiter(): void {
   callCounter.clear();
 }
 
+/**
+ * Hard wall-clock budget for a single tool execution. A hung DB query (or a
+ * stuck adapter call) must never freeze the whole agent loop and UI — the
+ * MAX_ITERATIONS loop-cap cannot help because it only counts completed calls.
+ * Report/aggregation tools run multiple SQL queries, so the budget is generous.
+ */
+const TOOL_TIMEOUT_MS = 30_000;
+
 export async function executeToolCall(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext
 ): Promise<ExecutionOutcome> {
   const tool = getTool(name);
-  if (!tool) return { ok: false, error: `أداة غير معروفة: ${name}` };
+  if (!tool) {
+    const error = `أداة غير معروفة: ${name}`;
+    return { ok: false, error, errorClass: classifyToolError(error) };
+  }
 
   if (!canExecute(tool)) {
-    return { ok: false, error: `ليس لديك صلاحية تنفيذ هذه العملية (${tool.permission})` };
+    const error = `ليس لديك صلاحية تنفيذ هذه العملية (${tool.permission})`;
+    return { ok: false, error, errorClass: classifyToolError(error) };
   }
 
   // Single hygiene choke-point: Arabic digits, thousands separators and
@@ -119,7 +139,8 @@ export async function executeToolCall(
   const { args: cleanArgs } = sanitizeToolArgs(args);
 
   if (!isTest && !allowCall(ctx, tool.dangerLevel)) {
-    return { ok: false, error: 'تم تجاوز حد الاستدعاءات المسموح به — حاول مرة أخرى بعد قليل' };
+    const error = 'تم تجاوز حد الاستدعاءات المسموح به — حاول مرة أخرى بعد قليل';
+    return { ok: false, error, errorClass: classifyToolError(error) };
   }
 
   // Read tools: check cache first
@@ -129,7 +150,7 @@ export async function executeToolCall(
   }
 
   try {
-    const result = await tool.execute(cleanArgs, ctx);
+    const result = await withTimeout(tool.execute(cleanArgs, ctx), TOOL_TIMEOUT_MS, tool.labelAr);
 
     if (tool.dangerLevel === 'write') {
       // Invalidate all cache after write — data may have changed
@@ -153,7 +174,8 @@ export async function executeToolCall(
 
     return { ok: true, result };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const error = e instanceof Error ? e.message : String(e);
+    return { ok: false, error, errorClass: classifyToolError(error) };
   }
 }
 
@@ -164,4 +186,25 @@ function summarizeForAudit(result: unknown): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * Race a promise against a wall-clock budget. The losing side produces an
+ * honest, actionable error instead of an eternal "executing" card.
+ * The underlying promise is NOT aborted (adapter queries own their cleanup);
+ * the unhandled-rejection path is guarded by the .catch(() => {}) noop so a
+ * late failure after timeout can never crash the renderer.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, labelAr: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`انتهت مهلة تنفيذ الأداة "${labelAr}" (30 ثانية) — قد يكون الاتصال بقاعدة البيانات بطيئاً. جرّب طلباً أصغر أو أعِد المحاولة.`));
+    }, ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+    // Post-timeout failures from the abandoned call must stay unobserved.
+    p.catch(() => { /* already rejected by the timer */ });
+  });
 }

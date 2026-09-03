@@ -223,10 +223,50 @@ function isWriteTool(toolName: string): boolean {
   );
 }
 
+/**
+ * Proactive NEXT-STEP suggestion for a SUCCESSFUL write — the accountant's
+ * natural follow-up (مسار العمل المحاسبي). Rendered as a prompt chip the
+ * user can fire with one tap. Keyed by EXACT tool name; keyed by verb for
+ * the rest (create_ → post chip, etc.).
+ */
+const NEXT_ACTIONS: Record<string, { promptKey: string; labelKey: string }> = {
+  'sales.create_invoice': { promptKey: 'ai.actions.postLatestInvoice', labelKey: 'ai.actions.postLatestInvoice' },
+  'sales.create_and_post_invoice': { promptKey: 'ai.actions.receiptForLatestInvoice', labelKey: 'ai.actions.receiptForLatestInvoice' },
+  'purchases.create_invoice': { promptKey: 'ai.actions.postLatestPurchase', labelKey: 'ai.actions.postLatestPurchase' },
+  'purchases.create_and_post_invoice': { promptKey: 'ai.actions.payLatestPurchase', labelKey: 'ai.actions.payLatestPurchase' },
+  'sales.create_customer': { promptKey: 'ai.actions.invoiceLatestCustomer', labelKey: 'ai.actions.invoiceLatestCustomer' },
+  'purchases.create_supplier': { promptKey: 'ai.actions.invoiceLatestSupplier', labelKey: 'ai.actions.invoiceLatestSupplier' },
+  'crm.win_opportunity': { promptKey: 'ai.actions.quoteWonOpportunity', labelKey: 'ai.actions.quoteWonOpportunity' },
+  'crm.convert_lead_to_customer': { promptKey: 'ai.actions.followUpConvertedCustomer', labelKey: 'ai.actions.followUpConvertedCustomer' },
+  'hr.create_leave': { promptKey: 'ai.actions.checkLeaveBalances', labelKey: 'ai.actions.checkLeaveBalances' },
+  'hr.generate_payroll_run': { promptKey: 'ai.actions.postLatestPayroll', labelKey: 'ai.actions.postLatestPayroll' },
+  'manufacturing.create_work_order': { promptKey: 'ai.actions.startLatestWorkOrder', labelKey: 'ai.actions.startLatestWorkOrder' },
+  'manufacturing.update_work_order_status': { promptKey: 'ai.actions.productionFollowUp', labelKey: 'ai.actions.productionFollowUp' },
+};
+
+/** Verb-level defaults when no exact tool match exists. */
+const VERB_NEXT_ACTIONS: Array<{ match: RegExp; action: { promptKey: string; labelKey: string } }> = [
+  { match: /^post_/, action: { promptKey: 'ai.actions.showLatestPosting', labelKey: 'ai.actions.showLatestPosting' } },
+  { match: /^create_/, action: { promptKey: 'ai.actions.summarizeLatestDocument', labelKey: 'ai.actions.summarizeLatestDocument' } },
+];
+
 /** Suggestions for an assistant message that carried a tool call. */
 export function suggestionsForToolCall(toolName: string): Suggestion[] {
   const target = findRoute(toolName);
   const result: Suggestion[] = [];
+
+  // Proactive next step FIRST — it is the most valuable chip after a write.
+  const next =
+    NEXT_ACTIONS[toolName] ??
+    VERB_NEXT_ACTIONS.find((v) => v.match.test(toolName.split('.')[1] ?? ''))?.action;
+  if (next) {
+    result.push({
+      id: `next-${toolName}`,
+      type: 'prompt',
+      labelKey: next.labelKey,
+      promptKey: next.promptKey,
+    });
+  }
 
   if (target) {
     result.push({
@@ -253,7 +293,8 @@ export function suggestionsForToolCall(toolName: string): Suggestion[] {
     });
   }
 
-  return result;
+  // Cap at 3 — more chips is noise, the next-step chip must stay visible.
+  return result.slice(0, 3);
 }
 
 /** Suggestions for plain assistant text (no tool call) via keyword matching. */

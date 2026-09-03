@@ -34,23 +34,26 @@ describe('suggestionEngine', () => {
     expect(extractSuggestions(msg)).toEqual([]);
   });
 
-  it('maps a successful write tool to a navigate + create-another chip', () => {
+  it('maps a successful create_invoice to a PROACTIVE next-step chip first (post it)', () => {
     const msg = makeMsg({ toolCall: makeToolCall('sales.create_invoice') });
     const suggestions = extractSuggestions(msg);
-    expect(suggestions.length).toBe(2);
-    expect(suggestions[0]).toMatchObject({ type: 'navigate', path: '/sales/invoices' });
-    expect(suggestions[1]).toMatchObject({ type: 'prompt', promptKey: 'ai.actions.createAnother' });
+    // next-step + navigate + create-another, capped at 3
+    expect(suggestions.length).toBe(3);
+    expect(suggestions[0]).toMatchObject({
+      type: 'prompt',
+      promptKey: 'ai.actions.postLatestInvoice',
+    });
+    expect(suggestions[1]).toMatchObject({ type: 'navigate', path: '/sales/invoices' });
+    expect(suggestions[2]).toMatchObject({ type: 'prompt', promptKey: 'ai.actions.createAnother' });
   });
 
-  it('maps a write tool for customers to the customers page', () => {
-    const msg = makeMsg({ toolCall: makeToolCall('sales.create_customer') });
-    const [s] = suggestionsForToolCall('sales.create_customer');
-    expect(s.path).toBe('/sales/customers');
-    expect(s.labelKey).toBe('ai.actions.openCustomers');
-    void msg;
+  it('maps a write tool for customers to the customers page (next-step first)', () => {
+    const suggestions = suggestionsForToolCall('sales.create_customer');
+    expect(suggestions[0]).toMatchObject({ promptKey: 'ai.actions.invoiceLatestCustomer' });
+    expect(suggestions[1]).toMatchObject({ path: '/sales/customers', labelKey: 'ai.actions.openCustomers' });
   });
 
-  it('maps a read tool to navigate + compare chip', () => {
+  it('maps a read tool to navigate + compare chip (unchanged by next-step work)', () => {
     const [nav, compare] = suggestionsForToolCall('read.profit_loss');
     expect(nav).toMatchObject({ type: 'navigate', path: '/accounting/profit' });
     expect(compare).toMatchObject({ type: 'prompt', promptKey: 'ai.actions.comparePrevious' });
@@ -87,11 +90,33 @@ describe('suggestionEngine', () => {
     expect(extractSuggestions(msg)).toEqual([]);
   });
 
-  it('treats convert_ tools as write tools', () => {
-    const [s] = suggestionsForToolCall('crm.convert_lead_to_customer');
-    expect(s).toMatchObject({ path: '/crm/leads' });
-    expect(suggestionsForToolCall('crm.convert_lead_to_customer')[1]).toMatchObject({
-      type: 'prompt',
-    });
+  it('treats convert_ tools as write tools (follow-up chip after nav)', () => {
+    const suggestions = suggestionsForToolCall('crm.convert_lead_to_customer');
+    expect(suggestions[0]).toMatchObject({ promptKey: 'ai.actions.followUpConvertedCustomer' });
+    expect(suggestions[1]).toMatchObject({ path: '/crm/leads' });
+  });
+
+  it('win_opportunity proposes invoicing the won deal (rule 34 chip)', () => {
+    const suggestions = suggestionsForToolCall('crm.win_opportunity');
+    expect(suggestions[0]).toMatchObject({ promptKey: 'ai.actions.quoteWonOpportunity' });
+  });
+
+  it('verb-level fallback: post_* tools get a show-posting chip', () => {
+    const suggestions = suggestionsForToolCall('accounting.post_journal_entry');
+    expect(suggestions[0]).toMatchObject({ promptKey: 'ai.actions.showLatestPosting' });
+  });
+
+  it('verb-level fallback: unknown create_* tools get a summarize chip', () => {
+    const suggestions = suggestionsForToolCall('crm.create_activity');
+    expect(suggestions[0]).toMatchObject({ promptKey: 'ai.actions.summarizeLatestDocument' });
+  });
+
+  it('never exceeds 3 chips so the next-step chip stays visible', () => {
+    for (const name of [
+      'sales.create_invoice', 'sales.create_and_post_invoice', 'purchases.create_invoice',
+      'hr.generate_payroll_run', 'manufacturing.create_work_order', 'crm.win_opportunity',
+    ]) {
+      expect(suggestionsForToolCall(name).length).toBeLessThanOrEqual(3);
+    }
   });
 });

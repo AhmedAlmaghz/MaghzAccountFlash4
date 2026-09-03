@@ -7,6 +7,7 @@ import { hrTools } from './hrTools';
 import { wizardTools } from './wizardTools';
 import { reportTools } from './reportTools';
 import { detailedReportTools } from './detailedReportTools';
+import { diagnosticTools } from './diagnosticTools';
 
 /**
  * Registers every built-in tool. Import this module once (side effect) before
@@ -16,7 +17,7 @@ let registered = false;
 
 export function ensureToolsRegistered(): void {
   if (registered) return;
-  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools]);
+  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools]);
   registered = true;
 }
 

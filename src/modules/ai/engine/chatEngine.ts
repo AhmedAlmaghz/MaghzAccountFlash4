@@ -5,9 +5,13 @@ import { useAiStore } from '../store';
 import { getVisibleTools, toLlmTools } from '../tools/registry';
 import { ensureToolsRegistered } from '../tools/index';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
-import { buildSystemPrompt } from './systemPrompt';
+import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
+import { renderErrorGuidance } from './errorTaxonomy';
+import { resolveArgsForCard } from './cardResolvers';
+import { expandDialectText } from './dialectMap';
 import { resolveEntitiesInText } from '../entityResolver';
+import { coreApi } from '@/modules/core/api';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, PendingToolCall, ToolContext } from '../types';
 import type { Skill } from '../skills/types';
 
@@ -231,6 +235,35 @@ class ChatEngine {
   }
 
   /**
+   * Live financial context for the system prompt (VAT rate). Cached for
+   * LIVE_CONTEXT_TTL_MS — the engine rebuilds the prompt on every send, and
+   * a settings round-trip per message would be wasteful; one VAT row per
+   * minute is plenty fresh.
+   */
+  private liveContextCache: { at: number; data: LiveCompanyContext } | null = null;
+  private static readonly LIVE_CONTEXT_TTL_MS = 60_000;
+
+  private async fetchLiveContext(): Promise<LiveCompanyContext> {
+    const { companyId } = this.ctx;
+    if (!companyId) return {};
+    const now = Date.now();
+    if (this.liveContextCache && now - this.liveContextCache.at < ChatEngine.LIVE_CONTEXT_TTL_MS) {
+      return this.liveContextCache.data;
+    }
+    try {
+      const vat = await coreApi.getVatSettings(companyId);
+      const data: LiveCompanyContext =
+        vat.success && vat.data && typeof vat.data.vatRate === 'number' && vat.data.vatRate > 0
+          ? { vatRate: vat.data.vatRate }
+          : {};
+      this.liveContextCache = { at: now, data };
+      return data;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
    * Selects the skills that should be active given the latest user message.
    * Returns always-on skills (regardless of message) + trigger-based skills
    * matching the user text. Filtered by current tool visibility.
@@ -258,7 +291,8 @@ class ChatEngine {
       // index 0 of history and is reused on every API call.
       const tools = getVisibleTools();
       const activeSkills = this.activeSkillsForMessage(text);
-      const systemContent = buildSystemPrompt({ tools, activeSkills });
+      const liveContext = await this.fetchLiveContext();
+      const systemContent = buildSystemPrompt({ tools, activeSkills, liveContext });
 
       if (this.history.length === 0) {
         this.history.push({ role: 'system', content: systemContent });
@@ -271,20 +305,36 @@ class ChatEngine {
         this.history.unshift({ role: 'system', content: systemContent });
       }
 
-      // ── Entity resolution ──────────────────────────────────────────
-      // Pre-process the user message: fuzzy-match entity names against the
-      // DB, correct common typos (guarded — never inside "اسمه …" definition
-      // zones or when ambiguous), and alert the user about corrections.
+      // ── Dialect expansion + entity resolution ──────────────────────────
+      // Pre-process the user message:
+      //  1. DIALECT: regional business words (Yemeni/Gulf/Egyptian…) are
+      //     rewritten into the canonical vocabulary BEFORE anything else —
+      //     search tools and the model read one language.
+      //  2. ENTITY: fuzzy-match entity names against the DB, correct guarded
+      //     typos, and alert the user about corrections.
       let userText = text;
       let correctionMsg: string | null = null;
 
+      // Dialect first — the canonical text feeds entity resolution too.
+      let dialectChanged: string[] = [];
       try {
-        const resolved = await resolveEntitiesInText(text, this.ctx.companyId);
-        userText = resolved.text || text;
+        const expanded = expandDialectText(text);
+        userText = expanded.text;
+        dialectChanged = expanded.changed;
+      } catch {
+        // Dialect expansion is best-effort — never block the message
+      }
 
-        if (resolved.corrections.length > 0) {
+      try {
+        const resolved = await resolveEntitiesInText(userText, this.ctx.companyId);
+        userText = resolved.text || userText;
+
+        if (resolved.corrections.length > 0 || dialectChanged.length > 0) {
           // Build user-friendly correction summary
           const lines: string[] = [];
+          if (dialectChanged.length > 0) {
+            lines.push(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
+          }
           for (const c of resolved.corrections) {
             const typeLabel: Record<string, string> = {
               account: 'حساب', customer: 'عميل', supplier: 'مورد',
@@ -298,10 +348,7 @@ class ChatEngine {
             const lbl = typeLabel[c.type] ?? c.type;
             lines.push(`- **${lbl}**: "${c.original}" ← "${c.corrected}"`);
           }
-          correctionMsg = `🔍 **تم تصحيح أسماء الكيانات تلقائياً:**\n${lines.join('\n')}\n\n_تم تحديث طلبك بالاسم الصحيح._`;
-
-          // Update the displayed user message in the store to show the correction
-          // We show the original text + correction note so the user sees what happened
+          correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n${lines.join('\n')}\n\n_تم تحديث طلبك بالمصطلحات والأسماء الصحيحة._`;
         }
       } catch {
         // Entity resolution is best-effort — never block the user's message
@@ -382,9 +429,13 @@ class ChatEngine {
           const key = ChatEngine.writeAttemptKey(pending.toolName, pending.args);
           this.failedWriteAttempts.set(key, (this.failedWriteAttempts.get(key) ?? 0) + 1);
 
+          // The failure reaches the model WITH the structured guidance block
+          // (classification + reason + fixHint) so the next reply guides the
+          // user to the resolution instead of repeating the raw error.
+          const guidance = outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : '';
           this.history.push({
             role: 'tool',
-            content: `خطأ: ${outcome.error}`,
+            content: `خطأ: ${outcome.error}${guidance}`,
             tool_call_id: callId,
           });
         }
@@ -474,20 +525,27 @@ class ChatEngine {
    * are reconstructed as assistant + tool pairs. Stale/error/pending tool
    * calls are skipped — the LLM should not re-process failed operations.
    */
-  restoreHistory(messages: ChatMessage[]): void {
+  restoreHistorySync(messages: ChatMessage[]): void {
     const history: LlmMessage[] = [];
 
     // Inject a fresh system prompt first so the LLM has current context
     // (company, currency, date, user info, available tools, active skills).
+    // Live context uses the last cached VAT fetch (best-effort on restore).
     const tools = getVisibleTools();
 
     // Find the most recent user message — use it to seed trigger-based skills
     const lastUserText = [...messages].reverse().find((m) => m.role === 'user' && m.kind === 'text')?.content ?? '';
     const activeSkills = this.activeSkillsForMessage(lastUserText);
 
+    const liveContext = this.liveContextCache?.data ?? {};
+
     history.push({
       role: 'system',
-      content: buildSystemPrompt({ tools, activeSkills }),
+      content: buildSystemPrompt({
+        tools,
+        activeSkills,
+        liveContext,
+      }),
     });
 
     for (const msg of messages) {
@@ -812,9 +870,14 @@ class ChatEngine {
           },
         });
 
+        // Failed reads reach the model WITH structured guidance (code + reason
+        // + fixHint) so it explains the failure and proposes the next step
+        // instead of parroting the raw error string.
         this.history.push({
           role: 'tool',
-          content: outcome.ok ? compactToolResultForLlm(outcome.result) : `خطأ: ${outcome.error}`,
+          content: outcome.ok
+            ? compactToolResultForLlm(outcome.result)
+            : `خطأ: ${outcome.error}${outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : ''}`,
           tool_call_id: tc.id,
         });
       }
@@ -874,12 +937,23 @@ class ChatEngine {
           };
           this.pendingWriteCalls.push(pending);
 
-          this.store().addMessage({
+          const messageId = this.store().addMessage({
             role: 'assistant',
             kind: 'tool',
             content: '',
             toolCall: pending,
           });
+
+          // Enrich the confirmation card asynchronously: resolve raw UUID
+          // args (customerId/productId…) into human names/numbers so the user
+          // approves SUBSTANCE, not "المعرف: 3f2a1b9c…". Best-effort — the
+          // card stays fully functional with the plain summary alone.
+          void resolveArgsForCard(tc.arguments, this.ctx).then((labels) => {
+            if (labels.length === 0) return;
+            this.store().updateToolCall(messageId, {
+              argsSummary: [pending.argsSummary, ...labels].filter(Boolean).join(' — '),
+            });
+          }).catch(() => { /* best-effort enrichment */ });
         }
 
         // Stop loop — waiting for user confirmation

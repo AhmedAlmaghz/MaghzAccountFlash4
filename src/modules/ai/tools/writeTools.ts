@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { parseFlexibleNumber } from '../engine/argNormalizers';
+import { localToday } from '../engine/dateUtils';
 import { getDbAdapter } from '@/core/database/adapters';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
@@ -47,7 +48,8 @@ function str(v: unknown): string | undefined {
 }
 
 function today(): string {
-  return new Date().toISOString().split('T')[0];
+  // LOCAL calendar day — UTC "today" is yesterday for GMT+3 between 00:00-03:00
+  return localToday();
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
@@ -2897,7 +2899,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_company',
     labelAr: 'تعديل بيانات الشركة',
     descriptionAr: 'يُحدّث معلومات الشركة — الاسم، الرقم الضريبي، العنوان، الهاتف، البريد الإلكتروني.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -2929,7 +2931,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_branch',
     labelAr: 'تعديل فرع',
     descriptionAr: 'يُحدّث بيانات فرع — الاسم، العنوان، الهاتف، حالة التفعيل. استخدم settings.get_branches أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -2982,7 +2984,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_document_sequence',
     labelAr: 'تعديل تسلسل مستند',
     descriptionAr: 'يُحدّث تسلسل مستند — البادئة، الرقم الحالي، خطوة الترقيم، التفعيل. استخدم settings.get_document_sequences أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3016,7 +3018,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.create_product_type',
     labelAr: 'إضافة نوع منتج',
     descriptionAr: 'يُضيف نوع منتج جديد — الاسم (عربي/إنجليزي) وحالة التفعيل.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3028,10 +3030,10 @@ export const writeTools: ToolDefinition[] = [
       required: ['nameAr'],
     },
     summarizeArgs: (a) => `إضافة نوع منتج: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       if (!nameAr) return { error: 'nameAr مطلوب' };
-      const data: Record<string, unknown> = { nameAr };
+      const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       data.isActive = args.isActive !== undefined ? Boolean(args.isActive) : true;
       const res = await createProductType(data as Parameters<typeof createProductType>[0]);
@@ -3045,7 +3047,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_product_type',
     labelAr: 'تعديل نوع منتج',
     descriptionAr: 'يُحدّث نوع منتج — الاسم (عربي/إنجليزي)، حالة التفعيل. استخدم settings.get_product_types أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3077,7 +3079,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.delete_product_type',
     labelAr: 'حذف نوع منتج',
     descriptionAr: 'يحذف نوع منتج. استخدم settings.get_product_types أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3101,7 +3103,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.create_unit',
     labelAr: 'إضافة وحدة قياس',
     descriptionAr: 'يُضيف وحدة قياس جديدة — الاسم (عربي/إنجليزي)، معامل التحويل، رمز الوحدة، وحدة أساسية.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3116,10 +3118,10 @@ export const writeTools: ToolDefinition[] = [
       required: ['nameAr'],
     },
     summarizeArgs: (a) => `إضافة وحدة قياس: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       if (!nameAr) return { error: 'nameAr مطلوب' };
-      const data: Record<string, unknown> = { nameAr };
+      const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
       if (args.conversionFactor !== undefined) data.conversionFactor = num(args.conversionFactor);
@@ -3136,7 +3138,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_unit',
     labelAr: 'تعديل وحدة قياس',
     descriptionAr: 'يُحدّث وحدة قياس — الاسم، الرمز، معامل التحويل، التفعيل. استخدم settings.get_units أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3174,7 +3176,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.delete_unit',
     labelAr: 'حذف وحدة قياس',
     descriptionAr: 'يحذف وحدة قياس. استخدم settings.get_units أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3198,7 +3200,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.create_cash_box',
     labelAr: 'إضافة صندوق نقدي',
     descriptionAr: 'يُضيف صندوق نقدي جديد — الاسم (عربي/إنجليزي)، الرصيد الافتتاحي، وصف، حالة التفعيل.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3212,10 +3214,10 @@ export const writeTools: ToolDefinition[] = [
       required: ['nameAr'],
     },
     summarizeArgs: (a) => `إضافة صندوق نقدي: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       if (!nameAr) return { error: 'nameAr مطلوب' };
-      const data: Record<string, unknown> = { nameAr };
+      const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       data.openingBalance = args.openingBalance !== undefined ? num(args.openingBalance) : 0;
       if (args.description !== undefined) data.description = str(args.description);
@@ -3231,7 +3233,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_cash_box',
     labelAr: 'تعديل صندوق نقدي',
     descriptionAr: 'يُحدّث صندوق نقدي — الاسم، الرصيد، الوصف، التفعيل. استخدم settings.get_cash_boxes أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3267,7 +3269,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.delete_cash_box',
     labelAr: 'حذف صندوق نقدي',
     descriptionAr: 'يحذف صندوق نقدي. استخدم settings.get_cash_boxes أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3291,7 +3293,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.create_cost_center',
     labelAr: 'إضافة مركز تكلفة',
     descriptionAr: 'يُضيف مركز تكلفة جديد — الاسم (عربي/إنجليزي)، الكود، الوصف، مركز تكلفة أب.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3306,10 +3308,10 @@ export const writeTools: ToolDefinition[] = [
       required: ['nameAr'],
     },
     summarizeArgs: (a) => `إضافة مركز تكلفة: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const nameAr = str(args.nameAr);
       if (!nameAr) return { error: 'nameAr مطلوب' };
-      const data: Record<string, unknown> = { nameAr };
+      const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
       if (args.description !== undefined) data.description = str(args.description);
@@ -3326,7 +3328,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_cost_center',
     labelAr: 'تعديل مركز تكلفة',
     descriptionAr: 'يُحدّث مركز تكلفة — الاسم، الكود، الوصف، المركز الأب، التفعيل. استخدم settings.get_cost_centers أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3364,7 +3366,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.delete_cost_center',
     labelAr: 'حذف مركز تكلفة',
     descriptionAr: 'يحذف مركز تكلفة. استخدم settings.get_cost_centers أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3494,7 +3496,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.update_default_account',
     labelAr: 'تعديل حساب افتراضي',
     descriptionAr: 'يُحدّث الحساب الافتراضي لنوع معين — يربط حساباً أو يفصل الحساب (بإرسال null). استخدم settings.get_default_accounts أولاً.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -3520,7 +3522,7 @@ export const writeTools: ToolDefinition[] = [
     name: 'settings.apply_default_template',
     labelAr: 'تطبيق نموذج حسابات افتراضي',
     descriptionAr: 'يطبق نموذج حسابات افتراضي على الحسابات الافتراضية للنظام. الخيارات: trading (تجاري)، manufacturing (تصنيعي)، services (خدمي). يحذّر: هذا يستبدل الحسابات الافتراضية الحالية.',
-    permission: 'settings.view',
+    permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

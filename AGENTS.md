@@ -3958,4 +3958,103 @@ npx drizzle-kit migrate
 - **التحقق الحي**: على PG حقيقي — date يرجع Date object، المفتاح القديم MISMATCH دائماً، بعد الإصلاح المسار الثاني UPDATE. + اختبار regression يحاكي Date object في mock (80/80)
 - **أداة hr.update_employee كانت معطوبة**: params لا تحوي departmentId/position/baseSalary أصلاً (رغم أن API يدعمها منذ البداية) — الوكيل حاول ربط قسم فاعتذر "الأداة لا تدعم ربط الموظف بالقسم" ووقف. أضيفت الحقول الثلاثة + تحقق salary>0 + تصحيح إحالة create_employee من "hr.get_departments" الوهمية إلى search.departments + اختبارات أداة جديدة (5/5)
 - **القاعدة الذهبية**: upsert الـ pre-fetch الذي يبني مفاتيح من أعمدة date/timestamp هو فخ Phase 45 مزدوج — طبّق الجانبين بنفس التطبيع (toDateString) وإلا فالـ lookup يفشل بصمت والـ INSERT يفجر القيد. وأداة AI ناقصة الحقول = موت مكتوم: راجع أدوات update مقابل حقول الـ API الحقيقية لا الوصف النصي
-*آخر تحديث: 2026-09-01 | الإصدار: maghzaccount-pro v0.9.1*
+
+### المرحلة 76 (v0.12.0): إصلاحات P0 لوحدة الذكاء الاصطناعي — RBAC + companyId + تقرير كاذب + UTC + Timeout + CI Gate
+- **الأصل**: فحص شامل لوحدة AI (75 ملفاً، 250 أداة) كشف 3 ثغرات P0 و37 مشكلة. هذه المرحلة نفّذت الإصلاحات الخمسة الحرجة + بوابة CI دائمة
+- **P0-1 — RBAC escalation (17 أداة)**: كل أدوات `settings.*` الكتابية كانت مقيدة بـ `settings.view` (صلاحية **قراءة**) — أي مستخدم يملك عرض الإعدادات كان يستطيع تعديل الشركة/الفروع/التسلسلات/حذف الخزائن والمراكز. أُصلحت 17 أداة إلى `settings.edit`: `update_company`, `update_branch`, `update_document_sequence`, `create/update/delete_product_type`, `create/update/delete_unit`, `create/update/delete_cash_box`, `create/update/delete_cost_center`, `update_default_account`, `apply_default_template`. أداة القراءة الوحيدة `settings.get_document_sequences` بقيت `settings.view` عن قصد
+- **P0-2 — إسقاط companyId (4 أدوات)**: `settings.create_product_type/create_unit/create_cash_box/create_cost_center` كانت تستدعي `createProductType(data)` **بدون companyId** (و`execute: async (args)` لا يستقبل ctx أصلاً!) → `company_id = NULL` → فشل NOT NULL صامت أو صفوف يتيمة cross-tenant. الإصلاح: استقبال ctx + `data.companyId = ctx.companyId` في الأدوات الأربع
+- **P0-3 — تقرير كاذب + حقل ميت**:
+  - `sales.quotations_detailed` كانت تستدعي `salesApi.getInvoicesPaginated` وتعيد تسمية الفواتير "عروض أسعار" (fields: invoiceNumber→quotationNumber, dueDate→expiryDate, customer?.name) — المستخدم يسأل عن عروض فيحصل على فواتير. أُصلحت إلى `getQuotationsPaginated` + الحقول الصحيحة (`q.customer?.name` — mapper يضع الاسم في customer.name وليس customerName)
+  - `sales.returns_detailed`: SQL يرجع `si.invoice_number AS orig` لكن mapper قرأ `r.invoice_invoice` (حقل غير موجود) → عمود "الفاتورة الأصلية" فارغ دائماً. أُصلح إلى `r.orig`
+- **P0-4 — فخ UTC-midnight (26 موقعاً)**: `new Date().toISOString().split('T')[0]` يعطي **أمس** لمستخدمي GMT+3 بين 00:00-03:00 — فواتير/سندات بتاريخ خاطئ + system prompt يكذب على النموذج بالتاريخ + التقارير الافتراضية تستبعد بيانات المساء. المسح الآلي وجد **26 موقعاً** (5 موثقة في التقرير + 21 داخل أجسام الأدوات). الإصلاح:
+  - ملف جديد `engine/dateUtils.ts`: `localToday()` (يستخدم toDateString — مكونات محلية)، `localTodayOr(value)` (fallback محلي)، `localMonthStart()`
+  - استبدال موحد: writeTools/wizardTools (today() helper)، systemPrompt (تاريخ السياق)، reportTools + detailedReportTools (dateRange + بلوك reports.dashboard بالكامل — حسابات prev period بـ `new Date(y, m, d-N)` محلية)، readTools (3 مواضع)، wizardTools qualify_lead (dueDate متابعة)
+  - أسماء ملفات تصدير المحادثة في AiChatPage أيضاً محلية
+- **P0-5 — Timeout 30s لكل أداة**: `executeToolCall` بلا مهلة = استعلام DB معلق واحد يجمّد الوكيل والواجهة للأبد (rate limiter لا يحمي الاستدعاء الأول). أُضيف `withTimeout(p, 30_000, labelAr)` — `Promise.race` بحائط زمني، رسالة خطأ عربية صادقة، **حارس unhandled rejection** (`p.catch(() => {})` — فشل النداء المتروك بعد المهلة لا يكسر renderer). المتروك لا يُلغى (adapter يملك cleanup الخاص به)
+- **CI Gate — `toolsContract.test.ts` (10 اختبارات)**: مسح آلي لكل ToolDefinition مسجل:
+  1. أداة write لا تُقيَّد بصلاحية `*.view`/`*.own` أبداً (privilege escalation)
+  2. صلاحيات write يجب أن تنتهي بـ create/edit/delete/post (أو settings.edit/users/roles، core.edit، ai.*)
+  3. كل permission عضو في Permission union (لا typos تسقط بصمت)
+  4. أسماء فريدة + namespaced (`domain.verb`)
+  5. كل أداة write تعرّف `summarizeArgs` (بطاقة تأكيد ذات مضمون)
+  6. لا أداة read اسمها فعل كتابة (misclassification تتجاوز الموافقة)
+  7. labelAr/descriptionAr غير فارغين + parameters صيغة object JSON-Schema
+- **اختبارات جديدة (50)**: `dateUtils.test.ts` (6 — محلي vs UTC)، `toolExecutor.timeout.test.ts` (5 — hung tool/honest error/late-rejection guard/RBAC/unknown tool)، `writeTools.settings.test.ts` (23 — RBAC لكل أداة + companyId forwarding للـ APIs الأربعة)، `detailedReportTools.test.ts` (3 — wrong-API regression + mapping الحقول + الفلاتر)، `toolsContract.test.ts` (10) + إصلاح 3 اختبارات قديمة
+- **ملاحظة RBAC في الاختبارات**: role `viewer` fallback يحوي `accounting.view` و`admin` bypass كل شيء عدا core.edit — لاختبار الرفض استخدم `sales_rep` (fallback بلا accounting.view) أو role غير معروف
+- **النتيجة النهائية**: `tsc -b` 0 errors ✓ | `eslint src --max-warnings=0` 0/0 ✓ | **vitest 1382/1382** (90 ملفاً، +50) ✓ | build 26s ✓ | e2e sales/payment **13/13** ✓
+- **قواعد ذهبية مضافة**:
+  - **أداة AI write بصلاحية view = تصعيد صلاحيات**: أي `dangerLevel: 'write'` يجب أن يُقيَّد بـ create/edit/delete/post — والـ CI gate (`toolsContract.test.ts`) يمنعها للأبد. لا تنتظر الفحص اليدوي
+  - **execute يستقبل ctx دائماً**: `execute: async (args)` بدون ctx علامة خطر — أي أداة تنشئ بيانات scoped تحتاج companyId من الجلسة، لا من الـ LLM ولا من العدم. الأدوات الأربع كانت تعمل بالحظ فقط
+  - **اسم الأداة قد يكذب على استدعائها**: `quotations_detailed` كانت تجلب invoices — الـ CI لا يستطيع كشف هذا (كلاهما API مشروع). الاختبار regression الوحيد هو اختبار يجيب: "عند الطلب هل تستدعي الأداة الـ API الذي يطابق اسمها؟"
+  - **`toISOString()` في أدوات AI محظور**: أي "اليوم" بـ UTC هو أمس لمستخدمي GMT+3 ثلاث ساعات يومياً — استخدم `localToday()` من `engine/dateUtils` (single source). المسح الآلي `scan_utc.cjs` نمط جاهز للـ CI
+  - **Timeout إجباري على كل استدعاء أداة**: الـ LLM loop معلّق على كل أداة — بلا مهلة، أول استعلام بطيء يجمّد الواجهة. 30s سخية للأدوات التجميعية متعددة الاستعلامات
+  - **`Promise.race` timeout يحتاج حارس unhandled rejection**: النداء المتروك سيفشل لاحقاً ولا أحد يسمعه — `p.catch(() => {})` noop يمنع انهيار الـ renderer
+  - **CI gate على العقد لا على التنفيذ**: مسح كل ToolDefinition (permissions/dangerLevel/summarizeArgs/naming) يكشف فئة كاملة من الأخطاء قبل أن تصل للإنتاج — الثلاث P0 هنا كان يمكن اكتشافها بـ 10 اختبارات
+
+### المرحلة 76ب (v0.12.0): التوجيه الذكي — Error Taxonomy + بطاقات موافقة غنية + أدوات تشخيص + اقتراحات استباقية
+- **الهدف**: تحويل الوكيل من "ناقل أخطاء" إلى **مرشد محاسبي** — يكتشف الخطأ ويعرض سببه وما يجب فعله (طلب المستخدم الصريح)، مع بطاقات موافقة ذات مضمون يمكن التحقق منه
+- **B-1 — `errorTaxonomy.ts` (تصنيف أخطاء مركزي)**:
+  - `ToolErrorCode` (22 كوداً مستقراً): MISSING_ID / MISSING_FIELD / UNBALANCED_ENTRY / INSUFFICIENT_BALANCE / INVALID_STATUS_TRANSITION / DOCUMENT_NOT_DRAFT / DOCUMENT_HAS_CHILDREN / DUPLICATE_DOCUMENT / DUPLICATE_ENTITY / PERIOD_LOCKED / NO_COMPANY_DATA / AMOUNT_NOT_POSITIVE / INVALID_VALUE / NOT_FOUND / PERMISSION_DENIED / TIMEOUT / RATE_LIMIT / DB_ERROR / UNKNOWN…
+  - `classifyToolError(raw)`: 18 نمط regex مُرتّبة (الأخص قبل العام) على الرسالة **مع تطبيع عربي** (همزات/تاء مربوطة/تشكيل) → `{code, userMessage, reason, fixHint, retryable, raw}`
+  - `renderErrorGuidance(c)`: كتلة `[تصنيف الخطأ: CODE] + ما حدث + السبب + الإجراء المقترح + قابلية إعادة المحاولة` تُحقن في سياق الـ LLM
+  - **التوصيل**: `ExecutionOutcome.errorClass` جديد — toolExecutor يصنّف كل مسار فشل (أداة غير معروفة/صلاحية/rate-limit/exception/timeout). chatEngine يحقن `renderErrorGuidance` في history لكل من **أدوات القراءة الفاشلة** (runLoop) و**أدوات الكتابة الفاشلة** (resolveConfirmation) — النموذج يقرأ الإرشاد ويوجه المستخدم بأسلوبه بدل ترديد الخطأ خاماً
+  - قاعدة البرومبت 35: عند فشل كتابة اقرأ كتلة التصنيف، اشرح السبب بلغة بسيطة واعرض الإجراء المقترح — لا تكرر خاماً ولا تعتذر فقط؛ retryable=false تعني لا تكرر نفس الاستدعاء
+- **B-2 — `cardResolvers.ts` (بطاقات موافقة غنية)**:
+  - `resolveArgsForCard(args, ctx)`: يحل UUIDs في args إلى أسماء بشرية قبل عرض البطاقة — `customerId → "عميل: شركة الأمل"`, `productId → "كرتون (PRD-001)"`, `supplierId/employeeId/leadId/opportunityId` كذلك. `lines[].productId` تُحل كل منتج فريد مرة
+  - **التوصيل**: runLoop عند بناء بطاقة التأكيد يستدعيها fire-and-forget ويحدّث `argsSummary` بالأسماء المحلولة — المستخدم يوافق على **مضمون** ("إنشاء فاتورة — 3 أصناف — الإجمالي ≈ 172,500 — عميل: شركة الأمل") لا "المعرف: 3f2a1b9c…". Best-effort: الفشل يترك البطاقة بالملخص العادي
+- **B-3 — `diagnosticTools.ts` (أداتا تشخيص محاسبيتان)**:
+  - `diagnose.posting_blockers(invoiceId, invoiceType)`: يفحص فاتورة ويحدد أسباب فشل الترحيل بدقة: حالة غير draft، فاتورة نقدية بلا خزنة، **خزنة بلا حساب دفتري** (اكتشاف عميق جديد)، حسابات افتراضية ناقصة (default_ar/ap + default_sales/inventory + default_vat_output/input عند وجود ضريبة)، مدفوع > إجمالي. كل عائق `{issue, detail, fix, blocking}` + `canPost` نهائي
+  - `diagnose.unbalanced_entries(fromDate?, toDate?)`: فحص توازن القيود لفترة — قيود مدين≠دائن (بفروقات دقيقة)، قيود مرحّلة بلا أطراف، ميزان المجموع الكلي. `isBalanced` + تفاصيل مقيدة (20/10)
+  - قاعدة البرومبت 36: عند فشل ترحيل أو شك في الدفاتر استخدم أدوات التشخيص واعرض النتائج كتشخيص (الأسباب + الحل)
+- **B-4 — الاقتراحات الاستباقية (`suggestionEngine`)**:
+  - `NEXT_ACTIONS` map (12 أداة → الخطوة المنطقية التالية في المسار المحاسبي): create_invoice → "رحّل هذه الفاتورة الآن"، create_and_post → "سجّل سند قبض"، win_opportunity → "أنشئ فاتورة للفرصة" (قاعدة 34)، create_customer → "أنشئ فاتورة لهذا العميل"، generate_payroll_run → "رحّل المسير"، create_work_order → "ابدأ التنفيذ"…
+  - `VERB_NEXT_ACTIONS` fallback (post_* → اعرض القيد الناتج، create_* → اعرض تفاصيل المستند)
+  - الـ next-step chip **أولاً** في الترتيب + سقف 3 chips كلي (الضجيج يطمسه)
+- **i18n**: +12 مفتاح `ai.actions.*` متوازن AR/EN (2643 = 2643 ✓)
+- **اختبارات (+31 → AI 248/248)**: `errorTaxonomy.test.ts` (17 — كل كود عائلة + تطبيع عربي + retryable + render block)، `cardResolvers.test.ts` (5 — حل الأسماء + lines + best-effort + swallow)، `diagnosticTools.test.ts` (5 — عقد + validation)، `suggestionEngine.test.ts` مُحدّث (15 — next-action أولاً + fallback الأفعال + سقف 3)
+- **النتيجة النهائية**: tsc 0 ✓ | eslint 0/0 ✓ | **vitest 1413/1413 (93 ملفاً)** ✓ | build 19s ✓ | e2e sales 7/7 ✓
+- **قواعد ذهبية مضافة**:
+  - **كل رسالة خطأ API جديدة تحتاج نمط تصنيف**: الـ API layer هي العقد — صياغة الحارس يجب أن يلتقطها `errorTaxonomy` (مثال: "المتبقي: N" → INSUFFICIENT_BALANCE). النمط بلا اختبار = عقد مكسور
+  - **errorClass في ExecutionOutcome لا يُفقد raw أبداً**: التصنيف طبقة فوق، لا بديل — `raw` يبقى للـ audit والـ fallback
+  - **إثراء البطاقة async fire-and-forget**: لا تعطّل ظهور بطاقة التأكيد على resolution الاسم — البطاقة تعمل بالملخص العادي، الأسماء تصل لحظياً بعد لحظة
+  - **عرض الاسم في البطاقة ≠ تنفيذ الاسم**: الـ id هو ما يُنفذ، الـ label ما يقرأه الإنسان — اسم قديم في بطاقة موافقة غير مؤذٍ (لذا TTL الـ cache لا يهم هنا)
+  - **next-step chip أولاً وبسقف 3**: قيمة الاقتراح الاستباقي في ظهوره — أكثر من 3 chips ضجيج يقتل الميزة
+  - **أدوات التشخيص "تشخص ثم تعرض"**: كل عائق يحمل fix konkret (شاشة/أداة/إعداد) — تشخيص بلا إجراء مقترح نصف قيمة
+
+### المرحلة 76ج (v0.12.0): اللهجات والثقافة — dialectMap + التواريخ الهجرية + سياق الشركة الفعلي
+- **الهدف**: الوكيل يفهم اللهجات العربية (يمني/خليجي/مصري/شامي/مغربي) من أول مرة، ويقبل التواريخ الهجرية، ويعرف سياق الشركة المالي الفعلي (VAT/سنة مالية/تقويم) — "يفهم اللهجات والثقافات المختلفة حسب البلد" (طلب المستخدم الصريح)
+- **C-1 — `engine/dialectMap.ts` (قاموس المفردات الإقليمي)**:
+  - `VOCABULARY` (14 عائلة): يمني ("حوالة عبر المنصة/محفظة جيب/كريم/أيبك" → حوالة إلكترونية bank، "الصراف/مكتب حوالات" → الخزنة)، خليجي ("الصراف/الفلوس الحاضرة" → cash)، مصري ("كسر في السعر/تنزيلات" → خصم، "إيصال" → سند قبض، "مصروفية" → مصروف)، شامي ("دستة" → dozen)، عام ("كرتونة" → كرتون)
+  - `expandDialectText(text)`: يعيد كتابة الرسالة بالمصطلح القياسي **قبل** entity resolution — الأدوات والنموذج يقرؤون مفردات واحدة
+  - `canonicalPaymentMethod(text)`: خريطة حتمية dialect word → paymentMethod enum (cash/bank/check) — مرآة القاعدة 26 لكن deterministic
+  - **Regex بحدود عربية سليمة**: `(?<![\u0621-\u064A\u0671-\u06D3])` — حروف فقط (التنوين خارجها فمثلًا "نقداً" تطابق)، و"ال" التعريفية + حروف الجر والوصل (و/ف/ب/ل/ك) قبل الكلمة **محفوظة في الاستبدال** ("بكسر" → "بخصم" لا "خصم")
+  - **foldKeepLength**: folding 1:1 (أ→ا، ة→ه، ى→ي) بلا حذف — الـ indices في النص المطوي تطابق الأصل، والاستبدال يستخدم شرائح النص الأصلي فلا تُفقد الأشكال الإملائية للمستخدم
+- **C-2 — التواريخ الهجرية في `argNormalizers.ts`**:
+  - `hijriToGregorian(hy, hm, hd)`: خوارزمية Kuwaiti الجدولية — `354*(hy-1) + floor((3+11*(hy-1))/30)` للأيام الكبيسة + أشهر متناوبة 30/29 + JDN conversion (Fliegel–Van Flandern). دقة ±1-2 يوم مقابل أم القرى (حدّ الخوارزمية الجدولية)
+  - `normalizeHijriDateArg("15 محرم 1448" / "١ رمضان" / "10 ذو القعدة")`: 22 شهراً هجرياً بأشكالهم المطوية، السنة الغائبة تُستنتج من اليوم الحالي
+  - `normalizeDateArg` يجرّب الهجري **قبل** الميلادي (أسماء لا تت collide) ويُسقط للمسار الميلادي إن لم يكن هجرياً
+  - **+ أسماء الأشهر الشامية** (كانون الثاني/شباط/آذار…): أضيفت لـ AR_MONTH_LOOKUP + الـ regex الميلادي صار يقبل الأشهر **المركبة بمسافة** ("1 كانون الثاني 2027")
+  - **القاعدة**: التاريخ الهجري في مستند حرج → الوكيل يذكر التاريخ الميلادي المحوّل ويطلب التأكيد (قاعدة المهارة + البرومبت)
+- **C-3 — ربط dialectMap في `chatEngine.send`**:
+  - `expandDialectText` يُطبق **أولاً** على رسالة المستخدم (قبل `resolveEntitiesInText`) — أدوات البحث تقرأ المصطلح القياسي
+  - رسالة التصحيح الموحدة تعرض: سطر لهجة (N مصطلحاً محلياً وُحد) + أسطر الكيانات المصححة
+- **C-4 — سياق الشركة الفعلي في البرومبت (`systemPrompt.ts`)**:
+  - `LiveCompanyContext { vatRate? }` — chatEngine يجلب الـ VAT من `coreApi.getVatSettings` مع cache 60s (`fetchLiveContext`)
+  - البرومبت يعرض: **VAT الفعلي للشركة** (أو "غير محددة — اسأل ولا تفترض 15%")، **بداية السنة المالية** ("السنة/هذا العام" تُفسَّر بها)، **التقويم** (هجري/ميلادي + ملاحظة دعم الهجري)
+  - `restoreHistory` → `restoreHistorySync` (يستخدم آخر cache بدل await)
+- **C-5 — مهارة `regionalFluency` (always-on)**:
+  - خريطة اللهجات ← النظامية (جدول لكل منطقة)، قواعد الرد بلغة المستخدم دون تصحيح لهجته، أعراف VAT الإقليمية (SA 15% / AE 5% / EG 14% — "طبّق إعداد الشركة الفعلي دائماً")، دعم المزج الفرنسي للمغربي، العملات الإقليمية، قاعدة تأكيد التاريخ الهجري المحوّل
+- **اختبارات (+36 → AI 284/284)**: `dialectMap.test.ts` (12 — الحدود العربية، الـ clitics، الإمالة، canonical payment)، `argNormalizers.test.ts` +21 (hijri مع مصاديق أم القرى ±2، الأشهر المركبة، الشامية، الرفض)، `regionalFluency.test.ts` (6)، `systemPrompt.test.ts` +5 (VAT الفعلي/افتراض ممنوع/سنة مالية/تقويم)
+- **النتيجة النهائية**: tsc 0 ✓ | eslint 0/0 ✓ | **vitest 1449/1449 (95 ملفاً)** ✓ (فشل أول كان worker flake عابراً) | build 34s ✓ | e2e sales 7/7 ✓
+- **قواعد ذهبية مضافة**:
+  - **`(?<![^\u0621-\u064A])` معكوسة الفهم**: negated class في lookbehind يطابق المسافة/البداية فيمنعها — حدود الكلمة العربية الصحيحة `(?<!ARABIC_LETTERS)` (حروف فقط، التنوين خارجها فمثلًا "نقداً" تطابق)
+  - **foldKeepLength للـ index-safe replacement**: أي normalization يغيّر الطول يكسر مطابقة الـ indices — استبدال الكلمات في نص عربي يتطلب folding 1:1 أو إعادة بناء النص كاملاً
+  - **"ال" التعريفية + حروف الجر محفوظة في الاستبدال**: "الصراف" → "الخزنة النقدية" و"بكسر" → "بخصم" — الكلمة تُستبدل والصيغة الإعراعية تبقى
+  - **الخوارزمية الجدولية الهجرية دقتها ±1-2 يوم بالتصميم**: الكويتی/الجدولية لا تعرف رؤية الهلال — أي مستند حرج بتاريخ هجري يستلزم عرض التاريخ المحوّل للمستخدم وتأكيده (مطبق في القاعدة والمهارة)
+  - **VAT في البرومبت = إعداد الشركة الفعلي أو "اسأل"**: لا تفترض 15% أبداً — الرقم يأتي من getVatSettings مع cache 60s
+  - **اختبارات التواريخ بنطاقات لا نقاط**: هجري/أم القرى/جدولي = انحرافات حتمية — `toMatch(/^2026-06-1[4-9]$/)` لا `toBe('2026-06-16')`
+  - **God-tier debugging lesson**: فشل regex بعد "الصراف" نجح و"كاش" فشل → اكتب ملف node مؤقت يعزل الـ regex قبل تعديل الكود — PowerShell escaping يفسد inline node -e
+
+
+
+*آخر تحديث: 2026-09-03 | الإصدار: maghzaccount-pro v0.12.0 (سلسلة package.json)*

@@ -128,4 +128,42 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('غير محددة');
     expect(prompt).toContain('YER');
   });
+
+  // ── Live financial context (المرحلة ج) ────────────────────────────────────
+
+  it('renders the ACTUAL company VAT rate when liveContext is provided', () => {
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    const prompt = buildSystemPrompt({ tools: [], liveContext: { vatRate: 5 } });
+    expect(prompt).toContain('5%');
+    expect(prompt).not.toContain('لا تفترض 15%');
+  });
+
+  it('instructs the model to ASK about VAT when liveContext lacks it (no 15% assumption)', () => {
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    const prompt = buildSystemPrompt({ tools: [] });
+    expect(prompt).toContain('لا تفترض 15%');
+  });
+
+  it('states the fiscal year start and interprets "السنة" by it', () => {
+    useAppStore.setState({
+      activeCompany: { id: 'c1', name: 'شركة', currency: 'YER', fiscalYearStart: '2026-04-01' },
+    });
+    const prompt = buildSystemPrompt({ tools: [] });
+    expect(prompt).toContain('2026-04-01');
+    expect(prompt).toContain('بداية السنة المالية');
+  });
+
+  it('notes hijri support for hijri-calendar companies and in general', () => {
+    useAppStore.setState({
+      activeCompany: { id: 'c1', name: 'شركة', currency: 'YER', calendar: 'hijri' },
+    });
+    const hijriPrompt = buildSystemPrompt({ tools: [] });
+    expect(hijriPrompt).toContain('هجري');
+    expect(hijriPrompt).toContain('15 محرم 1448');
+
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    const gregPrompt = buildSystemPrompt({ tools: [] });
+    expect(gregPrompt).toContain('ميلادي');
+    expect(gregPrompt).toContain('التواريخ الهجرية');
+  });
 });
