@@ -107,8 +107,20 @@ describe('locale utility', () => {
   });
 
   it('formatDateTime includes time component', () => {
-    const result = formatDateTime('2026-01-15T10:30:00Z');
-    expect(result).toMatch(/01:30|٠١:٣٠|13:30|١:٣٠/);
+    // The instant 2026-01-15T10:30:00Z renders at different local hours per
+    // machine zone (GMT+3 → 13:30, UTC → 10:30), and Intl may use a 12- or
+    // 24-hour cycle per ICU data — so derive the expectation from the local
+    // components and accept either cycle (digits normalized like the other
+    // tests in this file).
+    const d = new Date('2026-01-15T10:30:00Z');
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const latin = (s: string) =>
+      s.replace(/[٠-٩]/g, (ch) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)));
+    const result = latin(formatDateTime(d));
+    const h24 = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const h12raw = d.getHours() % 12 === 0 ? 12 : d.getHours() % 12;
+    const h12 = `${pad(h12raw)}:${pad(d.getMinutes())}`;
+    expect(result.includes(h24) || result.includes(h12)).toBe(true);
   });
 
   it('formatDateTime uses Hijri when set', () => {

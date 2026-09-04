@@ -116,7 +116,10 @@ describe('journalEntryGenerator', () => {
 
       // Simulate what node-postgres returns for a `timestamptz` column: a Date object.
       // Its `toString()` yields a locale-formatted string that PG cannot parse.
-      const dateAsDateObject = new Date('2026-07-13T00:00:00+03:00');
+      // Constructed from LOCAL components so this assertion is exact on every
+      // machine zone (an offset-built instant would resolve to the previous
+      // day on UTC runners — see mapPgRow.test.ts).
+      const dateAsDateObject = new Date(2026, 6, 13);
 
       const result = await postSalesInvoice('comp-1', {
         invoiceNumber: 'INV-002',

@@ -8,9 +8,19 @@ describe('toDateString', () => {
   });
 
   it('converts a Date in GMT+0300 to the correct local date', () => {
-    // 2026-07-13 00:00:00 GMT+0300 is 2026-07-12 21:00:00 UTC
+    // 2026-07-13 00:00:00 GMT+0300 is 2026-07-12 21:00:00 UTC, so the correct
+    // LOCAL-calendar answer depends on the machine zone (GMT+3 → 2026-07-13,
+    // UTC → 2026-07-12). toDateString promises local components, hence the
+    // expectation is derived from them — never hardcoded to one timezone.
     const d = new Date('2026-07-13T00:00:00+03:00');
-    expect(toDateString(d)).toBe('2026-07-13');
+    const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    expect(toDateString(d)).toBe(expected);
+  });
+
+  it('resolves a locally-constructed midnight Date to the exact same day', () => {
+    // new Date(y, m, day) is midnight in the runner's own zone on every
+    // platform — deterministic on UTC runners and GMT+3 machines alike.
+    expect(toDateString(new Date(2026, 6, 13))).toBe('2026-07-13');
   });
 
   it('returns null for an invalid Date', () => {

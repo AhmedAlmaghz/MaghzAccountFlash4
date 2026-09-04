@@ -9,14 +9,18 @@ import { toDateString } from '@/core/utils/mapPgRow';
 /**
  * Normalize a date-like value (Date, ISO string, locale-formatted string)
  * to a strict `YYYY-MM-DD` string suitable for PG `timestamp with time zone`.
- * If the value is a `Date` object (e.g. from node-postgres on `timestamptz`
- * columns) we must call `toISOString()` instead of `toString()`; the latter
- * produces locale formats like `"Mon Jul 13 2026 00:00:00 GMT+0300 (...)"`
- * which PG rejects with `invalid input syntax for type timestamp with time zone`.
+ * Date objects are resolved via `toDateString` (local-time components) —
+ * never via `toString()`, whose locale formats like
+ * `"Mon Jul 13 2026 00:00:00 GMT+0300 (...)"` PG rejects with
+ * `invalid input syntax for type timestamp with time zone`.
  */
 function normalizeDate(value: unknown): string {
   const s = toDateString(value);
-  return s ?? new Date().toISOString().split('T')[0];
+  if (s) return s;
+  // Fallback is local-time too: toISOString() is UTC, so on GMT+3 machines
+  // between 00:00–03:00 it would silently back-date new entries by a day.
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 export interface JournalEntryLine {
