@@ -64,10 +64,13 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('وصف sales.get_invoices');
   });
 
-  it('includes today date in ISO format', () => {
+  it('includes today date in LOCAL ISO format (never the UTC day)', () => {
     const prompt = buildSystemPrompt({ tools: [] });
-    const today = new Date().toISOString().split('T')[0];
-    expect(prompt).toContain(today);
+    // The prompt must carry the LOCAL calendar day — the UTC day can be
+    // yesterday for GMT+3 users between 00:00 and 03:00 (Phase 76 rule).
+    const now = new Date();
+    const local = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    expect(prompt).toContain(local);
   });
 
   it('contains the strict rules section', () => {

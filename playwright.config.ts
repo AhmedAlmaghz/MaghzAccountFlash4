@@ -30,10 +30,15 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npx vite --config vite.e2e.config.ts --port 5173 --strictPort --host 127.0.0.1',
+    // Direct node invocation — `npx` resolution stalls on this machine and
+    // inside CI caches (observed: 120s webServer timeouts while the same
+    // binary runs in seconds via node). node_modules is always present for
+    // tests. Timeout is 240s to absorb cold dep-optimizer runs after a
+    // dependency bump (observed 58s+ first boot on vite 8).
+    command: 'node node_modules/vite/bin/vite.js --config vite.e2e.config.ts --port 5173 --strictPort --host 127.0.0.1',
     url: VITE_URL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 240_000,
     stdout: 'ignore',
     stderr: 'pipe',
   },

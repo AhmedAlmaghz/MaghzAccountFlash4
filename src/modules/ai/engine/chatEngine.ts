@@ -610,6 +610,45 @@ class ChatEngine {
   // ─── Private ─────────────────────────────────────────────────────────────
 
   /**
+   * Context-window budget: long sessions grew this.history without bound —
+   * a 40+ message conversation eventually trips provider context limits
+   * (or degrades into huge, slow, costly requests). The window keeps the
+   * system prompt (index 0) plus the most recent messages, SNAPPED to a
+   * safe boundary so we never orphan a tool result from its tool_call.
+   */
+  private static readonly CONTEXT_WINDOW_MESSAGES = 30;
+
+  /**
+   * Slice history to the context budget without breaking conversation
+   * invariants:
+   *   - the system message is always kept (index 0);
+   *   - the slice never STARTS on a `tool` message (its assistant tool_call
+   *     partner must come with it);
+   *   - the slice never STARTS mid-pair after an assistant(tool_calls) —
+   *     the following tool results must not be orphaned.
+   */
+  private windowedHistory(): LlmMessage[] {
+    const h = this.history;
+    if (h.length <= ChatEngine.CONTEXT_WINDOW_MESSAGES) return h;
+
+    const system = h[0]?.role === 'system' ? [h[0]] : [];
+    const rest = system.length ? h.slice(1) : h;
+
+    let start = rest.length - (ChatEngine.CONTEXT_WINDOW_MESSAGES - system.length);
+    if (start < 0) start = 0;
+
+    // Snap forward past orphaned tool results / dangling tool_call partners.
+    while (start < rest.length) {
+      const m = rest[start];
+      if (m.role === 'tool') { start++; continue; }              // orphaned result
+      if (m.tool_calls && m.tool_calls.length > 0) { start++; continue; } // pair opener without its results yet
+      break;
+    }
+
+    return [...system, ...rest.slice(start)];
+  }
+
+  /**
    * Build the messages array for the LLM request. Clones each message and its
    * tool_calls to avoid mutating history. Also ensures that if ANY tool_call
    * across the ENTIRE history has thought_signature, ALL tool_calls in every
@@ -622,12 +661,17 @@ class ChatEngine {
    * retains execution context without triggering Gemini's 400 rejection.
    * This also prevents infinite tool-call loops because the LLM can see that
    * its previous call was already executed.
+   *
+   * The input is first windowed (see CONTEXT_WINDOW_MESSAGES) so unbounded
+   * sessions stop growing every request.
    */
   private buildMessages(): LlmMessage[] {
-    // First pass: find any thought_signature across all assistant messages
+    const history = this.windowedHistory();
+
+    // First pass: find any thought_signature across all (windowed) assistant messages
     let globalTs: string | undefined;
     let hasAnyToolCalls = false;
-    for (const m of this.history) {
+    for (const m of history) {
       if (m.tool_calls && m.tool_calls.length > 0) {
         hasAnyToolCalls = true;
         for (const call of m.tool_calls) {
@@ -642,7 +686,7 @@ class ChatEngine {
 
     // ── Thread-safe path (thought_signature available) ──────────────
     if (globalTs || !hasAnyToolCalls) {
-      return this.history.map((message) => {
+      return history.map((message) => {
         const tool_calls = message.tool_calls?.map((call) => {
           const fn = { ...call.function };
           if (globalTs && !fn.thought_signature) {
@@ -661,7 +705,7 @@ class ChatEngine {
     let pendingPreText: string | null = null;   // text before the tool_calls
     let pendingCallNames: string[] | null = null; // function names to merge
 
-    for (const m of this.history) {
+    for (const m of history) {
       if (m.role === 'tool') {
         // Pair with the preceding assistant tool_call message
         const names = pendingCallNames?.join(', ') ?? 'tools';
