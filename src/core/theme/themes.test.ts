@@ -3,6 +3,7 @@ import {
   BRAND_EMERALD,
   BRAND_GOLD,
   BUILT_IN_THEMES,
+  FONT_STACKS,
   applyThemeDefinition,
   findTheme,
   generateScale,
@@ -10,6 +11,7 @@ import {
   isValidHex,
   normalizeHex,
   themeDisplayName,
+  withThemeDefaults,
   type ThemeDefinition,
 } from './themes';
 
@@ -47,6 +49,12 @@ describe('brand identity tokens', () => {
       accent: '#654321',
       background: '#111111',
       surface: '#222222',
+      sidebarBg: '#111111',
+      headerBg: '#111111',
+      navText: '#D4D4D8',
+      navActive: '#123456',
+      navIcon: '#A1A1AA',
+      font: 'cairo',
     };
     expect(findTheme('custom-1', [custom]).id).toBe('custom-1');
   });
@@ -109,5 +117,49 @@ describe('applyThemeDefinition', () => {
     applyThemeDefinition(BUILT_IN_THEMES[0]);
     expect(document.documentElement.classList.contains('light')).toBe(true);
     expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+
+  it('publishes interface tokens and the typeface', () => {
+    applyThemeDefinition(BUILT_IN_THEMES[0]);
+    const style = document.documentElement.style;
+    expect(style.getPropertyValue('--brand-sidebar-bg')).toBe('#FFFFFF');
+    expect(style.getPropertyValue('--brand-header-bg')).toBe('#FFFFFF');
+    expect(style.getPropertyValue('--brand-nav-text')).toBe('#52525B');
+    expect(style.getPropertyValue('--brand-nav-icon')).toBe('#71717A');
+    expect(style.getPropertyValue('--font-arabic')).toContain('Cairo');
+  });
+});
+
+describe('withThemeDefaults (backward compatibility)', () => {
+  it('fills interface tokens for legacy custom themes', () => {
+    const legacy = {
+      id: 'custom-old',
+      nameAr: 'قديم',
+      nameEn: 'Old',
+      mode: 'dark',
+      primary: '#123456',
+      accent: '#654321',
+      background: '#111111',
+      surface: '#222222',
+    } as ThemeDefinition;
+    const full = withThemeDefaults(legacy);
+    expect(full.sidebarBg).toBe('#1A1A2E');
+    expect(full.headerBg).toBe('#1A1A2E');
+    expect(full.navActive).toBe('#123456');
+    expect(full.font).toBe('cairo');
+  });
+
+  it('keeps explicitly customized tokens', () => {
+    const full = withThemeDefaults({ ...BUILT_IN_THEMES[0], sidebarBg: '#000000', font: 'inter' });
+    expect(full.sidebarBg).toBe('#000000');
+    expect(full.font).toBe('inter');
+  });
+});
+
+describe('FONT_STACKS', () => {
+  it('offers four world-class typefaces', () => {
+    expect(Object.keys(FONT_STACKS)).toEqual(['cairo', 'inter', 'plex', 'system']);
+    expect(FONT_STACKS.cairo).toContain('Cairo');
+    expect(FONT_STACKS.system).toContain('system-ui');
   });
 });

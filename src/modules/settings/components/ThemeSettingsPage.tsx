@@ -18,11 +18,14 @@ import {
   BRAND_CHARCOAL,
   BRAND_CHARCOAL_SURFACE,
   BUILT_IN_THEMES,
+  FONT_STACKS,
   generateScale,
   isValidHex,
   normalizeHex,
   themeDisplayName,
+  withThemeDefaults,
   type ThemeDefinition,
+  type ThemeFont,
   type ThemeMode,
 } from '@/core/theme/themes';
 
@@ -34,17 +37,32 @@ interface ThemeForm {
   accent: string;
   background: string;
   surface: string;
+  sidebarBg: string;
+  headerBg: string;
+  navText: string;
+  navActive: string;
+  navIcon: string;
+  font: ThemeFont;
 }
 
-const defaultForm = (mode: ThemeMode): ThemeForm => ({
-  nameAr: '',
-  nameEn: '',
-  mode,
-  primary: BRAND_EMERALD,
-  accent: BRAND_GOLD,
-  background: mode === 'dark' ? BRAND_CHARCOAL : '#F7FAF8',
-  surface: mode === 'dark' ? BRAND_CHARCOAL_SURFACE : '#FFFFFF',
-});
+const defaultForm = (mode: ThemeMode): ThemeForm => {
+  const dark = mode === 'dark';
+  return {
+    nameAr: '',
+    nameEn: '',
+    mode,
+    primary: dark ? '#14B58A' : BRAND_EMERALD,
+    accent: BRAND_GOLD,
+    background: dark ? BRAND_CHARCOAL : '#F7FAF8',
+    surface: dark ? BRAND_CHARCOAL_SURFACE : '#FFFFFF',
+    sidebarBg: dark ? BRAND_CHARCOAL : '#FFFFFF',
+    headerBg: dark ? BRAND_CHARCOAL : '#FFFFFF',
+    navText: dark ? '#D4D4D8' : '#52525B',
+    navActive: dark ? '#14B58A' : BRAND_EMERALD,
+    navIcon: dark ? '#A1A1AA' : '#71717A',
+    font: 'cairo',
+  };
+};
 
 function newThemeId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return `custom-${crypto.randomUUID()}`;
@@ -54,28 +72,42 @@ function newThemeId(): string {
 const ThemePreview: React.FC<{ def: ThemeDefinition; active: boolean }> = ({ def, active }) => {
   const scale = useMemo(() => generateScale(def.primary), [def.primary]);
   const { t, language } = useTranslation();
+  // Runtime guards: themes stored before the interface tokens existed.
+  const full = withThemeDefaults(def);
   return (
     <div
       className="rounded-xl border-2 overflow-hidden transition-all"
-      style={{ borderColor: active ? def.primary : undefined }}
+      style={{ borderColor: active ? full.primary : undefined }}
     >
-      <div className="flex items-center gap-1.5 px-3 py-2" style={{ background: def.background }}>
-        <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#f43f5e' }} />
-        <span className="w-2.5 h-2.5 rounded-full" style={{ background: def.accent }} />
-        <span className="w-2.5 h-2.5 rounded-full" style={{ background: def.primary }} />
-        <span className="ms-auto text-[10px] opacity-60">{themeDisplayName(def, language)}</span>
-      </div>
-      <div className="p-3 space-y-2" style={{ background: def.surface }}>
-        <div
-          className="h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white"
-          style={{ background: `linear-gradient(135deg, ${def.primary}, ${scale['700']})` }}
-        >
-          {t('settings.themes.previewButton')}
+      <div className="flex" style={{ fontFamily: FONT_STACKS[full.font] }}>
+        {/* Mini sidebar */}
+        <div className="w-14 shrink-0 p-1.5 space-y-1.5" style={{ background: full.sidebarBg }}>
+          <span className="block h-4 rounded" style={{ background: full.navActive }} />
+          <span className="block h-4 rounded opacity-70" style={{ background: full.navIcon }} />
+          <span className="block h-4 rounded opacity-70" style={{ background: full.navIcon }} />
+          <span className="block text-[8px] font-bold truncate" style={{ color: full.navText }}>
+            {themeDisplayName(full, language)}
+          </span>
         </div>
-        <div className="flex gap-1.5">
-          <span className="h-4 flex-1 rounded" style={{ background: def.primary }} />
-          <span className="h-4 flex-1 rounded" style={{ background: def.accent }} />
-          <span className="h-4 flex-1 rounded border" style={{ background: def.background }} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 px-3 py-2" style={{ background: full.headerBg }}>
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#f43f5e' }} />
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: full.accent }} />
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: full.primary }} />
+          </div>
+          <div className="p-3 space-y-2" style={{ background: full.surface }}>
+            <div
+              className="h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white"
+              style={{ background: `linear-gradient(135deg, ${full.primary}, ${scale['700']})` }}
+            >
+              {t('settings.themes.previewButton')}
+            </div>
+            <div className="flex gap-1.5">
+              <span className="h-4 flex-1 rounded" style={{ background: full.primary }} />
+              <span className="h-4 flex-1 rounded" style={{ background: full.accent }} />
+              <span className="h-4 flex-1 rounded border" style={{ background: full.background }} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -133,14 +165,21 @@ export const ThemeSettingsPage: React.FC = () => {
   };
 
   const openEdit = (def: ThemeDefinition) => {
+    const full = withThemeDefaults(def);
     setForm({
-      nameAr: def.nameAr,
-      nameEn: def.nameEn,
-      mode: def.mode,
-      primary: def.primary,
-      accent: def.accent,
-      background: def.background,
-      surface: def.surface,
+      nameAr: full.nameAr,
+      nameEn: full.nameEn,
+      mode: full.mode,
+      primary: full.primary,
+      accent: full.accent,
+      background: full.background,
+      surface: full.surface,
+      sidebarBg: full.sidebarBg,
+      headerBg: full.headerBg,
+      navText: full.navText,
+      navActive: full.navActive,
+      navIcon: full.navIcon,
+      font: full.font,
     });
     setEditingId(def.id);
     setIsOpen(true);
@@ -156,6 +195,11 @@ export const ThemeSettingsPage: React.FC = () => {
       accent: form.accent,
       background: form.background,
       surface: form.surface,
+      sidebarBg: form.sidebarBg,
+      headerBg: form.headerBg,
+      navText: form.navText,
+      navActive: form.navActive,
+      navIcon: form.navIcon,
     })) {
       if (!isValidHex(val)) {
         addToast('error', t('settings.themes.invalidColor', { field: key }));
@@ -171,6 +215,12 @@ export const ThemeSettingsPage: React.FC = () => {
       accent: normalizeHex(form.accent, BRAND_GOLD),
       background: normalizeHex(form.background, '#ffffff'),
       surface: normalizeHex(form.surface, '#ffffff'),
+      sidebarBg: normalizeHex(form.sidebarBg, '#ffffff'),
+      headerBg: normalizeHex(form.headerBg, '#ffffff'),
+      navText: normalizeHex(form.navText, '#52525b'),
+      navActive: normalizeHex(form.navActive, BRAND_EMERALD),
+      navIcon: normalizeHex(form.navIcon, '#71717a'),
+      font: form.font,
     };
     if (editingId) {
       updateCustomTheme(editingId, def);
@@ -355,6 +405,33 @@ export const ThemeSettingsPage: React.FC = () => {
               <ColorField label={t('settings.themes.surface')} value={form.surface} onChange={(v) => setForm({ ...form, surface: v })} />
             </div>
             <div>
+              <p className="form-label mb-1.5">{t('settings.themes.interfaceColors')}</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <ColorField label={t('settings.themes.sidebarBg')} value={form.sidebarBg} onChange={(v) => setForm({ ...form, sidebarBg: v })} />
+                <ColorField label={t('settings.themes.headerBg')} value={form.headerBg} onChange={(v) => setForm({ ...form, headerBg: v })} />
+                <ColorField label={t('settings.themes.navText')} value={form.navText} onChange={(v) => setForm({ ...form, navText: v })} />
+                <ColorField label={t('settings.themes.navActive')} value={form.navActive} onChange={(v) => setForm({ ...form, navActive: v })} />
+                <ColorField label={t('settings.themes.navIcon')} value={form.navIcon} onChange={(v) => setForm({ ...form, navIcon: v })} />
+              </div>
+            </div>
+            <div>
+              <label className="form-label block mb-1.5" htmlFor="theme-font-select">
+                {t('settings.themes.font')}
+              </label>
+              <select
+                id="theme-font-select"
+                className="form-control"
+                value={form.font}
+                onChange={(e) => setForm({ ...form, font: e.target.value as ThemeFont })}
+              >
+                {(Object.keys(FONT_STACKS) as ThemeFont[]).map((f) => (
+                  <option key={f} value={f} style={{ fontFamily: FONT_STACKS[f] }}>
+                    {t(`settings.themes.font_${f}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
               <p className="form-label mb-1.5">{t('settings.themes.livePreview')}</p>
               <ThemePreview
                 def={{
@@ -366,6 +443,12 @@ export const ThemeSettingsPage: React.FC = () => {
                   accent: isValidHex(form.accent) ? form.accent : BRAND_GOLD,
                   background: isValidHex(form.background) ? form.background : '#ffffff',
                   surface: isValidHex(form.surface) ? form.surface : '#ffffff',
+                  sidebarBg: isValidHex(form.sidebarBg) ? form.sidebarBg : '#ffffff',
+                  headerBg: isValidHex(form.headerBg) ? form.headerBg : '#ffffff',
+                  navText: isValidHex(form.navText) ? form.navText : '#52525b',
+                  navActive: isValidHex(form.navActive) ? form.navActive : BRAND_EMERALD,
+                  navIcon: isValidHex(form.navIcon) ? form.navIcon : '#71717a',
+                  font: form.font,
                 }}
                 active={false}
               />

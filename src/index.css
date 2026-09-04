@@ -55,6 +55,11 @@
   --brand-accent: #d4a017;
   --brand-background: #f7faf8;
   --brand-surface: #ffffff;
+  --brand-sidebar-bg: #ffffff;
+  --brand-header-bg: #ffffff;
+  --brand-nav-text: #52525b;
+  --brand-nav-active: #0b7a5e;
+  --brand-nav-icon: #71717a;
 
   /* Slate — legacy compatibility (existing pages use it) */
   --color-slate-50: #f8fafc;
@@ -368,6 +373,39 @@ html.dark {
   }
   .ring-brand {
     --tw-ring-color: color-mix(in srgb, var(--brand-primary, var(--color-primary-600)) 30%, transparent);
+  }
+
+  /* ---- Theme-driven app chrome ------------------------------------
+     Sidebar / header / nav links read the active ThemeDefinition via
+     --brand-* vars, so custom themes re-skin the whole shell. States:
+     default → hover → active are all token-driven (no hard-coded zinc). */
+  .surface-sidebar {
+    background-color: var(--brand-sidebar-bg);
+  }
+  .surface-header {
+    background: color-mix(in srgb, var(--brand-header-bg) 85%, transparent);
+  }
+  .surface-pop {
+    background-color: var(--brand-surface);
+  }
+  .nav-link {
+    color: var(--brand-nav-text);
+  }
+  .nav-link:hover {
+    background-color: color-mix(in srgb, var(--brand-nav-active) 8%, transparent);
+    color: var(--brand-nav-active);
+  }
+  .nav-link-active {
+    background-color: color-mix(in srgb, var(--brand-nav-active) 12%, transparent);
+    color: var(--brand-nav-active);
+    font-weight: 600;
+  }
+  .nav-icon {
+    color: var(--brand-nav-icon);
+  }
+  .nav-link:hover .nav-icon,
+  .nav-link-active .nav-icon {
+    color: var(--brand-nav-active);
   }
 
   /* Skeleton shimmer placeholder blocks */

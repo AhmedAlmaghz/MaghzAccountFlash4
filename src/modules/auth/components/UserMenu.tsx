@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   User as UserIcon,
@@ -35,19 +36,51 @@ export const UserMenu: React.FC = () => {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
 
+  const MENU_WIDTH = 288;
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; style: React.CSSProperties } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // The menu renders in a portal on document.body (above every stacking
+  // context), so measure the trigger and pin the popup under it. The menu's
+  // inline-END edge aligns with the trigger's inline-end edge, then clamps
+  // into the viewport — correct in RTL and LTR alike.
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const rtl = document.documentElement.dir !== 'ltr';
+    const top = Math.min(rect.bottom + 8, window.innerHeight - 16);
+    if (rtl) {
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
+      setMenuPos({ top, style: { position: 'fixed', top, left, width: MENU_WIDTH } });
+    } else {
+      const right = Math.max(8, Math.min(window.innerWidth - rect.right, window.innerWidth - MENU_WIDTH - 8));
+      setMenuPos({ top, style: { position: 'fixed', top, right, width: MENU_WIDTH } });
+    }
+  }, [open ]);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
+    // Re-measuring on scroll/resize fights the user; closing is predictable.
+    const onScroll = () => setOpen(false);
     document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
   }, [open ]);
 
   useEscapeKey(open, () => {
@@ -88,12 +121,15 @@ export const UserMenu: React.FC = () => {
         />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          aria-label={t('header.userMenu.openMenu')}
-          className="absolute end-0 top-full mt-2 w-72 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-float p-2 z-50 animate-scale-in origin-top"
-        >
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={t('header.userMenu.openMenu')}
+            style={menuPos?.style}
+            className="rounded-2xl border border-zinc-200 dark:border-zinc-700 surface-pop shadow-float p-2 z-[100] animate-scale-in origin-top"
+          >
           {/* Identity */}
           <div className="flex items-center gap-3 px-3 py-3">
             <UserAvatar user={user} size="md" />
@@ -219,8 +255,9 @@ export const UserMenu: React.FC = () => {
             <LogOut size={16} aria-hidden />
             {t('header.userMenu.logout')}
           </button>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
 
       <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
       <ChangePasswordModal isOpen={passwordOpen} onClose={() => setPasswordOpen(false)} />

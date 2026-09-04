@@ -85,4 +85,19 @@ describe('ActionButtons', () => {
     );
     expect(container.firstChild).toHaveClass('custom-actions');
   });
+
+  it('mobile kebab popup anchors to inline-start (opens into the card in RTL and LTR)', () => {
+    const { container } = render(
+      <div dir="rtl">
+        <ActionButtons onView={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} />
+      </div>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'إجراءات' }));
+    const popup = container.querySelector('.absolute.z-30');
+    expect(popup).not.toBeNull();
+    // `end-0` grows toward the viewport edge and is clipped by the page
+    // scroll container in RTL (popup hidden to the right).
+    expect(popup).toHaveClass('start-0');
+    expect(popup).not.toHaveClass('end-0');
+  });
 });

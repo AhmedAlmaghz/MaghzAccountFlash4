@@ -308,16 +308,14 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
         }}
         className={cn(
           'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150',
-          isActive
-            ? 'bg-primary-50/80 dark:bg-primary-500/10 text-primary-700 dark:text-primary-300 font-semibold'
-            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/70 hover:text-zinc-900 dark:hover:text-zinc-100'
+          isActive ? 'nav-link-active' : 'nav-link'
         )}
         title={!sidebarOpen ? t(item.labelKey) : undefined}
       >
         {isActive && (
           <span className="absolute inset-y-2 start-0 w-1 rounded-full bg-gradient-to-b from-primary-500 to-primary-400" />
         )}
-        <item.icon size={20} className={cn('shrink-0 transition-colors', isActive && 'text-primary-600 dark:text-primary-400')} />
+        <item.icon size={20} className="nav-icon shrink-0 transition-colors" />
         {sidebarOpen && (
           <>
             <span className="text-sm flex-1">{t(item.labelKey)}</span>
@@ -342,9 +340,7 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
                 onClick={onNavigate}
                 className={cn(
                   'flex items-center px-3 py-2 rounded-lg text-sm min-h-11 lg:min-h-9 transition-colors',
-                  childActive
-                    ? 'bg-primary-100/70 dark:bg-primary-500/10 text-primary-700 dark:text-primary-300 font-medium'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/70 hover:text-zinc-900 dark:hover:text-zinc-100'
+                  childActive ? 'nav-link-active font-medium' : 'nav-link'
                 )}
               >
                 {t(child.labelKey)}
@@ -405,7 +401,7 @@ export const Sidebar: React.FC = () => {
   return (
     <aside
       className={cn(
-        'hidden lg:flex h-full bg-white dark:bg-zinc-900 text-zinc-100 flex-col transition-all duration-300 ease-spring shrink-0 border-e border-zinc-200/60 dark:border-zinc-800',
+        'hidden lg:flex h-full surface-sidebar flex-col transition-all duration-300 ease-spring shrink-0 border-e border-zinc-200/60 dark:border-zinc-800',
         sidebarOpen ? 'w-72' : 'w-[4.5rem]'
       )}
     >
@@ -454,7 +450,7 @@ const MobileDrawer: React.FC<{ open: boolean; onClose: () => void }> = ({ open, 
         aria-modal="true"
         aria-label={t('nav.menu')}
         className={cn(
-          'absolute inset-y-0 start-0 w-[17.5rem] max-w-[85vw] bg-white dark:bg-zinc-900 shadow-float flex flex-col transition-transform duration-300 ease-spring',
+          'absolute inset-y-0 start-0 w-[17.5rem] max-w-[85vw] surface-sidebar shadow-float flex flex-col transition-transform duration-300 ease-spring',
           open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full'
         )}
       >
@@ -596,7 +592,7 @@ const CompanyChip: React.FC = () => {
 };
 
 const headerIconClass =
-  'p-2.5 rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors';
+  'p-2.5 rounded-xl nav-link nav-icon transition-colors';
 
 export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => void }> = ({
   onOpenSearch,
@@ -606,8 +602,8 @@ export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => vo
   const aiCanUse = useAuthStore((state) => state.hasPermission('ai.use' as Permission));
 
   return (
-    <header className="h-14 sm:h-16 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-xl border-b border-zinc-200/70 dark:border-zinc-800 flex items-center justify-between px-3 sm:px-6 gap-2 shrink-0">
-      {/* Start: menu + app brand + company */}
+    <header className="h-14 sm:h-16 surface-header backdrop-blur-xl border-b border-zinc-200/70 dark:border-zinc-800 flex items-center justify-between px-3 sm:px-6 gap-2 shrink-0">
+      {/* Start: menu + company (app brand lives only atop the sidebar) */}
       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
         {onOpenMenu && (
           <button
@@ -619,13 +615,6 @@ export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => vo
             <Menu size={22} />
           </button>
         )}
-        <div className="hidden sm:block">
-          <AppBrand variant="full" />
-        </div>
-        <div className="sm:hidden">
-          <AppBrand variant="compact" />
-        </div>
-        <div className="hidden sm:block h-6 w-px bg-zinc-200 dark:bg-zinc-700" />
         <CompanyChip />
       </div>
 

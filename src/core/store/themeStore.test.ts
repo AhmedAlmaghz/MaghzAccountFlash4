@@ -39,6 +39,12 @@ describe('useAppStore themes', () => {
       accent: '#654321',
       background: '#ffffff',
       surface: '#f5f5f5',
+      sidebarBg: '#ffffff',
+      headerBg: '#ffffff',
+      navText: '#52525b',
+      navActive: '#123456',
+      navIcon: '#71717a',
+      font: 'cairo',
     });
     const state = useAppStore.getState();
     expect(state.customThemes).toHaveLength(1);
@@ -55,6 +61,12 @@ describe('useAppStore themes', () => {
       accent: '#654321',
       background: '#ffffff',
       surface: '#f5f5f5',
+      sidebarBg: '#ffffff',
+      headerBg: '#ffffff',
+      navText: '#52525b',
+      navActive: '#123456',
+      navIcon: '#71717a',
+      font: 'cairo',
     });
     useAppStore.getState().updateCustomTheme('custom-1', { primary: '#0b7a5e' });
     expect(useAppStore.getState().customThemes[0].primary).toBe('#0b7a5e');
@@ -71,6 +83,12 @@ describe('useAppStore themes', () => {
       accent: '#654321',
       background: '#ffffff',
       surface: '#f5f5f5',
+      sidebarBg: '#ffffff',
+      headerBg: '#ffffff',
+      navText: '#52525b',
+      navActive: '#123456',
+      navIcon: '#71717a',
+      font: 'cairo',
     });
     useAppStore.getState().deleteCustomTheme('custom-1');
     const state = useAppStore.getState();

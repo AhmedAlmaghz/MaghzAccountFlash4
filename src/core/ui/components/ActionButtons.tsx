@@ -134,7 +134,10 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
           <MoreVertical size={18} />
         </button>
         {menuOpen && (
-          <div className="absolute z-30 top-full end-0 mt-1 min-w-36 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-float py-1.5 animate-scale-in">
+          // Anchored to the inline-START edge so the popup always opens INTO
+          // the card: `end-0` grows toward the viewport edge and gets clipped
+          // by the page scroll container in RTL (hidden to the right).
+          <div className="absolute z-30 top-full start-0 mt-1 min-w-36 surface-pop border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-float py-1.5 animate-scale-in">
             {actions.map((a) => (
               <button
                 key={a.key}
