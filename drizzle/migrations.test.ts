@@ -360,9 +360,8 @@ describe('Migration 0014: HR professional (payroll posting accounts & policies)'
     expect(migrationSql).not.toMatch(/DROP TABLE/i);
   });
 
-  it('journal mirrors the migration files (0015 is last)', () => {
+  it('journal mirrors the migration files (0015 registered, count in sync)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    const last = journal.entries[journal.entries.length - 1];
     expect(journal.entries.some((e) => e.tag === '0015_crm_professional')).toBe(true);
     expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
   });
