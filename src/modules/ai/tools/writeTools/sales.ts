@@ -32,6 +32,7 @@ export const salesWriteTools: ToolDefinition[] = [
     descriptionAr: 'ينشئ عميلاً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان، رقم ضريبي) مع رصيد افتتاحي وحد ائتماني اختياريين. الرصيد الافتتاحي يُرحّل تلقائياً محاسبياً.',
     permission: 'sales.create',
     dangerLevel: 'write',
+    route: '/sales/customers',
     parameters: {
       type: 'object',
       properties: {

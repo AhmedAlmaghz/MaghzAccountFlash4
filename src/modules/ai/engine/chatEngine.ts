@@ -385,6 +385,7 @@ class ChatEngine {
       this.successfulWritesThisSend.clear();
       this.fabricationRetries = 0;
       this.failedWriteAttempts.clear();
+      this.abortRequested = false; // fresh request — previous stop is consumed
 
       await this.runLoop();
     } catch (e) {
@@ -747,8 +748,33 @@ class ChatEngine {
     return result;
   }
 
-  private async runLoop(): Promise<void> {
+  /**
+   * Stop-generation request: set by the UI stop button while streaming.
+   * The runLoop checks it (a) between iterations and (b) on every streamed
+   * chunk — an aborted request finalizes the partial text honestly instead
+   * of hammering the provider to completion.
+   */
+  private abortRequested = false;
+
+  /** Request the current generation to stop at the next safe point. */
+  requestStop(): void {
+    this.abortRequested = true;
+  }
+
+  private consumeAbort(): boolean {
+    const was = this.abortRequested;
+    this.abortRequested = false;
+    return was;
+  }
+
+  async runLoop(): Promise<void> {
     while (this.iterationCount < MAX_ITERATIONS) {
+      // User pressed stop between turns — end the loop gracefully.
+      if (this.consumeAbort()) {
+        this.emitStoppedNotice();
+        return;
+      }
+
       this.iterationCount++;
 
       const llmTools = toLlmTools(getVisibleTools());
@@ -795,6 +821,21 @@ class ChatEngine {
         };
 
         for await (const chunk of streamGen) {
+          // Stop button: finalize the partial text and end the request.
+          if (this.abortRequested) {
+            this.abortRequested = false;
+            // Drain the generator so its cleanup (listener removal) runs.
+            void streamGen.return?.({ success: false, error: 'stopped' }).catch(() => {});
+            if (streamedContent && streamingId) {
+              this.store().updateMessageContent(streamingId, stripImitationToolBlocks(contentAcc));
+            }
+            this.store().addMessage({
+              role: 'assistant',
+              kind: 'text',
+              content: '⏹️ أوقفت التوليد بطلبك — المحتوى أعلاه جزئي.',
+            });
+            return;
+          }
           chunks.push(chunk);
           // Progressively update the text content as chunks arrive
           if (chunk.type === 'content' && chunk.content) {
@@ -1063,6 +1104,15 @@ class ChatEngine {
         'توقّف قبل إكمال الطلب لأنه تجاوز الحد الأقصى لخطوات التنفيذ. ما نُفِّذ فعلاً يظهر فقط في بطاقات الأدوات أعلاه — لا شيء إضافي. جرّب تقسيم الطلب إلى خطوات أصغر.',
     });
   }
+
+  /** Honest partial-output notice when the user stops between iterations. */
+  private emitStoppedNotice(): void {
+    this.store().addMessage({
+      role: 'assistant',
+      kind: 'text',
+      content: '⏹️ أوقفت التنفيذ بطلبك. ما نُفِّذ فعلاً يظهر في بطاقات الأدوات أعلاه فقط.',
+    });
+  }
 }
 
 /**
@@ -1195,8 +1245,11 @@ const TOOL_RESULT_MAX_CHARS = 4000;
 const NOISY_FIELDS = new Set([
   'companyId', 'company_id', 'createdBy', 'created_by', 'updatedBy', 'updated_by',
   'createdAt', 'created_at', 'updatedAt', 'updated_at', 'openingBalancePosted',
-  'opening_balance_posted', 'isActive', 'is_active', 'passwordHash', 'notes',
+  'opening_balance_posted', 'isActive', 'is_active', 'passwordHash',
 ]);
+// NOTE: `notes` is deliberately NOT stripped — in search results it can carry
+// the business WHY (rejection reason, reference, memo). Only truly internal
+// audit/tenant plumbing is noise for the model.
 
 function compactToolResultForLlm(result: unknown): string {
   let json: string;

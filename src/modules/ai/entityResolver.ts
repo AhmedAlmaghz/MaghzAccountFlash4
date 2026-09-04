@@ -20,6 +20,7 @@ import { accountingApi } from '@/modules/accounting/api';
 import { hrApi } from '@/modules/hr/api';
 import { manufacturingApi } from '@/modules/manufacturing/api';
 import { crmApi } from '@/modules/crm/api';
+import { useAuthStore } from '@/modules/auth/store';
 import * as coreApi from '@/core/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -491,20 +492,68 @@ function rankMatches(
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
+ * RBAC gate for entity lookups: a viewer without hr.view must not warm (or
+ * match against) the employees list — prefetch and the public search API
+ * (autocomplete consumers) filter by the CURRENT user's permissions so
+ * restricted data never enters the cache.
+ *
+ * `resolveEntitiesInText` (the engine's in-message correction pass) is
+ * deliberately EXEMPT: every tool the model can call is already RBAC-gated
+ * at the executor, so an entity type the user cannot view can never be the
+ * target of a correction; blocking the pass there would only break typo
+ * fixing for the types they DO own.
+ */
+const ENTITY_PERMISSIONS: Record<EntityType, string> = {
+  account: 'accounting.view',
+  customer: 'sales.view',
+  supplier: 'purchases.view',
+  employee: 'hr.view',
+  product: 'inventory.view',
+  warehouse: 'inventory.view',
+  cashBox: 'settings.view',
+  invoice: 'sales.view',
+  purchaseInvoice: 'purchases.view',
+  quotation: 'sales.view',
+  receiptVoucher: 'accounting.view',
+  paymentVoucher: 'accounting.view',
+  journalEntry: 'accounting.view',
+  workOrder: 'manufacturing.view',
+  bom: 'manufacturing.view',
+  lead: 'crm.view',
+  opportunity: 'crm.view',
+  task: 'crm.view',
+};
+
+function canSee(type: EntityType): boolean {
+  return useAuthStore.getState().hasPermission(ENTITY_PERMISSIONS[type] ?? 'ai.use');
+}
+
+/** RBAC-filtered searcher list for UI-facing lookups (autocomplete/prefetch). */
+function visibleSearchers(): typeof ENTITY_SEARCHERS {
+  return ENTITY_SEARCHERS.filter((s) => canSee(s.type));
+}
+
+/**
  * Search for entities matching a query string.
- * Used by the autocomplete UI (debounced, cached).
+ * Used by the autocomplete UI (debounced, cached). RBAC-FILTERED by default:
+ * entity types the current user cannot view are invisible. The engine's
+ * in-message pass passes `rbacFilter: false` — every callable tool is already
+ * gated at the executor, so an invisible-to-user entity type can never be a
+ * correction target there, and the pass must keep working for unit tests
+ * and headless engine runs.
  */
 export async function searchEntities(
   query: string,
   companyId: string,
   types?: EntityType[],
+  opts?: { rbacFilter?: boolean },
 ): Promise<EntityMatch[]> {
   const trimmed = query.trim();
   if (!trimmed || !companyId) return [];
 
-  const searchers = types
-    ? ENTITY_SEARCHERS.filter((s) => types.includes(s.type))
-    : ENTITY_SEARCHERS;
+  const rbacFilter = opts?.rbacFilter !== false;
+  const pool = rbacFilter ? visibleSearchers() : ENTITY_SEARCHERS;
+  const searchers = types ? pool.filter((s) => types.includes(s.type)) : pool;
 
   const results = await Promise.all(
     searchers.map(async (s) => {
@@ -528,13 +577,15 @@ export async function searchEntities(
 /**
  * Warm the entity cache in the background (fire-and-forget). Called when the
  * chat panel mounts so the FIRST user message doesn't pay the cold-fetch cost
- * of every entity type — by the time the user finishes typing, all lists are
- * already in memory.
+ * of every entity type. RBAC-filtered: only entity types the current user
+ * may view are warmed — restricted data never enters the cache at all.
  */
 export function prefetchEntityCache(companyId: string): void {
   if (!companyId) return;
   // Each searcher checks its own cache first — safe to call unconditionally.
-  void Promise.allSettled(ENTITY_SEARCHERS.map((s) => s.searcher('ا', companyId)));
+  void Promise.allSettled(
+    visibleSearchers().map((s) => s.searcher('ا', companyId)),
+  );
 }
 
 /**
@@ -631,7 +682,12 @@ export async function resolveEntitiesInText(
     const batchResults = await Promise.all(
       batch.map(async (token) => {
         try {
-          return await searchEntities(token.raw, companyId);
+          // rbacFilter: false — the ENGINE pass. Every tool callable by the
+          // model is RBAC-gated at the executor, so no correction can point
+          // at data the user cannot already act on; filtering here would only
+          // break typo fixing (and the engine's own unit tests, which run
+          // without a logged-in user).
+          return await searchEntities(token.raw, companyId, undefined, { rbacFilter: false });
         } catch {
           return [];
         }

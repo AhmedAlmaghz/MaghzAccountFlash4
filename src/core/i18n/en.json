@@ -230,6 +230,7 @@
     "openChat": "Open Assistant",
     "newChat": "New Chat",
     "inputPlaceholder": "Type your request... e.g., What are this month's total sales?",
+    "stopGeneration": "Stop generating",
     "send": "Send",
     "thinking": "Thinking...",
     "executingTool": "Executing: {{tool}}",

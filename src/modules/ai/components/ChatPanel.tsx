@@ -104,6 +104,10 @@ export function ChatPanel() {
     await engine.send(text);
   }, [engine]);
 
+  const handleStop = useCallback(() => {
+    getChatEngine().requestStop();
+  }, []);
+
   const handleConfirm = useCallback(async (callId: string, approved: boolean) => {
     await engine.resolveConfirmation(callId, approved);
   }, [engine]);
@@ -179,7 +183,7 @@ export function ChatPanel() {
         </div>
 
         {/* Input */}
-        <ChatInput onSend={handleSend} isProcessing={isProcessing} />
+        <ChatInput onSend={handleSend} onStop={handleStop} isProcessing={isProcessing} />
       </div>
     );
   }
@@ -221,7 +225,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <ChatInput onSend={handleSend} isProcessing={isProcessing} />
+      <ChatInput onSend={handleSend} onStop={handleStop} isProcessing={isProcessing} />
     </div>
   );
 }

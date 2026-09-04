@@ -230,6 +230,7 @@
     "openChat": "فتح المساعد",
     "newChat": "محادثة جديدة",
     "inputPlaceholder": "اكتب طلبك هنا... مثال: ما إجمالي مبيعات هذا الشهر؟",
+    "stopGeneration": "إيقاف التوليد",
     "send": "إرسال",
     "thinking": "يفكر...",
     "executingTool": "جاري تنفيذ: {{tool}}",

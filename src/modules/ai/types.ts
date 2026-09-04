@@ -131,6 +131,12 @@ export interface ToolDefinition {
   /** JSON Schema object describing the tool parameters (sent to the LLM). */
   parameters: Record<string, unknown>;
   /**
+   * App route to open after a successful run — powers the navigate chip.
+   * Declared ON the tool (single source of truth); the suggestion engine
+   * falls back to its prefix maps for tools that predate this field.
+   */
+  route?: string;
+  /**
    * Human-readable summary of a call — shown on the confirmation card
    * before execution of write tools.
    */

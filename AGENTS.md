@@ -4112,4 +4112,28 @@ npx drizzle-kit migrate
   - **CRLF يكسر مقارنات السطور الحرفية**: طبّع `\r\n→\n` قبل أي parsing حرفي للملفات على ويندوز
   - **sliding window snap**: أي نافذة سياق يجب أن تحترم علاقات الرسائل (tool↔tool_call) — بتر على حدّ خاطئ يُيتم النتائج ويربك المزود
   - **لا تدفع ترقية أداء كاذبة**: القياس أولاً (vite 8.2 أبطأ 3x في dev/e2e هنا) — الترقية الأمنية تُحفظ فقط إذا أثبتت القياسات السلامة
-*آخر تحديث: 2026-09-03 | الإصدار: maghzaccount-pro v0.12.2 (سلسلة package.json)*
+
+### المرحلة 77ب (v0.12.3): إغلاق المتبقي — RBAC للكيانات + تنظيف الميت + Stop Generation + route metadata
+- **الهدف**: آخر البنود الصغيرة من تقرير الفحص الشامل (P2-9/10/11/12 + P3-14/16)
+- **P2-9 — RBAC لعمليات الكيانات (entityResolver)**:
+  - `ENTITY_PERMISSIONS` خريطة type→permission + `visibleSearchers()`: prefetch وautocomplete API (searchEntities الافتراضي) لا يحوّمان ولا يعيدان أنواع كيانات لا يملك المستخدم صلاحية عرضها — **الموظفون لا يدخلون الكاش أصلاً** لدور بلا hr.view
+  - `resolveEntitiesInText` (مسار المحرك) **معفى عمداً** عبر `rbacFilter: false`: كل أداة يستطيع النموذج استدعاءها محمية أصلاً في المنفّذ، فلا يمكن لتصحيح أن يشير لبيانات لا يستطيع المستخدم الوصول لها — والفلترة هناك كانت تكسر فقط إصلاح الأخطاء الإملائية
+  - درس معماري: **طبّق RBAC عند حدود الاستهلاك الواجهة، لا في المسارات الداخلية المحمية أصلاً بطبقة أعلى**
+- **P2-10 — تنظيف الـ autocomplete الميت**: AutoCompleteDropdown.tsx (مكون + ~150 سطر ربط: state/blur/debounce/keyboard/selectEntity) **حُذف نهائياً** — كان معطلاً بـ `AUTOCOMPLETE_ENABLED=false` منذ 2026-07-31 ومستبدلاً بتصحيح المحرك في send. ChatInput نحف من 389→242 سطراً
+- **P2-11 — NOISY_FIELDS لم تعد تحذف notes**: في نتائج البحث تحمل السبب التجاري (سبب رفض/مرجع/بيان) — فقط عومل السباكة الداخلية (audit/tenant) يُقتطع
+- **P2-12 — toolExecutor cache/limiter**:
+  - توقيع الكاش الصادق: `getCachedToolResult(namespace, name, args)` — القديم كان يمرر namespace مركّباً في معامل اسمه "name". namespace فارغ يرفض (لا مشاركة كاش بين tenants)
+  - `isTest` عبر `import.meta.env.MODE === 'test'` بدل `typeof window === 'undefined'` (كان يعطل الـ limiter في أي بيئة بلا window مستقبلاً)
+- **P3-14 — زر إيقاف التوليد (Stop Generation)**:
+  - `ChatEngine.requestStop()` + `abortRequested`: الحلقة تفحص بين التكرارات وعلى **كل chunk متدفق** — إيقاف يُنهي النص الجزئي بأمان (drain للـ generator) + إشعار صادق "أوقفت بطلبك — المحتوى أعلاه جزئي"
+  - ChatInput: زر المعالجة تحول من spinner ميت إلى زر Stop أحمر؛ موصول عبر ChatPanel→engine. طلب جديد يصفّر العلم
+- **P3-16 — route metadata على ToolDefinition**: حقل `route?: string` اختياري (مصدر حقيقة واحد للأداة) — suggestionEngine يقرأه أولاً مع fallback للخرائط المنسقة. POC على sales.create_customer؛ الترحيل التدريجي لبقية الأدوات يلغي TOOL_ROUTES نهائياً
+- **i18n**: +`ai.stopGeneration` متوازن AR/EN
+- **اختبارات (+3 → AI 317/317، المشروع 1482/1482)**: `entityResolver.rbac.test.ts` (3): prefetch لا يحمّل المحظور، search لا يعيده، المسموح يعمل
+- **النتيجة النهائية**: tsc 0 ✓ | eslint 0/0 ✓ | vitest 1482/1482 (100 ملف، أول تشغيلة خضراء) ✓ | build 18s ✓
+- **قواعد ذهبية مضافة**:
+  - **RBAC عند حدود الاستهلاك**: autonomy الفلترة في prefetch/autocomplete (مداخل الواجهة)؛ المسارات الداخلية المحمية بالمنفّذ لا تُفلتر مجدداً — ازدواج الفلطة يكسر الاختبارات بلا أمن إضافي
+  - **الكود الميت يُحذف لا يُعلَّق**: flag معطل 3 أشهر + 700 سطر = عبء صيانة بلا قيمة؛ التاريخ في git
+  - **إيقاف التوليد يفحص على مستوى chunk لا iteration فقط**: المستخدم يضغط Stop أثناء تدفق طويل — الانتظار للدورة التالية يعني انتظار دقيقة+
+  - **إخفاء سلوك بمعامل افتراضي آمن**: `opts?: { rbacFilter?: boolean }` مع true افتراضياً — المستدعيات القديمة آمنة بلا تعديل، والاستثناء (المحرك) صريح وموثق
+*آخر تحديث: 2026-09-03 | الإصدار: maghzaccount-pro v0.12.3 (سلسلة package.json)*

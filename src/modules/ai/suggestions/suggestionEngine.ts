@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../types';
+import { getTool } from '../tools/registry';
 
 /**
  * Suggestion engine — turns an assistant message into actionable suggestion
@@ -203,9 +204,24 @@ const TEXT_KEYWORDS: Array<{ keywords: string[]; target: RouteTarget }> = [
 ];
 
 function findRoute(toolName: string): RouteTarget | null {
+  // 1. Single source of truth: the tool's own `route` field (Phase 77ب).
+  const def = getTool(toolName);
+  const declaredRoute = def?.route;
+  if (declaredRoute) {
+    // Prefer the curated Arabic label whose path matches the declared route;
+    // otherwise a sensible module-page label.
+    const curated = TOOL_ROUTES.find(
+      ({ prefixes, target }) => target.path === declaredRoute && prefixes.some((p) => toolName.startsWith(p) || toolName === p),
+    );
+    if (curated) return curated.target;
+    const moduleTarget = MODULE_FALLBACKS.find(({ prefixes }) => prefixes.some((p) => declaredRoute.startsWith(p.slice(0, 6)) || declaredRoute.includes(p.slice(0, 6))));
+    return moduleTarget?.target ?? { path: declaredRoute, labelKey: 'ai.actions.openReports' };
+  }
+  // 2. Curated prefix map (legacy but still maintained).
   for (const { prefixes, target } of TOOL_ROUTES) {
     if (prefixes.some((p) => toolName.startsWith(p) || toolName === p)) return target;
   }
+  // 3. Module-level fallback.
   for (const { prefixes, target } of MODULE_FALLBACKS) {
     if (prefixes.some((p) => toolName.startsWith(p))) return target;
   }

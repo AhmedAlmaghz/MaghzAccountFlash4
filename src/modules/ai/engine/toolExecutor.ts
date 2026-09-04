@@ -7,37 +7,45 @@ import type { ToolContext, ToolDefinition } from '../types';
 
 /**
  * Tool result cache — avoids redundant read queries within a session.
- * Keys are `${toolName}:${JSON.stringify(args)}`. Invalidated after any
- * write tool execution.
+ * Namespaced by tenant+user+tool and keyed by the JSON of the cleaned args.
+ * Invalidated after any write tool execution.
+ *
+ * Cache key design note: the OLD signature was `getCachedToolResult(name, args)`
+ * while every caller passed a pre-composed `${companyId}:${userId}:${tool}` —
+ * the parameter named "name" was actually a namespace. The new signature
+ * makes both explicit and guards against empty namespaces (which would
+ * have silently shared results across tenants).
  */
 const toolResultCache = new Map<string, { result: unknown; timestamp: number }>();
 const CACHE_TTL_MS = 60_000; // 1 minute
 
-function cacheKey(name: string, args: Record<string, unknown>): string {
-  return `${name}:${JSON.stringify(args)}`;
+function cacheKey(namespace: string, name: string, args: Record<string, unknown>): string {
+  return `${namespace}:${name}:${JSON.stringify(args)}`;
 }
 
 export function getCachedToolResult(
+  namespace: string,
   name: string,
   args: Record<string, unknown>
 ): { result: unknown } | null {
-  const key = cacheKey(name, args);
-  const entry = toolResultCache.get(key);
+  if (!namespace) return null; // defensive: never share cache across tenants
+  const entry = toolResultCache.get(cacheKey(namespace, name, args));
   if (!entry) return null;
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    toolResultCache.delete(key);
+    toolResultCache.delete(cacheKey(namespace, name, args));
     return null;
   }
   return { result: entry.result };
 }
 
 export function setCachedToolResult(
+  namespace: string,
   name: string,
   args: Record<string, unknown>,
   result: unknown
 ): void {
-  const key = cacheKey(name, args);
-  toolResultCache.set(key, { result, timestamp: Date.now() });
+  if (!namespace) return;
+  toolResultCache.set(cacheKey(namespace, name, args), { result, timestamp: Date.now() });
 }
 
 /** Invalidate all cache — called after any write tool executes. */
@@ -87,7 +95,17 @@ const TOOL_RATE_LIMIT_WRITE_PER_MINUTE = 60;
 const TOOL_RATE_WINDOW_MS = 60_000;
 
 const callCounter = new Map<string, number[]>();
-const isTest = typeof window === 'undefined';
+/**
+ * The OLD heuristic (`typeof window === 'undefined'`) silently disabled the
+ * limiter in any windowless environment (SSR, workers, a future server
+ * runtime). The explicit flag is opt-OUT by the TEST SUITE ONLY — production
+ * paths (browser AND any future renderer host) are always rate-limited.
+ * `import.meta.env.MODE` is the renderer-safe way to detect vitest (vitest
+ * injects MODE === 'test').
+ */
+const isTest: boolean =
+  typeof import.meta !== 'undefined' &&
+  (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE === 'test';
 
 function userRateKey(ctx: ToolContext, dangerLevel: string): string {
   return `${ctx.userId}:${dangerLevel}`;
@@ -143,9 +161,9 @@ export async function executeToolCall(
     return { ok: false, error, errorClass: classifyToolError(error) };
   }
 
-  // Read tools: check cache first
+  // Read tools: check cache first (namespaced per tenant+user)
   if (tool.dangerLevel === 'read') {
-    const cached = getCachedToolResult(`${ctx.companyId}:${ctx.userId}:${name}`, cleanArgs);
+    const cached = getCachedToolResult(`${ctx.companyId}:${ctx.userId}`, name, cleanArgs);
     if (cached) return { ok: true, result: cached.result };
   }
 
@@ -168,8 +186,8 @@ export async function executeToolCall(
         companyId: ctx.companyId,
       });
     } else {
-      // Cache read tool results
-      setCachedToolResult(`${ctx.companyId}:${ctx.userId}:${name}`, cleanArgs, result);
+      // Cache read tool results (namespaced per tenant+user)
+      setCachedToolResult(`${ctx.companyId}:${ctx.userId}`, name, cleanArgs, result);
     }
 
     return { ok: true, result };
