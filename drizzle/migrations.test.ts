@@ -484,11 +484,9 @@ describe('Migration 0016: HR attendance & payroll notes (v0.8.1)', () => {
     expect(hr).toMatch(/notes: text\('notes'\)/);
   });
 
-  it('journal registers 0016 as the last entry', () => {
+  it('journal registers 0016 (entry present, count mirrors sql files)', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
-    const last = journal.entries[journal.entries.length - 1];
-    expect(last.tag).toBe('0016_hr_attendance_notes');
-    expect(last.idx).toBe(16);
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0016_hr_attendance_notes')).toBe(true);
     expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
   });
 
@@ -496,5 +494,35 @@ describe('Migration 0016: HR attendance & payroll notes (v0.8.1)', () => {
     const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
     expect(pglite).toMatch(/0016_hr_attendance_notes\.sql\?raw/);
     expect(pglite).toMatch(/\{ name: '0016_hr_attendance_notes', sql: hrAttendanceNotes \}/);
+  });
+});
+
+describe('Migration 0017: users.photo_url (header avatar menu)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0017_users_photo_url.sql'), 'utf-8');
+
+  it('adds users.photo_url as nullable text', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url text/);
+  });
+
+  it('is purely additive/idempotent (no DROP, guarded)', () => {
+    expect(migrationSql).not.toMatch(/DROP TABLE/i);
+    expect(migrationSql).toMatch(/IF NOT EXISTS/);
+  });
+
+  it('Drizzle schema exposes photoUrl on users', () => {
+    const core = readFileSync(join(process.cwd(), 'src/core/database/schema/core.ts'), 'utf-8');
+    expect(core).toMatch(/photoUrl: text\('photo_url'\)/);
+  });
+
+  it('journal registers 0017 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0017_users_photo_url')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0017 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0017_users_photo_url\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0017_users_photo_url', sql: usersPhotoUrl \}/);
   });
 });

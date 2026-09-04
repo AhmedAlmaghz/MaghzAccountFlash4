@@ -173,7 +173,7 @@ interface PreloadDB {
 interface ElectronAuth {
   login(credentials: { username: string; password: string }): Promise<{
     success: boolean;
-    user?: { id: string; companyId: string; username: string; role: string; roleId?: string; branchId?: string; email?: string; fullName?: string; phone?: string; isActive: boolean };
+    user?: { id: string; companyId: string; username: string; role: string; roleId?: string; branchId?: string; email?: string; fullName?: string; phone?: string; photoUrl?: string; isActive: boolean };
     permissions?: string[];
     error?: string;
   }>;
@@ -183,6 +183,8 @@ interface ElectronAuth {
   createUser(data: Record<string, unknown>): Promise<{ success: boolean; id?: string; error?: string }>;
   updateUser(id: string, data: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
   resetPassword(id: string, password: string): Promise<{ success: boolean; error?: string }>;
+  updateProfile(data: { fullName?: string | null; phone?: string | null; photoUrl?: string | null }): Promise<{ success: boolean; user?: ElectronAuthUser; error?: string }>;
+  changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }>;
   deleteUser(id: string): Promise<{ success: boolean; error?: string }>;
   listRoles(): Promise<{ success: boolean; data?: Record<string, unknown>[]; error?: string }>;
   createRole(data: Record<string, unknown>): Promise<{ success: boolean; id?: string; error?: string }>;
@@ -201,6 +203,7 @@ interface ElectronAuthUser {
   email?: string;
   fullName?: string;
   phone?: string;
+  photoUrl?: string;
   isActive: boolean;
 }
 

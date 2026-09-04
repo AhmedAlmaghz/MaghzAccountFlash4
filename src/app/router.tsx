@@ -112,6 +112,7 @@ const UnitsPage = React.lazy(() => import('@/modules/settings/components/UnitsPa
 const CashBoxesPage = React.lazy(() => import('@/modules/settings/components/CashBoxesPage'));
 const CostCentersPage = React.lazy(() => import('@/modules/settings/components/CostCentersPage'));
 const DatabaseSettingsPage = React.lazy(() => import('@/modules/settings/components/DatabaseSettingsPage'));
+const ThemeSettingsPage = React.lazy(() => import('@/modules/settings/components/ThemeSettingsPage'));
 
 const withSuspense = (Component: React.ComponentType) => (
   <React.Suspense fallback={<PageLoader />}>
@@ -277,6 +278,7 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="settings" />}>
               <Route path="/settings" element={withSuspense(SettingsLayout)}>
                 <Route path="company" element={withSuspense(CompanySetup)} />
+                <Route path="themes" element={withSuspense(ThemeSettingsPage)} />
                 <Route path="currencies" element={withSuspense(CurrenciesPage)} />
                 <Route path="vat" element={withSuspense(VatSettingsPage)} />
           <Route path="hr-policies" element={withSuspense(HrSettingsPage)} />

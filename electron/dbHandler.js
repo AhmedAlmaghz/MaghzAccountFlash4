@@ -3245,7 +3245,7 @@ export function registerAuthHandlers() {
       // and accept the first active one whose password verifies (LIMIT 1 used
       // to pick an arbitrary tenant on collisions).
       const result = await pool.query(
-        `SELECT id, company_id, username, email, full_name, phone, role, branch_id, is_active, password_hash
+        `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, password_hash
            FROM users WHERE username = $1`,
         [username.trim()]
       );
@@ -3271,6 +3271,7 @@ export function registerAuthHandlers() {
         email: row.email || undefined,
         fullName: row.full_name || undefined,
         phone: row.phone || undefined,
+        photoUrl: row.photo_url || undefined,
         role: row.role,
         roleId,
         branchId: row.branch_id || undefined,
@@ -3302,7 +3303,7 @@ export function registerAuthHandlers() {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.view')) return { success: false, error: 'Permission denied' };
       const result = await pool.query(
-        `SELECT id, company_id, username, email, full_name, phone, role, branch_id, is_active, last_login_at, created_at, updated_at
+        `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, last_login_at, created_at, updated_at
            FROM users WHERE company_id = $1 ORDER BY username`,
         [session.user.companyId]
       );
@@ -3354,9 +3355,9 @@ export function registerAuthHandlers() {
       }
       const result = await pool.query(
         `UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, role = $5,
-         branch_id = $6::uuid, is_active = $7, updated_at = NOW() WHERE id = $8::uuid AND company_id = $9 RETURNING id`,
+         branch_id = $6::uuid, is_active = $7, photo_url = $8, updated_at = NOW() WHERE id = $9::uuid AND company_id = $10 RETURNING id`,
         [data?.username, data?.email || null, data?.fullName || null, data?.phone || null, data?.role,
-          data?.branchId || null, data?.isActive !== false, id, session.user.companyId]
+          data?.branchId || null, data?.isActive !== false, data?.photoUrl || null, id, session.user.companyId]
       );
       if (result.rows.length) {
         // Deactivating a user must cut off their live sessions immediately.
@@ -3391,6 +3392,67 @@ export function registerAuthHandlers() {
         return { success: true };
       }
       return { success: false, error: 'User not found' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Self-service profile update — the signed-in user edits ONLY their own
+  // row (full name, phone, photo). No settings.edit required: identity comes
+  // from the session, never from the payload.
+  ipcMain.handle('auth:update-profile', async (event, { sessionToken, data } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session) return { success: false, error: 'Permission denied' };
+      const fullName = typeof data?.fullName === 'string' ? data.fullName.trim().slice(0, 255) : null;
+      const phone = typeof data?.phone === 'string' ? data.phone.trim().slice(0, 50) : null;
+      const photoUrl = typeof data?.photoUrl === 'string' && data.photoUrl.length <= 3000000 ? data.photoUrl : null;
+      const result = await pool.query(
+        `UPDATE users SET full_name = $1, phone = $2, photo_url = $3, updated_at = NOW()
+          WHERE id = $4::uuid AND company_id = $5
+          RETURNING id, username, email, full_name, phone, photo_url, role, branch_id, is_active`,
+        [fullName, phone, photoUrl, session.user.id, session.user.companyId]
+      );
+      if (!result.rows.length) return { success: false, error: 'User not found' };
+      const row = result.rows[0];
+      return {
+        success: true,
+        user: {
+          ...session.user,
+          fullName: row.full_name || undefined,
+          phone: row.phone || undefined,
+          photoUrl: row.photo_url || undefined,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Self-service password change — verifies the CURRENT password first, then
+  // applies the policy-checked new one. Other sessions are revoked; the
+  // current session stays alive so the user is not logged out mid-flow.
+  ipcMain.handle('auth:change-password', async (event, { sessionToken, currentPassword, newPassword } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session) return { success: false, error: 'Permission denied' };
+      if (!validateNewPassword(newPassword)) return { success: false, error: 'Password does not meet policy' };
+      const found = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1::uuid AND company_id = $2',
+        [session.user.id, session.user.companyId]
+      );
+      if (!found.rows.length) return { success: false, error: 'User not found' };
+      if (!verifyPasswordNode(currentPassword, found.rows[0].password_hash)) {
+        return { success: false, error: 'Current password is incorrect' };
+      }
+      await pool.query(
+        'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3',
+        [hashPasswordNode(newPassword), session.user.id, session.user.companyId]
+      );
+      for (const [token, candidate] of sessions) {
+        if (candidate.user.id === session.user.id && token !== sessionToken) sessions.delete(token);
+      }
+      return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }

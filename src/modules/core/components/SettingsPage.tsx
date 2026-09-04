@@ -19,6 +19,7 @@ import {
   Vault,
   Landmark,
   Target,
+  Palette,
   Database as DatabaseIcon,
 } from 'lucide-react';
 import { cn } from '@/core/utils';
@@ -33,6 +34,7 @@ interface SettingsMenuItem {
 
 const menuItems: SettingsMenuItem[] = [
   { id: 'company', labelKey: 'settings.menu.company', icon: Building2, path: '/settings/company' },
+  { id: 'themes', labelKey: 'settings.menu.themes', icon: Palette, path: '/settings/themes' },
   { id: 'currencies', labelKey: 'settings.menu.currencies', icon: Coins, path: '/settings/currencies' },
   { id: 'vat', labelKey: 'settings.menu.vat', icon: Receipt, path: '/settings/vat' },
   { id: 'branches', labelKey: 'settings.menu.branches', icon: GitBranch, path: '/settings/branches' },

@@ -29,4 +29,30 @@ test.describe('Authentication', () => {
     await logout(page);
     await expect(page).toHaveURL(/login/);
   });
+
+  test('header shows brand, home, AI shortcuts and the avatar menu', async ({ page }) => {
+    await loginAs(page);
+
+    // App name + dynamic version under it (AppBrand in the header)
+    await expect(page.locator('header').getByText('محاسبة المهذب').first()).toBeVisible();
+    await expect(page.locator('header').getByText(/^v\d+\.\d+\.\d+/).first()).toBeVisible();
+
+    // Home + AI assistant shortcuts in the header (sidebar has its own AI link)
+    const header = page.locator('header');
+    await expect(header.getByRole('link', { name: 'الصفحة الرئيسية' })).toHaveAttribute('href', '/');
+    await expect(header.getByRole('link', { name: 'المساعد الذكي' })).toHaveAttribute('href', '/ai');
+
+    // Avatar menu: name + sections
+    await page.getByRole('button', { name: 'قائمة المستخدم' }).click();
+    const menu = page.getByRole('menu');
+    await expect(menu.getByText('admin').first()).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'الملف الشخصي' })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'تغيير كلمة السر' })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'الإعدادات' })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'تسجيل الخروج' })).toBeVisible();
+
+    // Change-password modal opens from the menu
+    await menu.getByRole('menuitem', { name: 'تغيير كلمة السر' }).click();
+    await expect(page.locator('text=تغيير كلمة السر').last()).toBeVisible();
+  });
 });

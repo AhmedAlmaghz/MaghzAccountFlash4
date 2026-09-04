@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, LogIn, Eye, EyeOff, ShieldCheck, User, Lock } from 'lucide-react';
-import { Button, Input } from '@/core/ui/components';
+import { LogIn, Eye, EyeOff, ShieldCheck, User, Lock } from 'lucide-react';
+import { AppBrand, Button, Input } from '@/core/ui/components';
 import { useAuthStore } from '../store';
 import { authApi } from '../api';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -57,14 +57,8 @@ export const LoginPage: React.FC = () => {
       </div>
 
       <div className={`w-full max-w-md relative z-10 transition-all duration-700 ${showAnimation ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-primary-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-600/30 animate-scale-in">
-            <Building2 size={40} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">{t('appName')}</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">{t('appSubtitle')}</p>
-        </div>
+        {/* Logo — unified brand (icon + name + subtitle + dynamic version) */}
+        <AppBrand variant="login" className="mb-8" />
 
         {/* Login Form */}
         <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 sm:p-8 backdrop-blur-sm">

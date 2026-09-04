@@ -27,7 +27,7 @@ function createWindow() {
       webSecurity: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
-    title: 'maghzaccount-pro - نظام ERP محاسبي متكامل',
+    title: 'محاسبة المهذب | MaghzAccount Pro — نظام ERP محاسبي متكامل',
     frame: true,
     show: false,
   });

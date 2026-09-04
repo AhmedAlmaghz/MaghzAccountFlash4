@@ -15,6 +15,7 @@ export { PermissionGate, Can } from './PermissionGate';
 export { ToastContainer } from './Toast';
 export { PageLoader } from './PageLoader';
 export { DuplicateWarningDialog } from './DuplicateWarningDialog';
+export { AppBrand } from './AppBrand';
 export { PageHeader } from './patterns/PageHeader';
 export { StatsGrid } from './patterns/StatsGrid';
 export { FilterBar } from './patterns/FilterBar';

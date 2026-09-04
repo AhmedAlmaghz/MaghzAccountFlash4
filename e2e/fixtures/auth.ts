@@ -45,9 +45,13 @@ export async function loginAs(page: Page, credentials = ADMIN_USER): Promise<voi
 }
 
 export async function logout(page: Page): Promise<void> {
-  const logoutBtn = page.locator('button[title="تسجيل الخروج"]').first();
-  await logoutBtn.waitFor({ state: 'visible', timeout: 5_000 });
-  await logoutBtn.click();
+  // Logout lives inside the avatar dropdown since the header redesign.
+  const menuBtn = page.getByRole('button', { name: 'قائمة المستخدم' });
+  await menuBtn.waitFor({ state: 'visible', timeout: 5_000 });
+  await menuBtn.click();
+  const logoutItem = page.getByRole('menuitem', { name: 'تسجيل الخروج' });
+  await logoutItem.waitFor({ state: 'visible', timeout: 5_000 });
+  await logoutItem.click();
   await page.waitForURL(/login/);
 }
 

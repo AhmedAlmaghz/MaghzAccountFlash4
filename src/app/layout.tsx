@@ -16,11 +16,8 @@ import {
   ChevronLeft,
   ChevronDown,
   Building2,
-  LogOut,
   User,
-  Moon,
-  Sun,
-  Globe,
+  House,
   Search,
   UserPlus,
   Target,
@@ -30,6 +27,8 @@ import {
   X,
 } from 'lucide-react';
 import { CommandPalette, type EntitySource } from '@/core/ui/components/command/CommandPalette';
+import { AppBrand } from '@/core/ui/components/AppBrand';
+import { UserMenu } from '@/modules/auth/components/UserMenu';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { inventoryApi } from '@/modules/inventory/api';
@@ -210,6 +209,7 @@ const menuItems: MenuItem[] = [
     module: 'settings',
     children: [
       { labelKey: 'sidebar.settings.company', path: '/settings/company' },
+      { labelKey: 'settings.menu.themes', path: '/settings/themes' },
       { labelKey: 'sidebar.settings.currencies', path: '/settings/currencies' },
       { labelKey: 'sidebar.settings.vat', path: '/settings/vat' },
       { labelKey: 'sidebar.hrPolicy', path: '/settings/hr-policies' },
@@ -358,7 +358,6 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
 }
 
 const SidebarContent: React.FC<{ sidebarOpen: boolean; onNavigate?: () => void }> = ({ sidebarOpen, onNavigate }) => {
-  const { t } = useTranslation();
   const hasModuleAccess = useModuleAccess();
   const groups = useMemo(
     () => [
@@ -374,20 +373,9 @@ const SidebarContent: React.FC<{ sidebarOpen: boolean; onNavigate?: () => void }
 
   return (
     <>
-      {/* Logo */}
+      {/* Logo — unified brand (icon + name + dynamic version) */}
       <div className="h-16 flex items-center px-4 border-b border-zinc-200/60 dark:border-zinc-800 shrink-0">
-        {sidebarOpen ? (
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-lift">
-              <Building2 size={18} className="text-white" />
-            </div>
-            <span className="font-bold text-lg text-zinc-900 dark:text-white">{t('appSubtitle')}</span>
-          </div>
-        ) : (
-          <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center mx-auto">
-            <Building2 size={18} className="text-white" />
-          </div>
-        )}
+        {sidebarOpen ? <AppBrand variant="full" /> : <AppBrand variant="compact" />}
       </div>
 
       {/* Navigation */}
@@ -471,12 +459,7 @@ const MobileDrawer: React.FC<{ open: boolean; onClose: () => void }> = ({ open, 
         )}
       >
         <div className="h-16 flex items-center justify-between px-4 border-b border-zinc-200/60 dark:border-zinc-800 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-lift">
-              <Building2 size={18} className="text-white" />
-            </div>
-            <span className="font-bold text-lg text-zinc-900 dark:text-white">{t('appSubtitle')}</span>
-          </div>
+          <AppBrand variant="full" />
           <button
             onClick={onClose}
             className="p-2.5 -me-2 rounded-xl text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
@@ -577,39 +560,77 @@ const BottomTabs: React.FC<{ onOpenMore: () => void }> = ({ onOpenMore }) => {
   );
 };
 
+/**
+ * Company identity chip — logo (or fallback mark) + name.
+ * Hidden on small screens to keep the header compact.
+ */
+const CompanyChip: React.FC = () => {
+  const { t } = useTranslation();
+  const activeCompany = useAppStore((state) => state.activeCompany);
+  const [logoBroken, setLogoBroken] = useState(false);
+
+  useEffect(() => {
+    setLogoBroken(false);
+  }, [activeCompany?.logoUrl]);
+
+  if (!activeCompany) return null;
+  const logo = !logoBroken && activeCompany.logoUrl ? activeCompany.logoUrl : null;
+
+  return (
+    <div className="hidden md:flex items-center gap-2 min-w-0 max-w-55 text-sm text-zinc-600 dark:text-zinc-300">
+      {logo ? (
+        <img
+          src={logo}
+          alt={t('header.companyLogo')}
+          onError={() => setLogoBroken(true)}
+          className="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-zinc-200 dark:ring-zinc-700"
+        />
+      ) : (
+        <span className="w-8 h-8 rounded-lg bg-gold-100 dark:bg-gold-900/30 flex items-center justify-center shrink-0">
+          <Building2 size={16} className="text-gold-600 dark:text-gold-400" aria-hidden />
+        </span>
+      )}
+      <span className="font-medium truncate">{activeCompany.name}</span>
+    </div>
+  );
+};
+
+const headerIconClass =
+  'p-2.5 rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors';
+
 export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => void }> = ({
   onOpenSearch,
   onOpenMenu,
 }) => {
   const { t } = useTranslation();
-  const theme = useAppStore((state) => state.theme);
-  const toggleTheme = useAppStore((state) => state.toggleTheme);
-  const language = useAppStore((state) => state.language);
-  const setLanguage = useAppStore((state) => state.setLanguage);
-  const activeCompany = useAppStore((state) => state.activeCompany);
-  const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
-  const navigate = useNavigate();
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  const aiCanUse = useAuthStore((state) => state.hasPermission('ai.use' as Permission));
 
   return (
     <header className="h-14 sm:h-16 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-xl border-b border-zinc-200/70 dark:border-zinc-800 flex items-center justify-between px-3 sm:px-6 gap-2 shrink-0">
+      {/* Start: menu + app brand + company */}
       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-        {/* Mobile hamburger */}
         {onOpenMenu && (
           <button
             onClick={onOpenMenu}
-            className="lg:hidden p-2.5 -ms-1 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+            className={cn('lg:hidden -ms-1', headerIconClass)}
             title={t('nav.menu')}
             aria-label={t('nav.menu')}
           >
             <Menu size={22} />
           </button>
         )}
+        <div className="hidden sm:block">
+          <AppBrand variant="full" />
+        </div>
+        <div className="sm:hidden">
+          <AppBrand variant="compact" />
+        </div>
+        <div className="hidden sm:block h-6 w-px bg-zinc-200 dark:bg-zinc-700" />
+        <CompanyChip />
+      </div>
+
+      {/* End: search + home + AI + user menu */}
+      <div className="flex items-center gap-1 sm:gap-2">
         {onOpenSearch && (
           <button
             onClick={onOpenSearch}
@@ -624,53 +645,25 @@ export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => vo
             </kbd>
           </button>
         )}
-        {activeCompany && (
-          <div className="hidden sm:flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300 min-w-0">
-            <Building2 size={16} className="shrink-0 text-primary-600 dark:text-primary-400" />
-            <span className="font-medium truncate">{activeCompany.name}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-1 sm:gap-2">
-        {user && (
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden md:flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-              <span className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 text-white flex items-center justify-center text-xs font-bold uppercase">
-                {user.username?.charAt(0)}
-              </span>
-              <span className="font-medium">{user.username}</span>
-              <span className="text-xs text-zinc-400">({user.role})</span>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="p-2.5 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
-              title={t('header.logout')}
-              aria-label={t('header.logout')}
-            >
-              <LogOut size={18} />
-            </button>
-          </div>
-        )}
-
-        <div className="hidden sm:block h-6 w-px bg-zinc-200 dark:bg-zinc-700" />
-
-        <button
-          onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
-          className="p-2.5 rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors"
-          title={language === 'ar' ? t('header.switchToEnglish') : t('header.switchToArabic')}
-          aria-label={language === 'ar' ? t('header.switchToEnglish') : t('header.switchToArabic')}
+        <Link
+          to="/"
+          className={headerIconClass}
+          title={t('header.home')}
+          aria-label={t('header.home')}
         >
-          <Globe size={18} />
-        </button>
-        <button
-          onClick={toggleTheme}
-          className="p-2.5 rounded-xl text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800 transition-colors"
-          title={theme === 'dark' ? t('header.lightMode') : t('header.darkMode')}
-          aria-label={theme === 'dark' ? t('header.lightMode') : t('header.darkMode')}
-        >
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
+          <House size={18} />
+        </Link>
+        {aiCanUse && (
+          <Link
+            to="/ai"
+            className={headerIconClass}
+            title={t('header.aiAssistant')}
+            aria-label={t('header.aiAssistant')}
+          >
+            <Bot size={18} />
+          </Link>
+        )}
+        <UserMenu />
       </div>
     </header>
   );

@@ -115,6 +115,7 @@ interface AuthState {
   lastActivityAt: number | null;
 
   setUser: (user: User | null) => void;
+  updateStoredUser: (user: User) => void;
   login: (user: User, permissions?: Permission[]) => void;
   logout: () => void;
   setLoading: (loading: boolean) => void;
@@ -135,6 +136,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   lastActivityAt: null,
 
   setUser: (user) => set({ user, isAuthenticated: !!user }),
+
+  // Profile/self-service updates: refresh in-memory state AND the persisted
+  // envelope, otherwise a reload would restore the stale pre-edit user.
+  updateStoredUser: (user) => {
+    set({ user });
+    try {
+      const raw = localStorage.getItem(AUTH_USER_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (parsed && typeof parsed.version === 'number') {
+          localStorage.setItem(AUTH_USER_KEY, JSON.stringify({ ...parsed, user }));
+          return;
+        }
+      }
+      persistAuth(user, get().permissions);
+    } catch { /* storage unavailable */ }
+  },
 
   login: (user, permissions = []) => {
     set({ user, isAuthenticated: true, isLoading: false, permissions, lastActivityAt: Date.now() });

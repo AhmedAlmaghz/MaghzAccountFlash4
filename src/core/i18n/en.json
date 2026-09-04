@@ -1,6 +1,7 @@
 {
   "appName": "MaghzAccount Pro",
   "appSubtitle": "Integrated ERP Accounting System",
+  "appVersion": "Version {{version}}",
   "palette": {
     "title": "Global Search",
     "searchPlaceholder": "Search pages, reports, customers, products...",
@@ -530,6 +531,30 @@
       "table_warehouses": "Warehouses",
       "recordsCount": "Records ({{count}})",
       "logTitle": "System Audit Log"
+    },
+    "profile": {
+      "title": "Profile",
+      "fullName": "Full name",
+      "phone": "Phone",
+      "changePhoto": "Change photo",
+      "photoHint": "Photo up to 2MB — shown in the user menu",
+      "photoTooLarge": "Photo exceeds 2MB",
+      "saved": "Profile saved",
+      "saveError": "Failed to save profile"
+    },
+    "changePassword": {
+      "title": "Change password",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "policyHint": "At least 12 characters with a letter (Arabic or Latin) and a digit",
+      "currentRequired": "Enter the current password",
+      "mismatch": "Password confirmation does not match",
+      "weakPassword": "New password does not meet the policy (12 characters with a letter and a digit)",
+      "show": "Show",
+      "hide": "Hide",
+      "success": "Password changed successfully",
+      "saveError": "Failed to change password"
     }
   },
   "dashboard": {
@@ -2303,7 +2328,37 @@
       "roles": "Roles & Permissions",
       "backup": "Backup",
       "database": "Database",
-      "reset": "Reset"
+      "reset": "Reset",
+      "themes": "Appearance & Themes"
+    },
+    "themes": {
+      "title": "Appearance & Themes",
+      "subtitle": "Visual identity — emerald & gold, light & dark, plus your own themes",
+      "builtIn": "Identity themes",
+      "custom": "My custom themes",
+      "newTheme": "New theme",
+      "editTheme": "Edit theme",
+      "deleteTheme": "Delete theme",
+      "active": "Active",
+      "mode": "Mode",
+      "light": "Light",
+      "dark": "Dark",
+      "primary": "Primary color (emerald)",
+      "accent": "Accent color (gold)",
+      "background": "Background",
+      "surface": "Surface (cards)",
+      "nameAr": "Arabic name",
+      "nameEn": "English name",
+      "livePreview": "Live preview",
+      "previewButton": "Primary button",
+      "emptyMessage": "No custom themes yet — create your first one with your company colors",
+      "nameRequired": "Theme name in Arabic and English is required",
+      "invalidColor": "Invalid color: {{field}} — use #RRGGBB format",
+      "created": "Theme created and activated",
+      "updated": "Theme updated",
+      "deleted": "Theme deleted",
+      "deleteTitle": "Delete theme",
+      "deleteMessage": "Are you sure you want to delete this theme? The default identity theme will be restored if it was active."
     },
     "database": {
       "title": "Database",
@@ -2735,7 +2790,24 @@
     "switchToArabic": "التبديل إلى العربية",
     "lightMode": "Light Mode",
     "darkMode": "Dark Mode",
-    "logout": "Logout"
+    "logout": "Logout",
+    "home": "Home",
+    "aiAssistant": "AI Assistant",
+    "companyLogo": "Company logo",
+    "userMenu": {
+      "openMenu": "User menu",
+      "language": "Language",
+      "arabic": "العربية",
+      "english": "English",
+      "appearance": "Appearance",
+      "light": "Light",
+      "dark": "Dark",
+      "allThemes": "All themes",
+      "profile": "Profile",
+      "changePassword": "Change password",
+      "settings": "Settings",
+      "logout": "Logout"
+    }
   },
   "common": {
     "loading": "Loading...",

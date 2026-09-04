@@ -5,6 +5,7 @@ export interface User {
   email?: string;
   fullName?: string;
   phone?: string;
+  photoUrl?: string;
   role: 'super_admin' | 'admin' | 'manager' | 'accountant' | 'sales_rep' | 'viewer' | string;
   roleId?: string;
   branchId?: string | null;

@@ -127,7 +127,7 @@ export const authApi = {
         // Browser/PGlite fallback — verify against the users table directly.
         const adapter = await getDbAdapter();
         const result = await adapter.query(
-          `SELECT id, company_id, username, email, full_name, phone, role, branch_id, is_active, password_hash
+          `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, password_hash
              FROM users WHERE username = $1`,
           [credentials.username.trim()]
         );
@@ -168,6 +168,7 @@ export const authApi = {
           email: row.email ? String(row.email) : undefined,
           fullName: row.full_name ? String(row.full_name) : undefined,
           phone: row.phone ? String(row.phone) : undefined,
+          photoUrl: row.photo_url ? String(row.photo_url) : undefined,
           role: (roleName || 'viewer') as User['role'],
           roleId,
           branchId: row.branch_id ? String(row.branch_id) : null,
@@ -341,8 +342,8 @@ export const authApi = {
       if (window.electronAuth) return window.electronAuth.updateUser(id, data as Record<string, unknown>);
       const adapter = await getDbAdapter();
       return adapter.query(
-        `UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, role = $5, role_id = $6, branch_id = $7, is_active = $8, updated_at = $9 WHERE id = $10 AND company_id = $11`,
-        [data.username, data.email, data.fullName, data.phone, data.role, data.roleId, data.branchId, data.isActive, new Date().toISOString(), id, companyId]
+        `UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, role = $5, role_id = $6, branch_id = $7, is_active = $8, photo_url = $9, updated_at = $10 WHERE id = $11 AND company_id = $12`,
+        [data.username, data.email, data.fullName, data.phone, data.role, data.roleId, data.branchId, data.isActive, data.photoUrl ?? null, new Date().toISOString(), id, companyId]
       );
     } catch {
       return { success: false, error: 'حدث خطأ أثناء تحديث المستخدم' };
@@ -372,6 +373,100 @@ export const authApi = {
       );
     } catch {
       return { success: false, error: 'حدث خطأ أثناء إعادة تعيين كلمة المرور' };
+    }
+  },
+
+  /**
+   * Client-side mirror of the main-process password policy
+   * (`validateNewPassword` in electron/dbHandler.js): min 12 chars with at
+   * least one letter (Latin or Arabic) and one digit. The server always
+   * re-enforces it — this only gives instant form feedback.
+   */
+  meetsPasswordPolicy(password: string): boolean {
+    return (
+      typeof password === 'string' &&
+      password.length >= 12 &&
+      /[A-Za-z\u0600-\u06FF]/.test(password) &&
+      /\d/.test(password)
+    );
+  },
+
+  /**
+   * Self-service profile update (own row only: full name, phone, photo).
+   * In Electron this goes through the session-scoped `auth:update-profile`
+   * channel (no settings.edit needed); elsewhere it falls back to a direct
+   * guarded UPDATE.
+   */
+  async updateProfile(
+    companyId: string,
+    id: string,
+    data: { fullName?: string | null; phone?: string | null; photoUrl?: string | null },
+  ): Promise<{ success: boolean; user?: User; error?: string }> {
+    try {
+      const cidValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (window.electronAuth?.updateProfile) {
+        const result = await window.electronAuth.updateProfile({
+          fullName: data.fullName ?? null,
+          phone: data.phone ?? null,
+          photoUrl: data.photoUrl ?? null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, user: result.user as User | undefined };
+      }
+      const adapter = await getDbAdapter();
+      const fullName = typeof data.fullName === 'string' ? data.fullName.trim().slice(0, 255) || null : null;
+      const phone = typeof data.phone === 'string' ? data.phone.trim().slice(0, 50) || null : null;
+      const photoUrl = typeof data.photoUrl === 'string' && data.photoUrl.length <= 3000000 ? data.photoUrl : null;
+      const result = await adapter.query(
+        `UPDATE users SET full_name = $1, phone = $2, photo_url = $3, updated_at = $4
+          WHERE id = $5 AND company_id = $6`,
+        [fullName, phone, photoUrl, new Date().toISOString(), id, companyId],
+      );
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true };
+    } catch {
+      return { success: false, error: 'حدث خطأ أثناء تحديث الملف الشخصي' };
+    }
+  },
+
+  /**
+   * Self-service password change: verifies the CURRENT password first.
+   * The current session stays alive; other sessions are revoked server-side.
+   */
+  async changePasswordSelf(
+    companyId: string,
+    id: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const cidValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!this.meetsPasswordPolicy(newPassword)) {
+        return { success: false, error: 'كلمة المرور الجديدة لا تطابق السياسة (12 حرفاً على الأقل مع حرف ورقم)' };
+      }
+      if (window.electronAuth?.changePassword) {
+        return window.electronAuth.changePassword(currentPassword, newPassword);
+      }
+      const adapter = await getDbAdapter();
+      const found = await adapter.query(
+        'SELECT password_hash FROM users WHERE id = $1 AND company_id = $2',
+        [id, companyId],
+      );
+      if (!found.success) return { success: false, error: found.error };
+      const row = (found.rows?.[0] ?? null) as Record<string, unknown> | null;
+      if (!row) return { success: false, error: 'User not found' };
+      if (!(await verifyPassword(currentPassword, row.password_hash as string | null))) {
+        return { success: false, error: 'كلمة المرور الحالية غير صحيحة' };
+      }
+      const passwordHash = await hashPassword(newPassword);
+      return adapter.query(
+        'UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3 AND company_id = $4',
+        [passwordHash, new Date().toISOString(), id, companyId],
+      );
+    } catch {
+      return { success: false, error: 'حدث خطأ أثناء تغيير كلمة المرور' };
     }
   },
 

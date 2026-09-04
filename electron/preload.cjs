@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAuth', {
   createUser: (data) => ipcRenderer.invoke('auth:create-user', { sessionToken, data }),
   updateUser: (id, data) => ipcRenderer.invoke('auth:update-user', { sessionToken, id, data }),
   resetPassword: (id, password) => ipcRenderer.invoke('auth:reset-password', { sessionToken, id, password }),
+  updateProfile: (data) => ipcRenderer.invoke('auth:update-profile', { sessionToken, data }),
+  changePassword: (currentPassword, newPassword) => ipcRenderer.invoke('auth:change-password', { sessionToken, currentPassword, newPassword }),
   deleteUser: (id) => ipcRenderer.invoke('auth:delete-user', { sessionToken, id }),
   listRoles: () => ipcRenderer.invoke('auth:list-roles', { sessionToken }),
   createRole: (data) => ipcRenderer.invoke('auth:create-role', { sessionToken, data }),

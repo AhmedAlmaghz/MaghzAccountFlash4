@@ -1,40 +1,43 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
 
 @import "tailwindcss";
 
 /* ============================================================
-   maghzaccount-pro UI v2.0 — "Modern Fintech Arabic" Design System
-   Teal financial brand · IBM Plex Sans Arabic · Zinc neutrals
-   Mobile-first · RTL-native · Dark mode
+   maghzaccount-pro UI v3.0 — "Emerald & Gold" Visual Identity
+   Deep emerald #0B7A5E · Warm gold #D4A017 · Charcoal #1A1A2E
+   Cairo / Inter · RTL-native · Light + Dark + Custom themes
+   Theme values below are DEFAULTS — the Theme Engine
+   (src/core/theme/themes.ts) overrides them at runtime per
+   active theme, so Tailwind classes re-theme for free.
    ============================================================ */
 
 @theme {
-  /* Brand — Teal financial (fintech growth identity) */
-  --color-primary-50: #f0fdfa;
-  --color-primary-100: #ccfbf1;
-  --color-primary-200: #99f6e4;
-  --color-primary-300: #5eead4;
-  --color-primary-400: #2dd4bf;
-  --color-primary-500: #14b8a6;
-  --color-primary-600: #0d9488;
-  --color-primary-700: #0f766e;
-  --color-primary-800: #115e59;
-  --color-primary-900: #134e4a;
-  --color-primary-950: #042f2e;
+  /* Brand — Deep emerald (trustworthy, modern-Arabic, premium) */
+  --color-primary-50: #f0f7f5;
+  --color-primary-100: #ddece8;
+  --color-primary-200: #bbdad2;
+  --color-primary-300: #91c3b7;
+  --color-primary-400: #59a592;
+  --color-primary-500: #288a71;
+  --color-primary-600: #0b7a5e;
+  --color-primary-700: #09644d;
+  --color-primary-800: #074e3c;
+  --color-primary-900: #05372a;
+  --color-primary-950: #031f18;
 
-  /* Accent — Warm gold (financial highlights & numbers) */
-  --color-gold-50: #fffbf2;
-  --color-gold-100: #fef3d9;
-  --color-gold-200: #fadfae;
-  --color-gold-300: #f7c878;
-  --color-gold-400: #f0ae3f;
-  --color-gold-500: #e8940e;
-  --color-gold-600: #c97508;
-  --color-gold-700: #a35a06;
-  --color-gold-800: #874508;
-  --color-gold-900: #713a09;
+  /* Accent — Warm gold (premium highlights & financial figures) */
+  --color-gold-50: #fcf9f1;
+  --color-gold-100: #f9f2df;
+  --color-gold-200: #f3e4be;
+  --color-gold-300: #ecd497;
+  --color-gold-400: #e2be61;
+  --color-gold-500: #d9ab33;
+  --color-gold-600: #d4a017;
+  --color-gold-700: #ae8313;
+  --color-gold-800: #88660f;
+  --color-gold-900: #5f480a;
 
-  /* Neutrals — Zinc (cleaner, more modern than slate) */
+  /* Neutrals — Zinc, dark end tuned to brand charcoal #1A1A2E */
   --color-zinc-50: #fafafa;
   --color-zinc-100: #f4f4f5;
   --color-zinc-200: #e4e4e7;
@@ -43,9 +46,15 @@
   --color-zinc-500: #71717a;
   --color-zinc-600: #52525b;
   --color-zinc-700: #3f3f46;
-  --color-zinc-800: #27272a;
-  --color-zinc-900: #18181b;
-  --color-zinc-950: #09090b;
+  --color-zinc-800: #26263a;
+  --color-zinc-900: #23233f;
+  --color-zinc-950: #1a1a2e;
+
+  /* Brand semantic tokens (mirrored by Theme Engine at runtime) */
+  --brand-primary: #0b7a5e;
+  --brand-accent: #d4a017;
+  --brand-background: #f7faf8;
+  --brand-surface: #ffffff;
 
   /* Slate — legacy compatibility (existing pages use it) */
   --color-slate-50: #f8fafc;
@@ -96,8 +105,8 @@
   --color-blue-700: #1d4ed8;
 
   /* Charts — theme-aware via CSS vars, overridden in dark mode */
-  --chart-1: #0d9488;
-  --chart-2: #e8940e;
+  --chart-1: #0b7a5e;
+  --chart-2: #d4a017;
   --chart-3: #6366f1;
   --chart-4: #0ea5e9;
   --chart-5: #ec4899;
@@ -107,9 +116,9 @@
   --chart-grid: #e4e4e7;
   --chart-text: #52525b;
 
-  /* Fonts — IBM Plex Sans Arabic (harmonized Latin+Arabic, tabular figures) */
-  --font-sans: 'Inter', 'IBM Plex Sans Arabic', system-ui, -apple-system, sans-serif;
-  --font-arabic: 'IBM Plex Sans Arabic', 'Inter', system-ui, -apple-system, sans-serif;
+  /* Fonts — Cairo first (brand Arabic), Inter for Latin, Plex as fallback */
+  --font-sans: 'Inter', 'Cairo', 'IBM Plex Sans Arabic', system-ui, -apple-system, sans-serif;
+  --font-arabic: 'Cairo', 'IBM Plex Sans Arabic', 'Inter', system-ui, -apple-system, sans-serif;
 
   /* Border Radius — larger, softer shapes */
   --radius-sm: 0.5rem;
@@ -118,10 +127,10 @@
   --radius-xl: 1.25rem;
   --radius-2xl: 1.5rem;
 
-  /* Shadows — layered soft elevation */
+  /* Shadows — layered soft elevation (lift tinted with brand emerald) */
   --shadow-soft: 0 1px 2px rgba(9, 9, 11, 0.04), 0 4px 12px rgba(9, 9, 11, 0.04);
   --shadow-card: 0 1px 3px rgba(9, 9, 11, 0.05), 0 8px 24px -12px rgba(9, 9, 11, 0.12);
-  --shadow-lift: 0 2px 4px rgba(9, 9, 11, 0.04), 0 12px 32px -8px rgba(13, 148, 136, 0.18);
+  --shadow-lift: 0 2px 4px rgba(9, 9, 11, 0.04), 0 12px 32px -8px rgba(11, 122, 94, 0.22);
   --shadow-float: 0 4px 8px rgba(9, 9, 11, 0.06), 0 16px 48px -12px rgba(9, 9, 11, 0.22);
 
   /* Animations */
@@ -141,8 +150,8 @@
   --chart-text: #71717a;
 }
 html.dark {
-  --chart-1: #2dd4bf;
-  --chart-2: #f0ae3f;
+  --chart-1: #14b58a;
+  --chart-2: #e2be61;
   --chart-3: #818cf8;
   --chart-4: #38bdf8;
   --chart-5: #f472b6;
@@ -345,6 +354,20 @@ html.dark {
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+  }
+
+  /* Brand identity — cinematic emerald→gold signature */
+  .brand-gradient {
+    background: linear-gradient(135deg, var(--brand-primary, var(--color-primary-600)) 0%, var(--brand-accent, var(--color-gold-500)) 130%);
+  }
+  .brand-gradient-soft {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--brand-primary, var(--color-primary-600)) 12%, transparent), color-mix(in srgb, var(--brand-accent, var(--color-gold-500)) 12%, transparent));
+  }
+  .btn-gold {
+    @apply bg-gold-500 text-white shadow-lift hover:bg-gold-600 dark:hover:bg-gold-400 dark:text-zinc-950;
+  }
+  .ring-brand {
+    --tw-ring-color: color-mix(in srgb, var(--brand-primary, var(--color-primary-600)) 30%, transparent);
   }
 
   /* Skeleton shimmer placeholder blocks */

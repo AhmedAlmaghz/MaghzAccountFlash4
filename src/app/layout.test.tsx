@@ -12,7 +12,11 @@ vi.mock('react-router-dom', async () => {
     ...actual,
     useNavigate: () => vi.fn(),
     useLocation: () => ({ pathname: '/' }),
-    Link: ({ children, to }: { children: React.ReactNode; to: string }) => <a href={to}>{children}</a>,
+    Link: ({ children, to, ...rest }: { children: React.ReactNode; to: string }) => (
+      <a href={to} {...rest}>
+        {children}
+      </a>
+    ),
     Outlet: () => <div data-testid="outlet">Outlet Content</div>,
   };
 });
@@ -39,7 +43,7 @@ describe('Sidebar', () => {
       </BrowserRouter>
     );
 
-    expect(screen.getByText('appSubtitle')).toBeInTheDocument();
+    expect(screen.getByText('appName')).toBeInTheDocument();
   });
 
   it('renders collapsed sidebar without text', () => {
@@ -126,7 +130,7 @@ describe('Header', () => {
     expect(screen.getByText('Test Company')).toBeInTheDocument();
   });
 
-  it('renders user info when logged in', () => {
+  it('renders avatar button when logged in (identity lives inside the menu)', () => {
     const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
     useAuthStore.getState().login(user);
 
@@ -136,21 +140,38 @@ describe('Header', () => {
       </BrowserRouter>
     );
 
-    expect(screen.getByText('admin')).toBeInTheDocument();
-    expect(screen.getByText('(admin)')).toBeInTheDocument();
-  });
-
-  it('does not render user info when not logged in', () => {
-    render(
-      <BrowserRouter>
-        <Header />
-      </BrowserRouter>
-    );
-
+    expect(screen.getByRole('button', { name: /header\.userMenu\.openMenu/i })).toBeInTheDocument();
+    // Name/email are hidden until the menu opens
     expect(screen.queryByText('admin')).not.toBeInTheDocument();
   });
 
-  it('toggles theme on button click', () => {
+  it('opens the user menu showing name and email', () => {
+    const user: User = { id: '1', username: 'salem', email: 'salem@x.com', role: 'manager', isActive: true };
+    useAuthStore.getState().login(user);
+
+    render(
+      <BrowserRouter>
+        <Header />
+      </BrowserRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /header\.userMenu\.openMenu/i }));
+
+    expect(screen.getByText('salem')).toBeInTheDocument();
+    expect(screen.getByText('salem@x.com')).toBeInTheDocument();
+  });
+
+  it('does not render user menu when not logged in', () => {
+    render(
+      <BrowserRouter>
+        <Header />
+      </BrowserRouter>
+    );
+
+    expect(screen.queryByRole('button', { name: /header\.userMenu\.openMenu/i })).not.toBeInTheDocument();
+  });
+
+  it('toggles theme from inside the user menu', () => {
     const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
     useAuthStore.getState().login(user);
 
@@ -160,13 +181,13 @@ describe('Header', () => {
       </BrowserRouter>
     );
 
-    const themeButton = screen.getByRole('button', { name: /header.darkMode/i });
-    fireEvent.click(themeButton);
+    fireEvent.click(screen.getByRole('button', { name: /header\.userMenu\.openMenu/i }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /header\.userMenu\.dark/i }));
 
     expect(useAppStore.getState().theme).toBe('dark');
   });
 
-  it('toggles language on button click', () => {
+  it('toggles language from inside the user menu', () => {
     const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
     useAuthStore.getState().login(user);
 
@@ -176,13 +197,13 @@ describe('Header', () => {
       </BrowserRouter>
     );
 
-    const langButton = screen.getByRole('button', { name: /header.switchToEnglish/i });
-    fireEvent.click(langButton);
+    fireEvent.click(screen.getByRole('button', { name: /header\.userMenu\.openMenu/i }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /header\.userMenu\.english/i }));
 
     expect(useAppStore.getState().language).toBe('en');
   });
 
-  it('logs out on logout button click', () => {
+  it('logs out from inside the user menu', () => {
     const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
     useAuthStore.getState().login(user);
 
@@ -192,10 +213,25 @@ describe('Header', () => {
       </BrowserRouter>
     );
 
-    const logoutButton = screen.getByRole('button', { name: /header.logout/i });
-    fireEvent.click(logoutButton);
+    fireEvent.click(screen.getByRole('button', { name: /header\.userMenu\.openMenu/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /header\.userMenu\.logout/i }));
 
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it('renders home and AI assistant shortcuts', () => {
+    const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
+    useAuthStore.getState().login(user);
+
+    render(
+      <BrowserRouter>
+        <Header />
+      </BrowserRouter>
+    );
+
+    expect(screen.getByRole('link', { name: /header\.home/i })).toHaveAttribute('href', '/');
+    // admin bypasses all permission checks, so the AI shortcut is visible
+    expect(screen.getByRole('link', { name: /header\.aiAssistant/i })).toHaveAttribute('href', '/ai');
   });
 });
 
@@ -220,9 +256,10 @@ describe('AppLayout', () => {
       </BrowserRouter>
     );
 
-    // Sidebar (desktop) + MobileDrawer (closed but rendered) both carry the logo title
-    expect(screen.getAllByText('appSubtitle').length).toBeGreaterThan(0);
-    expect(screen.getByText('admin')).toBeInTheDocument();
+    // Sidebar (desktop) + MobileDrawer (closed but rendered) both carry the unified brand
+    expect(screen.getAllByText('appName').length).toBeGreaterThan(0);
+    // Identity (username) lives inside the avatar menu, not on the surface
+    expect(screen.getByRole('button', { name: /header\.userMenu\.openMenu/i })).toBeInTheDocument();
   });
 
   it('renders outlet content', () => {

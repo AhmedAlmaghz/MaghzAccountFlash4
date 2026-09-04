@@ -28,6 +28,7 @@ export const users = pgTable('users', {
   fullName: varchar('full_name', { length: 255 }),
   phone: varchar('phone', { length: 50 }),
   passwordHash: text('password_hash'),
+  photoUrl: text('photo_url'),
   role: varchar('role', { length: 50 }).notNull().default('accountant'),
   branchId: uuid('branch_id'),
   isActive: boolean('is_active').notNull().default(true),
