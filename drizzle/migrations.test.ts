@@ -560,3 +560,37 @@ describe('Migration 0018: recompute party balances (statement alignment)', () =>
     expect(pglite).toMatch(/\{ name: '0018_recompute_party_balances', sql: recomputePartyBalances \}/);
   });
 });
+
+describe('Migration 0019: payroll_components audit columns', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0019_payroll_components_audit.sql'), 'utf-8');
+
+  it('adds created_by and updated_by to payroll_components', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE payroll_components ADD COLUMN IF NOT EXISTS created_by uuid/);
+    expect(migrationSql).toMatch(/ALTER TABLE payroll_components ADD COLUMN IF NOT EXISTS updated_by uuid/);
+  });
+
+  it('is idempotent (IF NOT EXISTS on every ADD COLUMN)', () => {
+    const adds = migrationSql.match(/ADD COLUMN/g) || [];
+    const guards = migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) || [];
+    expect(adds.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(adds.length);
+  });
+
+  it('journal registers 0019 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0019_payroll_components_audit')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0019 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0019_payroll_components_audit\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0019_payroll_components_audit', sql: payrollComponentsAudit \}/);
+  });
+
+  it('Drizzle schema exposes createdBy/updatedBy on payrollComponents', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/settings.ts'), 'utf-8');
+    expect(schema).toMatch(/createdBy: uuid\('created_by'\)/);
+    expect(schema).toMatch(/updatedBy: uuid\('updated_by'\)/);
+  });
+});

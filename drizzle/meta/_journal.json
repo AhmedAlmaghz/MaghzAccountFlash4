@@ -134,6 +134,13 @@
       "when": 1797100000000,
       "tag": "0018_recompute_party_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1797200000000,
+      "tag": "0019_payroll_components_audit",
+      "breakpoints": true
     }
   ]
 }

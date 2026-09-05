@@ -105,6 +105,8 @@ export const payrollComponents = pgTable('payroll_components', {
   affectsSocialInsurance: boolean('affects_social_insurance').notNull().default(false),
   defaultAccountId: uuid('default_account_id').references(() => accounts.id),
   isActive: boolean('is_active').notNull().default(true),
+  createdBy: uuid('created_by'),
+  updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
