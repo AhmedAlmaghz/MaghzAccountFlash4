@@ -347,6 +347,11 @@ export const SalesReturnsPage: React.FC = () => {
       const res = await salesApi.getReturnById(ret.id, activeCompany.id);
       if (res.success && res.data?.lines) lines = res.data.lines;
     }
+    const STATUS_LABELS: Record<string, string> = {
+      draft: t('sales.status.draft'),
+      posted: t('sales.status.posted'),
+      cancelled: t('sales.status.cancelled'),
+    };
     printDocument({
       type: 'sales-return',
       docNumber: ret.returnNumber,
@@ -379,6 +384,8 @@ export const SalesReturnsPage: React.FC = () => {
       currency: activeCompany?.currency,
       paymentType: ret.paymentType,
       createdBy: ret.createdBy,
+      statusBadge: STATUS_LABELS[ret.status] || ret.status,
+      statusTone: ret.status === 'posted' ? 'success' : 'muted',
     });
   };
 

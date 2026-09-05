@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart, TrendingUp, Store, Receipt } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
+import { todayIso } from '@/core/utils/aging';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
@@ -455,6 +456,14 @@ export const PurchaseInvoicesPage: React.FC = () => {
       const res = await purchasesApi.getInvoiceById(invoice.id, activeCompany.id);
       if (res.success && res.data?.lines) lines = res.data.lines;
     }
+    const STATUS_LABELS: Record<string, string> = {
+      draft: t('purchases.filter.draft'),
+      posted: t('purchases.filter.posted'),
+      partially_paid: t('sales.status.partially_paid'),
+      paid: t('sales.status.paid'),
+      cancelled: t('purchases.filter.cancelled'),
+    };
+    const isOverdue = invoice.dueDate ? invoice.dueDate < todayIso() : false;
     printDocument({
       type: 'purchase-invoice',
       docNumber: invoice.invoiceNumber,
@@ -488,6 +497,8 @@ export const PurchaseInvoicesPage: React.FC = () => {
       currency: currencySymbol,
       paymentType: invoice.paymentType,
       createdBy: invoice.createdBy,
+      statusBadge: STATUS_LABELS[invoice.status] || invoice.status,
+      statusTone: invoice.status === 'paid' ? 'success' : (isOverdue ? 'warning' : 'muted'),
     });
   }, [activeCompany, t, currencySymbol, vatRate]);
 

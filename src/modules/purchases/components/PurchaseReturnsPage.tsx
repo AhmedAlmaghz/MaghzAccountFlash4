@@ -348,6 +348,11 @@ export const PurchaseReturnsPage: React.FC = () => {
       const res = await purchasesApi.getReturnById(ret.id, activeCompany.id);
       if (res.success && res.data?.lines) lines = res.data.lines;
     }
+    const STATUS_LABELS: Record<string, string> = {
+      draft: t('purchases.filter.draft'),
+      posted: t('purchases.filter.posted'),
+      cancelled: t('purchases.filter.cancelled'),
+    };
     printDocument({
       type: 'purchase-return',
       docNumber: ret.returnNumber,
@@ -380,6 +385,8 @@ export const PurchaseReturnsPage: React.FC = () => {
       currency: currencySymbol,
       paymentType: ret.paymentType,
       createdBy: ret.createdBy,
+      statusBadge: STATUS_LABELS[ret.status] || ret.status,
+      statusTone: ret.status === 'posted' ? 'success' : 'muted',
     });
   }, [activeCompany, t, currencySymbol, vatRate]);
 

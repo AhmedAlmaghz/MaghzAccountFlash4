@@ -89,6 +89,11 @@ export const ReceiptVouchersPage: React.FC = () => {
 
   const handlePrint = useCallback(
     (voucher: ReceiptVoucher) => {
+      const STATUS_LABELS: Record<string, string> = {
+        draft: t('accounting.draft'),
+        posted: t('accounting.posted'),
+        cancelled: t('accounting.cancelled'),
+      };
       printDocument({
         type: 'receipt-voucher',
         docNumber: voucher.voucherNumber,
@@ -120,6 +125,8 @@ export const ReceiptVouchersPage: React.FC = () => {
         checkNumber: voucher.checkNumber,
         checkDate: voucher.checkDate,
         createdBy: voucher.createdBy ? getUserName(voucher.createdBy) : undefined,
+        statusBadge: STATUS_LABELS[voucher.status] || voucher.status,
+        statusTone: voucher.status === 'posted' ? 'success' : 'muted',
       });
     },
     [t, activeCompany, currencySymbol, getUserName, settings?.vatRate],

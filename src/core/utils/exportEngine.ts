@@ -2,6 +2,7 @@ import { useAppStore } from '@/core/store';
 import { formatReportDate, formatReportNumber } from '@/core/reports/formatters';
 import { exportReportHtml } from '@/core/reports/exporters';
 import { getReportBranding } from '@/core/reports/branding';
+import { ARABIC_FONT_NAME, ensureArabicFont, shapeForPdf } from '@/core/reports/arabicPdf';
 
 export interface ExportColumn {
   key: string;
@@ -172,32 +173,35 @@ export async function exportToPDF(
 
   const doc = new jsPDF(options?.rtl ? { orientation: 'portrait', unit: 'mm', format: 'a4' } : {});
 
-  if (options?.rtl) {
-    doc.setR2L(true);
-  }
+  // Arabic pipeline (see core/reports/arabicPdf): embedded Amiri plus
+  // pre-shaped visual-order text. No setR2L — it would double-reverse.
+  // The legacy 'Cairo' font name never had an embedded file behind it.
+  const arabic = await ensureArabicFont(doc);
+  if (arabic) doc.setFont(ARABIC_FONT_NAME);
+  const shape = (s: string): string => (arabic ? shapeForPdf(s) : s);
 
   if (options?.title) {
     doc.setFontSize(18);
-    doc.text(options.title, options?.rtl ? doc.internal.pageSize.width - 14 : 14, 20, { align: options?.rtl ? 'right' : 'left' });
+    doc.text(shape(options.title), options?.rtl ? doc.internal.pageSize.width - 14 : 14, 20, { align: options?.rtl ? 'right' : 'left' });
   }
 
   if (options?.subtitle) {
     doc.setFontSize(11);
     doc.setTextColor(100);
-    doc.text(options.subtitle, options?.rtl ? doc.internal.pageSize.width - 14 : 14, 28, { align: options?.rtl ? 'right' : 'left' });
+    doc.text(shape(options.subtitle), options?.rtl ? doc.internal.pageSize.width - 14 : 14, 28, { align: options?.rtl ? 'right' : 'left' });
   } else if (options?.currency) {
     doc.setFontSize(10);
     doc.setTextColor(120);
-    doc.text(`العملة: ${options.currency}`, options?.rtl ? doc.internal.pageSize.width - 14 : 14, 28, { align: options?.rtl ? 'right' : 'left' });
+    doc.text(shape(`العملة: ${options.currency}`), options?.rtl ? doc.internal.pageSize.width - 14 : 14, 28, { align: options?.rtl ? 'right' : 'left' });
   }
 
   autoTable(doc, {
     startY: options?.title ? 35 : 20,
-    head: [columns.map((c) => c.header)],
-    body: rows.map((row) => columns.map((c) => formatCellValue(row[c.key], c))),
+    head: [columns.map((c) => shape(c.header))],
+    body: rows.map((row) => columns.map((c) => shape(formatCellValue(row[c.key], c)))),
     theme: 'grid',
     headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
-    styles: { font: options?.rtl ? 'Cairo' : 'helvetica', fontSize: 9, cellPadding: 2 },
+    styles: { font: arabic ? ARABIC_FONT_NAME : 'helvetica', fontSize: 9, cellPadding: 2 },
     alternateRowStyles: { fillColor: [248, 250, 252] },
     direction: options?.rtl ? 'rtl' : 'ltr',
   } as unknown as Parameters<typeof autoTable>[1]);

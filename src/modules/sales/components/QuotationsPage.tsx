@@ -22,6 +22,7 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
 import { printDocument } from '@/core/utils/printDocument';
+import { todayIso } from '@/core/utils/aging';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useToastStore } from '@/core/store/toastStore';
@@ -380,6 +381,7 @@ export const QuotationsPage: React.FC = () => {
       const res = await salesApi.getQuotationById(q.id, activeCompany.id);
       if (res.success && res.data?.lines) lines = res.data.lines;
     }
+    const isOverdue = q.expiryDate ? q.expiryDate < todayIso() : false;
     printDocument({
       type: 'quotation',
       docNumber: q.quotationNumber,
@@ -413,6 +415,8 @@ export const QuotationsPage: React.FC = () => {
       currency: currencySymbol,
       paymentType: q.paymentType,
       createdBy: q.createdBy,
+      statusBadge: STATUS_FLOW[q.status] || q.status,
+      statusTone: q.status === 'converted' || q.status === 'accepted' ? 'success' : (isOverdue ? 'warning' : 'muted'),
     });
   };
 

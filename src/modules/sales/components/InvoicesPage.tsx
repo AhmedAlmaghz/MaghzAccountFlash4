@@ -22,6 +22,7 @@ import { useCurrencyDisplay } from '@/core/utils/useCurrencyDisplay';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { printDocument } from '@/core/utils/printDocument';
+import { todayIso } from '@/core/utils/aging';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { salesApi } from '../api';
 import { logAudit } from '@/core/utils/auditLogger';
@@ -457,6 +458,7 @@ export const InvoicesPage: React.FC = () => {
       const res = await salesApi.getInvoiceById(invoice.id, activeCompany.id);
       if (res.success && res.data?.lines) lines = res.data.lines;
     }
+    const isOverdue = invoice.dueDate ? invoice.dueDate < todayIso() : false;
     printDocument({
       type: 'sales-invoice',
       docNumber: invoice.invoiceNumber,
@@ -491,6 +493,8 @@ export const InvoicesPage: React.FC = () => {
       currency: currencySymbol,
       paymentType: invoice.paymentType,
       createdBy: invoice.createdBy,
+      statusBadge: STATUS_FLOW[invoice.status] || invoice.status,
+      statusTone: invoice.status === 'paid' ? 'success' : (isOverdue ? 'warning' : 'muted'),
     });
   };
 

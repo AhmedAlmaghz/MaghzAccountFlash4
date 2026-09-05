@@ -48,6 +48,9 @@ export interface PrintDocumentData {
   companyEmail?: string;
   companyLogoUrl?: string;
   vatRate?: number;
+  /** Pre-translated status ribbon (e.g. مدفوعة / مرحّل / مسودة). */
+  statusBadge?: string;
+  statusTone?: 'success' | 'warning' | 'muted';
   currency?: string;
   paymentType?: string;
   paymentMethod?: string;
@@ -586,6 +589,10 @@ function generateHtml(data: PrintDocumentData): string {
           <div class="number">رقم: ${escapeHtml(data.docNumber)}</div>
         </div>
       </div>
+
+      ${data.statusBadge ? `
+      <div style="margin:0 0 14px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:800;text-align:center;letter-spacing:0.3px;${data.statusTone === 'success' ? 'background:#ecfdf5;color:#047857;border:1px solid #a7f3d0' : data.statusTone === 'warning' ? 'background:#fffbeb;color:#b45309;border:1px solid #fde68a' : 'background:#f8fafc;color:#475569;border:1px solid #e2e8f0'}">${escapeHtml(data.statusBadge)}</div>
+      ` : ''}
 
       <div class="meta-section">
         <div class="meta-card party">

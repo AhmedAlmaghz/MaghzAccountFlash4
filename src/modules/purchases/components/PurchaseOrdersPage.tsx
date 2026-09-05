@@ -325,6 +325,14 @@ export const PurchaseOrdersPage: React.FC = () => {
       const res = await purchasesApi.getOrderById(order.id, activeCompany.id);
       if (res.success && res.data?.lines) lines = res.data.lines;
     }
+    const STATUS_LABELS: Record<string, string> = {
+      draft: t('purchases.filter.draft'),
+      sent: t('purchases.order.sent'),
+      partially_received: t('purchases.order.partiallyReceived'),
+      received: t('purchases.order.received'),
+      invoiced: t('purchases.filter.invoiced'),
+      cancelled: t('purchases.filter.cancelled'),
+    };
     printDocument({
       type: 'purchase-order',
       docNumber: order.orderNumber,
@@ -357,6 +365,8 @@ export const PurchaseOrdersPage: React.FC = () => {
       currency: currencySymbol,
       paymentType: order.paymentType,
       createdBy: order.createdBy,
+      statusBadge: STATUS_LABELS[order.status] || order.status,
+      statusTone: order.status === 'invoiced' ? 'success' : 'muted',
     });
   }, [activeCompany, t, currencySymbol, vatRate]);
 
