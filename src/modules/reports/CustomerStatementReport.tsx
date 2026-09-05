@@ -38,7 +38,7 @@ export const CustomerStatementReport: React.FC = () => {
                               (total_amount - COALESCE(paid_amount, 0)) AS outstanding
                          FROM sales_invoices
                         WHERE company_id = $1
-                          AND status != 'cancelled'
+                          AND status IN ('posted', 'partially_paid', 'paid')
                           AND (total_amount - COALESCE(paid_amount, 0)) > 0
                         UNION ALL
                         SELECT id AS customer_id, 'OPENING' AS invoice_number,

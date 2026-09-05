@@ -38,7 +38,7 @@ export const SupplierStatementReport: React.FC = () => {
                               (total_amount - COALESCE(paid_amount, 0)) AS outstanding
                          FROM purchase_invoices
                         WHERE company_id = $1
-                          AND status != 'cancelled'
+                          AND status IN ('posted', 'partially_paid', 'paid')
                           AND (total_amount - COALESCE(paid_amount, 0)) > 0
                         UNION ALL
                         SELECT id AS supplier_id, 'OPENING' AS invoice_number,

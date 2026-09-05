@@ -71,16 +71,18 @@ describe('aging', () => {
       expect(alice.bucket90plus).toBe(2000);
     });
 
-    it('skips invoices with non-positive outstanding', () => {
+    it('skips zero rows but nets negative credits (receipts/returns)', () => {
       const rows = [
         { customer_id: 'c1', invoice_number: 'INV-1', date: '2026-05-01', due_date: '2026-05-31', outstanding: 0 },
-        { customer_id: 'c1', invoice_number: 'INV-2', date: '2026-05-01', due_date: '2026-05-31', outstanding: -100 },
+        { customer_id: 'c1', invoice_number: 'RV-1', date: '2026-05-28', due_date: null, outstanding: -100 },
         { customer_id: 'c1', invoice_number: 'INV-3', date: '2026-05-01', due_date: '2026-05-31', outstanding: 500 },
       ];
       const result = aggregateCustomerAging(rows, '2026-06-04', customers);
       const alice = result.find((c) => c.customerId === 'c1')!;
-      expect(alice.totalOutstanding).toBe(500);
+      expect(alice.totalOutstanding).toBe(400);
+      expect(alice.bucket0to30).toBe(400);
       expect(alice.invoiceCount).toBe(1);
+      expect(alice.lastInvoice).toBe('2026-05-01');
     });
 
     it('uses date as fallback when due_date is null', () => {
@@ -132,6 +134,17 @@ describe('aging', () => {
       expect(result[0].supplierId).toBe('s1');
       expect(result[0].totalOutstanding).toBe(800);
       expect(result[0].bucket0to30).toBe(800);
+    });
+
+    it('nets negative payments/returns against buckets (not counted as invoices)', () => {
+      const rows = [
+        { supplier_id: 's1', invoice_number: 'PO-1', date: '2026-05-01', due_date: '2026-05-15', outstanding: 800 },
+        { supplier_id: 's1', invoice_number: 'PV-1', date: '2026-05-10', due_date: null, outstanding: -300 },
+      ];
+      const result = aggregateSupplierAging(rows, '2026-06-04', suppliers);
+      expect(result[0].totalOutstanding).toBe(500);
+      expect(result[0].bucket0to30).toBe(500);
+      expect(result[0].invoiceCount).toBe(1);
     });
   });
 

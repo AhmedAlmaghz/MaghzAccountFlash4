@@ -138,9 +138,8 @@ export function aggregateCustomerAging(
       byCustomer.set(cid, entry);
     }
     const outstanding = Number(r.outstanding);
-    if (outstanding <= 0) continue;
+    if (!Number.isFinite(outstanding) || outstanding === 0) continue;
     entry.totalOutstanding += outstanding;
-    entry.invoiceCount++;
     const dueDate = r.due_date || r.date;
     const daysPast = Math.max(0, daysBetween(dueDate, asOfDate));
     const idx = bucketFor(daysPast);
@@ -148,8 +147,13 @@ export function aggregateCustomerAging(
     else if (idx === 1) entry.bucket31to60 += outstanding;
     else if (idx === 2) entry.bucket61to90 += outstanding;
     else entry.bucket90plus += outstanding;
-    if (!entry.lastInvoice || r.date > entry.lastInvoice) {
-      entry.lastInvoice = r.date;
+    // Negative rows (receipts/returns) reduce the bucket they fall in —
+    // they are credits, not invoices.
+    if (outstanding > 0) {
+      entry.invoiceCount++;
+      if (!entry.lastInvoice || r.date > entry.lastInvoice) {
+        entry.lastInvoice = r.date;
+      }
     }
   }
   return Array.from(byCustomer.values()).sort((a, b) => b.totalOutstanding - a.totalOutstanding);
@@ -195,9 +199,8 @@ export function aggregateSupplierAging(
       bySupplier.set(sid, entry);
     }
     const outstanding = Number(r.outstanding);
-    if (outstanding <= 0) continue;
+    if (!Number.isFinite(outstanding) || outstanding === 0) continue;
     entry.totalOutstanding += outstanding;
-    entry.invoiceCount++;
     const dueDate = r.due_date || r.date;
     const daysPast = Math.max(0, daysBetween(dueDate, asOfDate));
     const idx = bucketFor(daysPast);
@@ -205,8 +208,13 @@ export function aggregateSupplierAging(
     else if (idx === 1) entry.bucket31to60 += outstanding;
     else if (idx === 2) entry.bucket61to90 += outstanding;
     else entry.bucket90plus += outstanding;
-    if (!entry.lastInvoice || r.date > entry.lastInvoice) {
-      entry.lastInvoice = r.date;
+    // Negative rows (payments/returns) reduce the bucket they fall in —
+    // they are credits, not invoices.
+    if (outstanding > 0) {
+      entry.invoiceCount++;
+      if (!entry.lastInvoice || r.date > entry.lastInvoice) {
+        entry.lastInvoice = r.date;
+      }
     }
   }
   return Array.from(bySupplier.values()).sort((a, b) => b.totalOutstanding - a.totalOutstanding);
