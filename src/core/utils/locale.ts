@@ -9,6 +9,28 @@ import { useAppStore } from '@/core/store';
 
 export const DEFAULT_LOCALE = 'ar-YE';
 
+export const DEFAULT_DECIMAL_PLACES = 2;
+export const MAX_DECIMAL_PLACES = 6;
+
+/**
+ * Single source of truth for the company's decimal precision.
+ * Zero is a valid setting (whole-unit currencies) — callers must use `??`,
+ * never `||`, when falling back, or 0 silently becomes 2.
+ */
+export function getCompanyDecimalPlaces(): number {
+  const raw = useAppStore.getState().activeCompany?.decimalPlaces;
+  const n = typeof raw === 'string' ? Number(raw) : (raw ?? DEFAULT_DECIMAL_PLACES);
+  if (!Number.isFinite(n)) return DEFAULT_DECIMAL_PLACES;
+  return Math.min(MAX_DECIMAL_PLACES, Math.max(0, Math.trunc(n)));
+}
+
+/** Rounds a monetary value to the company's decimal places. */
+export function roundMoney(value: number, decimalPlaces?: number): number {
+  const dp = decimalPlaces ?? getCompanyDecimalPlaces();
+  const factor = 10 ** dp;
+  return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
+}
+
 const HIJRI_LOCALE = 'ar-SA-u-ca-islamic-umalqura';
 
 function getSettings() {

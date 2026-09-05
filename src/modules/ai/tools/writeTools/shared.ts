@@ -17,7 +17,14 @@ export function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
-const round2 = (v: number) => Math.round(v * 100) / 100;
+import { roundMoney, getCompanyDecimalPlaces } from '@/core/utils/locale';
+
+/**
+ * Rounds a monetary value to the company's decimal places (0 allowed).
+ * Kept under the historic `round2` name so all existing money call sites
+ * inherit company precision with no call-site changes; the default is 2.
+ */
+const round2 = (v: number) => roundMoney(v);
 export { round2 };
 
 /**
@@ -33,7 +40,8 @@ export function summarizeDocLines(label: string, lines: unknown): string {
       0,
     ),
   );
-  const totalStr = new Intl.NumberFormat('ar-YE', { maximumFractionDigits: 2 }).format(total);
+  const dp = getCompanyDecimalPlaces();
+  const totalStr = new Intl.NumberFormat('ar-YE', { minimumFractionDigits: dp, maximumFractionDigits: dp }).format(total);
   return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
 }
 

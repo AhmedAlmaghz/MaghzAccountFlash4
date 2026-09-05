@@ -76,7 +76,7 @@ export const PurchaseReturnsPage: React.FC = () => {
   const returnFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
   const { returns, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, post } = usePurchaseReturnsPaginated(activeCompany?.id || '', returnFilters);
   const { invoices } = usePurchaseInvoices(activeCompany?.id || '');
-  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -101,8 +101,8 @@ export const PurchaseReturnsPage: React.FC = () => {
   const calculateLine = useCallback((line: ReturnFormLine): ReturnFormLine => {
     const effectiveDiscount = showDiscount ? line.discountPercent : 0;
     const net = line.quantity * line.unitPrice * (1 - effectiveDiscount / 100);
-    return { ...line, lineTotal: Number(net.toFixed(2)) };
-  }, [showDiscount]);
+    return { ...line, lineTotal: Number(net.toFixed(dp)) };
+  }, [showDiscount, dp]);
 
   const formTotals = useMemo(() => {
     const lineDiscountTotal = showDiscount ? form.lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
@@ -116,14 +116,14 @@ export const PurchaseReturnsPage: React.FC = () => {
     const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
     const totalAmount = netSubtotal + vatAmount;
     return {
-      subtotal: Number(subtotalBeforeInvoiceDiscount.toFixed(2)),
-      vatAmount: Number(vatAmount.toFixed(2)),
-      discountAmount: Number(totalDiscountAmount.toFixed(2)),
-      invoiceDiscountAmount: Number(cappedInvoiceDiscount.toFixed(2)),
-      totalAmount: Number(totalAmount.toFixed(2)),
+      subtotal: Number(subtotalBeforeInvoiceDiscount.toFixed(dp)),
+      vatAmount: Number(vatAmount.toFixed(dp)),
+      discountAmount: Number(totalDiscountAmount.toFixed(dp)),
+      invoiceDiscountAmount: Number(cappedInvoiceDiscount.toFixed(dp)),
+      totalAmount: Number(totalAmount.toFixed(dp)),
       vatRate,
     };
-  }, [form.lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, vatRate]);
+  }, [form.lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, vatRate, dp]);
 
   const updateLine = useCallback((idx: number, patch: Partial<ReturnFormLine>) => {
     setForm(prev => {
@@ -224,7 +224,7 @@ export const PurchaseReturnsPage: React.FC = () => {
         description: l.description,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
-        lineTotal: Number(lineNet.toFixed(2)),
+        lineTotal: Number(lineNet.toFixed(dp)),
       };
     });
     const payload = {
@@ -311,7 +311,7 @@ export const PurchaseReturnsPage: React.FC = () => {
     setForm(initialForm());
     setInvoiceDiscount(0);
     setInvoiceDiscountType('amount');
-  }, [activeCompany, form, formTotals, editingId, returns, create, update, user, addToast, t, getNextNumber, showDiscount]);
+  }, [activeCompany, form, formTotals, editingId, returns, create, update, user, addToast, t, getNextNumber, showDiscount, dp]);
 
   const handleDelete = useCallback((id: string) => setConfirmDelete(id), []);
   const confirmDeleteAction = useCallback(async () => {

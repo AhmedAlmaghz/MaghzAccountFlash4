@@ -7,6 +7,7 @@ vi.mock('./useSettings', () => ({
 
 import { useSettings } from './useSettings';
 import { useFormatters } from './useFormatters';
+import { useAppStore } from '@/core/store';
 
 const mockUseSettings = useSettings as unknown as ReturnType<typeof vi.fn>;
 
@@ -230,5 +231,25 @@ describe('useFormatters - missing settings (fallbacks)', () => {
     expect(result.current.defaultCurrency).toBe('YER');
     expect(result.current.formatCurrency(100)).not.toBe('-');
     expect(result.current.formatDate(new Date(2024, 0, 1))).toMatch(/2024|٢٠٢٤/);
+  });
+});
+
+describe('useFormatters - store-first freshness (post-save consistency)', () => {
+  it('prefers the store snapshot over stale DB settings, including 0 decimals', () => {
+    // DB settings lag behind a company save (same company id); the store is
+    // refreshed synchronously, so formatters must follow it immediately.
+    mockUseSettings.mockReturnValue(fullSettings({ decimalPlaces: 2 }));
+    useAppStore.setState({
+      activeCompany: { id: 'c1', name: 'C', currency: 'YER', decimalPlaces: 0 },
+    } as never);
+    try {
+      const { result } = renderHook(() => useFormatters('c1'));
+      expect(result.current.decimalPlaces).toBe(0);
+      const formatted = result.current.formatCurrency(1234.56);
+      expect(formatted).not.toBe('-');
+      expect(formatted).not.toMatch(/56|٥٦/);
+    } finally {
+      useAppStore.setState({ activeCompany: null } as never);
+    }
   });
 });

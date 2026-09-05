@@ -16,6 +16,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { roundMoney } from '@/core/utils/locale';
 import { useUserMap } from '@/core/utils/useUserMap';
 import { useCurrencyDisplay } from '@/core/utils/useCurrencyDisplay';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
@@ -71,7 +72,7 @@ export const InvoicesPage: React.FC = () => {
   }), [isOwnOnly, currentUser?.id, statusFilter]));
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
-  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
   const { getUserName } = useUserMap();
   const { currencies, defaultCurrency } = useCurrencyDisplay();
   const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
@@ -229,14 +230,14 @@ export const InvoicesPage: React.FC = () => {
     const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
     const totalAmount = netSubtotal + vatAmount;
     return {
-      subtotal: subtotalBeforeInvoiceDiscount,
-      vatAmount,
-      discountAmount: totalDiscountAmount,
-      invoiceDiscountAmount: cappedInvoiceDiscount,
-      totalAmount,
+      subtotal: roundMoney(subtotalBeforeInvoiceDiscount, dp),
+      vatAmount: roundMoney(vatAmount, dp),
+      discountAmount: roundMoney(totalDiscountAmount, dp),
+      invoiceDiscountAmount: roundMoney(cappedInvoiceDiscount, dp),
+      totalAmount: roundMoney(totalAmount, dp),
       vatRate,
     };
-  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate]);
+  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate, dp]);
 
   const buildInvoicePayload = (invoiceNumber: string): Omit<SalesInvoice, 'id'> => {
     const mappedLines: SalesInvoiceLine[] = lines.map(l => {
@@ -244,7 +245,7 @@ export const InvoicesPage: React.FC = () => {
       const lineNet = l.quantity * l.unitPrice * (1 - effectiveDiscount / 100);
       // VAT is now invoice-level when showVat is enabled; line VAT is ignored in that mode
       const lineVat = showVat ? 0 : lineNet * (l.vatPercent / 100);
-      const lineTotal = lineNet + lineVat;
+      const lineTotal = roundMoney(lineNet + lineVat, dp);
       return {
         productId: l.productId,
         productName: l.productName,
@@ -255,7 +256,7 @@ export const InvoicesPage: React.FC = () => {
         lineTotal,
         currencyCode,
         exchangeRate,
-        baseCurrencyLineTotal: lineTotal * exchangeRate,
+        baseCurrencyLineTotal: roundMoney(lineTotal * exchangeRate, dp),
       };
     });
     // When VAT is invoice-level, totals already include it; line totals are net, so add invoice VAT back via payload totals

@@ -1,5 +1,5 @@
 import { escapeHtml } from '@/core/utils/html';
-import { formatDateValue } from '@/core/utils/locale';
+import { formatDateValue, getCompanyDecimalPlaces } from '@/core/utils/locale';
 
 export interface PrintLine {
   description: string;
@@ -99,7 +99,7 @@ function numberToWords(n: number): string {
   if (n < 0) return 'سالب ' + numberToWords(Math.abs(n));
 
   const intPart = Math.floor(n);
-  const fracPart = Math.round((n - intPart) * 100);
+  const fracPart = Math.round((n - intPart) * 10 ** getCompanyDecimalPlaces());
 
   let result = '';
 
@@ -174,7 +174,8 @@ function convertHundreds(n: number): string {
 
 function formatCurrency(amount: number, currency = 'YER'): string {
   const symbol = currency === 'YER' ? 'ر.ي' : currency;
-  return `${new Intl.NumberFormat('ar-YE').format(amount)} ${symbol}`;
+  const dp = getCompanyDecimalPlaces();
+  return `${new Intl.NumberFormat('ar-YE', { minimumFractionDigits: dp, maximumFractionDigits: dp }).format(amount)} ${symbol}`;
 }
 
 function escapeLineBreaks(value: string): string {

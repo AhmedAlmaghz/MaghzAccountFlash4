@@ -15,7 +15,7 @@ vi.mock('@/core/store', () => ({
 }));
 
 import { useAppStore } from '@/core/store';
-import { DEFAULT_LOCALE, formatNumber, formatCurrencyValue, formatDateValue, formatDateTime } from './locale';
+import { DEFAULT_LOCALE, formatNumber, formatCurrencyValue, formatDateValue, formatDateTime, getCompanyDecimalPlaces, roundMoney } from './locale';
 
 const mockUseAppStore = useAppStore as unknown as { getState: ReturnType<typeof vi.fn> };
 
@@ -281,5 +281,49 @@ describe('locale utility', () => {
       },
     });
     expect(formatDateTime('invalid-date')).toBe('-');
+  });
+
+  it('getCompanyDecimalPlaces honors an explicit 0 (whole-unit display)', () => {
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: { id: 'c-1', decimalPlaces: 0 } });
+    expect(getCompanyDecimalPlaces()).toBe(0);
+  });
+
+  it('getCompanyDecimalPlaces falls back to 2 when unset and clamps to 0-6', () => {
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: null });
+    expect(getCompanyDecimalPlaces()).toBe(2);
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: { id: 'c-1' } });
+    expect(getCompanyDecimalPlaces()).toBe(2);
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: { id: 'c-1', decimalPlaces: 9 } });
+    expect(getCompanyDecimalPlaces()).toBe(6);
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: { id: 'c-1', decimalPlaces: -3 } });
+    expect(getCompanyDecimalPlaces()).toBe(0);
+  });
+
+  it('formatNumber renders zero decimals when the company sets 0', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: { id: 'c-1', decimalPlaces: 0, dateFormat: 'yyyy-MM-dd', calendar: 'gregorian', currency: 'YER' },
+    });
+    const result = formatNumber(1234.56);
+    const normalized = result.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/٬/g, ',')
+      .replace(/٫/g, '.');
+    expect(normalized).toBe('1,235');
+  });
+
+  it('formatCurrencyValue renders zero decimals when the company sets 0', () => {
+    mockUseAppStore.getState.mockReturnValue({
+      activeCompany: { id: 'c-1', decimalPlaces: 0, dateFormat: 'yyyy-MM-dd', calendar: 'gregorian', currency: 'YER' },
+    });
+    const result = formatCurrencyValue(1234.56, 'USD', 'en-US');
+    expect(result).toBe('$1,235');
+  });
+
+  it('roundMoney rounds to company decimals including 0', () => {
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: { id: 'c-1', decimalPlaces: 0 } });
+    expect(roundMoney(1234.56)).toBe(1235);
+    expect(roundMoney(100.4)).toBe(100);
+    mockUseAppStore.getState.mockReturnValue({ activeCompany: { id: 'c-1', decimalPlaces: 2 } });
+    expect(roundMoney(0.1 + 0.2)).toBe(0.3);
+    expect(roundMoney(1234.567, 0)).toBe(1235);
   });
 });

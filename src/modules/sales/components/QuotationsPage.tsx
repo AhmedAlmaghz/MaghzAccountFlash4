@@ -14,6 +14,7 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { roundMoney } from '@/core/utils/locale';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { useSettings } from '@/core/utils/useSettings';
@@ -74,7 +75,7 @@ export const QuotationsPage: React.FC = () => {
   const { settings } = useSettings(activeCompany?.id || '');
   const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
-  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
 
   const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -164,8 +165,15 @@ export const QuotationsPage: React.FC = () => {
     const vatRate = settings?.vatRate ?? 15;
     const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
     const totalAmount = netSubtotal + vatAmount;
-    return { subtotal, vatAmount, discountAmount: lineDiscountTotal + cappedInvoiceDiscount, invoiceDiscountAmount: cappedInvoiceDiscount, totalAmount, vatRate };
-  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate]);
+    return {
+      subtotal: roundMoney(subtotal, dp),
+      vatAmount: roundMoney(vatAmount, dp),
+      discountAmount: roundMoney(lineDiscountTotal + cappedInvoiceDiscount, dp),
+      invoiceDiscountAmount: roundMoney(cappedInvoiceDiscount, dp),
+      totalAmount: roundMoney(totalAmount, dp),
+      vatRate,
+    };
+  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate, dp]);
 
   const buildPayload = (quotationNumber: string): Omit<Quotation, 'id'> => ({
     companyId: activeCompany!.id,
@@ -184,7 +192,7 @@ export const QuotationsPage: React.FC = () => {
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       discountPercent: l.discountPercent,
-      lineTotal: l.quantity * l.unitPrice * (1 - l.discountPercent / 100),
+      lineTotal: roundMoney(l.quantity * l.unitPrice * (1 - l.discountPercent / 100), dp),
     })),
   });
 

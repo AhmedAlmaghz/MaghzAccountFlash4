@@ -74,9 +74,9 @@ export function useCurrencyDisplay() {
     (value: number | string, currencyCode?: string | null) => {
       const code = currencyCode ?? defaultCurrency?.code;
       const c = currencies.find((x) => x.code === code);
-      return formatWithSymbol(value, c);
+      return formatWithSymbol(value, c, activeCompany?.decimalPlaces ?? 2);
     },
-    [currencies, defaultCurrency]
+    [currencies, defaultCurrency, activeCompany?.decimalPlaces]
   );
 
   const convert = useCallback(

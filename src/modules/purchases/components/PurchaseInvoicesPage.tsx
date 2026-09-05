@@ -95,7 +95,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
   } = usePurchaseInvoicesPaginated(activeCompany?.id || '', invoiceFilters);
   const { orders } = usePurchaseOrders(activeCompany?.id || '');
   const { settings } = useSettings(activeCompany?.id || '');
-  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
   const { getNextNumber } = useDocumentSequence();
   const { getUserName } = useUserMap();
   const { currencies, defaultCurrency } = useCurrencyDisplay();
@@ -142,8 +142,8 @@ export const PurchaseInvoicesPage: React.FC = () => {
     const net = gross - discount;
     const vat = showVat ? 0 : net * (line.vatPercent / 100);
     const total = net + vat;
-    return { ...line, lineTotal: Number(total.toFixed(2)) };
-  }, [showDiscount, showVat]);
+    return { ...line, lineTotal: Number(total.toFixed(dp)) };
+  }, [showDiscount, showVat, dp]);
 
   const formTotals = useMemo(() => {
     const lineDiscountTotal = showDiscount ? form.lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
@@ -157,14 +157,14 @@ export const PurchaseInvoicesPage: React.FC = () => {
     const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
     const totalAmount = netSubtotal + vatAmount;
     return {
-      subtotal: Number(subtotalBeforeInvoiceDiscount.toFixed(2)),
-      vatAmount: Number(vatAmount.toFixed(2)),
-      discountAmount: Number(totalDiscountAmount.toFixed(2)),
-      invoiceDiscountAmount: Number(cappedInvoiceDiscount.toFixed(2)),
-      totalAmount: Number(totalAmount.toFixed(2)),
+      subtotal: Number(subtotalBeforeInvoiceDiscount.toFixed(dp)),
+      vatAmount: Number(vatAmount.toFixed(dp)),
+      discountAmount: Number(totalDiscountAmount.toFixed(dp)),
+      invoiceDiscountAmount: Number(cappedInvoiceDiscount.toFixed(dp)),
+      totalAmount: Number(totalAmount.toFixed(dp)),
       vatRate,
     };
-  }, [form.lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, vatRate]);
+  }, [form.lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, vatRate, dp]);
 
   const updateLine = useCallback((idx: number, patch: Partial<InvoiceFormLine>) => {
     setForm(prev => {

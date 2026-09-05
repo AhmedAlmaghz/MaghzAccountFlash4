@@ -44,10 +44,13 @@ export function useFormatters(companyId?: string): Formatters {
   const resolvedCompanyId = companyId ?? activeCompany?.id ?? '';
   const { settings } = useSettings(resolvedCompanyId);
 
-  const decimalPlaces = settings?.decimalPlaces ?? DEFAULT_DECIMAL_PLACES;
-  const dateFormat = settings?.dateFormat ?? DEFAULT_DATE_FORMAT;
-  const calendar = settings?.calendar ?? DEFAULT_CALENDAR;
-  const defaultCurrency = settings?.defaultCurrency ?? DEFAULT_CURRENCY;
+  // Store first: it is refreshed synchronously on company save, while the
+  // DB-backed settings only reload when the company id changes (stale after
+  // a save). `??` (never `||`) keeps an explicit 0-decimal setting intact.
+  const decimalPlaces = activeCompany?.decimalPlaces ?? settings?.decimalPlaces ?? DEFAULT_DECIMAL_PLACES;
+  const dateFormat = activeCompany?.dateFormat ?? settings?.dateFormat ?? DEFAULT_DATE_FORMAT;
+  const calendar = activeCompany?.calendar ?? settings?.calendar ?? DEFAULT_CALENDAR;
+  const defaultCurrency = activeCompany?.currency ?? settings?.defaultCurrency ?? DEFAULT_CURRENCY;
 
   const locale = useMemo(() => getCalendarLocale(calendar), [calendar]);
   const normalizedFormat = useMemo(() => normalizeDateFormat(dateFormat), [dateFormat]);

@@ -83,7 +83,9 @@ export function useSettings(companyId: string) {
         ? String(companyResult.rows[0].date_format)
         : 'yyyy-MM-dd';
 
-      const decimalPlaces = companyResult.success && companyResult.rows?.[0]?.decimal_places !== undefined
+      // NULL (legacy rows) means "unset" — fall back to 2, not 0
+      // (Number(null) === 0 would silently force whole-unit display).
+      const decimalPlaces = companyResult.success && companyResult.rows?.[0]?.decimal_places != null
         ? Number(companyResult.rows[0].decimal_places)
         : 2;
 

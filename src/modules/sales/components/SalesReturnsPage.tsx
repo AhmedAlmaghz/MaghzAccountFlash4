@@ -13,6 +13,7 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { roundMoney } from '@/core/utils/locale';
 import { useSettings } from '@/core/utils/useSettings';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
@@ -63,7 +64,7 @@ export const SalesReturnsPage: React.FC = () => {
   const { invoices } = usePostedInvoicesWithLines(activeCompany?.id || '');
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
-  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
   const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
 
   const [formOpen, setFormOpen] = useState(false);
@@ -129,10 +130,16 @@ export const SalesReturnsPage: React.FC = () => {
     const invoiceDiscountAmount = showDiscount ? (invoiceDiscountType === 'percent' ? subtotal * (invoiceDiscount / 100) : invoiceDiscount) : 0;
     const cappedDiscount = Math.min(invoiceDiscountAmount, subtotal);
     const netSubtotal = subtotal - cappedDiscount;
-    const vatAmount = showVat ? Math.round(netSubtotal * (vatRate / 100) * 100) / 100 : 0;
+    const vatAmount = showVat ? roundMoney(netSubtotal * (vatRate / 100), dp) : 0;
     const totalAmount = netSubtotal + vatAmount;
-    return { subtotal, vatAmount, totalAmount, invoiceDiscountAmount: cappedDiscount, vatRate };
-  }, [lines, vatRate, invoiceDiscount, invoiceDiscountType, showDiscount, showVat]);
+    return {
+      subtotal: roundMoney(subtotal, dp),
+      vatAmount,
+      totalAmount: roundMoney(totalAmount, dp),
+      invoiceDiscountAmount: roundMoney(cappedDiscount, dp),
+      vatRate,
+    };
+  }, [lines, vatRate, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, dp]);
 
   const handleInvoiceSelect = (invoiceId: string) => {
     const inv = invoices.find(i => i.id === invoiceId);
@@ -164,7 +171,7 @@ export const SalesReturnsPage: React.FC = () => {
       productName: l.productName,
       quantity: l.quantity,
       unitPrice: l.unitPrice,
-      lineTotal: l.quantity * l.unitPrice,
+      lineTotal: roundMoney(l.quantity * l.unitPrice, dp),
     })),
   });
 

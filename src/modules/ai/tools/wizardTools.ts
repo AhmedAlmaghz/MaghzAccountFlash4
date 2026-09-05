@@ -25,7 +25,10 @@ function today(): string {
   return localToday();
 }
 
-const round2 = (v: number) => Math.round(v * 100) / 100;
+import { roundMoney, getCompanyDecimalPlaces } from '@/core/utils/locale';
+
+// Company-precision rounding (0 allowed) — same contract as writeTools/shared.
+const round2 = (v: number) => roundMoney(v);
 
 /**
  * Rich confirmation summary for document tools: line count + estimated
@@ -40,7 +43,8 @@ function summarizeDocLines(label: string, lines: unknown): string {
       0,
     ),
   );
-  const totalStr = new Intl.NumberFormat('ar-YE', { maximumFractionDigits: 2 }).format(total);
+  const dp = getCompanyDecimalPlaces();
+  const totalStr = new Intl.NumberFormat('ar-YE', { minimumFractionDigits: dp, maximumFractionDigits: dp }).format(total);
   return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
 }
 
