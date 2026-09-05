@@ -2650,16 +2650,22 @@ export function registerDatabaseHandlers() {
   // transactions (dynamic header SET + optional line rebuild); delete* / post*
   // use guarded CTEs so rows only change when the business rules allow it.
 
-  // sales.getCustomers
+  // sales.getCustomers — computed balance so list/KPIs always match the statement
   registerRpc('sales.getCustomers', {
     compose: (p, session) => ({
-      sql: `SELECT * FROM customers WHERE company_id = $1::uuid ORDER BY name ASC`,
+      sql: `SELECT c.*,
+                (COALESCE(c.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM customers c WHERE c.company_id = $1::uuid ORDER BY c.name ASC`,
       params: [session.user.companyId],
     }),
     paramCount: 1,
   });
 
-  // sales.getCustomersPaginated
+  // sales.getCustomersPaginated — computed balance so list/KPIs always match the statement
   registerRpc('sales.getCustomersPaginated', {
     compose: (p, session) => {
       const page = Math.max(1, Number(p.page) || 1);
@@ -2667,17 +2673,30 @@ export function registerDatabaseHandlers() {
       const offset = (page - 1) * pageSize;
       const isActive = p.isActive === undefined || p.isActive === null ? null : (p.isActive === true || p.isActive === 'true');
       return {
-        sql: `SELECT c.*, (COUNT(*) OVER())::int AS total_count FROM customers c WHERE c.company_id = $1::uuid AND ($2::boolean IS NULL OR c.is_active = $2) AND ($3::text IS NULL OR c.name ILIKE $3 OR c.phone ILIKE $3 OR c.code ILIKE $3) ORDER BY c.name ASC LIMIT $4 OFFSET $5`,
+        sql: `SELECT c.*,
+                (COALESCE(c.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
+                ) AS computed_balance,
+                (COUNT(*) OVER())::int AS total_count
+         FROM customers c WHERE c.company_id = $1::uuid AND ($2::boolean IS NULL OR c.is_active = $2) AND ($3::text IS NULL OR c.name ILIKE $3 OR c.phone ILIKE $3 OR c.code ILIKE $3) ORDER BY c.name ASC LIMIT $4 OFFSET $5`,
         params: [session.user.companyId, isActive, TEXT_FILTER(p.search), pageSize, offset],
       };
     },
     paramCount: 5,
   });
 
-  // sales.getCustomerById
+  // sales.getCustomerById — computed balance
   registerRpc('sales.getCustomerById', {
     compose: (p, session) => ({
-      sql: `SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+      sql: `SELECT c.*,
+                (COALESCE(c.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid LIMIT 1`,
       params: [String(p.id), session.user.companyId],
     }),
     paramCount: 2,
@@ -2742,13 +2761,10 @@ export function registerDatabaseHandlers() {
     },
   });
 
-  // sales.getCustomerStatement
-  // Includes the customer's opening balance as the first row so the running
-  // balance (and the last row's closing balance) always equals the FULL
-  // balance = opening + invoices - receipts.
+  // sales.getCustomerStatement — opening + invoices - receipts - returns
   registerRpc('sales.getCustomerStatement', {
     compose: (p, session) => ({
-      sql: `WITH entries AS (SELECT COALESCE(c.opening_date, DATE '1900-01-01') AS date, 'رصيد افتتاحي'::varchar AS document_type, 'OPENING'::varchar AS document_number, CASE WHEN c.opening_balance >= 0 THEN c.opening_balance ELSE 0 END AS debit, CASE WHEN c.opening_balance < 0 THEN -c.opening_balance ELSE 0 END AS credit, NULL::text AS notes, 0 AS sort_type FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid AND c.opening_balance <> 0 UNION ALL SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number, total_amount as debit, 0::numeric as credit, notes, 1 as sort_type FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' UNION ALL SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number, 0::numeric as debit, amount as credit, notes, 2 as sort_type FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted') SELECT date, document_type, document_number, debit, credit, SUM(debit - credit) OVER (ORDER BY date, sort_type, document_number) as balance, notes FROM entries ORDER BY date, sort_type, document_number`,
+      sql: `WITH entries AS (SELECT COALESCE(c.opening_date, DATE '1900-01-01') AS date, 'رصيد افتتاحي'::varchar AS document_type, 'OPENING'::varchar AS document_number, CASE WHEN c.opening_balance >= 0 THEN c.opening_balance ELSE 0 END AS debit, CASE WHEN c.opening_balance < 0 THEN -c.opening_balance ELSE 0 END AS credit, NULL::text AS notes, 0 AS sort_type FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid AND c.opening_balance <> 0 UNION ALL SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number, total_amount as debit, 0::numeric as credit, notes, 1 as sort_type FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' UNION ALL SELECT date, 'مردود'::varchar as document_type, return_number as document_number, 0::numeric as debit, total_amount as credit, reason as notes, 2 as sort_type FROM sales_returns WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted' UNION ALL SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number, 0::numeric as debit, amount as credit, notes, 3 as sort_type FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted') SELECT date, document_type, document_number, debit, credit, SUM(debit - credit) OVER (ORDER BY date, sort_type, document_number) as balance, notes FROM entries ORDER BY date, sort_type, document_number`,
       params: [String(p.customerId), session.user.companyId],
     }),
     paramCount: 2,
@@ -2757,12 +2773,10 @@ export function registerDatabaseHandlers() {
     },
   });
 
-  // sales.getCustomerArAging
-  // Includes each customer's opening balance as an undated (1900-01-01) row
-  // so it always lands in the oldest bucket (>90).
+  // sales.getCustomerArAging — opening + invoices - receipts - returns
   registerRpc('sales.getCustomerArAging', {
     compose: (p, session) => ({
-      sql: `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date FROM customers c JOIN sales_invoices i ON i.customer_id = c.id WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date FROM customers c WHERE c.company_id = $1 AND c.opening_balance > 0`,
+      sql: `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - COALESCE(i.paid_amount,0)) as due_amount, COALESCE(i.due_date, i.date) as aging_date FROM customers c JOIN sales_invoices i ON i.customer_id = c.id WHERE c.company_id = $1 AND c.id = i.company_id AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - COALESCE(i.paid_amount,0)) > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date FROM customers c WHERE c.company_id = $1 AND c.opening_balance > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, -rv.amount as due_amount, rv.date as aging_date FROM customers c JOIN receipt_vouchers rv ON rv.customer_id = c.id WHERE c.company_id = $1 AND rv.company_id = $1 AND rv.status = 'posted' UNION ALL SELECT c.id as customer_id, c.name as customer_name, -sr.total_amount as due_amount, sr.date as aging_date FROM customers c JOIN sales_returns sr ON sr.customer_id = c.id WHERE c.company_id = $1 AND sr.company_id = $1 AND sr.status = 'posted'`,
       params: [session.user.companyId],
     }),
     paramCount: 1,
@@ -2942,10 +2956,10 @@ export function registerDatabaseHandlers() {
     },
   });
 
-  // sales.postInvoice (atomic: status flip + customer balance in one CTE)
+  // sales.postInvoice (atomic: status/paid flip + customer balance, cash-aware)
   registerRpc('sales.postInvoice', {
     compose: (p, session) => ({
-      sql: `WITH upd AS (UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' RETURNING customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date), bal AS (UPDATE customers SET balance = balance + (SELECT (total_amount - paid_amount) FROM upd), updated_by = $3::uuid, updated_at = NOW() WHERE id = (SELECT customer_id FROM upd) AND company_id = $2::uuid AND (SELECT (total_amount - paid_amount) FROM upd) <> 0) SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date FROM upd`,
+      sql: `WITH upd AS (UPDATE sales_invoices SET status = CASE WHEN payment_type = 'cash' THEN 'paid' ELSE 'posted' END, paid_amount = CASE WHEN payment_type = 'cash' THEN total_amount ELSE paid_amount END, base_currency_paid = CASE WHEN payment_type = 'cash' THEN base_currency_amount ELSE base_currency_paid END, updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' RETURNING customer_id, total_amount, paid_amount, payment_type, subtotal, vat_amount, invoice_number, date), bal AS (UPDATE customers SET balance = balance + (SELECT total_amount - paid_amount FROM upd), updated_by = $3::uuid, updated_at = NOW() WHERE id = (SELECT customer_id FROM upd) AND company_id = $2::uuid AND (SELECT total_amount - paid_amount FROM upd) <> 0) SELECT customer_id, total_amount, paid_amount, payment_type, subtotal, vat_amount, invoice_number, date FROM upd`,
       params: [String(p.id), session.user.companyId, session.user.id],
     }),
     paramCount: 3,
@@ -3455,6 +3469,203 @@ export function registerAuthHandlers() {
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+
+  // ── Company backup / restore ──────────────────────────────────────────
+  // Mirrors src/core/backup/backupTables.ts DELETE_ORDER (same tables, same
+  // order). A parity test keeps the two copies in sync — update both.
+  // Reads need settings.view; the destructive restore needs settings.edit.
+  const BACKUP_PLAN = [
+    { table: 'product_product_categories', scope: { type: 'children', parent: 'products', fk: 'product_id' } },
+    { table: 'warehouse_transfer_lines', scope: { type: 'children', parent: 'warehouse_transfers', fk: 'transfer_id' } },
+    { table: 'quotation_lines', scope: { type: 'children', parent: 'quotations', fk: 'quotation_id' } },
+    { table: 'sales_invoice_lines', scope: { type: 'children', parent: 'sales_invoices', fk: 'invoice_id' } },
+    { table: 'sales_return_lines', scope: { type: 'children', parent: 'sales_returns', fk: 'return_id' } },
+    { table: 'purchase_invoice_lines', scope: { type: 'children', parent: 'purchase_invoices', fk: 'invoice_id' } },
+    { table: 'purchase_order_lines', scope: { type: 'children', parent: 'purchase_orders', fk: 'order_id' } },
+    { table: 'purchase_return_lines', scope: { type: 'children', parent: 'purchase_returns', fk: 'return_id' } },
+    { table: 'bom_lines', scope: { type: 'children', parent: 'boms', fk: 'bom_id' } },
+    { table: 'work_order_consumptions', scope: { type: 'children', parent: 'work_orders', fk: 'work_order_id' } },
+    { table: 'payroll_lines', scope: { type: 'children', parent: 'payroll_runs', fk: 'payroll_run_id' } },
+    { table: 'sales_returns', scope: { type: 'company' } },
+    { table: 'sales_invoices', scope: { type: 'company' } },
+    { table: 'quotations', scope: { type: 'company' } },
+    { table: 'purchase_returns', scope: { type: 'company' } },
+    { table: 'purchase_invoices', scope: { type: 'company' } },
+    { table: 'purchase_orders', scope: { type: 'company' } },
+    { table: 'receipt_vouchers', scope: { type: 'company' } },
+    { table: 'payment_vouchers', scope: { type: 'company' } },
+    { table: 'journal_entries', scope: { type: 'company' } },
+    { table: 'transactions', scope: { type: 'company' } },
+    { table: 'stock_movements', scope: { type: 'company' } },
+    { table: 'stock_adjustments', scope: { type: 'company' } },
+    { table: 'warehouse_transfers', scope: { type: 'company' } },
+    { table: 'attendance', scope: { type: 'company' } },
+    { table: 'leaves', scope: { type: 'company' } },
+    { table: 'end_of_service', scope: { type: 'company' } },
+    { table: 'payroll_runs', scope: { type: 'company' } },
+    { table: 'tasks', scope: { type: 'company' } },
+    { table: 'activities', scope: { type: 'company' } },
+    { table: 'leads', scope: { type: 'company' } },
+    { table: 'opportunities', scope: { type: 'company' } },
+    { table: 'ai_chat_messages', scope: { type: 'company' } },
+    { table: 'ai_chat_sessions', scope: { type: 'company' } },
+    { table: 'audit_logs', scope: { type: 'company' } },
+    { table: 'stock', scope: { type: 'company' } },
+    { table: 'customers', scope: { type: 'company' } },
+    { table: 'suppliers', scope: { type: 'company' } },
+    { table: 'work_orders', scope: { type: 'company' } },
+    { table: 'boms', scope: { type: 'company' } },
+    { table: 'products', scope: { type: 'company' } },
+    { table: 'product_categories', scope: { type: 'company' } },
+    { table: 'product_types', scope: { type: 'company' } },
+    { table: 'employees', scope: { type: 'company' } },
+    { table: 'departments', scope: { type: 'company' } },
+    { table: 'payroll_components', scope: { type: 'company' } },
+    { table: 'warehouses', scope: { type: 'company' } },
+    { table: 'branches', scope: { type: 'company' } },
+    { table: 'cash_boxes', scope: { type: 'company' } },
+    { table: 'cost_centers', scope: { type: 'company' } },
+    // default_accounts.account_id → accounts is NO ACTION: must go first.
+    { table: 'default_accounts', scope: { type: 'company' } },
+    { table: 'accounts', scope: { type: 'company' } },
+    { table: 'currencies', scope: { type: 'company' } },
+    { table: 'units', scope: { type: 'company' } },
+    { table: 'vat_settings', scope: { type: 'company' } },
+    { table: 'document_sequences', scope: { type: 'company' } },
+    { table: 'users', scope: { type: 'company' } },
+    { table: 'roles', scope: { type: 'company' } },
+    { table: 'settings', scope: { type: 'company' } },
+    { table: 'companies', scope: { type: 'single', idColumn: 'id' } },
+  ];
+
+  // Explicit FK-safe INSERT order (mirrors INSERT_ORDER in
+  // src/core/backup/backupTables.ts — SET NULL relations still enforce
+  // existence on insert, so this is NOT the reverse of BACKUP_PLAN).
+  const BACKUP_INSERT_ORDER = [
+    'companies', 'currencies', 'units', 'branches', 'roles', 'users',
+    'departments', 'accounts', 'cash_boxes', 'cost_centers', 'vat_settings',
+    'default_accounts', 'document_sequences', 'settings', 'payroll_components',
+    'product_types', 'product_categories', 'warehouses', 'products', 'boms',
+    'employees', 'work_orders', 'customers', 'suppliers', 'leads',
+    'opportunities', 'tasks', 'activities', 'quotations', 'sales_invoices',
+    'sales_returns', 'purchase_orders', 'purchase_invoices', 'purchase_returns',
+    'receipt_vouchers', 'payment_vouchers', 'transactions', 'journal_entries',
+    'stock', 'stock_movements', 'stock_adjustments', 'warehouse_transfers',
+    'attendance', 'leaves', 'payroll_runs', 'end_of_service', 'ai_chat_sessions',
+    'ai_chat_messages', 'audit_logs', 'product_product_categories',
+    'warehouse_transfer_lines', 'quotation_lines', 'sales_invoice_lines',
+    'sales_return_lines', 'purchase_invoice_lines', 'purchase_order_lines',
+    'purchase_return_lines', 'bom_lines', 'work_order_consumptions', 'payroll_lines',
+  ];
+
+  const SAFE_IDENT = /^[a-z][a-z0-9_]{0,63}$/;
+  function backupSelectSql(entry) {
+    const { table, scope } = entry;
+    if (!SAFE_IDENT.test(table)) throw new Error(`Unsafe table: ${table}`);
+    if (scope.type === 'company') return `SELECT * FROM ${table} WHERE company_id = $1`;
+    if (scope.type === 'single') {
+      if (!SAFE_IDENT.test(scope.idColumn)) throw new Error('Unsafe id column');
+      return `SELECT * FROM ${table} WHERE ${scope.idColumn} = $1`;
+    }
+    if (!SAFE_IDENT.test(scope.parent) || !SAFE_IDENT.test(scope.fk)) throw new Error('Unsafe parent reference');
+    return `SELECT c.* FROM ${table} c JOIN ${scope.parent} p ON p.id = c.${scope.fk} WHERE p.company_id = $1`;
+  }
+
+  ipcMain.handle('db:backup-company', async (event, { sessionToken } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session || !hasPermission(session, 'settings.view')) return { success: false, error: 'Permission denied' };
+      const tables = {};
+      const warnings = [];
+      for (const entry of BACKUP_PLAN) {
+        try {
+          const result = await pool.query(backupSelectSql(entry), [session.user.companyId]);
+          tables[entry.table] = result.rows;
+        } catch (err) {
+          warnings.push(`${entry.table}: ${err.message}`);
+        }
+      }
+      return { success: true, tables, warnings };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('db:restore-company', async (event, { sessionToken, tables } = {}) => {
+    const client = await pool.connect();
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
+      if (!tables || typeof tables !== 'object') return { success: false, error: 'Invalid backup payload' };
+      const companyId = session.user.companyId;
+      const warnings = [];
+      let restored = 0;
+      await client.query('BEGIN');
+      try {
+        // DELETEs in FK-safe order (children → documents → masters → company).
+        for (const entry of BACKUP_PLAN) {
+          if (!(entry.table in tables)) continue;
+          const { scope } = entry;
+          if (scope.type === 'company') {
+            await client.query(`DELETE FROM ${entry.table} WHERE company_id = $1`, [companyId]);
+          } else if (scope.type === 'single') {
+            await client.query(`DELETE FROM ${entry.table} WHERE ${scope.idColumn} = $1`, [companyId]);
+          } else {
+            await client.query(
+              `DELETE FROM ${entry.table} WHERE ${scope.fk} IN (SELECT id FROM ${scope.parent} WHERE company_id = $1)`,
+              [companyId]
+            );
+          }
+        }
+        // INSERTs in explicit FK-safe order (referenced rows first).
+        const planByTable = new Map(BACKUP_PLAN.map((e) => [e.table, e]));
+        for (const table of BACKUP_INSERT_ORDER) {
+          const entry = planByTable.get(table);
+          if (!entry) throw new Error(`BACKUP_INSERT_ORDER references unplanned table: ${table}`);
+          const rows = tables[table];
+          if (!Array.isArray(rows) || rows.length === 0) continue;
+          const columns = Array.from(
+            new Set(rows.flatMap((r) => Object.keys(r || {})).filter((c) => SAFE_IDENT.test(c)))
+          );
+          if (columns.length === 0) {
+            warnings.push(`${entry.table}: no safe columns, skipped`);
+            continue;
+          }
+          const toValue = (v) => {
+            if (v === undefined) return null;
+            if (v instanceof Date) return v.toISOString();
+            if (v !== null && typeof v === 'object') return JSON.stringify(v);
+            return v;
+          };
+          const CHUNK = 500;
+          for (let start = 0; start < rows.length; start += CHUNK) {
+            const params = [];
+            const groups = rows.slice(start, start + CHUNK).map((row) => {
+              const placeholders = columns.map((col) => {
+                params.push(toValue(row[col]));
+                return `$${params.length}`;
+              });
+              return `(${placeholders.join(', ')})`;
+            });
+            await client.query(`INSERT INTO ${entry.table} (${columns.join(', ')}) VALUES ${groups.join(', ')}`, params);
+          }
+          restored += rows.length;
+        }
+        for (const unknown of Object.keys(tables)) {
+          if (!BACKUP_PLAN.some((e) => e.table === unknown)) warnings.push(`${unknown}: unknown table, skipped`);
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      }
+      return { success: true, restored, warnings };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      client.release();
     }
   });
 

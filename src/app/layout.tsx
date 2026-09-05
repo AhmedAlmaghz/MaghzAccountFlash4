@@ -572,18 +572,21 @@ const CompanyChip: React.FC = () => {
   if (!activeCompany) return null;
   const logo = !logoBroken && activeCompany.logoUrl ? activeCompany.logoUrl : null;
 
+  // Always visible on every screen and device: compact on phones (logo +
+  // short name), roomier from sm up. The header itself renders on all
+  // protected routes, so this chip is the single company identity spot.
   return (
-    <div className="hidden md:flex items-center gap-2 min-w-0 max-w-55 text-sm text-zinc-600 dark:text-zinc-300">
+    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 max-w-28 sm:max-w-44 md:max-w-55 text-sm text-zinc-600 dark:text-zinc-300">
       {logo ? (
         <img
           src={logo}
           alt={t('header.companyLogo')}
           onError={() => setLogoBroken(true)}
-          className="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-zinc-200 dark:ring-zinc-700"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover shrink-0 ring-1 ring-zinc-200 dark:ring-zinc-700"
         />
       ) : (
-        <span className="w-8 h-8 rounded-lg bg-gold-100 dark:bg-gold-900/30 flex items-center justify-center shrink-0">
-          <Building2 size={16} className="text-gold-600 dark:text-gold-400" aria-hidden />
+        <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-gold-100 dark:bg-gold-900/30 flex items-center justify-center shrink-0">
+          <Building2 size={15} className="text-gold-600 dark:text-gold-400" aria-hidden />
         </span>
       )}
       <span className="font-medium truncate">{activeCompany.name}</span>
@@ -781,6 +784,16 @@ export const AppLayout = () => {
   useEffect(() => {
     if (!isMobile && drawerOpen) setDrawerOpen(false);
   }, [isMobile, drawerOpen]);
+
+  // Silent daily auto-backup (OPFS) — fire-and-forget, never blocks UI.
+  const activeCompanyId = useAppStore((s) => s.activeCompany?.id);
+  const activeCompanyName = useAppStore((s) => s.activeCompany?.name);
+  useEffect(() => {
+    if (!isAuthenticated || !activeCompanyId) return;
+    void import('@/core/backup/backupService').then(({ maybeAutoBackup }) =>
+      maybeAutoBackup(activeCompanyId, activeCompanyName || 'company'),
+    );
+  }, [isAuthenticated, activeCompanyId, activeCompanyName]);
 
   return (
     <div className="flex h-dvh w-screen overflow-hidden bg-zinc-50 dark:bg-zinc-950">

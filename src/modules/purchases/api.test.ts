@@ -173,15 +173,16 @@ describe('purchasesApi.getSupplierStatement', () => {
     expect(res.success).toBe(true);
     expect(captured).toHaveLength(1);
     const { sql, params } = captured[0];
-    // opening + invoices + payments in ONE query with a running balance
+    // opening + invoices + returns + payments in ONE query with a running balance
     expect(sql).toMatch(/FROM suppliers s/);
     expect(sql).toMatch(/s\.opening_balance <> 0/);
     expect(sql).toMatch(/FROM purchase_invoices/);
     expect(sql).toMatch(/FROM payment_vouchers/);
+    expect(sql).toMatch(/FROM purchase_returns/);
     expect(sql).toMatch(/رصيد افتتاحي/);
     expect(sql).toMatch(/SUM\(credit - debit\) OVER/);
     // every UNION branch must scope to the caller's company
-    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(3);
+    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(4);
     expect(params).toEqual([SUPPLIER_ID, COMPANY_ID]);
   });
 

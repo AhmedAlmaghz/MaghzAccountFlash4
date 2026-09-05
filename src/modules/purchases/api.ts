@@ -185,11 +185,22 @@ export const purchasesApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
       const result = await adapter.query(
-        'SELECT * FROM suppliers WHERE company_id = $1 AND is_active = true ORDER BY name',
+        `SELECT s.*,
+                (COALESCE(s.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM suppliers s WHERE s.company_id = $1 AND s.is_active = true ORDER BY s.name`,
         [companyId]
       );
       if (result.success) {
-        return { success: true, data: (result.rows || []).map(mapSupplier) };
+        const rows = (result.rows || []).map((r: Record<string, unknown>) => {
+          const mapped = mapSupplier(r);
+          if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+          return mapped;
+        });
+        return { success: true, data: rows };
       }
       return { success: false, error: result.error };
     } catch (e) {
@@ -233,12 +244,22 @@ export const purchasesApi = {
       const offsetIdx = params.length;
 
       const dataResult = await adapter.query(
-        `SELECT * FROM suppliers WHERE ${where} ORDER BY name LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        `SELECT s.*,
+                (COALESCE(s.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM suppliers s WHERE ${where} ORDER BY s.name LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         params
       );
       if (!dataResult.success) return { success: false, error: dataResult.error };
 
-      const items = (dataResult.rows || []).map((row: Record<string, unknown>) => mapSupplier(row));
+      const items = (dataResult.rows || []).map((r: Record<string, unknown>) => {
+        const mapped = mapSupplier(r);
+        if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+        return mapped;
+      });
       return { success: true, data: paginatedResult(items, total, p, ps) };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -251,11 +272,19 @@ export const purchasesApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const result = await adapter.query(
-        'SELECT * FROM suppliers WHERE id = $1 AND company_id = $2 LIMIT 1',
+        `SELECT s.*,
+                (COALESCE(s.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM suppliers s WHERE s.id = $1 AND s.company_id = $2 LIMIT 1`,
         [id, companyId]
       );
       if (result.success && result.rows?.[0]) {
-        return { success: true, data: mapSupplier(result.rows[0]) };
+        const mapped = mapSupplier(result.rows[0] as Record<string, unknown>);
+        if ((result.rows[0] as Record<string, unknown>).computed_balance !== undefined) mapped.balance = Number((result.rows[0] as Record<string, unknown>).computed_balance) || 0;
+        return { success: true, data: mapped };
       }
       return { success: false, error: result.error || 'Supplier not found' };
     } catch (e) {
@@ -374,6 +403,11 @@ export const purchasesApi = {
           FROM purchase_invoices
           WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status != 'cancelled'
           UNION ALL
+          SELECT id, date, 'return' AS type, return_number AS doc_number, 'مردود مشتريات' AS description,
+                 total_amount AS debit, 0::numeric AS credit, 1 AS sort_type
+          FROM purchase_returns
+          WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
+          UNION ALL
           SELECT id, date, 'payment' AS type, voucher_number AS doc_number, 'سند صرف' AS description,
                  amount AS debit, 0::numeric AS credit, 2 AS sort_type
           FROM payment_vouchers
@@ -393,7 +427,7 @@ export const purchasesApi = {
       const items: SupplierStatementItem[] = (result.rows || []).map((row) => ({
         id: String(row.id),
         date: toDateString(row.date) || String(row.date),
-        type: (row.type === 'opening' || row.type === 'invoice' || row.type === 'payment' ? row.type : 'invoice') as SupplierStatementItem['type'],
+        type: (row.type === 'opening' || row.type === 'invoice' || row.type === 'payment' || row.type === 'return' ? row.type : 'invoice') as SupplierStatementItem['type'],
         documentNumber: String(row.document_number || ''),
         description: String(row.description || ''),
         debit: Number(row.debit) || 0,
@@ -412,17 +446,20 @@ export const purchasesApi = {
       const idValidation = validateInput(z.object({ supplierId: uuidSchema, companyId: companyIdSchema }), { supplierId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
-      // Aging includes the supplier's opening balance: an undated opening is
-      // by definition the OLDEST debt → it always lands in the 91+ bucket.
+      // Aging = opening + outstanding invoices - posted payments - posted returns.
       const result = await adapter.query(
-        `SELECT due_date, date, total_amount, paid_amount, 0::numeric AS opening_balance
+        `SELECT COALESCE(due_date, date) AS aging_date, (total_amount - COALESCE(paid_amount,0)) AS due_amount
         FROM purchase_invoices
-        WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid')
+        WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount,0)) > 0
         UNION ALL
-        SELECT NULL::date AS due_date, COALESCE(opening_date, DATE '1900-01-01') AS date,
-               0::numeric AS total_amount, 0::numeric AS paid_amount, opening_balance
-        FROM suppliers
-        WHERE id = $1 AND company_id = $2 AND opening_balance > 0`,
+        SELECT COALESCE(opening_date, DATE '1900-01-01') AS aging_date, opening_balance AS due_amount
+        FROM suppliers WHERE id = $1 AND company_id = $2 AND opening_balance > 0
+        UNION ALL
+        SELECT date AS aging_date, -amount AS due_amount
+        FROM payment_vouchers WHERE supplier_id = $1 AND company_id = $2 AND status = 'posted'
+        UNION ALL
+        SELECT date AS aging_date, -total_amount AS due_amount
+        FROM purchase_returns WHERE supplier_id = $1 AND company_id = $2 AND status = 'posted'`,
         [supplierId, companyId]
       );
       if (!result.success) return { success: false, error: result.error };
@@ -431,13 +468,14 @@ export const purchasesApi = {
       const now = new Date();
 
       for (const row of result.rows || []) {
-        const dueRaw = row.due_date || row.date;
-        if (!dueRaw) continue; // skip rows without a date to avoid NaN buckets
-        const due = new Date(dueRaw);
-        if (isNaN(due.getTime())) continue; // skip invalid dates
-        const remaining = Number(row.total_amount) - Number(row.paid_amount || 0) || Number(row.opening_balance);
-        if (remaining <= 0) continue;
+        const dueRaw = (row.aging_date as string) || (row.due_date as string) || (row.date as string);
+        if (!dueRaw) continue;
+        const due = new Date(dueRaw as string);
+        if (isNaN(due.getTime())) continue;
+        const remaining = Number((row.due_amount as number) ?? 0);
+        if (remaining === 0) continue;
         const diffDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+        // Negative credits (payments/returns) reduce the bucket they fall in.
         if (diffDays <= 30) buckets['0-30'] += remaining;
         else if (diffDays <= 60) buckets['31-60'] += remaining;
         else if (diffDays <= 90) buckets['61-90'] += remaining;
@@ -461,23 +499,17 @@ export const purchasesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
-      // Full AP outstanding = unpaid invoices + every supplier's opening balance.
+      // Full AP = opening + outstanding invoices - posted payments - posted returns.
       const result = await adapter.query(
-        `SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) AS outstanding
-           FROM purchase_invoices
-          WHERE company_id = $1 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount, 0)) > 0`,
-        [companyId]
-      );
-      const openingsResult = await adapter.query(
-        `SELECT COALESCE(SUM(opening_balance), 0) AS openings
-           FROM suppliers
-          WHERE company_id = $1 AND opening_balance > 0`,
-        [companyId]
+        `SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) AS outstanding FROM purchase_invoices WHERE company_id = $1 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount, 0)) > 0
+         UNION ALL SELECT COALESCE(SUM(opening_balance),0) FROM suppliers WHERE company_id = $1 AND opening_balance > 0
+         UNION ALL SELECT -COALESCE(SUM(amount),0) FROM payment_vouchers WHERE company_id = $1 AND status = 'posted'
+         UNION ALL SELECT -COALESCE(SUM(total_amount),0) FROM purchase_returns WHERE company_id = $1 AND status = 'posted'`,
+        [companyId, companyId, companyId, companyId]
       );
       if (!result.success) return { success: false, error: result.error };
-      const invoices = Number(result.rows?.[0]?.outstanding || 0);
-      const openings = openingsResult.success ? Number(openingsResult.rows?.[0]?.openings || 0) : 0;
-      return { success: true, total: invoices + openings };
+      const total = (result.rows || []).reduce((s: number, r: Record<string, unknown>) => s + Number(Object.values(r)[0] || 0), 0);
+      return { success: true, total: Math.max(0, total) };
     } catch (e) {
       return { success: false, error: String(e) };
     }

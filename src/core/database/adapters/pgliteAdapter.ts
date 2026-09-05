@@ -112,6 +112,7 @@ import hrProfessional from '@root/drizzle/0014_hr_professional.sql?raw'
 import crmProfessional from '@root/drizzle/0015_crm_professional.sql?raw'
 import hrAttendanceNotes from '@root/drizzle/0016_hr_attendance_notes.sql?raw';
 import usersPhotoUrl from '@root/drizzle/0017_users_photo_url.sql?raw';
+import recomputePartyBalances from '@root/drizzle/0018_recompute_party_balances.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -132,6 +133,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0015_crm_professional', sql: crmProfessional },
   { name: '0016_hr_attendance_notes', sql: hrAttendanceNotes },
   { name: '0017_users_photo_url', sql: usersPhotoUrl },
+  { name: '0018_recompute_party_balances', sql: recomputePartyBalances },
 ];
 
 /**

@@ -526,3 +526,37 @@ describe('Migration 0017: users.photo_url (header avatar menu)', () => {
     expect(pglite).toMatch(/\{ name: '0017_users_photo_url', sql: usersPhotoUrl \}/);
   });
 });
+
+describe('Migration 0018: recompute party balances (statement alignment)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0018_recompute_party_balances.sql'), 'utf-8');
+
+  it('recomputes customers from opening + invoices - receipts - returns', () => {
+    expect(migrationSql).toMatch(/UPDATE customers/);
+    expect(migrationSql).toMatch(/sales_invoices/);
+    expect(migrationSql).toMatch(/receipt_vouchers/);
+    expect(migrationSql).toMatch(/sales_returns/);
+  });
+
+  it('recomputes suppliers from opening + purchase invoices - payments - returns', () => {
+    expect(migrationSql).toMatch(/UPDATE suppliers/);
+    expect(migrationSql).toMatch(/purchase_invoices/);
+    expect(migrationSql).toMatch(/payment_vouchers/);
+    expect(migrationSql).toMatch(/purchase_returns/);
+  });
+
+  it('is idempotent (IS DISTINCT FROM)', () => {
+    expect(migrationSql).toMatch(/IS DISTINCT FROM/);
+  });
+
+  it('journal registers 0018 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0018_recompute_party_balances')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0018 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0018_recompute_party_balances\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0018_recompute_party_balances', sql: recomputePartyBalances \}/);
+  });
+});

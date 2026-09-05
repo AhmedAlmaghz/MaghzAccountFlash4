@@ -191,7 +191,8 @@ describe('accountingApi.createReceiptVoucher with payment application', () => {
     } as never, 'user-1');
 
     expect(res.success).toBe(true);
-    expect(queries.some(q => q.includes('UPDATE sales_invoices'))).toBe(true);
+    // Draft vouchers are inert — invoice/balance moves happen only when posted.
+    expect(queries.some(q => q.includes('UPDATE sales_invoices'))).toBe(false);
   });
 
   it('does not apply payment when amountApplied is 0', async () => {

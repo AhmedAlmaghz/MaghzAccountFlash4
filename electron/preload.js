@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('electronDB', {
   seedDemo: (adminPassword) => ipcRenderer.invoke('db:seed-demo', { sessionToken, adminPassword }),
   clearAll: (payload) => ipcRenderer.invoke('db:clear-all', { ...(payload || {}), sessionToken }),
   getDbInfo: () => ipcRenderer.invoke('db:info'),
+  backupCompany: () => ipcRenderer.invoke('db:backup-company', { sessionToken }),
+  restoreCompany: (payload) => ipcRenderer.invoke('db:restore-company', { ...(payload || {}), sessionToken }),
 
   // ── Typed RPC surface (Phase 4) ─────────────────────────────────────
   accounting: {

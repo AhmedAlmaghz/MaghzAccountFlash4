@@ -97,12 +97,13 @@ describe('salesApi.getCustomerStatement', () => {
     const [sql, params] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/FROM sales_invoices/);
     expect(sql).toMatch(/FROM receipt_vouchers/);
+    expect(sql).toMatch(/FROM sales_returns/);
     expect(sql).toMatch(/voucher_number as document_number/);
     // the opening-balance branch must exist and fall outside the movement rows
     expect(sql).toMatch(/FROM customers c/);
     expect(sql).toMatch(/رصيد افتتاحي/);
-    // all three UNION branches (opening + invoices + receipts) must filter by the caller's company
-    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(3);
+    // all four UNION branches (opening + invoices + returns + receipts) must filter by the caller's company
+    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(4);
     expect(params).toEqual([CUSTOMER_ID, COMPANY_ID]);
   });
 
@@ -205,7 +206,7 @@ describe('salesApi.getCustomerArAging', () => {
     const [sql, params] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/c\.company_id = \$1/);
     expect(sql).toMatch(/status IN \('posted', 'partially_paid'\)/);
-    expect(sql).toMatch(/total_amount - i\.paid_amount\) > 0/);
+    expect(sql).toMatch(/total_amount - COALESCE\(i\.paid_amount,0\)\) > 0/);
     expect(params[0]).toBe(COMPANY_ID);
   });
 

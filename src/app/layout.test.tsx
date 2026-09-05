@@ -130,6 +130,28 @@ describe('Header', () => {
     expect(screen.getByText('Test Company')).toBeInTheDocument();
   });
 
+  it('renders the company logo image when logoUrl exists (all screens and devices)', () => {
+    const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
+    useAuthStore.getState().login(user);
+    useAppStore.setState({
+      activeCompany: { id: 'c1', name: 'Test Company', currency: 'YER', logoUrl: 'data:image/png;base64,AAA' },
+    });
+
+    const { container } = render(
+      <BrowserRouter>
+        <Header />
+      </BrowserRouter>
+    );
+
+    // No responsive-hiding class: the chip must survive phone widths too.
+    const chip = screen.getByText('Test Company').closest('div');
+    expect(chip?.className).not.toMatch(/hidden/);
+    expect(container.querySelector('img[alt="header.companyLogo"]')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,AAA',
+    );
+  });
+
   it('renders avatar button when logged in (identity lives inside the menu)', () => {
     const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
     useAuthStore.getState().login(user);

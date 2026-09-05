@@ -7,6 +7,8 @@ export interface ElectronDB extends PreloadDB {
   seedDefault?(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   seedDemo?(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   reset?(): Promise<{ success: boolean; error?: string }>;
+  backupCompany?(): Promise<{ success: boolean; tables?: Record<string, Record<string, unknown>[]>; warnings?: string[]; error?: string }>;
+  restoreCompany?(payload: { tables: Record<string, Record<string, unknown>[]> }): Promise<{ success: boolean; restored?: number; warnings?: string[]; error?: string }>;
 
   // Typed RPC surface (Phase 4) — preferred over `_exec` for new code.
   // Each method sends a structured payload to a fixed SQL statement in

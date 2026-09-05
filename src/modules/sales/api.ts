@@ -100,16 +100,33 @@ export const salesApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       if (isElectronPg()) {
         const result = await invokeSalesRpc('getCustomers');
-        return result.success
-          ? { success: true, data: mapRows<Customer>(result.rows || []) }
-          : { success: false, error: result.error };
+        if (!result.success) return { success: false, error: result.error };
+        const rows = (result.rows || []).map((r: Record<string, unknown>) => {
+          const mapped = mapRows<Customer>([r])[0];
+          if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+          return mapped;
+        });
+        return { success: true, data: rows };
       }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
-        'SELECT * FROM customers WHERE company_id = $1 ORDER BY name',
+        `SELECT c.*,
+                (COALESCE(c.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM customers c WHERE c.company_id = $1 ORDER BY c.name`,
         [companyId]
       );
-      if (result.success) return { success: true, data: mapRows<Customer>(result.rows) };
+      if (result.success) {
+        const rows = (result.rows || []).map((r: Record<string, unknown>) => {
+          const mapped = mapRows<Customer>([r])[0];
+          if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+          return mapped;
+        });
+        return { success: true, data: rows };
+      }
       return { success: false, error: result.error };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -136,7 +153,12 @@ export const salesApi = {
         if (!result.success) return { success: false, error: result.error };
         const rows = result.rows || [];
         const total = Number(rows[0]?.total_count) || 0;
-        return { success: true, data: paginatedResult(mapRows<Customer>(rows), total, p, ps) };
+        const items = rows.map((r: Record<string, unknown>) => {
+          const mapped = mapRows<Customer>([r])[0];
+          if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+          return mapped;
+        });
+        return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
 
@@ -164,12 +186,22 @@ export const salesApi = {
       const offsetIdx = params.length;
 
       const dataResult = await adapter.query(
-        `SELECT c.* FROM customers c WHERE ${where} ORDER BY c.name ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        `SELECT c.*,
+                (COALESCE(c.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM customers c WHERE ${where} ORDER BY c.name ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         params
       );
       if (!dataResult.success) return { success: false, error: dataResult.error };
 
-      const items = mapRows<Customer>(dataResult.rows || []);
+      const items = (dataResult.rows || []).map((r: Record<string, unknown>) => {
+        const mapped = mapRows<Customer>([r])[0];
+        if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+        return mapped;
+      });
       return { success: true, data: paginatedResult(items, total, p, ps) };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -184,11 +216,24 @@ export const salesApi = {
         const result = await invokeSalesRpc('getCustomerById', { id });
         if (!result.success) return { success: false, error: result.error };
         if (!result.rows?.[0]) return { success: false, error: 'Not found' };
-        return { success: true, data: mapRows<Customer>(result.rows)[0] };
+        const mapped = mapRows<Customer>(result.rows)[0];
+        if ((result.rows[0] as Record<string, unknown>).computed_balance !== undefined) mapped.balance = Number((result.rows[0] as Record<string, unknown>).computed_balance) || 0;
+        return { success: true, data: mapped };
       }
       const adapter = await getDbAdapter();
-      const result = await adapter.query('SELECT * FROM customers WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1', [id, companyId]);
-      if (result.success && result.rows?.[0]) return { success: true, data: mapRows<Customer>([result.rows[0]])[0] };
+      const result = await adapter.query(
+        `SELECT c.*,
+                (COALESCE(c.opening_balance,0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
+                ) AS computed_balance
+         FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid LIMIT 1`, [id, companyId]);
+      if (result.success && result.rows?.[0]) {
+        const mapped = mapRows<Customer>([result.rows[0]])[0];
+        if ((result.rows[0] as Record<string, unknown>).computed_balance !== undefined) mapped.balance = Number((result.rows[0] as Record<string, unknown>).computed_balance) || 0;
+        return { success: true, data: mapped };
+      }
       return { success: false, error: result.error || 'Not found' };
     } catch (e) {
       return { success: false, error: String(e) };
@@ -334,9 +379,15 @@ export const salesApi = {
           FROM sales_invoices
           WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled'
           UNION ALL
+          SELECT date, 'مردود'::varchar as document_type, return_number as document_number,
+                 0::numeric as debit, total_amount as credit, reason as notes,
+                 2 as sort_type
+          FROM sales_returns
+          WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
+          UNION ALL
           SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number,
                  0::numeric as debit, amount as credit, notes,
-                 2 as sort_type
+                 3 as sort_type
           FROM receipt_vouchers
           WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
         )
@@ -364,17 +415,25 @@ export const salesApi = {
         return { success: true, data: buildArAging(result.rows || []) };
       }
       const adapter = await getDbAdapter();
-      // Aging must include the opening balance (an undated opening receivable
-      // is by definition the OLDEST debt → it always falls in the >90 bucket).
+      // Aging = opening + outstanding invoices - posted receipts - posted returns.
+      // An undated opening is the OLDEST debt → >90 bucket.
       const result = await adapter.query(
-        `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - i.paid_amount) as due_amount, COALESCE(i.due_date, i.date) as aging_date
+        `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - COALESCE(i.paid_amount,0)) as due_amount, COALESCE(i.due_date, i.date) as aging_date
         FROM customers c
         JOIN sales_invoices i ON i.customer_id = c.id
-        WHERE c.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - i.paid_amount) > 0
+        WHERE c.company_id = $1 AND i.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - COALESCE(i.paid_amount,0)) > 0
         UNION ALL
         SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date
         FROM customers c
-        WHERE c.company_id = $1 AND c.opening_balance > 0`,
+        WHERE c.company_id = $1 AND c.opening_balance > 0
+        UNION ALL
+        SELECT c.id as customer_id, c.name as customer_name, -rv.amount as due_amount, rv.date as aging_date
+        FROM customers c JOIN receipt_vouchers rv ON rv.customer_id = c.id
+        WHERE c.company_id = $1 AND rv.company_id = $1 AND rv.status = 'posted'
+        UNION ALL
+        SELECT c.id as customer_id, c.name as customer_name, -sr.total_amount as due_amount, sr.date as aging_date
+        FROM customers c JOIN sales_returns sr ON sr.customer_id = c.id
+        WHERE c.company_id = $1 AND sr.company_id = $1 AND sr.status = 'posted'`,
         [companyId]
       );
       if (!result.success) return { success: false, error: result.error };

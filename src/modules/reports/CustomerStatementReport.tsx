@@ -45,7 +45,13 @@ export const CustomerStatementReport: React.FC = () => {
                                COALESCE(opening_date, DATE '1900-01-01') AS date, NULL AS due_date,
                                opening_balance AS outstanding
                           FROM customers
-                         WHERE company_id = $1 AND opening_balance > 0`;
+                         WHERE company_id = $1 AND opening_balance > 0
+                        UNION ALL
+                        SELECT customer_id, 'RECEIPT' AS invoice_number, date, NULL AS due_date, -amount AS outstanding
+                          FROM receipt_vouchers WHERE company_id = $1 AND status = 'posted'
+                        UNION ALL
+                        SELECT customer_id, 'RETURN' AS invoice_number, date, NULL AS due_date, -total_amount AS outstanding
+                          FROM sales_returns WHERE company_id = $1 AND status = 'posted'`;
       if (fromDate) { invQuery = `SELECT * FROM (${invQuery}) aged WHERE date >= $${params.length + 1}`; params.push(fromDate); }
       if (toDate) { invQuery = `SELECT * FROM (${invQuery}) aged WHERE date <= $${params.length + 1}`; params.push(toDate); }
       const invResult = await adapter.query(invQuery, params);

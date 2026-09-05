@@ -497,33 +497,9 @@ export const accountingApi = {
           params: [id, data.companyId, data.voucherNumber, data.date, data.customerId, data.invoiceId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
         },
       ];
-      if (data.invoiceId && amountApplied > 0) {
-        statements.push({
-          sql: `WITH updated AS (
-            UPDATE sales_invoices AS i
-            SET
-              paid_amount = COALESCE(i.paid_amount, 0) + $1,
-              base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
-              status = CASE
-                WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount
-                  AND i.status NOT IN ('cancelled', 'paid')
-                THEN 'paid'
-                WHEN COALESCE(i.paid_amount, 0) + $1 > 0
-                  AND i.status NOT IN ('cancelled', 'paid')
-                THEN 'partially_paid'
-                ELSE i.status
-              END,
-              updated_at = NOW()
-            WHERE i.id = $3::uuid AND i.company_id = $4::uuid
-            RETURNING i.customer_id
-          )
-          UPDATE customers SET balance = COALESCE(balance, 0) - $5::numeric, updated_at = NOW()
-          WHERE id = (SELECT customer_id FROM updated) AND company_id = $4::uuid`,
-          params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId, -amountApplied],
-        });
-      }
-      // Created directly as posted → include JE + customer balance in the batch.
-      if (data.status === 'posted' && amountApplied === 0 && !data.invoiceId) {
+      // Posted vouchers: JE + invoice allocation + customer balance — all atomic.
+      // Draft vouchers are inert (no GL, no balance, no invoice update).
+      if (data.status === 'posted') {
         const je = await buildReceiptVoucherStatements(data.companyId, {
           voucherNumber: data.voucherNumber,
           date: data.date,
@@ -535,6 +511,30 @@ export const accountingApi = {
         });
         if (!je.success) return { success: false, error: je.error };
         statements.push(...je.statements);
+        // Customer balance always drops by the full voucher amount (on-account
+        // and allocated alike — statement nets the full receipt).
+        statements.push({
+          sql: `UPDATE customers SET balance = COALESCE(balance,0) - $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [data.amount, data.customerId, data.companyId],
+        });
+        // Allocated portion also bumps the invoice's paid amount.
+        if (data.invoiceId && amountApplied > 0) {
+          statements.push({
+            sql: `UPDATE sales_invoices AS i
+                  SET paid_amount = COALESCE(i.paid_amount, 0) + $1,
+                      base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
+                      status = CASE
+                        WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount AND i.status NOT IN ('cancelled', 'paid') THEN 'paid'
+                        WHEN COALESCE(i.paid_amount, 0) + $1 > 0 AND i.status NOT IN ('cancelled', 'paid') THEN 'partially_paid'
+                        ELSE i.status END,
+                      updated_at = NOW()
+                  WHERE i.id = $3::uuid AND i.company_id = $4::uuid`,
+            params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId],
+          });
+        }
+      } else if (data.invoiceId && amountApplied > 0) {
+        // Draft but invoice-linked: validate linkage without touching balances.
+        // No-op — invoice/balance moves happen only when posted.
       }
       const result = await runTransaction(statements);
       if (!result.success) {
@@ -607,7 +607,7 @@ export const accountingApi = {
         statements.push(...je.statements);
         if (supplierId && amount !== 0) {
           statements.push({
-            sql: `UPDATE suppliers SET balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+            sql: `UPDATE suppliers SET balance = COALESCE(balance,0) - $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
             params: [amount, supplierId, companyId],
           });
         }
@@ -827,32 +827,9 @@ export const accountingApi = {
           params: [id, data.companyId, data.voucherNumber, data.date, data.supplierId || null, data.invoiceId || null, data.expenseAccountId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
         },
       ];
-      if (data.invoiceId && amountApplied > 0) {
-        statements.push({
-          sql: `WITH updated AS (
-            UPDATE purchase_invoices AS i
-            SET
-              paid_amount = COALESCE(i.paid_amount, 0) + $1,
-              base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
-              status = CASE
-                WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount
-                  AND i.status NOT IN ('cancelled', 'paid')
-                THEN 'paid'
-                WHEN COALESCE(i.paid_amount, 0) + $1 > 0
-                  AND i.status NOT IN ('cancelled', 'paid')
-                THEN 'partially_paid'
-                ELSE i.status
-              END,
-              updated_at = NOW()
-            WHERE i.id = $3::uuid AND i.company_id = $4::uuid
-            RETURNING i.supplier_id
-          )
-          UPDATE suppliers SET balance = COALESCE(balance, 0) + $5::numeric, updated_at = NOW()
-          WHERE id = (SELECT supplier_id FROM updated) AND company_id = $4::uuid`,
-          params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId, amountApplied],
-        });
-      }
-      if (data.status === 'posted' && amountApplied === 0 && !data.invoiceId) {
+      // Posted vouchers: JE + invoice allocation + supplier balance — all atomic.
+      // Draft vouchers are inert.
+      if (data.status === 'posted') {
         const je = await buildPaymentVoucherStatements(data.companyId, {
           voucherNumber: data.voucherNumber,
           date: data.date,
@@ -865,12 +842,29 @@ export const accountingApi = {
         });
         if (!je.success) return { success: false, error: je.error };
         statements.push(...je.statements);
+        // Supplier AP always drops by the full voucher amount when we pay.
         if (data.supplierId && data.amount !== 0) {
           statements.push({
-            sql: `UPDATE suppliers SET balance = COALESCE(balance,0) + $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+            sql: `UPDATE suppliers SET balance = COALESCE(balance,0) - $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
             params: [data.amount, data.supplierId, data.companyId],
           });
         }
+        if (data.invoiceId && amountApplied > 0) {
+          statements.push({
+            sql: `UPDATE purchase_invoices AS i
+                  SET paid_amount = COALESCE(i.paid_amount, 0) + $1,
+                      base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
+                      status = CASE
+                        WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount AND i.status NOT IN ('cancelled', 'paid') THEN 'paid'
+                        WHEN COALESCE(i.paid_amount, 0) + $1 > 0 AND i.status NOT IN ('cancelled', 'paid') THEN 'partially_paid'
+                        ELSE i.status END,
+                      updated_at = NOW()
+                  WHERE i.id = $3::uuid AND i.company_id = $4::uuid`,
+            params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId],
+          });
+        }
+      } else if (data.invoiceId && amountApplied > 0) {
+        // Draft but invoice-linked: no-op — invoice/balance moves happen only when posted.
       }
       const result = await runTransaction(statements);
       if (!result.success) {
