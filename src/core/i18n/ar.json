@@ -295,6 +295,8 @@
       "openTasks": "فتح المهام",
       "openActivities": "فتح الأنشطة",
       "openSettings": "فتح الإعدادات",
+      "openThemes": "فتح الثيمات",
+      "activateGeneratedTheme": "فعّل الثيم الجديد",
       "openReports": "فتح مركز التقارير",
       "openCustomerStatement": "فتح كشف حساب عميل",
       "openSupplierStatement": "فتح كشف حساب مورد",
@@ -2417,7 +2419,11 @@
       "noCompany": "لا توجد شركة",
       "noCompanyDesc": "يرجى إنشاء شركة أولاً",
       "created": "تم تحديث بيانات الشركة بنجاح",
-      "updated": "تم تحديث بيانات الشركة بنجاح"
+      "updated": "تم تحديث بيانات الشركة بنجاح",
+      "saved": "تم حفظ بيانات الشركة بنجاح",
+      "saveError": "حدث خطأ أثناء حفظ بيانات الشركة",
+      "nameRequired": "اسم الشركة مطلوب",
+      "logoTooLarge": "حجم الشعار يتجاوز 2 ميجابايت"
     },
     "branches": {
       "title": "الفروع",

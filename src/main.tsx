@@ -100,18 +100,23 @@ function App() {
 
         setDbStatus('postgresql', true);
 
+        const { mapCompanyRow } = await import('@/core/api/company');
         const companyResult = await adapter.getCompany();
         if (companyResult.success && companyResult.data) {
-          setActiveCompany(
-            companyResult.data.name,
-            companyResult.data.id,
-            companyResult.data.currency || 'YER',
-            {
-              dateFormat: companyResult.data.date_format || companyResult.data.dateFormat,
-              decimalPlaces: Number(companyResult.data.decimal_places ?? companyResult.data.decimalPlaces ?? 2),
-              calendar: companyResult.data.calendar || 'gregorian',
-            }
-          );
+          // Single mapping point: every company column lands in the store.
+          const company = mapCompanyRow(companyResult.data as Record<string, unknown>);
+          setActiveCompany(company.name, company.id, company.currency || 'YER', {
+            nameEn: company.nameEn,
+            taxNumber: company.taxNumber,
+            address: company.address,
+            phone: company.phone,
+            email: company.email,
+            logoUrl: company.logoUrl,
+            dateFormat: company.dateFormat,
+            decimalPlaces: company.decimalPlaces,
+            calendar: company.calendar,
+            fiscalYearStart: company.fiscalYearStart,
+          });
           // Company loaded successfully
         } else {
           console.error('[App] Could not load company');

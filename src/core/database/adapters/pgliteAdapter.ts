@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { DbAdapter } from './types';
+import type { DbAdapter, CompanySeedProfile } from './types';
 import { PGlite } from '@electric-sql/pglite';
 
 /**
@@ -598,6 +598,38 @@ async function ensureRow(
   return null;
 }
 
+/**
+ * Overwrites the freshly seeded company row with the onboarding wizard's
+ * profile. No-op when no usable profile is supplied (seed defaults kept).
+ */
+async function applySeedCompanyProfile(
+  this: DbAdapter,
+  companyId: string,
+  company?: CompanySeedProfile,
+): Promise<void> {
+  const name = typeof company?.name === 'string' && company.name.trim() ? company.name.trim().slice(0, 255) : null;
+  if (!name) return;
+  const str = (v: unknown, max: number): string | null =>
+    typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
+  const currency = typeof company?.currency === 'string' && company.currency.trim().length === 3
+    ? company.currency.trim()
+    : 'YER';
+  const decimalPlaces = Number.isInteger(company?.decimalPlaces) && (company?.decimalPlaces as number) >= 0 && (company?.decimalPlaces as number) <= 6
+    ? (company?.decimalPlaces as number)
+    : 2;
+  const fiscalYearStart = typeof company?.fiscalYearStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(company.fiscalYearStart)
+    ? company.fiscalYearStart
+    : null;
+  await this.query(
+    `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7,
+            date_format = $8, decimal_places = $9::numeric, calendar = $10, fiscal_year_start = $11::date, updated_at = NOW()
+      WHERE id = $12::uuid`,
+    [name, str(company?.nameEn, 255), currency, str(company?.taxNumber, 50), str(company?.address, 1000),
+     str(company?.phone, 50), str(company?.email, 255), str(company?.dateFormat, 20) || 'yyyy-MM-dd',
+     decimalPlaces, company?.calendar === 'hijri' ? 'hijri' : 'gregorian', fiscalYearStart, companyId],
+  );
+}
+
 async function seedCompanyAndAdmin(
   this: DbAdapter,
   passwordHash: string
@@ -1114,8 +1146,12 @@ export const pgliteAdapter: DbAdapter = {
   async updateCompany(data: any, updatedBy?: string) {
     if (!data?.id) return { success: false, error: 'Company id required' };
     return this.query(
-      `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7, updated_by = $8, updated_at = NOW() WHERE id = $9`,
-      [data.name, data.nameEn, data.currency, data.taxNumber, data.address, data.phone, data.email, updatedBy || null, data.id]
+      `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7,
+              logo_url = $8, date_format = $9, decimal_places = $10::numeric, calendar = $11, fiscal_year_start = $12::date,
+              updated_by = $13, updated_at = NOW() WHERE id = $14`,
+      [data.name, data.nameEn ?? null, data.currency ?? null, data.taxNumber ?? null, data.address ?? null, data.phone ?? null,
+       data.email ?? null, data.logoUrl ?? null, data.dateFormat ?? null, data.decimalPlaces ?? 2, data.calendar ?? 'gregorian',
+       data.fiscalYearStart ?? null, updatedBy || null, data.id]
     );
   },
 
@@ -1381,7 +1417,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async seedDefault(this: DbAdapter, adminPassword?: string) {
+  async seedDefault(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
     try {
       // Ensure migrations are applied
       await runPgliteMigrations();
@@ -1393,6 +1429,9 @@ export const pgliteAdapter: DbAdapter = {
 
       // Create company + admin user
       const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
+
+      // Onboarding profile wins over seed defaults when supplied
+      await applySeedCompanyProfile.call(this, companyId, company);
 
       // Seed the full default-settings set (chart of accounts, numbering,
       // currencies, VAT, branches, units, cost centers, banks, cash box,
@@ -1425,7 +1464,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async seedDemo(this: DbAdapter, adminPassword?: string) {
+  async seedDemo(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
     try {
       // Ensure migrations are applied
       await runPgliteMigrations();
@@ -1437,6 +1476,9 @@ export const pgliteAdapter: DbAdapter = {
 
       // Create company + admin user
       const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
+
+      // Onboarding profile wins over seed defaults when supplied
+      await applySeedCompanyProfile.call(this, companyId, company);
 
       // Seed chart of accounts (required for any accounting operation)
       const codeToId = await seedChartOfAccounts.call(this, companyId);

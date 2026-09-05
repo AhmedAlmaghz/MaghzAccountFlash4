@@ -47,12 +47,28 @@ export const OnboardingWizard: React.FC = () => {
     setError(null);
 
     try {
-      // Update app company state
-      setActiveCompany(companyConfig.name, 'comp-1', companyConfig.currency, {
-        dateFormat: companyConfig.dateFormat || 'yyyy-MM-dd',
-        decimalPlaces: companyConfig.decimalPlaces ?? 2,
-        calendar: (companyConfig.calendar as 'gregorian' | 'hijri') || 'gregorian',
-        fiscalYearStart: companyConfig.fiscalYearStart || undefined,
+      // Persist the wizard's company profile to the database first, so the
+      // seeded company row carries the user's data (name, currency, calendar,
+      // locale, fiscal year…) instead of hardcoded seed defaults. The seed
+      // step already applied it; this covers re-finish and repair paths.
+      // Best-effort: sessionless transports keep the seed-time write.
+      const { applyOnboardingCompany } = await import('@/core/api/company');
+      const persisted = await applyOnboardingCompany(companyConfig);
+
+      // Update app company state from the database row when available
+      // (real id + canonical values), otherwise from the wizard config.
+      const c = persisted.success && persisted.data ? persisted.data : null;
+      setActiveCompany(c?.name || companyConfig.name, c?.id || 'comp-1', c?.currency || companyConfig.currency, {
+        nameEn: c?.nameEn,
+        taxNumber: c?.taxNumber,
+        address: c?.address,
+        phone: c?.phone,
+        email: c?.email,
+        logoUrl: c?.logoUrl,
+        dateFormat: c?.dateFormat || companyConfig.dateFormat || 'yyyy-MM-dd',
+        decimalPlaces: c?.decimalPlaces ?? companyConfig.decimalPlaces ?? 2,
+        calendar: c?.calendar || (companyConfig.calendar as 'gregorian' | 'hijri') || 'gregorian',
+        fiscalYearStart: c?.fiscalYearStart || companyConfig.fiscalYearStart || undefined,
       });
 
       // Persist DB config via the active adapter (works in both web and Electron modes)
@@ -543,7 +559,22 @@ function CompanyStep({ onNext, onBack }: { onNext: () => void; onBack: () => voi
 // ─── Step 4: Seed Data ───────────────────────────────────────────────────────
 function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { t } = useTranslation();
-  const { seedOption, setSeedOption, adminPassword, setAdminPassword, setError, setProcessing, isProcessing } = useOnboardingStore();
+  const { seedOption, setSeedOption, adminPassword, setAdminPassword, setError, setProcessing, isProcessing, companyConfig } = useOnboardingStore();
+  // The wizard's company profile travels with the seed call so the seeded
+  // company row carries the user's data instead of hardcoded demo values.
+  const seedProfile = {
+    name: companyConfig.name,
+    nameEn: companyConfig.nameEn,
+    currency: companyConfig.currency,
+    taxNumber: companyConfig.taxNumber,
+    address: companyConfig.address,
+    phone: companyConfig.phone,
+    email: companyConfig.email,
+    dateFormat: companyConfig.dateFormat,
+    decimalPlaces: companyConfig.decimalPlaces,
+    calendar: companyConfig.calendar,
+    fiscalYearStart: companyConfig.fiscalYearStart,
+  };
   const [seedStatus, setSeedStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [seedMessage, setSeedMessage] = useState('');
   const [generatedPassword, setGeneratedPassword] = useState('');
@@ -572,7 +603,7 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
         if (!adapter.seedDefault) {
           throw new Error('seedDefault ' + t('onboarding.seedFailed'));
         }
-        const result = await adapter.seedDefault(adminPassword);
+        const result = await adapter.seedDefault(adminPassword, seedProfile);
         if (result.success) {
           setSeedStatus('success');
           setSeedMessage(t('onboarding.defaultSeeded'));
@@ -584,7 +615,7 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
         if (!adapter.seedDemo) {
           throw new Error('seedDemo ' + t('onboarding.seedFailed'));
         }
-        const result = await adapter.seedDemo(adminPassword);
+        const result = await adapter.seedDemo(adminPassword, seedProfile);
         if (result.success) {
           setSeedStatus('success');
           setSeedMessage(t('onboarding.demoSeeded'));

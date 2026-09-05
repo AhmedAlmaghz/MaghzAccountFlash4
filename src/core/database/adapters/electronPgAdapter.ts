@@ -1,11 +1,11 @@
-import type { DbAdapter } from './types';
+import type { DbAdapter, CompanySeedProfile } from './types';
 
 export interface ElectronDB extends PreloadDB {
   updateConfig?(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
   testConnection?(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string }): Promise<{ success: boolean; db?: string; version?: string; error?: string }>;
   clearAll?(payload?: { confirm?: boolean; username?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
-  seedDefault?(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
-  seedDemo?(adminPassword?: string): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
+  seedDefault?(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
+  seedDemo?(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   reset?(): Promise<{ success: boolean; error?: string }>;
   backupCompany?(): Promise<{ success: boolean; tables?: Record<string, Record<string, unknown>[]>; warnings?: string[]; error?: string }>;
   restoreCompany?(payload: { tables: Record<string, Record<string, unknown>[]> }): Promise<{ success: boolean; restored?: number; warnings?: string[]; error?: string }>;
@@ -149,7 +149,7 @@ export interface ElectronDB extends PreloadDB {
   // can never reference another company's row.
   core?: {
     getCompany(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    updateCompany(payload: { name: string; nameEn?: string | null; currency?: string | null; taxNumber?: string | null; address?: string | null; phone?: string | null; email?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateCompany(payload: { name: string; nameEn?: string | null; currency?: string | null; taxNumber?: string | null; address?: string | null; phone?: string | null; email?: string | null; logoUrl?: string | null; dateFormat?: string | null; decimalPlaces?: number | null; calendar?: string | null; fiscalYearStart?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     // Phase 4 slice 6 — settings typed RPC. All handlers derive company_id
     // and audit user_id from the session; the renderer payload carries only
     // the editable fields.
@@ -364,6 +364,11 @@ export const electronPgAdapter: DbAdapter = {
       address: data.address,
       phone: data.phone,
       email: data.email,
+      logoUrl: data.logoUrl,
+      dateFormat: data.dateFormat,
+      decimalPlaces: data.decimalPlaces,
+      calendar: data.calendar,
+      fiscalYearStart: data.fiscalYearStart,
     });
     return result.success ? { success: true } : { success: false, error: result.error };
   },
@@ -540,16 +545,16 @@ export const electronPgAdapter: DbAdapter = {
     return { success: false, error: 'electronDB not available' };
   },
 
-  async seedDefault(adminPassword) {
+  async seedDefault(adminPassword, company?: CompanySeedProfile) {
     if (typeof window !== 'undefined' && window.electronDB?.seedDefault) {
-      return await window.electronDB.seedDefault(adminPassword);
+      return await window.electronDB.seedDefault(adminPassword, company);
     }
     return { success: false, error: 'electronDB not available' };
   },
 
-  async seedDemo(adminPassword) {
+  async seedDemo(adminPassword, company?: CompanySeedProfile) {
     if (typeof window !== 'undefined' && window.electronDB?.seedDemo) {
-      return await window.electronDB.seedDemo(adminPassword);
+      return await window.electronDB.seedDemo(adminPassword, company);
     }
     return { success: false, error: 'electronDB not available' };
   },

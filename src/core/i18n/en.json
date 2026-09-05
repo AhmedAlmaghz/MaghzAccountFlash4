@@ -295,6 +295,8 @@
       "openTasks": "Open tasks",
       "openActivities": "Open activities",
       "openSettings": "Open settings",
+      "openThemes": "Open themes",
+      "activateGeneratedTheme": "Activate the new theme",
       "openReports": "Open reports hub",
       "openCustomerStatement": "Open customer statement",
       "openSupplierStatement": "Open supplier statement",
@@ -2417,7 +2419,11 @@
       "noCompany": "No Company",
       "noCompanyDesc": "Please create a company first",
       "created": "Company updated successfully",
-      "updated": "Company updated successfully"
+      "updated": "Company updated successfully",
+      "saved": "Company data saved successfully",
+      "saveError": "Failed to save company data",
+      "nameRequired": "Company name is required",
+      "logoTooLarge": "Logo exceeds 2 MB"
     },
     "branches": {
       "title": "Branches",

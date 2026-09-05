@@ -962,12 +962,14 @@ export function registerDatabaseHandlers() {
   // the WHERE clause uses the session company id (payload.id is ignored)
   // and `updated_by` is derived from the session (renderer value ignored).
   registerRpc('core.updateCompany', {
-    paramCount: 9,
+    paramCount: 14,
     validate: (p) => {
       if (!p.name) throw new Error('name required');
     },
     compose: (p, session) => ({
-      sql: `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7, updated_by = $8, updated_at = NOW() WHERE id = $9::uuid`,
+      sql: `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7,
+              logo_url = $8, date_format = $9, decimal_places = $10::numeric, calendar = $11, fiscal_year_start = $12::date,
+              updated_by = $13, updated_at = NOW() WHERE id = $14::uuid`,
       params: [
         String(p.name || ''),
         p.nameEn ?? null,
@@ -976,6 +978,11 @@ export function registerDatabaseHandlers() {
         p.address ?? null,
         p.phone ?? null,
         p.email ?? null,
+        p.logoUrl ?? null,
+        p.dateFormat ?? null,
+        p.decimalPlaces ?? 2,
+        p.calendar ?? 'gregorian',
+        p.fiscalYearStart ?? null,
         session.user.id,
         session.user.companyId,
       ],
@@ -3797,7 +3804,46 @@ export function registerAuthHandlers() {
 /* initializeSchema removed — schema is managed exclusively by Drizzle migrations (drizzle/*.sql). */
 
 // Seed initial data
-export async function seedInitialData(adminPassword) {
+/**
+ * Sanitizes an onboarding company profile inside the main process.
+ * The renderer is never trusted: strings are truncated to column sizes,
+ * calendar/decimalPlaces/fiscalYearStart are strictly validated, and an
+ * empty name means "no profile supplied" (seed defaults are kept).
+ */
+function sanitizeCompanyProfile(input) {
+  const c = input && typeof input === 'object' ? input : {};
+  const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+  const name = str(c.name, 255);
+  if (!name) return null;
+  const currency = typeof c.currency === 'string' && c.currency.trim().length === 3 ? c.currency.trim() : 'YER';
+  const decimalPlaces = Number.isInteger(c.decimalPlaces) && c.decimalPlaces >= 0 && c.decimalPlaces <= 6 ? c.decimalPlaces : 2;
+  return {
+    name,
+    nameEn: str(c.nameEn, 255),
+    currency,
+    taxNumber: str(c.taxNumber, 50),
+    address: str(c.address, 1000),
+    phone: str(c.phone, 50),
+    email: str(c.email, 255),
+    dateFormat: str(c.dateFormat, 20) || 'yyyy-MM-dd',
+    decimalPlaces,
+    calendar: c.calendar === 'hijri' ? 'hijri' : 'gregorian',
+    fiscalYearStart: typeof c.fiscalYearStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(c.fiscalYearStart) ? c.fiscalYearStart : null,
+  };
+}
+
+/** Applies a sanitized onboarding profile onto an existing company row. */
+async function applyCompanyProfile(companyId, profile) {
+  await pool.query(
+    `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7,
+            date_format = $8, decimal_places = $9, calendar = $10, fiscal_year_start = $11::date, updated_at = NOW()
+      WHERE id = $12::uuid`,
+    [profile.name, profile.nameEn, profile.currency, profile.taxNumber, profile.address, profile.phone, profile.email,
+     profile.dateFormat, profile.decimalPlaces, profile.calendar, profile.fiscalYearStart, companyId],
+  );
+}
+
+export async function seedInitialData(adminPassword, company) {
   if (!pool) createPool();
 
   // Check if already seeded
@@ -3815,19 +3861,36 @@ export async function seedInitialData(adminPassword) {
     await client.query('BEGIN');
     await client.query('DEALLOCATE ALL');
 
-    // 1. Seed company with YER currency
+    // 1. Seed company — onboarding profile wins when supplied, hardcoded
+    // defaults otherwise (fresh installs that skip the wizard).
+    const profile = sanitizeCompanyProfile(company);
     const companyResult = await client.query(`
       INSERT INTO companies (name, name_en, currency, tax_number, address, phone, email, date_format, decimal_places, calendar, fiscal_year_start)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'yyyy-MM-dd', 2, 'gregorian', $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::date)
       RETURNING id;
-    `, [
-      'ط´ط±ظƒط© ط§ظ„ظ…ط؛ط² ط§ظ„طھط¬ط§ط±ظٹط© ط§ظ„ظ…ط­ط¯ظˆط¯ط©',
+    `, profile ? [
+      profile.name,
+      profile.nameEn,
+      profile.currency,
+      profile.taxNumber,
+      profile.address,
+      profile.phone,
+      profile.email,
+      profile.dateFormat,
+      profile.decimalPlaces,
+      profile.calendar,
+      profile.fiscalYearStart,
+    ] : [
+      'شركة المغز التجارية المحدودة',
       'Maghz Trading Company Ltd.',
       'YER',
       '100123456789',
-      'طµظ†ط¹ط§ط،طŒ ط§ظ„ط¬ظ…ظ‡ظˆط±ظٹط© ط§ظ„ظٹظ…ظ†ظٹط©',
+      'صنعاء، الجمهورية اليمنية',
       '+967712345678',
       'info@maghz-erp.com',
+      'yyyy-MM-dd',
+      2,
+      'gregorian',
       `${new Date().getFullYear()}-01-01`
     ]);
 
@@ -4318,10 +4381,10 @@ export function registerOnboardingHandlers() {
   });
 
   // Seed default data (chart of accounts, company, admin user, basic settings)
-  ipcMain.handle('db:seed-default', async (event, { sessionToken, adminPassword } = {}) => {
+  ipcMain.handle('db:seed-default', async (event, { sessionToken, adminPassword, company } = {}) => {
     try {
       await assertOnboardingAllowed(event, sessionToken);
-      const result = await seedInitialData(adminPassword);
+      const result = await seedInitialData(adminPassword, company);
       const companyId = typeof result === 'string' ? result : result?.companyId;
       const effectivePassword = typeof result === 'string' ? undefined : result?.adminPassword;
       if (!companyId) {
@@ -4331,6 +4394,8 @@ export function registerOnboardingHandlers() {
         if (!existingId) {
           return { success: false, error: 'ظپط´ظ„ ط§ظ„ط¨ط°ط±: ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظˆظ„ط§ ظٹظ…ظƒظ† ط¥ظ†ط´ط§ط¦ظ‡ط§' };
         }
+        const existingProfile = sanitizeCompanyProfile(company);
+        if (existingProfile) await applyCompanyProfile(existingId, existingProfile);
         return { success: true, companyId: existingId };
       }
       return { success: true, companyId, adminPassword: effectivePassword };
@@ -4341,18 +4406,20 @@ export function registerOnboardingHandlers() {
   });
 
   // Seed demo data (extensive fake data for all modules)
-  ipcMain.handle('db:seed-demo', async (event, { sessionToken, adminPassword } = {}) => {
+  ipcMain.handle('db:seed-demo', async (event, { sessionToken, adminPassword, company } = {}) => {
     try {
       await assertOnboardingAllowed(event, sessionToken);
       const companyCheck = await pool.query('SELECT id FROM companies LIMIT 1');
       let companyId;
       let effectivePassword;
       if (companyCheck.rows.length === 0) {
-        const res = await seedInitialData(adminPassword);
+        const res = await seedInitialData(adminPassword, company);
         companyId = typeof res === 'string' ? res : res?.companyId;
         effectivePassword = typeof res === 'string' ? undefined : res?.adminPassword;
       } else {
         companyId = companyCheck.rows[0].id;
+        const demoProfile = sanitizeCompanyProfile(company);
+        if (demoProfile) await applyCompanyProfile(companyId, demoProfile);
       }
 
       const client = wrapClient(await pool.connect());

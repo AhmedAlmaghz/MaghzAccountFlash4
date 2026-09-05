@@ -33,6 +33,28 @@ export const idCompanySchema = z.object({
   companyId: companyIdSchema,
 });
 
+// ─── Company profile (shared by onboarding, settings page, and seed) ────────
+// Single source of truth for which company fields the app accepts and their
+// limits. Column sizes mirror drizzle/0000_init.sql (companies table).
+export const companyProfileSchema = z.object({
+  name: nonEmptyString,
+  nameEn: z.string().max(255).optional().or(z.literal('')),
+  currency: z.string().length(3),
+  taxNumber: z.string().max(50).optional().or(z.literal('')),
+  address: z.string().max(1000).optional().or(z.literal('')),
+  phone: phoneSchema,
+  email: emailSchema,
+  logoUrl: z.string().max(4_000_000).optional().or(z.literal('')),
+  dateFormat: z.string().max(20).optional().or(z.literal('')),
+  decimalPlaces: z.number().int().min(0).max(6).optional(),
+  calendar: z.enum(['gregorian', 'hijri']).optional(),
+  fiscalYearStart: dateSchema.optional().or(z.literal('')),
+});
+
+export const createCompanySchema = companyProfileSchema;
+
+export const updateCompanySchema = companyProfileSchema;
+
 export const createAccountSchema = z.object({
   companyId: companyIdSchema,
   code: z.string().min(1).max(20),
