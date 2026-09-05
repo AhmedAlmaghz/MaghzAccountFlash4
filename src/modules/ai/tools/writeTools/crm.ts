@@ -614,7 +614,7 @@ export const crmWriteTools: ToolDefinition[] = [
     name: 'crm.update_customer',
     labelAr: 'تعديل عميل',
     descriptionAr: 'يُعدّل بيانات عميل موجود تحت وحدة CRM. استخدم search.customers أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -650,7 +650,7 @@ export const crmWriteTools: ToolDefinition[] = [
     name: 'crm.delete_customer',
     labelAr: 'حذف عميل',
     descriptionAr: 'يحذف عميلاً (نفس sales.delete_customer). استخدم search.customers أولاً.',
-    permission: 'crm.create',
+    permission: 'crm.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

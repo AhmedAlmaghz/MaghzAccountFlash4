@@ -147,6 +147,19 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('لا تفترض 15%');
   });
 
+  it('tells the model VAT is off when the company disabled it on invoices', () => {
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    const prompt = buildSystemPrompt({ tools: [], liveContext: { vatRate: 0, vatOnInvoices: false } });
+    expect(prompt).toContain('invoice.showVat');
+    expect(prompt).toContain('بدون ضريبة');
+  });
+
+  it('keeps the rate line when VAT display is on', () => {
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    const prompt = buildSystemPrompt({ tools: [], liveContext: { vatRate: 5, vatOnInvoices: true } });
+    expect(prompt).toContain('5%');
+  });
+
   it('states the fiscal year start and interprets "السنة" by it', () => {
     useAppStore.setState({
       activeCompany: { id: 'c1', name: 'شركة', currency: 'YER', fiscalYearStart: '2026-04-01' },

@@ -6,7 +6,7 @@ import {
   str,
   round2,
   summarizeDocLines,
-  getVatRate,
+  getInvoiceTaxConfig,
   parseLines,
   LINES_SCHEMA,
 } from './shared';
@@ -102,13 +102,16 @@ export const purchasesWriteTools: ToolDefinition[] = [
         return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
       }
 
-      const vatRate = await getVatRate(ctx.companyId);
+      // Company invoice settings win: VAT/discount the company switched off
+      // are booked as zero (same flags the invoice forms obey).
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
       const lines = parsed.map((l) => {
-        const lineTotal = round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100));
-        return { ...l, vatPercent: vatRate, lineTotal };
+        const discountPercent = tax.showDiscount ? l.discountPercent : 0;
+        const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
+        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
       const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
@@ -140,6 +143,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
         invoiceNumber: docNumber.number,
         paymentType,
         totalAmount,
+        ...(tax.showVat
+          ? {}
+          : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
         note: paymentType === 'cash'
           ? 'فاتورة مشتريات نقدية (مسودة) — استخدم purchases.post_invoice لترحيلها؛ سيُخصم المبلغ من الخزنة لا من ذمة المورد'
           : undefined,
@@ -260,9 +266,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_return');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم المردود' };
 
-      const vatRate = await getVatRate(ctx.companyId);
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const vatAmount = round2(subtotal * vatRate / 100);
+      const vatAmount = round2(subtotal * tax.vatRate / 100);
       const totalAmount = round2(subtotal + vatAmount);
 
       const res = await purchasesApi.createReturn({
@@ -280,7 +286,15 @@ export const purchasesWriteTools: ToolDefinition[] = [
         lines,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء المردود' };
-      return { created: true, returnId: res.id, returnNumber: docNumber.number, totalAmount };
+      return {
+        created: true,
+        returnId: res.id,
+        returnNumber: docNumber.number,
+        totalAmount,
+        ...(tax.showVat
+          ? {}
+          : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجل المردود بدون ضريبة' }),
+      };
     },
   },
 
@@ -289,7 +303,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.post_invoice',
     labelAr: 'ترحيل فاتورة مشتريات',
     descriptionAr: 'يُرحّل فاتورة مشتريات من حالة draft إلى posted. يُنشئ القيد المحاسبي تلقائياً.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -313,7 +327,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.post_return',
     labelAr: 'ترحيل مردود مشتريات',
     descriptionAr: 'يُرحّل مردود مشتريات من حالة draft إلى posted. يُحدّث رصيد المورد والمخزون تلقائياً.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -337,7 +351,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.update_supplier',
     labelAr: 'تعديل مورد',
     descriptionAr: 'يُعدّل بيانات مورد موجود (الاسم، الهاتف، البريد، العنوان، الرقم الضريبي، الحالة). استخدم search.suppliers أولاً لإيجاد supplierId.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -375,7 +389,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.update_invoice',
     labelAr: 'تعديل فاتورة مشتريات',
     descriptionAr: 'يُعدّل بيانات فاتورة مشتريات موجودة (ملاحظات، الحالة، الخصم، المبلغ المدفوع). استخدم purchases.get_invoices أولاً لإيجاد invoiceId.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -413,7 +427,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.delete_invoice',
     labelAr: 'حذف فاتورة مشتريات',
     descriptionAr: 'يحذف فاتورة مشتريات في حالة draft. لا يمكن حذف فاتورة مرحلة أو مدفوعة.',
-    permission: 'purchases.create',
+    permission: 'purchases.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -437,7 +451,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.update_order',
     labelAr: 'تعديل أمر شراء',
     descriptionAr: 'يُعدّل بيانات أمر شراء موجود (ملاحظات، الحالة). استخدم purchases.get_purchase_orders أولاً لإيجاد orderId.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -471,7 +485,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.delete_order',
     labelAr: 'حذف أمر شراء',
     descriptionAr: 'يحذف أمر شراء في حالة draft.',
-    permission: 'purchases.create',
+    permission: 'purchases.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -495,7 +509,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.update_return',
     labelAr: 'تعديل مردود مشتريات',
     descriptionAr: 'يُعدّل بيانات مردود مشتريات موجود (ملاحظات، الحالة). استخدم purchases.get_returns أولاً لإيجاد returnId.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -529,7 +543,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.delete_return',
     labelAr: 'حذف مردود مشتريات',
     descriptionAr: 'يحذف مردود مشتريات في حالة draft.',
-    permission: 'purchases.create',
+    permission: 'purchases.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -553,7 +567,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
     name: 'purchases.delete_supplier',
     labelAr: 'حذف مورد',
     descriptionAr: 'يحذف مورداً من النظام. إذا كان للمورد فواتير مرتبطة، الـ API يُرجع خطأ FK.',
-    permission: 'purchases.create',
+    permission: 'purchases.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

@@ -6,7 +6,7 @@ import {
   str,
   round2,
   summarizeDocLines,
-  getVatRate,
+  getInvoiceTaxConfig,
   parseLines,
   LINES_SCHEMA,
 } from './shared';
@@ -107,13 +107,16 @@ export const salesWriteTools: ToolDefinition[] = [
         return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
       }
 
-      const vatRate = await getVatRate(ctx.companyId);
+      // Company invoice settings win: VAT/discount the company switched off
+      // are booked as zero (same flags the invoice forms obey).
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
       const lines = parsed.map((l) => {
-        const lineTotal = round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100));
-        return { ...l, vatPercent: vatRate, lineTotal };
+        const discountPercent = tax.showDiscount ? l.discountPercent : 0;
+        const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
+        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
       const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
@@ -148,6 +151,9 @@ export const salesWriteTools: ToolDefinition[] = [
         subtotal,
         vatAmount,
         totalAmount,
+        ...(tax.showVat
+          ? {}
+          : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
         note: paymentType === 'cash'
           ? 'فاتورة نقدية (مسودة) — استخدم sales.post_invoice لترحيلها؛ سيُقيَّد المبلغ على الخزنة لا على العميل'
           : 'الفاتورة مسودة — استخدم sales.post_invoice لترحيلها عند طلب المستخدم',
@@ -278,9 +284,9 @@ export const salesWriteTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_return');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم المردود' };
 
-      const vatRate = await getVatRate(ctx.companyId);
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const vatAmount = round2(subtotal * vatRate / 100);
+      const vatAmount = round2(subtotal * tax.vatRate / 100);
       const totalAmount = round2(subtotal + vatAmount);
 
       const res = await salesApi.createReturn({
@@ -298,7 +304,15 @@ export const salesWriteTools: ToolDefinition[] = [
         lines,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء المردود' };
-      return { created: true, returnId: res.id, returnNumber: docNumber.number, totalAmount };
+      return {
+        created: true,
+        returnId: res.id,
+        returnNumber: docNumber.number,
+        totalAmount,
+        ...(tax.showVat
+          ? {}
+          : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجل المردود بدون ضريبة' }),
+      };
     },
   },
 
@@ -307,7 +321,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.update_customer',
     labelAr: 'تعديل عميل',
     descriptionAr: 'يُعدّل بيانات عميل موجود (الاسم، الهاتف، البريد، العنوان، الرقم الضريبي، الحد الائتماني، الرصيد، الحالة). استخدم search.customers أولاً لإيجاد customerId.',
-    permission: 'sales.create',
+    permission: 'sales.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -349,7 +363,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.post_return',
     labelAr: 'ترحيل مردود مبيعات',
     descriptionAr: 'يُرحّل مردود مبيعات من حالة draft إلى posted. يُحدّث رصيد العميل والمخزون تلقائياً. استخدم search.sales_invoices أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -373,7 +387,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.update_invoice',
     labelAr: 'تعديل فاتورة مبيعات',
     descriptionAr: 'يُعدّل حقول فاتورة مبيعات موجودة (الملاحظات، الحالة، الخصم، المبلغ المدفوع). لا يُمكن تعديل الأصناف أو العميل. استخدم sales.get_invoices أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -411,7 +425,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.delete_invoice',
     labelAr: 'حذف فاتورة مبيعات',
     descriptionAr: 'يحذف فاتورة مبيعات مسودة (draft). الـ API يرفض حذف الفواتير المرحلة. استخدم sales.get_invoices أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -435,7 +449,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.update_quotation',
     labelAr: 'تعديل عرض سعر',
     descriptionAr: 'يُعدّل حقول عرض سعر موجود (الملاحظات، الحالة، تاريخ الانتهاء). استخدم sales.get_quotations أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -471,7 +485,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.delete_quotation',
     labelAr: 'حذف عرض سعر',
     descriptionAr: 'يحذف عرض سعر. استخدم sales.get_quotations أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -495,7 +509,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.update_return',
     labelAr: 'تعديل مردود مبيعات',
     descriptionAr: 'يُعدّل حقول مردود مبيعات موجود (الملاحظات، الحالة). استخدم sales.get_returns أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -529,7 +543,7 @@ export const salesWriteTools: ToolDefinition[] = [
     name: 'sales.delete_return',
     labelAr: 'حذف مردود مبيعات',
     descriptionAr: 'يحذف مردود مبيعات مسودة (draft). الـ API يرفض حذف المردودات المرحلة. استخدم sales.get_returns أولاً.',
-    permission: 'sales.create',
+    permission: 'sales.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

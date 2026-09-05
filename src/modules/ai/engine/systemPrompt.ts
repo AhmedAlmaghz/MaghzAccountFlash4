@@ -172,6 +172,8 @@ function renderToolInventory(tools: ToolDefinition[]): string {
  */
 export interface LiveCompanyContext {
   vatRate?: number;
+  /** Mirrors settings `invoice.showVat` — false means book zero VAT. */
+  vatOnInvoices?: boolean;
 }
 
 function renderCompanyContext(
@@ -183,11 +185,15 @@ function renderCompanyContext(
   const fiscal = company?.fiscalYearStart;
   const calendar = company?.calendar ?? 'gregorian';
   const vat = live.vatRate;
+  const vatLine =
+    live.vatOnInvoices === false
+      ? 'ضريبة القيمة المضافة: معطلة في إعدادات الشركة (invoice.showVat) — سجّل الفواتير والمردودات بدون ضريبة ولا تعد المستخدم بضريبة'
+      : `ضريبة القيمة المضافة للشركة: ${vat !== undefined ? `${vat}%` : 'غير محددة — إن ذكرها المستخدم أو احتجتها اسأله عنها، ولا تفترض 15%'}`;
   return [
     `السياق الحالي:`,
     `- الشركة: ${company?.name ?? 'غير محددة'}`,
     `- العملة الافتراضية: ${company?.currency ?? 'YER'}`,
-    `- ضريبة القيمة المضافة للشركة: ${vat !== undefined ? `${vat}%` : 'غير محددة — إن ذكرها المستخدم أو احتجتها اسأله عنها، ولا تفترض 15%'}`,
+    `- ${vatLine}`,
     `- بداية السنة المالية للشركة: ${fiscal ? fiscal : '1 يناير (افتراضي)'} — عند قول المستخدم "السنة/هذا العام" فسّرها بهذه البداية`,
     `- التقويم المعتمد: ${calendar === 'hijri' ? 'هجري (يقبل النظام التواريخ الهجرية مثل "15 محرم 1448" ويحوّلها تلقائياً إلى ميلادية — أكّد التاريخ الميلادي المحوّل على المستخدم)' : 'ميلادي (مع دعم دخول التواريخ الهجرية وتحويلها تلقائياً)'}`,
     `- تاريخ اليوم (ميلادي): ${today}`,

@@ -210,7 +210,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     name: 'manufacturing.update_work_order_status',
     labelAr: 'تحديث حالة أمر تشغيل',
     descriptionAr: 'يُحدّث حالة أمر تشغيل: in_progress يصرف الخامات من المخزون فوراً (يفشل إن لم يكفِ المخزون)، و completed يسلّم المنتج التام إلى المستودع المختار ويُسوّي الفروق. استخدم search.work_orders أولاً.',
-    permission: 'manufacturing.create',
+    permission: 'manufacturing.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -247,7 +247,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     name: 'manufacturing.update_bom',
     labelAr: 'تعديل تركيبة منتج (BOM)',
     descriptionAr: 'يُحدّث بيانات تركيبة منتج — الاسم، الملاحظات، الحالة. استخدم manufacturing.get_boms أولاً.',
-    permission: 'manufacturing.create',
+    permission: 'manufacturing.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -281,7 +281,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     name: 'manufacturing.delete_bom',
     labelAr: 'حذف تركيبة منتج (BOM)',
     descriptionAr: 'يحذف تركيبة منتج. الـ API يرفض حذف التركيبات المرتبطة بأوامر تشغيل. استخدم manufacturing.get_boms أولاً.',
-    permission: 'manufacturing.create',
+    permission: 'manufacturing.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -305,7 +305,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     name: 'manufacturing.update_work_order',
     labelAr: 'تعديل أمر تشغيل',
     descriptionAr: 'يُحدّث بيانات أمر تشغيل — الكمية، الحالة، الملاحظات، تاريخ الاستحقاق. استخدم manufacturing.get_work_orders أولاً.',
-    permission: 'manufacturing.create',
+    permission: 'manufacturing.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -343,7 +343,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     name: 'manufacturing.delete_work_order',
     labelAr: 'حذف أمر تشغيل',
     descriptionAr: 'يحذف أمر تشغيل. الـ API يرفض حذف أوامر التشغيل المرحلة (completed/in_progress). استخدم manufacturing.get_work_orders أولاً.',
-    permission: 'manufacturing.create',
+    permission: 'manufacturing.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

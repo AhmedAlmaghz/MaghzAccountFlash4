@@ -19,6 +19,11 @@ import { ALL_PERMISSIONS } from '@/modules/auth/types';
  *   5. Read tools must never create/modify — enforced lexically as a
  *      tripwire: a read tool whose name starts with create/update/delete
  *      is a misclassification that bypasses user confirmation entirely.
+ *   6. Verb→permission alignment: update_* requires *.edit, delete_*
+ *      requires *.delete, post_* requires *.post (or *.edit where the
+ *      module defines no post grant). Composite wizards that post
+ *      (create_and_post_*, create_journal_flow) are allowlisted on their
+ *      STRONGEST action so a create-only role can never post through them.
  */
 
 const VIEW_PERMISSIONS = new Set(
@@ -100,6 +105,42 @@ describe('AI tools contract gate (CI)', () => {
       violations.map((v) => `${v.name} (read)`),
       'mutation-named tools marked read bypass user confirmation',
     ).toEqual([]);
+  });
+
+  it('verb matches permission strength (update→edit, delete→delete, post→post)', () => {
+    // Modules that define a post grant — everywhere else posting falls back
+    // to the edit grant (purchases / inventory / hr have no *.post).
+    const MODULES_WITH_POST = new Set(['sales', 'accounting', 'manufacturing']);
+    // Composite wizards gated on their strongest action (intentional).
+    const COMPOSITE_ALLOWLIST: Record<string, string> = {
+      'sales.create_and_post_invoice': 'sales.post',
+      'purchases.create_and_post_invoice': 'purchases.edit',
+      'accounting.create_journal_flow': 'accounting.post',
+    };
+    const violations: string[] = [];
+    for (const t of tools.filter((x) => x.dangerLevel === 'write')) {
+      const [module, ...rest] = t.name.split('.');
+      const verb = rest.join('_').split('_')[0];
+      const suffix = t.permission.split('.').pop() ?? '';
+      if (module === 'settings') {
+        if (t.permission !== 'settings.edit' && t.permission !== 'settings.view') {
+          violations.push(`${t.name} -> ${t.permission} (settings tools use settings.edit)`);
+        }
+        continue;
+      }
+      const allowed = COMPOSITE_ALLOWLIST[t.name];
+      if (allowed) {
+        if (t.permission !== allowed) violations.push(`${t.name} -> ${t.permission} (want ${allowed})`);
+        continue;
+      }
+      if (verb === 'create' && suffix !== 'create') violations.push(`${t.name} -> ${t.permission} (want .create)`);
+      if (verb === 'update' && suffix !== 'edit') violations.push(`${t.name} -> ${t.permission} (want .edit)`);
+      if (verb === 'delete' && suffix !== 'delete') violations.push(`${t.name} -> ${t.permission} (want .delete)`);
+      if (verb === 'post' && suffix !== (MODULES_WITH_POST.has(module) ? 'post' : 'edit')) {
+        violations.push(`${t.name} -> ${t.permission} (want .${MODULES_WITH_POST.has(module) ? 'post' : 'edit'})`);
+      }
+    }
+    expect(violations).toEqual([]);
   });
 
   it('every tool has a non-empty Arabic label and description', () => {

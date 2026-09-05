@@ -250,6 +250,17 @@ export const PurchaseInvoicesPage: React.FC = () => {
     setViewModalOpen(true);
   }, [activeCompany]);
 
+  // Paginated rows carry lines: [] — refetch the full document so the edit
+  // form shows its products instead of an empty list.
+  const handleEditRow = useCallback(async (invoice: PurchaseInvoice) => {
+    let full = invoice;
+    if ((!invoice.lines || invoice.lines.length === 0) && activeCompany?.id) {
+      const res = await purchasesApi.getInvoiceById(invoice.id, activeCompany.id);
+      if (res.success && res.data && res.data.lines.length > 0) full = res.data;
+    }
+    openEdit(full);
+  }, [activeCompany, openEdit]);
+
   const handleSave = useCallback(async () => {
     if (!activeCompany?.id || !form.supplierId) return;
     const existingInvoice = editingId ? invoices.find(i => i.id === editingId) : null;
@@ -571,7 +582,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
           <div className="flex items-center gap-1">
             <ActionButtons
               onView={() => openView(inv)}
-              onEdit={inv.status === 'draft' ? () => openEdit(inv) : undefined}
+              onEdit={inv.status === 'draft' ? () => handleEditRow(inv) : undefined}
               onDelete={inv.status === 'draft' ? () => handleDelete(inv.id) : undefined}
               onPrint={() => handlePrint(inv)}
               onExport={undefined}
@@ -603,7 +614,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
         );
       },
     },
-  ], [t, postingId, openView, openEdit, handleDelete, handlePrint, handlePost, formatCurrency, formatDate, getUserName]);
+  ], [t, postingId, openView, handleEditRow, handleDelete, handlePrint, handlePost, formatCurrency, formatDate, getUserName]);
 
   const canSave = form.supplierId && form.lines.length > 0 && form.lines.every(l => l.productId && l.quantity > 0);
 

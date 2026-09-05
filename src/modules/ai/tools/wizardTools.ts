@@ -7,7 +7,7 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { crmApi } from '@/modules/crm/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
-import { coreApi } from '@/modules/core/api';
+import { getInvoiceTaxConfig } from './writeTools/shared';
 
 // ─── Helpers (mirror writeTools.ts) ───────────────────────────────────────
 
@@ -42,12 +42,6 @@ function summarizeDocLines(label: string, lines: unknown): string {
   );
   const totalStr = new Intl.NumberFormat('ar-YE', { maximumFractionDigits: 2 }).format(total);
   return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
-}
-
-async function getVatRate(companyId: string): Promise<number> {
-  const res = await coreApi.getVatSettings(companyId);
-  const rate = res.success && res.data ? num(res.data.vatRate) : 0;
-  return rate > 0 ? rate : 15;
 }
 
 interface RawLine {
@@ -101,7 +95,7 @@ export const wizardTools: ToolDefinition[] = [
     name: 'sales.create_and_post_invoice',
     labelAr: 'إنشاء وترحيل فاتورة مبيعات',
     descriptionAr: 'ينشئ فاتورة مبيعات ويرحّلها فوراً (مسودة ← مرحّلة) في خطوة واحدة. الإجمالي والضريبة يُحتسبان تلقائياً. استخدم search.customers و search.products أولاً. إذا قال المستخدم "نقدي/فوري/دفع حالاً" مرّر paymentType="cash" + cashBoxId (من search.cash_boxes) — النقدية تُقيَّد على الخزنة ولا يُسجَّل دين على العميل.',
-    permission: 'sales.create',
+    permission: 'sales.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -130,13 +124,15 @@ export const wizardTools: ToolDefinition[] = [
         return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
       }
 
-      const vatRate = await getVatRate(ctx.companyId);
+      // Company invoice settings win (same flags the invoice forms obey).
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
       const lines = parsed.map((l) => {
-        const lineTotal = round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100));
-        return { ...l, vatPercent: vatRate, lineTotal };
+        const discountPercent = tax.showDiscount ? l.discountPercent : 0;
+        const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
+        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
       const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
@@ -183,6 +179,9 @@ export const wizardTools: ToolDefinition[] = [
         subtotal,
         vatAmount,
         totalAmount,
+        ...(tax.showVat
+          ? {}
+          : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
         note: paymentType === 'cash'
           ? 'فاتورة نقدية مرحّلة — المبلغ مُقيَّد على الخزنة ولا يوجد دين على العميل'
           : undefined,
@@ -195,7 +194,7 @@ export const wizardTools: ToolDefinition[] = [
     name: 'purchases.create_and_post_invoice',
     labelAr: 'إنشاء وترحيل فاتورة مشتريات',
     descriptionAr: 'ينشئ فاتورة مشتريات ويرحّلها فوراً (مسودة ← مرحّلة) في خطوة واحدة. الإجمالي والضريبة يُحتسبان تلقائياً. استخدم search.suppliers و search.products أولاً (سعر التكلفة costPrice). إذا قال المستخدم "نقدي/دفعت حالاً من الخزنة" مرّر paymentType="cash" + cashBoxId (من search.cash_boxes) — النقدية تُخصم من الخزنة ولا يُسجَّل دين للمورد.',
-    permission: 'purchases.create',
+    permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -224,13 +223,15 @@ export const wizardTools: ToolDefinition[] = [
         return { error: 'cashBoxId مطلوب للفواتير النقدية — استخدم search.cash_boxes أولاً' };
       }
 
-      const vatRate = await getVatRate(ctx.companyId);
+      // Company invoice settings win (same flags the invoice forms obey).
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
       const lines = parsed.map((l) => {
-        const lineTotal = round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100));
-        return { ...l, vatPercent: vatRate, lineTotal };
+        const discountPercent = tax.showDiscount ? l.discountPercent : 0;
+        const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
+        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
       const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
@@ -276,6 +277,9 @@ export const wizardTools: ToolDefinition[] = [
         subtotal,
         vatAmount,
         totalAmount,
+        ...(tax.showVat
+          ? {}
+          : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
         note: paymentType === 'cash'
           ? 'فاتورة مشتريات نقدية مرحّلة — المبلغ مُخصم من الخزنة ولا توجد ذمة للمورد'
           : undefined,
@@ -595,7 +599,7 @@ export const wizardTools: ToolDefinition[] = [
     name: 'accounting.create_journal_flow',
     labelAr: 'إنشاء وترحيل قيد يومي',
     descriptionAr: 'ينشئ قيداً يومياً (قيد محاسبي) ويرحّله فوراً من مسودة إلى مرحّل. يجب أن يتساوى مجموع الديون (debit) مع مجموع الأرصان (credit). استخدم search.accounts أولاً لإيجاد معرف كل حساب.',
-    permission: 'accounting.create',
+    permission: 'accounting.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

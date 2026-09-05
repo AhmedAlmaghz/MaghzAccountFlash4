@@ -1,5 +1,6 @@
 import { parseFlexibleNumber } from '../../engine/argNormalizers';
 import { coreApi } from '@/modules/core/api';
+import { getDbAdapter } from '@/core/database/adapters';
 
 /**
  * Shared helpers for ALL write-tool domains (Phase 77 split). Extracted
@@ -41,6 +42,43 @@ export async function getVatRate(companyId: string): Promise<number> {
   const res = await coreApi.getVatSettings(companyId);
   const rate = res.success && res.data ? num(res.data.vatRate) : 0;
   return rate > 0 ? rate : 15;
+}
+
+export interface InvoiceTaxConfig {
+  /** Effective VAT rate — 0 when the company disabled VAT on invoices. */
+  vatRate: number;
+  /** Mirrors settings `invoice.showVat` (default true). */
+  showVat: boolean;
+  /** Mirrors settings `invoice.showDiscount` (default true). */
+  showDiscount: boolean;
+}
+
+/**
+ * Invoice tax/display configuration for ONE company — the same flags the
+ * invoice forms obey (`settings.invoice.showVat/showDiscount`, default
+ * visible). Document tools MUST go through this instead of getVatRate
+ * alone, otherwise the agent books VAT the company switched off.
+ */
+export async function getInvoiceTaxConfig(companyId: string): Promise<InvoiceTaxConfig> {
+  let showVat = true;
+  let showDiscount = true;
+  try {
+    const adapter = await getDbAdapter();
+    const res = await adapter.query<{ key: string; value: string }>(
+      `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showVat', 'invoice.showDiscount')`,
+      [companyId],
+    );
+    if (res.success && res.rows) {
+      for (const row of res.rows) {
+        if (row.key === 'invoice.showVat') showVat = row.value === 'true';
+        if (row.key === 'invoice.showDiscount') showDiscount = row.value === 'true';
+      }
+    }
+  } catch {
+    // unreadable settings — fall back to visible (previous behavior)
+  }
+  const vatRate = showVat ? await getVatRate(companyId) : 0;
+  return { vatRate, showVat, showDiscount };
 }
 
 export interface RawLine {

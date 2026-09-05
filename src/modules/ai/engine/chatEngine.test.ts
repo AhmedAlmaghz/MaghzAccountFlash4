@@ -29,6 +29,15 @@ vi.mock('./toolExecutor', () => ({
   resolveTool: mocks.resolveTool,
 }));
 
+// fetchLiveContext reads invoice flags via the shared tax helper — keep it
+// off the real database in unit tests.
+vi.mock('@/core/database/adapters', () => ({
+  getDbAdapter: vi.fn(async () => ({
+    query: vi.fn(async () => ({ success: true, rows: [] })),
+  })),
+  isElectronPg: vi.fn(() => false),
+}));
+
 import { getChatEngine } from './chatEngine';
 import { useAiStore } from '../store';
 import { useAppStore } from '@/core/store';

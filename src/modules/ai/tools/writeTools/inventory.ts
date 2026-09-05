@@ -169,7 +169,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.update_product',
     labelAr: 'تعديل منتج',
     descriptionAr: 'يُحدّث بيانات منتج موجود — الاسم، السعر، الوحدة، الباركود، إلخ. استخدم inventory.get_products أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -212,7 +212,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.delete_product',
     labelAr: 'حذف منتج',
     descriptionAr: 'يحذف منتجاً من نظام المخزون. الـ API يرفض حذف المنتجات المرتبطة بفواتير أو حركات مخزون. استخدم search.products أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -268,7 +268,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.update_warehouse',
     labelAr: 'تعديل مستودع',
     descriptionAr: 'يُحدّث بيانات مستودع موجود — الاسم، العنوان، حالة التفعيل. استخدم inventory.get_warehouses أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -300,7 +300,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.delete_warehouse',
     labelAr: 'حذف مستودع',
     descriptionAr: 'يحذف مستودعاً. الـ API يرفض حذف المستودعات المرتبطة بحركات مخزون. استخدم inventory.get_warehouses أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -324,7 +324,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.delete_stock_adjustment',
     labelAr: 'حذف تسوية مخزون',
     descriptionAr: 'يحذف تسوية مخزون (جرد). الـ API يرفض حذف التسويات المرحلة (posted). استخدم inventory.get_stock_adjustments أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -348,7 +348,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.update_stock_adjustment',
     labelAr: 'تعديل تسوية مخزون',
     descriptionAr: 'يُحدّث بيانات تسوية مخزون — الكمية النظامية، الكمية الفعلية، الفرق، السبب، تكلفة الوحدة. الفرق يُحسب تلقائياً إذا مررت الكمية النظامية والفعلية. استخدم inventory.get_stock_adjustments أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -385,7 +385,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.post_stock_adjustment',
     labelAr: 'ترحيل تسوية مخزون',
     descriptionAr: 'يُرحّل تسوية مخزون — يُغير حالتها إلى posted ويُحدث المخزون تلقائياً. استخدم inventory.get_stock_adjustments أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -477,7 +477,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.delete_stock_transfer',
     labelAr: 'حذف تحويل مخزون',
     descriptionAr: 'يحذف تحويل مخزون. الـ API يرفض حذف التحويلات المرحلة. استخدم inventory.get_stock_transfers أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -528,7 +528,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.update_category',
     labelAr: 'تعديل تصنيف منتج',
     descriptionAr: 'يُحدّث بيانات تصنيف منتج — الاسم، التصنيف الأب. استخدم inventory.get_categories أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -558,7 +558,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     name: 'inventory.delete_category',
     labelAr: 'حذف تصنيف منتج',
     descriptionAr: 'يحذف تصنيف منتج. الـ API يرفض حذف التصنيفات المرتبطة بمنتجات. استخدم inventory.get_categories أولاً.',
-    permission: 'inventory.create',
+    permission: 'inventory.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',

@@ -185,6 +185,17 @@ export const PurchaseReturnsPage: React.FC = () => {
     setViewModalOpen(true);
   }, [activeCompany]);
 
+  // Paginated rows carry lines: [] — refetch the full document so the edit
+  // form shows its products instead of an empty list.
+  const handleEditRow = useCallback(async (ret: PurchaseReturn) => {
+    let full = ret;
+    if ((!ret.lines || ret.lines.length === 0) && activeCompany?.id) {
+      const res = await purchasesApi.getReturnById(ret.id, activeCompany.id);
+      if (res.success && res.data && res.data.lines.length > 0) full = res.data;
+    }
+    openEdit(full);
+  }, [activeCompany, openEdit]);
+
   const handleSave = useCallback(async () => {
     if (!activeCompany?.id || !form.supplierId) return;
     const existingReturn = editingId ? returns.find(r => r.id === editingId) : null;
@@ -411,7 +422,7 @@ export const PurchaseReturnsPage: React.FC = () => {
           <div className="flex items-center gap-1">
             <ActionButtons
               onView={() => openView(ret)}
-              onEdit={ret.status === 'draft' ? () => openEdit(ret) : undefined}
+              onEdit={ret.status === 'draft' ? () => handleEditRow(ret) : undefined}
               onDelete={ret.status === 'draft' ? () => handleDelete(ret.id) : undefined}
               onPrint={() => handlePrint(ret)}
               showView
@@ -441,7 +452,7 @@ export const PurchaseReturnsPage: React.FC = () => {
         );
       },
     },
-  ], [t, postingId, openView, openEdit, handleDelete, handlePrint, handlePost, formatCurrency, formatDate]);
+  ], [t, postingId, openView, handleEditRow, handleDelete, handlePrint, handlePost, formatCurrency, formatDate]);
 
   const canSave = form.supplierId && form.lines.length > 0 && form.lines.every(l => l.productId && l.quantity > 0);
 

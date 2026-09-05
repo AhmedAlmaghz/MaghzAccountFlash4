@@ -120,6 +120,17 @@ export const QuotationsPage: React.FC = () => {
     setFormOpen(true);
   }, []);
 
+  // Paginated rows carry lines: [] — refetch the full document so the edit
+  // form shows its products instead of an empty list.
+  const handleEditRow = async (q: Quotation) => {
+    let full = q;
+    if ((!q.lines || q.lines.length === 0) && activeCompany?.id) {
+      const res = await salesApi.getQuotationById(q.id, activeCompany.id);
+      if (res.success && res.data && res.data.lines.length > 0) full = res.data;
+    }
+    openEdit(full);
+  };
+
   const addLine = () => setLines(prev => [...prev, defaultLine()]);
   const removeLine = (idx: number) => setLines(prev => prev.filter((_, i) => i !== idx));
   const updateLine = (idx: number, field: keyof QuotationLineForm, value: string | number) => {
@@ -482,7 +493,7 @@ export const QuotationsPage: React.FC = () => {
             }
             setViewing(row); setDetailOpen(true);
           }}
-          onEdit={row.status !== 'converted' ? () => openEdit(row) : undefined}
+          onEdit={row.status !== 'converted' ? () => handleEditRow(row) : undefined}
           onDelete={row.status !== 'converted' ? () => handleDelete(row) : undefined}
           onPrint={() => handlePrint(row)}
           showView

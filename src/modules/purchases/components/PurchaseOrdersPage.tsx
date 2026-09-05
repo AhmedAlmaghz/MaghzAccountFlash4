@@ -181,6 +181,17 @@ export const PurchaseOrdersPage: React.FC = () => {
     setViewModalOpen(true);
   }, [activeCompany]);
 
+  // Paginated rows carry lines: [] — refetch the full document so the edit
+  // form shows its products instead of an empty list.
+  const handleEditRow = useCallback(async (order: PurchaseOrder) => {
+    let full = order;
+    if ((!order.lines || order.lines.length === 0) && activeCompany?.id) {
+      const res = await purchasesApi.getOrderById(order.id, activeCompany.id);
+      if (res.success && res.data && (res.data.lines?.length ?? 0) > 0) full = res.data;
+    }
+    openEdit(full);
+  }, [activeCompany, openEdit]);
+
   const handleSave = useCallback(async () => {
     if (!activeCompany?.id || !form.supplierId) return;
     let orderNumber: string;
@@ -375,7 +386,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           <div className="flex items-center gap-1">
             <ActionButtons
               onView={() => openView(order)}
-              onEdit={order.status === 'draft' ? () => openEdit(order) : undefined}
+              onEdit={order.status === 'draft' ? () => handleEditRow(order) : undefined}
               onDelete={order.status === 'draft' ? () => handleDelete(order.id) : undefined}
               onPrint={() => handlePrint(order)}
               showView
@@ -399,7 +410,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         );
       },
     },
-  ], [t, openView, openEdit, handleDelete, handlePrint, handleConvert, convertingId, formatCurrency, formatDate]);
+  ], [t, openView, handleEditRow, handleDelete, handlePrint, handleConvert, convertingId, formatCurrency, formatDate]);
 
   const canSave = form.supplierId && form.lines.length > 0 && form.lines.every(l => l.productId && l.quantity > 0);
 

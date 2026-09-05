@@ -11,7 +11,7 @@ import { renderErrorGuidance } from './errorTaxonomy';
 import { resolveArgsForCard } from './cardResolvers';
 import { expandDialectText } from './dialectMap';
 import { resolveEntitiesInText } from '../entityResolver';
-import { coreApi } from '@/modules/core/api';
+import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, PendingToolCall, ToolContext } from '../types';
 import type { Skill } from '../skills/types';
 
@@ -245,10 +245,10 @@ class ChatEngine {
   }
 
   /**
-   * Live financial context for the system prompt (VAT rate). Cached for
-   * LIVE_CONTEXT_TTL_MS — the engine rebuilds the prompt on every send, and
-   * a settings round-trip per message would be wasteful; one VAT row per
-   * minute is plenty fresh.
+   * Live financial context for the system prompt (VAT rate + invoice
+   * display flags). Cached for LIVE_CONTEXT_TTL_MS — the engine rebuilds
+   * the prompt on every send, and a settings round-trip per message would
+   * be wasteful; one settings read per minute is plenty fresh.
    */
   private liveContextCache: { at: number; data: LiveCompanyContext } | null = null;
   private static readonly LIVE_CONTEXT_TTL_MS = 60_000;
@@ -261,11 +261,11 @@ class ChatEngine {
       return this.liveContextCache.data;
     }
     try {
-      const vat = await coreApi.getVatSettings(companyId);
-      const data: LiveCompanyContext =
-        vat.success && vat.data && typeof vat.data.vatRate === 'number' && vat.data.vatRate > 0
-          ? { vatRate: vat.data.vatRate }
-          : {};
+      const tax = await getInvoiceTaxConfig(companyId);
+      const data: LiveCompanyContext = {
+        ...(tax.vatRate > 0 ? { vatRate: tax.vatRate } : {}),
+        vatOnInvoices: tax.showVat,
+      };
       this.liveContextCache = { at: now, data };
       return data;
     } catch {

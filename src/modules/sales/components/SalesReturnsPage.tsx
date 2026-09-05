@@ -321,6 +321,19 @@ export const SalesReturnsPage: React.FC = () => {
     setConfirmOpen(true);
   };
 
+  // Paginated rows carry lines: [] — refetch the full document so the edit
+  // form shows its products instead of an empty list.
+  const handleEditRow = async (row: SalesReturn) => {
+    let full = row;
+    if ((!row.lines || row.lines.length === 0) && activeCompany?.id) {
+      const res = await salesApi.getReturnById(row.id, activeCompany.id);
+      if (res.success && res.data && res.data.lines.length > 0) full = res.data;
+    }
+    setEditingId(full.id);
+    setLines(full.lines.map(l => ({ productId: l.productId, productName: l.productName || l.productId, quantity: l.quantity, unitPrice: l.unitPrice })));
+    setFormOpen(true);
+  };
+
   const handlePrint = async (ret: SalesReturn) => {
     let lines = ret.lines;
     if ((!lines || lines.length === 0) && activeCompany?.id) {
@@ -441,11 +454,7 @@ export const SalesReturnsPage: React.FC = () => {
             }
             setViewing(row); setDetailOpen(true);
           }}
-          onEdit={row.status === 'draft' ? () => {
-            setEditingId(row.id);
-            setLines(row.lines.map(l => ({ productId: l.productId, productName: l.productName || l.productId, quantity: l.quantity, unitPrice: l.unitPrice })));
-            setFormOpen(true);
-          } : undefined}
+          onEdit={row.status === 'draft' ? () => handleEditRow(row) : undefined}
           onDelete={row.status === 'draft' ? () => handleDelete(row) : undefined}
           onPrint={() => handlePrint(row)}
           showView

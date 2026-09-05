@@ -24,6 +24,12 @@ vi.mock('./cardResolvers', () => ({ resolveArgsForCard: vi.fn(async () => []) })
 vi.mock('@/modules/core/api', () => ({
   coreApi: { getVatSettings: vi.fn(async () => ({ success: true, data: { vatRate: 15 } })) },
 }));
+vi.mock('@/core/database/adapters', () => ({
+  getDbAdapter: vi.fn(async () => ({
+    query: vi.fn(async () => ({ success: true, rows: [] })),
+  })),
+  isElectronPg: vi.fn(() => false),
+}));
 
 import { getChatEngine } from './chatEngine';
 import { useAiStore } from '../store';

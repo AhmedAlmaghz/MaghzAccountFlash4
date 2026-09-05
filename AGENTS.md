@@ -4158,4 +4158,16 @@ npx drizzle-kit migrate
 - **متغيرات الثيم الاحترافية**: `sidebarBg/headerBg/navText/navActive/navIcon/font` (Cairo/Inter/Plex/System) عبر `--brand-*` + أصناف `.surface-*`/`.nav-*` بكل الحالات؛ `withThemeDefaults` للثيمات المخزنة قديماً
 - **RTL الموبايل**: قائمة أكشن البطاقات `end-0` → `start-0` (كانت تُقص يميناً بالعربية) + اختبار regression
 - **التحقق**: tsc 0 ✓ | eslint 0/0 ✓ | **vitest 1544/1544** ✓ | build ✓ | e2e 01-auth 4/4 ✓
-*آخر تحديث: 2026-09-04 | الإصدار: maghzaccount-pro v0.13.1 (سلسلة package.json)*
+### المرحلة 79 (v0.13.2): إصلاحات الفواتير والوكيل
+- **سطور فارغة عند التعديل**: زر التعديل كان يمرر صف الـ pagination (`lines: []`) مباشرة لـ openEdit في 6 صفحات (فواتير/عروض/مردودات مبيعات + فواتير/أوامر/مردودات مشتريات). **الحل**: `handleEditRow` يجلب المستند الكامل عبر getById عند فراغ السطور ثم يفتح النموذج (نفس نمط handlePrint الموجود)
+- **الوكيل يتجاهل إعدادات الضريبة**: أدوات الإنشاء كانت تقرأ `vat_rate` فقط وتسجّل ضريبة حتى مع `invoice.showVat=false`. **الحل**: `getInvoiceTaxConfig(companyId)` في `writeTools/shared.ts` يقرأ `invoice.showVat/showDiscount` (افتراضي ظاهر) + المعدل، والأدوات الست (إنشاء فواتير/مردودات مبيعات ومشتريات + wizardا الترحيل) تصفّر الضريبة/الخصم المطفأ وتعيد `vatSkipped` + `vatNote`. البرومبت يحمل `vatOnInvoices` عبر `fetchLiveContext` فيُحذَّر النموذج من الوعد بضريبة
+- **تدقيق الصلاحيات (48 تصحيحاً)**: كل `update_*` كانت `*.create` (تسمح بالتعديل لمن يملك الإنشاء فقط دون التعديل!) وكل `delete_*` كانت `*.create` — صُححت لـ edit/delete/post حسب الفعل (post حيث يوجد `*.post` وإلا edit). الـ wizards المركبة على أقوى فعل (`sales.create_and_post_invoice` ← `sales.post`) لسد ثغرة الترحيل الخلفي. بوابة العقد `toolsContract` امتدت بقاعدة المحاذاة + allowlist مركّب
+- **اختبارات**: `invoiceTax.test.ts` (10: إعدادات + 6 أدوات + 2 wizards)، قاعدة المحاذاة في العقد، سطرا برومبت، mocks للـ adapters في 3 ملفات محرك
+- **التحقق**: tsc 0 ✓ | تنفيذ حقيقي داخل العملية (14 فحصاً على الكود الفعلي: VAT مصفّر/مطبّق + محاذاة 252 أداة) ✓ | vitest/eslint/build معلّقة — الجهاز مرهق لدرجة فشل توليد العمال (workers timeout) — **يجب تشغيلها في CI قبل الدمج**
+- **قواعد ذهبية مضافة**:
+  - **صف الـ pagination ليس مستنداً**: `lines: []` افتراضي في الـ mapper — أي زر تعديل يجب أن يمر عبر getById عند فراغ السطور
+  - **إعدادات العرض عقدٌ على الوكيل أيضاً**: `invoice.showVat/showDiscount` ليست تجميلية — أي أداة تنشئ مستنداً يجب أن تقرأها مثل النماذج
+  - **الفعل في الاسم يحدد الصلاحية**: فحص آلي `update→edit/delete→delete/post→post` في بوابة العقد — الانحراف الوحيد المقبول allowlist موثق للمركّبات
+  - **المسح المنفصل للأسماء والصلاحيات يكذب**: `names[i] ↔ perms[i]` ينحرف عند أي أداة بلا permission — الاسناد يجب أن يكون `name` ← أول `permission` تليه
+  - **عندما تختنق العمال: تحقق داخل العملية**: `node --experimental-strip-types` + resolve hook للـ stubs ينفّذ الكود الحقيقي بلا vitest — مؤقت حتى يتعافى الجهاز
+*آخر تحديث: 2026-09-05 | الإصدار: maghzaccount-pro v0.13.2 (سلسلة package.json)*

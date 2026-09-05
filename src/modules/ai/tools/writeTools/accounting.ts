@@ -331,7 +331,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.update_account',
     labelAr: 'تعديل حساب',
     descriptionAr: 'يعدّل بيانات حساب موجود في شجرة الحسابات. الخانات الفارغة لن تُعدّل.',
-    permission: 'accounting.create',
+    permission: 'accounting.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -371,7 +371,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.delete_account',
     labelAr: 'حذف حساب',
     descriptionAr: 'يحذف حساباً من شجرة الحسابات. لا يمكن حذف حساب له حركات أو أرصدة.',
-    permission: 'accounting.create',
+    permission: 'accounting.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -395,7 +395,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.post_journal_entry',
     labelAr: 'ترحيل قيد يومي',
     descriptionAr: 'يرحّل قيداً يومياً (يغير حالته إلى posted) ليصبح نافذاً في الدفاتر.',
-    permission: 'accounting.create',
+    permission: 'accounting.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -418,7 +418,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.delete_journal_entry',
     labelAr: 'حذف قيد يومي',
     descriptionAr: 'يحذف قيداً يومياً. يبحث عن معرف القيد تلقائياً إذا لم يكن متاحاً.',
-    permission: 'accounting.create',
+    permission: 'accounting.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -442,7 +442,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.update_receipt_voucher',
     labelAr: 'تعديل سند قبض',
     descriptionAr: 'يعدّل حقول سند قبض موجود (ملاحظات، المبلغ، الفاتورة المرتبطة، المبلغ المطبق، الحالة). الحالة يمكن تغييرها إلى draft أو cancelled فقط — لترحيل السند استخدم accounting.post_receipt_voucher.',
-    permission: 'accounting.create',
+    permission: 'accounting.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -480,7 +480,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.delete_receipt_voucher',
     labelAr: 'حذف سند قبض',
     descriptionAr: 'يحذف سند قبض مسودة (draft). الـ API يرفض حذف السندات التي لها مبالغ مطبقة (amount_applied > 0).',
-    permission: 'accounting.create',
+    permission: 'accounting.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -503,7 +503,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.update_payment_voucher',
     labelAr: 'تعديل سند صرف',
     descriptionAr: 'يعدّل حقول سند صرف موجود (ملاحظات، المبلغ، الفاتورة المرتبطة، المبلغ المطبق، الحالة). الحالة يمكن تغييرها إلى draft أو cancelled فقط — لترحيل السند استخدم accounting.post_payment_voucher.',
-    permission: 'accounting.create',
+    permission: 'accounting.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -541,7 +541,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.delete_payment_voucher',
     labelAr: 'حذف سند صرف',
     descriptionAr: 'يحذف سند صرف مسودة (draft). الـ API يرفض حذف السندات التي لها مبالغ مطبقة (amount_applied > 0).',
-    permission: 'accounting.create',
+    permission: 'accounting.delete',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -564,7 +564,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.post_receipt_voucher',
     labelAr: 'ترحيل سند قبض',
     descriptionAr: 'يرحّل سند قبض من حالة draft إلى posted. لا يمكن تعديل السند بعد الترحيل.',
-    permission: 'accounting.create',
+    permission: 'accounting.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
@@ -587,7 +587,7 @@ export const accountingWriteTools: ToolDefinition[] = [
     name: 'accounting.post_payment_voucher',
     labelAr: 'ترحيل سند صرف',
     descriptionAr: 'يرحّل سند صرف من حالة draft إلى posted. لا يمكن تعديل السند بعد الترحيل.',
-    permission: 'accounting.create',
+    permission: 'accounting.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
