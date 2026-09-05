@@ -106,7 +106,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   'inventory.view', 'inventory.create', 'inventory.edit', 'inventory.delete', 'inventory.own',
   'sales.view', 'sales.create', 'sales.edit', 'sales.delete', 'sales.post', 'sales.own',
   'purchases.view', 'purchases.create', 'purchases.edit', 'purchases.delete', 'purchases.own',
-  'manufacturing.view', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.own',
+  'manufacturing.view', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.delete', 'manufacturing.post', 'manufacturing.own',
   'hr.view', 'hr.create', 'hr.edit', 'hr.delete', 'hr.own',
   'crm.view', 'crm.create', 'crm.edit', 'crm.delete', 'crm.own',
   'reports.view', 'reports.export', 'reports.custom',
@@ -183,6 +183,8 @@ export const PERMISSION_GROUPS = [
       { key: 'manufacturing.own', labelAr: 'مستنداتي فقط', labelEn: 'Own Only' },
       { key: 'manufacturing.create', labelAr: 'إنشاء', labelEn: 'Create' },
       { key: 'manufacturing.edit', labelAr: 'تعديل', labelEn: 'Edit' },
+      { key: 'manufacturing.delete', labelAr: 'حذف', labelEn: 'Delete' },
+      { key: 'manufacturing.post', labelAr: 'ترحيل', labelEn: 'Post' },
     ],
   },
   {

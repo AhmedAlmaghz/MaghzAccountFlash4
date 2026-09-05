@@ -21,6 +21,16 @@ vi.mock('@/modules/core/api', () => ({
   coreApi: { getVatSettings: vi.fn(async () => ({ success: true, data: { vatRate: 5 } })) },
 }));
 
+// The wizards read invoice display flags via the REAL adapter
+// (writeTools/shared getInvoiceTaxConfig) — stub it so no PGlite WASM
+// spins up here (that costs ~15s and trips the 5s test timeout).
+vi.mock('@/core/database/adapters', () => ({
+  getDbAdapter: vi.fn(async () => ({
+    query: vi.fn(async () => ({ success: true, rows: [] })),
+  })),
+  isElectronPg: vi.fn(() => false),
+}));
+
 import { wizardTools } from './wizardTools';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';

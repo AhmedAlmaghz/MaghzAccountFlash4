@@ -64,6 +64,11 @@ describe('settings tools — RBAC + companyId regression', () => {
       'settings.delete_cost_center',
       'settings.update_default_account',
       'settings.apply_default_template',
+      'settings.generate_theme',
+      'settings.create_theme',
+      'settings.update_theme',
+      'settings.activate_theme',
+      'settings.delete_theme',
     ];
 
     it.each(WRITE_SETTINGS_TOOLS)('%s requires settings.edit', (name) => {
@@ -73,10 +78,12 @@ describe('settings tools — RBAC + companyId regression', () => {
       expect(tool!.dangerLevel).toBe('write');
     });
 
-    it('the ONLY settings.view tool in writeTools is the read-only sequences list', () => {
+    it('the ONLY settings.view tools in writeTools are read-only lists', () => {
       const viewTools = writeTools.filter((t) => t.permission === 'settings.view');
-      expect(viewTools.map((t) => t.name)).toEqual(['settings.get_document_sequences']);
-      expect(viewTools[0].dangerLevel).toBe('read');
+      expect(viewTools.map((t) => t.name).sort()).toEqual(
+        ['settings.get_document_sequences', 'settings.list_themes'].sort(),
+      );
+      for (const tool of viewTools) expect(tool.dangerLevel).toBe('read');
     });
   });
 
