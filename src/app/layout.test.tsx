@@ -105,6 +105,59 @@ describe('Sidebar', () => {
     expect(screen.getByText('sidebar.dashboard')).toBeInTheDocument();
     expect(screen.queryByText('sidebar.settings.title')).not.toBeInTheDocument();
   });
+
+  it('section titles link to landing pages and expand children on click', () => {
+    const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
+    useAuthStore.getState().login(user);
+
+    render(
+      <BrowserRouter>
+        <Sidebar />
+      </BrowserRouter>
+    );
+
+    const salesLink = screen.getByText('sidebar.sales.title').closest('a');
+    expect(salesLink).toHaveAttribute('href', '/sales');
+    // Children are hidden until the section is opened
+    expect(screen.queryByText('sidebar.sales.invoices')).not.toBeInTheDocument();
+    fireEvent.click(salesLink!);
+    expect(screen.getByText('sidebar.sales.invoices')).toBeInTheDocument();
+  });
+
+  it('chevron button toggles children without following the section link', () => {
+    const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
+    useAuthStore.getState().login(user);
+
+    render(
+      <BrowserRouter>
+        <Sidebar />
+      </BrowserRouter>
+    );
+
+    const salesLink = screen.getByText('sidebar.sales.title').closest('a');
+    const chevron = salesLink!.querySelector('button');
+    expect(chevron).toBeInTheDocument();
+    fireEvent.click(chevron!);
+    expect(screen.getByText('sidebar.sales.invoices')).toBeInTheDocument();
+    fireEvent.click(chevron!);
+    expect(screen.queryByText('sidebar.sales.invoices')).not.toBeInTheDocument();
+  });
+
+  it('settings section includes the database link', () => {
+    const user: User = { id: '1', username: 'admin', email: 'a@b.com', role: 'admin', isActive: true };
+    useAuthStore.getState().login(user);
+
+    render(
+      <BrowserRouter>
+        <Sidebar />
+      </BrowserRouter>
+    );
+
+    const settingsLink = screen.getByText('sidebar.settings.title').closest('a');
+    fireEvent.click(settingsLink!);
+    const dbLink = screen.getByText('sidebar.settings.database').closest('a');
+    expect(dbLink).toHaveAttribute('href', '/settings/database');
+  });
 });
 
 describe('Header', () => {

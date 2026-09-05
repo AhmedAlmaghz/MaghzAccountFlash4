@@ -222,6 +222,7 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.settings.units', path: '/settings/units' },
       { labelKey: 'sidebar.settings.cashBoxes', path: '/settings/cash-boxes' },
       { labelKey: 'sidebar.settings.costCenters', path: '/settings/cost-centers' },
+      { labelKey: 'sidebar.settings.database', path: '/settings/database' },
       { labelKey: 'sidebar.settings.users', path: '/settings/users' },
       { labelKey: 'sidebar.settings.roles', path: '/roles' },
       { labelKey: 'sidebar.settings.auditLogs', path: '/audit-logs' },
@@ -298,13 +299,11 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
     <div className="space-y-0.5">
       <Link
         to={item.path}
-        onClick={(e) => {
-          if (hasChildren) {
-            e.preventDefault();
-            setIsExpanded(!isExpanded);
-          } else {
-            onNavigate?.();
-          }
+        onClick={() => {
+          // Section titles are real links to the section landing page;
+          // visiting a section also expands its children.
+          if (hasChildren) setIsExpanded(true);
+          onNavigate?.();
         }}
         className={cn(
           'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150',
@@ -320,10 +319,23 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
           <>
             <span className="text-sm flex-1">{t(item.labelKey)}</span>
             {hasChildren && (
-              <ChevronDown
-                size={14}
-                className={cn('transition-transform duration-200', isExpanded && 'rotate-180')}
-              />
+              <button
+                type="button"
+                aria-label={t('sidebar.toggleSection')}
+                title={t('sidebar.toggleSection')}
+                onClick={(e) => {
+                  // Toggle only — do not follow the section link.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsExpanded(!isExpanded);
+                }}
+                className="rounded-md p-1 text-current opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500"
+              >
+                <ChevronDown
+                  size={14}
+                  className={cn('transition-transform duration-200', isExpanded && 'rotate-180')}
+                />
+              </button>
             )}
           </>
         )}

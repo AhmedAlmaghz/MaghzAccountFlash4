@@ -118,6 +118,7 @@
   },
   "sidebar": {
     "dashboard": "Dashboard",
+    "toggleSection": "Expand / collapse section",
     "ai": "AI Assistant",
     "accounting": {
       "title": "Accounting",
@@ -210,6 +211,7 @@
       "units": "Units",
       "cashBoxes": "Cash & Treasuries",
       "costCenters": "Cost Centers",
+      "database": "Database",
       "payrollComponents": "Payroll Components",
       "users": "Users",
       "roles": "Roles",

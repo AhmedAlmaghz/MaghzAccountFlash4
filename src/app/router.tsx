@@ -277,6 +277,7 @@ export const AppRouter: React.FC = () => {
             {/* Settings with nested routes */}
             <Route element={<PermissionRoute module="settings" />}>
               <Route path="/settings" element={withSuspense(SettingsLayout)}>
+                <Route index element={<Navigate to="company" replace />} />
                 <Route path="company" element={withSuspense(CompanySetup)} />
                 <Route path="themes" element={withSuspense(ThemeSettingsPage)} />
                 <Route path="currencies" element={withSuspense(CurrenciesPage)} />

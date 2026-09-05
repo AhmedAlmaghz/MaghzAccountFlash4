@@ -118,6 +118,7 @@
   },
   "sidebar": {
     "dashboard": "لوحة التحكم",
+    "toggleSection": "توسيع / طي القسم",
     "ai": "المساعد الذكي",
     "accounting": {
       "title": "الحسابات",
@@ -210,6 +211,7 @@
       "units": "الوحدات",
       "cashBoxes": "النقدية والخزائن",
       "costCenters": "مراكز التكلفة",
+      "database": "قاعدة البيانات",
       "payrollComponents": "مكونات الرواتب",
       "users": "المستخدمين",
       "roles": "الأدوار",
