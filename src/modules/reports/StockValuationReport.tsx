@@ -4,7 +4,7 @@ import { useFormatters } from '@/core/utils/useFormatters';
 import { getDbAdapter } from '@/core/database/adapters';
 import { useAppStore } from '@/core/store';
 import { Card, Button, Table, PageHeader } from '@/core/ui/components';
-import { exportToExcel } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { Package, Layers, Warehouse, FileDown } from 'lucide-react';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
 import KpiCardPro from './components/KpiCardPro';
@@ -44,6 +44,8 @@ export const StockValuationReport = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -162,10 +164,11 @@ export const StockValuationReport = () => {
   const totalQty = products.reduce((s, p) => s + p.totalQty, 0);
   const activeProductCount = products.length;
 
-  const handleExportExcel = useCallback(async () => {
+  const buildSpec = useCallback((): ReportSpec => {
     let data: Record<string, unknown>[];
-    let cols: { key: string; header: string }[];
+    let columns: ReportColumnDef[];
     let filename: string;
+    let totals: ReportSpec['totals'];
 
     if (viewMode === 'products') {
       data = products.map((p) => ({
@@ -179,18 +182,22 @@ export const StockValuationReport = () => {
         saleValue: p.totalSaleValue,
         profit: p.potentialProfit,
       }));
-      cols = [
+      columns = [
         { key: 'product', header: t('reports.product') },
         { key: 'sku', header: t('reports.sku') },
         { key: 'category', header: t('reports.category') },
-        { key: 'quantity', header: t('reports.quantity') },
-        { key: 'costPrice', header: t('reports.cost') },
-        { key: 'salePrice', header: t('reports.revenue') },
-        { key: 'costValue', header: t('reports.amount') },
-        { key: 'saleValue', header: t('reports.revenue') },
-        { key: 'profit', header: t('reports.profit') },
+        { key: 'quantity', header: t('reports.quantity'), format: 'quantity' },
+        { key: 'costPrice', header: t('reports.cost'), format: 'money' },
+        { key: 'salePrice', header: t('reports.revenue'), format: 'money' },
+        { key: 'costValue', header: t('reports.amount'), format: 'money' },
+        { key: 'saleValue', header: t('reports.revenue'), format: 'money' },
+        { key: 'profit', header: t('reports.profit'), format: 'money' },
       ];
       filename = 'Stock_Valuation_Products';
+      totals = {
+        label: t('reports.total'),
+        values: { quantity: totalQty, costValue: totalCostValue, saleValue: totalSaleValue },
+      };
     } else if (viewMode === 'categories') {
       data = categories.map((c) => ({
         category: c.categoryName,
@@ -198,13 +205,17 @@ export const StockValuationReport = () => {
         quantity: c.totalQty,
         value: c.totalValue,
       }));
-      cols = [
+      columns = [
         { key: 'category', header: t('reports.category') },
-        { key: 'productCount', header: t('reports.count') },
-        { key: 'quantity', header: t('reports.quantity') },
-        { key: 'value', header: t('reports.total') },
+        { key: 'productCount', header: t('reports.count'), format: 'quantity' },
+        { key: 'quantity', header: t('reports.quantity'), format: 'quantity' },
+        { key: 'value', header: t('reports.total'), format: 'money' },
       ];
       filename = 'Stock_Valuation_Categories';
+      totals = {
+        label: t('reports.total'),
+        values: { value: categories.reduce((s, c) => s + c.totalValue, 0) },
+      };
     } else {
       data = warehouses.map((w) => ({
         warehouse: w.warehouseName,
@@ -212,17 +223,42 @@ export const StockValuationReport = () => {
         quantity: w.totalQty,
         value: w.totalValue,
       }));
-      cols = [
+      columns = [
         { key: 'warehouse', header: t('reports.warehouse') },
-        { key: 'productCount', header: t('reports.count') },
-        { key: 'quantity', header: t('reports.quantity') },
-        { key: 'value', header: t('reports.total') },
+        { key: 'productCount', header: t('reports.count'), format: 'quantity' },
+        { key: 'quantity', header: t('reports.quantity'), format: 'quantity' },
+        { key: 'value', header: t('reports.total'), format: 'money' },
       ];
       filename = 'Stock_Valuation_Warehouses';
+      totals = {
+        label: t('reports.total'),
+        values: { value: warehouses.reduce((s, w) => s + w.totalValue, 0) },
+      };
     }
 
-    await exportToExcel(data, cols, filename);
-  }, [viewMode, products, categories, warehouses, t]);
+    return {
+      columns,
+      rows: data,
+      meta: {
+        title: t('reports.stockValuation'),
+        subtitle: branding.companyName,
+        direction,
+      },
+      branding,
+      filename,
+      totals,
+    };
+  }, [viewMode, products, categories, warehouses, t, totalQty, totalCostValue, totalSaleValue, branding, direction]);
+
+  const handleExportExcel = useCallback(async () => {
+    await exportReportExcel(buildSpec());
+  }, [buildSpec]);
+
+  const handleExportPDF = useCallback(async () => {
+    await exportReportPdf(buildSpec());
+  }, [buildSpec]);
+
+  const handleExportHtml = useCallback(() => exportReportHtml(buildSpec()), [buildSpec]);
 
   if (!canView) {
     return (
@@ -249,9 +285,17 @@ export const StockValuationReport = () => {
         icon={<Package size={22} />}
         title={t('reports.stockValuation')}
         actions={
-          <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-            {t('reports.exportExcel')}
-          </Button>
+          <>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
+              {t('reports.exportExcel')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
+            </Button>
+          </>
         }
       />
 

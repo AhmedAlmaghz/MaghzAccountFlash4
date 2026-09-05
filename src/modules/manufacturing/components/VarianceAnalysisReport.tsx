@@ -6,7 +6,7 @@ import { getDbAdapter } from '@/core/database/adapters';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { formatDateValue } from '@/core/utils/locale';
 
 interface WorkOrderVarianceRow {
@@ -36,6 +36,8 @@ export const VarianceAnalysisReport: React.FC = () => {
   const activeCompany = useAppStore((state) => state.activeCompany);
   const companyId = activeCompany?.id || '';
   const { formatCurrency } = useFormatters(companyId);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
 
   const [rows, setRows] = useState<WorkOrderVarianceRow[]>([]);
   const [materials, setMaterials] = useState<MaterialVarianceRow[]>([]);
@@ -234,29 +236,47 @@ export const VarianceAnalysisReport: React.FC = () => {
     },
   ];
 
-  const handleExportExcel = async () => {
-    await exportToExcel(rows, [
+  const inferReportFormat = (key: string): ReportColumnDef['format'] => {
+    const k = key.toLowerCase();
+    if (/(amount|total|balance|price|value|cost)/.test(k)) return 'money';
+    if (/date/.test(k)) return 'date';
+    if (/(qty|quantity)/.test(k)) return 'quantity';
+    if (/(rate|margin|percent)/.test(k)) return 'percent';
+    return undefined;
+  };
+
+  const buildSpec = (): ReportSpec => {
+    const rawColumns: Array<{ key: string; header: string; width: number }> = [
       { key: 'orderNumber', header: t('manufacturing.orderNumber'), width: 15 },
       { key: 'productName', header: t('manufacturing.product'), width: 20 },
       { key: 'status', header: t('manufacturing.table.status'), width: 12 },
       { key: 'plannedCost', header: t('manufacturing.plannedCost'), width: 15 },
       { key: 'actualCost', header: t('manufacturing.actualCost'), width: 15 },
       { key: 'variance', header: t('manufacturing.variance.title'), width: 15 },
-    ], `variance-analysis-${new Date().toISOString().slice(0, 10)}`);
+    ];
+    const columns: ReportColumnDef[] = rawColumns.map((c) => {
+      const format = inferReportFormat(c.key);
+      return format ? { ...c, format } : { ...c };
+    });
+    return {
+      columns,
+      rows: rows as unknown as Record<string, unknown>[],
+      meta: { title: t('manufacturing.varianceReport'), direction },
+      branding,
+      filename: `variance-analysis-${new Date().toISOString().slice(0, 10)}`,
+    };
+  };
+
+  const handleExportExcel = async () => {
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
-    await exportToPDF(rows, [
-      { key: 'orderNumber', header: t('manufacturing.orderNumber') },
-      { key: 'productName', header: t('manufacturing.product') },
-      { key: 'status', header: t('manufacturing.table.status') },
-      { key: 'plannedCost', header: t('manufacturing.plannedCostShort') },
-      { key: 'actualCost', header: t('manufacturing.actualCostShort') },
-      { key: 'variance', header: t('manufacturing.varianceShort') },
-    ], `variance-analysis-${new Date().toISOString().slice(0, 10)}`, {
-      title: t('manufacturing.varianceReport'),
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
+  };
+
+  const handleExportHtml = async () => {
+    await exportReportHtml(buildSpec());
   };
 
   return (
@@ -274,10 +294,13 @@ export const VarianceAnalysisReport: React.FC = () => {
             {t('reports.filter')}
           </Button>
           <Can action="export" module="reports">
-            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel}>{t('export.excel')}</Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel}>{t('reports.exportExcel')}</Button>
           </Can>
           <Can action="export" module="reports">
-            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF}>{t('export.pdf')}</Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF}>{t('reports.exportPdf')}</Button>
+          </Can>
+          <Can action="export" module="reports">
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml}>{t('reports.exportHtml')}</Button>
           </Can>
         </div>
       </div>

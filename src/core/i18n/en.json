@@ -1998,6 +1998,7 @@
     "exportPdf": "Export PDF",
     "exportExcel": "Export Excel",
     "exportCsv": "Export CSV",
+    "exportHtml": "Export HTML",
     "print": "Print",
     "period": "Period",
     "today": "Today",

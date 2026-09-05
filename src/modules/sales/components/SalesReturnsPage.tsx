@@ -374,6 +374,8 @@ export const SalesReturnsPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
+      vatRate,
       currency: activeCompany?.currency,
       paymentType: ret.paymentType,
       createdBy: ret.createdBy,

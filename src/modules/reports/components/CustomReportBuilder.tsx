@@ -5,7 +5,7 @@ import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
@@ -107,6 +107,8 @@ export const CustomReportBuilder: React.FC = () => {
   const canCustom = usePermission('reports.custom');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
   const [step, setStep] = useState<Step>('table');
   const [selectedTable, setSelectedTable] = useState<TableMeta | null>(null);
@@ -203,26 +205,43 @@ export const CustomReportBuilder: React.FC = () => {
     setIsLoading(false);
   };
 
+  const buildSpec = (): ReportSpec => {
+    const selected = selectedColumns.length
+      ? selectedColumns
+      : (selectedTable?.columns.map((c) => ({ key: c.key, label: c.label })) ?? []);
+    const columns: ReportColumnDef[] = selected.map((c) => {
+      const colDef = selectedTable?.columns.find((tc) => tc.key === c.key);
+      const format = colDef?.type === 'date' ? 'date'
+        : colDef?.type === 'number' ? 'money'
+        : undefined;
+      return {
+        key: c.key,
+        header: t(c.label),
+        ...(format ? { format } : {}),
+      };
+    });
+    return {
+      columns,
+      rows: previewData,
+      meta: {
+        title: reportName || t('reports.customReportBuilder'),
+        subtitle: branding.companyName,
+        direction,
+      },
+      branding,
+      filename: reportName || 'Custom_Report',
+    };
+  };
+
   const handleExportExcel = async () => {
-    const cols = (selectedColumns.length ? selectedColumns : selectedTable!.columns.map((c) => ({ key: c.key, label: c.label }))).map((c) => ({
-      key: c.key,
-      header: c.label,
-    }));
-    await exportToExcel(previewData, cols, reportName || 'Custom_Report');
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
-    const cols = (selectedColumns.length ? selectedColumns : selectedTable!.columns.map((c) => ({ key: c.key, label: c.label }))).map((c) => ({
-      key: c.key,
-      header: c.label,
-      width: 18,
-    }));
-    await exportToPDF(previewData, cols, reportName || 'Custom_Report', {
-      title: reportName || t('reports.customReportBuilder'),
-      subtitle: activeCompany?.name,
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
   };
+
+  const handleExportHtml = () => exportReportHtml(buildSpec());
 
   const canNext = () => {
     if (step === 'table') return !!selectedTable;
@@ -402,10 +421,13 @@ export const CustomReportBuilder: React.FC = () => {
                     onChange={(e) => setReportName(e.target.value)}
                   />
                   <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={isLoading || !canExport}>
-                    Excel
+                    {t('reports.exportExcel')}
                   </Button>
                   <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={isLoading || !canExport}>
-                    PDF
+                    {t('reports.exportPdf')}
+                  </Button>
+                  <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={isLoading || !canExport}>
+                    {t('reports.exportHtml')}
                   </Button>
                 </div>
               </div>
@@ -428,7 +450,7 @@ export const CustomReportBuilder: React.FC = () => {
                       const isCurrency = colDef?.type === 'number';
                       return {
                         key: c.key,
-                        header: c.label,
+                        header: t(c.label),
                         align: isCurrency ? 'right' as const : 'left' as const,
                         mobile: (ci === 0 ? 'title' : ci === 1 ? 'subtitle' : 'hidden') as 'title' | 'subtitle' | 'hidden',
                         render: (row: Record<string, unknown>) => {

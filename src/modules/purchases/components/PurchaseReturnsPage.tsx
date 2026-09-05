@@ -375,11 +375,13 @@ export const PurchaseReturnsPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
+      vatRate,
       currency: currencySymbol,
       paymentType: ret.paymentType,
       createdBy: ret.createdBy,
     });
-  }, [activeCompany, t, currencySymbol]);
+  }, [activeCompany, t, currencySymbol, vatRate]);
 
   const totalPosted = useMemo(() => returns.filter(r => r.status === 'posted').reduce((s, r) => s + r.totalAmount, 0), [returns]);
 

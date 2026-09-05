@@ -352,11 +352,13 @@ export const PurchaseOrdersPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
+      vatRate,
       currency: currencySymbol,
       paymentType: order.paymentType,
       createdBy: order.createdBy,
     });
-  }, [activeCompany, t, currencySymbol]);
+  }, [activeCompany, t, currencySymbol, vatRate]);
 
   const columns = useMemo(() => [
     { key: 'orderNumber', header: t('purchases.orderNumber'), mobile: 'title' as const, render: (row: PurchaseOrder) => <span className="font-medium text-zinc-900 dark:text-zinc-100">{row.orderNumber}</span> },

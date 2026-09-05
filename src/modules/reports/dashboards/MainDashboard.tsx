@@ -16,7 +16,7 @@ import { KpiCardPro } from '../components/KpiCardPro';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { Card } from '@/core/ui/components';
 import { Link, useNavigate } from 'react-router-dom';
-import { exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { cn, formatCurrency, formatDate } from '@/core/utils';
 import { manufacturingApi } from '@/modules/manufacturing/api';
 import { purchasesApi } from '@/modules/purchases/api';
@@ -35,9 +35,10 @@ const MainDashboard: React.FC = () => {
   const { t } = useTranslation();
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
-  void canExport;
   const navigate = useNavigate();
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const [filters, setFilters] = useState<DashboardFilters>({
     period: 'month',
     comparePrevious: false,
@@ -51,25 +52,48 @@ const MainDashboard: React.FC = () => {
     setShowCustomDate(period === 'custom');
   };
 
-  const handleExportDashboardPdf = async () => {
-    if (!data) return;
-    const rows = [
-      { metric: t('reports.totalRevenue'), value: formatCurrency(data.current.totalRevenue) },
-      { metric: t('reports.totalExpenses'), value: formatCurrency(data.current.totalExpenses) },
-      { metric: t('reports.netProfit'), value: formatCurrency(data.current.netProfit) },
-      { metric: t('reports.invoicesCount'), value: data.current.invoicesCount },
-      { metric: t('reports.productsCount'), value: data.current.productsCount },
-      { metric: t('reports.customersCount'), value: data.current.customersCount },
+  const buildSpec = (): ReportSpec | null => {
+    if (!data) return null;
+    const columns: ReportColumnDef[] = [
+      { key: 'metric', header: t('reports.kpiMetric') },
+      { key: 'value', header: t('reports.kpiValue') },
     ];
-    await exportToPDF(rows, [
-      { key: 'metric', header: t('reports.kpiMetric'), width: 30 },
-      { key: 'value', header: t('reports.kpiValue'), width: 20 },
-    ], `Dashboard_${formatDate(new Date())}`, {
-      title: t('sidebar.dashboard'),
-      subtitle: activeCompany?.name || t('reports.defaultCompany'),
-      companyName: activeCompany?.name,
-      rtl: true,
-    });
+    return {
+      columns,
+      rows: [
+        { metric: t('reports.totalRevenue'), value: formatCurrency(data.current.totalRevenue) },
+        { metric: t('reports.totalExpenses'), value: formatCurrency(data.current.totalExpenses) },
+        { metric: t('reports.netProfit'), value: formatCurrency(data.current.netProfit) },
+        { metric: t('reports.invoicesCount'), value: data.current.invoicesCount },
+        { metric: t('reports.productsCount'), value: data.current.productsCount },
+        { metric: t('reports.customersCount'), value: data.current.customersCount },
+      ],
+      meta: {
+        title: t('sidebar.dashboard'),
+        subtitle: branding.companyName || activeCompany?.name,
+        direction,
+      },
+      branding,
+      filename: `Dashboard_${formatDate(new Date())}`,
+    };
+  };
+
+  const handleExportDashboardPdf = async () => {
+    const spec = buildSpec();
+    if (!spec) return;
+    await exportReportPdf(spec);
+  };
+
+  const handleExportDashboardExcel = async () => {
+    const spec = buildSpec();
+    if (!spec) return;
+    await exportReportExcel(spec);
+  };
+
+  const handleExportDashboardHtml = () => {
+    const spec = buildSpec();
+    if (!spec) return;
+    return exportReportHtml(spec);
   };
 
   const current = data?.current;
@@ -141,13 +165,31 @@ const MainDashboard: React.FC = () => {
               <p className="text-primary-100/80 text-base max-w-lg">{t('dashboard.subtitle')}</p>
             </div>
             <button
+              onClick={handleExportDashboardExcel}
+              disabled={!canExport}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title={t('reports.exportExcel')}
+            >
+              <Download size={16} />
+              {t('reports.exportExcel')}
+            </button>
+            <button
               onClick={handleExportDashboardPdf}
               disabled={!canExport}
               className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               title={t('reports.exportDashboardPdf')}
             >
               <Download size={16} />
-              PDF
+              {t('reports.exportPdf')}
+            </button>
+            <button
+              onClick={handleExportDashboardHtml}
+              disabled={!canExport}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              title={t('reports.exportHtml')}
+            >
+              <Download size={16} />
+              {t('reports.exportHtml')}
             </button>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { Package, AlertTriangle, FileDown, Filter, RotateCcw, TrendingDown } fro
 import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
@@ -30,6 +30,8 @@ export const InventoryAnalysisReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
   const [items, setItems] = useState<StockItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -161,32 +163,43 @@ export const InventoryAnalysisReport: React.FC = () => {
     { name: t('reports.out'), value: outOfStock },
   ];
 
-  const handleExportExcel = async () => {
-    const cols = [
+  const buildSpec = (): ReportSpec => {
+    const exportData = view === 'abc' ? abcData : filteredItems;
+    const columns: ReportColumnDef[] = [
       { key: 'product', header: t('reports.product') },
       { key: 'sku', header: t('reports.sku') },
       { key: 'warehouse', header: t('reports.warehouse') },
-      { key: 'quantity', header: t('reports.quantity') },
-      { key: 'minStock', header: t('reports.minStock') },
+      { key: 'quantity', header: t('reports.quantity'), format: 'quantity' },
+      { key: 'minStock', header: t('reports.minStock'), format: 'quantity' },
       { key: 'status', header: t('reports.status') },
-      { key: 'value', header: t('reports.amount') },
+      { key: 'value', header: t('reports.amount'), format: 'money' },
     ];
-    await exportToExcel(view === 'abc' ? abcData : filteredItems, cols, 'Inventory_Analysis');
+    return {
+      columns,
+      rows: exportData as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.inventoryAnalysis'),
+        subtitle: branding.companyName,
+        direction,
+      },
+      branding,
+      filename: 'Inventory_Analysis',
+      totals: {
+        label: t('reports.total'),
+        values: { value: totalValue },
+      },
+    };
+  };
+
+  const handleExportExcel = async () => {
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
-    const cols = [
-      { key: 'product', header: t('reports.product'), width: 25 },
-      { key: 'sku', header: t('reports.sku'), width: 15 },
-      { key: 'quantity', header: t('reports.quantity'), width: 12 },
-      { key: 'value', header: t('reports.amount'), width: 15 },
-    ];
-    await exportToPDF(view === 'abc' ? abcData : filteredItems, cols, 'Inventory_Analysis', {
-      title: t('reports.inventoryAnalysis'),
-      subtitle: activeCompany?.name,
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
   };
+
+  const handleExportHtml = () => exportReportHtml(buildSpec());
 
   if (!canView) {
     return (
@@ -223,6 +236,9 @@ export const InventoryAnalysisReport: React.FC = () => {
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
               {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
             </Button>
           </>
         }

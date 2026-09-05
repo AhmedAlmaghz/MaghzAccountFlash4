@@ -4,7 +4,7 @@ import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { formatCurrency } from '@/core/utils';
 import { aggregateCustomerAging, computeAgingTotals, todayIso, AGING_BUCKETS } from '@/core/utils/aging';
@@ -15,6 +15,8 @@ export const CustomerStatementReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const [customers, setCustomers] = useState<ReturnType<typeof aggregateCustomerAging>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [_error, setError] = useState<string | null>(null);
@@ -75,32 +77,47 @@ export const CustomerStatementReport: React.FC = () => {
   const totals = useMemo(() => computeAgingTotals(customers), [customers]);
   const totalInvoiced = customers.reduce((s, c) => s + (c.invoiceCount > 0 ? c.totalOutstanding : 0), 0);
 
-  const handleExportExcel = async () => {
-    const cols = [
+  const buildSpec = (): ReportSpec => {
+    const columns: ReportColumnDef[] = [
       { key: 'customer', header: t('reports.customer') },
       { key: 'phone', header: t('reports.phone') },
-      { key: 'bucket0to30', header: t('reports.agingBucket0to30') },
-      { key: 'bucket31to60', header: t('reports.agingBucket31to60') },
-      { key: 'bucket61to90', header: t('reports.agingBucket61to90') },
-      { key: 'bucket90plus', header: t('reports.agingBucket90plus') },
-      { key: 'totalOutstanding', header: t('reports.total') },
-      { key: 'invoiceCount', header: t('reports.invoicesCount') },
+      { key: 'bucket0to30', header: t('reports.agingBucket0to30'), format: 'money' },
+      { key: 'bucket31to60', header: t('reports.agingBucket31to60'), format: 'money' },
+      { key: 'bucket61to90', header: t('reports.agingBucket61to90'), format: 'money' },
+      { key: 'bucket90plus', header: t('reports.agingBucket90plus'), format: 'money' },
+      { key: 'totalOutstanding', header: t('reports.total'), format: 'money' },
+      { key: 'invoiceCount', header: t('reports.invoicesCount'), format: 'quantity' },
     ];
-    await exportToExcel(customers, cols, 'Customer_Aging');
+    const periodLabel = fromDate || toDate
+      ? `${t('reports.fromDate')}: ${fromDate || '…'} — ${t('reports.toDate')}: ${toDate || '…'}`
+      : undefined;
+    return {
+      columns,
+      rows: customers as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.customerStatement'),
+        subtitle: branding.companyName,
+        ...(periodLabel ? { periodLabel } : {}),
+        direction,
+      },
+      branding,
+      filename: 'Customer_Aging',
+      totals: {
+        label: t('reports.total'),
+        values: { totalOutstanding: totals.totalOutstanding, invoiceCount: customers.reduce((s, c) => s + c.invoiceCount, 0) },
+      },
+    };
+  };
+
+  const handleExportExcel = async () => {
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
-    const cols = [
-      { key: 'customer', header: t('reports.customer'), width: 25 },
-      { key: 'phone', header: t('reports.phone'), width: 15 },
-      { key: 'totalOutstanding', header: t('reports.total'), width: 15 },
-    ];
-    await exportToPDF(customers, cols, 'Customer_Aging', {
-      title: t('reports.customerStatement'),
-      subtitle: activeCompany?.name,
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
   };
+
+  const handleExportHtml = () => exportReportHtml(buildSpec());
 
   const clearFilters = () => {
     setFromDate('');
@@ -153,10 +170,13 @@ export const CustomerStatementReport: React.FC = () => {
               {t('reports.filter')}
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-              Excel
+              {t('reports.exportExcel')}
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-              PDF
+              {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
             </Button>
           </>
         }

@@ -92,6 +92,7 @@ export const AccountLedgerPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
       currency: activeCompany?.currency,
     });
   };

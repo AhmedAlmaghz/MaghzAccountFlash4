@@ -1,6 +1,9 @@
 import { useAppStore } from '@/core/store';
+import { formatReportDate, formatReportNumber } from '@/core/reports/formatters';
+import { exportReportHtml } from '@/core/reports/exporters';
+import { getReportBranding } from '@/core/reports/branding';
 
-interface ExportColumn {
+export interface ExportColumn {
   key: string;
   header: string;
   width?: number;
@@ -20,29 +23,14 @@ function getCompanySettings() {
 const HIJRI_LOCALE = 'ar-SA-u-ca-islamic-umalqura';
 
 function formatNumber(value: unknown, decimalPlaces: number): string {
-  if (value === null || value === undefined || value === '') return '';
-  const num = typeof value === 'string' ? Number(value) : (value as number);
-  if (typeof num !== 'number' || isNaN(num)) return String(value);
-  return num.toLocaleString('en-US', {
-    minimumFractionDigits: decimalPlaces,
-    maximumFractionDigits: decimalPlaces,
-  });
+  // Unified implementation — Latin digits, company decimal places.
+  return formatReportNumber(value, decimalPlaces);
 }
 
-function formatDate(value: unknown, calendar: 'gregorian' | 'hijri'): string {
-  if (!value) return '';
-  const d = new Date(value as string);
-  if (isNaN(d.getTime())) return String(value);
-  const locale = calendar === 'hijri' ? HIJRI_LOCALE : 'en-US';
-  const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  };
-  if (calendar === 'hijri') {
-    (options as Record<string, unknown>).calendar = 'islamic';
-  }
-  return new Intl.DateTimeFormat(locale, options).format(d);
+function formatDate(value: unknown, _calendar: 'gregorian' | 'hijri'): string {
+  // Unified implementation — honours the company's date format
+  // (YYYY-MM-DD family) instead of a hardcoded MM/DD layout.
+  return formatReportDate(value);
 }
 
 function formatDateTime(value: unknown, calendar: 'gregorian' | 'hijri'): string {
@@ -129,6 +117,36 @@ export async function exportToCSV(
   link.href = URL.createObjectURL(blob);
   link.download = `${filename}.csv`;
   link.click();
+}
+
+/**
+ * Branded HTML export for simple list pages — same document builder as the
+ * report center (header, table, totals, footer), one call from any page.
+ */
+export async function exportToHtml(
+  data: unknown[],
+  columns: ExportColumn[],
+  filename: string,
+  options?: { title?: string; subtitle?: string },
+): Promise<void> {
+  const language = useAppStore.getState().language;
+  const branding = getReportBranding();
+  await exportReportHtml({
+    columns: columns.map((c) => ({
+      key: c.key,
+      header: c.header,
+      width: c.width,
+      render: c.format ? (v: unknown) => c.format!(v) : undefined,
+    })),
+    rows: data as Record<string, unknown>[],
+    meta: {
+      title: options?.title || filename,
+      subtitle: options?.subtitle || branding.companyName,
+      direction: language === 'en' ? 'ltr' : 'rtl',
+    },
+    branding,
+    filename,
+  });
 }
 
 export async function exportToPDF(

@@ -3,7 +3,7 @@ import { AlertTriangle, Package, FileDown, Search, ShoppingCart } from 'lucide-r
 import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
@@ -36,6 +36,8 @@ export const LowStockAlertReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const companyId = activeCompany?.id || '';
   const { formatCurrency } = useFormatters(companyId);
 
@@ -140,20 +142,44 @@ export const LowStockAlertReport: React.FC = () => {
     return ratio > 0.9 && ratio <= 1;
   }).length;
 
-  const handleExportExcel = useCallback(async () => {
-    const cols = [
+  const buildSpec = useCallback((): ReportSpec => {
+    const columns: ReportColumnDef[] = [
       { key: 'productName', header: t('reports.product') },
       { key: 'sku', header: t('reports.sku') },
       { key: 'warehouseName', header: t('reports.warehouse') },
-      { key: 'quantity', header: t('reports.quantity') },
-      { key: 'minStockAlert', header: t('reports.minStock') },
-      { key: 'deficit', header: t('reports.deficit') },
+      { key: 'quantity', header: t('reports.quantity'), format: 'quantity' },
+      { key: 'minStockAlert', header: t('reports.minStock'), format: 'quantity' },
+      { key: 'deficit', header: t('reports.deficit'), format: 'quantity' },
       { key: 'stockStatus', header: t('reports.status') },
-      { key: 'costPrice', header: t('reports.costPrice') },
-      { key: 'valueAtRisk', header: t('reports.valueAtRisk') },
+      { key: 'costPrice', header: t('reports.costPrice'), format: 'money' },
+      { key: 'valueAtRisk', header: t('reports.valueAtRisk'), format: 'money' },
     ];
-    await exportToExcel(filteredItems, cols, 'Low_Stock_Alert');
-  }, [filteredItems, t]);
+    return {
+      columns,
+      rows: filteredItems as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.lowStockAlert'),
+        subtitle: branding.companyName,
+        direction,
+      },
+      branding,
+      filename: 'Low_Stock_Alert',
+      totals: {
+        label: t('reports.total'),
+        values: { deficit: totalDeficit },
+      },
+    };
+  }, [filteredItems, t, totalDeficit, branding, direction]);
+
+  const handleExportExcel = useCallback(async () => {
+    await exportReportExcel(buildSpec());
+  }, [buildSpec]);
+
+  const handleExportPDF = useCallback(async () => {
+    await exportReportPdf(buildSpec());
+  }, [buildSpec]);
+
+  const handleExportHtml = useCallback(() => exportReportHtml(buildSpec()), [buildSpec]);
 
   if (!canView) {
     return (
@@ -202,6 +228,12 @@ export const LowStockAlertReport: React.FC = () => {
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
               {t('reports.exportExcel')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
             </Button>
           </>
         }

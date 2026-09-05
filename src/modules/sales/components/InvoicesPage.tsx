@@ -486,6 +486,8 @@ export const InvoicesPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
+      vatRate: settings?.vatRate ?? 15,
       currency: currencySymbol,
       paymentType: invoice.paymentType,
       createdBy: invoice.createdBy,

@@ -46,6 +46,8 @@ export interface PrintDocumentData {
   companyAddress?: string;
   companyPhone?: string;
   companyEmail?: string;
+  companyLogoUrl?: string;
+  vatRate?: number;
   currency?: string;
   paymentType?: string;
   paymentMethod?: string;
@@ -251,7 +253,7 @@ function generateHtml(data: PrintDocumentData): string {
         </div>
         ` : ''}
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px">
-          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#10b981;border-radius:50%;display:inline-block"></span> ضريبة القيمة المضافة <span style="font-size:11px;background:#ecfdf5;color:#047857;padding:1px 6px;border-radius:10px">15%</span></span>
+          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#10b981;border-radius:50%;display:inline-block"></span> ضريبة القيمة المضافة <span style="font-size:11px;background:#ecfdf5;color:#047857;padding:1px 6px;border-radius:10px">${data.vatRate ?? 15}%</span></span>
           <span style="font-weight:600;direction:ltr;color:#047857">${formatCurrency(data.vatAmount, data.currency)}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin:8px -14px -12px;background:${color};color:white;border-radius:0 0 10px 10px">
@@ -569,6 +571,7 @@ function generateHtml(data: PrintDocumentData): string {
     <div class="page-inner">
       <div class="header">
         <div class="company-section">
+          ${data.companyLogoUrl ? `<img src="${data.companyLogoUrl}" alt="logo" style="width:64px;height:64px;object-fit:contain;border:1px solid #e5e7eb;border-radius:10px;padding:4px;margin-bottom:8px" />` : ''}
           <div class="company-name">${escapeHtml(data.companyName || 'الشركة')}</div>
           <div class="company-details">
             ${data.companyTaxNumber ? `<span>الرقم الضريبي: ${escapeHtml(data.companyTaxNumber)}</span>` : ''}

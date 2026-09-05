@@ -4,7 +4,7 @@ import { Card, Button, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
 import { mapRows } from '@/core/utils/mapPgRow';
-import { exportToExcel } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { formatNumber } from '@/core/utils/locale';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -65,6 +65,8 @@ export const StockMovementReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((s) => s.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const companyId = activeCompany?.id || '';
   const months = useMemo(() => [t('reports.months.jan'), t('reports.months.feb'), t('reports.months.mar'), t('reports.months.apr'), t('reports.months.may'), t('reports.months.jun'), t('reports.months.jul'), t('reports.months.aug'), t('reports.months.sep'), t('reports.months.oct'), t('reports.months.nov'), t('reports.months.dec')], [t]);
 
@@ -190,15 +192,36 @@ export const StockMovementReport: React.FC = () => {
     return monthlyData;
   }, [monthlyData]);
 
-  const handleExportExcel = async () => {
-    const cols = [
-       { key: 'month', header: t('reports.month') },
-       { key: 'type', header: t('reports.type') },
-       { key: 'totalQty', header: t('reports.quantity') },
-       { key: 'transactionCount', header: t('reports.transactionCount') },
+  const buildSpec = (): ReportSpec => {
+    const columns: ReportColumnDef[] = [
+      { key: 'month', header: t('reports.month') },
+      { key: 'type', header: t('reports.type') },
+      { key: 'totalQty', header: t('reports.quantity'), format: 'quantity' },
+      { key: 'transactionCount', header: t('reports.transactionCount'), format: 'quantity' },
     ];
-    await exportToExcel(monthlyData, cols, 'Stock_Movement_Analysis');
+    return {
+      columns,
+      rows: monthlyData as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.stockMovement'),
+        subtitle: branding.companyName,
+        periodLabel: `${t('reports.from')}: ${dateFrom} — ${t('reports.to')}: ${dateTo}`,
+        direction,
+      },
+      branding,
+      filename: 'Stock_Movement_Analysis',
+    };
   };
+
+  const handleExportExcel = async () => {
+    await exportReportExcel(buildSpec());
+  };
+
+  const handleExportPDF = async () => {
+    await exportReportPdf(buildSpec());
+  };
+
+  const handleExportHtml = () => exportReportHtml(buildSpec());
 
   if (!canView) {
     return (
@@ -250,6 +273,12 @@ export const StockMovementReport: React.FC = () => {
           <>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
               {t('reports.exportExcel')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
+              {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
             </Button>
             <Button variant="secondary" leftIcon={<RefreshCw size={16} />} onClick={loadData}>
               {t('reports.refresh')}

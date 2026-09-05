@@ -235,7 +235,9 @@ export const JournalEntriesPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
       currency: currencySymbol,
+      vatRate: settings?.vatRate,
       createdBy: tx.createdBy,
     });
   };

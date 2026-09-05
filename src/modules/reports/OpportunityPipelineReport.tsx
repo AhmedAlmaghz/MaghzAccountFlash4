@@ -4,7 +4,7 @@ import { Card, Button, Table } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { formatCurrency } from '@/core/utils';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
@@ -40,6 +40,8 @@ export const OpportunityPipelineReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const [stages, setStages] = useState<StageSummary[]>([]);
   const [repData, setRepData] = useState<RepSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -128,25 +130,44 @@ export const OpportunityPipelineReport: React.FC = () => {
   const wonValue = useMemo(() => stages.find((s) => s.stage === 'won')?.totalValue || 0, [stages]);
   const totalCount = useMemo(() => stages.reduce((s, st) => s + st.count, 0), [stages]);
 
-  const handleExportExcel = async () => {
-    const cols: Array<{ key: string; header: string; width?: number }> = [
+  const buildSpec = (): ReportSpec => {
+    const columns: ReportColumnDef[] = [
       { key: 'stage', header: t('reports.stage') },
-      { key: 'count', header: t('reports.count') },
-      { key: 'totalValue', header: t('reports.totalValue') },
-      { key: 'avgValue', header: t('reports.avgValue') },
-      { key: 'weightedValue', header: t('reports.weightedValue') },
-      { key: 'probability', header: t('reports.probability') },
+      { key: 'count', header: t('reports.count'), format: 'quantity' },
+      { key: 'totalValue', header: t('reports.totalValue'), format: 'money' },
+      { key: 'avgValue', header: t('reports.avgValue'), format: 'money' },
+      { key: 'weightedValue', header: t('reports.weightedValue'), format: 'money' },
+      { key: 'probability', header: t('reports.probability'), format: 'percent' },
     ];
-    const rows = stages.map((s) => ({
-      stage: t(STAGE_KEYS[s.stage] || s.stage),
-      count: s.count,
-      totalValue: formatCurrency(s.totalValue),
-      avgValue: formatCurrency(s.avgValue),
-      weightedValue: formatCurrency(s.weightedValue),
-      probability: `${s.probability.toFixed(0)}%`,
-    }));
-    await exportToExcel(rows, cols, `Opportunity_Pipeline_${new Date().toISOString().split('T')[0]}`);
+    return {
+      columns,
+      rows: stages.map((s) => ({
+        stage: t(STAGE_KEYS[s.stage] || s.stage),
+        count: s.count,
+        totalValue: s.totalValue,
+        avgValue: s.avgValue,
+        weightedValue: s.weightedValue,
+        probability: s.probability,
+      })),
+      meta: {
+        title: t('reports.opportunityPipeline'),
+        subtitle: branding.companyName,
+        direction,
+      },
+      branding,
+      filename: `Opportunity_Pipeline_${new Date().toISOString().split('T')[0]}`,
+    };
   };
+
+  const handleExportExcel = async () => {
+    await exportReportExcel(buildSpec());
+  };
+
+  const handleExportPDF = async () => {
+    await exportReportPdf(buildSpec());
+  };
+
+  const handleExportHtml = () => exportReportHtml(buildSpec());
 
   const chartData = stages
     .filter((s) => s.stage !== 'won' && s.stage !== 'lost')
@@ -187,7 +208,13 @@ export const OpportunityPipelineReport: React.FC = () => {
             <p className="text-slate-500 dark:text-slate-400 text-sm">{t('reports.opportunityPipelineDesc')}</p>
           </div>
         </div>
-        {totalCount > 0 && <Button variant="secondary" onClick={handleExportExcel} disabled={!canExport}>{t('reports.exportExcel')}</Button>}
+        {totalCount > 0 && (
+          <>
+            <Button variant="secondary" onClick={handleExportExcel} disabled={!canExport}>{t('reports.exportExcel')}</Button>
+            <Button variant="secondary" onClick={handleExportPDF} disabled={!canExport}>{t('reports.exportPdf')}</Button>
+            <Button variant="secondary" onClick={handleExportHtml} disabled={!canExport}>{t('reports.exportHtml')}</Button>
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

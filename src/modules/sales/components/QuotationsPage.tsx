@@ -408,6 +408,8 @@ export const QuotationsPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
+      vatRate: settings?.vatRate ?? 15,
       currency: currencySymbol,
       paymentType: q.paymentType,
       createdBy: q.createdBy,

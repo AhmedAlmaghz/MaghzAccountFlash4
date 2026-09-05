@@ -310,6 +310,7 @@ export const CustomersPage: React.FC = () => {
         companyTaxNumber: activeCompany.taxNumber,
         companyPhone: activeCompany.phone,
         companyAddress: activeCompany.address,
+        companyLogoUrl: activeCompany.logoUrl,
         currency: activeCompany.currency || YER_CODE,
       });
     } catch (err) {

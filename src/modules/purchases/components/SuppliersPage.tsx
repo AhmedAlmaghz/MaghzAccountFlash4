@@ -277,6 +277,7 @@ export const SuppliersPage: React.FC = () => {
           companyTaxNumber: activeCompany.taxNumber,
           companyPhone: activeCompany.phone,
           companyAddress: activeCompany.address,
+          companyLogoUrl: activeCompany.logoUrl,
           currency: activeCompany.currency || 'YER',
         });
       } catch (err) {

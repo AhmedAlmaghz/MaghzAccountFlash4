@@ -5,7 +5,7 @@ import { EmptyState } from '@/core/ui/components/EmptyState';
 import { CurrencyBreakdown } from '@/core/ui/components/CurrencyBreakdown';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart as RePieChart, Pie, Cell } from 'recharts';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
@@ -82,6 +82,8 @@ export const ProfitAnalysisReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
   const { currencies } = useCurrencies(activeCompany?.id || '');
   const { settings: appSettings } = useSettings(activeCompany?.id || '');
@@ -360,28 +362,47 @@ export const ProfitAnalysisReport: React.FC = () => {
     }));
   }, [currentPeriod, previousPeriod]);
 
+  const buildSpec = (): ReportSpec => {
+    const expenses = currentPeriod?.expenses ?? [];
+    const columns: ReportColumnDef[] = [
+      { key: 'category', header: t('reports.category') },
+      { key: 'amount', header: t('reports.amount'), format: 'money' },
+      { key: 'percent', header: t('reports.percentage'), format: 'percent' },
+    ];
+    const periodLabel = fromDate || toDate
+      ? `${t('reports.fromDate')}: ${fromDate || '…'} — ${t('reports.toDate')}: ${toDate || '…'}`
+      : undefined;
+    return {
+      columns,
+      rows: expenses as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.profitAnalysis'),
+        subtitle: branding.companyName,
+        ...(periodLabel ? { periodLabel } : {}),
+        direction,
+      },
+      branding,
+      filename: 'Profit_Analysis',
+      totals: {
+        label: t('reports.total'),
+        values: { amount: expenses.reduce((s, e) => s + e.amount, 0) },
+      },
+    };
+  };
+
   const handleExportExcel = async () => {
     if (!currentPeriod) return;
-    const cols = [
-      { key: 'category', header: t('reports.category') },
-      { key: 'amount', header: t('reports.amount') },
-      { key: 'percent', header: t('reports.percentage') },
-    ];
-    await exportToExcel(currentPeriod.expenses, cols, 'Profit_Analysis');
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
     if (!currentPeriod) return;
-    const cols = [
-      { key: 'category', header: t('reports.category'), width: 25 },
-      { key: 'amount', header: t('reports.amount'), width: 15 },
-      { key: 'percent', header: t('reports.percentage'), width: 12 },
-    ];
-    await exportToPDF(currentPeriod.expenses, cols, 'Profit_Analysis', {
-      title: t('reports.profitAnalysis'),
-      subtitle: activeCompany?.name,
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
+  };
+
+  const handleExportHtml = () => {
+    if (!currentPeriod) return;
+    return exportReportHtml(buildSpec());
   };
 
   if (!canView) {
@@ -425,10 +446,13 @@ export const ProfitAnalysisReport: React.FC = () => {
               {t('reports.filter')}
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-              Excel
+              {t('reports.exportExcel')}
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-              PDF
+              {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
             </Button>
           </>
         }

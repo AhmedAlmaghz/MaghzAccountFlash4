@@ -5,7 +5,7 @@ import { EmptyState } from '@/core/ui/components/EmptyState';
 import { CurrencyBreakdown } from '@/core/ui/components/CurrencyBreakdown';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useFormatters } from '@/core/utils/useFormatters';
@@ -39,6 +39,8 @@ export const SalesAnalysisReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
   const { currencies } = useCurrencies(activeCompany?.id || '');
   const [rawData, setRawData] = useState<SalesLine[]>([]);
@@ -227,30 +229,44 @@ export const SalesAnalysisReport: React.FC = () => {
     return Object.entries(monthMap).map(([name, revenue]) => ({ name, revenue }));
   }, [filteredData, pivotData, pivotBy]);
 
-  const handleExportExcel = async () => {
-    const cols = [
+  const buildSpec = (): ReportSpec => {
+    const columns: ReportColumnDef[] = [
       { key: 'month', header: t('reports.month') },
       { key: 'customerName', header: t('reports.customer') },
       { key: 'productName', header: t('reports.product') },
-      { key: 'revenue', header: t('reports.revenue') },
-      { key: 'invoiceCount', header: t('reports.invoicesCount') },
+      { key: 'revenue', header: t('reports.revenue'), format: 'money' },
+      { key: 'invoiceCount', header: t('reports.invoicesCount'), format: 'quantity' },
     ];
-    await exportToExcel(filteredData, cols, 'Sales_Analysis');
+    const periodLabel = fromDate || toDate
+      ? `${t('reports.fromDate')}: ${fromDate || '…'} — ${t('reports.toDate')}: ${toDate || '…'}`
+      : undefined;
+    return {
+      columns,
+      rows: filteredData as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.salesAnalysis'),
+        subtitle: branding.companyName,
+        ...(periodLabel ? { periodLabel } : {}),
+        direction,
+      },
+      branding,
+      filename: 'Sales_Analysis',
+      totals: {
+        label: t('reports.total'),
+        values: { revenue: totalRevenue, invoiceCount: totalInvoices },
+      },
+    };
+  };
+
+  const handleExportExcel = async () => {
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
-    const cols = [
-      { key: 'month', header: t('reports.month'), width: 12 },
-      { key: 'customerName', header: t('reports.customer'), width: 20 },
-      { key: 'productName', header: t('reports.product'), width: 20 },
-      { key: 'revenue', header: t('reports.revenue'), width: 15 },
-    ];
-    await exportToPDF(filteredData, cols, 'Sales_Analysis', {
-      title: t('reports.salesAnalysis'),
-      subtitle: activeCompany?.name,
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
   };
+
+  const handleExportHtml = () => exportReportHtml(buildSpec());
 
   const clearFilters = () => {
     setFromDate('');
@@ -307,10 +323,13 @@ export const SalesAnalysisReport: React.FC = () => {
               {t('reports.filter')}
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportExcel} disabled={!canExport}>
-              Excel
+              {t('reports.exportExcel')}
             </Button>
             <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportPDF} disabled={!canExport}>
-              PDF
+              {t('reports.exportPdf')}
+            </Button>
+            <Button variant="secondary" leftIcon={<FileDown size={16} />} onClick={handleExportHtml} disabled={!canExport}>
+              {t('reports.exportHtml')}
             </Button>
           </>
         }

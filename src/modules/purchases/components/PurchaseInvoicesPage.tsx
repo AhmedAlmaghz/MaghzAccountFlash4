@@ -483,11 +483,13 @@ export const PurchaseInvoicesPage: React.FC = () => {
       companyAddress: activeCompany?.address,
       companyPhone: activeCompany?.phone,
       companyEmail: activeCompany?.email,
+      companyLogoUrl: activeCompany?.logoUrl,
+      vatRate,
       currency: currencySymbol,
       paymentType: invoice.paymentType,
       createdBy: invoice.createdBy,
     });
-  }, [activeCompany, t, currencySymbol]);
+  }, [activeCompany, t, currencySymbol, vatRate]);
 
   const handleExportExcel = useCallback(() => {
     exportToExcel(invoices, [

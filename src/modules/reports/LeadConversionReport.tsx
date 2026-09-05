@@ -8,7 +8,7 @@ import { Card, Button, Table } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { getDbAdapter } from '@/core/database/adapters';
-import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
+import { exportReportExcel, exportReportPdf, exportReportHtml, useReportBranding, type ReportColumnDef, type ReportSpec } from '@/core/reports';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { formatCurrency } from '@/core/utils';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
@@ -51,6 +51,8 @@ export const LeadConversionReport: React.FC = () => {
   const canView = usePermission('reports.view');
   const canExport = usePermission('reports.export');
   const activeCompany = useAppStore((state) => state.activeCompany);
+  const branding = useReportBranding();
+  const direction = useAppStore((s) => s.language) === 'en' ? 'ltr' : 'rtl';
   const [summary, setSummary] = useState<ConversionSummary | null>(null);
   const [sourceData, setSourceData] = useState<LeadSourceRow[]>([]);
   const [funnelData, setFunnelData] = useState<Array<{ stage: string; count: number }>>([]);
@@ -212,48 +214,46 @@ export const LeadConversionReport: React.FC = () => {
     setToDate('');
   };
 
+  const buildSpec = (): ReportSpec => {
+    const columns: ReportColumnDef[] = [
+      { key: 'source', header: t('reports.source') },
+      { key: 'total', header: t('crm.status.new'), format: 'quantity' },
+      { key: 'contacted', header: t('crm.status.contacted'), format: 'quantity' },
+      { key: 'qualified', header: t('crm.status.qualified'), format: 'quantity' },
+      { key: 'converted', header: t('crm.status.converted'), format: 'quantity' },
+      { key: 'lost', header: t('crm.status.lost'), format: 'quantity' },
+      { key: 'conversionRate', header: t('reports.conversionRate'), format: 'percent' },
+    ];
+    const periodLabel = fromDate || toDate
+      ? `${t('reports.fromDate')}: ${fromDate || '…'} — ${t('reports.toDate')}: ${toDate || '…'}`
+      : undefined;
+    return {
+      columns,
+      rows: sourceData as unknown as Record<string, unknown>[],
+      meta: {
+        title: t('reports.leadConversion'),
+        subtitle: branding.companyName,
+        ...(periodLabel ? { periodLabel } : {}),
+        direction,
+      },
+      branding,
+      filename: `Lead_Conversion_${new Date().toISOString().split('T')[0]}`,
+    };
+  };
+
   const handleExportExcel = async () => {
     if (!sourceData.length) return;
-    const cols: Array<{ key: string; header: string; width?: number }> = [
-      { key: 'source', header: t('reports.source') },
-      { key: 'total', header: t('crm.status.new') },
-      { key: 'contacted', header: t('crm.status.contacted') },
-      { key: 'qualified', header: t('crm.status.qualified') },
-      { key: 'converted', header: t('crm.status.converted') },
-      { key: 'lost', header: t('crm.status.lost') },
-      { key: 'conversionRate', header: t('reports.conversionRate') },
-    ];
-    const rows = sourceData.map((r) => ({
-      source: r.source,
-      total: r.total,
-      contacted: r.contacted,
-      qualified: r.qualified,
-      converted: r.converted,
-      lost: r.lost,
-      conversionRate: `${r.conversionRate.toFixed(1)}%`,
-    }));
-    await exportToExcel(rows, cols, `Lead_Conversion_${new Date().toISOString().split('T')[0]}`);
+    await exportReportExcel(buildSpec());
   };
 
   const handleExportPDF = async () => {
     if (!summary) return;
-    const pdfRows = [
-      { metric: t('reports.totalLeads'), value: summary.totalLeads },
-      { metric: t('reports.overallConversionRate'), value: `${summary.overallRate.toFixed(1)}%` },
-      { metric: t('reports.convertedLeads'), value: summary.converted },
-      { metric: t('reports.totalEstimatedValue'), value: formatCurrency(summary.totalEstimatedValue) },
-      { metric: t('reports.convertedValue'), value: formatCurrency(summary.convertedValue) },
-    ];
-    const pdfCols = [
-      { key: 'metric', header: t('reports.kpiMetric'), width: 50 },
-      { key: 'value', header: t('reports.kpiValue'), width: 50 },
-    ];
-    await exportToPDF(pdfRows, pdfCols, `Lead_Conversion_${new Date().toISOString().split('T')[0]}`, {
-      title: t('reports.leadConversion'),
-      subtitle: activeCompany?.name || '',
-      companyName: activeCompany?.name,
-      rtl: true,
-    });
+    await exportReportPdf(buildSpec());
+  };
+
+  const handleExportHtml = () => {
+    if (!summary) return;
+    return exportReportHtml(buildSpec());
   };
 
   if (!canView) {
@@ -310,6 +310,7 @@ export const LeadConversionReport: React.FC = () => {
             <>
               <Button variant="secondary" onClick={handleExportExcel} disabled={!canExport}>{t('reports.exportExcel')}</Button>
               <Button variant="secondary" onClick={handleExportPDF} disabled={!canExport}>{t('reports.exportPdf')}</Button>
+              <Button variant="secondary" onClick={handleExportHtml} disabled={!canExport}>{t('reports.exportHtml')}</Button>
             </>
           )}
         </div>

@@ -113,14 +113,16 @@ export const ReceiptVouchersPage: React.FC = () => {
         companyAddress: activeCompany?.address,
         companyPhone: activeCompany?.phone,
         companyEmail: activeCompany?.email,
+        companyLogoUrl: activeCompany?.logoUrl,
         currency: voucher.currencyCode || currencySymbol,
+        vatRate: settings?.vatRate,
         paymentMethod: voucher.paymentMethod === 'cash' ? 'نقداً' : voucher.paymentMethod === 'bank' ? 'تحويل بنكي' : 'شيك',
         checkNumber: voucher.checkNumber,
         checkDate: voucher.checkDate,
         createdBy: voucher.createdBy ? getUserName(voucher.createdBy) : undefined,
       });
     },
-    [t, activeCompany, currencySymbol, getUserName],
+    [t, activeCompany, currencySymbol, getUserName, settings?.vatRate],
   );
 
   const handlePost = async (voucher: ReceiptVoucher) => {
