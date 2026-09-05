@@ -15,6 +15,8 @@ export const companies = pgTable('companies', {
   decimalPlaces: numeric('decimal_places', { precision: 1, scale: 0 }).default('2'),
   calendar: varchar('calendar', { length: 10 }).default('gregorian'),
   fiscalYearStart: date('fiscal_year_start'),
+  createdBy: uuid('created_by'),
+  updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

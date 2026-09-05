@@ -594,3 +594,44 @@ describe('Migration 0019: payroll_components audit columns', () => {
     expect(schema).toMatch(/updatedBy: uuid\('updated_by'\)/);
   });
 });
+
+describe('Migration 0020: companies audit columns', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0020_companies_audit.sql'), 'utf-8');
+
+  it('adds created_by and updated_by to companies', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE companies ADD COLUMN IF NOT EXISTS created_by uuid/);
+    expect(migrationSql).toMatch(/ALTER TABLE companies ADD COLUMN IF NOT EXISTS updated_by uuid/);
+  });
+
+  it('is idempotent (IF NOT EXISTS on every ADD COLUMN)', () => {
+    const adds = migrationSql.match(/ADD COLUMN/g) || [];
+    const guards = migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) || [];
+    expect(adds.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(adds.length);
+  });
+
+  it('journal registers 0020 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0020_companies_audit')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0020 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0020_companies_audit\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0020_companies_audit', sql: companiesAudit \}/);
+  });
+
+  it('Drizzle schema exposes createdBy/updatedBy on companies', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/core.ts'), 'utf-8');
+    expect(schema).toMatch(/createdBy: uuid\('created_by'\)/);
+    expect(schema).toMatch(/updatedBy: uuid\('updated_by'\)/);
+  });
+
+  it('unified updateCompany writes updated_by (regression: companies save)', () => {
+    const rpc = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(rpc).toMatch(/UPDATE companies SET[\s\S]*?updated_by/);
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/UPDATE companies SET[\s\S]*?updated_by/);
+  });
+});

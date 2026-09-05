@@ -114,6 +114,7 @@ import hrAttendanceNotes from '@root/drizzle/0016_hr_attendance_notes.sql?raw';
 import usersPhotoUrl from '@root/drizzle/0017_users_photo_url.sql?raw';
 import recomputePartyBalances from '@root/drizzle/0018_recompute_party_balances.sql?raw';
 import payrollComponentsAudit from '@root/drizzle/0019_payroll_components_audit.sql?raw';
+import companiesAudit from '@root/drizzle/0020_companies_audit.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -136,6 +137,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0017_users_photo_url', sql: usersPhotoUrl },
   { name: '0018_recompute_party_balances', sql: recomputePartyBalances },
   { name: '0019_payroll_components_audit', sql: payrollComponentsAudit },
+  { name: '0020_companies_audit', sql: companiesAudit },
 ];
 
 /**

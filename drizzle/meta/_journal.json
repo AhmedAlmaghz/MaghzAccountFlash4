@@ -141,6 +141,13 @@
       "when": 1797200000000,
       "tag": "0019_payroll_components_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1797300000000,
+      "tag": "0020_companies_audit",
+      "breakpoints": true
     }
   ]
 }
