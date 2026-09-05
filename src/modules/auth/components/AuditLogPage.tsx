@@ -157,7 +157,7 @@ export const AuditLogPage: React.FC = () => {
       header: t('auth.auditLog.recordId'),
       cell: ({ row }) => (
         <span className="text-xs font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
-          {row.original.recordId.slice(0, 8)}...
+          {row.original.recordId ? `${row.original.recordId.slice(0, 8)}...` : '—'}
         </span>
       ),
     },

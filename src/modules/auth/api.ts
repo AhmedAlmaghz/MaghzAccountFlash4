@@ -108,6 +108,11 @@ function mapRowToAuditLog(row: Record<string, unknown>): AuditLog {
     newValues,
     username,
     recordLabel,
+    userId: (row.user_id as string) || (row.userId as string) || '',
+    companyId: (row.company_id as string) || (row.companyId as string) || '',
+    tableName: (row.table_name as string) || (row.tableName as string) || '',
+    recordId: row.record_id != null ? String(row.record_id) : ((row.recordId as string) || ''),
+    ipAddress: (row.ip_address as string) || (row.ipAddress as string),
     createdAt: (row.created_at as string) || (row.createdAt as string),
   } as AuditLog;
 }
