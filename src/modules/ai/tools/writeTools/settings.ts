@@ -23,6 +23,20 @@ import {
   num,
   str,
 } from './shared';
+import { useAppStore } from '@/core/store';
+import {
+  BUILT_IN_THEMES,
+  isBuiltInTheme,
+  isValidHex,
+  normalizeHex,
+  withThemeDefaults,
+  type ThemeDefinition,
+  type ThemeFont,
+} from '@/core/theme/themes';
+import {
+  THEME_STYLE_PRESETS,
+  generateTheme,
+} from '@/core/theme/themeGenerator';
 
 /**
  * WRITE tools — الإعدادات (21 أداة).
@@ -682,6 +696,233 @@ export const settingsWriteTools: ToolDefinition[] = [
       const res = await applyDefaultTemplate(ctx.companyId, template as 'trading' | 'manufacturing' | 'services');
       if (!res.success) return { error: res.error || 'فشل تطبيق نموذج الحسابات' };
       return { applied: true, template };
+    },
+  },
+
+  // ─── ─── Settings: List Themes ─────────────────────────────────────────── ───
+  {
+    name: 'settings.list_themes',
+    labelAr: 'عرض الثيمات',
+    descriptionAr: 'يعرض كل الثيمات: المدمجة (زمردي فاتح/داكن) والمخصصة، مع تمييز الثيم النشط. استخدمه قبل التعديل أو التفعيل أو الحذف.',
+    permission: 'settings.view',
+    dangerLevel: 'read',
+    route: '/settings/themes',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    execute: async () => {
+      const state = useAppStore.getState();
+      const slim = (t: ThemeDefinition) => ({ id: t.id, nameAr: t.nameAr, nameEn: t.nameEn, mode: t.mode });
+      return {
+        activeThemeId: state.themeId,
+        builtIn: BUILT_IN_THEMES.map(slim),
+        custom: (state.customThemes || []).map(slim),
+      };
+    },
+  },
+
+  // ─── ─── Settings: Generate Theme ──────────────────────────────────────── ───
+  {
+    name: 'settings.generate_theme',
+    labelAr: 'توليد ثيم',
+    descriptionAr: 'يولّد ثيماً متناسقاً كاملاً من لون أساسي أو نمط جاهز (ocean/desert/forest/royal/sunset/rose) مع الوضع (فاتح/داكن) والخط، ثم يفعّله فوراً. الألوان المشتقة (الخلفيات، القائمة، الروابط) تُحسب تلقائياً.',
+    permission: 'settings.edit',
+    dangerLevel: 'write',
+    route: '/settings/themes',
+    parameters: {
+      type: 'object',
+      properties: {
+        nameAr: { type: 'string', description: 'اسم الثيم بالعربية' },
+        nameEn: { type: 'string', description: 'اسم الثيم بالإنجليزية' },
+        mode: { type: 'string', enum: ['light', 'dark'], description: 'الوضع: light (فاتح) أو dark (داكن)' },
+        primary: { type: 'string', description: 'اللون الأساسي بصيغة hex (مثال #0B7A5E)' },
+        accent: { type: 'string', description: 'لون التمييز بصيغة hex (يُشتق تلقائياً إن تُرك)' },
+        style: { type: 'string', enum: Object.keys(THEME_STYLE_PRESETS), description: 'نمط جاهز يُستخدم عند غياب primary' },
+        font: { type: 'string', enum: ['cairo', 'inter', 'plex', 'system'], description: 'الخط' },
+      },
+    },
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      return `توليد ثيم: ${String(r.nameAr || r.style || r.primary || 'مخصص').slice(0, 30)} (${r.mode === 'dark' ? 'داكن' : 'فاتح'})`;
+    },
+    execute: async (args) => {
+      const def = generateTheme({
+        nameAr: str(args.nameAr),
+        nameEn: str(args.nameEn),
+        mode: args.mode === 'dark' ? 'dark' : 'light',
+        primary: str(args.primary),
+        accent: str(args.accent),
+        style: str(args.style),
+        font: str(args.font) as ThemeFont | undefined,
+      });
+      useAppStore.getState().addCustomTheme(def);
+      return { created: true, activated: true, id: def.id, nameAr: def.nameAr, mode: def.mode, primary: def.primary, accent: def.accent };
+    },
+  },
+
+  // ─── ─── Settings: Create Theme ────────────────────────────────────────── ───
+  {
+    name: 'settings.create_theme',
+    labelAr: 'إنشاء ثيم يدوي',
+    descriptionAr: 'ينشئ ثيماً مخصصاً من لوحة ألوان كاملة يحددها المستخدم (أساسي، تمييز، خلفية، سطح، قائمة، ترويسة، نصوص، خط). أي لون يُترك يُشتق تلقائياً من الأساسي. يُفعَّل فور إنشائه.',
+    permission: 'settings.edit',
+    dangerLevel: 'write',
+    route: '/settings/themes',
+    parameters: {
+      type: 'object',
+      properties: {
+        nameAr: { type: 'string', description: 'اسم الثيم بالعربية (مطلوب)' },
+        nameEn: { type: 'string', description: 'اسم الثيم بالإنجليزية' },
+        mode: { type: 'string', enum: ['light', 'dark'], description: 'الوضع' },
+        primary: { type: 'string', description: 'اللون الأساسي hex' },
+        accent: { type: 'string', description: 'لون التمييز hex' },
+        background: { type: 'string', description: 'لون الخلفية hex' },
+        surface: { type: 'string', description: 'لون البطاقات hex' },
+        sidebarBg: { type: 'string', description: 'خلفية القائمة الجانبية hex' },
+        headerBg: { type: 'string', description: 'خلفية الترويسة hex' },
+        navText: { type: 'string', description: 'لون نصوص التنقل hex' },
+        navActive: { type: 'string', description: 'لون العنصر النشط hex' },
+        navIcon: { type: 'string', description: 'لون الأيقونات hex' },
+        font: { type: 'string', enum: ['cairo', 'inter', 'plex', 'system'], description: 'الخط' },
+      },
+      required: ['nameAr'],
+    },
+    summarizeArgs: (a) => `إنشاء ثيم: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
+    execute: async (args) => {
+      const nameAr = str(args.nameAr);
+      if (!nameAr) return { error: 'nameAr مطلوب' };
+      const colorFields = ['primary', 'accent', 'background', 'surface', 'sidebarBg', 'headerBg', 'navText', 'navActive', 'navIcon'] as const;
+      for (const f of colorFields) {
+        const v = str((args as Record<string, unknown>)[f]);
+        if (v !== undefined && !isValidHex(v)) return { error: `اللون ${f} غير صالح — استخدم صيغة hex مثل #0B7A5E` };
+      }
+      const base = generateTheme({
+        nameAr,
+        nameEn: str(args.nameEn),
+        mode: args.mode === 'dark' ? 'dark' : 'light',
+        primary: str(args.primary),
+        accent: str(args.accent),
+        font: str(args.font) as ThemeFont | undefined,
+      });
+      const overrides: Partial<ThemeDefinition> = {};
+      for (const f of colorFields) {
+        const v = str((args as Record<string, unknown>)[f]);
+        if (v !== undefined) overrides[f] = normalizeHex(v, base[f]);
+      }
+      const def = withThemeDefaults({ ...base, ...overrides });
+      useAppStore.getState().addCustomTheme(def);
+      return { created: true, activated: true, id: def.id, nameAr: def.nameAr, mode: def.mode };
+    },
+  },
+
+  // ─── ─── Settings: Update Theme ────────────────────────────────────────── ───
+  {
+    name: 'settings.update_theme',
+    labelAr: 'تعديل ثيم',
+    descriptionAr: 'يُحدّث ثيماً مخصصاً (الاسم، الألوان، الوضع، الخط). الثيمات المدمجة محمية — أنشئ نسخة عبر settings.generate_theme أولاً. استخدم settings.list_themes لمعرفة المعرفات.',
+    permission: 'settings.edit',
+    dangerLevel: 'write',
+    route: '/settings/themes',
+    parameters: {
+      type: 'object',
+      properties: {
+        themeId: { type: 'string', description: 'معرف الثيم (من settings.list_themes)' },
+        nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
+        mode: { type: 'string', enum: ['light', 'dark'], description: 'الوضع' },
+        primary: { type: 'string', description: 'اللون الأساسي hex' },
+        accent: { type: 'string', description: 'لون التمييز hex' },
+        background: { type: 'string', description: 'لون الخلفية hex' },
+        surface: { type: 'string', description: 'لون البطاقات hex' },
+        sidebarBg: { type: 'string', description: 'خلفية القائمة hex' },
+        headerBg: { type: 'string', description: 'خلفية الترويسة hex' },
+        navText: { type: 'string', description: 'لون نصوص التنقل hex' },
+        navActive: { type: 'string', description: 'لون العنصر النشط hex' },
+        navIcon: { type: 'string', description: 'لون الأيقونات hex' },
+        font: { type: 'string', enum: ['cairo', 'inter', 'plex', 'system'], description: 'الخط' },
+      },
+      required: ['themeId'],
+    },
+    summarizeArgs: (a) => `تعديل ثيم: ${String((a as Record<string, unknown>).themeId || '').slice(0, 20)}`,
+    execute: async (args) => {
+      const themeId = str(args.themeId);
+      if (!themeId) return { error: 'themeId مطلوب — استخدم settings.list_themes أولاً' };
+      if (isBuiltInTheme(themeId)) return { error: 'الثيمات المدمجة محمية من التعديل — ولّد نسخة عبر settings.generate_theme' };
+      const patch: Partial<ThemeDefinition> = {};
+      const nameAr = str(args.nameAr);
+      const nameEn = str(args.nameEn);
+      if (nameAr !== undefined) patch.nameAr = nameAr;
+      if (nameEn !== undefined) patch.nameEn = nameEn;
+      if (args.mode === 'light' || args.mode === 'dark') patch.mode = args.mode;
+      const font = str(args.font);
+      if (font !== undefined) {
+        if (!['cairo', 'inter', 'plex', 'system'].includes(font)) return { error: 'font يجب أن يكون واحداً من: cairo، inter، plex، system' };
+        patch.font = font as ThemeFont;
+      }
+      const colorFields = ['primary', 'accent', 'background', 'surface', 'sidebarBg', 'headerBg', 'navText', 'navActive', 'navIcon'] as const;
+      for (const f of colorFields) {
+        const v = str((args as Record<string, unknown>)[f]);
+        if (v !== undefined) {
+          if (!isValidHex(v)) return { error: `اللون ${f} غير صالح — استخدم صيغة hex مثل #0B7A5E` };
+          patch[f] = normalizeHex(v, v);
+        }
+      }
+      if (Object.keys(patch).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
+      useAppStore.getState().updateCustomTheme(themeId, patch);
+      return { updated: true, themeId };
+    },
+  },
+
+  // ─── ─── Settings: Activate Theme ──────────────────────────────────────── ───
+  {
+    name: 'settings.activate_theme',
+    labelAr: 'تفعيل ثيم',
+    descriptionAr: 'يفعّل ثيماً (مدمجاً أو مخصصاً) فيطبَّق فوراً على كل الواجهة. استخدم settings.list_themes لمعرفة المعرفات.',
+    permission: 'settings.edit',
+    dangerLevel: 'write',
+    route: '/settings/themes',
+    parameters: {
+      type: 'object',
+      properties: {
+        themeId: { type: 'string', description: 'معرف الثيم (مثال emerald-dark أو custom-…)' },
+      },
+      required: ['themeId'],
+    },
+    summarizeArgs: (a) => `تفعيل ثيم: ${String((a as Record<string, unknown>).themeId || '').slice(0, 20)}`,
+    execute: async (args) => {
+      const themeId = str(args.themeId);
+      if (!themeId) return { error: 'themeId مطلوب — استخدم settings.list_themes أولاً' };
+      const state = useAppStore.getState();
+      const known = BUILT_IN_THEMES.some((t) => t.id === themeId) || (state.customThemes || []).some((t) => t.id === themeId);
+      if (!known) return { error: `لا يوجد ثيم بالمعرف ${themeId} — استخدم settings.list_themes` };
+      state.setThemeId(themeId);
+      return { activated: true, themeId };
+    },
+  },
+
+  // ─── ─── Settings: Delete Theme ────────────────────────────────────────── ───
+  {
+    name: 'settings.delete_theme',
+    labelAr: 'حذف ثيم',
+    descriptionAr: 'يحذف ثيماً مخصصاً نهائياً (الثيمات المدمجة محمية). إن كان نشطاً يتراجع النظام تلقائياً لثيم مدمج بنفس الوضع.',
+    permission: 'settings.edit',
+    dangerLevel: 'write',
+    route: '/settings/themes',
+    parameters: {
+      type: 'object',
+      properties: {
+        themeId: { type: 'string', description: 'معرف الثيم المخصص' },
+      },
+      required: ['themeId'],
+    },
+    summarizeArgs: (a) => `حذف ثيم: ${String((a as Record<string, unknown>).themeId || '').slice(0, 20)}`,
+    execute: async (args) => {
+      const themeId = str(args.themeId);
+      if (!themeId) return { error: 'themeId مطلوب — استخدم settings.list_themes أولاً' };
+      if (isBuiltInTheme(themeId)) return { error: 'الثيمات المدمجة محمية من الحذف' };
+      useAppStore.getState().deleteCustomTheme(themeId);
+      return { deleted: true, themeId };
     },
   },
 ];

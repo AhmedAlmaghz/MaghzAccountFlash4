@@ -181,6 +181,10 @@ const MODULE_FALLBACKS: Array<{ prefixes: string[]; target: RouteTarget }> = [
   { prefixes: ['manufacturing.'], target: { path: '/manufacturing/work-orders', labelKey: 'ai.actions.openWorkOrders' } },
   { prefixes: ['hr.'], target: { path: '/hr/employees', labelKey: 'ai.actions.openEmployees' } },
   { prefixes: ['crm.'], target: { path: '/crm/leads', labelKey: 'ai.actions.openLeads' } },
+  {
+    prefixes: ['settings.create_theme', 'settings.generate_theme', 'settings.update_theme', 'settings.activate_theme', 'settings.list_themes', 'settings.delete_theme'],
+    target: { path: '/settings/themes', labelKey: 'ai.actions.openThemes' },
+  },
   { prefixes: ['settings.'], target: { path: '/settings', labelKey: 'ai.actions.openSettings' } },
   { prefixes: ['reports.'], target: { path: '/reports', labelKey: 'ai.actions.openReports' } },
   { prefixes: ['read.'], target: { path: '/reports', labelKey: 'ai.actions.openReports' } },
@@ -201,6 +205,7 @@ const TEXT_KEYWORDS: Array<{ keywords: string[]; target: RouteTarget }> = [
   { keywords: ['قيد يومي', 'journal'], target: { path: '/accounting/journal', labelKey: 'ai.actions.openJournal' } },
   { keywords: ['سند قبض', 'receipt voucher'], target: { path: '/accounting/receipt-vouchers', labelKey: 'ai.actions.openReceiptVouchers' } },
   { keywords: ['سند صرف', 'payment voucher'], target: { path: '/accounting/payment-vouchers', labelKey: 'ai.actions.openPaymentVouchers' } },
+  { keywords: ['ثيم', 'مظهر', 'سمة', 'الوضع الداكن', 'وضع ليلي', 'theme', 'dark mode', 'appearance'], target: { path: '/settings/themes', labelKey: 'ai.actions.openThemes' } },
 ];
 
 function findRoute(toolName: string): RouteTarget | null {
