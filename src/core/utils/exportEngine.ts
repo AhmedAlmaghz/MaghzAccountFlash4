@@ -173,11 +173,16 @@ export async function exportToPDF(
 
   const doc = new jsPDF(options?.rtl ? { orientation: 'portrait', unit: 'mm', format: 'a4' } : {});
 
-  // Arabic pipeline (see core/reports/arabicPdf): embedded Amiri plus
-  // pre-shaped visual-order text. No setR2L — it would double-reverse.
-  // The legacy 'Cairo' font name never had an embedded file behind it.
+  // Arabic pipeline (see core/reports/arabicPdf): embedded Tajawal plus
+  // pre-shaped visual-order text. No setR2L on the shaped path — it would
+  // double-reverse. The legacy 'Cairo' font name never had an embedded
+  // file behind it. setR2L stays as the no-font fallback (ordered output).
   const arabic = await ensureArabicFont(doc);
-  if (arabic) doc.setFont(ARABIC_FONT_NAME);
+  if (arabic) {
+    doc.setFont(ARABIC_FONT_NAME);
+  } else if (options?.rtl) {
+    doc.setR2L(true);
+  }
   const shape = (s: string): string => (arabic ? shapeForPdf(s) : s);
 
   if (options?.title) {

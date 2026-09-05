@@ -65,17 +65,25 @@ export async function exportReportPdf(spec: ReportSpec): Promise<void> {
   const autoTable = autoTableModule.default;
   const direction = spec.meta.direction ?? 'rtl';
 
+  // Wide tables read better in landscape — auto-switch past 6 columns
+  // unless the caller pinned an orientation.
+  const landscape = spec.landscape ?? spec.columns.length > 6;
   const doc = new jsPDF({
-    orientation: spec.landscape ? 'landscape' : 'portrait',
+    orientation: landscape ? 'landscape' : 'portrait',
     unit: 'mm',
     format: 'a4',
   });
 
-  // Arabic pipeline: embedded Amiri + pre-shaped visual-order text.
-  // NOTE: no doc.setR2L — shapeForPdf already reordered the glyphs, and
-  // setR2L would reverse them a second time.
+  // Arabic pipeline: embedded Tajawal + pre-shaped visual-order text.
+  // NOTE: no doc.setR2L on the shaped path — shapeForPdf already reordered
+  // the glyphs, and setR2L would reverse them a second time. The legacy
+  // setR2L path is kept ONLY for the no-font fallback (unshaped but ordered).
   const arabic = await ensureArabicFont(doc);
-  if (arabic) doc.setFont(ARABIC_FONT_NAME);
+  if (arabic) {
+    doc.setFont(ARABIC_FONT_NAME);
+  } else if (direction === 'rtl') {
+    doc.setR2L(true);
+  }
   const shape = (s: string): string => (arabic ? shapeForPdf(s) : s);
 
   const margin = 14;

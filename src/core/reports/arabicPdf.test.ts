@@ -15,15 +15,6 @@ function makeDoc() {
   };
 }
 
-function stubFontFetch(bytes = 20_000): void {
-  const buf = new ArrayBuffer(bytes);
-  new Uint8Array(buf).fill(65);
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true, arrayBuffer: async () => buf })),
-  );
-}
-
 describe('arabicPdf pipeline', () => {
   beforeEach(() => {
     clearArabicFontCache();
@@ -62,42 +53,26 @@ describe('arabicPdf pipeline', () => {
     expect(needsShaping(42)).toBe(false);
   });
 
-  it('registers Amiri regular+bold in the jsPDF VFS', async () => {
-    stubFontFetch();
+  it('registers bundled Tajawal regular+bold in the jsPDF VFS', async () => {
     const doc = makeDoc();
     const ok = await ensureArabicFont(doc);
     expect(ok).toBe(true);
+    expect(ARABIC_FONT_NAME).toBe('Tajawal');
     expect(doc.addFileToVFS).toHaveBeenCalledTimes(2);
-    expect(doc.addFileToVFS).toHaveBeenCalledWith('Amiri-Regular.ttf', expect.any(String));
-    expect(doc.addFont).toHaveBeenCalledWith('Amiri-Regular.ttf', ARABIC_FONT_NAME, 'normal');
-    expect(doc.addFont).toHaveBeenCalledWith('Amiri-Bold.ttf', ARABIC_FONT_NAME, 'bold');
+    expect(doc.addFileToVFS).toHaveBeenCalledWith('Tajawal-Regular.ttf', expect.any(String));
+    expect(doc.addFont).toHaveBeenCalledWith('Tajawal-Regular.ttf', ARABIC_FONT_NAME, 'normal');
+    expect(doc.addFont).toHaveBeenCalledWith('Tajawal-Bold.ttf', ARABIC_FONT_NAME, 'bold');
   });
 
-  it('caches the font files across documents', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      arrayBuffer: async () => {
-        const buf = new ArrayBuffer(20_000);
-        new Uint8Array(buf).fill(66);
-        return buf;
-      },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    await ensureArabicFont(makeDoc());
-    await ensureArabicFont(makeDoc());
-    // One fetch round (regular + bold), not two.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('fails honestly when the font cannot load', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new Error('offline');
-      }),
-    );
+  it('fails honestly when the bundled font cannot load', async () => {
+    vi.resetModules();
+    vi.doMock('./arabicFontData', () => ({ getEmbeddedFonts: () => null }));
+    const fresh = await import('./arabicPdf');
+    fresh.clearArabicFontCache();
     const doc = makeDoc();
-    expect(await ensureArabicFont(doc)).toBe(false);
+    expect(await fresh.ensureArabicFont(doc)).toBe(false);
     expect(doc.addFileToVFS).not.toHaveBeenCalled();
+    vi.doUnmock('./arabicFontData');
+    vi.resetModules();
   });
 });

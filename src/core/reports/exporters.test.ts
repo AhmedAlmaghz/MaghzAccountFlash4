@@ -86,16 +86,12 @@ describe('report exporters', () => {
     const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;
     expect(opts.theme).toBe('grid');
     expect(opts.direction).toBe('rtl');
-    expect((opts.head as string[][])[0]).toEqual(['الاسم', 'المبلغ']);
+    // Bundled Tajawal is always available: headers ship pre-shaped
+    // (visual order), never raw logical Arabic.
+    expect((opts.head as string[][])[0]).toEqual(['ﻢﺳﻻﺍ', 'ﻎﻠﺒﻤﻟﺍ']);
   });
 
-  it('embeds Amiri and shapes Arabic when the font loads', async () => {
-    const buf = new ArrayBuffer(20_000);
-    new Uint8Array(buf).fill(66);
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: true, arrayBuffer: async () => buf })),
-    );
+  it('embeds Tajawal and shapes Arabic when the font loads', async () => {
     const { clearArabicFontCache } = await import('./arabicPdf');
     clearArabicFontCache();
     const { default: autoTable } = await import('jspdf-autotable');
@@ -103,12 +99,11 @@ describe('report exporters', () => {
     vi.clearAllMocks();
     await exportReportPdf(makeSpec());
     const instance = vi.mocked(JsPDF).mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
-    expect(instance.setFont).toHaveBeenCalledWith('Amiri');
+    expect(instance.setFont).toHaveBeenCalledWith('Tajawal');
     const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;
-    expect(opts.styles).toMatchObject({ font: 'Amiri' });
+    expect(opts.styles).toMatchObject({ font: 'Tajawal' });
     // Headers are pre-shaped visual-order text, not raw logical Arabic.
     expect((opts.head as string[][])[0][0]).not.toBe('الاسم');
-    vi.unstubAllGlobals();
     clearArabicFontCache();
   });
 
