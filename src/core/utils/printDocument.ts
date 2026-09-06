@@ -314,9 +314,17 @@ function generateHtml(data: PrintDocumentData): string {
       background: white;
       box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
       position: relative;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .page-accent-bar {
+      height: 6px;
+      background: linear-gradient(90deg, ${color} 0%, ${color}88 55%, ${color} 100%);
+      position: relative;
+      z-index: 1;
     }
     .page-inner {
-      padding: 30px 35px 20px;
+      padding: 26px 35px 20px;
     }
     .watermark {
       position: absolute;
@@ -344,10 +352,11 @@ function generateHtml(data: PrintDocumentData): string {
       flex: 1;
     }
     .company-name {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 800;
       color: ${color};
       letter-spacing: -0.5px;
+      line-height: 1.3;
     }
     .company-details {
       margin-top: 6px;
@@ -360,23 +369,30 @@ function generateHtml(data: PrintDocumentData): string {
     }
     .doc-badge {
       text-align: center;
-      min-width: 160px;
+      min-width: 170px;
+      border: 1.5px solid ${color};
+      border-radius: 12px;
+      padding: 12px 18px 10px;
+      background: linear-gradient(180deg, ${color}14 0%, transparent 70%);
     }
     .doc-badge .badge {
       display: inline-block;
       background: ${color};
       color: white;
-      padding: 10px 28px;
+      padding: 7px 26px;
       font-weight: 800;
       font-size: 16px;
-      letter-spacing: 1px;
-      border-radius: 4px;
+      letter-spacing: 0.5px;
+      border-radius: 999px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.18);
     }
     .doc-badge .number {
-      margin-top: 6px;
-      font-size: 14px;
-      font-weight: 700;
-      color: #374151;
+      margin-top: 8px;
+      font-size: 15px;
+      font-weight: 800;
+      color: #1f2937;
+      letter-spacing: 0.5px;
+      direction: ltr;
     }
     .meta-section {
       display: grid;
@@ -445,13 +461,19 @@ function generateHtml(data: PrintDocumentData): string {
       z-index: 1;
     }
     table.items thead th {
-      background: ${color};
+      background: linear-gradient(180deg, ${color} 0%, ${color}dd 100%);
       color: white;
-      padding: 10px 10px;
-      font-weight: 700;
+      padding: 11px 12px;
+      font-weight: 800;
       font-size: 12px;
       text-align: center;
       border: none;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+    table.items tbody td {
+      padding: 10px 12px;
+      font-variant-numeric: tabular-nums;
     }
     table.items thead th:first-child {
       border-radius: 0 6px 0 0;
@@ -493,11 +515,12 @@ function generateHtml(data: PrintDocumentData): string {
       text-align: center;
     }
     .sig-line {
-      border-top: 1px solid #d1d5db;
-      margin-top: 40px;
+      border-top: 1.5px solid #9ca3af;
+      margin-top: 44px;
       padding-top: 8px;
       font-size: 11px;
-      color: #9ca3af;
+      font-weight: 700;
+      color: #6b7280;
     }
     .footer {
       margin-top: 24px;
@@ -553,9 +576,13 @@ function generateHtml(data: PrintDocumentData): string {
     }
     @media print {
       body { background: white; padding: 0; }
-      .page { box-shadow: none; max-width: 100%; }
+      .page { box-shadow: none; max-width: 100%; border-radius: 0; }
+      .page-accent-bar { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      table.items thead th { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      table.items tbody tr { break-inside: avoid; }
       .print-btn { display: none !important; }
-      .page-inner { padding: 15mm; }
+      .page-inner { padding: 12mm 15mm; }
+      @page { size: A4; margin: 10mm; }
     }
     @media screen and (max-width: 768px) {
       body { padding: 8px; }
@@ -570,6 +597,7 @@ function generateHtml(data: PrintDocumentData): string {
 </head>
 <body>
   <div class="page">
+    <div class="page-accent-bar"></div>
     <div class="watermark">${escapeHtml(data.companyName || '')}</div>
     <div class="page-inner">
       <div class="header">
@@ -667,6 +695,11 @@ function generateHtml(data: PrintDocumentData): string {
       ${!isStatement && data.notes ? `<div class="notes-section"><strong>ملاحظات:</strong><br>${escapeLineBreaks(data.notes)}</div>` : ''}
 
       ${isVoucher ? `
+      <div style="margin:6px 0 4px;text-align:center;padding:22px 16px;border-radius:14px;background:linear-gradient(135deg, ${color} 0%, ${color}cc 100%);color:white;box-shadow:0 4px 10px rgba(0,0,0,0.15)">
+        <div style="font-size:12px;font-weight:600;opacity:0.9;margin-bottom:6px">المبلغ</div>
+        <div style="font-size:30px;font-weight:800;letter-spacing:0.5px;direction:ltr">${formatCurrency(data.totalAmount, data.currency)}</div>
+        <div style="font-size:12px;font-weight:600;opacity:0.92;margin-top:8px">${escapeHtml(amountInWords)}</div>
+      </div>
       <div class="notes-section" style="background:#f0fdf4;border-right-color:#16a34a">
         <strong>بيان السند:</strong><br>
         ${escapeHtml(data.notes || data.lines[0]?.description || '')}

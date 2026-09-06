@@ -68,6 +68,65 @@ describe('printDocument', () => {
     openSpy.mockRestore();
   });
 
+  it('renders premium chrome: accent bar, logo frame, and status ribbon', () => {
+    const mockWrite = vi.fn();
+    const mockWindow = {
+      document: { open: vi.fn(), write: mockWrite, close: vi.fn() },
+    };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(mockWindow as unknown as Window);
+
+    printDocument({
+      type: 'sales-invoice',
+      docNumber: 'INV-009',
+      date: '2024-06-01',
+      partyName: 'عميل',
+      partyLabel: 'العميل',
+      lines: [{ description: 'صنف', quantity: 1, unitPrice: 100, total: 100 }],
+      subtotal: 100,
+      vatAmount: 15,
+      totalAmount: 115,
+      companyName: 'شركتي',
+      companyLogoUrl: 'data:image/png;base64,AAA',
+      statusBadge: 'مدفوعة',
+      statusTone: 'success',
+    });
+
+    const html = mockWrite.mock.calls[0][0] as string;
+    expect(html).toContain('page-accent-bar');
+    expect(html).toContain('data:image/png;base64,AAA');
+    expect(html).toContain('مدفوعة');
+    expect(html).toContain('@page');
+
+    openSpy.mockRestore();
+  });
+
+  it('renders a voucher amount centerpiece with amount in words', () => {
+    const mockWrite = vi.fn();
+    const mockWindow = {
+      document: { open: vi.fn(), write: mockWrite, close: vi.fn() },
+    };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(mockWindow as unknown as Window);
+
+    printDocument({
+      type: 'receipt-voucher',
+      docNumber: 'RV-001',
+      date: '2024-06-01',
+      partyName: 'عميل',
+      partyLabel: 'العميل',
+      lines: [{ description: 'قبض', total: 1000 }],
+      subtotal: 1000,
+      vatAmount: 0,
+      totalAmount: 1000,
+      companyName: 'شركتي',
+    });
+
+    const html = mockWrite.mock.calls[0][0] as string;
+    expect(html).toContain('المبلغ');
+    expect(html).toContain('بيان السند');
+
+    openSpy.mockRestore();
+  });
+
   it('shows alert when popup blocked', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
