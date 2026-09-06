@@ -905,42 +905,70 @@ export function registerDatabaseHandlers() {
     }),
   });
 
-  // inventory.createProductUnit
-  registerRpc('inventory.createProductUnit', {
-    paramCount: 10,
-    validate: (p) => {
-      if (!p.productId) throw new Error('productId required');
-      if (!p.unitId) throw new Error('unitId required');
-      if (!(Number(p.factor) > 0)) throw new Error('factor must be positive');
-    },
-    compose: (p, session) => ({
-      sql: `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
-            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`,
-      params: [
-        session.user.companyId,
-        String(p.productId),
-        String(p.unitId),
-        Number(p.factor),
-        Number(p.salePrice) || 0,
-        Number(p.purchasePrice) || 0,
-        p.barcode ?? null,
-        p.isBase === true,
-        p.isDefaultSale === true,
-        p.isDefaultPurchase === true,
-      ],
-    }),
+  // inventory.createProductUnit — transaction: clear-then-set. The partial
+  // unique indexes (one base / default-sale / default-purchase per
+  // product) would otherwise raise uq_product_units_* on flag handover.
+  // NOTE: a single-statement CTE is NOT safe here — PG runs WITH
+  // sub-statements interleaved with the outer query, so the INSERT's
+  // uniqueness check can fire before the pre-clear lands (reproduced live:
+  // "duplicate key violates uq_product_units_default_sale"). Sequential
+  // statements inside one transaction order it correctly.
+  ipcMain.handle('db:rpc:inventory.createProductUnit', async (event, payload = {}) => {
+    const session = getSession(event.sender.id, payload.sessionToken);
+    if (!session) return { success: false, error: 'Authentication required' };
+    const p = payload;
+    if (!p.productId) return { success: false, error: 'productId required' };
+    if (!p.unitId) return { success: false, error: 'unitId required' };
+    if (!(Number(p.factor) > 0)) return { success: false, error: 'factor must be positive' };
+    const cid = session.user.companyId;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (p.isBase === true) {
+        await execQuery(client, `UPDATE product_units SET is_base = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [String(p.productId), cid]);
+      }
+      if (p.isDefaultSale === true) {
+        await execQuery(client, `UPDATE product_units SET is_default_sale = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [String(p.productId), cid]);
+      }
+      if (p.isDefaultPurchase === true) {
+        await execQuery(client, `UPDATE product_units SET is_default_purchase = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [String(p.productId), cid]);
+      }
+      const ins = await execQuery(client,
+        `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`,
+        [cid, String(p.productId), String(p.unitId), Number(p.factor), Number(p.salePrice) || 0, Number(p.purchasePrice) || 0, p.barcode ?? null, p.isBase === true, p.isDefaultSale === true, p.isDefaultPurchase === true]);
+      await client.query('COMMIT');
+      return { success: true, rows: ins.rows, rowCount: ins.rowCount };
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (rbErr) { void rbErr; }
+      return { success: false, error: e.message || String(e) };
+    } finally {
+      client.release();
+    }
   });
 
-  // inventory.updateProductUnit — single-statement partial update.
-  registerRpc('inventory.updateProductUnit', {
-    paramCount: null,
-    validate: (p) => {
-      const d = p.data || {};
-      if (!d.id) throw new Error('id required');
-      if (d.factor !== undefined && !(Number(d.factor) > 0)) throw new Error('factor must be positive');
-    },
-    compose: (p, session) => {
-      const d = p.data || {};
+  // inventory.updateProductUnit — transaction: clear-then-set (same CTE
+  // interleaving hazard as create; see note above).
+  ipcMain.handle('db:rpc:inventory.updateProductUnit', async (event, payload = {}) => {
+    const session = getSession(event.sender.id, payload.sessionToken);
+    if (!session) return { success: false, error: 'Authentication required' };
+    const d = payload.data || {};
+    if (!d.id) return { success: false, error: 'id required' };
+    if (d.factor !== undefined && !(Number(d.factor) > 0)) return { success: false, error: 'factor must be positive' };
+    const cid = session.user.companyId;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const scope = `product_id = (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid) AND company_id = $2::uuid AND id <> $1::uuid`;
+      if (d.isBase === true) {
+        await execQuery(client, `UPDATE product_units SET is_base = false WHERE ${scope}`, [String(d.id), cid]);
+      }
+      if (d.isDefaultSale === true) {
+        await execQuery(client, `UPDATE product_units SET is_default_sale = false WHERE ${scope}`, [String(d.id), cid]);
+      }
+      if (d.isDefaultPurchase === true) {
+        await execQuery(client, `UPDATE product_units SET is_default_purchase = false WHERE ${scope}`, [String(d.id), cid]);
+      }
       const fields = [];
       const values = [];
       let idx = 1;
@@ -953,12 +981,16 @@ export function registerDatabaseHandlers() {
       if (d.isDefaultSale !== undefined) { fields.push(`is_default_sale = $${idx++}`); values.push(d.isDefaultSale === true); }
       if (d.isDefaultPurchase !== undefined) { fields.push(`is_default_purchase = $${idx++}`); values.push(d.isDefaultPurchase === true); }
       fields.push('updated_at = NOW()');
-      values.push(String(d.id), session.user.companyId);
-      return {
-        sql: `UPDATE product_units SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`,
-        params: values,
-      };
-    },
+      values.push(String(d.id), cid);
+      await execQuery(client, `UPDATE product_units SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`, values);
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (rbErr) { void rbErr; }
+      return { success: false, error: e.message || String(e) };
+    } finally {
+      client.release();
+    }
   });
 
   // inventory.deleteProductUnit — guarded: never delete the last unit row.

@@ -4219,5 +4219,10 @@ npx drizzle-kit migrate
 - **اختبارات (+2)**: `buildSalesReturnPostingStatements`/`buildPurchaseReturnPostingStatements` مع `id` تُنتجان `COALESCE` في الحركة (`'in'`/`'out'`) والتجميع. تحقق حي: EXPLAIN على PG حقيقي + صيغة `24 + 5(legacy) = 29` داخل ROLLBACK
 - **القاعدة الذهبية**: **قبل إضافة حركة مخزنية جديدة، ابحث أين تُبنى الحركات الحالية** — `journalEntryGenerator.ts` يملك مسارات `if (ret.id)` للترحيل تُنفَّذ داخل نفس الـ transaction. الإضافة المكررة = تضاعف صامت لا يكشفه أي اختبار عدّي إلا بفحص الرصيد النهائي
 
+### تصحيح Phase 82c: قيد `uq_product_units_default_sale` — تسليم الأعلام الفريدة
+- **العرض**: `duplicate key value violates unique constraint "uq_product_units_default_sale"` عند تعيين وحدة كافتراضية للبيع/الشراء — الصف الأساسي (يُنشأ تلقائياً بكل الأعلام) يملك العلم، والكتابة الجديدة ترفع العلم الثاني قبل تصفير الأول
+- **الإصلاح على 5 طبقات** (كل كاتب يجب أن يصفّر الأشقاء **قبل** الكتابة): الواجهة (`ProductUnitsSection` يعيد الترتيب: تصفير ثم كتابة)، الـ API fallback (UPDATEs تصفير قبل INSERT/UPDATE)، الـ RPC (انظر القاعدة أدناه)، البذور (electron + pglite تصفّر قبل صفّي العرض)، الـ e2e shim
+- **القاعدة الذهبية**: **CTE واحد مع INSERT/UPDATE + قيد فريد = سباق مؤكد**. توثيق PostgreSQL: عبارات `WITH` الفرعية تُنفَّذ **متداخلة** مع الاستعلام الخارجي — فحص التفرد في الـ INSERT قد يشتعل قبل أن يهبط الـ UPDATE التصفيري (أُعيد إنتاجه حياً بنفس رسالة المستخدم حرفياً). **الحل**: `ipcMain.handle` مخصص بـ `BEGIN` ← تصفير ← كتابة ← `COMMIT` (نمط `updateQuotation`/`updateBom` القائم) — statements متسلسلة داخل transaction واحد هي الترتيب الوحيد المضمون
+
 *آخر تحديث: 2026-09-06 | الإصدار: maghzaccount-pro v0.14.0 (تعدد الوحدات)*
 *آخر تحديث: 2026-09-05 | الإصدار: maghzaccount-pro v0.13.11 (سلسلة package.json)*

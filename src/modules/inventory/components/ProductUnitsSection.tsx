@@ -135,7 +135,12 @@ export const ProductUnitsSection: React.FC<ProductUnitsSectionProps> = ({
     }
     setSaving(true);
     try {
+      // Uniqueness flags (partial unique indexes) must be cleared on
+      // siblings BEFORE the write — otherwise PG raises
+      // uq_product_units_default_sale / _purchase (or _base).
       if (editing) {
+        if (form.isDefaultSale) await clearSiblingsFlag('isDefaultSale', editing.id);
+        if (form.isDefaultPurchase) await clearSiblingsFlag('isDefaultPurchase', editing.id);
         const res = await update(editing.id, {
           unitId: form.unitId,
           factor,
@@ -146,14 +151,14 @@ export const ProductUnitsSection: React.FC<ProductUnitsSectionProps> = ({
           isDefaultPurchase: form.isDefaultPurchase,
         });
         if (res.success) {
-          if (form.isDefaultSale) await clearSiblingsFlag('isDefaultSale', editing.id);
-          if (form.isDefaultPurchase) await clearSiblingsFlag('isDefaultPurchase', editing.id);
           addToast('success', t('inventory.productUnits.updated'));
           setFormOpen(false);
         } else {
           addToast('error', res.error || t('common.error'));
         }
       } else {
+        if (form.isDefaultSale) await clearSiblingsFlag('isDefaultSale');
+        if (form.isDefaultPurchase) await clearSiblingsFlag('isDefaultPurchase');
         const res = await create({
           unitId: form.unitId,
           factor,

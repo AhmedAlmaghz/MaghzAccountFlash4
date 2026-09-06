@@ -278,6 +278,17 @@ export const inventoryApi = {
       }
       const adapter = await getDbAdapter();
       const v = validation.data;
+      // Partial unique indexes (one base / default-sale / default-purchase
+      // per product): clear siblings first or PG raises uq_product_units_*.
+      if (v.isBase) {
+        await adapter.query('UPDATE product_units SET is_base = false WHERE product_id = $1::uuid AND company_id = $2::uuid', [v.productId, v.companyId]);
+      }
+      if (v.isDefaultSale) {
+        await adapter.query('UPDATE product_units SET is_default_sale = false WHERE product_id = $1::uuid AND company_id = $2::uuid', [v.productId, v.companyId]);
+      }
+      if (v.isDefaultPurchase) {
+        await adapter.query('UPDATE product_units SET is_default_purchase = false WHERE product_id = $1::uuid AND company_id = $2::uuid', [v.productId, v.companyId]);
+      }
       const result = await adapter.query(
         `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`,
@@ -302,6 +313,16 @@ export const inventoryApi = {
       }
       const adapter = await getDbAdapter();
       const v = validation.data;
+      // Clear uniqueness flags on siblings first (partial unique indexes).
+      if (v.isBase) {
+        await adapter.query('UPDATE product_units SET is_base = false WHERE product_id = (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid) AND company_id = $2::uuid AND id <> $1::uuid', [id, companyId]);
+      }
+      if (v.isDefaultSale) {
+        await adapter.query('UPDATE product_units SET is_default_sale = false WHERE product_id = (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid) AND company_id = $2::uuid AND id <> $1::uuid', [id, companyId]);
+      }
+      if (v.isDefaultPurchase) {
+        await adapter.query('UPDATE product_units SET is_default_purchase = false WHERE product_id = (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid) AND company_id = $2::uuid AND id <> $1::uuid', [id, companyId]);
+      }
       const fields: string[] = [];
       const params: unknown[] = [];
       let idx = 1;

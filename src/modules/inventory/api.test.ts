@@ -112,6 +112,52 @@ describe('inventoryApi.createProductUnit', () => {
   });
 });
 
+describe('inventoryApi uniqueness handover (uq_product_units_*)', () => {
+  it('create clears sibling default flags before INSERT', async () => {
+    const calls: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      calls.push(sql);
+      return { success: true, rows: [{ id: UNIT_ROW_ID }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await inventoryApi.createProductUnit({
+      companyId: COMPANY_ID, productId: PRODUCT_ID, unitId: UNIT_ID,
+      factor: 12, salePrice: 12000, purchasePrice: 10000, isBase: false,
+      isDefaultSale: true, isDefaultPurchase: false,
+    });
+    expect(res.success).toBe(true);
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toMatch(/UPDATE product_units SET is_default_sale = false WHERE product_id/);
+    expect(calls[1]).toMatch(/INSERT INTO product_units/);
+  });
+
+  it('update clears sibling default flags before the SET', async () => {
+    const calls: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      calls.push(sql);
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await inventoryApi.updateProductUnit(UNIT_ROW_ID, COMPANY_ID, { isDefaultPurchase: true });
+    expect(res.success).toBe(true);
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toMatch(/UPDATE product_units SET is_default_purchase = false WHERE product_id = \(SELECT/);
+    expect(calls[1]).toMatch(/UPDATE product_units SET .* WHERE id = .* AND company_id = /);
+  });
+
+  it('update without flags issues a single statement', async () => {
+    const calls: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      calls.push(sql);
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await inventoryApi.updateProductUnit(UNIT_ROW_ID, COMPANY_ID, { factor: 24 });
+    expect(res.success).toBe(true);
+    expect(calls.length).toBe(1);
+  });
+});
+
 describe('inventoryApi.deleteProductUnit', () => {
   it('refuses to delete the only unit row of a product', async () => {
     const adapter = makeMockAdapter(async () => ({

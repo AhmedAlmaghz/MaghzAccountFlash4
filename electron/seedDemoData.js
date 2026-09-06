@@ -627,6 +627,14 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
   for (const d of demoUnits) {
     const pid = productIdByCode.get(d.product);
     if (!pid) continue;
+    // Uniqueness handover first: the auto-created base row owns the
+    // default flags, otherwise uq_product_units_default_* raises.
+    if (d.defSale) {
+      await client.query(`UPDATE product_units SET is_default_sale = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [pid, companyId]);
+    }
+    if (d.defPurch) {
+      await client.query(`UPDATE product_units SET is_default_purchase = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [pid, companyId]);
+    }
     await client.query(
       `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
        SELECT $1::uuid, $2::uuid, u.id, $3::numeric, $4::numeric, $5::numeric, false, $6, $7
