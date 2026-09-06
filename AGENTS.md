@@ -4185,4 +4185,4 @@ npx drizzle-kit migrate
   - **أعمار**: أضيفت السندات والمردودات كـ `-amount` بتواريخها — `totalDue` أصبح صافياً
   - **تقارير**: `CustomerStatementReport`/`SupplierStatementReport` تضم السندات والمردودات. **ترحيل**: `0018_recompute_party_balances` يُصلح كل الأرصدة القديمة (`IS DISTINCT FROM`)
 - **القاعدة الذهبية**: **كشف الحساب هو المصدر الموثوق** — كل عرض رصيد يشتق منه (`computed_balance`) ولا يُبنى بتراكم
-*آخر تحديث: 2026-09-05 | الإصدار: maghzaccount-pro v0.13.9 (سلسلة package.json)*
+*آخر تحديث: 2026-09-05 | الإصدار: maghzaccount-pro v0.13.10 (سلسلة package.json)*
