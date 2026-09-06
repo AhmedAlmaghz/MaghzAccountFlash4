@@ -7,7 +7,7 @@ import bidiFactory from 'bidi-js';
  * Root cause: jsPDF's built-in helvetica has no Arabic glyphs AND jsPDF
  * performs no Arabic shaping, so Arabic text came out as tofu/disjointed
  * letters. This module:
- *  1. embeds the bundled Tajawal TTF (regular + bold) into the jsPDF VFS,
+ *  1. embeds the bundled IBM Plex Sans Arabic TTF (regular + bold) into the jsPDF VFS (full presentation-forms coverage — Tajawal lacks isolated forms),
  *  2. reshapes logical Arabic into visual presentation forms
  *     (arabic-reshaper: contextual joining + lam-alef ligatures),
  *  3. reorders runs per the Unicode bidi algorithm (bidi-js), so text is
@@ -19,7 +19,7 @@ import bidiFactory from 'bidi-js';
  * while setR2L had already been dropped).
  */
 
-export const ARABIC_FONT_NAME = 'Tajawal';
+export const ARABIC_FONT_NAME = 'IBMPlexSansArabic';
 
 const ARABIC_RANGE = /[؀-ۿ]/;
 
@@ -47,10 +47,10 @@ export async function ensureArabicFont(doc: JsPdfWithFont): Promise<boolean> {
       embeddedFonts = getEmbeddedFonts();
     }
     if (!embeddedFonts) return false;
-    doc.addFileToVFS('Tajawal-Regular.ttf', embeddedFonts.regular);
-    doc.addFileToVFS('Tajawal-Bold.ttf', embeddedFonts.bold);
-    doc.addFont('Tajawal-Regular.ttf', ARABIC_FONT_NAME, 'normal');
-    doc.addFont('Tajawal-Bold.ttf', ARABIC_FONT_NAME, 'bold');
+    doc.addFileToVFS('IBMPlexSansArabic-Regular.ttf', embeddedFonts.regular);
+    doc.addFileToVFS('IBMPlexSansArabic-Bold.ttf', embeddedFonts.bold);
+    doc.addFont('IBMPlexSansArabic-Regular.ttf', ARABIC_FONT_NAME, 'normal');
+    doc.addFont('IBMPlexSansArabic-Bold.ttf', ARABIC_FONT_NAME, 'bold');
     return true;
   } catch {
     return false;

@@ -1,5 +1,5 @@
-import regularDataUrl from './fonts/Tajawal-Regular.ttf?inline';
-import boldDataUrl from './fonts/Tajawal-Bold.ttf?inline';
+import regularDataUrl from './fonts/IBMPlexSansArabic-Regular.ttf?inline';
+import boldDataUrl from './fonts/IBMPlexSansArabic-Bold.ttf?inline';
 
 /**
  * Tajawal TTFs bundled into the PDF chunk via Vite `?inline` (base64 data

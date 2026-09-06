@@ -53,15 +53,15 @@ describe('arabicPdf pipeline', () => {
     expect(needsShaping(42)).toBe(false);
   });
 
-  it('registers bundled Tajawal regular+bold in the jsPDF VFS', async () => {
+  it('registers bundled Plex Arabic regular+bold in the jsPDF VFS', async () => {
     const doc = makeDoc();
     const ok = await ensureArabicFont(doc);
     expect(ok).toBe(true);
-    expect(ARABIC_FONT_NAME).toBe('Tajawal');
+    expect(ARABIC_FONT_NAME).toBe('IBMPlexSansArabic');
     expect(doc.addFileToVFS).toHaveBeenCalledTimes(2);
-    expect(doc.addFileToVFS).toHaveBeenCalledWith('Tajawal-Regular.ttf', expect.any(String));
-    expect(doc.addFont).toHaveBeenCalledWith('Tajawal-Regular.ttf', ARABIC_FONT_NAME, 'normal');
-    expect(doc.addFont).toHaveBeenCalledWith('Tajawal-Bold.ttf', ARABIC_FONT_NAME, 'bold');
+    expect(doc.addFileToVFS).toHaveBeenCalledWith('IBMPlexSansArabic-Regular.ttf', expect.any(String));
+    expect(doc.addFont).toHaveBeenCalledWith('IBMPlexSansArabic-Regular.ttf', ARABIC_FONT_NAME, 'normal');
+    expect(doc.addFont).toHaveBeenCalledWith('IBMPlexSansArabic-Bold.ttf', ARABIC_FONT_NAME, 'bold');
   });
 
   it('fails honestly when the bundled font cannot load', async () => {

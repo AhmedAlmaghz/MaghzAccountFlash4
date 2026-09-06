@@ -99,9 +99,9 @@ describe('report exporters', () => {
     vi.clearAllMocks();
     await exportReportPdf(makeSpec());
     const instance = vi.mocked(JsPDF).mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
-    expect(instance.setFont).toHaveBeenCalledWith('Tajawal');
+    expect(instance.setFont).toHaveBeenCalledWith('IBMPlexSansArabic');
     const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;
-    expect(opts.styles).toMatchObject({ font: 'Tajawal' });
+    expect(opts.styles).toMatchObject({ font: 'IBMPlexSansArabic' });
     // Headers are pre-shaped visual-order text, not raw logical Arabic.
     expect((opts.head as string[][])[0][0]).not.toBe('الاسم');
     clearArabicFontCache();
