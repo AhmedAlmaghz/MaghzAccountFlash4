@@ -8,6 +8,8 @@ import {
   postPurchaseReturn,
   postInventoryTransaction,
   postStockAdjustment,
+  buildSalesReturnPostingStatements,
+  buildPurchaseReturnPostingStatements,
 } from './journalEntryGenerator';
 
 // Mock the database adapter
@@ -428,6 +430,54 @@ describe('journalEntryGenerator', () => {
 
       expect(result.success).toBe(true);
       expect(adapter.createTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('return posting statements consume base quantities (multi-unit)', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('sales return movement + stock update use COALESCE base_quantity', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildSalesReturnPostingStatements('comp-1', {
+        id: 'ret-1',
+        returnNumber: 'SR-001',
+        date: '2024-06-01',
+        customer: 'عميل',
+        amount: 500,
+      });
+      expect(res.success).toBe(true);
+      if (!res.success) return;
+      const movement = res.statements.find((s) => s.sql.includes('INSERT INTO stock_movements'));
+      expect(movement).toBeDefined();
+      expect(movement!.sql).toContain("'in', COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity)");
+      const update = res.statements.find((s) => s.sql.includes('UPDATE stock s SET'));
+      expect(update).toBeDefined();
+      expect(update!.sql).toContain('SUM(COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity))');
+    });
+
+    it('purchase return movement + stock update use COALESCE base_quantity', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildPurchaseReturnPostingStatements('comp-1', {
+        id: 'ret-1',
+        returnNumber: 'PR-001',
+        date: '2024-06-01',
+        supplier: 'مورد',
+        amount: 1000,
+      });
+      expect(res.success).toBe(true);
+      if (!res.success) return;
+      const movement = res.statements.find((s) => s.sql.includes('INSERT INTO stock_movements'));
+      expect(movement).toBeDefined();
+      expect(movement!.sql).toContain("'out', COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity)");
+      const update = res.statements.find((s) => s.sql.includes('UPDATE stock s SET'));
+      expect(update).toBeDefined();
+      expect(update!.sql).toContain('SUM(COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity))');
     });
   });
 });

@@ -915,7 +915,39 @@
       "imageTooLarge": "Image size exceeds 2MB",
       "cameraFailed": "Failed to start camera"
     },
-    "selectWarehouseLabel": "Select warehouse"
+    "selectWarehouseLabel": "Select warehouse",
+    "productUnits": {
+      "title": "Product Units",
+      "description": "The base unit is used for stock; other units sell/purchase with a conversion factor",
+      "add": "Add unit",
+      "edit": "Edit unit",
+      "empty": "No additional units — base unit only",
+      "unit": "Unit",
+      "factor": "Conversion factor",
+      "factorHint": "How many base units = 1 of this unit (carton of 12 → 12)",
+      "salePrice": "Sale price",
+      "purchasePrice": "Purchase price",
+      "barcode": "Unit barcode",
+      "base": "Base",
+      "setAsBase": "Set as base",
+      "defaultSale": "Default sale",
+      "defaultPurchase": "Default purchase",
+      "availableInUnit": "Available",
+      "baseEquivalent": "In base",
+      "errors": {
+        "unitRequired": "Select a unit",
+        "factorPositive": "Conversion factor must be greater than zero",
+        "duplicate": "This unit is already added to this product",
+        "onlyUnit": "Cannot delete the only unit of a product"
+      },
+      "created": "Unit added",
+      "updated": "Unit updated",
+      "deleted": "Unit deleted"
+    },
+    "line": {
+      "unit": "Unit",
+      "baseEquivalent": "In base"
+    }
   },
   "sales": {
     "invoices": "Sales Invoices",
@@ -1096,6 +1128,10 @@
       "clearFilters": "Clear filters",
       "noResults": "No results found",
       "noResultsDesc": "Try changing your search or filters"
+    },
+    "line": {
+      "unit": "Unit",
+      "baseEquivalent": "In base"
     }
   },
   "purchases": {
@@ -1280,6 +1316,10 @@
       "updated": "Purchase return updated successfully",
       "deleted": "Purchase return deleted",
       "posted": "Purchase return posted successfully"
+    },
+    "line": {
+      "unit": "Unit",
+      "baseEquivalent": "In base"
     }
   },
   "manufacturing": {
@@ -1500,6 +1540,10 @@
       "actualConsumption": "Actual material consumption",
       "actualConsumptionHint": "Leave a field empty to use its planned quantity — enter the actual quantity only when it differs",
       "actualPrefilledHint": "Actual = planned by default — edit only what deviated"
+    },
+    "line": {
+      "unit": "Unit",
+      "baseEquivalent": "In base"
     }
   },
   "hr": {
@@ -3026,6 +3070,15 @@
       "search": "Search BOMs...",
       "empty": "No BOMs",
       "version": "Version"
+    },
+    "productUnit": {
+      "placeholder": "Select unit...",
+      "search": "Search units...",
+      "empty": "No units — add units to the product first",
+      "price": "Price",
+      "equals": "=",
+      "available": "Available",
+      "base": "Base"
     }
   },
   "currencies": {

@@ -72,6 +72,14 @@ export interface SalesInvoiceLine {
   barcode?: string;
   sku?: string;
   unit?: string;
+  /** Chosen product_units row id (snapshot — survives later unit edits). */
+  unitId?: string;
+  /** Frozen conversion factor at document time (base units per 1 of unit). */
+  unitFactor?: number;
+  /** Quantity in the base unit — the ONLY value stock postings consume. */
+  baseQuantity?: number;
+  /** Resolved chosen-unit display name (from product_units cache). */
+  unitName?: string;
   quantity: number;
   unitPrice: number;
   discountPercent: number;
@@ -109,6 +117,10 @@ export interface QuotationLine {
   barcode?: string;
   sku?: string;
   unit?: string;
+  unitId?: string;
+  unitFactor?: number;
+  baseQuantity?: number;
+  unitName?: string;
   quantity: number;
   unitPrice: number;
   discountPercent: number;
@@ -146,6 +158,10 @@ export interface SalesReturnLine {
   barcode?: string;
   sku?: string;
   unit?: string;
+  unitId?: string;
+  unitFactor?: number;
+  baseQuantity?: number;
+  unitName?: string;
   quantity: number;
   unitPrice: number;
   lineTotal: number;

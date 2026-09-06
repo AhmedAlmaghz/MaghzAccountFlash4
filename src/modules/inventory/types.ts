@@ -151,3 +151,28 @@ parentId?: string;
 createdBy?: string;
 updatedBy?: string;
 }
+
+/**
+ * One row of a product's units (multi-unit).
+ * factor = how many BASE units equal 1 of this unit (carton of 12 → 12).
+ * Stock is always stored in the base unit; documents snapshot the factor.
+ */
+export interface ProductUnit {
+  id: string;
+  companyId: string;
+  productId: string;
+  /** Global catalog unit id (units.id). */
+  unitId: string;
+  /** Resolved display name (units.name_ar → name_en → code). */
+  unitName?: string;
+  unitCode?: string;
+  factor: number;
+  salePrice: number;
+  purchasePrice: number;
+  barcode?: string;
+  isBase: boolean;
+  isDefaultSale: boolean;
+  isDefaultPurchase: boolean;
+  createdBy?: string;
+  updatedBy?: string;
+}

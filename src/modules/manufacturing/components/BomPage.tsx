@@ -7,6 +7,9 @@ import { Can } from '@/core/ui/components/PermissionGate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { ProductSelect } from '@/core/ui/components/smart/fields/ProductSelect';
+import { ProductUnitSelect } from '@/core/ui/components/smart';
+import { toBaseQty } from '@/core/utils/unitConversion';
+import type { ProductUnit } from '@/modules/inventory/types';
 import { useAppStore } from '@/core/store';
 import { useBomsPaginated } from '../hooks/useManufacturing';
 import { useDebouncedValue } from '@/core/hooks/useDebouncedValue';
@@ -22,6 +25,10 @@ interface BomFormLine {
   materialName: string;
   quantity: number;
   unitCost: number;
+  /** Display unit factor (base units per 1). Stored qty/cost are base. */
+  unitId?: string;
+  unitFactor?: number;
+  unitName?: string;
 }
 
 export const BomPage: React.FC = () => {
@@ -97,7 +104,7 @@ export const BomPage: React.FC = () => {
   };
 
   const [formData, setFormData] = useState({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '', outputQuantity: '1' });
-  const [lines, setLines] = useState<BomFormLine[]>([{ materialId: '', materialName: '', quantity: 1, unitCost: 0 }]);
+  const [lines, setLines] = useState<BomFormLine[]>([{ materialId: '', materialName: '', quantity: 1, unitCost: 0, unitFactor: 1, unitName: undefined }]);
 
   const estimatedTotal = useMemo(() =>
     lines.reduce((sum, l) => sum + (l.quantity * l.unitCost), 0),
@@ -105,7 +112,7 @@ export const BomPage: React.FC = () => {
 
   const resetForm = () => {
     setFormData({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '', outputQuantity: '1' });
-    setLines([{ materialId: '', materialName: '', quantity: 1, unitCost: 0 }]);
+    setLines([{ materialId: '', materialName: '', quantity: 1, unitCost: 0, unitFactor: 1, unitName: undefined }]);
     setEditing(null);
   };
 
@@ -132,6 +139,8 @@ export const BomPage: React.FC = () => {
         materialName: l.materialName || l.materialId,
         quantity: l.quantity,
         unitCost: l.unitCost || 0,
+        unitFactor: 1,
+        unitName: undefined,
       })));
     } else {
       setFormData({
@@ -174,7 +183,15 @@ export const BomPage: React.FC = () => {
       outputQuantity: Math.max(Number(formData.outputQuantity) || 1, 0.0001),
       totalCost,
       notes: formData.notes || undefined,
-      lines: validLines.map((l) => ({ materialId: l.materialId, quantity: Number(l.quantity), unitCost: Number(l.unitCost) || 0 })),
+      // Display qty/cost are in the chosen unit — persist base values.
+      lines: validLines.map((l) => {
+        const factor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
+        return {
+          materialId: l.materialId,
+          quantity: toBaseQty(Number(l.quantity), factor),
+          unitCost: Number(l.unitCost) / factor || 0,
+        };
+      }),
     };
     const res = editing ? await update(editing.id, payload) : await create(payload);
     if (res && res.success) {
@@ -202,9 +219,22 @@ export const BomPage: React.FC = () => {
     printWindow.document.close();
   };
 
-  const addLine = () => setLines((prev) => [...prev, { materialId: '', materialName: '', quantity: 1, unitCost: 0 }]);
+  const addLine = () => setLines((prev) => [...prev, { materialId: '', materialName: '', quantity: 1, unitCost: 0, unitFactor: 1, unitName: undefined }]);
   const updateLine = (index: number, field: keyof BomFormLine, value: string | number) => {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  };
+  /**
+   * Unit switch keeps the BASE cost invariant: displayed cost rescales to
+   * the price of one chosen unit, quantity stays as typed (converted at save).
+   */
+  const handleBomUnitChange = (index: number, unit: ProductUnit | null) => {
+    setLines((prev) => prev.map((l, i) => {
+      if (i !== index) return l;
+      const oldFactor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
+      const newFactor = unit?.factor && unit.factor > 0 ? unit.factor : 1;
+      const baseCost = (Number(l.unitCost) || 0) / oldFactor;
+      return { ...l, unitId: unit?.id, unitFactor: newFactor, unitName: unit?.unitName, unitCost: baseCost * newFactor };
+    }));
   };
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index));
 
@@ -413,7 +443,7 @@ export const BomPage: React.FC = () => {
             <div className="space-y-2">
               {lines.map((line, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-4">
+                  <div className="col-span-3">
                     <ProductSelect
                       companyId={companyId}
                       manufacturingRole="material"
@@ -428,6 +458,9 @@ export const BomPage: React.FC = () => {
                                   materialId: product.id,
                                   materialName: product.nameAr,
                                   unitCost: l.unitCost ? l.unitCost : Number(product.costPrice) || 0,
+                                  unitId: undefined,
+                                  unitFactor: 1,
+                                  unitName: undefined,
                                 }
                               : l
                           )
@@ -438,8 +471,21 @@ export const BomPage: React.FC = () => {
                       placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
                     />
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-2">
                     <Input label={idx === 0 ? t('manufacturing.bom.materialName') : ''} value={line.materialName} onChange={(e) => updateLine(idx, 'materialName', e.target.value)} />
+                  </div>
+                  <div className="col-span-2">
+                    <ProductUnitSelect
+                      companyId={companyId}
+                      productId={line.materialId}
+                      value={line.unitId}
+                      onChange={(u) => handleBomUnitChange(idx, u)}
+                      mode="purchase"
+                      size="sm"
+                    />
+                    {(line.unitFactor ?? 1) > 1 && (
+                      <p className="text-[10px] text-slate-400 mt-0.5 tabular-nums">≈ {toBaseQty(line.quantity, line.unitFactor ?? 1)} {t('manufacturing.line.baseEquivalent')}</p>
+                    )}
                   </div>
                   <div className="col-span-2">
                     <Input label={idx === 0 ? t('manufacturing.bom.quantity') : ''} type="number" value={String(line.quantity)} onChange={(e) => updateLine(idx, 'quantity', Number(e.target.value))} />

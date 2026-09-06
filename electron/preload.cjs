@@ -64,6 +64,11 @@ contextBridge.exposeInMainWorld('electronDB', {
     getProducts: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProducts', { ...payload, sessionToken }),
     createProduct: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProduct', { ...payload, sessionToken }),
     createProductCategories: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProductCategories', { ...payload, sessionToken }),
+    getProductUnits: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProductUnits', { ...payload, sessionToken }),
+    ensureBaseProductUnit: (payload) => ipcRenderer.invoke('db:rpc:inventory.ensureBaseProductUnit', { ...payload, sessionToken }),
+    createProductUnit: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProductUnit', { ...payload, sessionToken }),
+    updateProductUnit: (payload) => ipcRenderer.invoke('db:rpc:inventory.updateProductUnit', { ...payload, sessionToken }),
+    deleteProductUnit: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteProductUnit', { ...payload, sessionToken }),
   },
   contacts: {
     getCustomers: (payload) => ipcRenderer.invoke('db:rpc:contacts.getCustomers', { ...payload, sessionToken }),

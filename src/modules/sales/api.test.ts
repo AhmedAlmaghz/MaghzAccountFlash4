@@ -908,3 +908,112 @@ describe('salesApi.getInvoicesPaginated owner filter', () => {
     expect(countSql).toMatch(/WHERE i\.company_id = \$1/);
   });
 });
+
+describe('salesApi line unit snapshots (multi-unit)', () => {
+  const PRODUCT_ID = '00000000-0000-0000-0000-000000000040';
+  const UNIT_ROW_ID = '00000000-0000-0000-0000-000000000041';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function baseInvoice(lines: unknown[]) {
+    return {
+      companyId: COMPANY_ID,
+      invoiceNumber: 'INV-U1',
+      customerId: CUSTOMER_ID,
+      date: '2026-06-01',
+      dueDate: undefined,
+      subtotal: 24000,
+      discountAmount: 0,
+      vatAmount: 0,
+      totalAmount: 24000,
+      paidAmount: 0,
+      currencyCode: 'YER',
+      exchangeRate: 1,
+      status: 'draft',
+      notes: '',
+      lines,
+    } as never;
+  }
+
+  it('persists unit triple appended at the end of line params (2 cartons x12)', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql: string, params: unknown[]) => {
+      captured.push({ sql, params });
+      return { success: true, rows: [{ id: 'inv-1' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.createInvoice(baseInvoice([{
+      productId: PRODUCT_ID, quantity: 2, unitPrice: 12000,
+      discountPercent: 0, vatPercent: 0, lineTotal: 24000,
+      unitId: UNIT_ROW_ID, unitFactor: 12, baseQuantity: 24,
+    }]));
+    expect(res.success).toBe(true);
+    const cte = captured.find((c) => c.sql.startsWith('WITH inv AS'));
+    expect(cte).toBeDefined();
+    expect(cte!.sql).toMatch(/unit_id,unit_factor,base_quantity/);
+    // append-at-end: last three params are the unit triple
+    const p = cte!.params;
+    expect(p.slice(-3)).toEqual([UNIT_ROW_ID, 12, 24]);
+  });
+
+  it('server recomputes baseQuantity when the caller omits it (3 x 12 = 36)', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql: string, params: unknown[]) => {
+      captured.push({ sql, params });
+      return { success: true, rows: [{ id: 'inv-1' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.createInvoice(baseInvoice([{
+      productId: PRODUCT_ID, quantity: 3, unitPrice: 12000,
+      discountPercent: 0, vatPercent: 0, lineTotal: 36000,
+      unitId: UNIT_ROW_ID, unitFactor: 12,
+    }]));
+    expect(res.success).toBe(true);
+    const cte = captured.find((c) => c.sql.startsWith('WITH inv AS'));
+    expect(cte!.params.slice(-3)).toEqual([UNIT_ROW_ID, 12, 36]);
+  });
+
+  it('legacy lines without units keep factor 1 and base = qty', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql: string, params: unknown[]) => {
+      captured.push({ sql, params });
+      return { success: true, rows: [{ id: 'inv-1' }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.createInvoice(baseInvoice([{
+      productId: PRODUCT_ID, quantity: 5, unitPrice: 1000,
+      discountPercent: 0, vatPercent: 0, lineTotal: 5000,
+    }]));
+    expect(res.success).toBe(true);
+    const cte = captured.find((c) => c.sql.startsWith('WITH inv AS'));
+    expect(cte!.params.slice(-3)).toEqual([null, 1, 5]);
+  });
+
+  it('stock posting consumes base_quantity with legacy fallback', async () => {
+    const captured: { sql: string }[] = [];
+    const adapter = makeMockAdapter(async (sql: string) => {
+      captured.push({ sql });
+      if (sql.startsWith('SELECT customer_id')) {
+        return {
+          success: true,
+          rows: [{ customer_id: CUSTOMER_ID, total_amount: 24000, paid_amount: 0, subtotal: 24000, vat_amount: 0, invoice_number: 'INV-U1', date: '2026-06-01', payment_type: 'credit', cash_box_id: null }],
+        };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: '00000000-0000-0000-0000-000000000050' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    // resolveExistingUserId + resolvePostingAccounts hit the adapter too —
+    // keep them quiet by returning empty rows for anything else.
+    const res = await salesApi.postInvoice(INVOICE_ID, COMPANY_ID);
+    expect(captured.some((c) => c.sql.includes('COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity)'))).toBe(true);
+    expect(res.success).toBe(true);
+  });
+});

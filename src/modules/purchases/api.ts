@@ -4,6 +4,7 @@ import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator'
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createSupplierSchema, createPurchaseInvoiceSchema, createPurchaseOrderSchema, createPurchaseReturnSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
+import { snapshotLineUnit } from '@/core/utils/unitConversion';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { getNextDocumentNumber } from '@/core/api';
 import { resolvePostingAccounts, buildPurchaseInvoicePostingStatements, buildPurchaseReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
@@ -82,6 +83,10 @@ function mapInvoiceLine(row: Record<string, unknown>): PurchaseInvoiceLine {
     barcode: row.barcode ? String(row.barcode) : undefined,
     sku: row.sku ? String(row.sku) : undefined,
     unit: row.unit ? String(row.unit) : undefined,
+    unitId: row.unit_id ? String(row.unit_id) : undefined,
+    unitFactor: row.unit_factor !== undefined && row.unit_factor !== null ? toNum(row.unit_factor) : 1,
+    baseQuantity: row.base_quantity !== undefined && row.base_quantity !== null ? toNum(row.base_quantity) : toNum(row.quantity),
+    unitName: row.unit_name ? String(row.unit_name) : undefined,
     description: row.description ? String(row.description) : undefined,
     quantity: toNum(row.quantity),
     unitPrice: toNum(row.unit_price || row.unitPrice),
@@ -126,6 +131,10 @@ function mapOrderLine(row: Record<string, unknown>): PurchaseOrderLine {
     barcode: row.barcode ? String(row.barcode) : undefined,
     sku: row.sku ? String(row.sku) : undefined,
     unit: row.unit ? String(row.unit) : undefined,
+    unitId: row.unit_id ? String(row.unit_id) : undefined,
+    unitFactor: row.unit_factor !== undefined && row.unit_factor !== null ? toNum(row.unit_factor) : 1,
+    baseQuantity: row.base_quantity !== undefined && row.base_quantity !== null ? toNum(row.base_quantity) : toNum(row.quantity),
+    unitName: row.unit_name ? String(row.unit_name) : undefined,
     description: row.description ? String(row.description) : undefined,
     quantity: toNum(row.quantity),
     unitPrice: toNum(row.unit_price || row.unitPrice),
@@ -170,6 +179,10 @@ function mapReturnLine(row: Record<string, unknown>): PurchaseReturnLine {
     barcode: row.barcode ? String(row.barcode) : undefined,
     sku: row.sku ? String(row.sku) : undefined,
     unit: row.unit ? String(row.unit) : undefined,
+    unitId: row.unit_id ? String(row.unit_id) : undefined,
+    unitFactor: row.unit_factor !== undefined && row.unit_factor !== null ? toNum(row.unit_factor) : 1,
+    baseQuantity: row.base_quantity !== undefined && row.base_quantity !== null ? toNum(row.base_quantity) : toNum(row.quantity),
+    unitName: row.unit_name ? String(row.unit_name) : undefined,
     description: row.description ? String(row.description) : undefined,
     quantity: toNum(row.quantity),
     unitPrice: toNum(row.unit_price || row.unitPrice),
@@ -660,8 +673,9 @@ export const purchasesApi = {
           const lc = line.currencyCode || currencyCode;
           const lr = line.exchangeRate ?? exchangeRate;
           const lb = line.baseCurrencyLineTotal ?? (line.lineTotal * lr);
+          const usnap = snapshotLineUnit(line);
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::numeric,$${off + 8},$${off + 9}::numeric,$${off + 10}::numeric)`);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::numeric,$${off + 8},$${off + 9}::numeric,$${off + 10}::numeric,$${off + 11}::uuid,$${off + 12}::numeric,$${off + 13}::numeric)`);
           params.push(
             invoiceId,
             line.productId,
@@ -673,9 +687,12 @@ export const purchasesApi = {
             lc,
             lr,
             lb,
+            usnap.unitId,
+            usnap.unitFactor,
+            usnap.baseQuantity,
           );
         }
-        sql += `,lines_ins AS (INSERT INTO purchase_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total) ON true)`;
+        sql += `,lines_ins AS (INSERT INTO purchase_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total,v.unit_id,v.unit_factor,v.base_quantity FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) ON true)`;
       }
       sql += ' SELECT id FROM inv';
       const result = await adapter.query(sql, params);
@@ -808,7 +825,7 @@ export const purchasesApi = {
         // Stock movements (in) for each line
         {
           sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
-                SELECT pi.company_id, pil.product_id, w.warehouse_id, 'in', pil.quantity, pi.invoice_number, 'فاتورة مشتريات', NOW()
+                SELECT pi.company_id, pil.product_id, w.warehouse_id, 'in', COALESCE(NULLIF(pil.base_quantity, 0), pil.quantity), pi.invoice_number, 'فاتورة مشتريات', NOW()
                   FROM purchase_invoices pi
                   JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
                   CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
@@ -819,7 +836,7 @@ export const purchasesApi = {
         {
           sql: `UPDATE stock s SET quantity = s.quantity + sub.qty, updated_at = NOW()
                   FROM (
-                    SELECT pil.product_id, w.warehouse_id, SUM(pil.quantity) AS qty
+                    SELECT pil.product_id, w.warehouse_id, SUM(COALESCE(NULLIF(pil.base_quantity, 0), pil.quantity)) AS qty
                       FROM purchase_invoices pi
                       JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
                       CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
@@ -971,10 +988,11 @@ export const purchasesApi = {
         const lineValues: string[] = [];
         for (const line of data.lines) {
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric)`);
-          params.push(orderId, line.productId, line.quantity, line.unitPrice, line.lineTotal);
+          const usnap = snapshotLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::uuid,$${off + 7}::numeric,$${off + 8}::numeric)`);
+          params.push(orderId, line.productId, line.quantity, line.unitPrice, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO purchase_order_lines (order_id,product_id,quantity,unit_price,line_total) SELECT v.order_id,v.product_id,v.quantity,v.unit_price,v.line_total FROM ord JOIN (VALUES ${lineValues.join(',')}) v(order_id,product_id,quantity,unit_price,line_total) ON true)`;
+        sql += `,lines_ins AS (INSERT INTO purchase_order_lines (order_id,product_id,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity) SELECT v.order_id,v.product_id,v.quantity,v.unit_price,v.line_total,v.unit_id,v.unit_factor,v.base_quantity FROM ord JOIN (VALUES ${lineValues.join(',')}) v(order_id,product_id,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity) ON true)`;
       }
       sql += ' SELECT id FROM ord';
       const result = await adapter.query(sql, params);
@@ -1067,6 +1085,9 @@ export const purchasesApi = {
           productId: l.productId,
           description: l.description,
           quantity: l.quantity,
+          unitId: l.unitId,
+          unitFactor: l.unitFactor,
+          baseQuantity: l.baseQuantity,
           unitPrice: l.unitPrice,
           discountPercent: 0,
           vatPercent: 0,
@@ -1197,10 +1218,11 @@ export const purchasesApi = {
         const lineValues: string[] = [];
         for (const line of data.lines) {
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3},$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric)`);
-          params.push(returnId, line.productId, line.description ?? null, line.quantity, line.unitPrice, line.lineTotal);
+          const usnap = snapshotLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3},$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::uuid,$${off + 8}::numeric,$${off + 9}::numeric)`);
+          params.push(returnId, line.productId, line.description ?? null, line.quantity, line.unitPrice, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO purchase_return_lines (return_id,product_id,description,quantity,unit_price,line_total) SELECT v.return_id,v.product_id,v.description,v.quantity,v.unit_price,v.line_total FROM ret JOIN (VALUES ${lineValues.join(',')}) v(return_id,product_id,description,quantity,unit_price,line_total) ON true)`;
+        sql += `,lines_ins AS (INSERT INTO purchase_return_lines (return_id,product_id,description,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity) SELECT v.return_id,v.product_id,v.description,v.quantity,v.unit_price,v.line_total,v.unit_id,v.unit_factor,v.base_quantity FROM ret JOIN (VALUES ${lineValues.join(',')}) v(return_id,product_id,description,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity) ON true)`;
       }
       sql += ' SELECT id FROM ret';
       const result = await adapter.query(sql, params);

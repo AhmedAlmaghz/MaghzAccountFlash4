@@ -28,6 +28,9 @@ import { salesApi } from '../api';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
+import { ProductUnitSelect } from '@/core/ui/components/smart';
+import { toBaseQty } from '@/core/utils/unitConversion';
+import type { ProductUnit } from '@/modules/inventory/types';
 import type { SalesInvoice, SalesInvoiceLine, InvoiceAttachment } from '../types';
 import type { Product } from '@/modules/inventory/types';
 
@@ -35,6 +38,11 @@ interface InvoiceLineForm {
   productId: string;
   productName: string;
   quantity: number;
+  /** Chosen product_units row id + frozen factor + base qty (stock truth). */
+  unitId?: string;
+  unitFactor?: number;
+  baseQuantity?: number;
+  unitName?: string;
   unitPrice: number;
   discountPercent: number;
   vatPercent: number;
@@ -96,7 +104,7 @@ export const InvoicesPage: React.FC = () => {
   const docDuplicateConfirmedRef = useRef(false);
 
   const defaultLine = useCallback((): InvoiceLineForm => ({
-    productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0, vatPercent: settings?.vatRate || 15,
+    productId: '', productName: '', quantity: 1, unitId: undefined, unitFactor: 1, baseQuantity: 1, unitName: undefined, unitPrice: 0, discountPercent: 0, vatPercent: settings?.vatRate || 15,
   }), [settings?.vatRate]);
 
   const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
@@ -106,6 +114,12 @@ export const InvoicesPage: React.FC = () => {
   const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
   const [invoiceDiscountType, setInvoiceDiscountType] = useState<'amount' | 'percent'>('amount');
+  // Cache of each line-product's units (fed by ProductUnitSelect) so unit
+  // switches can tell auto-filled prices apart from manual entries.
+  const [lineUnitsCache, setLineUnitsCache] = useState<Record<string, ProductUnit[]>>({});
+  const cacheProductUnits = useCallback((productId: string, units: ProductUnit[]) => {
+    setLineUnitsCache((prev) => (prev[productId] === units ? prev : { ...prev, [productId]: units }));
+  }, []);
   const showDiscount = settings?.invoiceShowDiscount ?? true;
   const showVat = settings?.invoiceShowVat ?? true;
 
@@ -160,6 +174,10 @@ export const InvoicesPage: React.FC = () => {
       productId: l.productId,
       productName: l.productName || l.productId,
       quantity: l.quantity,
+      unitId: l.unitId,
+      unitFactor: l.unitFactor ?? 1,
+      baseQuantity: l.baseQuantity ?? l.quantity,
+      unitName: l.unitName || l.unit,
       unitPrice: l.unitPrice,
       discountPercent: l.discountPercent,
       vatPercent: l.vatPercent,
@@ -195,15 +213,21 @@ export const InvoicesPage: React.FC = () => {
       if (field === 'productId' && typeof value === 'string') {
         next[idx].productName = value;
       }
+      // Keep the base quantity in sync — stock postings consume it, never
+      // the display quantity.
+      if (field === 'quantity' && typeof value === 'number') {
+        next[idx].baseQuantity = toBaseQty(value, next[idx].unitFactor ?? 1);
+      }
       return next;
     });
   };
 
   /**
-   * When the user picks a product from the dropdown, auto-fill the unit price
-   * with the product's sale price (in the chosen invoice currency). If the
-   * line was previously empty (price = 0) we always overwrite; otherwise we
-   * leave the user's manual entry intact to avoid surprising edits.
+   * When the user picks a product from the dropdown, reset the unit choice
+   * (ProductUnitSelect auto-picks the default sale unit, which then prices
+   * the line via handleUnitChange). If the line was previously empty
+   * (price = 0) seed the base sale price immediately so the row never
+   * flashes a zero price while units load.
    */
   const handleProductChange = useCallback((idx: number, product: Product) => {
     setLines(prev => {
@@ -212,11 +236,38 @@ export const InvoicesPage: React.FC = () => {
       next[idx] = {
         ...current,
         productName: product.nameAr,
+        unitId: undefined,
+        unitFactor: 1,
+        baseQuantity: current.quantity,
+        unitName: undefined,
         unitPrice: current.unitPrice > 0 ? current.unitPrice : product.salePrice,
       };
       return next;
     });
   }, []);
+
+  /**
+   * Unit switch: adopt the unit's own sale price unless the user typed a
+   * custom price (i.e. current price matches no known unit price for this
+   * product). Base quantity is always recomputed.
+   */
+  const handleUnitChange = useCallback((idx: number, unit: ProductUnit | null) => {
+    setLines(prev => {
+      const next = [...prev];
+      const current = next[idx];
+      const known = lineUnitsCache[current.productId] || [];
+      const isAutoPrice = current.unitPrice === 0 || known.some((u) => u.salePrice === current.unitPrice);
+      next[idx] = {
+        ...current,
+        unitId: unit?.id,
+        unitFactor: unit?.factor ?? 1,
+        baseQuantity: toBaseQty(current.quantity, unit?.factor ?? 1),
+        unitName: unit?.unitName,
+        unitPrice: unit && isAutoPrice ? unit.salePrice : current.unitPrice,
+      };
+      return next;
+    });
+  }, [lineUnitsCache]);
 
   const calculations = useMemo(() => {
     const lineDiscountTotal = showDiscount ? lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
@@ -251,6 +302,10 @@ export const InvoicesPage: React.FC = () => {
         productId: l.productId,
         productName: l.productName,
         quantity: l.quantity,
+        unitId: l.unitId,
+        unitFactor: l.unitFactor ?? 1,
+        baseQuantity: toBaseQty(l.quantity, l.unitFactor ?? 1),
+        unitName: l.unitName,
         unitPrice: l.unitPrice,
         discountPercent: effectiveDiscount,
         vatPercent: showVat ? 0 : l.vatPercent,
@@ -474,7 +529,7 @@ export const InvoicesPage: React.FC = () => {
         productName: l.productName,
         barcode: l.barcode,
         sku: l.sku,
-        unit: l.unit,
+        unit: l.unitName || l.unit,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
         total: l.lineTotal,
@@ -844,7 +899,8 @@ export const InvoicesPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
-                    <th className="px-4 py-3 text-right font-semibold w-[48%]">{t('inventory.productName')}</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[36%]">{t('inventory.productName')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-32">{t('sales.line.unit')}</th>
                     <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
                     <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
                     {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
@@ -869,6 +925,20 @@ export const InvoicesPage: React.FC = () => {
                             size="sm"
                             module="sales"
                           />
+                        </td>
+                        <td className="px-2 py-2">
+                          <ProductUnitSelect
+                            companyId={activeCompany?.id || ''}
+                            productId={line.productId}
+                            value={line.unitId}
+                            onChange={(u) => handleUnitChange(idx, u)}
+                            onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
+                            mode="sale"
+                            size="sm"
+                          />
+                          {(line.unitFactor ?? 1) > 1 && (
+                            <p className="text-[10px] text-slate-400 text-center mt-0.5 tabular-nums">≈ {line.baseQuantity} {t('sales.line.baseEquivalent')}</p>
+                          )}
                         </td>
                         <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" /></td>
                         <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" /></td>
@@ -902,6 +972,15 @@ export const InvoicesPage: React.FC = () => {
                       <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
                       <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
                     </div>
+                    <ProductUnitSelect
+                      companyId={activeCompany?.id || ''}
+                      productId={line.productId}
+                      value={line.unitId}
+                      onChange={(u) => handleUnitChange(idx, u)}
+                      onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
+                      mode="sale"
+                      size="sm"
+                    />
                     {showDiscount && <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" />}
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
@@ -1056,7 +1135,7 @@ export const InvoicesPage: React.FC = () => {
                       <td className="px-3 py-2 font-medium">{l.productName || l.productId}</td>
                       <td className="px-3 py-2 text-slate-500 font-mono text-xs">{l.productCode || '-'}</td>
                       <td className="px-3 py-2 text-slate-500 font-mono text-xs">{l.barcode || '-'}</td>
-                      <td className="px-3 py-2 text-slate-500">{l.unit || '-'}</td>
+                      <td className="px-3 py-2 text-slate-500">{l.unitName || l.unit || '-'}</td>
                       <td className="px-3 py-2">{l.quantity}</td>
                       <td className="px-3 py-2">{formatCurrency(l.unitPrice)}</td>
                       <td className="px-3 py-2 font-medium">{formatCurrency(l.lineTotal)}</td>

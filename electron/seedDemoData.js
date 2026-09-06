@@ -606,6 +606,36 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
     }
   }
 
+  // ─── 14b. Product units: base row per product + demo multi-unit rows ────
+  console.log('[SEED] Inserting product units...');
+  for (const [, productId] of productIdByCode) {
+    await client.query(
+      `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
+       SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
+         FROM products p JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)`,
+      [productId, companyId]
+    );
+  }
+  // Demo multi-unit: tuna carton of 48 (default sale/purchase) + oil carton
+  // of 6. Custom prices on purpose — per-unit pricing, not factor math.
+  const demoUnits = [
+    { product: 'PRD-008', unitCode: 'CTN', factor: 48, sale: 35000, purchase: 31200, defSale: true, defPurch: true },
+    { product: 'PRD-002', unitCode: 'CTN', factor: 6, sale: 28000, purchase: 25200, defSale: false, defPurch: false },
+  ];
+  for (const d of demoUnits) {
+    const pid = productIdByCode.get(d.product);
+    if (!pid) continue;
+    await client.query(
+      `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
+       SELECT $1::uuid, $2::uuid, u.id, $3::numeric, $4::numeric, $5::numeric, false, $6, $7
+         FROM units u WHERE u.company_id = $1::uuid AND u.code = $8::text
+         AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = $2::uuid AND pu.unit_id = u.id)`,
+      [companyId, pid, d.factor, d.sale, d.purchase, d.defSale, d.defPurch, d.unitCode]
+    );
+  }
+
   // ─── 15. Warehouses ──────────────────────────────────────────────────────
   console.log('[SEED] Inserting warehouses...');
   const whIdByCode = new Map();

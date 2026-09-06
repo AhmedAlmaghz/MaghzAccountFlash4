@@ -1,10 +1,49 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { mapRows } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { z } from 'zod';
-import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createProductSchema, createWarehouseSchema, createStockTransferSchema, createStockAdjustmentSchema, createInventoryTransactionSchema, createProductCategorySchema } from '@/core/utils/validation';
+import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createProductSchema, createProductUnitSchema, updateProductUnitSchema, createWarehouseSchema, createStockTransferSchema, createStockAdjustmentSchema, createInventoryTransactionSchema, createProductCategorySchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
-import type { Product, Warehouse, Stock, StockItem, StockTransfer, InventoryTransaction, StockAdjustment, ProductCategory } from './types';
+import type { Product, ProductUnit, Warehouse, Stock, StockItem, StockTransfer, InventoryTransaction, StockAdjustment, ProductCategory } from './types';
+
+// Typed RPC bridge for Inventory product-units. In Electron the renderer
+// sends a structured payload and the main process derives `company_id`
+// from the authenticated session. Fallback (PGlite / e2e) uses
+// `adapter.query` with explicit `company_id = $N` filters.
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokeInventoryRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
+  const inventory = (typeof window !== 'undefined' && (window as unknown as { electronDB?: { inventory?: Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined> } }).electronDB?.inventory) || undefined;
+  const fn = inventory?.[method];
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    return await fn.call(inventory, payload);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function mapProductUnitRow(row: Record<string, unknown>): ProductUnit {
+  return {
+    id: String(row.id),
+    companyId: String(row.company_id),
+    productId: String(row.product_id),
+    unitId: String(row.unit_id),
+    unitName: row.unit_name ? String(row.unit_name) : (row.unit_name_en ? String(row.unit_name_en) : (row.unit_code ? String(row.unit_code) : undefined)),
+    unitCode: row.unit_code ? String(row.unit_code) : undefined,
+    factor: Number(row.factor) || 1,
+    salePrice: Number(row.sale_price) || 0,
+    purchasePrice: Number(row.purchase_price) || 0,
+    barcode: row.barcode ? String(row.barcode) : undefined,
+    isBase: row.is_base === true || row.is_base === 'true' || row.is_base === 1,
+    isDefaultSale: row.is_default_sale === true || row.is_default_sale === 'true' || row.is_default_sale === 1,
+    isDefaultPurchase: row.is_default_purchase === true || row.is_default_purchase === 'true' || row.is_default_purchase === 1,
+  };
+}
+
+const PRODUCT_UNITS_SELECT = `SELECT pu.*,
+  u.name_ar AS unit_name, u.name_en AS unit_name_en, u.code AS unit_code
+  FROM product_units pu JOIN units u ON u.id = pu.unit_id`;
 
 export const inventoryApi = {
   // ─── Products ─────────────────────────────────────────────────────────────
@@ -103,6 +142,9 @@ export const inventoryApi = {
       const created = await adapter.createProduct(payload);
       if (!created.success || !created.id) return { success: false, error: created.error };
       const productId = String(created.id);
+      // Every product owns at least its base unit row (migration 0021
+      // backfills history; this covers newly created products).
+      await inventoryApi.ensureBaseProductUnit(productId, data.companyId);
       // Opening stock: movement + stock row + balanced JE (Dr Inventory / Cr Opening Equity)
       const openingQty = Number(data.openingStockQty) || 0;
       if (productId && openingQty > 0 && !data.openingStockPosted) {
@@ -140,7 +182,24 @@ export const inventoryApi = {
       return adapter.query(
         `UPDATE products SET name_ar = $1, name_en = $2, code = $3, barcode = $4, sku = $5, unit = $6, cost_price = $7, sale_price = $8, is_active = $9, image = $10, min_stock = $11, max_stock = $12, reorder_point = $13, category_id = $14, product_type_id = $15, updated_by = $16, updated_at = NOW() WHERE id = $17 AND company_id = $18`,
         [data.nameAr, data.nameEn, data.code, data.barcode, data.sku, data.unit, data.costPrice, data.salePrice, data.isActive, data.image, data.minStock, data.maxStock, data.reorderPoint, data.categoryId ?? null, data.productTypeId ?? null, _updatedBy ?? data.updatedBy ?? null, id, companyId]
-      );
+      ).then(async (res) => {
+        // The base unit row mirrors the product card prices by definition.
+        if (res.success && (data.costPrice !== undefined || data.salePrice !== undefined)) {
+          const syncFields: string[] = [];
+          const syncParams: unknown[] = [];
+          let sIdx = 1;
+          if (data.salePrice !== undefined) { syncFields.push(`sale_price = $${sIdx++}::numeric`); syncParams.push(data.salePrice); }
+          if (data.costPrice !== undefined) { syncFields.push(`purchase_price = $${sIdx++}::numeric`); syncParams.push(data.costPrice); }
+          syncFields.push('updated_at = NOW()');
+          syncParams.push(id);
+          syncParams.push(companyId);
+          await adapter.query(
+            `UPDATE product_units SET ${syncFields.join(', ')} WHERE product_id = $${sIdx++}::uuid AND company_id = $${sIdx}::uuid AND is_base`,
+            syncParams
+          );
+        }
+        return res;
+      });
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -152,6 +211,148 @@ export const inventoryApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       return adapter.query('DELETE FROM products WHERE id = $1 AND company_id = $2', [id, companyId]);
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // ─── Product Units (Multi-unit) ─────────────────────────────────────────
+  async getProductUnits(productId: string, companyId: string): Promise<{ success: boolean; data?: ProductUnit[]; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id: productId, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeInventoryRpc('getProductUnits', { productId });
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: (result.rows || []).map(mapProductUnitRow) };
+      }
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `${PRODUCT_UNITS_SELECT} WHERE pu.product_id = $1::uuid AND pu.company_id = $2::uuid ORDER BY pu.is_base DESC, pu.factor`,
+        [productId, companyId]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, data: (result.rows || []).map((r) => mapProductUnitRow(r as Record<string, unknown>)) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * Ensure the product has at least its base unit row (idempotent).
+   * Called after product creation and lazily before unit reads so legacy
+   * products (created before migration 0021 backfill gaps) self-heal.
+   */
+  async ensureBaseProductUnit(productId: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id: productId, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeInventoryRpc('ensureBaseProductUnit', { productId });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
+      const adapter = await getDbAdapter();
+      const result = await adapter.query(
+        `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
+         SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
+           FROM products p
+           JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
+          WHERE p.id = $1::uuid AND p.company_id = $2::uuid
+            AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)`,
+        [productId, companyId]
+      );
+      return result.success ? { success: true } : { success: false, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async createProductUnit(data: Omit<ProductUnit, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const validation = validateInput(createProductUnitSchema, data);
+      if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeInventoryRpc('createProductUnit', { ...data });
+        if (!result.success || !result.rows?.[0]) return { success: false, error: result.error };
+        return { success: true, id: String((result.rows[0] as Record<string, unknown>).id) };
+      }
+      const adapter = await getDbAdapter();
+      const v = validation.data;
+      const result = await adapter.query(
+        `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`,
+        [v.companyId, v.productId, v.unitId, v.factor, v.salePrice ?? 0, v.purchasePrice ?? 0, v.barcode ?? null, v.isBase ?? false, v.isDefaultSale ?? false, v.isDefaultPurchase ?? false]
+      );
+      if (!result.success || !result.rows?.[0]) return { success: false, error: result.error };
+      return { success: true, id: String((result.rows[0] as Record<string, unknown>).id) };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async updateProductUnit(id: string, companyId: string, data: Partial<Omit<ProductUnit, 'id' | 'companyId' | 'productId'>>, _userId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      const validation = validateInput(updateProductUnitSchema, data);
+      if (!validation.success) return { success: false, error: validation.error };
+      if (isElectronPg()) {
+        const result = await invokeInventoryRpc('updateProductUnit', { data: { id, ...validation.data } });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
+      const adapter = await getDbAdapter();
+      const v = validation.data;
+      const fields: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+      if (v.unitId !== undefined) { fields.push(`unit_id = $${idx++}::uuid`); params.push(v.unitId); }
+      if (v.factor !== undefined) { fields.push(`factor = $${idx++}::numeric`); params.push(v.factor); }
+      if (v.salePrice !== undefined) { fields.push(`sale_price = $${idx++}::numeric`); params.push(v.salePrice); }
+      if (v.purchasePrice !== undefined) { fields.push(`purchase_price = $${idx++}::numeric`); params.push(v.purchasePrice); }
+      if (v.barcode !== undefined) { fields.push(`barcode = $${idx++}`); params.push(v.barcode); }
+      if (v.isBase !== undefined) { fields.push(`is_base = $${idx++}`); params.push(v.isBase); }
+      if (v.isDefaultSale !== undefined) { fields.push(`is_default_sale = $${idx++}`); params.push(v.isDefaultSale); }
+      if (v.isDefaultPurchase !== undefined) { fields.push(`is_default_purchase = $${idx++}`); params.push(v.isDefaultPurchase); }
+      fields.push('updated_at = NOW()');
+      if (fields.length === 1) return { success: true };
+      params.push(id);
+      params.push(companyId);
+      return adapter.query(
+        `UPDATE product_units SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`,
+        params
+      );
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  async deleteProductUnit(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const idValidation = validateInput(idCompanySchema, { id, companyId });
+      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeInventoryRpc('deleteProductUnit', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0] as Record<string, unknown> | undefined;
+        if (!row || !row.deleted) {
+          const remaining = Number(row?.remaining) || 0;
+          if (remaining <= 1) return { success: false, error: 'Cannot delete the only unit of a product.' };
+          return { success: false, error: 'Unit not found' };
+        }
+        return { success: true };
+      }
+      const adapter = await getDbAdapter();
+      // Guard: never delete the last remaining unit row of a product.
+      const check = await adapter.query(
+        'SELECT id, is_base FROM product_units WHERE product_id = (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid) AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success) return { success: false, error: check.error };
+      const rows = check.rows || [];
+      if (rows.length <= 1) {
+        return { success: false, error: 'Cannot delete the only unit of a product.' };
+      }
+      return adapter.query('DELETE FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
     } catch (e) {
       return { success: false, error: String(e) };
     }

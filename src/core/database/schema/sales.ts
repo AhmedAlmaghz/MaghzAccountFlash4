@@ -58,6 +58,11 @@ export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   invoiceId: uuid('invoice_id').notNull().references(() => salesInvoices.id, { onDelete: 'cascade' }),
   productId: uuid('product_id').notNull(),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
+  // Multi-unit snapshot: chosen unit + frozen factor + qty in base unit.
+  // Stock postings consume baseQuantity only (COALESCE fallback = quantity).
+  unitId: uuid('unit_id'),
+  unitFactor: numeric('unit_factor', { precision: 18, scale: 6 }).notNull().default('1'),
+  baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
   vatPercent: numeric('vat_percent', { precision: 5, scale: 2 }).default('15'),
@@ -92,6 +97,9 @@ export const quotationLines = pgTable('quotation_lines', {
   quotationId: uuid('quotation_id').notNull().references(() => quotations.id, { onDelete: 'cascade' }),
   productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'restrict' }),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
+  unitId: uuid('unit_id'),
+  unitFactor: numeric('unit_factor', { precision: 18, scale: 6 }).notNull().default('1'),
+  baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
@@ -125,6 +133,9 @@ export const salesReturnLines = pgTable('sales_return_lines', {
   returnId: uuid('return_id').notNull().references(() => salesReturns.id, { onDelete: 'cascade' }),
   productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'restrict' }),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
+  unitId: uuid('unit_id'),
+  unitFactor: numeric('unit_factor', { precision: 18, scale: 6 }).notNull().default('1'),
+  baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
 });

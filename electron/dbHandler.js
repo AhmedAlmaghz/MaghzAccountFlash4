@@ -359,7 +359,7 @@ const SQL_MODULE_TABLE_RULES = [
       'hr.create', 'hr.edit',
     ],
   },
-  { module: 'inventory', tables: ['products', 'product_types', 'product_categories', 'product_product_categories', 'stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'] },
+  { module: 'inventory', tables: ['products', 'product_types', 'product_categories', 'product_product_categories', 'product_units', 'stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'] },
   // Warehouses & stock movements are touched by cross-module posting flows:
   // completing a work order books material consumption (out) and finished
   // goods (in) against the first warehouse. Warehouses is reference data
@@ -871,6 +871,107 @@ export function registerDatabaseHandlers() {
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  // ── inventory product_units (multi-unit, migration 0021) ──────────
+  // Session-derived company scoping: the renderer never sends company_id.
+
+  // inventory.getProductUnits — units of one product with catalog names.
+  registerRpc('inventory.getProductUnits', {
+    paramCount: 2,
+    validate: (p) => { if (!p.productId) throw new Error('productId required'); },
+    compose: (p, session) => ({
+      sql: `SELECT pu.*, u.name_ar AS unit_name, u.name_en AS unit_name_en, u.code AS unit_code
+              FROM product_units pu JOIN units u ON u.id = pu.unit_id
+             WHERE pu.product_id = $1::uuid AND pu.company_id = $2::uuid
+             ORDER BY pu.is_base DESC, pu.factor`,
+      params: [String(p.productId), session.user.companyId],
+    }),
+  });
+
+  // inventory.ensureBaseProductUnit — idempotent base-row backfill.
+  registerRpc('inventory.ensureBaseProductUnit', {
+    paramCount: 2,
+    validate: (p) => { if (!p.productId) throw new Error('productId required'); },
+    compose: (p, session) => ({
+      sql: `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
+            SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
+              FROM products p
+              JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
+             WHERE p.id = $1::uuid AND p.company_id = $2::uuid
+               AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)
+            RETURNING id`,
+      params: [String(p.productId), session.user.companyId],
+    }),
+  });
+
+  // inventory.createProductUnit
+  registerRpc('inventory.createProductUnit', {
+    paramCount: 10,
+    validate: (p) => {
+      if (!p.productId) throw new Error('productId required');
+      if (!p.unitId) throw new Error('unitId required');
+      if (!(Number(p.factor) > 0)) throw new Error('factor must be positive');
+    },
+    compose: (p, session) => ({
+      sql: `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
+            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`,
+      params: [
+        session.user.companyId,
+        String(p.productId),
+        String(p.unitId),
+        Number(p.factor),
+        Number(p.salePrice) || 0,
+        Number(p.purchasePrice) || 0,
+        p.barcode ?? null,
+        p.isBase === true,
+        p.isDefaultSale === true,
+        p.isDefaultPurchase === true,
+      ],
+    }),
+  });
+
+  // inventory.updateProductUnit — single-statement partial update.
+  registerRpc('inventory.updateProductUnit', {
+    paramCount: null,
+    validate: (p) => {
+      const d = p.data || {};
+      if (!d.id) throw new Error('id required');
+      if (d.factor !== undefined && !(Number(d.factor) > 0)) throw new Error('factor must be positive');
+    },
+    compose: (p, session) => {
+      const d = p.data || {};
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (d.unitId !== undefined) { fields.push(`unit_id = $${idx++}::uuid`); values.push(String(d.unitId)); }
+      if (d.factor !== undefined) { fields.push(`factor = $${idx++}::numeric`); values.push(Number(d.factor)); }
+      if (d.salePrice !== undefined) { fields.push(`sale_price = $${idx++}::numeric`); values.push(Number(d.salePrice) || 0); }
+      if (d.purchasePrice !== undefined) { fields.push(`purchase_price = $${idx++}::numeric`); values.push(Number(d.purchasePrice) || 0); }
+      if (d.barcode !== undefined) { fields.push(`barcode = $${idx++}`); values.push(d.barcode || null); }
+      if (d.isBase !== undefined) { fields.push(`is_base = $${idx++}`); values.push(d.isBase === true); }
+      if (d.isDefaultSale !== undefined) { fields.push(`is_default_sale = $${idx++}`); values.push(d.isDefaultSale === true); }
+      if (d.isDefaultPurchase !== undefined) { fields.push(`is_default_purchase = $${idx++}`); values.push(d.isDefaultPurchase === true); }
+      fields.push('updated_at = NOW()');
+      values.push(String(d.id), session.user.companyId);
+      return {
+        sql: `UPDATE product_units SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`,
+        params: values,
+      };
+    },
+  });
+
+  // inventory.deleteProductUnit — guarded: never delete the last unit row.
+  registerRpc('inventory.deleteProductUnit', {
+    paramCount: 2,
+    validate: (p) => { if (!p.id) throw new Error('id required'); },
+    compose: (p, session) => ({
+      sql: `WITH target AS (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid),
+            cnt AS (SELECT COUNT(*)::int AS n FROM product_units pu JOIN target t ON t.product_id = pu.product_id WHERE pu.company_id = $2::uuid),
+            del AS (DELETE FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid AND (SELECT n FROM cnt) > 1 RETURNING id)
+            SELECT (SELECT n FROM cnt) AS remaining, (SELECT id::text FROM del) AS deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
   });
 
   // contacts.getCustomers
@@ -2813,7 +2914,7 @@ export function registerDatabaseHandlers() {
   // sales.getPostedInvoicesWithLines
   registerRpc('sales.getPostedInvoicesWithLines', {
     compose: (p, session) => ({
-      sql: `SELECT i.*, c.name as customer_name, COALESCE(json_agg(json_build_object('id', l.id, 'invoice_id', l.invoice_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'vat_percent', l.vat_percent, 'line_total', l.line_total, 'currency_code', l.currency_code, 'exchange_rate', l.exchange_rate, 'base_currency_line_total', l.base_currency_line_total)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN sales_invoice_lines l ON l.invoice_id = i.id LEFT JOIN products p ON l.product_id = p.id WHERE i.company_id = $1::uuid AND i.status IN ('posted', 'partially_paid', 'paid') GROUP BY i.id, c.name ORDER BY i.date DESC`,
+      sql: `SELECT i.*, c.name as customer_name, COALESCE(json_agg(json_build_object('id', l.id, 'invoice_id', l.invoice_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'vat_percent', l.vat_percent, 'line_total', l.line_total, 'unit_id', l.unit_id, 'unit_factor', l.unit_factor, 'base_quantity', l.base_quantity, 'currency_code', l.currency_code, 'exchange_rate', l.exchange_rate, 'base_currency_line_total', l.base_currency_line_total)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN sales_invoice_lines l ON l.invoice_id = i.id LEFT JOIN products p ON l.product_id = p.id WHERE i.company_id = $1::uuid AND i.status IN ('posted', 'partially_paid', 'paid') GROUP BY i.id, c.name ORDER BY i.date DESC`,
       params: [session.user.companyId],
     }),
     paramCount: 1,
@@ -2836,14 +2937,29 @@ export function registerDatabaseHandlers() {
   // sales.getInvoiceById
   registerRpc('sales.getInvoiceById', {
     compose: (p, session) => ({
-      sql: `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active, COALESCE(json_agg(json_build_object('id', l.id, 'invoice_id', l.invoice_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'vat_percent', l.vat_percent, 'line_total', l.line_total, 'currency_code', l.currency_code, 'exchange_rate', l.exchange_rate, 'base_currency_line_total', l.base_currency_line_total)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN sales_invoice_lines l ON l.invoice_id = i.id LEFT JOIN products p ON l.product_id = p.id WHERE i.id = $1::uuid AND i.company_id = $2::uuid GROUP BY i.id, c.name, c.phone, c.email, c.address, c.tax_number, c.balance, c.is_active LIMIT 1`,
+      sql: `SELECT i.*, c.name as customer_name, c.phone as customer_phone, c.email as customer_email, c.address as customer_address, c.tax_number as customer_tax_number, c.balance as customer_balance, c.is_active as customer_is_active, COALESCE(json_agg(json_build_object('id', l.id, 'invoice_id', l.invoice_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'vat_percent', l.vat_percent, 'line_total', l.line_total, 'unit_id', l.unit_id, 'unit_factor', l.unit_factor, 'base_quantity', l.base_quantity, 'currency_code', l.currency_code, 'exchange_rate', l.exchange_rate, 'base_currency_line_total', l.base_currency_line_total)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id LEFT JOIN sales_invoice_lines l ON l.invoice_id = i.id LEFT JOIN products p ON l.product_id = p.id WHERE i.id = $1::uuid AND i.company_id = $2::uuid GROUP BY i.id, c.name, c.phone, c.email, c.address, c.tax_number, c.balance, c.is_active LIMIT 1`,
       params: [String(p.id), session.user.companyId],
     }),
     paramCount: 2,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
     },
-  });// sales.createInvoice
+  });// Multi-unit line snapshot (migration 0021): normalize the unit triple
+  // for document line INSERTs. Factor defaults to 1; baseQuantity is
+  // recomputed as qty × factor unless the caller already computed it.
+  // unitId is a pure snapshot (no FK) — null means "base/legacy".
+  function snapLineUnit(line) {
+    const qty = Number(line.quantity) || 0;
+    const factor = Number(line.unitFactor) > 0 ? Number(line.unitFactor) : 1;
+    const rawBase = line.baseQuantity;
+    const base = rawBase !== undefined && rawBase !== null && rawBase !== ''
+      ? Number(rawBase) || qty * factor
+      : qty * factor;
+    const unitId = typeof line.unitId === 'string' && line.unitId ? line.unitId : null;
+    return { unitId, unitFactor: factor, baseQuantity: base };
+  }
+
+  // sales.createInvoice
   registerRpc('sales.createInvoice', {
     compose: (p, session) => {
       const cid = session.user.companyId;
@@ -2857,10 +2973,11 @@ export function registerDatabaseHandlers() {
           const off = params.length;
           const lineRate = line.exchangeRate !== undefined && line.exchangeRate !== null ? Number(line.exchangeRate) : lr;
           const lineBaseTotal = line.baseCurrencyLineTotal !== undefined && line.baseCurrencyLineTotal !== null ? Number(line.baseCurrencyLineTotal) : (Number(line.lineTotal) || 0) * lineRate;
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::varchar, $${off + 8}::numeric, $${off + 9}::numeric)`);
-          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal);
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::varchar, $${off + 8}::numeric, $${off + 9}::numeric, $${off + 10}::uuid, $${off + 11}::numeric, $${off + 12}::numeric)`);
+          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total) ON true)`;
+        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total, v.unit_id, v.unit_factor, v.base_quantity FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) ON true)`;
       }
       sql += ' SELECT id FROM inv';
       return { sql, params };
@@ -2936,10 +3053,11 @@ export function registerDatabaseHandlers() {
           const off = lineParams.length;
           const lineRate = line.exchangeRate !== undefined && line.exchangeRate !== null ? Number(line.exchangeRate) : lr;
           const lineBaseTotal = line.baseCurrencyLineTotal !== undefined && line.baseCurrencyLineTotal !== null ? Number(line.baseCurrencyLineTotal) : (Number(line.lineTotal) || 0) * lineRate;
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10})`);
-          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal);
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`);
+          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        await execQuery(client, `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total) VALUES ${lineValues.join(', ')}`, lineParams);
+        await execQuery(client, `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues.join(', ')}`, lineParams);
       }
       await client.query('COMMIT');
       return { success: true };
@@ -3001,7 +3119,7 @@ export function registerDatabaseHandlers() {
   // sales.getQuotationById
   registerRpc('sales.getQuotationById', {
     compose: (p, session) => ({
-      sql: `SELECT q.*, c.name as customer_name, COALESCE(json_agg(json_build_object('id', l.id, 'quotation_id', l.quotation_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'line_total', l.line_total)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN quotation_lines l ON l.quotation_id = q.id LEFT JOIN products p ON l.product_id = p.id WHERE q.id = $1::uuid AND q.company_id = $2::uuid GROUP BY q.id, c.name LIMIT 1`,
+      sql: `SELECT q.*, c.name as customer_name, COALESCE(json_agg(json_build_object('id', l.id, 'quotation_id', l.quotation_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'line_total', l.line_total, 'unit_id', l.unit_id, 'unit_factor', l.unit_factor, 'base_quantity', l.base_quantity)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id LEFT JOIN quotation_lines l ON l.quotation_id = q.id LEFT JOIN products p ON l.product_id = p.id WHERE q.id = $1::uuid AND q.company_id = $2::uuid GROUP BY q.id, c.name LIMIT 1`,
       params: [String(p.id), session.user.companyId],
     }),
     paramCount: 2,
@@ -3021,10 +3139,11 @@ export function registerDatabaseHandlers() {
         const lineValues = [];
         for (const line of p.lines) {
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric)`);
-          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.lineTotal) || 0);
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::uuid, $${off + 7}::numeric, $${off + 8}::numeric)`);
+          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.lineTotal) || 0, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total) SELECT quo.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.line_total FROM quo JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, line_total) ON true)`;
+        sql += `,lines_ins AS (INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity) SELECT quo.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.line_total, v.unit_id, v.unit_factor, v.base_quantity FROM quo JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity) ON true)`;
       }
       sql += ' SELECT id FROM quo';
       return { sql, params };
@@ -3075,10 +3194,11 @@ export function registerDatabaseHandlers() {
         const lineParams = [];
         for (const line of p.lines) {
           const off = lineParams.length;
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6})`);
-          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.lineTotal) || 0);
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}::uuid, $${off + 8}, $${off + 9})`);
+          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.lineTotal) || 0, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        await execQuery(client, `INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total) VALUES ${lineValues.join(', ')}`, lineParams);
+        await execQuery(client, `INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues.join(', ')}`, lineParams);
       }
       await client.query('COMMIT');
       return { success: true };
@@ -3128,7 +3248,7 @@ export function registerDatabaseHandlers() {
   // sales.getReturnById
   registerRpc('sales.getReturnById', {
     compose: (p, session) => ({
-      sql: `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref, COALESCE(json_agg(json_build_object('id', l.id, 'return_id', l.return_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'discount_percent', l.discount_percent, 'line_total', l.line_total)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id LEFT JOIN sales_return_lines l ON l.return_id = r.id LEFT JOIN products p ON l.product_id = p.id WHERE r.id = $1::uuid AND r.company_id = $2::uuid GROUP BY r.id, c.name, i.invoice_number LIMIT 1`,
+      sql: `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref, COALESCE(json_agg(json_build_object('id', l.id, 'return_id', l.return_id, 'product_id', l.product_id, 'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode, 'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price, 'line_total', l.line_total, 'unit_id', l.unit_id, 'unit_factor', l.unit_factor, 'base_quantity', l.base_quantity)) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id LEFT JOIN sales_return_lines l ON l.return_id = r.id LEFT JOIN products p ON l.product_id = p.id WHERE r.id = $1::uuid AND r.company_id = $2::uuid GROUP BY r.id, c.name, i.invoice_number LIMIT 1`,
       params: [String(p.id), session.user.companyId],
     }),
     paramCount: 2,
@@ -3148,10 +3268,11 @@ export function registerDatabaseHandlers() {
         const lineValues = [];
         for (const line of p.lines) {
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric)`);
-          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0);
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::uuid, $${off + 6}::numeric, $${off + 7}::numeric)`);
+          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total) SELECT ret.id, v.product_id, v.quantity, v.unit_price, v.line_total FROM ret JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, line_total) ON true)`;
+        sql += `,lines_ins AS (INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity) SELECT ret.id, v.product_id, v.quantity, v.unit_price, v.line_total, v.unit_id, v.unit_factor, v.base_quantity FROM ret JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity) ON true)`;
       }
       sql += ' SELECT id FROM ret';
       return { sql, params };
@@ -3207,10 +3328,11 @@ export function registerDatabaseHandlers() {
         const lineParams = [];
         for (const line of p.lines) {
           const off = lineParams.length;
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5})`);
-          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0);
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}::uuid, $${off + 7}, $${off + 8})`);
+          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        await execQuery(client, `INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total) VALUES ${lineValues.join(', ')}`, lineParams);
+        await execQuery(client, `INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues.join(', ')}`, lineParams);
       }
       await client.query('COMMIT');
       return { success: true };
@@ -3495,6 +3617,7 @@ export function registerAuthHandlers() {
     { table: 'bom_lines', scope: { type: 'children', parent: 'boms', fk: 'bom_id' } },
     { table: 'work_order_consumptions', scope: { type: 'children', parent: 'work_orders', fk: 'work_order_id' } },
     { table: 'payroll_lines', scope: { type: 'children', parent: 'payroll_runs', fk: 'payroll_run_id' } },
+    { table: 'product_units', scope: { type: 'company' } },
     { table: 'sales_returns', scope: { type: 'company' } },
     { table: 'sales_invoices', scope: { type: 'company' } },
     { table: 'quotations', scope: { type: 'company' } },
@@ -3554,7 +3677,7 @@ export function registerAuthHandlers() {
     'companies', 'currencies', 'units', 'branches', 'roles', 'users',
     'departments', 'accounts', 'cash_boxes', 'cost_centers', 'vat_settings',
     'default_accounts', 'document_sequences', 'settings', 'payroll_components',
-    'product_types', 'product_categories', 'warehouses', 'products', 'boms',
+    'product_types', 'product_categories', 'warehouses', 'products', 'product_units', 'boms',
     'employees', 'work_orders', 'customers', 'suppliers', 'leads',
     'opportunities', 'tasks', 'activities', 'quotations', 'sales_invoices',
     'sales_returns', 'purchase_orders', 'purchase_invoices', 'purchase_returns',

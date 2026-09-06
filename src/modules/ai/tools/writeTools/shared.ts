@@ -94,6 +94,8 @@ export interface RawLine {
   quantity: number;
   unitPrice: number;
   discountPercent: number;
+  /** Optional product_units row id — resolved to a snapshot by resolveLineUnits. */
+  unitId?: string;
 }
 
 export function parseLines(raw: unknown): RawLine[] | { error: string } {
@@ -104,10 +106,11 @@ export function parseLines(raw: unknown): RawLine[] | { error: string } {
     const quantity = num((item as Record<string, unknown>).quantity);
     const unitPrice = num((item as Record<string, unknown>).unitPrice);
     const discountPercent = num((item as Record<string, unknown>).discountPercent);
+    const unitId = str((item as Record<string, unknown>).unitId);
     if (!productId) return { error: 'كل صنف يحتاج productId — استخدم search.products لإيجاد المنتج' };
     if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
     if (unitPrice < 0) return { error: 'السعر لا يمكن أن يكون سالباً' };
-    lines.push({ productId, quantity, unitPrice, discountPercent });
+    lines.push({ productId, quantity, unitPrice, discountPercent, ...(unitId ? { unitId } : {}) });
   }
   return lines;
 }
@@ -119,10 +122,52 @@ export const LINES_SCHEMA = {
     type: 'object',
     properties: {
       productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
-      quantity: { type: 'number', description: 'الكمية' },
-      unitPrice: { type: 'number', description: 'سعر الوحدة (سعر البيع من search.products)' },
+      quantity: { type: 'number', description: 'الكمية بالوحدة المختارة' },
+      unitPrice: { type: 'number', description: 'سعر الوحدة المختارة (سعر البيع/الشراء من search.products أو search.product_units)' },
       discountPercent: { type: 'number', description: 'نسبة الخصم 0-100 (اختياري)' },
+      unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري؛ عند تركه تُستخدم الوحدة الافتراضية للمنتج. استخدمه عندما يذكر المستخدم كرتون/درزن/شدة أو أي وحدة غير الأساسية' },
     },
     required: ['productId', 'quantity', 'unitPrice'],
   },
 };
+
+export interface ResolvedLine extends RawLine {
+  /** Frozen factor + base qty snapshot for the document line. */
+  unitFactor: number;
+  baseQuantity: number;
+}
+
+/**
+ * Resolve each line's unit to a stock-safe snapshot. Lines without unitId
+ * inherit the product's default sale/purchase unit; an unknown unitId is a
+ * hard error guiding the model to search.product_units (never silently 1).
+ */
+export async function resolveLineUnits(
+  companyId: string,
+  mode: 'sale' | 'purchase',
+  lines: RawLine[],
+): Promise<ResolvedLine[] | { error: string }> {
+  const { inventoryApi } = await import('@/modules/inventory/api');
+  const { defaultSaleUnit, defaultPurchaseUnit } = await import('@/core/utils/unitConversion');
+  const cache = new Map<string, Array<{ id: string; factor: number; isBase: boolean; isDefaultSale: boolean; isDefaultPurchase: boolean }>>();
+  const out: ResolvedLine[] = [];
+  for (const l of lines) {
+    let units = cache.get(l.productId);
+    if (!units) {
+      const res = await inventoryApi.getProductUnits(l.productId, companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب وحدات المنتج' };
+      units = res.data;
+      cache.set(l.productId, units);
+    }
+    let chosen;
+    if (l.unitId) {
+      chosen = units.find((u) => u.id === l.unitId);
+      if (!chosen) return { error: `وحدة غير معروفة لهذا المنتج — استخدم search.product_units أولاً لاختيار وحدة صحيحة` };
+    } else {
+      chosen = (mode === 'sale' ? defaultSaleUnit(units) : defaultPurchaseUnit(units)) ?? units[0];
+    }
+    const factor = chosen && chosen.factor > 0 ? chosen.factor : 1;
+    out.push({ ...l, unitId: chosen?.id, unitFactor: factor, baseQuantity: l.quantity * factor });
+  }
+  return out;
+}

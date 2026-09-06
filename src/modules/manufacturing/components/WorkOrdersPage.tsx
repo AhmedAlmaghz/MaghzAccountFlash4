@@ -9,6 +9,8 @@ import { EmptyState } from '@/core/ui/components/EmptyState';
 import { ProductSelect } from '@/core/ui/components/smart/fields/ProductSelect';
 import { EmployeeSelect } from '@/core/ui/components/smart/fields/EmployeeSelect';
 import { WarehouseSelect } from '@/core/ui/components/smart';
+import { ProductUnitSelect } from '@/core/ui/components/smart';
+import { toBaseQty } from '@/core/utils/unitConversion';
 import { useToastStore } from '@/core/store/toastStore';
 import { useAppStore } from '@/core/store';
 import { useWorkOrdersPaginated, useWorkOrderVariance } from '../hooks/useManufacturing';
@@ -23,6 +25,10 @@ interface WorkOrderFormLine {
   materialId: string;
   plannedQuantity: number;
   unitCost: number;
+  /** Display unit (base values persisted, converted at save). */
+  unitId?: string;
+  unitFactor?: number;
+  unitName?: string;
 }
 
 const STATUS_FLOW: WorkOrder['status'][] = ['planned', 'in_progress', 'completed', 'cancelled'];
@@ -93,7 +99,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
   // Per-batch material quantities of the selected BOM (base, before × batches).
   const [bomBaseLines, setBomBaseLines] = useState<WorkOrderFormLine[] | null>(null);
   const [bomOutputQuantity, setBomOutputQuantity] = useState<number>(1);
-  const [lines, setLines] = useState<WorkOrderFormLine[]>([{ materialId: '', plannedQuantity: 1, unitCost: 0 }]);
+  const [lines, setLines] = useState<WorkOrderFormLine[]>([{ materialId: '', plannedQuantity: 1, unitCost: 0, unitId: undefined, unitFactor: 1, unitName: undefined }]);
   // Production costs (labor / energy / packaging / other) — capitalized on completion.
   const [productionCosts, setProductionCosts] = useState<{ category: 'labor' | 'energy' | 'packaging' | 'other'; description: string; amount: string }[]>([
     { category: 'labor', description: '', amount: '' },
@@ -131,7 +137,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     setAvailableBoms([]);
     setBomBaseLines(null);
     setBomOutputQuantity(1);
-    setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0 }]);
+    setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0, unitId: undefined, unitFactor: 1, unitName: undefined }]);
     setProductionCosts([
       { category: 'labor', description: '', amount: '' },
       { category: 'energy', description: '', amount: '' },
@@ -169,7 +175,8 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     });
     const res = await manufacturingApi.getWorkOrderById(wo.id, companyId);
     if (res.success && res.data) {
-      setLines(res.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost || 0 })));
+      // Stored values are base — display starts at factor 1.
+      setLines(res.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost || 0, unitId: undefined, unitFactor: 1, unitName: undefined })));
       const pcs = res.data.workOrder.productionCosts || [];
       setProductionCosts([
         { category: 'labor', description: pcs.find((c) => c.category === 'labor')?.description || '', amount: pcs.find((c) => c.category === 'labor') ? String(pcs.find((c) => c.category === 'labor')!.amount) : '' },
@@ -236,9 +243,13 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
       // the same formula the live card shows. No client override.
       // Empty default rows (materialId = '') must be excluded — zod rejects ''
       // as a uuid and the whole save fails silently otherwise.
+      // Display qty/cost are in the chosen unit — persist base values.
       lines: lines
         .filter((l) => l.materialId && Number(l.plannedQuantity) > 0)
-        .map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.plannedQuantity), unitCost: Number(l.unitCost) || 0 })),
+        .map((l) => {
+          const factor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
+          return { materialId: l.materialId, plannedQuantity: toBaseQty(Number(l.plannedQuantity), factor), unitCost: (Number(l.unitCost) || 0) / factor };
+        }),
     };
     const res = editing ? await update(editing.id, payload) : await create(payload);
     if (res && res.success) {
@@ -560,7 +571,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                     const { bom, lines } = res.data;
                     const outQty = Math.max(Number(bom.outputQuantity) || 1, 0.0001);
                     setBomOutputQuantity(outQty);
-                    const base = lines.map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.quantity), unitCost: Number(l.unitCost || 0) }));
+                    const base = lines.map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.quantity), unitCost: Number(l.unitCost || 0), unitId: undefined, unitFactor: 1, unitName: undefined }));
                     setBomBaseLines(base);
                     const n = Math.max(Number(formData.quantity) || 1, 1);
                     setLines(base.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
@@ -568,7 +579,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                 } else {
                   setBomBaseLines(null);
                   setBomOutputQuantity(1);
-                  setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0 }]);
+                  setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0, unitId: undefined, unitFactor: 1, unitName: undefined }]);
                 }
               }} disabled={availableBoms.length === 0} className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
                 <option value="">{availableBoms.length === 0 ? t('manufacturing.workOrders.noBom') : t('manufacturing.workOrders.withoutBom')}</option>
@@ -664,16 +675,16 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
             <div className="space-y-2">
               {lines.map((line, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-5">
+                  <div className="col-span-4">
                     <ProductSelect
                       companyId={companyId}
                       manufacturingRole="material"
                       value={line.materialId}
-                      onChange={(v) => setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, materialId: typeof v === 'string' ? v : '' } : l)))}
+                      onChange={(v) => setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, materialId: typeof v === 'string' ? v : '', unitId: undefined, unitFactor: 1, unitName: undefined } : l)))}
                       onProductChange={(product) =>
                         setLines((prev) =>
                           prev.map((l, i) =>
-                            i === idx ? { ...l, materialId: product.id, unitCost: l.unitCost ? l.unitCost : Number(product.costPrice) || 0 } : l
+                            i === idx ? { ...l, materialId: product.id, unitCost: l.unitCost ? l.unitCost : Number(product.costPrice) || 0, unitId: undefined, unitFactor: 1, unitName: undefined } : l
                           )
                         )
                       }
@@ -682,7 +693,28 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                       placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
                     />
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-2">
+                    <ProductUnitSelect
+                      companyId={companyId}
+                      productId={line.materialId}
+                      value={line.unitId}
+                      onChange={(u) =>
+                        setLines((prev) => prev.map((l, i) => {
+                          if (i !== idx) return l;
+                          const oldFactor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
+                          const newFactor = u?.factor && u.factor > 0 ? u.factor : 1;
+                          const baseCost = (Number(l.unitCost) || 0) / oldFactor;
+                          return { ...l, unitId: u?.id, unitFactor: newFactor, unitName: u?.unitName, unitCost: baseCost * newFactor };
+                        }))
+                      }
+                      mode="purchase"
+                      size="sm"
+                    />
+                    {(line.unitFactor ?? 1) > 1 && (
+                      <p className="text-[10px] text-slate-400 mt-0.5 tabular-nums">≈ {toBaseQty(line.plannedQuantity, line.unitFactor ?? 1)} {t('manufacturing.line.baseEquivalent')}</p>
+                    )}
+                  </div>
+                  <div className="col-span-2">
                     <Input label={idx === 0 ? t('manufacturing.bom.quantity') : ''} type="number" value={String(line.plannedQuantity)} onChange={(e) => setLines((prev) => prev.map((l, i) => i === idx ? { ...l, plannedQuantity: Number(e.target.value) } : l))} />
                   </div>
                   <div className="col-span-3">

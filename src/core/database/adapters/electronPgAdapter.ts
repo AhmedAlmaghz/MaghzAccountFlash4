@@ -23,6 +23,11 @@ export interface ElectronDB extends PreloadDB {
     getProducts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createProduct(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; barcode?: string | null; sku?: string | null; unit?: string | null; categoryId?: string | null; productTypeId?: string | null; costPrice?: number; salePrice?: number; isActive?: boolean; createdBy?: string | null; updatedBy?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createProductCategories(payload: { productId: string; categoryIds: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getProductUnits(payload: { productId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    ensureBaseProductUnit(payload: { productId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createProductUnit(payload: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateProductUnit(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteProductUnit(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
   contacts?: {
     getCustomers(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;

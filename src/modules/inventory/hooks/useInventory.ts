@@ -1,7 +1,63 @@
 import { useState, useEffect, useCallback } from 'react';
 import { inventoryApi } from '../api';
 import { usePaginatedList } from '@/core/hooks/usePaginatedList';
-import type { Product, Warehouse, Stock, StockItem, StockTransfer, InventoryTransaction, StockAdjustment, ProductCategory } from '../types';
+import type { Product, ProductUnit, Warehouse, Stock, StockItem, StockTransfer, InventoryTransaction, StockAdjustment, ProductCategory } from '../types';
+
+/**
+ * Units of one product (multi-unit). Loads on productId change; self-heals
+ * legacy products via ensureBaseProductUnit when the list comes back empty.
+ */
+export function useProductUnits(companyId: string, productId: string | undefined) {
+  const [units, setUnits] = useState<ProductUnit[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!companyId || !productId) {
+      setUnits([]);
+      return;
+    }
+    setIsLoading(true);
+    try {
+      let result = await inventoryApi.getProductUnits(productId, companyId);
+      if (result.success && (!result.data || result.data.length === 0)) {
+        await inventoryApi.ensureBaseProductUnit(productId, companyId);
+        result = await inventoryApi.getProductUnits(productId, companyId);
+      }
+      if (result.success && result.data) {
+        setUnits(result.data);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [companyId, productId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const create = useCallback(async (data: Omit<ProductUnit, 'id' | 'companyId' | 'productId'>) => {
+    if (!companyId || !productId) return { success: false, error: 'Missing product' };
+    const result = await inventoryApi.createProductUnit({ ...data, companyId, productId });
+    if (result.success) await load();
+    return result;
+  }, [companyId, productId, load]);
+
+  const update = useCallback(async (id: string, data: Partial<Omit<ProductUnit, 'id' | 'companyId' | 'productId'>>) => {
+    if (!companyId) return { success: false, error: 'Missing company' };
+    const result = await inventoryApi.updateProductUnit(id, companyId, data);
+    if (result.success) await load();
+    return result;
+  }, [companyId, load]);
+
+  const remove = useCallback(async (id: string) => {
+    if (!companyId) return { success: false, error: 'Missing company' };
+    const result = await inventoryApi.deleteProductUnit(id, companyId);
+    if (result.success) await load();
+    return result;
+  }, [companyId, load]);
+
+  return { units, isLoading, reload: load, create, update, remove };
+}
 
 export function useProducts(companyId: string) {
   const [products, setProducts] = useState<Product[]>([]);

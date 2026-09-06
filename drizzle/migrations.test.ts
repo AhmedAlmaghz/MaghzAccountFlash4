@@ -635,3 +635,58 @@ describe('Migration 0020: companies audit columns', () => {
     expect(pglite).toMatch(/UPDATE companies SET[\s\S]*?updated_by/);
   });
 });
+
+describe('Migration 0021: multi-unit products', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0021_product_units.sql'), 'utf-8');
+
+  it('creates the product_units table with factor/price/base columns', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS product_units/);
+    expect(migrationSql).toMatch(/factor numeric\(18, 6\) NOT NULL DEFAULT 1/);
+    expect(migrationSql).toMatch(/sale_price numeric\(18, 4\) NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/purchase_price numeric\(18, 4\) NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/is_base boolean NOT NULL DEFAULT false/);
+    expect(migrationSql).toMatch(/UNIQUE \(product_id, unit_id\)/);
+  });
+
+  it('adds unit snapshot columns to all 6 document line tables', () => {
+    for (const table of ['sales_invoice_lines', 'quotation_lines', 'sales_return_lines', 'purchase_invoice_lines', 'purchase_order_lines', 'purchase_return_lines']) {
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS unit_id uuid`));
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS unit_factor numeric`));
+      expect(migrationSql).toMatch(new RegExp(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS base_quantity numeric`));
+    }
+  });
+
+  it('backfills base rows idempotently (WHERE NOT EXISTS)', () => {
+    expect(migrationSql).toMatch(/INSERT INTO product_units[\s\S]*?WHERE NOT EXISTS \(SELECT 1 FROM product_units/);
+    expect(migrationSql).toMatch(/INSERT INTO units[\s\S]*?AND NOT EXISTS/);
+  });
+
+  it('guards one base / default-sale / default-purchase row per product', () => {
+    expect(migrationSql).toMatch(/uq_product_units_base ON product_units \(product_id\) WHERE is_base/);
+    expect(migrationSql).toMatch(/uq_product_units_default_sale ON product_units \(product_id\) WHERE is_default_sale/);
+    expect(migrationSql).toMatch(/uq_product_units_default_purchase ON product_units \(product_id\) WHERE is_default_purchase/);
+  });
+
+  it('journal registers 0021 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0021_product_units')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0021 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0021_product_units\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0021_product_units', sql: productUnits \}/);
+  });
+
+  it('Drizzle schema exposes productUnits plus unit columns on all 6 line tables', () => {
+    const inventory = readFileSync(join(process.cwd(), 'src/core/database/schema/inventory.ts'), 'utf-8');
+    expect(inventory).toMatch(/export const productUnits = pgTable\('product_units'/);
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    expect(sales.match(/unitFactor: numeric\('unit_factor'/g)?.length).toBe(3);
+    expect(sales.match(/baseQuantity: numeric\('base_quantity'/g)?.length).toBe(3);
+    const purchases = readFileSync(join(process.cwd(), 'src/core/database/schema/purchases.ts'), 'utf-8');
+    expect(purchases.match(/unitFactor: numeric\('unit_factor'/g)?.length).toBe(3);
+    expect(purchases.match(/baseQuantity: numeric\('base_quantity'/g)?.length).toBe(3);
+  });
+});

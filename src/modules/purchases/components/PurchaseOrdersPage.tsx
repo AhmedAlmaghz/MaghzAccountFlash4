@@ -11,7 +11,9 @@ import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { purchaseOrderFingerprint, detectDocumentDuplicates, genericNearScore } from '@/core/utils/documentDuplicate';
-import { SupplierSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
+import { SupplierSelect, ProductSelect, CashBoxSelect, ProductUnitSelect } from '@/core/ui/components/smart';
+import { toBaseQty } from '@/core/utils/unitConversion';
+import type { ProductUnit } from '@/modules/inventory/types';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePurchaseOrdersPaginated } from '../hooks/usePurchases';
 import { useAppStore } from '@/core/store';
@@ -27,6 +29,11 @@ interface OrderFormLine {
   productId: string;
   description: string;
   quantity: number;
+  /** Chosen product_units row id + frozen factor + base qty (stock truth). */
+  unitId?: string;
+  unitFactor?: number;
+  baseQuantity?: number;
+  unitName?: string;
   unitPrice: number;
   discountPercent: number;
   lineTotal: number;
@@ -46,6 +53,10 @@ const initialLine = (): OrderFormLine => ({
   productId: '',
   description: '',
   quantity: 1,
+  unitId: undefined,
+  unitFactor: 1,
+  baseQuantity: 1,
+  unitName: undefined,
   unitPrice: 0,
   discountPercent: 0,
   lineTotal: 0,
@@ -85,6 +96,12 @@ export const PurchaseOrdersPage: React.FC = () => {
   const showDiscount = settings?.invoiceShowDiscount ?? true;
   const showVat = settings?.invoiceShowVat ?? true;
   const vatRate = settings?.vatRate ?? 15;
+  // Cache of each line-product's units (fed by ProductUnitSelect) so unit
+  // switches can tell auto-filled prices apart from manual entries.
+  const [lineUnitsCache, setLineUnitsCache] = useState<Record<string, ProductUnit[]>>({});
+  const cacheProductUnits = useCallback((productId: string, units: ProductUnit[]) => {
+    setLineUnitsCache((prev) => (prev[productId] === units ? prev : { ...prev, [productId]: units }));
+  }, []);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmConvert, setConfirmConvert] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
@@ -125,23 +142,64 @@ export const PurchaseOrdersPage: React.FC = () => {
   const updateLine = useCallback((idx: number, patch: Partial<OrderFormLine>) => {
     setForm(prev => {
       const newLines = [...prev.lines];
-      newLines[idx] = calculateLine({ ...newLines[idx], ...patch });
+      const merged = { ...newLines[idx], ...patch };
+      // Keep the base quantity in sync — stock postings consume it, never
+      // the display quantity.
+      if (patch.quantity !== undefined) {
+        merged.baseQuantity = toBaseQty(merged.quantity, merged.unitFactor ?? 1);
+      }
+      newLines[idx] = calculateLine(merged);
       return { ...prev, lines: newLines };
     });
   }, [calculateLine]);
 
+  /**
+   * When the user picks a product from the dropdown, reset the unit choice
+   * (ProductUnitSelect auto-picks the default purchase unit, which then prices
+   * the line via handleUnitChange). If the line was previously empty
+   * (price = 0) seed the base cost price immediately so the row never
+   * flashes a zero price while units load.
+   */
   const handleProductChange = useCallback((idx: number, product: Product) => {
     setForm(prev => {
       const newLines = [...prev.lines];
       const current = newLines[idx];
       const patch: Partial<OrderFormLine> = {
         description: current.description || product.nameAr,
+        unitId: undefined,
+        unitFactor: 1,
+        baseQuantity: current.quantity,
+        unitName: undefined,
         unitPrice: current.unitPrice > 0 ? current.unitPrice : product.costPrice,
       };
       newLines[idx] = calculateLine({ ...current, ...patch });
       return { ...prev, lines: newLines };
     });
   }, [calculateLine]);
+
+  /**
+   * Unit switch: adopt the unit's own purchase price unless the user typed a
+   * custom price (i.e. current price matches no known unit price for this
+   * product). Base quantity is always recomputed.
+   */
+  const handleUnitChange = useCallback((idx: number, unit: ProductUnit | null) => {
+    setForm(prev => {
+      const newLines = [...prev.lines];
+      const current = newLines[idx];
+      const known = lineUnitsCache[current.productId] || [];
+      const isAutoPrice = current.unitPrice === 0 || known.some((u) => u.purchasePrice === current.unitPrice);
+      const merged = {
+        ...current,
+        unitId: unit?.id,
+        unitFactor: unit?.factor ?? 1,
+        baseQuantity: toBaseQty(current.quantity, unit?.factor ?? 1),
+        unitName: unit?.unitName,
+        unitPrice: unit && isAutoPrice ? unit.purchasePrice : current.unitPrice,
+      };
+      newLines[idx] = calculateLine(merged);
+      return { ...prev, lines: newLines };
+    });
+  }, [calculateLine, lineUnitsCache]);
 
   const addLine = useCallback(() => setForm(prev => ({ ...prev, lines: [...prev.lines, initialLine()] })), []);
   const removeLine = useCallback((idx: number) => setForm(prev => ({ ...prev, lines: prev.lines.filter((_, i) => i !== idx) })), []);
@@ -164,7 +222,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       cashBoxId: order.cashBoxId || '',
       notes: order.notes || '',
       lines: order.lines && order.lines.length > 0
-        ? order.lines.map(l => ({ productId: l.productId || '', description: l.description || '', quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: 0, lineTotal: l.lineTotal }))
+        ? order.lines.map(l => ({ productId: l.productId || '', description: l.description || '', quantity: l.quantity, unitId: l.unitId, unitFactor: l.unitFactor ?? 1, baseQuantity: l.baseQuantity ?? l.quantity, unitName: l.unitName || l.unit, unitPrice: l.unitPrice, discountPercent: 0, lineTotal: l.lineTotal }))
         : [initialLine()],
     });
     setInvoiceDiscount(0);
@@ -213,6 +271,10 @@ export const PurchaseOrdersPage: React.FC = () => {
         productId: l.productId,
         description: l.description,
         quantity: l.quantity,
+        unitId: l.unitId,
+        unitFactor: l.unitFactor ?? 1,
+        baseQuantity: toBaseQty(l.quantity, l.unitFactor ?? 1),
+        unitName: l.unitName,
         unitPrice: l.unitPrice,
         lineTotal: Number(lineNet.toFixed(dp)),
       };
@@ -346,7 +408,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         productCode: l.productCode,
         barcode: l.barcode,
         sku: l.sku,
-        unit: l.unit,
+        unit: l.unitName || l.unit,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
         total: l.lineTotal,
@@ -585,7 +647,8 @@ export const PurchaseOrdersPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
-                    <th className="px-4 py-3 text-right font-semibold w-[38%]">{t('inventory.productName')}</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[30%]">{t('inventory.productName')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-32">{t('purchases.line.unit')}</th>
                     <th className="px-3 py-3 text-center font-semibold w-28">{t('description')}</th>
                     <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
                     <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
@@ -611,6 +674,20 @@ export const PurchaseOrdersPage: React.FC = () => {
                             size="sm"
                             module="purchases"
                           />
+                        </td>
+                        <td className="px-2 py-2">
+                          <ProductUnitSelect
+                            companyId={activeCompany?.id || ''}
+                            productId={line.productId}
+                            value={line.unitId}
+                            onChange={(u) => handleUnitChange(idx, u)}
+                            onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
+                            mode="purchase"
+                            size="sm"
+                          />
+                          {(line.unitFactor ?? 1) > 1 && (
+                            <p className="text-[10px] text-slate-400 text-center mt-0.5 tabular-nums">≈ {line.baseQuantity} {t('purchases.line.baseEquivalent')}</p>
+                          )}
                         </td>
                         <td className="px-3 py-2"><Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} size="sm" /></td>
                         <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} size="sm" className="text-center font-medium" /></td>
@@ -641,6 +718,18 @@ export const PurchaseOrdersPage: React.FC = () => {
                       size="sm"
                       module="purchases"
                     />
+                    <ProductUnitSelect
+                      companyId={activeCompany?.id || ''}
+                      productId={line.productId}
+                      value={line.unitId}
+                      onChange={(u) => handleUnitChange(idx, u)}
+                      onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
+                      mode="purchase"
+                      size="sm"
+                    />
+                    {(line.unitFactor ?? 1) > 1 && (
+                      <p className="text-[10px] text-slate-400 text-center mt-0.5 tabular-nums">≈ {line.baseQuantity} {t('purchases.line.baseEquivalent')}</p>
+                    )}
                     <Input type="text" placeholder={t('description')} value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} size="sm" />
                     <div className="grid grid-cols-2 gap-3">
                       <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, { quantity: Number(e.target.value) })} size="sm" />
@@ -751,6 +840,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                   <tr>
                     <th className="p-2 text-right">#</th>
                     <th className="p-2 text-right">{t('inventory.productName')}</th>
+                    <th className="p-2 text-right">{t('purchases.line.unit')}</th>
                     <th className="p-2 text-right">{t('inventory.quantity')}</th>
                     <th className="p-2 text-right">{t('inventory.unitPrice')}</th>
                     <th className="p-2 text-right">{t('purchases.total')}</th>
@@ -761,6 +851,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                     <tr key={idx} className="border-t border-slate-200 dark:border-slate-700">
                       <td className="p-2">{idx + 1}</td>
                       <td className="p-2">{line.productName || line.description || line.productId}</td>
+                      <td className="p-2">{line.unitName || line.unit || '-'}</td>
                       <td className="p-2">{line.quantity}</td>
                       <td className="p-2">{formatCurrency(line.unitPrice || 0)}</td>
                       <td className="p-2 font-medium">{formatCurrency(line.lineTotal || 0)}</td>

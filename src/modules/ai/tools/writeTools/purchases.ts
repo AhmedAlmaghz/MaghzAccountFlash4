@@ -8,6 +8,7 @@ import {
   summarizeDocLines,
   getInvoiceTaxConfig,
   parseLines,
+  resolveLineUnits,
   LINES_SCHEMA,
 } from './shared';
 import { localToday } from '../../engine/dateUtils';
@@ -108,7 +109,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
-      const lines = parsed.map((l) => {
+      const resolved = await resolveLineUnits(ctx.companyId, 'purchase', parsed);
+      if ('error' in resolved) return { error: resolved.error };
+      const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
         return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
@@ -172,8 +175,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
             type: 'object',
             properties: {
               productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
-              quantity: { type: 'number', description: 'الكمية' },
-              unitPrice: { type: 'number', description: 'سعر الوحدة التقديري (سعر التكلفة)' },
+              quantity: { type: 'number', description: 'الكمية بالوحدة المختارة' },
+              unitPrice: { type: 'number', description: 'سعر الوحدة المختارة التقديري (سعر التكلفة)' },
+              unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري' },
             },
             required: ['productId', 'quantity', 'unitPrice'],
           },
@@ -187,15 +191,19 @@ export const purchasesWriteTools: ToolDefinition[] = [
       if (!supplierId) return { error: 'supplierId مطلوب — استخدم search.suppliers أولاً' };
       const rawLines = args.lines;
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير صنف واحد على الأقل في lines' };
-      const lines: { productId: string; quantity: number; unitPrice: number; lineTotal: number }[] = [];
-      for (const item of rawLines) {
-        const productId = str((item as Record<string, unknown>).productId);
-        const quantity = num((item as Record<string, unknown>).quantity);
-        const unitPrice = num((item as Record<string, unknown>).unitPrice);
-        if (!productId) return { error: 'كل صنف يحتاج productId' };
-        if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
-        lines.push({ productId, quantity, unitPrice, lineTotal: round2(quantity * unitPrice) });
-      }
+      const parsedOrder = parseLines(rawLines);
+      if ('error' in parsedOrder) return { error: parsedOrder.error };
+      const resolvedOrder = await resolveLineUnits(ctx.companyId, 'purchase', parsedOrder);
+      if ('error' in resolvedOrder) return { error: resolvedOrder.error };
+      const lines = resolvedOrder.map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+        unitId: l.unitId,
+        unitFactor: l.unitFactor,
+        baseQuantity: l.baseQuantity,
+        unitPrice: l.unitPrice,
+        lineTotal: round2(l.quantity * l.unitPrice),
+      }));
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_order');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الأمر' };
@@ -238,8 +246,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
             type: 'object',
             properties: {
               productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
-              quantity: { type: 'number', description: 'الكمية المرتجعة' },
-              unitPrice: { type: 'number', description: 'سعر الوحدة (سعر التكلفة)' },
+              quantity: { type: 'number', description: 'الكمية المرتجعة بالوحدة المختارة' },
+              unitPrice: { type: 'number', description: 'سعر الوحدة المختارة (سعر التكلفة)' },
+              unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري' },
             },
             required: ['productId', 'quantity', 'unitPrice'],
           },
@@ -253,15 +262,19 @@ export const purchasesWriteTools: ToolDefinition[] = [
       if (!supplierId) return { error: 'supplierId مطلوب' };
       const rawLines = args.lines;
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير صنف واحد على الأقل' };
-      const lines: { productId: string; quantity: number; unitPrice: number; lineTotal: number }[] = [];
-      for (const item of rawLines) {
-        const productId = str((item as Record<string, unknown>).productId);
-        const quantity = num((item as Record<string, unknown>).quantity);
-        const unitPrice = num((item as Record<string, unknown>).unitPrice);
-        if (!productId) return { error: 'كل صنف يحتاج productId' };
-        if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
-        lines.push({ productId, quantity, unitPrice, lineTotal: round2(quantity * unitPrice) });
-      }
+      const parsedRet = parseLines(rawLines);
+      if ('error' in parsedRet) return { error: parsedRet.error };
+      const resolvedRet = await resolveLineUnits(ctx.companyId, 'purchase', parsedRet);
+      if ('error' in resolvedRet) return { error: resolvedRet.error };
+      const lines = resolvedRet.map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+        unitId: l.unitId,
+        unitFactor: l.unitFactor,
+        baseQuantity: l.baseQuantity,
+        unitPrice: l.unitPrice,
+        lineTotal: round2(l.quantity * l.unitPrice),
+      }));
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_return');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم المردود' };

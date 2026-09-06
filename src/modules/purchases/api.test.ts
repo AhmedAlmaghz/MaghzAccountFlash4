@@ -78,7 +78,8 @@ describe('purchasesApi.createOrder', () => {
     expect(sql).toContain('::date');
     expect(sql).toContain('::varchar');
     expect(sql).not.toMatch(/\$\d+(?!.*::)/);
-    expect(params.length).toBe(18);
+    // 13 header + 5 line + 3 unit snapshot = 21
+    expect(params.length).toBe(21);
     expect(typeof params[0]).toBe('string');
     expect((params[0] as string).length).toBeGreaterThan(0);
     expect(params[1]).toBe(COMPANY_ID);
@@ -98,6 +99,11 @@ describe('purchasesApi.createOrder', () => {
     expect(params[15]).toBe(5);
     expect(params[16]).toBe(200);
     expect(params[17]).toBe(1000);
+    // multi-unit snapshot appended at the end (unitId, factor, base qty)
+    expect(params.length).toBe(21);
+    expect(params[18]).toBeNull();
+    expect(params[19]).toBe(1);
+    expect(params[20]).toBe(5);
   });
   it('does not include non-existent description/received_quantity columns in line insert', async () => {
     const captured: { sql: string }[] = [];
@@ -123,7 +129,7 @@ describe('purchasesApi.createOrder', () => {
     });
     const linesInsert = captured.find(c => c.sql.includes('INSERT INTO purchase_order_lines'));
     expect(linesInsert).toBeDefined();
-    expect(linesInsert!.sql).toContain('INSERT INTO purchase_order_lines (order_id,product_id,quantity,unit_price,line_total)');
+    expect(linesInsert!.sql).toContain('INSERT INTO purchase_order_lines (order_id,product_id,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity)');
     expect(linesInsert!.sql).not.toContain('description');
     expect(linesInsert!.sql).not.toContain('received_quantity');
   });

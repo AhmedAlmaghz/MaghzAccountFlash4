@@ -148,6 +148,13 @@
       "when": 1797300000000,
       "tag": "0020_companies_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1797400000000,
+      "tag": "0021_product_units",
+      "breakpoints": true
     }
   ]
 }

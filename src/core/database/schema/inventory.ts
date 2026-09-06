@@ -1,6 +1,6 @@
 import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey } from 'drizzle-orm/pg-core';
 import { companies } from './core';
-import { productTypes } from './settings';
+import { productTypes, units } from './settings';
 
 // ─── Product Categories ───────────────────────────────────────────────────────
 export const productCategories = pgTable('product_categories', {
@@ -35,6 +35,26 @@ export const products = pgTable('products', {
   openingStockPosted: boolean('opening_stock_posted').notNull().default(false),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+// ─── Product Units (Multi-unit: per-product units linked to global catalog) ──
+// factor = how many BASE units equal 1 of this unit (e.g. carton of 12 → 12).
+// Stock is always stored in the base unit; documents snapshot unit_id +
+// unit_factor + base_quantity at creation time.
+export const productUnits = pgTable('product_units', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+  unitId: uuid('unit_id').notNull().references(() => units.id, { onDelete: 'restrict' }),
+  factor: numeric('factor', { precision: 18, scale: 6 }).notNull().default('1'),
+  salePrice: numeric('sale_price', { precision: 18, scale: 4 }).notNull().default('0'),
+  purchasePrice: numeric('purchase_price', { precision: 18, scale: 4 }).notNull().default('0'),
+  barcode: varchar('barcode', { length: 100 }),
+  isBase: boolean('is_base').notNull().default(false),
+  isDefaultSale: boolean('is_default_sale').notNull().default(false),
+  isDefaultPurchase: boolean('is_default_purchase').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

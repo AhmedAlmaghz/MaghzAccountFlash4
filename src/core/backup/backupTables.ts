@@ -49,6 +49,9 @@ export const CHILD_TABLES: PlannedTable[] = [
  */
 export const DELETE_ORDER: PlannedTable[] = [
   ...CHILD_TABLES,
+  // product_units is company-scoped but FK-bound to products + units —
+  // delete before both masters (units is RESTRICT-referenced).
+  C('product_units'),
   // documents & operations (children of masters)
   C('sales_returns'),
   C('sales_invoices'),
@@ -130,6 +133,7 @@ const INSERT_TABLES = [
   'product_categories',
   'warehouses',
   'products',
+  'product_units',
   'boms',
   'employees',
   'work_orders',

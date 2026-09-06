@@ -291,7 +291,7 @@ export async function buildSalesReturnPostingStatements(
     });
     statements.push({
       sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
-         SELECT sr.company_id, srl.product_id, wh.warehouse_id, 'in', srl.quantity, $1, 'مردود مبيعات', NOW()
+         SELECT sr.company_id, srl.product_id, wh.warehouse_id, 'in', COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity), $1, 'مردود مبيعات', NOW()
            FROM sales_returns sr
            JOIN sales_return_lines srl ON srl.return_id = sr.id
            JOIN LATERAL (
@@ -303,11 +303,12 @@ export async function buildSalesReturnPostingStatements(
           WHERE sr.id = $2::uuid AND sr.company_id = $3::uuid AND wh.warehouse_id IS NOT NULL`,
       params: [ret.returnNumber, ret.id, companyId],
     });
-    // Increase stock quantities
+    // Increase stock quantities (base units — the document quantity may be
+    // expressed in a larger unit such as carton).
     statements.push({
       sql: `UPDATE stock s SET quantity = s.quantity + sub.qty, updated_at = NOW()
               FROM (
-                SELECT srl.product_id, wh.warehouse_id, SUM(srl.quantity) AS qty
+                SELECT srl.product_id, wh.warehouse_id, SUM(COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity)) AS qty
                   FROM sales_returns sr
                   JOIN sales_return_lines srl ON srl.return_id = sr.id
                   JOIN LATERAL (
@@ -443,7 +444,7 @@ export async function buildPurchaseReturnPostingStatements(
   if (ret.id) {
     statements.push({
       sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
-         SELECT pr.company_id, prl.product_id, wh.warehouse_id, 'out', prl.quantity, $1, 'مردود مشتريات', NOW()
+         SELECT pr.company_id, prl.product_id, wh.warehouse_id, 'out', COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity), $1, 'مردود مشتريات', NOW()
            FROM purchase_returns pr
            JOIN purchase_return_lines prl ON prl.return_id = pr.id
            JOIN LATERAL (
@@ -454,11 +455,12 @@ export async function buildPurchaseReturnPostingStatements(
           WHERE pr.id = $2::uuid AND pr.company_id = $3::uuid`,
       params: [ret.returnNumber, ret.id, companyId],
     });
-    // Decrement stock quantities
+    // Decrement stock quantities (base units — the document quantity may be
+    // expressed in a larger unit such as carton).
     statements.push({
       sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
               FROM (
-                SELECT prl.product_id, wh.warehouse_id, SUM(prl.quantity) AS qty
+                SELECT prl.product_id, wh.warehouse_id, SUM(COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity)) AS qty
                   FROM purchase_returns pr
                   JOIN purchase_return_lines prl ON prl.return_id = pr.id
                   JOIN LATERAL (

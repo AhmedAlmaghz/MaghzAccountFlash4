@@ -193,6 +193,37 @@ export const searchTools: ToolDefinition[] = [
     },
   },
   {
+    name: 'search.product_units',
+    labelAr: 'وحدات المنتج',
+    descriptionAr: 'يعيد وحدات منتج معين (كرتون/درزن/شدة…) مع عامل التحويل وسعر كل وحدة. استخدمه عندما يذكر المستخدم وحدة غير الأساسية، ثم مرّر unitId في سطور الفواتير.',
+    permission: 'inventory.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: { productId: { type: 'string', description: 'معرف المنتج (من search.products)' } },
+      required: ['productId'],
+    },
+    execute: async (args, ctx) => {
+      const productId = String(args.productId || '').trim();
+      if (!productId) return { error: 'productId مطلوب — استخدم search.products أولاً' };
+      const res = await inventoryApi.getProductUnits(productId, ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الوحدات' };
+      return {
+        units: res.data.map((u) => ({
+          unitId: u.id,
+          name: u.unitName,
+          factor: u.factor,
+          salePrice: u.salePrice,
+          purchasePrice: u.purchasePrice,
+          barcode: u.barcode,
+          isBase: u.isBase,
+          isDefaultSale: u.isDefaultSale,
+          isDefaultPurchase: u.isDefaultPurchase,
+        })),
+      };
+    },
+  },
+  {
     name: 'search.accounts',
     labelAr: 'بحث عن حساب',
     descriptionAr: 'يبحث في شجرة الحسابات بالكود أو الاسم ويعيد معرف الحساب (id) ونوعه. استخدمه قبل أي عملية محاسبية تحتاج معرف حساب.',

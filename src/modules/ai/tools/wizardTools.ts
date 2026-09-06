@@ -7,7 +7,7 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { crmApi } from '@/modules/crm/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
-import { getInvoiceTaxConfig } from './writeTools/shared';
+import { getInvoiceTaxConfig, parseLines, resolveLineUnits, LINES_SCHEMA } from './writeTools/shared';
 
 // ─── Helpers (mirror writeTools.ts) ───────────────────────────────────────
 
@@ -48,43 +48,11 @@ function summarizeDocLines(label: string, lines: unknown): string {
   return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
 }
 
-interface RawLine {
-  productId: string;
-  quantity: number;
-  unitPrice: number;
-  discountPercent: number;
-}
-
-function parseLines(raw: unknown): RawLine[] | { error: string } {
-  if (!Array.isArray(raw) || raw.length === 0) return { error: 'يجب تمرير صنف واحد على الأقل في lines' };
-  const lines: RawLine[] = [];
-  for (const item of raw) {
-    const productId = str((item as Record<string, unknown>).productId);
-    const quantity = num((item as Record<string, unknown>).quantity);
-    const unitPrice = num((item as Record<string, unknown>).unitPrice);
-    const discountPercent = num((item as Record<string, unknown>).discountPercent);
-    if (!productId) return { error: 'كل صنف يحتاج productId — استخدم search.products لإيجاد المنتج' };
-    if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
-    if (unitPrice < 0) return { error: 'السعر لا يمكن أن يكون سالباً' };
-    lines.push({ productId, quantity, unitPrice, discountPercent });
-  }
-  return lines;
-}
-
-const LINES_SCHEMA = {
-  type: 'array',
-  description: 'أصناف الفاتورة. احصل على productId وسعر البيع من search.products',
-  items: {
-    type: 'object',
-    properties: {
-      productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
-      quantity: { type: 'number', description: 'الكمية' },
-      unitPrice: { type: 'number', description: 'سعر الوحدة' },
-      discountPercent: { type: 'number', description: 'نسبة الخصم 0-100 (اختياري)' },
-    },
-    required: ['productId', 'quantity', 'unitPrice'],
-  },
-};
+/**
+ * Multi-step wizard tools. Line parsing + unit resolution come from
+ * writeTools/shared (single source of truth) so wizards inherit unitId
+ * support and snapshot logic automatically.
+ */
 
 /**
  * Multi-step wizard tools.
@@ -133,7 +101,9 @@ export const wizardTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
-      const lines = parsed.map((l) => {
+      const resolved = await resolveLineUnits(ctx.companyId, 'sale', parsed);
+      if ('error' in resolved) return { error: resolved.error };
+      const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
         return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
@@ -232,7 +202,9 @@ export const wizardTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'purchase_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
-      const lines = parsed.map((l) => {
+      const resolved = await resolveLineUnits(ctx.companyId, 'purchase', parsed);
+      if ('error' in resolved) return { error: resolved.error };
+      const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
         return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };

@@ -28,6 +28,15 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { succe
   return { success: false, error: errors };
 }
 
+// ─── Multi-unit line snapshot (shared by all 6 document line schemas) ────
+// unitId = chosen product_units row; unitFactor = frozen factor;
+// baseQuantity = qty in base unit (server recomputes if missing).
+export const lineUnitFields = {
+  unitId: uuidSchema.optional(),
+  unitFactor: z.number().positive().optional(),
+  baseQuantity: currencyAmountSchema.optional(),
+};
+
 export const idCompanySchema = z.object({
   id: uuidSchema,
   companyId: companyIdSchema,
@@ -161,6 +170,7 @@ export const createInvoiceSchema = z.object({
   lines: z.array(z.object({
     productId: uuidSchema,
     quantity: currencyAmountSchema,
+    ...lineUnitFields,
     unitPrice: currencyAmountSchema,
     discountPercent: percentageSchema.optional(),
     vatPercent: percentageSchema.optional(),
@@ -185,6 +195,7 @@ export const createQuotationSchema = z.object({
   lines: z.array(z.object({
     productId: uuidSchema,
     quantity: currencyAmountSchema,
+    ...lineUnitFields,
     unitPrice: currencyAmountSchema,
     discountPercent: percentageSchema.optional(),
     lineTotal: currencyAmountSchema,
@@ -208,6 +219,7 @@ export const createSalesReturnSchema = z.object({
   lines: z.array(z.object({
     productId: uuidSchema,
     quantity: currencyAmountSchema,
+    ...lineUnitFields,
     unitPrice: currencyAmountSchema,
     lineTotal: currencyAmountSchema,
   })).min(1),
@@ -251,6 +263,7 @@ export const createPurchaseInvoiceSchema = z.object({
     productId: uuidSchema.optional(),
     description: z.string().max(1000).optional(),
     quantity: currencyAmountSchema,
+    ...lineUnitFields,
     unitPrice: currencyAmountSchema,
     discountPercent: z.number().min(0).max(100).optional().default(0),
     vatPercent: z.number().min(0).max(100).optional().default(0),
@@ -276,6 +289,7 @@ export const createPurchaseOrderSchema = z.object({
     productId: uuidSchema.optional(),
     description: z.string().max(1000).optional(),
     quantity: currencyAmountSchema,
+    ...lineUnitFields,
     unitPrice: currencyAmountSchema,
     lineTotal: currencyAmountSchema,
     receivedQuantity: currencyAmountSchema.optional(),
@@ -300,6 +314,7 @@ export const createPurchaseReturnSchema = z.object({
     productId: uuidSchema.optional(),
     description: z.string().max(1000).optional(),
     quantity: currencyAmountSchema,
+    ...lineUnitFields,
     unitPrice: currencyAmountSchema,
     lineTotal: currencyAmountSchema,
   })).min(1),
@@ -336,6 +351,30 @@ export const createWarehouseSchema = z.object({
   code: z.string().max(20).optional(),
   branchId: uuidSchema.optional(),
   isActive: z.boolean().default(true),
+});
+
+export const createProductUnitSchema = z.object({
+  companyId: companyIdSchema,
+  productId: uuidSchema,
+  unitId: uuidSchema,
+  factor: z.number().positive().multipleOf(0.000001),
+  salePrice: currencyAmountSchema.optional(),
+  purchasePrice: currencyAmountSchema.optional(),
+  barcode: z.string().max(100).optional(),
+  isBase: z.boolean().optional(),
+  isDefaultSale: z.boolean().optional(),
+  isDefaultPurchase: z.boolean().optional(),
+});
+
+export const updateProductUnitSchema = z.object({
+  unitId: uuidSchema.optional(),
+  factor: z.number().positive().multipleOf(0.000001).optional(),
+  salePrice: currencyAmountSchema.optional(),
+  purchasePrice: currencyAmountSchema.optional(),
+  barcode: z.string().max(100).optional().nullable(),
+  isBase: z.boolean().optional(),
+  isDefaultSale: z.boolean().optional(),
+  isDefaultPurchase: z.boolean().optional(),
 });
 
 export const createStockTransferSchema = z.object({

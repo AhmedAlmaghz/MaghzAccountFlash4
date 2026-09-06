@@ -4185,4 +4185,39 @@ npx drizzle-kit migrate
   - **أعمار**: أضيفت السندات والمردودات كـ `-amount` بتواريخها — `totalDue` أصبح صافياً
   - **تقارير**: `CustomerStatementReport`/`SupplierStatementReport` تضم السندات والمردودات. **ترحيل**: `0018_recompute_party_balances` يُصلح كل الأرصدة القديمة (`IS DISTINCT FROM`)
 - **القاعدة الذهبية**: **كشف الحساب هو المصدر الموثوق** — كل عرض رصيد يشتق منه (`computed_balance`) ولا يُبنى بتراكم
+
+### المرحلة 82 (v0.14.0): تعدد وحدات المنتجات — الوحدات الخاصة والتحويل التلقائي
+- **النموذج**: جدول `product_units` (وحدات كل منتج مربوطة بكتالوج `units` العام) — كل صف يحمل `factor` (كم وحدة أساسية = 1) + `sale_price`/`purchase_price` خاصين + `barcode` للوحدة + أعلام `is_base`/`is_default_sale`/`is_default_purchase` (partial unique indexes تضمن واحداً من كل نوع). المخزون يُحفظ **دائماً بالأساسية**؛ السطور تخزّن snapshot (`unit_id` بلا FK + `unit_factor` مجمّد + `base_quantity`) على الجداول الستة — الترحيل للمخزون يستهلك `COALESCE(NULLIF(base_quantity,0), quantity)` حصرياً
+- **Migration `0021_product_units`**: جدول + 18 عموداً على 6 جداول سطور + backfill من خطوتين (إكمال صفوف `units` الناقصة من تسميات `products.unit` القديمة، ثم صف أساسي لكل منتج) + `UPDATE ... WHERE base_quantity = 0` للسطور القديمة. journal idx=21 + pglite MIGRATIONS + اختبارات migration (+7)
+- **مصدر الحقيقة**: `unitConversion.ts` (pure: `toBaseQty`/`fromBaseQty`/`stockInUnit`/`suggestUnitPrice`/`buildLineUnitSnapshot`/`snapshotLineUnit`/`defaultSaleUnit`/`defaultPurchaseUnit`/`baseUnit`/`formatQtyWithUnit` + `UnitFlags` generic يقبل ProductUnit وUnitOption) + 15 اختباراً. الـ RPC يستخدم `snapLineUnit` المحلي (نفس الصيغة) — لا SQL-on-the-wire
+- **API**: `inventoryApi.getProductUnits`/`ensureBaseProductUnit` (شفاء ذاتي للقديم)/`create`/`update`/`delete` (حارس: لا حذف لآخر صف) + 5 قنوات `db:rpc:inventory.*` (النطاق من الجلسة) + preload×2 + adapter interface + shim (مع `_cid` على سطح inventory) + `SQL_MODULE_TABLE_RULES` + مزامنة أسعار الصف الأساسي مع بطاقة المنتج عند التعديل
+- **الواجهات**: `ProductUnitSelect` (اختيار تلقائي للافتراضي + `onUnitsLoad` للكاش + عرض السعر والمتاح المحوّل) + `ProductUnitsSection` في modal المنتج (وضع التعديل فقط؛ الأساسي يُنشأ تلقائياً) + عمود وحدة في السطور الست (مبيعات/مشتريات: فواتير+عروض/أوامر+مردودات) مع تعبئة سعر الوحدة وعدم سحق اليدوي + تلميح `≈ X بالأساسية` + الطباعة/التفاصيل تعرض `unitName` + المخزون يعرض المتاح بوحدة البيع الافتراضية + التحويلات المخزنية بوحدة مختارة + BOM/أوامر التشغيل: إدخال بالوحدة مع ثبات التكلفة الأساسية (`display/factor`) والحفظ بالقيم الأساسية
+- **الوكيل الذكي**: أداة `search.product_units` + `unitId` في `LINES_SCHEMA` وكل أدوات الإنشاء الست + الـ wizardين عبر `resolveLineUnits` (خطأ صريح يوجّه للبحث بدل factor=1 الصامت) + توحيد `parseLines`/`LINES_SCHEMA` المكررة في wizardTools مع shared + قاعدة برومبت 37
+- **البذور والنسخ**: قسم 14b في seedDemoData + `seedProductUnits` في pglite (صف أساسي لكل منتج + صفّا عرض: تونة/كرتون 48 وزيت/كرتون 6 بأسعار مخصصة) + `product_units` في BACKUP_PLAN/INSERT_ORDER/DELETE_ORDER (company scope، حذف قبل products وunits) مع parity test
+- **التحقق**: tsc 0 ✓ | eslint 0/0 ✓ | **vitest 1729/1729** ✓ (+31: تحويل 15 + API وحدات 7 + resolve 5 + سطور مبيعات 4) | build 32s ✓ | db:check نظيف ✓ | تحقق حي على PG (18/18 عمود + 18 صف أساس + صيغة COALESCE داخل ROLLBACK) ✓ | e2e مبيعات 7/7 + مدفوعات 6/6 ✓ (فشل أولي كان flake كلمة مرور admin المعروف — أُعيد التعيين dev-only)
+- **حوادث أثناء التنفيذ**: وكيل فرعي منقطع كتب `PurchaseReturnsPage.tsx` بترميز UTF-16 (binary) — الاستعادة `git checkout` ثم إعادة يدوية. كتابة PowerShell فوق ملف عربي تُنتج mojibake (`—` ← `â€"`) + BOM — القاعدة الذهبية مؤكدة عملياً مرة أخرى
+
+### قواعد ذهبية مضافة (Phase 82)
+- **المخزون بالأساسية دائماً، والسعر بسعر الوحدة المختارة**: `line_total = quantity × unit_price` (وحدة مختارة) و`base_quantity = quantity × factor` (مخزون) — لا تخلط الاتجاهين أبداً
+- **الـ snapshot المجمّد يحمي التاريخ**: `unit_factor` يُحفظ وقت المستند؛ تعديل العامل لاحقاً لا يعيد كتابة المستندات القديمة. `unit_id` بلا FK عمداً — حذف الوحدة لا يكسر السطور القديمة
+- **`COALESCE(NULLIF(base_quantity,0), quantity)` للترحيل**: يستهلك الأساسي مع fallback للقديم؛ الصفر الحقيقي (سطر صفري) يبقى صفراً في الحالتين
+- **إلحاق الأعمدة في آخر INSERT (append-at-end)**: أي عمود جديد في سطور المستندات يُضاف بعد آخر عمود — يحفظ ثبات فهارس الـ params في الاختبارات القائمة ويمنع off-by-one من نوع Phase 42
+- **zod يُسقط المفاتيح المجهولة بصمت**: أي حقل سطر جديد (unitId…) يجب إضافته لمخططات `validation.ts` الستة وإلا اختفى قبل الـ API دون أي خطأ — فخ صامت من الدرجة الأولى
+- **الصف الأساسي مرآة البطاقة**: `sale_price`/`cost_price` في البطاقة = أسعار الصف الأساسي — المزامنة في `updateProduct` تحفظ الثابت، والأسعار المخصصة للوحدات الأخرى لا تُمس
+- **الحارس على طبقتين**: API يرفض حذف آخر صف + RPC بـ CTE guard + partial unique indexes — لا تعتمد على إخفاء زر الحذف في الواجهة (`units.length > 1`) وحده
+- **`resolveLineUnits` تفشل بصوت عالٍ**: `unitId` مجهول ← خطأ يوجّه لـ `search.product_units` — factor=1 الصامت كان سيُفسد المخزون بصمت (كرتون يُرحَّل كحبة)
+- **تكلفة العرض = التكلفة الأساسية × العامل ( invariant )**: عند تبديل الوحدة في BOM/أوامر التشغيل أعد حساب المعروض من الثابت الأساسي، واحفظ `display/factor` — وإلا انفصلت التكلفة عن الكمية
+- **`_cid` لكل سطح shim جديد**: أي surface في `vite-e2e-plugin.ts` يستدعي `this._cid()` يجب أن يعرّفه — وإلا `undefined is not a function` تُسقط كل الاختبارات
+- **فحص الـ shim إلزامي بعد كل تعديل**: قيّم الـ template literal ثم `new Function(code)` + عدّ backticks=0 — التعديل اليدوي على السطر العملاق يبتلع الفواصل بصمت
+- **اختبارات الـ placeholder counting هشّة عمداً**: `params.length 18→21` كسر اختبار purchases — هذا مقصود (العقد الحساس يكشف أي إزاحة)؛ حدّث العدد ووثّق الصيغة `13 header + 5 line + 3 unit`
+- **e2e login-timeout = كلمة مرور أولاً**: `waitForURL` بعد الدخول يعني غالباً hash مختلف في قاعدة التطوير — أعد التعيين dev-only قبل اتهام الكود
+
+### تصحيح Phase 82b: المردودات تحرّك المخزون — عبر مولّد القيود لا الـ API
+- **التحقيق كشف خطأ الافتراض**: المردودات **كانت** تحرّك المخزون أصلاً — `buildSalesReturnPostingStatements` و `buildPurchaseReturnPostingStatements` تُضمّنان حركات + تحديث مخزون (مشروطة بـ `if (ret.id)`، وكلتا الدالتين `postReturn` تمرّران `id`). محاولة إضافة حركات ثانية في طبقة الـ API كانت ستُنتج **تضاعفاً** — رُصدت وأُعيدت قبل الدمج
+- **الفجوة الحقيقية**: حركات المولّد كانت تستهلك `srl.quantity`/`prl.quantity` (الكمية المعروضة) بدل الأساسية — مردود كرتونين ×12 كان يعيد حبتين فقط للمخزون
+- **الإصلاح (4 أسطر SQL)**: `COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity)` في الحركة والتجميع (مبيعات) + نفسها لـ `prl` (مشتريات) — داخل المولّد فيستفيد كل المسارات (واجهة + وكيل + e2e) دون لمس أي API
+- **اختبارات (+2)**: `buildSalesReturnPostingStatements`/`buildPurchaseReturnPostingStatements` مع `id` تُنتجان `COALESCE` في الحركة (`'in'`/`'out'`) والتجميع. تحقق حي: EXPLAIN على PG حقيقي + صيغة `24 + 5(legacy) = 29` داخل ROLLBACK
+- **القاعدة الذهبية**: **قبل إضافة حركة مخزنية جديدة، ابحث أين تُبنى الحركات الحالية** — `journalEntryGenerator.ts` يملك مسارات `if (ret.id)` للترحيل تُنفَّذ داخل نفس الـ transaction. الإضافة المكررة = تضاعف صامت لا يكشفه أي اختبار عدّي إلا بفحص الرصيد النهائي
+
+*آخر تحديث: 2026-09-06 | الإصدار: maghzaccount-pro v0.14.0 (تعدد الوحدات)*
 *آخر تحديث: 2026-09-05 | الإصدار: maghzaccount-pro v0.13.11 (سلسلة package.json)*

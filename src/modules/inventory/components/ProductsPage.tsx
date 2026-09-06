@@ -19,6 +19,7 @@ import { useToastStore } from '@/core/store/toastStore';
 import { getNextDocumentNumber } from '@/core/api';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { Product } from '../types';
+import { ProductUnitsSection } from './ProductUnitsSection';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates, buildCompositeName } from '@/core/utils/duplicateDetection';
 import { inventoryApi } from '../api';
@@ -773,6 +774,17 @@ export const ProductsPage: React.FC = () => {
               <input type="number" step="0.01" min="0" value={formData.reorderPoint} onChange={(e) => setFormData((prev) => ({ ...prev, reorderPoint: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
             </div>
           </div>
+
+          {/* Multi-unit: manageable only once the product exists (edit mode).
+              The base unit row is auto-created with the product. */}
+          {editingId ? (
+            <ProductUnitsSection
+              companyId={companyId}
+              productId={editingId}
+              baseSalePrice={Number(formData.salePrice) || 0}
+              basePurchasePrice={Number(formData.costPrice) || 0}
+            />
+          ) : null}
 
           {/* Opening stock (create mode only) */}
           <div className="rounded-xl border border-dashed border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-900/10 p-4 space-y-3">

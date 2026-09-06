@@ -7,7 +7,7 @@ import { salesQuotationFingerprint, genericNearScore, detectDocumentDuplicates }
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { CustomerSelect, ProductSelect, CashBoxSelect } from '@/core/ui/components/smart';
+import { CustomerSelect, ProductSelect, CashBoxSelect, ProductUnitSelect } from '@/core/ui/components/smart';
 import { useQuotationsPaginated } from '../hooks/useSales';
 import { salesApi } from '../api';
 import { useAppStore } from '@/core/store';
@@ -28,11 +28,18 @@ import { logAudit } from '@/core/utils/auditLogger';
 import { useToastStore } from '@/core/store/toastStore';
 import type { Quotation } from '../types';
 import type { Product } from '@/modules/inventory/types';
+import { toBaseQty } from '@/core/utils/unitConversion';
+import type { ProductUnit } from '@/modules/inventory/types';
 
 interface QuotationLineForm {
   productId: string;
   productName: string;
   quantity: number;
+  /** Chosen product_units row id + frozen factor + base qty (stock truth). */
+  unitId?: string;
+  unitFactor?: number;
+  baseQuantity?: number;
+  unitName?: string;
   unitPrice: number;
   discountPercent: number;
 }
@@ -94,13 +101,19 @@ export const QuotationsPage: React.FC = () => {
   const docDuplicateConfirmedRef = useRef(false);
 
   const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
-  const [lines, setLines] = useState<QuotationLineForm[]>([{ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 }]);
+  const [lines, setLines] = useState<QuotationLineForm[]>([{ productId: '', productName: '', quantity: 1, unitId: undefined, unitFactor: 1, baseQuantity: 1, unitName: undefined, unitPrice: 0, discountPercent: 0 }]);
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
   const [invoiceDiscountType, setInvoiceDiscountType] = useState<'amount' | 'percent'>('amount');
+  // Cache of each line-product's units (fed by ProductUnitSelect) so unit
+  // switches can tell auto-filled prices apart from manual entries.
+  const [lineUnitsCache, setLineUnitsCache] = useState<Record<string, ProductUnit[]>>({});
+  const cacheProductUnits = useCallback((productId: string, units: ProductUnit[]) => {
+    setLineUnitsCache((prev) => (prev[productId] === units ? prev : { ...prev, [productId]: units }));
+  }, []);
   const showDiscount = settings?.invoiceShowDiscount ?? true;
   const showVat = settings?.invoiceShowVat ?? true;
 
-  const defaultLine = (): QuotationLineForm => ({ productId: '', productName: '', quantity: 1, unitPrice: 0, discountPercent: 0 });
+  const defaultLine = (): QuotationLineForm => ({ productId: '', productName: '', quantity: 1, unitId: undefined, unitFactor: 1, baseQuantity: 1, unitName: undefined, unitPrice: 0, discountPercent: 0 });
 
   const resetForm = useCallback(() => {
     setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
@@ -118,7 +131,17 @@ export const QuotationsPage: React.FC = () => {
   const openEdit = useCallback((q: Quotation) => {
     if (q.status === 'converted') return;
     setEditingId(q.id);
-    setLines(q.lines.map(l => ({ productId: l.productId, productName: l.productName || l.productId, quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent })));
+    setLines(q.lines.map(l => ({
+      productId: l.productId,
+      productName: l.productName || l.productId,
+      quantity: l.quantity,
+      unitId: l.unitId,
+      unitFactor: l.unitFactor ?? 1,
+      baseQuantity: l.baseQuantity ?? l.quantity,
+      unitName: l.unitName || l.unit,
+      unitPrice: l.unitPrice,
+      discountPercent: l.discountPercent,
+    })));
     setFormOpen(true);
   }, []);
 
@@ -140,6 +163,11 @@ export const QuotationsPage: React.FC = () => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
       if (field === 'productId' && typeof value === 'string') next[idx].productName = value;
+      // Keep the base quantity in sync — stock postings consume it, never
+      // the display quantity.
+      if (field === 'quantity' && typeof value === 'number') {
+        next[idx].baseQuantity = toBaseQty(value, next[idx].unitFactor ?? 1);
+      }
       return next;
     });
   };
@@ -151,11 +179,38 @@ export const QuotationsPage: React.FC = () => {
       next[idx] = {
         ...current,
         productName: product.nameAr,
+        unitId: undefined,
+        unitFactor: 1,
+        baseQuantity: current.quantity,
+        unitName: undefined,
         unitPrice: current.unitPrice > 0 ? current.unitPrice : product.salePrice,
       };
       return next;
     });
   }, []);
+
+  /**
+   * Unit switch: adopt the unit's own sale price unless the user typed a
+   * custom price (i.e. current price matches no known unit price for this
+   * product). Base quantity is always recomputed.
+   */
+  const handleUnitChange = useCallback((idx: number, unit: ProductUnit | null) => {
+    setLines(prev => {
+      const next = [...prev];
+      const current = next[idx];
+      const known = lineUnitsCache[current.productId] || [];
+      const isAutoPrice = current.unitPrice === 0 || known.some((u) => u.salePrice === current.unitPrice);
+      next[idx] = {
+        ...current,
+        unitId: unit?.id,
+        unitFactor: unit?.factor ?? 1,
+        baseQuantity: toBaseQty(current.quantity, unit?.factor ?? 1),
+        unitName: unit?.unitName,
+        unitPrice: unit && isAutoPrice ? unit.salePrice : current.unitPrice,
+      };
+      return next;
+    });
+  }, [lineUnitsCache]);
 
   const calculations = useMemo(() => {
     const lineDiscountTotal = showDiscount ? lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
@@ -191,6 +246,10 @@ export const QuotationsPage: React.FC = () => {
       productId: l.productId,
       productName: l.productName,
       quantity: l.quantity,
+      unitId: l.unitId,
+      unitFactor: l.unitFactor ?? 1,
+      baseQuantity: toBaseQty(l.quantity, l.unitFactor ?? 1),
+      unitName: l.unitName,
       unitPrice: l.unitPrice,
       discountPercent: l.discountPercent,
       lineTotal: roundMoney(l.quantity * l.unitPrice * (1 - l.discountPercent / 100), dp),
@@ -357,6 +416,10 @@ export const QuotationsPage: React.FC = () => {
             productId: l.productId,
             productName: l.productName,
             quantity: l.quantity,
+            unitId: l.unitId,
+            unitFactor: l.unitFactor ?? 1,
+            baseQuantity: l.baseQuantity ?? l.quantity,
+            unitName: l.unitName || l.unit,
             unitPrice: l.unitPrice,
             discountPercent: l.discountPercent,
             vatPercent: 0,
@@ -396,7 +459,7 @@ export const QuotationsPage: React.FC = () => {
         productCode: l.productCode,
         barcode: l.barcode,
         sku: l.sku,
-        unit: l.unit,
+        unit: l.unitName || l.unit,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
         total: l.lineTotal,
@@ -690,7 +753,8 @@ export const QuotationsPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
-                    <th className="px-4 py-3 text-right font-semibold w-[48%]">{t('inventory.productName')}</th>
+                    <th className="px-4 py-3 text-right font-semibold w-[36%]">{t('inventory.productName')}</th>
+                    <th className="px-3 py-3 text-center font-semibold w-32">{t('sales.line.unit')}</th>
                     <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
                     <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
                     {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
@@ -704,6 +768,20 @@ export const QuotationsPage: React.FC = () => {
                     return (
                       <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors group">
                         <td className="px-3 py-3"><ProductSelect companyId={activeCompany?.id || ''} value={line.productId} onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))} onProductChange={(p) => handleProductChange(idx, p)} showBarcode showStock size="sm" module="sales" /></td>
+                        <td className="px-2 py-2">
+                          <ProductUnitSelect
+                            companyId={activeCompany?.id || ''}
+                            productId={line.productId}
+                            value={line.unitId}
+                            onChange={(u) => handleUnitChange(idx, u)}
+                            onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
+                            mode="sale"
+                            size="sm"
+                          />
+                          {(line.unitFactor ?? 1) > 1 && (
+                            <p className="text-[10px] text-slate-400 text-center mt-0.5 tabular-nums">≈ {line.baseQuantity} {t('sales.line.baseEquivalent')}</p>
+                          )}
+                        </td>
                         <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" /></td>
                         <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" /></td>
                         {showDiscount && <td className="px-3 py-2"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" /></td>}
@@ -735,6 +813,15 @@ export const QuotationsPage: React.FC = () => {
                       <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
                       <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
                     </div>
+                    <ProductUnitSelect
+                      companyId={activeCompany?.id || ''}
+                      productId={line.productId}
+                      value={line.unitId}
+                      onChange={(u) => handleUnitChange(idx, u)}
+                      onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
+                      mode="sale"
+                      size="sm"
+                    />
                     {showDiscount && <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" />}
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
@@ -801,12 +888,13 @@ export const QuotationsPage: React.FC = () => {
             </div>
             <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300"><tr><th className="px-3 py-2 text-right">#</th><th className="px-3 py-2 text-right">{t('inventory.productName')}</th><th className="px-3 py-2 text-right">{t('inventory.quantity')}</th><th className="px-3 py-2 text-right">{t('inventory.unitPrice')}</th><th className="px-3 py-2 text-right">{t('sales.total')}</th></tr></thead>
+                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300"><tr><th className="px-3 py-2 text-right">#</th><th className="px-3 py-2 text-right">{t('inventory.productName')}</th><th className="px-3 py-2 text-right">{t('select.product.unit')}</th><th className="px-3 py-2 text-right">{t('inventory.quantity')}</th><th className="px-3 py-2 text-right">{t('inventory.unitPrice')}</th><th className="px-3 py-2 text-right">{t('sales.total')}</th></tr></thead>
                 <tbody>
                   {(viewing.lines || []).map((l, i) => (
                     <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
                       <td className="px-3 py-2 text-slate-500">{i + 1}</td>
                       <td className="px-3 py-2 font-medium">{l.productName || l.productId}</td>
+                      <td className="px-3 py-2 text-slate-500">{l.unitName || l.unit || '-'}</td>
                       <td className="px-3 py-2">{l.quantity}</td>
                       <td className="px-3 py-2">{formatCurrency(l.unitPrice)}</td>
                       <td className="px-3 py-2 font-medium">{formatCurrency(l.lineTotal)}</td>

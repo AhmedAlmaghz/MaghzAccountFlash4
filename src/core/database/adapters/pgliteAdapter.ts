@@ -115,6 +115,7 @@ import usersPhotoUrl from '@root/drizzle/0017_users_photo_url.sql?raw';
 import recomputePartyBalances from '@root/drizzle/0018_recompute_party_balances.sql?raw';
 import payrollComponentsAudit from '@root/drizzle/0019_payroll_components_audit.sql?raw';
 import companiesAudit from '@root/drizzle/0020_companies_audit.sql?raw';
+import productUnits from '@root/drizzle/0021_product_units.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -138,6 +139,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0018_recompute_party_balances', sql: recomputePartyBalances },
   { name: '0019_payroll_components_audit', sql: payrollComponentsAudit },
   { name: '0020_companies_audit', sql: companiesAudit },
+  { name: '0021_product_units', sql: productUnits },
 ];
 
 /**
@@ -959,6 +961,40 @@ async function seedProducts(
   return productIdByCode;
 }
 
+async function seedProductUnits(
+  this: DbAdapter,
+  companyId: string,
+  productIdByCode: Map<string, string>
+): Promise<void> {
+  // Base row per product (mirrors migration 0021 backfill for seed-inserted rows).
+  for (const [, productId] of productIdByCode) {
+    await this.query(
+      `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
+       SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
+         FROM products p JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)`,
+      [productId, companyId]
+    );
+  }
+  // Demo multi-unit rows (custom prices on purpose — per-unit pricing).
+  const demo: Array<{ product: string; unitCode: string; factor: number; sale: number; purchase: number; defSale: boolean; defPurch: boolean }> = [
+    { product: 'PRD-008', unitCode: 'CTN', factor: 48, sale: 35000, purchase: 31200, defSale: true, defPurch: true },
+    { product: 'PRD-002', unitCode: 'CTN', factor: 6, sale: 28000, purchase: 25200, defSale: false, defPurch: false },
+  ];
+  for (const d of demo) {
+    const pid = productIdByCode.get(d.product);
+    if (!pid) continue;
+    await this.query(
+      `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
+       SELECT $1::uuid, $2::uuid, u.id, $3::numeric, $4::numeric, $5::numeric, false, $6, $7
+         FROM units u WHERE u.company_id = $1::uuid AND u.code = $8::text
+         AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = $2::uuid AND pu.unit_id = u.id)`,
+      [companyId, pid, d.factor, d.sale, d.purchase, d.defSale, d.defPurch, d.unitCode]
+    );
+  }
+}
+
 async function seedWarehouses(this: DbAdapter, companyId: string): Promise<Map<string, string>> {
   const whIdByCode = new Map<string, string>();
   for (const w of WAREHOUSES) {
@@ -1504,6 +1540,7 @@ export const pgliteAdapter: DbAdapter = {
       await seedSuppliers.call(this, companyId);
       const catIdByName = await seedProductCategories.call(this, companyId);
       const productIdByCode = await seedProducts.call(this, companyId, adminId, typeCodeToId, catIdByName);
+      await seedProductUnits.call(this, companyId, productIdByCode);
       const whIdByCode = await seedWarehouses.call(this, companyId);
       await seedStock.call(this, companyId, adminId, productIdByCode, whIdByCode);
       const deptIdByName = await seedDepartments.call(this, companyId);

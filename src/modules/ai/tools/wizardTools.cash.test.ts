@@ -30,6 +30,18 @@ vi.mock('@/core/database/adapters', () => ({
   })),
   isElectronPg: vi.fn(() => false),
 }));
+vi.mock('@/modules/inventory/api', () => ({
+  inventoryApi: {
+    getProductUnits: vi.fn(async () => ({
+      success: true,
+      data: [{
+        id: 'pu-base', unitId: 'u-base', unitName: 'حبة', factor: 1,
+        salePrice: 1000, purchasePrice: 900,
+        isBase: true, isDefaultSale: true, isDefaultPurchase: true,
+      }],
+    })),
+  },
+}));
 
 import { wizardTools } from './wizardTools';
 import { salesApi } from '@/modules/sales/api';

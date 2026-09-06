@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Boxes, ArrowRightLeft, Plus, Scale, AlertTriangle, CheckCircle, Search, X, Package, Warehouse, Layers, TrendingUp, FileText, Receipt, Wallet, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Button, Input, Modal, Table, Can, Badge, PageHeader } from '@/core/ui/components';
@@ -6,7 +6,10 @@ import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { ProductSelect, WarehouseSelect } from '@/core/ui/components/smart';
+import { ProductSelect, WarehouseSelect, ProductUnitSelect } from '@/core/ui/components/smart';
+import { defaultSaleUnit, fromBaseQty, toBaseQty } from '@/core/utils/unitConversion';
+import { inventoryApi } from '../api';
+import type { ProductUnit } from '../types';
 import { useStockDetailed, useStockTransfers } from '../hooks/useInventory';
 import { useAppStore } from '@/core/store';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
@@ -41,11 +44,38 @@ export const StockPage: React.FC = () => {
     fromWarehouseId: '',
     toWarehouseId: '',
     quantity: '',
+    transferUnitId: '',
+    transferUnitFactor: 1,
     date: new Date().toISOString().split('T')[0],
     transferNumber: '',
     reference: '',
     notes: '',
   });
+
+  // Per-product units cache for the visible rows: shows availability in the
+  // default sale unit next to the base quantity (stock truth stays base).
+  const [pageUnits, setPageUnits] = useState<Record<string, ProductUnit[]>>({});
+  useEffect(() => {
+    const cid = activeCompany?.id;
+    if (!cid) return;
+    const ids = [...new Set(stock.map((s) => s.productId).filter(Boolean))];
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(ids.map(async (pid) => {
+        const r = await inventoryApi.getProductUnits(pid, cid);
+        return [pid, r.success && r.data ? r.data : []] as const;
+      }));
+      if (!cancelled) {
+        setPageUnits((prev) => {
+          const next = { ...prev };
+          for (const [pid, u] of entries) next[pid] = u;
+          return next;
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stock, activeCompany?.id]);
 
   const stockStats = useMemo(() => {
     const totalItems = stock.length;
@@ -93,6 +123,8 @@ export const StockPage: React.FC = () => {
       fromWarehouseId: '',
       toWarehouseId: '',
       quantity: '',
+      transferUnitId: '',
+      transferUnitFactor: 1,
       date: new Date().toISOString().split('T')[0],
       transferNumber: '',
       reference: '',
@@ -126,7 +158,7 @@ export const StockPage: React.FC = () => {
         productId: transferForm.productId,
         fromWarehouseId: transferForm.fromWarehouseId,
         toWarehouseId: transferForm.toWarehouseId,
-        quantity: Number(transferForm.quantity),
+        quantity: toBaseQty(Number(transferForm.quantity), transferForm.transferUnitFactor),
         date: transferForm.date,
         transferNumber: transferForm.transferNumber,
         reference: transferForm.reference || undefined,
@@ -235,12 +267,17 @@ export const StockPage: React.FC = () => {
       key: 'quantity',
       header: t('inventory.quantity'),
       align: 'right' as const,
-      width: '110px',
+      width: '130px',
       render: (row: StockItem) => {
         const isLow = row.minStockAlert !== undefined && row.minStockAlert !== null && Number(row.quantity) < Number(row.minStockAlert);
+        const units = pageUnits[row.productId] || [];
+        const saleU = defaultSaleUnit(units);
+        const baseQty = Number(row.quantity) || 0;
         return (
           <span className={`font-bold tabular-nums px-2.5 py-1 rounded-full text-xs border ${isLow ? 'bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'}`}>
-            {row.quantity}
+            {saleU && !saleU.isBase && saleU.factor > 0
+              ? `${Number(fromBaseQty(baseQty, saleU.factor).toFixed(2))} ${saleU.unitName} (${baseQty} ${row.unit || ''})`
+              : baseQty}
           </span>
         );
       },
@@ -265,6 +302,7 @@ export const StockPage: React.FC = () => {
         return null;
       },
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t]);
 
   const transferColumns = useMemo(() => [
@@ -521,7 +559,17 @@ export const StockPage: React.FC = () => {
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.productName')} *</label>
-            <ProductSelect companyId={activeCompany?.id || ''} value={transferForm.productId} onChange={(v) => setTransferForm((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock module="inventory" />
+            <ProductSelect companyId={activeCompany?.id || ''} value={transferForm.productId} onChange={(v) => setTransferForm((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '', transferUnitId: '', transferUnitFactor: 1 }))} showBarcode showStock module="inventory" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('purchases.line.unit')}</label>
+            <ProductUnitSelect
+              companyId={activeCompany?.id || ''}
+              productId={transferForm.productId}
+              value={transferForm.transferUnitId || undefined}
+              onChange={(u) => setTransferForm((prev) => ({ ...prev, transferUnitId: u?.id || '', transferUnitFactor: u?.factor ?? 1 }))}
+              mode="sale"
+            />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

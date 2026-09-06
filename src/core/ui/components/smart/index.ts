@@ -11,6 +11,7 @@ export { LeadSelect } from './fields/LeadSelect';
 export { OpportunitySelect } from './fields/OpportunitySelect';
 export { PayrollComponentSelect } from './fields/PayrollComponentSelect';
 export { ProductSelect } from './fields/ProductSelect';
+export { ProductUnitSelect } from './fields/ProductUnitSelect';
 export { ProductTypeSelect } from './fields/ProductTypeSelect';
 export { SupplierSelect } from './fields/SupplierSelect';
 export { UnitSelect } from './fields/UnitSelect';

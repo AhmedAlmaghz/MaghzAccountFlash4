@@ -8,6 +8,7 @@ import {
   summarizeDocLines,
   getInvoiceTaxConfig,
   parseLines,
+  resolveLineUnits,
   LINES_SCHEMA,
 } from './shared';
 import { localToday } from '../../engine/dateUtils';
@@ -113,7 +114,9 @@ export const salesWriteTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_invoice');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم الفاتورة' };
 
-      const lines = parsed.map((l) => {
+      const resolved = await resolveLineUnits(ctx.companyId, 'sale', parsed);
+      if ('error' in resolved) return { error: resolved.error };
+      const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
         return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
@@ -210,9 +213,14 @@ export const salesWriteTools: ToolDefinition[] = [
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'quotation');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم العرض' };
 
-      const lines = parsed.map((l) => ({
+      const resolved = await resolveLineUnits(ctx.companyId, 'sale', parsed);
+      if ('error' in resolved) return { error: resolved.error };
+      const lines = resolved.map((l) => ({
         productId: l.productId,
         quantity: l.quantity,
+        unitId: l.unitId,
+        unitFactor: l.unitFactor,
+        baseQuantity: l.baseQuantity,
         unitPrice: l.unitPrice,
         discountPercent: l.discountPercent,
         lineTotal: round2(l.quantity * l.unitPrice * (1 - l.discountPercent / 100)),
@@ -256,8 +264,9 @@ export const salesWriteTools: ToolDefinition[] = [
             type: 'object',
             properties: {
               productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
-              quantity: { type: 'number', description: 'الكمية المرتجعة' },
-              unitPrice: { type: 'number', description: 'سعر الوحدة (سعر البيع)' },
+              quantity: { type: 'number', description: 'الكمية المرتجعة بالوحدة المختارة' },
+              unitPrice: { type: 'number', description: 'سعر الوحدة المختارة (سعر البيع)' },
+              unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري' },
             },
             required: ['productId', 'quantity', 'unitPrice'],
           },
@@ -271,15 +280,19 @@ export const salesWriteTools: ToolDefinition[] = [
       if (!customerId) return { error: 'customerId مطلوب' };
       const rawLines = args.lines;
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير صنف واحد على الأقل في lines' };
-      const lines: { productId: string; quantity: number; unitPrice: number; lineTotal: number }[] = [];
-      for (const item of rawLines) {
-        const productId = str((item as Record<string, unknown>).productId);
-        const quantity = num((item as Record<string, unknown>).quantity);
-        const unitPrice = num((item as Record<string, unknown>).unitPrice);
-        if (!productId) return { error: 'كل صنف يحتاج productId — استخدم search.products أولاً' };
-        if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
-        lines.push({ productId, quantity, unitPrice, lineTotal: round2(quantity * unitPrice) });
-      }
+      const parsedReturn = parseLines(rawLines);
+      if ('error' in parsedReturn) return { error: parsedReturn.error };
+      const resolvedReturn = await resolveLineUnits(ctx.companyId, 'sale', parsedReturn);
+      if ('error' in resolvedReturn) return { error: resolvedReturn.error };
+      const lines = resolvedReturn.map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+        unitId: l.unitId,
+        unitFactor: l.unitFactor,
+        baseQuantity: l.baseQuantity,
+        unitPrice: l.unitPrice,
+        lineTotal: round2(l.quantity * l.unitPrice),
+      }));
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'sales_return');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم المردود' };
