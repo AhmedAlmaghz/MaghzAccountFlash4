@@ -5,6 +5,7 @@ import { reportSmartAssistantSkill } from './reportSmartAssistant';
 import { businessAnalystSkill } from './businessAnalyst';
 import { searchExpertiseSkill } from './searchExpertise';
 import { crmAssistantSkill } from './crmAssistant';
+import { inventoryUnitsSkill } from './inventoryUnits';
 import { regionalFluencySkill } from './regionalFluency';
 import { themeDesignerSkill } from './themeDesigner';
 
@@ -25,6 +26,7 @@ export function ensureSkillsRegistered(): void {
     businessAnalystSkill,
     searchExpertiseSkill,
     crmAssistantSkill,
+    inventoryUnitsSkill,
     regionalFluencySkill,
     themeDesignerSkill,
   ]);

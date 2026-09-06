@@ -8,6 +8,32 @@ import {
   round2,
 } from './shared';
 import { localToday } from '../../engine/dateUtils';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
+import { getUnits } from '@/core/api';
+
+/**
+ * Resolve a catalog unit by human name ("كرتون") to its units.id.
+ * Tolerates alef/yeh/teh variants and the ال prefix — returns null when
+ * the unit does not exist so the tool can guide the model to create it.
+ */
+async function resolveCatalogUnitId(companyId: string, unitName: string): Promise<string | null> {
+  const norm = normalizeArabic(unitName).replace(/^(ال|لل)/, '');
+  if (!norm) return null;
+  try {
+    const res = await getUnits(companyId);
+    if (!res.success || !res.data) return null;
+    for (const u of res.data) {
+      if (!u.isActive) continue;
+      const candidates = [u.nameAr || '', u.nameEn || '', u.code || ''].map((s) => normalizeArabic(s).replace(/^(ال|لل)/, ''));
+      if (candidates.some((c) => c && (c === norm || c.includes(norm) || norm.includes(c)))) {
+        return u.id;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * WRITE tools — المخازن (15 أداة).
@@ -574,6 +600,121 @@ export const inventoryWriteTools: ToolDefinition[] = [
       const res = await inventoryApi.deleteProductCategory(id, ctx.companyId);
       if (!res.success) return { error: res.error || 'فشل حذف التصنيف' };
       return { deleted: true, categoryId: id };
+    },
+  },
+
+  // ─── ─── Inventory: Product Units (multi-unit) ─────────────────────────────
+  // Each product owns its base unit plus extra units (carton/dozen…) with
+  // their own factor + sale/purchase prices. Stock is always kept in the
+  // base unit; documents snapshot the factor at creation time.
+  {
+    name: 'inventory.create_product_unit',
+    labelAr: 'إضافة وحدة لمنتج',
+    descriptionAr: 'يضيف وحدة جديدة لمنتج (كرتون/درزن/شدة…) بعامل تحويل وسعري بيع وشراء خاصين. اذكر اسم الوحدة نصاً (كرتون) وسيُطابق مع كتالوج الوحدات تلقائياً — استخدم search.products أولاً لمعرف المنتج.',
+    permission: 'inventory.create',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
+        unitName: { type: 'string', description: 'اسم الوحدة نصاً كما في الإعدادات (كرتون، درزن، شدة، علبة…)' },
+        factor: { type: 'number', description: 'عامل التحويل: كم وحدة أساسية = 1 من هذه الوحدة (كرتون 12 حبة ← 12)' },
+        salePrice: { type: 'number', description: 'سعر بيع الوحدة (اختياري — يُقترح من الأساسية × العامل)' },
+        purchasePrice: { type: 'number', description: 'سعر شراء الوحدة (اختياري)' },
+        barcode: { type: 'string', description: 'باركود الوحدة (اختياري — باركود الكرتون يختلف عن الحبة)' },
+        isDefaultSale: { type: 'boolean', description: 'اجعلها الوحدة الافتراضية للبيع' },
+        isDefaultPurchase: { type: 'boolean', description: 'اجعلها الوحدة الافتراضية للشراء' },
+      },
+      required: ['productId', 'unitName', 'factor'],
+    },
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      return `إضافة وحدة "${r.unitName}" للمنتج (${String(r.productId || '').slice(0, 8)}…) — العامل: ${r.factor}`;
+    },
+    execute: async (args, ctx) => {
+      const productId = str(args.productId);
+      const unitName = str(args.unitName);
+      const factor = num(args.factor);
+      if (!productId) return { error: 'productId مطلوب — استخدم search.products أولاً' };
+      if (!unitName) return { error: 'unitName مطلوب (مثال: كرتون، درزن، شدة)' };
+      if (!(factor > 0)) return { error: 'factor يجب أن يكون أكبر من صفر (كرتون 12 حبة ← 12)' };
+      const unitId = await resolveCatalogUnitId(ctx.companyId, unitName);
+      if (!unitId) return { error: `الوحدة "${unitName}" غير موجودة في الإعدادات — أنشئها أولاً من صفحة الوحدات ثم أعد المحاولة` };
+      const res = await inventoryApi.createProductUnit({
+        companyId: ctx.companyId,
+        productId,
+        unitId,
+        factor,
+        salePrice: args.salePrice !== undefined ? num(args.salePrice) : 0,
+        purchasePrice: args.purchasePrice !== undefined ? num(args.purchasePrice) : 0,
+        barcode: str(args.barcode),
+        isBase: false,
+        isDefaultSale: Boolean(args.isDefaultSale),
+        isDefaultPurchase: Boolean(args.isDefaultPurchase),
+      });
+      if (!res.success) return { error: res.error || 'فشل إضافة الوحدة' };
+      return { created: true, unitRowId: res.id, productId, unitName, factor };
+    },
+  },
+  {
+    name: 'inventory.update_product_unit',
+    labelAr: 'تعديل وحدة منتج',
+    descriptionAr: 'يُعدّل وحدة منتج موجودة: العامل، أسعار البيع/الشراء، الباركود، أو الافتراضيات. استخدم search.product_units أولاً لمعرف صف الوحدة (unitId).',
+    permission: 'inventory.edit',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        unitRowId: { type: 'string', description: 'معرف صف وحدة المنتج (unitId من search.product_units — ليس معرف الكتالوج)' },
+        factor: { type: 'number', description: 'عامل التحويل الجديد (يؤثر على المستندات الجديدة فقط — القديمة مجمّدة)' },
+        salePrice: { type: 'number', description: 'سعر البيع الجديد' },
+        purchasePrice: { type: 'number', description: 'سعر الشراء الجديد' },
+        barcode: { type: 'string', description: 'باركود الوحدة' },
+        isDefaultSale: { type: 'boolean', description: 'اجعلها الافتراضية للبيع' },
+        isDefaultPurchase: { type: 'boolean', description: 'اجعلها الافتراضية للشراء' },
+      },
+      required: ['unitRowId'],
+    },
+    summarizeArgs: (a) => `تعديل وحدة منتج: ${String((a as Record<string, unknown>).unitRowId || '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const unitRowId = str(args.unitRowId);
+      if (!unitRowId) return { error: 'unitRowId مطلوب — استخدم search.product_units أولاً' };
+      const data: Record<string, unknown> = {};
+      if (args.factor !== undefined) {
+        if (!(num(args.factor) > 0)) return { error: 'factor يجب أن يكون أكبر من صفر' };
+        data.factor = num(args.factor);
+      }
+      if (args.salePrice !== undefined) data.salePrice = num(args.salePrice);
+      if (args.purchasePrice !== undefined) data.purchasePrice = num(args.purchasePrice);
+      if (args.barcode !== undefined) data.barcode = str(args.barcode);
+      if (args.isDefaultSale !== undefined) data.isDefaultSale = Boolean(args.isDefaultSale);
+      if (args.isDefaultPurchase !== undefined) data.isDefaultPurchase = Boolean(args.isDefaultPurchase);
+      if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
+      const res = await inventoryApi.updateProductUnit(unitRowId, ctx.companyId, data);
+      if (!res.success) return { error: res.error || 'فشل تعديل الوحدة' };
+      return { updated: true, unitRowId };
+    },
+  },
+  {
+    name: 'inventory.delete_product_unit',
+    labelAr: 'حذف وحدة منتج',
+    descriptionAr: 'يحذف وحدة إضافية من منتج. الـ API يرفض حذف الوحدة الوحيدة المتبقية. المستندات القديمة لا تتأثر (عاملها مجمّد فيها).',
+    permission: 'inventory.delete',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        unitRowId: { type: 'string', description: 'معرف صف وحدة المنتج (unitId من search.product_units)' },
+      },
+      required: ['unitRowId'],
+    },
+    summarizeArgs: (a) => `حذف وحدة منتج: ${String((a as Record<string, unknown>).unitRowId || '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const unitRowId = str(args.unitRowId);
+      if (!unitRowId) return { error: 'unitRowId مطلوب — استخدم search.product_units أولاً' };
+      const res = await inventoryApi.deleteProductUnit(unitRowId, ctx.companyId);
+      if (!res.success) return { error: res.error || 'فشل حذف الوحدة' };
+      return { deleted: true, unitRowId };
     },
   },
 ];
