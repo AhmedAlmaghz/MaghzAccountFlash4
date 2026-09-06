@@ -34,6 +34,8 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { hrApi } from '@/modules/hr/api';
 import { crmApi } from '@/modules/crm/api';
+import { accountingApi } from '@/modules/accounting/api';
+import { normalizeQuery } from '@/core/ui/components/command/paletteSearch';
 import { useAppStore } from '@/core/store';
 import { ToastContainer } from '@/core/ui/components/Toast';
 import { useAuthStore } from '@/modules/auth/store';
@@ -762,6 +764,66 @@ export const AppLayout = () => {
         fetch: async (companyId, q) => {
           const res = await crmApi.getOpportunitiesPaginated(companyId, 1, 5, { search: q });
           return res.success && res.data ? res.data.items.map((i) => ({ key: i.id, label: i.name })) : [];
+        },
+      },
+      {
+        key: 'accounts',
+        groupKey: 'sidebar.accounting.chartOfAccounts',
+        path: '/accounting/chart',
+        icon: Calculator,
+        fetch: async (companyId, q) => {
+          const res = await accountingApi.getAccounts(companyId);
+          if (!res.success || !res.data) return [];
+          const nq = normalizeQuery(q);
+          return res.data
+            .filter((a) => normalizeQuery(`${a.code} ${a.nameAr} ${a.nameEn || ''}`).includes(nq))
+            .slice(0, 5)
+            .map((i) => ({ key: i.id, label: `${i.code} - ${i.nameAr}`, subtitle: i.nameEn }));
+        },
+      },
+      {
+        key: 'warehouses',
+        groupKey: 'sidebar.inventory.warehouses',
+        path: '/inventory/warehouses',
+        icon: Package,
+        fetch: async (companyId, q) => {
+          const res = await inventoryApi.getWarehouses(companyId);
+          if (!res.success || !res.data) return [];
+          const nq = normalizeQuery(q);
+          return res.data
+            .filter((w) => normalizeQuery(`${w.code || ''} ${w.name}`).includes(nq))
+            .slice(0, 5)
+            .map((i) => ({ key: i.id, label: i.name, subtitle: i.code }));
+        },
+      },
+      {
+        key: 'sales-invoices',
+        groupKey: 'sidebar.sales.invoices',
+        path: '/sales/invoices',
+        icon: ShoppingCart,
+        fetch: async (companyId, q) => {
+          const res = await salesApi.getInvoicesPaginated(companyId, 1, 20);
+          if (!res.success || !res.data) return [];
+          const nq = normalizeQuery(q);
+          return res.data.items
+            .filter((i) => normalizeQuery(i.invoiceNumber).includes(nq))
+            .slice(0, 5)
+            .map((i) => ({ key: i.id, label: i.invoiceNumber, subtitle: i.customer?.name }));
+        },
+      },
+      {
+        key: 'purchase-invoices',
+        groupKey: 'sidebar.purchases.invoices',
+        path: '/purchases/invoices',
+        icon: Store,
+        fetch: async (companyId, q) => {
+          const res = await purchasesApi.getInvoicesPaginated(companyId, 1, 20);
+          if (!res.success || !res.data) return [];
+          const nq = normalizeQuery(q);
+          return res.data.items
+            .filter((i) => normalizeQuery(i.invoiceNumber).includes(nq))
+            .slice(0, 5)
+            .map((i) => ({ key: i.id, label: i.invoiceNumber, subtitle: i.supplier?.name }));
         },
       },
     ],

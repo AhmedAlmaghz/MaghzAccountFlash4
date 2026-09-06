@@ -18,29 +18,30 @@ describe('paletteItems registry', () => {
     expect(paths.size).toBe(paletteItems.length);
   });
 
-  it('includes every protected route', () => {
+  it('includes every protected route (mirror of router.tsx)', () => {
     const paths = paletteItems.map((i) => i.path);
     for (const p of [
-      '/', '/accounting/chart', '/accounting/journal', '/accounting/trial', '/accounting/balance',
+      '/', '/accounting', '/accounting/chart', '/accounting/journal', '/accounting/trial', '/accounting/balance',
       '/accounting/profit', '/accounting/cashflow', '/accounting/receipt-vouchers',
-      '/accounting/payment-vouchers', '/accounting/ledger', '/inventory/products',
+      '/accounting/payment-vouchers', '/accounting/ledger', '/inventory', '/inventory/products',
       '/inventory/warehouses', '/inventory/stock', '/inventory/transactions',
-      '/inventory/adjustments', '/sales/invoices', '/sales/customers', '/sales/quotations',
-      '/sales/returns', '/purchases/invoices', '/purchases/suppliers', '/purchases/orders',
-      '/purchases/returns', '/manufacturing/bom', '/manufacturing/work-orders',
-      '/manufacturing/cost-report', '/manufacturing/variance-report', '/hr/employees',
-      '/hr/attendance', '/hr/payroll', '/hr/leaves', '/hr/end-of-service', '/crm/leads',
-      '/crm/opportunities', '/crm/tasks', '/crm/activities', '/reports', '/reports/sales-analysis',
+      '/inventory/adjustments', '/sales', '/sales/invoices', '/sales/customers', '/sales/quotations',
+      '/sales/returns', '/purchases', '/purchases/invoices', '/purchases/suppliers', '/purchases/orders',
+      '/purchases/returns', '/manufacturing', '/manufacturing/bom', '/manufacturing/work-orders',
+      '/manufacturing/cost-report', '/manufacturing/variance-report', '/hr', '/hr/employees',
+      '/hr/departments', '/hr/attendance', '/hr/payroll', '/hr/leaves', '/hr/end-of-service', '/crm',
+      '/crm/leads', '/crm/opportunities', '/crm/tasks', '/crm/activities', '/reports', '/reports/sales-analysis',
       '/reports/inventory-analysis', '/reports/low-stock-alert', '/reports/stock-movement',
       '/reports/stock-valuation', '/reports/customer-statement', '/reports/supplier-statement',
       '/reports/profit-analysis', '/reports/custom-builder', '/reports/lead-conversion',
-      '/reports/opportunity-pipeline', '/users', '/roles', '/audit-logs', '/settings/company',
-      '/settings/currencies', '/settings/vat', '/settings/branches', '/settings/users',
+      '/reports/opportunity-pipeline', '/users', '/roles', '/audit-logs', '/settings', '/settings/company',
+      '/settings/themes', '/settings/currencies', '/settings/vat', '/settings/branches', '/settings/users',
       '/settings/ai', '/settings/document-sequences', '/settings/product-types',
       '/settings/product-categories', '/settings/default-accounts', '/settings/units',
-      '/settings/reset', '/ai',
+      '/settings/cash-boxes', '/settings/cost-centers', '/settings/database', '/settings/backup',
+      '/settings/hr-policies', '/settings/payroll-components', '/settings/reset', '/ai',
     ]) {
-      expect(paths).toContain(p);
+      expect(paths, `route ${p} must be searchable`).toContain(p);
     }
   });
 

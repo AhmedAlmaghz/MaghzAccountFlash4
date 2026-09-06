@@ -76,6 +76,7 @@ export const paletteItems: PaletteItem[] = [
   // HR
   { id: 'hr', labelKey: 'sidebar.hr.title', path: '/hr', module: 'hr', keywords: ['hr', 'موظفين'] },
   { id: 'hr-employees', labelKey: 'sidebar.hr.employees', path: '/hr/employees', module: 'hr', keywords: ['employees', 'staff', 'موظفين'] },
+  { id: 'hr-departments', labelKey: 'sidebar.hr.departments', path: '/hr/departments', module: 'hr', keywords: ['departments', 'أقسام'] },
   { id: 'hr-attendance', labelKey: 'sidebar.hr.attendance', path: '/hr/attendance', module: 'hr', keywords: ['attendance', 'حضور'] },
   { id: 'hr-payroll', labelKey: 'sidebar.hr.payroll', path: '/hr/payroll', module: 'hr', keywords: ['payroll', 'رواتب'] },
   { id: 'hr-leaves', labelKey: 'sidebar.hr.leaves', path: '/hr/leaves', module: 'hr', keywords: ['leaves', 'vacation', 'إجازات'] },
@@ -114,6 +115,10 @@ export const paletteItems: PaletteItem[] = [
   { id: 'settings-vat', labelKey: 'sidebar.settings.vat', path: '/settings/vat', module: 'settings', keywords: ['vat', 'ضريبة'] },
   { id: 'settings-branches', labelKey: 'sidebar.settings.branches', path: '/settings/branches', module: 'settings', keywords: ['branches', 'فروع'] },
   { id: 'settings-users', labelKey: 'settings.users.title', path: '/settings/users', module: 'settings', keywords: ['users', 'مستخدمين'] },
+  { id: 'settings-themes', labelKey: 'settings.menu.themes', path: '/settings/themes', module: 'settings', keywords: ['themes', 'appearance', 'ثيمات', 'مظهر'] },
+  { id: 'settings-database', labelKey: 'settings.menu.database', path: '/settings/database', module: 'settings', keywords: ['database', 'قاعدة', 'بيانات'] },
+  { id: 'settings-hr-policies', labelKey: 'sidebar.hrPolicy', path: '/settings/hr-policies', module: 'settings', keywords: ['hr', 'policies', 'سياسات'] },
+  { id: 'settings-payroll-components', labelKey: 'sidebar.settings.payrollComponents', path: '/settings/payroll-components', module: 'settings', keywords: ['payroll', 'components', 'مكونات', 'رواتب'] },
   { id: 'settings-ai', labelKey: 'ai.settings.title', path: '/settings/ai', module: 'settings', keywords: ['ai', 'ذكاء', 'اصطناعي'], permission: 'ai.settings' },
   { id: 'settings-sequences', labelKey: 'settings.sequences.title', path: '/settings/document-sequences', module: 'settings', keywords: ['sequences', 'تسلسل'] },
   { id: 'settings-producttypes', labelKey: 'settings.productTypes.title', path: '/settings/product-types', module: 'settings', keywords: ['types', 'أنواع'] },
