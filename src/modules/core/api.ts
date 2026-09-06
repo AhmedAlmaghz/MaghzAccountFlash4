@@ -1,6 +1,7 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, companyIdSchema } from '@/core/utils/validation';
+import { mapRows } from '@/core/utils/mapPgRow';
 import type { Company, Currency, VatSetting, Branch, Setting } from './types';
 
 // Typed RPC bridge for settings (Phase 4 slice 6). When the Electron IPC
@@ -47,9 +48,12 @@ export const coreApi = {
   async getCurrencies(companyId: string): Promise<{ success: boolean; data?: Currency[]; error?: string }> {
     const cidValidation = validateInput(companyIdSchema, companyId);
     if (!cidValidation.success) return { success: false, error: cidValidation.error };
+    // Both transports return raw snake_case rows — normalize to the
+    // camelCase Currency contract (isActive/isDefault/exchangeRate), or
+    // every consumer misreads the flags (e.g. all options disabled).
     if (isElectronPg()) {
-      const result = await invokeCoreRpc<Currency>('getCurrencies', {});
-      if (result.success) return { success: true, data: result.data };
+      const result = await invokeCoreRpc<Record<string, unknown>>('getCurrencies', {});
+      if (result.success) return { success: true, data: mapRows<Currency>(result.data) };
       return { success: false, error: result.error };
     }
     const adapter = await getDbAdapter();
@@ -58,7 +62,7 @@ export const coreApi = {
       [companyId]
     );
     if (result.success) {
-      return { success: true, data: result.rows as Currency[] };
+      return { success: true, data: mapRows<Currency>(result.rows as Record<string, unknown>[]) };
     }
     return { success: false, error: result.error };
   },
@@ -116,8 +120,10 @@ export const coreApi = {
     const cidValidation = validateInput(companyIdSchema, companyId);
     if (!cidValidation.success) return { success: false, error: cidValidation.error };
     if (isElectronPg()) {
-      const result = await invokeCoreRpc<VatSetting>('getVatSettings', {});
-      if (result.success && result.data && result.data.length > 0) return { success: true, data: result.data[0] };
+      const result = await invokeCoreRpc<Record<string, unknown>>('getVatSettings', {});
+      if (result.success && result.data && result.data.length > 0) {
+        return { success: true, data: mapRows<VatSetting>(result.data)[0] };
+      }
       return { success: false, error: result.error || 'No VAT settings found' };
     }
     const adapter = await getDbAdapter();
@@ -126,7 +132,7 @@ export const coreApi = {
       [companyId]
     );
     if (result.success && result.rows?.[0]) {
-      return { success: true, data: result.rows[0] as VatSetting };
+      return { success: true, data: mapRows<VatSetting>(result.rows as Record<string, unknown>[])[0] };
     }
     return { success: false, error: result.error || 'No VAT settings found' };
   },
@@ -156,8 +162,8 @@ export const coreApi = {
     const cidValidation = validateInput(companyIdSchema, companyId);
     if (!cidValidation.success) return { success: false, error: cidValidation.error };
     if (isElectronPg()) {
-      const result = await invokeCoreRpc<Branch>('getBranches', {});
-      if (result.success) return { success: true, data: result.data };
+      const result = await invokeCoreRpc<Record<string, unknown>>('getBranches', {});
+      if (result.success) return { success: true, data: mapRows<Branch>(result.data) };
       return { success: false, error: result.error };
     }
     const adapter = await getDbAdapter();
@@ -166,7 +172,7 @@ export const coreApi = {
       [companyId]
     );
     if (result.success) {
-      return { success: true, data: result.rows as Branch[] };
+      return { success: true, data: mapRows<Branch>(result.rows as Record<string, unknown>[]) };
     }
     return { success: false, error: result.error };
   },
@@ -220,8 +226,8 @@ export const coreApi = {
     const cidValidation = validateInput(companyIdSchema, companyId);
     if (!cidValidation.success) return { success: false, error: cidValidation.error };
     if (isElectronPg()) {
-      const result = await invokeCoreRpc<Setting>('getSettings', category ? { category } : {});
-      if (result.success) return { success: true, data: result.data };
+      const result = await invokeCoreRpc<Record<string, unknown>>('getSettings', category ? { category } : {});
+      if (result.success) return { success: true, data: mapRows<Setting>(result.data) };
       return { success: false, error: result.error };
     }
     const adapter = await getDbAdapter();
@@ -234,7 +240,7 @@ export const coreApi = {
     sql += ' ORDER BY key';
     const result = await adapter.query(sql, params);
     if (result.success) {
-      return { success: true, data: result.rows as Setting[] };
+      return { success: true, data: mapRows<Setting>(result.rows as Record<string, unknown>[]) };
     }
     return { success: false, error: result.error };
   },
