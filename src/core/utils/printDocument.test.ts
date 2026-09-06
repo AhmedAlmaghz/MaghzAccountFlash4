@@ -94,8 +94,14 @@ describe('printDocument', () => {
     const html = mockWrite.mock.calls[0][0] as string;
     expect(html).toContain('page-accent-bar');
     expect(html).toContain('data:image/png;base64,AAA');
+    expect(html).toContain('logo-center');
+    expect(html).toContain('doc-side-meta');
     expect(html).toContain('مدفوعة');
     expect(html).toContain('@page');
+    // No duplication: beneficiary/date live only in the side block,
+    // and there is no amount-in-words block or top meta cards.
+    expect(html).not.toContain('meta-card party');
+    expect(html).not.toContain('المبلغ بالكتابة');
 
     openSpy.mockRestore();
   });

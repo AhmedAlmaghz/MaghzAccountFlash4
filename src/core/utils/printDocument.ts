@@ -94,89 +94,6 @@ function toArabicDigits(num: number): string {
   return num.toString().replace(/\d/g, d => ARABIC_DIGITS[parseInt(d)]);
 }
 
-const ONES = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة'];
-const TENS = ['', 'عشرة', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
-const HUNDREDS = ['', 'مئة', 'مئتان', 'ثلاثمئة', 'أربعمئة', 'خمسمئة', 'ستمئة', 'سبعمئة', 'ثمانمئة', 'تسعمئة'];
-
-
-function numberToWords(n: number): string {
-  if (n === 0) return 'صفر';
-  if (n < 0) return 'سالب ' + numberToWords(Math.abs(n));
-
-  const intPart = Math.floor(n);
-  const fracPart = Math.round((n - intPart) * 10 ** getCompanyDecimalPlaces());
-
-  let result = '';
-
-  const billions = Math.floor(intPart / 1000000000);
-  const millions = Math.floor((intPart % 1000000000) / 1000000);
-  const thousands = Math.floor((intPart % 1000000) / 1000);
-  const remainder = intPart % 1000;
-
-  if (billions > 0) {
-    result += convertHundreds(billions) + ' ';
-    if (billions === 1) result += 'مليار ';
-    else if (billions === 2) result += 'ملياران ';
-    else result += 'مليارات ';
-  }
-
-  if (millions > 0) {
-    result += convertHundreds(millions) + ' ';
-    if (millions === 1) result += 'مليون ';
-    else if (millions === 2) result += 'مليونان ';
-    else result += 'ملايين ';
-  }
-
-  if (thousands > 0) {
-    result += convertHundreds(thousands) + ' ';
-    if (thousands === 1) result += 'ألف ';
-    else if (thousands === 2) result += 'ألفان ';
-    else result += 'آلاف ';
-  }
-
-  if (remainder > 0) {
-    result += convertHundreds(remainder);
-  }
-
-  if (fracPart > 0) {
-    result += ' فاصلة ' + numberToWords(fracPart);
-  }
-
-  return result.trim();
-}
-
-function convertHundreds(n: number): string {
-  const h = Math.floor(n / 100);
-  const t = Math.floor((n % 100) / 10);
-  const o = n % 10;
-  let result = '';
-
-  if (h > 0) {
-    if (h === 1) result += 'مئة ';
-    else if (h === 2) result += 'مئتان ';
-    else result += HUNDREDS[h] + ' ';
-  }
-
-  if (t > 0 || o > 0) {
-    if (t === 1 && o > 0) {
-      if (o === 1) result += 'أحد عشر';
-      else if (o === 2) result += 'اثنا عشر';
-      else result += ONES[o] + ' عشر';
-    } else {
-      if (o > 0) {
-        if (o === 2 && t === 0 && h === 0) result += 'اثنان';
-        else result += ONES[o] + ' ';
-      }
-      if (t > 0) {
-        if (t === 1 && o === 0) result += 'عشرة';
-        else result += TENS[t];
-      }
-    }
-  }
-
-  return result.trim();
-}
-
 function formatCurrency(amount: number, currency = 'YER'): string {
   const symbol = currency === 'YER' ? 'ر.ي' : currency;
   const dp = getCompanyDecimalPlaces();
@@ -193,9 +110,6 @@ function generateHtml(data: PrintDocumentData): string {
   const isInvoice = data.type === 'sales-invoice' || data.type === 'purchase-invoice' || data.type === 'purchase-order' || data.type === 'purchase-return' || data.type === 'sales-return' || data.type === 'quotation';
   const isVoucher = data.type === 'receipt-voucher' || data.type === 'payment-voucher';
   const isStatement = data.type === 'statement';
-  const amountWords = numberToWords(data.totalAmount);
-  const currencyName = data.currency === 'YER' ? 'ريال يمني' : data.currency;
-  const amountInWords = `${amountWords} ${currencyName} فقط لا غير`;
 
   const linesHtml = isStatement && data.statementLines
     ? data.statementLines.map((sl, i) => `
@@ -264,12 +178,8 @@ function generateHtml(data: PrintDocumentData): string {
           <span style="font-weight:800;font-size:16px;direction:ltr;letter-spacing:0.5px">${formatCurrency(data.totalAmount, data.currency)}</span>
         </div>
       </div>
-      <div style="padding:8px 14px;background:#f9fafb;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#6b7280">
-        <span>المبلغ بالحروف:</span>
-        <span style="font-weight:600;color:#374151;direction:ltr">${escapeHtml(amountInWords)}</span>
-      </div>
     </div>
-  ` : `
+  ` : isVoucher ? '' : `
     <div style="margin-top:20px;background:linear-gradient(135deg, ${color} 0%, ${color}dd 100%);border-radius:10px;padding:16px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 6px rgba(0,0,0,0.1)">
       <span style="font-size:13px;font-weight:600;opacity:0.9">المبلغ الإجمالي</span>
       <span style="font-size:18px;font-weight:800;direction:ltr;letter-spacing:0.5px">${formatCurrency(data.totalAmount, data.currency)}</span>
@@ -350,6 +260,71 @@ function generateHtml(data: PrintDocumentData): string {
     }
     .company-section {
       flex: 1;
+    }
+    .logo-center {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 2px;
+    }
+    .logo-center img {
+      width: 84px;
+      height: 84px;
+      object-fit: contain;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 6px;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .logo-center .logo-fallback {
+      width: 84px;
+      height: 84px;
+      border-radius: 16px;
+      background: ${color};
+      color: #fff;
+      font-size: 30px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .doc-side {
+      min-width: 200px;
+      max-width: 250px;
+    }
+    .doc-side-meta {
+      margin-top: 10px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+    .side-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 3px 0;
+    }
+    .side-row + .side-row {
+      border-top: 1px dashed #e5e7eb;
+    }
+    .side-label {
+      color: #9ca3af;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .side-value {
+      color: #1f2937;
+      font-weight: 700;
+      text-align: left;
+    }
+    .side-value.small {
+      font-weight: 400;
+      color: #6b7280;
+      font-size: 11px;
     }
     .company-name {
       font-size: 24px;
@@ -588,6 +563,8 @@ function generateHtml(data: PrintDocumentData): string {
       body { padding: 8px; }
       .page-inner { padding: 16px; }
       .header { flex-direction: column; gap: 12px; }
+      .logo-center { order: -1; }
+      .doc-side { max-width: 100%; }
       .doc-badge { text-align: right; }
       .meta-section { grid-template-columns: 1fr; }
       .meta-card.party, .meta-card.dates { grid-column: 1; }
@@ -602,7 +579,6 @@ function generateHtml(data: PrintDocumentData): string {
     <div class="page-inner">
       <div class="header">
         <div class="company-section">
-          ${data.companyLogoUrl ? `<img src="${data.companyLogoUrl}" alt="logo" style="width:64px;height:64px;object-fit:contain;border:1px solid #e5e7eb;border-radius:10px;padding:4px;margin-bottom:8px" />` : ''}
           <div class="company-name">${escapeHtml(data.companyName || 'الشركة')}</div>
           <div class="company-details">
             ${data.companyTaxNumber ? `<span>الرقم الضريبي: ${escapeHtml(data.companyTaxNumber)}</span>` : ''}
@@ -612,46 +588,28 @@ function generateHtml(data: PrintDocumentData): string {
             ${data.companyEmail ? `<span>بريد إلكتروني: ${escapeHtml(data.companyEmail)}</span>` : ''}
           </div>
         </div>
-        <div class="doc-badge">
-          <div class="badge">${escapeHtml(title)}</div>
-          <div class="number">رقم: ${escapeHtml(data.docNumber)}</div>
+        <div class="logo-center">
+          ${data.companyLogoUrl
+            ? `<img src="${data.companyLogoUrl}" alt="logo" />`
+            : `<div class="logo-fallback">${escapeHtml((data.companyName || '•').slice(0, 2))}</div>`}
+        </div>
+        <div class="doc-side">
+          <div class="doc-badge">
+            <div class="badge">${escapeHtml(title)}</div>
+            <div class="number">رقم: ${escapeHtml(data.docNumber)}</div>
+          </div>
+          <div class="doc-side-meta">
+            <div class="side-row"><span class="side-label">${escapeHtml(data.partyLabel)}</span><span class="side-value">${escapeHtml(data.partyName)}</span></div>
+            ${data.partyTaxNumber ? `<div class="side-row"><span class="side-label">الرقم الضريبي</span><span class="side-value small">${escapeHtml(data.partyTaxNumber)}</span></div>` : ''}
+            ${data.partyAddress ? `<div class="side-row"><span class="side-value small">${escapeHtml(data.partyAddress)}</span></div>` : ''}
+            <div class="side-row"><span class="side-label">التاريخ</span><span class="side-value">${formatDateValue(data.date)}</span></div>
+            ${data.dueDate ? `<div class="side-row"><span class="side-label">الاستحقاق</span><span class="side-value">${formatDateValue(data.dueDate)}</span></div>` : ''}
+          </div>
         </div>
       </div>
 
       ${data.statusBadge ? `
       <div style="margin:0 0 14px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:800;text-align:center;letter-spacing:0.3px;${data.statusTone === 'success' ? 'background:#ecfdf5;color:#047857;border:1px solid #a7f3d0' : data.statusTone === 'warning' ? 'background:#fffbeb;color:#b45309;border:1px solid #fde68a' : 'background:#f8fafc;color:#475569;border:1px solid #e2e8f0'}">${escapeHtml(data.statusBadge)}</div>
-      ` : ''}
-
-      <div class="meta-section">
-        <div class="meta-card party">
-          <div class="meta-label">${escapeHtml(data.partyLabel)}</div>
-          <div class="meta-value">${escapeHtml(data.partyName)}</div>
-          ${data.partyTaxNumber ? `<div class="meta-value small">الرقم الضريبي: ${escapeHtml(data.partyTaxNumber)}</div>` : ''}
-          ${data.partyAddress ? `<div class="meta-value small">${escapeHtml(data.partyAddress)}</div>` : ''}
-        </div>
-        <div class="meta-card dates">
-          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-            <span>
-              <div class="meta-label">تاريخ المستند</div>
-              <div class="meta-value">${formatDateValue(data.date)}</div>
-            </span>
-            ${data.dueDate ? `
-            <span style="text-align:left">
-              <div class="meta-label">تاريخ الاستحقاق</div>
-              <div class="meta-value">${formatDateValue(data.dueDate)}</div>
-            </span>
-            ` : ''}
-          </div>
-          ${data.createdBy ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #e5e7eb"><span class="meta-label">أنشئ بواسطة</span> <span class="meta-value" style="font-size:12px">${escapeHtml(data.createdBy)}</span></div>` : ''}
-          ${data.approvedBy ? `<div><span class="meta-label">اعتمد بواسطة</span> <span class="meta-value" style="font-size:12px">${escapeHtml(data.approvedBy)}</span></div>` : ''}
-        </div>
-      </div>
-
-      ${!isStatement ? `
-      <div class="amount-words">
-        <div class="label">المبلغ بالكتابة</div>
-        <div class="text">${escapeHtml(amountInWords)}</div>
-      </div>
       ` : ''}
 
       <table class="items">
@@ -698,7 +656,6 @@ function generateHtml(data: PrintDocumentData): string {
       <div style="margin:6px 0 4px;text-align:center;padding:22px 16px;border-radius:14px;background:linear-gradient(135deg, ${color} 0%, ${color}cc 100%);color:white;box-shadow:0 4px 10px rgba(0,0,0,0.15)">
         <div style="font-size:12px;font-weight:600;opacity:0.9;margin-bottom:6px">المبلغ</div>
         <div style="font-size:30px;font-weight:800;letter-spacing:0.5px;direction:ltr">${formatCurrency(data.totalAmount, data.currency)}</div>
-        <div style="font-size:12px;font-weight:600;opacity:0.92;margin-top:8px">${escapeHtml(amountInWords)}</div>
       </div>
       <div class="notes-section" style="background:#f0fdf4;border-right-color:#16a34a">
         <strong>بيان السند:</strong><br>
@@ -741,8 +698,8 @@ function generateHtml(data: PrintDocumentData): string {
         تم إنشاء هذا المستند إلكترونياً بواسطة نظام MaghzAccount
         <span class="divider">|</span>
         مستند رقم ${escapeHtml(data.docNumber)}
-        <span class="divider">|</span>
-        تاريخ ${formatDateValue(data.date)}
+        ${data.createdBy ? `<span class="divider">|</span> أنشئ بواسطة ${escapeHtml(data.createdBy)}` : ''}
+        ${data.approvedBy ? `<span class="divider">|</span> اعتمد بواسطة ${escapeHtml(data.approvedBy)}` : ''}
       </div>
     </div>
   </div>
