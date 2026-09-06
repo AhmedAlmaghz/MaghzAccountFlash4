@@ -21,11 +21,16 @@ export const CurrencySelect: React.FC<CurrencySelectProps> = ({
   const { currencies, isLoading } = useCurrencies(companyId);
 
   const options = useMemo(() => {
+    // SmartSelect matches/selects by `id`, while every parent works with
+    // currency CODES — so the code (unique natural key) is the option id.
+    // Using the row uuid here left the trigger permanently empty and made
+    // picks resolve to an unknown code downstream.
     return currencies.map(c => ({
+      ...c,
+      id: c.code,
       label: `${c.name} (${c.code})`,
       sublabel: c.isDefault ? t('select.currency.default') : `${t('select.currency.exchangeRate')}: ${c.exchangeRate}`,
       disabled: !c.isActive,
-      ...c,
     })) as SmartSelectItem[];
   }, [currencies, t]);
 
