@@ -880,7 +880,7 @@ export function registerAiHandlers() {
         items.forEach((it, i) => {
           const base = 2 + i * 6;
           placeholders.push(
-            `($2::uuid, $1::uuid, ${base + 1}, ${base + 2}, ${base + 3}::jsonb, ${base + 4}, ${base + 5}, ${base + 6})`
+            `($2::uuid, $1::uuid, $${base + 1}, $${base + 2}, $${base + 3}::jsonb, $${base + 4}, $${base + 5}, $${base + 6})`
           );
           params.push(
             i,

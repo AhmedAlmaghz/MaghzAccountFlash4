@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Pause, Play, RotateCcw, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ListChecks, Loader2, Pause, Play, RotateCcw, XCircle } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 import {
@@ -9,8 +9,18 @@ import {
   retryFailedBatch,
   unpauseBatch,
 } from '../api/batch';
-import type { JobBatchDetail, JobBatchStatus } from '../api/batchTypes';
+import type { JobBatchDetail, JobBatchItem, JobBatchStatus } from '../api/batchTypes';
 import { isTerminalBatchStatus } from '../engine/batchQueue';
+
+function itemDot(status: JobBatchItem['status']): string {
+  switch (status) {
+    case 'done': return 'bg-success-500';
+    case 'failed': return 'bg-danger-500';
+    case 'running': return 'bg-info-500 animate-pulse';
+    case 'skipped': return 'bg-zinc-300 dark:bg-zinc-600';
+    case 'queued': return 'bg-zinc-300 dark:bg-zinc-600';
+  }
+}
 
 /**
  * Live batch progress card (Package D).
@@ -39,6 +49,7 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
   const [detail, setDetail] = useState<JobBatchDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showTasks, setShowTasks] = useState(false);
 
   const load = useCallback(async () => {
     const res = await getBatch(batchId);
@@ -149,6 +160,44 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
             </li>
           ))}
         </ul>
+      )}
+
+      {/* Task list with per-item states — "what runs and what happened" */}
+      {(detail.items ?? []).length > 0 && (
+        <div className="border-t border-zinc-100 dark:border-zinc-700/60 pt-2">
+          <button
+            onClick={() => setShowTasks((v) => !v)}
+            className="w-full flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+            aria-expanded={showTasks}
+          >
+            <ListChecks size={12} />
+            {t('ai.batch.tasks')} ({detail.items.length})
+            <span className="ms-auto">
+              {showTasks ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </span>
+          </button>
+          {showTasks && (
+            <ul className="mt-1.5 space-y-1 max-h-44 overflow-y-auto pe-0.5">
+              {detail.items.map((i) => (
+                <li
+                  key={i.id}
+                  className="flex items-start gap-1.5 text-[11px] text-zinc-600 dark:text-zinc-300"
+                  title={i.status === 'failed' && i.lastError ? i.lastError : t(`ai.batch.item_${i.status}`)}
+                >
+                  <span className={cn('mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0', itemDot(i.status))} aria-hidden="true" />
+                  <span className="flex-1 min-w-0">
+                    <span className="font-mono">#{i.seq + 1} {i.toolName}</span>
+                    {i.label && <span className="text-zinc-500 dark:text-zinc-400"> — {i.label}</span>}
+                    {i.status === 'failed' && i.lastError && (
+                      <span className="block text-danger-600 dark:text-danger-400 truncate">{i.lastError}</span>
+                    )}
+                  </span>
+                  <span className="flex-shrink-0 text-zinc-400 dark:text-zinc-500">{t(`ai.batch.item_${i.status}`)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {active && (

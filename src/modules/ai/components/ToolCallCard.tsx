@@ -68,6 +68,16 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
     return parseFormattedText(toolCall.resultSummary);
   }, [toolCall.resultSummary]);
 
+  /**
+   * Approval substance — the human-readable summary (what/whom/how much).
+   * ALWAYS visible, not hidden behind expand: approving blind is how wrong
+   * postings happen. Long batch previews scroll inside a capped box.
+   */
+  const formattedSummary = useMemo(() => {
+    if (!toolCall.argsSummary) return null;
+    return parseFormattedText(toolCall.argsSummary);
+  }, [toolCall.argsSummary]);
+
   const handleCopy = useCallback(() => {
     const text = `Tool: ${toolCall.toolName}\nArgs: ${JSON.stringify(toolCall.args, null, 2)}\n${toolCall.resultSummary ? `Result: ${toolCall.resultSummary}` : ''}`;
     navigator.clipboard.writeText(text);
@@ -131,6 +141,15 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
           {isPending ? t('ai.confirmTitle') : isExecuting ? t('ai.executingTool', { tool: '' }).replace(': ', '') : t(config.labelKey)}
         </span>
       </div>
+
+      {/* Approval substance — visible without expanding */}
+      {formattedSummary && (
+        <div className="px-3 py-2 border-t border-black/5 dark:border-white/10">
+          <div className="text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300 max-h-44 overflow-y-auto">
+            {formattedSummary}
+          </div>
+        </div>
+      )}
 
       {/* Expanded details */}
       {expanded && (

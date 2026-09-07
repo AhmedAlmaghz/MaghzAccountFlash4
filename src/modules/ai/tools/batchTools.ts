@@ -63,7 +63,21 @@ export const batchTools: ToolDefinition[] = [
         .filter(Boolean)
         .slice(0, 3);
       const labelNote = labels.length > 0 ? ` — ${labels.join('؛ ')}` : '';
-      return `دفعة ${items.length} عملية (${tools}${items.length > 0 && tools.split('، ').length >= 3 ? '…' : ''})${linkNote}${labelNote}`;
+      const head = `دفعة ${items.length} عملية (${tools}${items.length > 0 && tools.split('، ').length >= 3 ? '…' : ''})${linkNote}${labelNote}`;
+      // Task preview — the approval card renders argsSummary verbatim, so the
+      // user sees WHAT runs before consenting (never a bare count).
+      const PREVIEW = 8;
+      const shown = items.slice(0, PREVIEW).map((it, i) => {
+        const tool = String(it.tool || '?');
+        const label = typeof it.label === 'string' && it.label.trim()
+          ? ` — ${it.label.trim().slice(0, 40)}`
+          : '';
+        const dep = it.after !== undefined && it.after !== null ? ` ← بعد #${typeof it.after === 'number' ? it.after + 1 : it.after}` : '';
+        return `${i + 1}. ${tool}${label}${dep}`;
+      });
+      const rest = items.length - shown.length;
+      const tail = rest > 0 ? `\n… و ${rest} مهمة أخرى` : '';
+      return items.length > 0 ? `${head}\nالمهام:\n${shown.join('\n')}${tail}` : head;
     },
     execute: async (args, ctx) => {
       const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];

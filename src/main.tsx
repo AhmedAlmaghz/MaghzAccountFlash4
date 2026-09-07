@@ -70,6 +70,24 @@ function DbErrorScreen({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+/**
+ * Startup timing marks (perf diagnostics).
+ * Zero behavior change: records how long each init phase takes so a slow
+ * machine can be diagnosed with real numbers instead of guesses. Read them
+ * in DevTools console as a single `[startup]` summary line.
+ */
+const startupT0 = typeof performance !== 'undefined' ? performance.now() : 0;
+const startupMarks: Record<string, number> = {};
+function markStartup(phase: string): void {
+  if (typeof performance === 'undefined') return;
+  startupMarks[phase] = Math.round(performance.now() - startupT0);
+  if (phase === 'company-loaded' || phase === 'db-error') {
+    const parts = Object.entries(startupMarks).map(([k, v]) => `${k}=${v}ms`).join(' ');
+    // eslint-disable-next-line no-console
+    console.info(`[startup] ${parts}`);
+  }
+}
+
 function App() {
   const setDbStatus = useAppStore((state) => state.setDbStatus);
   const setActiveCompany = useAppStore((state) => state.setActiveCompany);
@@ -88,13 +106,16 @@ function App() {
         setDbError(false);
 
         const adapter = await getDbAdapter();
+        markStartup('adapter-ready');
         const ping = await adapter.ping();
+        markStartup('db-ping');
 
         if (cancelled) return;
 
         if (!ping.success) {
           setDbStatus('error', false);
           setDbError(true);
+          markStartup('db-error');
           return;
         }
 
@@ -102,6 +123,7 @@ function App() {
 
         const { mapCompanyRow } = await import('@/core/api/company');
         const companyResult = await adapter.getCompany();
+        markStartup('company-loaded');
         if (companyResult.success && companyResult.data) {
           // Single mapping point: every company column lands in the store.
           const company = mapCompanyRow(companyResult.data as Record<string, unknown>);

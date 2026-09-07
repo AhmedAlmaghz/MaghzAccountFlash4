@@ -59,6 +59,19 @@ describe('batchTools registration', () => {
     });
     expect(s).toContain('معكوس ← مشتريات');
   });
+
+  it('enqueue lists every task with dependencies and overflow', () => {
+    const items = Array.from({ length: 10 }, (_, i) => ({
+      tool: 'sales.create_invoice',
+      args: {},
+      ...(i > 0 ? { after: 0 } : {}),
+    }));
+    const s = enqueue.summarizeArgs!({ items });
+    expect(s).toContain('المهام:');
+    expect(s).toContain('1. sales.create_invoice');
+    expect(s).toContain('← بعد #1');
+    expect(s).toContain('… و 2 مهمة أخرى');
+  });
 });
 
 describe('ai.enqueue_batch execute', () => {

@@ -98,6 +98,30 @@ describe('toolExecutor', () => {
       expect(outcome.error).toBe('DB exploded');
     });
 
+    it('treats a returned { error } as FAILURE, never success (silent-batch regression)', async () => {
+      // 2026-09-08: batch-create returned { error: 'cannot cast…' } and the
+      // card rendered green with an error payload — the worker never started.
+      useAuthStore.getState().login(adminUser);
+      registerTool(makeTool({
+        dangerLevel: 'write',
+        execute: async () => ({ error: 'cannot cast type integer to jsonb' }),
+      }));
+      const outcome = await executeToolCall('test.tool', {}, ctx);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toBe('cannot cast type integer to jsonb');
+      expect(outcome.errorClass).toBeDefined();
+    });
+
+    it('does not audit-log tools that return { error }', async () => {
+      useAuthStore.getState().login(adminUser);
+      registerTool(makeTool({
+        dangerLevel: 'write',
+        execute: async () => ({ error: 'nope' }),
+      }));
+      await executeToolCall('test.tool', {}, ctx);
+      expect(logAudit).not.toHaveBeenCalled();
+    });
+
     it('does NOT audit-log read tools', async () => {
       useAuthStore.getState().login(adminUser);
       registerTool(makeTool({ dangerLevel: 'read' }));

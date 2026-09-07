@@ -128,12 +128,17 @@ export function resetToolRateLimiter(): void {
 }
 
 /**
- * Hard wall-clock budget for a single tool execution. A hung DB query (or a
+ * Hard wall-clock budgets for a single tool execution. A hung DB query (or a
  * stuck adapter call) must never freeze the whole agent loop and UI — the
  * MAX_ITERATIONS loop-cap cannot help because it only counts completed calls.
- * Report/aggregation tools run multiple SQL queries, so the budget is generous.
+ *
+ * Writes get double: a posting flow (invoice create → lines → journal →
+ * stock → balances) is 10–30 sequential IPC queries, and 30s proved too
+ * tight on tasked machines (the 2026-09-08 cascade: posting writes timed
+ * out while simple writes passed on the same database).
  */
 const TOOL_TIMEOUT_MS = 30_000;
+const WRITE_TIMEOUT_MS = 60_000;
 
 export async function executeToolCall(
   name: string,
@@ -168,7 +173,24 @@ export async function executeToolCall(
   }
 
   try {
-    const result = await withTimeout(tool.execute(cleanArgs, ctx), TOOL_TIMEOUT_MS, tool.labelAr);
+    const budget = tool.dangerLevel === 'write' ? WRITE_TIMEOUT_MS : TOOL_TIMEOUT_MS;
+    const result = await withTimeout(tool.execute(cleanArgs, ctx), budget, tool.labelAr, tool.dangerLevel);
+
+    // Honesty gate: tools signal failure by RETURNING { error } (not by
+    // throwing) — every tool in the registry follows this convention. A
+    // returned error must surface as a FAILED outcome (red card + guidance +
+    // no success credit), never as a green card carrying an error payload.
+    // Without this, a failed batch creation renders as "success" and the
+    // worker never starts — the exact silent Batch Failure of 2026-09-08.
+    if (
+      result !== null &&
+      typeof result === 'object' &&
+      !Array.isArray(result) &&
+      typeof (result as { error?: unknown }).error === 'string'
+    ) {
+      const error = (result as { error: string }).error;
+      return { ok: false, error, errorClass: classifyToolError(error) };
+    }
 
     if (tool.dangerLevel === 'write') {
       // Invalidate all cache after write — data may have changed
@@ -237,10 +259,14 @@ export function auditActionFor(toolName: string): 'create' | 'update' | 'delete'
  * the unhandled-rejection path is guarded by the .catch(() => {}) noop so a
  * late failure after timeout can never crash the renderer.
  */
-function withTimeout<T>(p: Promise<T>, ms: number, labelAr: string): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number, labelAr: string, dangerLevel?: 'read' | 'write'): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`انتهت مهلة تنفيذ الأداة "${labelAr}" (30 ثانية) — قد يكون الاتصال بقاعدة البيانات بطيئاً. جرّب طلباً أصغر أو أعِد المحاولة.`));
+      const secs = Math.round(ms / 1000);
+      const hint = dangerLevel === 'write'
+        ? ` — إن تكرر، قسّم الدفعة لأجزاء أصغر أو أعد المحاولة لاحقاً`
+        : ` — جرّب طلباً أصغر أو أعِد المحاولة`;
+      reject(new Error(`انتهت مهلة تنفيذ الأداة "${labelAr}" (${secs} ثانية) — قد يكون الاتصال بقاعدة البيانات بطيئاً${hint}.`));
     }, ms);
     p.then(
       (v) => { clearTimeout(timer); resolve(v); },

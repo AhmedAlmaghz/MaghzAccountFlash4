@@ -434,7 +434,15 @@
       "resumeAction": "تابع",
       "dismiss": "إخفاء",
       "loadError": "تعذّر قراءة حالة الدفعة",
-      "cancelling": "جارٍ الإلغاء…"
+      "cancelling": "جارٍ الإلغاء…",
+      "tasks": "المهام",
+      "showTasks": "عرض المهام",
+      "hideTasks": "إخفاء المهام",
+      "item_queued": "بانتظار التنفيذ",
+      "item_running": "يُنفَّذ",
+      "item_done": "تم",
+      "item_failed": "فشل",
+      "item_skipped": "تُخطّي"
     }
   },
   "auth": {

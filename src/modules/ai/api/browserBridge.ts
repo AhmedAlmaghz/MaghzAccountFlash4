@@ -748,7 +748,7 @@ export const browserAiBridge = {
       const params: unknown[] = [batchId, companyId];
       items.forEach((it, i) => {
         const base = 2 + i * 6;
-        placeholders.push(`($2::uuid, $1::uuid, ${base + 1}, ${base + 2}, ${base + 3}::jsonb, ${base + 4}, ${base + 5}, ${base + 6})`);
+        placeholders.push(`($2::uuid, $1::uuid, $${base + 1}, $${base + 2}, $${base + 3}::jsonb, $${base + 4}, $${base + 5}, $${base + 6})`);
         params.push(i, it.tool_name.slice(0, 120), JSON.stringify(it.args), it.after_seq, it.idempotency_key.slice(0, 200), it.label ? it.label.slice(0, 200) : null);
       });
       const ins = await adapter.query<{ id: string }>(

@@ -434,7 +434,15 @@
       "resumeAction": "Resume",
       "dismiss": "Dismiss",
       "loadError": "Could not read batch status",
-      "cancelling": "Cancelling…"
+      "cancelling": "Cancelling…",
+      "tasks": "Tasks",
+      "showTasks": "Show tasks",
+      "hideTasks": "Hide tasks",
+      "item_queued": "Queued",
+      "item_running": "Running",
+      "item_done": "Done",
+      "item_failed": "Failed",
+      "item_skipped": "Skipped"
     }
   },
   "auth": {

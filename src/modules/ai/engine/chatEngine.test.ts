@@ -29,6 +29,12 @@ vi.mock('./toolExecutor', () => ({
   resolveTool: mocks.resolveTool,
 }));
 
+vi.mock('./batchRunner', () => ({
+  runBatch: vi.fn(async () => null),
+  batchProgressLine: vi.fn(() => 'أُنجز 0 — فشل 0 — تُخطّي 0 — متبقٍ 0 (من 0)'),
+  extractResultRef: vi.fn(() => null),
+}));
+
 // fetchLiveContext reads invoice flags via the shared tax helper — keep it
 // off the real database in unit tests.
 vi.mock('@/core/database/adapters', () => ({
@@ -188,6 +194,45 @@ describe('ChatEngine', () => {
     expect(mocks.executeToolCall).toHaveBeenCalledOnce();
     expect(messages[1].toolCall?.status).toBe('success');
     expect(messages[2].content).toBe('تم إنشاء المستند');
+  });
+
+  it('pins batchId and starts the worker when an approved write returns startBatchRun', async () => {
+    // Regression for the invisible-batch bug: the approval card computed
+    // argsSummary but never rendered it, and nothing proved that approving a
+    // batch actually launches the worker. This locks the whole chain.
+    const { runBatch } = await import('./batchRunner');
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    mocks.executeToolCall.mockResolvedValueOnce({
+      ok: true,
+      result: { batchId: 'b1', total: 3, startBatchRun: 'b1' },
+    });
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'batch-1', name: 'ai.enqueue_batch', arguments: { items: [] } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+
+    await getChatEngine().send('سجّل 3 فواتير');
+    await getChatEngine().resolveConfirmation('batch-1', true);
+
+    expect(runBatch).toHaveBeenCalledOnce();
+    expect(vi.mocked(runBatch).mock.calls[0].slice(0, 3)).toEqual([
+      '00000000-0000-0000-0000-000000000001',
+      user.id,
+      'b1',
+    ]);
+    const messages = useAiStore.getState().messages;
+    const card = messages.find((m) => m.toolCall?.callId === 'batch-1');
+    expect(card?.toolCall?.batchId).toBe('b1');
   });
 
   it('records a rejected write call without executing it', async () => {
