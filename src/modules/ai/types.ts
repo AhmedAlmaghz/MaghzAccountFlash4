@@ -1,4 +1,5 @@
 import type { Permission } from '@/modules/auth/types';
+import type { ChatAttachmentMeta } from './attachments/attachmentTypes';
 
 /**
  * AI Harness module types.
@@ -17,9 +18,21 @@ export interface LlmOutgoingToolCall {
   function: { name: string; arguments: string; [key: string]: unknown };
 }
 
+/**
+ * Multimodal content parts (OpenAI-compatible wire format).
+ * Text travels as before; images ride as image_url (model reads invoice
+ * photos directly); audio rides as input_audio (model transcribes + acts).
+ * Parts are pruned to text-only for all but the latest user turn so long
+ * sessions stop re-sending megabytes of base64 every request.
+ */
+export type LlmContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+  | { type: 'input_audio'; input_audio: { data: string; format: string } };
+
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: string | LlmContentPart[] | null;
   tool_call_id?: string;
   tool_calls?: LlmOutgoingToolCall[];
 }
@@ -164,6 +177,12 @@ export interface PendingToolCall {
   dangerLevel: ToolDangerLevel;
   /** Compact string summary of the execution result (success or error). */
   resultSummary?: string;
+  /**
+   * Batch this card drives (ai.enqueue_batch / ai.resume_batch). Persisted
+   * inside tool_call JSONB — backward compatible (absent on old rows).
+   * MessageBubble renders a live BatchProgressCard whenever present.
+   */
+  batchId?: string;
 }
 
 export type ChatMessageKind = 'text' | 'tool' | 'error';
@@ -174,5 +193,11 @@ export interface ChatMessage {
   kind: ChatMessageKind;
   content: string;
   toolCall?: PendingToolCall;
+  /**
+   * Attachment metadata + extracted text (Package B). Binaries are NOT here
+   * — they live in the renderer's attachmentBlobs registry and expire with
+   * the session; meta persists so history stays meaningful.
+   */
+  attachments?: ChatAttachmentMeta[];
   createdAt: number;
 }

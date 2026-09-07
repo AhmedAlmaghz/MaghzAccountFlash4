@@ -1,10 +1,20 @@
 import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Mic, Square } from 'lucide-react';
+import { Send, Mic, Square, Paperclip, X, Image as ImageIcon, FileText, Table, Mic as MicIcon, Loader2, Camera } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { useToastStore } from '@/core/store/toastStore';
 import { cn } from '@/core/utils';
 import { useSpeechRecognition } from './useSpeechRecognition';
+import { CameraCapture } from './CameraCapture';
+import { useAiStore } from '../store';
+import {
+  buildAttachmentDraftBlock,
+  dropAttachmentBlob,
+  formatAttachmentSize,
+  processAttachmentFile,
+  type AttachmentKind,
+  type PreparedAttachment,
+} from '../attachments';
 // NOTE (Phase 77ب): the letter-level autocomplete (AutoCompleteDropdown +
 // per-keystroke searchEntities) was dead code — disabled by
 // AUTOCOMPLETE_ENABLED=false since 2026-07-31 and superseded by the chat
@@ -14,18 +24,101 @@ import { useSpeechRecognition } from './useSpeechRecognition';
 // suggestions should reuse searchEntities' RBAC-filtered API instead.
 
 interface ChatInputProps {
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments: PreparedAttachment[]) => void;
   /** Request the in-flight generation to stop at the next safe point. */
   onStop?: () => void;
   disabled?: boolean;
   isProcessing?: boolean;
 }
 
+function kindIcon(kind: AttachmentKind) {
+  switch (kind) {
+    case 'image': return <ImageIcon size={14} className="flex-shrink-0" />;
+    case 'pdf': return <FileText size={14} className="flex-shrink-0" />;
+    case 'spreadsheet': return <Table size={14} className="flex-shrink-0" />;
+    case 'audio': return <MicIcon size={14} className="flex-shrink-0" />;
+    case 'other': return <Paperclip size={14} className="flex-shrink-0" />;
+  }
+}
+
 export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isProcessing }: ChatInputProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const language = useAppStore((s) => s.language);
+
+  // ── Attachments (Package B: multimodal intake) ──────────────────────────
+  // Files are processed locally (classify → cap → sha256 → extract/downscale)
+  // and their printable draft block is appended to the textarea (editable).
+  // The chip is the source of truth at send time — textarea edits advisory.
+  const [attachments, setAttachments] = useState<PreparedAttachment[]>([]);
+  const [attachMenu, setAttachMenu] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const attachmentsRef = useRef<PreparedAttachment[]>([]);
+  attachmentsRef.current = attachments;
+
+  const appendDraft = useCallback((block: string) => {
+    setValue((v) => (v ? `${v.replace(/\s+$/, '')}\n\n${block}` : block));
+  }, []);
+
+  const sessionHashes = useCallback(() => {
+    const hashes = new Set<string>();
+    for (const m of useAiStore.getState().messages) {
+      for (const a of m.attachments ?? []) hashes.add(a.sha256);
+    }
+    return hashes;
+  }, []);
+
+  const handleFiles = useCallback(async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setExtracting(true);
+    try {
+      for (const file of list) {
+        const pending = new Set(attachmentsRef.current.map((a) => a.meta.sha256));
+        try {
+          const { attachment, duplicateOfPending } = await processAttachmentFile(file, pending);
+          if (duplicateOfPending) {
+            useToastStore.getState().addToast('error', t('ai.attach.duplicateInInput'));
+            continue;
+          }
+          if (sessionHashes().has(attachment.meta.sha256)) {
+            useToastStore.getState().addToast('error', t('ai.attach.alreadyInSession'));
+          }
+          setAttachments((prev) => [...prev, attachment]);
+          appendDraft(buildAttachmentDraftBlock(attachment.meta));
+        } catch (e) {
+          useToastStore.getState().addToast('error', e instanceof Error ? e.message : t('ai.attach.extractFailed'));
+        }
+      }
+    } finally {
+      setExtracting(false);
+    }
+  }, [appendDraft, sessionHashes, t]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const found = prev.find((a) => a.meta.id === id);
+      if (found) dropAttachmentBlob(id);
+      return prev.filter((a) => a.meta.id !== id);
+    });
+  }, []);
+
+  const openFilePicker = useCallback(() => {
+    setAttachMenu(false);
+    fileInputRef.current?.click();
+  }, []);
+
+  const openCamera = useCallback(() => {
+    setAttachMenu(false);
+    setCameraOpen(true);
+  }, []);
+
+  const handleCameraCapture = useCallback((file: File) => {
+    void handleFiles([file]);
+  }, [handleFiles]);
 
   // ── Voice input (Web Speech API) ────────────────────────────────────────────
   // ar-YE matches the app's DEFAULT_LOCALE (locale.ts) — Gulf/Saudi voices
@@ -123,19 +216,27 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
+  const canSend = value.trim() !== '' || attachments.length > 0;
+
   const handleSend = useCallback(() => {
     if (speech.isListening) speech.stop();
     const trimmed = value.trim();
-    if (!trimmed || disabled || isProcessing) return;
-    onSend(trimmed);
+    if ((!trimmed && attachments.length === 0) || disabled || isProcessing) return;
+    const outgoing = attachmentsRef.current;
+    onSend(trimmed, outgoing);
+    // Binaries are single-use: the send consumed them (engine holds dataUrls
+    // in the outgoing objects). Drop the registry copies to free memory —
+    // regenerate resends text only by design.
+    for (const a of outgoing) dropAttachmentBlob(a.meta.id);
     setValue('');
+    setAttachments([]);
     speechBaseRef.current = '';
     speechFinalRef.current = '';
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [value, disabled, isProcessing, onSend, speech]);
+  }, [value, attachments.length, disabled, isProcessing, onSend, speech]);
 
   // ── Keyboard handling ──────────────────────────────────────────────────────
 
@@ -160,7 +261,92 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
 
   return (
     <div className="flex flex-col border-t border-zinc-200/70 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
-      <div className="relative flex items-end gap-2 p-3 max-w-3xl w-full mx-auto px-3 sm:px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+      <div className="flex flex-col gap-2 p-3 max-w-3xl w-full mx-auto px-3 sm:px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+
+      {/* Attachment chips — the pending files behind this message */}
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" aria-label={t('ai.attach.attachmentsCount')}>
+          {attachments.map((a) => (
+            <span
+              key={a.meta.id}
+              className={cn(
+                'inline-flex items-center gap-1.5 max-w-full ps-2 pe-1 py-1 rounded-xl text-xs',
+                'bg-primary-50 dark:bg-primary-950/40 text-primary-800 dark:text-primary-200',
+                'border border-primary-200 dark:border-primary-800'
+              )}
+            >
+              {kindIcon(a.meta.kind)}
+              <span className="truncate max-w-[140px]" title={a.meta.name}>{a.meta.name}</span>
+              <span className="text-primary-500 dark:text-primary-400 flex-shrink-0">{formatAttachmentSize(a.meta.size)}</span>
+              <button
+                onClick={() => removeAttachment(a.meta.id)}
+                className="p-1 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/60"
+                title={t('ai.attach.remove')}
+                aria-label={`${t('ai.attach.remove')}: ${a.meta.name}`}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          {extracting && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs text-zinc-500 dark:text-zinc-400">
+              <Loader2 size={12} className="animate-spin" />
+              {t('ai.attach.extracting')}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="relative flex items-end gap-2">
+      {/* Attach button + menu */}
+      <div className="relative flex-shrink-0">
+        <button
+          onClick={() => setAttachMenu((v) => !v)}
+          disabled={disabled || isProcessing}
+          className={cn(
+            'w-12 h-12 flex items-center justify-center rounded-2xl transition-all active:scale-90',
+            'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400',
+            'hover:bg-primary-50 dark:hover:bg-primary-950/40 hover:text-primary-600 dark:hover:text-primary-400',
+            'disabled:opacity-50 disabled:cursor-not-allowed'
+          )}
+          title={t('ai.attach.attachFile')}
+          aria-label={t('ai.attach.attachFile')}
+          aria-expanded={attachMenu}
+        >
+          <Paperclip size={19} />
+        </button>
+        {attachMenu && (
+          <div className="absolute bottom-14 start-0 z-50 min-w-[160px] rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lift p-1.5">
+            <button
+              onClick={openFilePicker}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <Paperclip size={15} />
+              {t('ai.attach.fromDevice')}
+            </button>
+            <button
+              onClick={openCamera}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <Camera size={15} />
+              {t('ai.attach.takePhoto')}
+            </button>
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        multiple
+        accept="image/*,.pdf,.xlsx,.xls,.csv,audio/*"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(e) => {
+          if (e.target.files) void handleFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
 
       <textarea
         ref={textareaRef}
@@ -197,7 +383,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         >
           <Square size={16} className="fill-current" />
         </button>
-      ) : value.trim() ? (
+      ) : canSend ? (
         <button
           onClick={handleSend}
           disabled={disabled}
@@ -206,7 +392,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
             'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift',
             'disabled:opacity-50 disabled:cursor-not-allowed'
           )}
-          title={t('ai.send')}
+          title={attachments.length > 0 ? t('ai.attach.sendWithAttachments') : t('ai.send')}
           aria-label={t('ai.send')}
         >
           <Send size={19} className="rtl:-scale-x-100" />
@@ -233,7 +419,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
       ) : (
         <button
           onClick={handleSend}
-          disabled={!value.trim() || disabled || isProcessing}
+          disabled={!canSend || disabled || isProcessing}
           className={cn(
             'flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl transition-colors',
             'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
@@ -244,6 +430,9 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         </button>
       )}
       </div>
+      </div>
+
+      <CameraCapture open={cameraOpen} onClose={() => setCameraOpen(false)} onCapture={handleCameraCapture} />
     </div>
   );
 });

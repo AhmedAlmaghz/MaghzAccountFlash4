@@ -11,6 +11,17 @@ import type {
   LlmStreamChunk,
   LlmTool,
 } from '../types';
+import type {
+  JobBatchDetail,
+  JobBatchItem,
+  JobBatchItemInput,
+  JobBatchSummary,
+} from './batchTypes';
+import {
+  BATCH_CLAIM_LIMIT,
+  BATCH_CREATE_CHUNK,
+  BATCH_MAX_ATTEMPTS,
+} from './batchTypes';
 
 /**
  * Browser-side AI bridge (PGlite mode).
@@ -336,6 +347,35 @@ async function runStream(opts: CallOptions): Promise<void> {
 
 // ─── Chat persistence ──────────────────────────────────────────────────────
 
+const ATTACHMENT_KINDS = new Set(['image', 'pdf', 'spreadsheet', 'audio', 'other']);
+
+function isValidChatMessageAttachments(attachments: unknown): boolean {
+  return (
+    attachments === undefined ||
+    attachments === null ||
+    (Array.isArray(attachments) &&
+      (attachments as Array<Record<string, unknown>>).every(
+        (a) =>
+          a &&
+          typeof a.id === 'string' &&
+          typeof a.name === 'string' &&
+          typeof a.sha256 === 'string' &&
+          ATTACHMENT_KINDS.has(a.kind as string)
+      ))
+  );
+}
+
+function parseMessageAttachments(raw: unknown): ChatMessage['attachments'] {
+  try {
+    const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(val) || val.length === 0) return undefined;
+    if (!isValidChatMessageAttachments(val)) return undefined;
+    return val as ChatMessage['attachments'];
+  } catch {
+    return undefined;
+  }
+}
+
 function isValidChatMessages(messages: unknown): boolean {
   return (
     Array.isArray(messages) &&
@@ -345,7 +385,8 @@ function isValidChatMessages(messages: unknown): boolean {
         typeof (m as ChatMessage).id === 'string' &&
         ((m as ChatMessage).role === 'user' || (m as ChatMessage).role === 'assistant') &&
         ((m as ChatMessage).kind === 'text' || (m as ChatMessage).kind === 'tool' || (m as ChatMessage).kind === 'error') &&
-        typeof (m as ChatMessage).createdAt === 'number'
+        typeof (m as ChatMessage).createdAt === 'number' &&
+        isValidChatMessageAttachments((m as ChatMessage).attachments)
     )
   );
 }
@@ -383,17 +424,18 @@ async function persistSession(payload: AiSaveSessionPayload): Promise<string> {
     );
   }
 
-  // Batched multi-row INSERT (8 params/row) — one round-trip per 100 messages
-  // instead of one per message.
+  // Batched multi-row INSERT (9 params/row) — one round-trip per 100 messages
+  // instead of one per message. Attachments persist as metadata + extracted
+  // text only; binaries stay in the renderer's registry.
   const BATCH_SIZE = 100;
   for (let start = 0; start < messages.length; start += BATCH_SIZE) {
     const batch = messages.slice(start, start + BATCH_SIZE);
     const placeholders: string[] = [];
     const params: unknown[] = [];
     batch.forEach((m, i) => {
-      const base = i * 8;
+      const base = i * 9;
       placeholders.push(
-        `($${base + 1}::uuid, $${base + 2}::uuid, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}::jsonb, $${base + 7}, $${base + 8}::timestamptz)`
+        `($${base + 1}::uuid, $${base + 2}::uuid, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}::jsonb, $${base + 7}::jsonb, $${base + 8}, $${base + 9}::timestamptz)`
       );
       params.push(
         companyId,
@@ -402,13 +444,14 @@ async function persistSession(payload: AiSaveSessionPayload): Promise<string> {
         m.kind,
         m.content || null,
         m.toolCall ? JSON.stringify(m.toolCall) : null,
+        Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : null,
         start + i,
         new Date(m.createdAt).toISOString()
       );
     });
     const res = await adapter.query(
       `INSERT INTO ai_chat_messages
-         (company_id, session_id, role, kind, content, tool_call, sort_order, created_at)
+         (company_id, session_id, role, kind, content, tool_call, attachments, sort_order, created_at)
        VALUES ${placeholders.join(', ')}`,
       params
     );
@@ -604,9 +647,10 @@ export const browserAiBridge = {
         kind: string;
         content: string | null;
         tool_call: unknown;
+        attachments: unknown;
         created_at: string;
       }>(
-        `SELECT m.id, m.role, m.kind, m.content, m.tool_call, m.created_at
+        `SELECT m.id, m.role, m.kind, m.content, m.tool_call, m.attachments, m.created_at
            FROM ai_chat_messages m
            JOIN ai_chat_sessions s ON s.id = m.session_id
           WHERE m.session_id = $1::uuid AND m.company_id = $2::uuid AND s.user_id = $3::uuid
@@ -621,6 +665,7 @@ export const browserAiBridge = {
           kind: r.kind as ChatMessage['kind'],
           content: r.content || '',
           toolCall: r.tool_call as ChatMessage['toolCall'],
+          attachments: parseMessageAttachments(r.attachments),
           createdAt: new Date(r.created_at).getTime(),
         })),
       };
@@ -665,6 +710,409 @@ export const browserAiBridge = {
         [payload.sessionId, payload.companyId, payload.userId]
       );
       return result.success ? { success: true } : { success: false, error: result.error };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  // ─── Job queue (mirrors the ai:batch-* IPC channels) ────────────────────
+  // Same SQL shapes as electron/aiHandler.js — single-user browser DB, so
+  // sequential adapter.query calls replace the main-process transactions.
+
+  async batchCreate(payload: {
+    companyId: string; userId: string; title?: string | null; kind?: string;
+    sessionId?: string | null; items: JobBatchItemInput[];
+  }): Promise<{ success: boolean; data?: { batchId: string; total: number; inserted: number }; error?: string }> {
+    try {
+      const { companyId, userId, items } = payload;
+      if (!Array.isArray(items) || items.length === 0) return { success: false, error: 'items must be a non-empty array' };
+      if (items.length > BATCH_CREATE_CHUNK) return { success: false, error: 'items exceeds 500 per call — enqueue in chunks' };
+      const adapter = await getDbAdapter();
+      const header = await adapter.query<{ id: string }>(
+        `INSERT INTO ai_job_batches (company_id, user_id, session_id, kind, title, total_count, status)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, 'pending')
+         RETURNING id`,
+        [
+          companyId, userId,
+          payload.sessionId || null,
+          (payload.kind || 'mixed').slice(0, 40),
+          (payload.title || null) as string | null,
+          items.length,
+        ]
+      );
+      if (!header.success || !header.rows || header.rows.length === 0) {
+        return { success: false, error: header.error || 'Failed to create batch' };
+      }
+      const batchId = String(header.rows[0].id);
+      const placeholders: string[] = [];
+      const params: unknown[] = [batchId, companyId];
+      items.forEach((it, i) => {
+        const base = 2 + i * 6;
+        placeholders.push(`($2::uuid, $1::uuid, ${base + 1}, ${base + 2}, ${base + 3}::jsonb, ${base + 4}, ${base + 5}, ${base + 6})`);
+        params.push(i, it.tool_name.slice(0, 120), JSON.stringify(it.args), it.after_seq, it.idempotency_key.slice(0, 200), it.label ? it.label.slice(0, 200) : null);
+      });
+      const ins = await adapter.query<{ id: string }>(
+        `INSERT INTO ai_job_items
+           (company_id, batch_id, seq, tool_name, args, after_seq, idempotency_key, label)
+         VALUES ${placeholders.join(', ')}
+         ON CONFLICT (batch_id, idempotency_key) DO NOTHING
+         RETURNING id`,
+        params
+      );
+      if (!ins.success) return { success: false, error: ins.error };
+      return { success: true, data: { batchId, total: items.length, inserted: (ins.rows || []).length } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchClaim(payload: { companyId: string; userId: string; batchId: string; limit?: number }): Promise<{ success: boolean; data?: JobBatchItem[]; error?: string }> {
+    try {
+      const take = Math.max(1, Math.min(Number(payload.limit) || 10, BATCH_CLAIM_LIMIT));
+      const adapter = await getDbAdapter();
+      const res = await adapter.query<{
+        id: string; seq: number; tool_name: string; args: unknown; after_seq: number | null; label: string | null; attempts: number;
+      }>(
+        `WITH claimed AS (
+           SELECT i.id FROM ai_job_items i
+           WHERE i.batch_id = $1::uuid AND i.company_id = $2::uuid AND i.status = 'queued'
+             AND i.attempts < 4
+             AND (i.after_seq IS NULL OR i.after_seq IN (
+               SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND status = 'done'
+             ))
+             AND EXISTS (
+               SELECT 1 FROM ai_job_batches b
+               WHERE b.id = $1::uuid AND b.company_id = $2::uuid
+                 AND b.user_id = $4::uuid AND b.status IN ('pending', 'running')
+             )
+           ORDER BY i.seq LIMIT $3
+           FOR UPDATE SKIP LOCKED
+         ),
+         updated AS (
+           UPDATE ai_job_items u SET status = 'running', attempts = u.attempts + 1, updated_at = NOW()
+           FROM claimed WHERE u.id = claimed.id
+           RETURNING u.id
+         )
+         SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.attempts
+           FROM ai_job_items i JOIN updated ON updated.id = i.id
+          ORDER BY i.seq`,
+        [payload.batchId, payload.companyId, take, payload.userId]
+      );
+      if (!res.success) return { success: false, error: res.error };
+      await adapter.query(
+        `UPDATE ai_job_batches SET status = 'running', updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid AND status = 'pending'`,
+        [payload.batchId, payload.companyId, payload.userId]
+      );
+      return {
+        success: true,
+        data: (res.rows || []).map((r) => ({
+          id: String(r.id),
+          seq: Number(r.seq),
+          toolName: String(r.tool_name),
+          args: (typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {})) as Record<string, unknown>,
+          afterSeq: r.after_seq === null ? null : Number(r.after_seq),
+          label: r.label || null,
+          status: 'queued' as const,
+          attempts: Number(r.attempts) || 0,
+          lastError: null,
+          errorCode: null,
+          resultRef: null,
+        })),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchItemDone(payload: {
+    companyId: string; userId: string; batchId: string; itemId: string; resultRef?: string | null;
+  }): Promise<{ success: boolean; data?: { finalStatus: string | null }; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const upd = await adapter.query<{ updated: string }>(
+        `WITH upd AS (
+           UPDATE ai_job_items SET status = 'done', result_ref = $4, updated_at = NOW()
+           WHERE id = $1::uuid AND batch_id = $2::uuid AND company_id = $3::uuid AND status = 'running'
+           RETURNING id
+         )
+         UPDATE ai_job_batches b SET done_count = done_count + (SELECT COUNT(*) FROM upd), updated_at = NOW()
+         WHERE b.id = $2::uuid AND b.company_id = $3::uuid AND b.user_id = $5::uuid
+         RETURNING (SELECT COUNT(*) FROM upd) AS updated`,
+        [payload.itemId, payload.batchId, payload.companyId, payload.resultRef ? payload.resultRef.slice(0, 200) : null, payload.userId]
+      );
+      if (!upd.success || !upd.rows || Number(upd.rows[0].updated) === 0) {
+        return { success: false, error: 'Item not found or not running' };
+      }
+      const fin = await adapter.query<{ status: string }>(
+        `UPDATE ai_job_batches
+            SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
+                updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+            AND NOT EXISTS (
+              SELECT 1 FROM ai_job_items
+              WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
+            )
+          RETURNING status`,
+        [payload.batchId, payload.companyId]
+      );
+      return { success: true, data: { finalStatus: fin.rows && fin.rows[0] ? String(fin.rows[0].status) : null } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchItemFail(payload: {
+    companyId: string; userId: string; batchId: string; itemId: string;
+    error?: string; errorCode?: string | null; retryable?: boolean;
+  }): Promise<{ success: boolean; data?: { retried: boolean; attempts?: number; skipped?: number; finalStatus?: string | null }; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const cur = await adapter.query<{ seq: number; attempts: number }>(
+        `SELECT i.seq, i.attempts FROM ai_job_items i
+          JOIN ai_job_batches b ON b.id = i.batch_id
+         WHERE i.id = $1::uuid AND i.batch_id = $2::uuid AND i.company_id = $3::uuid
+           AND b.user_id = $4::uuid AND i.status = 'running'`,
+        [payload.itemId, payload.batchId, payload.companyId, payload.userId]
+      );
+      if (!cur.success || !cur.rows || cur.rows.length === 0) {
+        return { success: false, error: 'Item not found or not running' };
+      }
+      const failedSeq = Number(cur.rows[0].seq);
+      const attempts = Number(cur.rows[0].attempts) || 0;
+      const safeError = (payload.error || 'خطأ غير معروف').slice(0, 2000);
+      const safeCode = payload.errorCode ? payload.errorCode.slice(0, 40) : null;
+      if (payload.retryable !== false && attempts < BATCH_MAX_ATTEMPTS) {
+        await adapter.query(
+          `UPDATE ai_job_items SET status = 'queued', last_error = $2, error_code = $3, updated_at = NOW()
+           WHERE id = $1::uuid`,
+          [payload.itemId, safeError, safeCode]
+        );
+        return { success: true, data: { retried: true, attempts } };
+      }
+      await adapter.query(
+        `UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
+         WHERE id = $1::uuid`,
+        [payload.itemId, safeError, safeCode]
+      );
+      const skipped = await adapter.query<{ seq: number }>(
+        `WITH RECURSIVE doomed(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND after_seq = $2
+           UNION
+           SELECT i.seq FROM ai_job_items i JOIN doomed d ON i.after_seq = d.seq
+           WHERE i.batch_id = $1::uuid
+         )
+         UPDATE ai_job_items SET status = 'skipped',
+           last_error = 'تخطي: فشل عنصر يعتمد عليه', updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $3::uuid AND status = 'queued'
+           AND seq IN (SELECT seq FROM doomed)
+         RETURNING seq`,
+        [payload.batchId, failedSeq, payload.companyId]
+      );
+      const skippedCount = skipped.rows ? skipped.rows.length : 0;
+      await adapter.query(
+        `UPDATE ai_job_batches SET failed_count = failed_count + 1,
+           skipped_count = skipped_count + $2, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid`,
+        [payload.batchId, skippedCount, payload.companyId, payload.userId]
+      );
+      const fin = await adapter.query<{ status: string }>(
+        `UPDATE ai_job_batches
+            SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
+                updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+            AND NOT EXISTS (
+              SELECT 1 FROM ai_job_items
+              WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
+            )
+          RETURNING status`,
+        [payload.batchId, payload.companyId]
+      );
+      return {
+        success: true,
+        data: { retried: false, skipped: skippedCount, finalStatus: fin.rows && fin.rows[0] ? String(fin.rows[0].status) : null },
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchSetStatus(payload: {
+    companyId: string; userId: string; batchId: string; status: 'paused' | 'running' | 'cancelled';
+  }): Promise<{ success: boolean; data?: { status: string; skipped: number }; error?: string }> {
+    try {
+      const allowed: Record<string, string[]> = {
+        paused: ['pending', 'running'],
+        running: ['paused'],
+        cancelled: ['pending', 'running', 'paused'],
+      };
+      if (!allowed[payload.status]) return { success: false, error: 'status must be paused, running or cancelled' };
+      const adapter = await getDbAdapter();
+      const upd = await adapter.query<{ status: string }>(
+        `UPDATE ai_job_batches SET status = $3, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid
+           AND status = ANY ($5)
+         RETURNING status`,
+        [payload.batchId, payload.companyId, payload.status, payload.userId, allowed[payload.status]]
+      );
+      if (!upd.success || !upd.rows || upd.rows.length === 0) {
+        return { success: false, error: upd.success ? 'Batch not found or transition not allowed' : upd.error };
+      }
+      let skipped = 0;
+      if (payload.status === 'cancelled') {
+        const res = await adapter.query(
+          `UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: أُلغيت الدفعة', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status IN ('queued', 'running')
+           RETURNING seq`,
+          [payload.batchId, payload.companyId]
+        );
+        skipped = res.rows ? res.rows.length : 0;
+        await adapter.query(
+          `UPDATE ai_job_batches SET skipped_count = skipped_count + $2, updated_at = NOW()
+           WHERE id = $1::uuid`,
+          [payload.batchId, skipped]
+        );
+      }
+      return { success: true, data: { status: payload.status, skipped } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchRetryFailed(payload: {
+    companyId: string; userId: string; batchId: string;
+  }): Promise<{ success: boolean; data?: { requeued: number }; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const requeued = await adapter.query(
+        `UPDATE ai_job_items SET status = 'queued', attempts = 0,
+           last_error = NULL, error_code = NULL, updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'failed'
+         RETURNING seq`,
+        [payload.batchId, payload.companyId]
+      );
+      if (!requeued.success || !requeued.rows || requeued.rows.length === 0) {
+        return { success: false, error: requeued.success ? 'No failed items to retry' : requeued.error };
+      }
+      await adapter.query(
+        `UPDATE ai_job_batches SET status = 'running',
+           failed_count = failed_count - $2, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid
+           AND status IN ('partial', 'paused')`,
+        [payload.batchId, requeued.rows.length, payload.companyId, payload.userId]
+      );
+      return { success: true, data: { requeued: requeued.rows.length } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchGet(payload: {
+    companyId: string; userId: string; batchId: string;
+  }): Promise<{ success: boolean; data?: JobBatchDetail; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const header = await adapter.query<{
+        id: string; kind: string; title: string | null; total_count: number;
+        done_count: number; failed_count: number; skipped_count: number;
+        status: string; created_at: string; updated_at: string;
+      }>(
+        `SELECT id, kind, title, total_count, done_count, failed_count, skipped_count,
+                status, created_at, updated_at
+           FROM ai_job_batches
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid`,
+        [payload.batchId, payload.companyId, payload.userId]
+      );
+      if (!header.success || !header.rows || header.rows.length === 0) {
+        return { success: false, error: header.success ? 'Batch not found' : header.error };
+      }
+      const items = await adapter.query<{
+        id: string; seq: number; tool_name: string; args: unknown; after_seq: number | null;
+        label: string | null; status: string; attempts: number; last_error: string | null;
+        error_code: string | null; result_ref: string | null;
+      }>(
+        `SELECT id, seq, tool_name, args, after_seq, label, status, attempts,
+                last_error, error_code, result_ref
+           FROM ai_job_items
+          WHERE batch_id = $1::uuid AND company_id = $2::uuid
+          ORDER BY seq ASC`,
+        [payload.batchId, payload.companyId]
+      );
+      if (!items.success) return { success: false, error: items.error };
+      const h = header.rows[0];
+      return {
+        success: true,
+        data: {
+          id: String(h.id),
+          kind: String(h.kind),
+          title: h.title,
+          totalCount: Number(h.total_count) || 0,
+          doneCount: Number(h.done_count) || 0,
+          failedCount: Number(h.failed_count) || 0,
+          skippedCount: Number(h.skipped_count) || 0,
+          status: h.status as JobBatchDetail['status'],
+          createdAt: String(h.created_at),
+          updatedAt: String(h.updated_at),
+          items: (items.rows || []).map((r) => ({
+            id: String(r.id),
+            seq: Number(r.seq),
+            toolName: String(r.tool_name),
+            args: (typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {})) as Record<string, unknown>,
+            afterSeq: r.after_seq === null ? null : Number(r.after_seq),
+            label: r.label || null,
+            status: r.status as JobBatchItem['status'],
+            attempts: Number(r.attempts) || 0,
+            lastError: r.last_error,
+            errorCode: r.error_code,
+            resultRef: r.result_ref,
+          })),
+        },
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  async batchList(payload: {
+    companyId: string; userId: string; status?: string;
+  }): Promise<{ success: boolean; data?: JobBatchSummary[]; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const params: unknown[] = [payload.companyId, payload.userId];
+      let where = 'WHERE company_id = $1::uuid AND user_id = $2::uuid';
+      if (payload.status) {
+        params.push(payload.status.slice(0, 20));
+        where += ' AND status = $3';
+      }
+      const res = await adapter.query<{
+        id: string; kind: string; title: string | null; total_count: number;
+        done_count: number; failed_count: number; skipped_count: number;
+        status: string; created_at: string; updated_at: string;
+      }>(
+        `SELECT id, kind, title, total_count, done_count, failed_count, skipped_count,
+                status, created_at, updated_at
+           FROM ai_job_batches ${where}
+          ORDER BY updated_at DESC
+          LIMIT 20`,
+        params
+      );
+      if (!res.success) return { success: false, error: res.error };
+      return {
+        success: true,
+        data: (res.rows || []).map((h) => ({
+          id: String(h.id),
+          kind: String(h.kind),
+          title: h.title,
+          totalCount: Number(h.total_count) || 0,
+          doneCount: Number(h.done_count) || 0,
+          failedCount: Number(h.failed_count) || 0,
+          skippedCount: Number(h.skipped_count) || 0,
+          status: h.status as JobBatchSummary['status'],
+          createdAt: String(h.created_at),
+          updatedAt: String(h.updated_at),
+        })),
+      };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

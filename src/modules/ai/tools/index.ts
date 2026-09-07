@@ -8,6 +8,8 @@ import { wizardTools } from './wizardTools';
 import { reportTools } from './reportTools';
 import { detailedReportTools } from './detailedReportTools';
 import { diagnosticTools } from './diagnosticTools';
+import { batchTools } from './batchTools';
+import { directionTools } from './directionTools';
 
 /**
  * Registers every built-in tool. Import this module once (side effect) before
@@ -17,7 +19,7 @@ let registered = false;
 
 export function ensureToolsRegistered(): void {
   if (registered) return;
-  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools]);
+  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools, ...batchTools, ...directionTools]);
   registered = true;
 }
 

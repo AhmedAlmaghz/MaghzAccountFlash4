@@ -70,6 +70,7 @@ describe('backup plan integrity', () => {
     before('purchase_invoices', 'purchase_returns');
     before('transactions', 'journal_entries');
     before('ai_chat_sessions', 'ai_chat_messages');
+    before('ai_job_batches', 'ai_job_items');
     before('accounts', 'cash_boxes');
     before('accounts', 'default_accounts');
     before('accounts', 'payroll_components');

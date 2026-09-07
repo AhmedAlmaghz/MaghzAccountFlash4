@@ -67,6 +67,7 @@ function snapshotFingerprint(sessionId: string | null, messages: ChatMessage[]):
     last.id,
     last.content.length,
     last.toolCall?.status ?? '',
+    last.attachments?.length ?? 0,
   ].join('|');
 }
 

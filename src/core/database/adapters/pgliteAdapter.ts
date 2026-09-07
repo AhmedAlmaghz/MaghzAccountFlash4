@@ -116,6 +116,9 @@ import recomputePartyBalances from '@root/drizzle/0018_recompute_party_balances.
 import payrollComponentsAudit from '@root/drizzle/0019_payroll_components_audit.sql?raw';
 import companiesAudit from '@root/drizzle/0020_companies_audit.sql?raw';
 import productUnits from '@root/drizzle/0021_product_units.sql?raw';
+import aiJobQueue from '@root/drizzle/0022_ai_job_queue.sql?raw';
+import aiChatAttachments from '@root/drizzle/0023_ai_chat_attachments.sql?raw';
+import aiJobItemLabels from '@root/drizzle/0024_ai_job_item_labels.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -140,6 +143,9 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0019_payroll_components_audit', sql: payrollComponentsAudit },
   { name: '0020_companies_audit', sql: companiesAudit },
   { name: '0021_product_units', sql: productUnits },
+  { name: '0022_ai_job_queue', sql: aiJobQueue },
+  { name: '0023_ai_chat_attachments', sql: aiChatAttachments },
+  { name: '0024_ai_job_item_labels', sql: aiJobItemLabels },
 ];
 
 /**

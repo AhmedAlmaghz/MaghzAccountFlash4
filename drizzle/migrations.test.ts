@@ -690,3 +690,151 @@ describe('Migration 0021: multi-unit products', () => {
     expect(purchases.match(/baseQuantity: numeric\('base_quantity'/g)?.length).toBe(3);
   });
 });
+
+describe('Migration 0022: AI job queue', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0022_ai_job_queue.sql'), 'utf-8');
+
+  it('creates ai_job_batches with counters and a status CHECK', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS ai_job_batches/);
+    expect(migrationSql).toMatch(/company_id uuid NOT NULL REFERENCES companies\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/user_id uuid NOT NULL REFERENCES users\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/session_id uuid REFERENCES ai_chat_sessions\(id\) ON DELETE SET NULL/);
+    expect(migrationSql).toMatch(/total_count integer NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/done_count integer NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/failed_count integer NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/skipped_count integer NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/status varchar\(20\) NOT NULL DEFAULT 'pending' CHECK \(status IN \('pending', 'running', 'paused', 'done', 'partial', 'cancelled'\)\)/);
+  });
+
+  it('creates ai_job_items with DAG link, idempotency key and status CHECK', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS ai_job_items/);
+    expect(migrationSql).toMatch(/batch_id uuid NOT NULL REFERENCES ai_job_batches\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/after_seq integer NULL/);
+    expect(migrationSql).toMatch(/idempotency_key varchar\(200\) NOT NULL/);
+    expect(migrationSql).toMatch(/UNIQUE \(batch_id, seq\)/);
+    expect(migrationSql).toMatch(/UNIQUE \(batch_id, idempotency_key\)/);
+    expect(migrationSql).toMatch(/status varchar\(20\) NOT NULL DEFAULT 'queued' CHECK \(status IN \('queued', 'running', 'done', 'failed', 'skipped'\)\)/);
+    expect(migrationSql).toMatch(/attempts integer NOT NULL DEFAULT 0/);
+  });
+
+  it('creates company-scoped and claim indexes', () => {
+    expect(migrationSql).toMatch(/idx_ai_job_batches_company_status ON ai_job_batches \(company_id, status\)/);
+    expect(migrationSql).toMatch(/idx_ai_job_items_batch_status_seq ON ai_job_items \(batch_id, status, seq\)/);
+    expect(migrationSql).toMatch(/idx_ai_job_items_queued ON ai_job_items \(batch_id, seq\) WHERE status = 'queued'/);
+  });
+
+  it('is idempotent (IF NOT EXISTS on every CREATE)', () => {
+    const creates = migrationSql.match(/CREATE (TABLE|INDEX)/g) || [];
+    const guards = migrationSql.match(/CREATE (TABLE|INDEX) IF NOT EXISTS/g) || [];
+    expect(creates.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(creates.length);
+  });
+
+  it('journal registers 0022 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0022_ai_job_queue')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0022 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0022_ai_job_queue\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0022_ai_job_queue', sql: aiJobQueue \}/);
+  });
+
+  it('Drizzle schema exposes aiJobBatches and aiJobItems', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/ai.ts'), 'utf-8');
+    expect(schema).toMatch(/export const aiJobBatches = pgTable\('ai_job_batches'/);
+    expect(schema).toMatch(/export const aiJobItems = pgTable\('ai_job_items'/);
+    expect(schema).toMatch(/afterSeq: integer\('after_seq'\)/);
+    expect(schema).toMatch(/idempotencyKey: varchar\('idempotency_key'/);
+  });
+
+  it('backup plan covers both tables in FK-safe order', () => {
+    const plan = readFileSync(join(process.cwd(), 'src/core/backup/backupTables.ts'), 'utf-8');
+    expect(plan).toMatch(/C\('ai_job_batches'\)/);
+    expect(plan).toMatch(/C\('ai_job_items'\)/);
+    // children delete first, parents insert first
+    expect(plan.indexOf("C('ai_job_items')")).toBeLessThan(plan.indexOf("C('ai_job_batches')"));
+  });
+});
+
+describe('Migration 0023: AI chat message attachments', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0023_ai_chat_attachments.sql'), 'utf-8');
+
+  it('adds attachments jsonb to ai_chat_messages (metadata + extracted text only)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE ai_chat_messages ADD COLUMN IF NOT EXISTS attachments jsonb NOT NULL DEFAULT '\[\]'::jsonb/);
+  });
+
+  it('is idempotent (IF NOT EXISTS)', () => {
+    const adds = migrationSql.match(/ADD COLUMN/g) || [];
+    const guards = migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) || [];
+    expect(adds.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(adds.length);
+  });
+
+  it('journal registers 0023 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0023_ai_chat_attachments')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0023 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0023_ai_chat_attachments\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0023_ai_chat_attachments', sql: aiChatAttachments \}/);
+  });
+
+  it('Drizzle schema exposes attachments on aiChatMessages', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/ai.ts'), 'utf-8');
+    expect(schema).toMatch(/attachments: jsonb\('attachments'\)\.notNull\(\)\.default\(\[\]\)/);
+  });
+
+describe('Migration 0024: AI job item labels', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0024_ai_job_item_labels.sql'), 'utf-8');
+
+  it('adds a display-only label column to ai_job_items', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE ai_job_items ADD COLUMN IF NOT EXISTS label varchar\(200\)/);
+  });
+
+  it('is idempotent (IF NOT EXISTS)', () => {
+    const adds = migrationSql.match(/ADD COLUMN/g) || [];
+    const guards = migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) || [];
+    expect(adds.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(adds.length);
+  });
+
+  it('journal registers 0024 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0024_ai_job_item_labels')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0024 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0024_ai_job_item_labels\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0024_ai_job_item_labels', sql: aiJobItemLabels \}/);
+  });
+
+  it('Drizzle schema exposes label on aiJobItems', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/ai.ts'), 'utf-8');
+    expect(schema).toMatch(/label: varchar\('label', \{ length: 200 \}\)/);
+  });
+
+  it('both batch channels carry the label (create + get)', () => {
+    const main = readFileSync(join(process.cwd(), 'electron/aiHandler.js'), 'utf-8');
+    expect(main).toMatch(/after_seq, idempotency_key, label\)/);
+    expect(main).toMatch(/label: r\.label \|\| null/);
+    const bridge = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    void bridge;
+  });
+
+  it('both persistence paths write and read the attachments column', () => {
+    const main = readFileSync(join(process.cwd(), 'electron/aiHandler.js'), 'utf-8');
+    expect(main).toMatch(/tool_call, attachments, sort_order/);
+    expect(main).toMatch(/parseMessageAttachments\(r\.attachments\)/);
+    const bridge = readFileSync(join(process.cwd(), 'src/modules/ai/api/browserBridge.ts'), 'utf-8');
+    expect(bridge).toMatch(/tool_call, attachments, sort_order/);
+    expect(bridge).toMatch(/parseMessageAttachments\(r\.attachments\)/);
+  });
+});

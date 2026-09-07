@@ -221,6 +221,14 @@ contextBridge.exposeInMainWorld('electronAI', {
   saveSession: (payload) => ipcRenderer.invoke('ai:save-session', { ...payload, sessionToken }),
   renameSession: (payload) => ipcRenderer.invoke('ai:rename-session', { ...payload, sessionToken }),
   deleteSession: (payload) => ipcRenderer.invoke('ai:delete-session', { ...payload, sessionToken }),
+  batchCreate: (payload) => ipcRenderer.invoke('ai:batch-create', { ...payload, sessionToken }),
+  batchClaim: (payload) => ipcRenderer.invoke('ai:batch-claim', { ...payload, sessionToken }),
+  batchItemDone: (payload) => ipcRenderer.invoke('ai:batch-item-done', { ...payload, sessionToken }),
+  batchItemFail: (payload) => ipcRenderer.invoke('ai:batch-item-fail', { ...payload, sessionToken }),
+  batchSetStatus: (payload) => ipcRenderer.invoke('ai:batch-set-status', { ...payload, sessionToken }),
+  batchRetryFailed: (payload) => ipcRenderer.invoke('ai:batch-retry-failed', { ...payload, sessionToken }),
+  batchGet: (payload) => ipcRenderer.invoke('ai:batch-get', { ...payload, sessionToken }),
+  batchList: (payload) => ipcRenderer.invoke('ai:batch-list', { ...payload, sessionToken }),
 });
 
 // ─── App Environment Info ─────────────────────────────────────────────────────

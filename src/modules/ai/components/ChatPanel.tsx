@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { useAiStore } from '../store';
@@ -9,8 +9,11 @@ import { registerNavigator, unregisterNavigator, navigateTo } from '../engine/na
 import { useNavigate } from 'react-router-dom';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
-import { Bot, Sparkles } from 'lucide-react';
+import { Bot, History, Play, Sparkles, X } from 'lucide-react';
+import { findResumableBatches } from '../api/batch';
+import type { JobBatchSummary } from '../api/batchTypes';
 import { extractSuggestions, type Suggestion } from '../suggestions/suggestionEngine';
+import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { cn } from '@/core/utils';
 
 export function ChatPanel() {
@@ -100,8 +103,8 @@ export function ChatPanel() {
     return -1;
   }, [messages]);
 
-  const handleSend = useCallback(async (text: string) => {
-    await engine.send(text);
+  const handleSend = useCallback(async (text: string, attachments: PreparedAttachment[] = []) => {
+    await engine.send(text, attachments);
   }, [engine]);
 
   const handleStop = useCallback(() => {
@@ -117,6 +120,26 @@ export function ChatPanel() {
       await engine.send(lastUserText);
     }
   }, [engine, lastUserText]);
+
+  // ── Resumable batches banner (Package D) ─────────────────────────────
+  // Batches persist in Postgres; after a restart the worker is gone but the
+  // rows remain running/paused. Offer one-tap resume instead of losing them.
+  const [resumable, setResumable] = useState<JobBatchSummary[]>([]);
+  const [resumeDismissed, setResumeDismissed] = useState(false);
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    void findResumableBatches().then((list) => {
+      if (!cancelled) setResumable(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+  const handleResumeBatch = useCallback(async (batchId: string) => {
+    setResumable((prev) => prev.filter((b) => b.id !== batchId));
+    await engine.resumeBatchById(batchId);
+  }, [engine]);
 
   // Suggestions for the last assistant message — interactive action chips
   const lastAssistantSuggestions = useMemo<Suggestion[]>(() => {
@@ -223,6 +246,39 @@ export function ChatPanel() {
           )}
         </div>
       </div>
+
+      {/* Resumable batches banner */}
+      {resumable.length > 0 && !resumeDismissed && !isProcessing && (
+        <div className="max-w-3xl w-full mx-auto px-3 sm:px-4 pb-2">
+          <div className="flex items-center gap-2 rounded-2xl border border-gold-300 dark:border-gold-800 bg-gold-50 dark:bg-gold-900/20 px-3 py-2.5">
+            <History size={15} className="flex-shrink-0 text-gold-700 dark:text-gold-300" />
+            <span className="flex-1 text-xs font-medium text-gold-800 dark:text-gold-200">
+              {t('ai.batch.resumeTitle')} ({resumable.length})
+            </span>
+            <div className="flex items-center gap-1.5">
+              {resumable.slice(0, 2).map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => void handleResumeBatch(b.id)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift active:scale-95"
+                  title={b.title || b.id}
+                >
+                  <Play size={11} />
+                  {t('ai.batch.resumeAction')}
+                </button>
+              ))}
+              <button
+                onClick={() => setResumeDismissed(true)}
+                className="p-1.5 rounded-xl text-gold-600 dark:text-gold-400 hover:bg-gold-100 dark:hover:bg-gold-900/40"
+                title={t('ai.batch.dismiss')}
+                aria-label={t('ai.batch.dismiss')}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <ChatInput onSend={handleSend} onStop={handleStop} isProcessing={isProcessing} />

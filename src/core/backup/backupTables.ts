@@ -76,6 +76,8 @@ export const DELETE_ORDER: PlannedTable[] = [
   C('opportunities'),
   C('ai_chat_messages'),
   C('ai_chat_sessions'),
+  C('ai_job_items'),
+  C('ai_job_batches'),
   C('audit_logs'),
   C('stock'),
   // masters (referenced by the documents above)
@@ -163,6 +165,8 @@ const INSERT_TABLES = [
   'end_of_service',
   'ai_chat_sessions',
   'ai_chat_messages',
+  'ai_job_batches',
+  'ai_job_items',
   'audit_logs',
   'product_product_categories',
   'warehouse_transfer_lines',

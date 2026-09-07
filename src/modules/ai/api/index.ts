@@ -9,6 +9,12 @@ import type {
   LlmStreamChunk,
   LlmTool,
 } from '../types';
+import type {
+  JobBatchDetail,
+  JobBatchItem,
+  JobBatchItemInput,
+  JobBatchSummary,
+} from './batchTypes';
 
 /**
  * Renderer-side client for the AI Harness IPC bridge (window.electronAI).
@@ -56,6 +62,24 @@ interface ElectronAI {
   saveSession: (payload: AiSaveSessionPayload) => Promise<IpcResult<{ sessionId: string }>>;
   renameSession: (payload: { sessionId: string; title: string; companyId?: string; userId?: string }) => Promise<IpcResult<void>>;
   deleteSession: (payload: { companyId: string; userId: string; sessionId: string }) => Promise<IpcResult<void>>;
+  batchCreate: (payload: {
+    companyId: string; userId: string; title?: string | null; kind?: string;
+    sessionId?: string | null; items: JobBatchItemInput[];
+  }) => Promise<IpcResult<{ batchId: string; total: number; inserted: number }>>;
+  batchClaim: (payload: { companyId: string; userId: string; batchId: string; limit?: number }) => Promise<IpcResult<JobBatchItem[]>>;
+  batchItemDone: (payload: {
+    companyId: string; userId: string; batchId: string; itemId: string; resultRef?: string | null;
+  }) => Promise<IpcResult<{ finalStatus: string | null }>>;
+  batchItemFail: (payload: {
+    companyId: string; userId: string; batchId: string; itemId: string;
+    error?: string; errorCode?: string | null; retryable?: boolean;
+  }) => Promise<IpcResult<{ retried: boolean; attempts?: number; skipped?: number; finalStatus?: string | null }>>;
+  batchSetStatus: (payload: {
+    companyId: string; userId: string; batchId: string; status: 'paused' | 'running' | 'cancelled';
+  }) => Promise<IpcResult<{ status: string; skipped: number }>>;
+  batchRetryFailed: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<{ requeued: number }>>;
+  batchGet: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<JobBatchDetail>>;
+  batchList: (payload: { companyId: string; userId: string; status?: string }) => Promise<IpcResult<JobBatchSummary[]>>;
 }
 
 declare global {
@@ -260,5 +284,64 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.deleteSession({ companyId, userId, sessionId });
+  },
+
+  // ─── Job queue (ONE approval for MANY tool calls) ────────────────────────
+  async batchCreate(payload: {
+    companyId: string; userId: string; title?: string | null; kind?: string;
+    sessionId?: string | null; items: JobBatchItemInput[];
+  }): Promise<IpcResult<{ batchId: string; total: number; inserted: number }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchCreate(payload);
+  },
+
+  async batchClaim(companyId: string, userId: string, batchId: string, limit?: number): Promise<IpcResult<JobBatchItem[]>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchClaim({ companyId, userId, batchId, limit });
+  },
+
+  async batchItemDone(
+    companyId: string, userId: string, batchId: string, itemId: string, resultRef?: string | null,
+  ): Promise<IpcResult<{ finalStatus: string | null }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchItemDone({ companyId, userId, batchId, itemId, resultRef });
+  },
+
+  async batchItemFail(
+    companyId: string, userId: string, batchId: string, itemId: string,
+    error?: string, errorCode?: string | null, retryable?: boolean,
+  ): Promise<IpcResult<{ retried: boolean; attempts?: number; skipped?: number; finalStatus?: string | null }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchItemFail({ companyId, userId, batchId, itemId, error, errorCode, retryable });
+  },
+
+  async batchSetStatus(
+    companyId: string, userId: string, batchId: string, status: 'paused' | 'running' | 'cancelled',
+  ): Promise<IpcResult<{ status: string; skipped: number }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchSetStatus({ companyId, userId, batchId, status });
+  },
+
+  async batchRetryFailed(companyId: string, userId: string, batchId: string): Promise<IpcResult<{ requeued: number }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchRetryFailed({ companyId, userId, batchId });
+  },
+
+  async batchGet(companyId: string, userId: string, batchId: string): Promise<IpcResult<JobBatchDetail>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchGet({ companyId, userId, batchId });
+  },
+
+  async batchList(companyId: string, userId: string, status?: string): Promise<IpcResult<JobBatchSummary[]>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchList({ companyId, userId, status });
   },
 };

@@ -7,6 +7,10 @@ import { ensureToolsRegistered } from '../tools/index';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
+import { runBatch, batchProgressLine } from './batchRunner';
+import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
+import { getBatch } from '../api/batch';
+import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { renderErrorGuidance } from './errorTaxonomy';
 import { resolveArgsForCard } from './cardResolvers';
 import { expandDialectText } from './dialectMap';
@@ -286,8 +290,13 @@ class ChatEngine {
     });
   }
 
-  /** Start or resume a conversation with user text. */
-  async send(text: string): Promise<void> {
+  /**
+   * Start or resume a conversation with user text plus optional file
+   * attachments. Attachment binaries ride the wire ONCE (latest turn only —
+   * see pruneMediaForWire); their metadata + extracted text persist with the
+   * message so history stays meaningful after the binary expires.
+   */
+  async send(text: string, attachments: PreparedAttachment[] = []): Promise<void> {
     ensureToolsRegistered();
     const store = this.store();
 
@@ -368,9 +377,20 @@ class ChatEngine {
         // Entity resolution is best-effort — never block the user's message
       }
 
-      // Append user message (original text visible in UI, corrected in LLM history)
-      this.history.push({ role: 'user', content: userText });
-      store.addMessage({ role: 'user', kind: 'text', content: text });
+      // Append user message (original text visible in UI, corrected in LLM history).
+      // Canonical extraction blocks ride with the wire content (chip = source
+      // of truth); the editable textarea draft is advisory. Binaries are
+      // trimmed to the per-send budget first (context-window protection).
+      const trimmedAttachments = trimAttachmentsToBudget(attachments);
+      this.history.push({ role: 'user', content: buildUserParts(userText, trimmedAttachments) });
+      store.addMessage({
+        role: 'user',
+        kind: 'text',
+        content: text,
+        ...(trimmedAttachments.length > 0
+          ? { attachments: trimmedAttachments.map((a) => a.meta) }
+          : {}),
+      });
 
       // If we corrected something, show a notification to the user
       if (correctionMsg) {
@@ -427,6 +447,15 @@ class ChatEngine {
           // success claims only when at least one write landed here.
           this.successfulWritesThisSend.add(pending.toolName);
 
+          // Batch tools hand back a batchId to run: the single approval the
+          // user just gave covers the whole batch, so the worker starts
+          // immediately (fire-and-forget) and reports progress onto the
+          // same card. No second approval round is ever requested.
+          const batchId = (outcome.result as { startBatchRun?: unknown } | null)?.startBatchRun;
+          if (typeof batchId === 'string' && batchId) {
+            void this.startBatchRun(batchId, messageId);
+          }
+
           // Add tool result to LLM history
           this.history.push({
             role: 'tool',
@@ -482,6 +511,119 @@ class ChatEngine {
       this.store().addMessage({ role: 'assistant', kind: 'error', content: errorText });
     } finally {
       this.store().setProcessing(false);
+    }
+  }
+
+  /**
+   * Run a batch to completion after its single approval. Fire-and-forget:
+   * progress lands on the same tool card after every chunk, and a final
+   * summary message closes the run. Stopping the whole engine also stops
+   * the worker via the shared abort flag — the batch row stays resumable.
+   */
+  private async startBatchRun(batchId: string, messageId: string): Promise<void> {
+    const store = this.store();
+    // Pin the batch to its card so MessageBubble renders the live progress
+    // card (persisted inside tool_call JSONB — survives reloads).
+    store.updateToolCall(messageId, { batchId });
+    try {
+      const final = await runBatch(this.ctx.companyId, this.ctx.userId, batchId, {
+        shouldStop: () => this.abortRequested,
+        onProgress: (detail) => {
+          this.reportBatchProgress(messageId, 'executing', batchProgressLine(detail));
+        },
+      });
+      if (!final) {
+        store.updateToolCall(messageId, { status: 'error', resultSummary: 'تعذّر قراءة حالة الدفعة' });
+        return;
+      }
+      const line = batchProgressLine(final);
+      this.reportBatchProgress(
+        messageId,
+        final.status === 'done' || final.status === 'partial' ? 'success' : 'error',
+        line,
+      );
+      store.addMessage({
+        role: 'assistant',
+        kind: final.status === 'done' ? 'text' : 'error',
+        content: final.status === 'done'
+          ? `اكتملت الدفعة: ${line}`
+          : final.status === 'partial'
+            ? `اكتملت الدفعة جزئياً: ${line} — اسألني عن تفاصيل الفاشلة أو قل "أعد الفاشلة" لإعادة المحاولة`
+            : `توقفت الدفعة (${final.status}): ${line} — قل "تابع" للاستئناف في أي وقت`,
+      });
+    } catch (e) {
+      const errorText = e instanceof Error ? e.message : String(e);
+      this.reportBatchProgress(messageId, 'error', errorText);
+    }
+  }
+
+  /**
+   * Report batch progress onto a message: the tool card when the message
+   * carries one (approval flows), otherwise the message text itself
+   * (resumed runs, which own a plain text message). Never both — the live
+   * BatchProgressCard already shows substance.
+   */
+  private reportBatchProgress(
+    messageId: string,
+    status: 'executing' | 'success' | 'error',
+    line: string,
+  ): void {
+    const store = this.store();
+    const hasCard = store.messages.some((m) => m.id === messageId && m.toolCall);
+    if (hasCard) {
+      store.updateToolCall(messageId, { status, resultSummary: line });
+    } else {
+      store.updateMessageContent(messageId, line);
+    }
+  }
+
+  /**
+   * Resume a persisted batch (running/paused/partial) — used by the resume
+   * banner after restarts and by "تابع" follow-ups. The original approval
+   * still covers the run: no new confirmation round is requested. Owns a
+   * plain text message that doubles as the progress line.
+   */
+  async resumeBatchById(batchId: string): Promise<void> {
+    const store = this.store();
+    if (store.isProcessing) return;
+    store.setProcessing(true);
+    try {
+      const got = await getBatch(batchId, { companyId: this.ctx.companyId, userId: this.ctx.userId });
+      if (!got.success || !got.data) {
+        store.addMessage({ role: 'assistant', kind: 'error', content: got.error || 'الدفعة غير موجودة' });
+        return;
+      }
+      const detail = got.data;
+      if (detail.status === 'done') {
+        store.addMessage({ role: 'assistant', kind: 'text', content: 'الدفعة مكتملة أصلاً — لا شيء لاستئنافه' });
+        return;
+      }
+      if (detail.status === 'cancelled') {
+        store.addMessage({ role: 'assistant', kind: 'error', content: 'الدفعة ملغاة — أنشئ دفعة جديدة بدلاً من ذلك' });
+        return;
+      }
+      if (detail.failedCount > 0) {
+        const retry = await aiApi.batchRetryFailed(this.ctx.companyId, this.ctx.userId, batchId);
+        if (!retry.success) {
+          store.addMessage({ role: 'assistant', kind: 'error', content: retry.error || 'فشل إعادة العناصر الفاشلة' });
+          return;
+        }
+      } else if (detail.status === 'paused') {
+        const unpause = await aiApi.batchSetStatus(this.ctx.companyId, this.ctx.userId, batchId, 'running');
+        if (!unpause.success) {
+          store.addMessage({ role: 'assistant', kind: 'error', content: unpause.error || 'فشل إلغاء الإيقاف' });
+          return;
+        }
+      }
+      const messageId = store.addMessage({
+        role: 'assistant',
+        kind: 'text',
+        content: `استئناف الدفعة: ${detail.title || batchId}`,
+      });
+      this.abortRequested = false;
+      await this.startBatchRun(batchId, messageId);
+    } finally {
+      store.setProcessing(false);
     }
   }
 
@@ -687,7 +829,7 @@ class ChatEngine {
 
     // ── Thread-safe path (thought_signature available) ──────────────
     if (globalTs || !hasAnyToolCalls) {
-      return history.map((message) => {
+      return pruneMediaForWire(history.map((message) => {
         const tool_calls = message.tool_calls?.map((call) => {
           const fn = { ...call.function };
           if (globalTs && !fn.thought_signature) {
@@ -696,7 +838,7 @@ class ChatEngine {
           return { ...call, function: fn };
         });
         return { ...message, tool_calls };
-      });
+      }));
     }
 
     // ── Thought-signature absent → flatten tool_call+tool pairs ────
@@ -721,7 +863,7 @@ class ChatEngine {
       }
 
       if (m.tool_calls && m.tool_calls.length > 0) {
-        pendingPreText = m.content;
+        pendingPreText = llmTextOf(m.content);
         pendingCallNames = m.tool_calls.map((tc) => tc.function?.name ?? 'tool');
         continue;
       }
@@ -745,7 +887,7 @@ class ChatEngine {
       result.push({ role: 'user', content: 'أكمل من فضلك.' });
     }
 
-    return result;
+    return pruneMediaForWire(result);
   }
 
   /**

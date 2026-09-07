@@ -359,6 +359,22 @@ function isValidMessages(messages) {
 
 // ─── Chat persistence (ai_chat_sessions + ai_chat_messages) ─────────────────
 
+function isValidChatMessageAttachments(attachments) {
+  return (
+    attachments === undefined ||
+    attachments === null ||
+    (Array.isArray(attachments) &&
+      attachments.every(
+        (a) =>
+          a &&
+          typeof a.id === 'string' &&
+          typeof a.name === 'string' &&
+          typeof a.sha256 === 'string' &&
+          ['image', 'pdf', 'spreadsheet', 'audio', 'other'].includes(a.kind)
+      ))
+  );
+}
+
 function isValidChatMessages(messages) {
   return (
     Array.isArray(messages) &&
@@ -368,23 +384,24 @@ function isValidChatMessages(messages) {
         typeof m.id === 'string' &&
         (m.role === 'user' || m.role === 'assistant') &&
         (m.kind === 'text' || m.kind === 'tool' || m.kind === 'error') &&
-        typeof m.createdAt === 'number'
+        typeof m.createdAt === 'number' &&
+        isValidChatMessageAttachments(m.attachments)
     )
   );
 }
 
 // Messages are written in multi-row batches instead of one round-trip per
-// message. 8 params/row × 100 rows = 800 params — far under PG's 65535 limit
+// message. 9 params/row × 100 rows = 900 params — far under PG's 65535 limit
 // while keeping each statement payload small enough for fast planning.
 const MESSAGE_BATCH_SIZE = 100;
 
 function buildMessageBatchInsert(batchCount) {
-  const cols = '(company_id, session_id, role, kind, content, tool_call, sort_order, created_at)';
+  const cols = '(company_id, session_id, role, kind, content, tool_call, attachments, sort_order, created_at)';
   const placeholders = [];
   for (let i = 0; i < batchCount; i++) {
-    const base = i * 8;
+    const base = i * 9;
     placeholders.push(
-      `($${base + 1}::uuid, $${base + 2}::uuid, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}::jsonb, $${base + 7}, $${base + 8}::timestamptz)`
+      `($${base + 1}::uuid, $${base + 2}::uuid, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}::jsonb, $${base + 7}::jsonb, $${base + 8}, $${base + 9}::timestamptz)`
     );
   }
   return `INSERT INTO ai_chat_messages ${cols} VALUES ${placeholders.join(', ')}`;
@@ -398,6 +415,7 @@ function messageRowParams(companyId, sid, m, sortOrder) {
     m.kind,
     m.content || null,
     m.toolCall ? JSON.stringify(m.toolCall) : null,
+    Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : null,
     sortOrder,
     new Date(m.createdAt).toISOString(),
   ];
@@ -454,6 +472,20 @@ async function persistSession({ companyId, userId, sessionId, title, messages })
     throw err;
   } finally {
     client.release();
+  }
+}
+
+// Attachments persist as metadata + extracted text (binaries never reach the
+// DB). Parse defensively — legacy rows and foreign payloads must not break
+// session loads.
+function parseMessageAttachments(raw) {
+  try {
+    const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(val) || val.length === 0) return undefined;
+    if (!isValidChatMessageAttachments(val)) return undefined;
+    return val;
+  } catch {
+    return undefined;
   }
 }
 
@@ -683,7 +715,7 @@ export function registerAiHandlers() {
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
       const result = await pool.query(
-        `SELECT m.id, m.role, m.kind, m.content, m.tool_call, m.sort_order, m.created_at
+        `SELECT m.id, m.role, m.kind, m.content, m.tool_call, m.attachments, m.sort_order, m.created_at
            FROM ai_chat_messages m
            JOIN ai_chat_sessions s ON s.id = m.session_id
           WHERE m.session_id = $1::uuid AND m.company_id = $2::uuid AND s.user_id = $3::uuid
@@ -698,6 +730,7 @@ export function registerAiHandlers() {
           kind: r.kind,
           content: r.content || '',
           toolCall: r.tool_call || undefined,
+          attachments: parseMessageAttachments(r.attachments),
           createdAt: new Date(r.created_at).getTime(),
         })),
       };
@@ -766,6 +799,457 @@ export function registerAiHandlers() {
         [sessionId, companyId, userId]
       );
       return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ─── Job queue (ai_job_batches + ai_job_items) ──────────────────────────
+  // Batches group many tool calls under ONE user approval. The renderer
+  // worker claims queued items (FOR UPDATE SKIP LOCKED) and executes each
+  // through the normal tool executor. Identity is session-derived, exactly
+  // like the chat channels above — never trusted from the payload.
+
+  // Flip a running batch to done/partial once nothing is queued or running.
+  async function finalizeBatch(pool, batchId, companyId) {
+    const res = await pool.query(
+      `UPDATE ai_job_batches
+          SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
+              updated_at = NOW()
+        WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+          AND NOT EXISTS (
+            SELECT 1 FROM ai_job_items
+            WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
+          )
+        RETURNING status`,
+      [batchId, companyId]
+    );
+    return res.rows.length > 0 ? res.rows[0].status : null;
+  }
+
+  function isValidBatchItem(it) {
+    return (
+      it &&
+      typeof it.tool_name === 'string' && it.tool_name.trim() &&
+      it.args !== null && typeof it.args === 'object' && !Array.isArray(it.args) &&
+      typeof it.idempotency_key === 'string' && it.idempotency_key.trim() &&
+      (it.after_seq === null || it.after_seq === undefined || Number.isInteger(it.after_seq)) &&
+      (it.label === undefined || it.label === null || typeof it.label === 'string')
+    );
+  }
+
+  // Create a batch header + its items atomically (idempotent re-enqueue via
+  // ON CONFLICT on (batch_id, idempotency_key)).
+  ipcMain.handle('ai:batch-create', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { title, kind, sessionId, items } = payload;
+      if (!Array.isArray(items) || items.length === 0) {
+        return { success: false, error: 'items must be a non-empty array' };
+      }
+      if (items.length > 500) {
+        return { success: false, error: 'items exceeds 500 per call — enqueue in chunks' };
+      }
+      if (!items.every(isValidBatchItem)) {
+        return { success: false, error: 'every item needs tool_name, args object and idempotency_key' };
+      }
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const header = await client.query(
+          `INSERT INTO ai_job_batches (company_id, user_id, session_id, kind, title, total_count, status)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, 'pending')
+           RETURNING id`,
+          [
+            companyId,
+            userId,
+            typeof sessionId === 'string' && sessionId ? sessionId : null,
+            typeof kind === 'string' ? kind.slice(0, 40) : 'mixed',
+            typeof title === 'string' ? title.slice(0, 200) : null,
+            items.length,
+          ]
+        );
+        const batchId = header.rows[0].id;
+        const placeholders = [];
+        const params = [batchId, companyId];
+        items.forEach((it, i) => {
+          const base = 2 + i * 6;
+          placeholders.push(
+            `($2::uuid, $1::uuid, ${base + 1}, ${base + 2}, ${base + 3}::jsonb, ${base + 4}, ${base + 5}, ${base + 6})`
+          );
+          params.push(
+            i,
+            String(it.tool_name).slice(0, 120),
+            JSON.stringify(it.args),
+            it.after_seq === null || it.after_seq === undefined ? null : it.after_seq,
+            String(it.idempotency_key).slice(0, 200),
+            typeof it.label === 'string' && it.label ? it.label.slice(0, 200) : null
+          );
+        });
+        const ins = await client.query(
+          `INSERT INTO ai_job_items
+             (company_id, batch_id, seq, tool_name, args, after_seq, idempotency_key, label)
+           VALUES ${placeholders.join(', ')}
+           ON CONFLICT (batch_id, idempotency_key) DO NOTHING
+           RETURNING id`,
+          params
+        );
+        await client.query('COMMIT');
+        return { success: true, data: { batchId, total: items.length, inserted: ins.rows.length } };
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Claim the next ready items (deps satisfied) and mark them running.
+  // SKIP LOCKED keeps concurrent workers from stepping on each other.
+  ipcMain.handle('ai:batch-claim', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId, limit } = payload;
+      if (!batchId) return { success: false, error: 'batchId is required' };
+      const take = Math.max(1, Math.min(Number(limit) || 10, 100));
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const res = await pool.query(
+        `WITH claimed AS (
+           SELECT i.id FROM ai_job_items i
+           WHERE i.batch_id = $1::uuid AND i.company_id = $2::uuid AND i.status = 'queued'
+             AND i.attempts < 4
+             AND (i.after_seq IS NULL OR i.after_seq IN (
+               SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND status = 'done'
+             ))
+             AND EXISTS (
+               SELECT 1 FROM ai_job_batches b
+               WHERE b.id = $1::uuid AND b.company_id = $2::uuid
+                 AND b.user_id = $4::uuid AND b.status IN ('pending', 'running')
+             )
+           ORDER BY i.seq LIMIT $3
+           FOR UPDATE SKIP LOCKED
+         ),
+         updated AS (
+           UPDATE ai_job_items u SET status = 'running', attempts = u.attempts + 1, updated_at = NOW()
+           FROM claimed WHERE u.id = claimed.id
+           RETURNING u.id
+         ),
+         bh AS (
+           UPDATE ai_job_batches SET status = 'running', updated_at = NOW()
+           WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid AND status = 'pending'
+           RETURNING id
+         )
+         SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.attempts
+           FROM ai_job_items i JOIN updated ON updated.id = i.id
+          ORDER BY i.seq`,
+        [batchId, companyId, take, userId]
+      );
+      return {
+        success: true,
+        data: res.rows.map((r) => ({
+          id: r.id,
+          seq: Number(r.seq),
+          toolName: r.tool_name,
+          args: typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {}),
+          afterSeq: r.after_seq === null ? null : Number(r.after_seq),
+          label: r.label || null,
+          attempts: Number(r.attempts) || 0,
+        })),
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Mark one claimed item done and bump the batch counter.
+  ipcMain.handle('ai:batch-item-done', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId, itemId, resultRef } = payload;
+      if (!batchId || !itemId) return { success: false, error: 'batchId and itemId are required' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const upd = await pool.query(
+        `WITH upd AS (
+           UPDATE ai_job_items SET status = 'done', result_ref = $4, updated_at = NOW()
+           WHERE id = $1::uuid AND batch_id = $2::uuid AND company_id = $3::uuid AND status = 'running'
+           RETURNING id
+         )
+         UPDATE ai_job_batches b SET done_count = done_count + (SELECT COUNT(*) FROM upd), updated_at = NOW()
+         WHERE b.id = $2::uuid AND b.company_id = $3::uuid AND b.user_id = $5::uuid
+         RETURNING (SELECT COUNT(*) FROM upd) AS updated`,
+        [itemId, batchId, companyId, typeof resultRef === 'string' ? resultRef.slice(0, 200) : null, userId]
+      );
+      if (!upd.rows.length || Number(upd.rows[0].updated) === 0) {
+        return { success: false, error: 'Item not found or not running' };
+      }
+      const finalStatus = await finalizeBatch(pool, batchId, companyId);
+      return { success: true, data: { finalStatus } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Mark one claimed item failed (or requeue for retry) and skip everything
+  // downstream of it — dependents can never become ready once their parent
+  // fails permanently, so they must not linger as queued forever.
+  ipcMain.handle('ai:batch-item-fail', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId, itemId, error, errorCode, retryable } = payload;
+      if (!batchId || !itemId) return { success: false, error: 'batchId and itemId are required' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const cur = await pool.query(
+        `SELECT i.seq, i.attempts FROM ai_job_items i
+          JOIN ai_job_batches b ON b.id = i.batch_id
+         WHERE i.id = $1::uuid AND i.batch_id = $2::uuid AND i.company_id = $3::uuid
+           AND b.user_id = $4::uuid AND i.status = 'running'`,
+        [itemId, batchId, companyId, userId]
+      );
+      if (cur.rows.length === 0) return { success: false, error: 'Item not found or not running' };
+      const failedSeq = Number(cur.rows[0].seq);
+      const attempts = Number(cur.rows[0].attempts) || 0;
+      const safeError = typeof error === 'string' ? error.slice(0, 2000) : 'خطأ غير معروف';
+      const safeCode = typeof errorCode === 'string' ? errorCode.slice(0, 40) : null;
+      if (retryable !== false && attempts < 4) {
+        await pool.query(
+          `UPDATE ai_job_items SET status = 'queued', last_error = $2, error_code = $3, updated_at = NOW()
+           WHERE id = $1::uuid`,
+          [itemId, safeError, safeCode]
+        );
+        return { success: true, data: { retried: true, attempts } };
+      }
+      await pool.query(
+        `UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
+         WHERE id = $1::uuid`,
+        [itemId, safeError, safeCode]
+      );
+      const skipped = await pool.query(
+        `WITH RECURSIVE doomed(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND after_seq = $2
+           UNION
+           SELECT i.seq FROM ai_job_items i JOIN doomed d ON i.after_seq = d.seq
+           WHERE i.batch_id = $1::uuid
+         )
+         UPDATE ai_job_items SET status = 'skipped',
+           last_error = 'تخطي: فشل عنصر يعتمد عليه', updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $3::uuid AND status = 'queued'
+           AND seq IN (SELECT seq FROM doomed)
+         RETURNING seq`,
+        [batchId, failedSeq, companyId]
+      );
+      await pool.query(
+        `UPDATE ai_job_batches SET failed_count = failed_count + 1,
+           skipped_count = skipped_count + $2, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid`,
+        [batchId, skipped.rows.length, companyId, userId]
+      );
+      const finalStatus = await finalizeBatch(pool, batchId, companyId);
+      return { success: true, data: { retried: false, skipped: skipped.rows.length, finalStatus } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Pause / resume / cancel a batch. Cancel also parks every queued item as
+  // skipped so no worker can pick them up afterwards.
+  ipcMain.handle('ai:batch-set-status', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId, status } = payload;
+      if (!batchId) return { success: false, error: 'batchId is required' };
+      const allowed = {
+        paused: ['pending', 'running'],
+        running: ['paused'],
+        cancelled: ['pending', 'running', 'paused'],
+      };
+      if (!allowed[status]) return { success: false, error: 'status must be paused, running or cancelled' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const upd = await pool.query(
+        `UPDATE ai_job_batches SET status = $3, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid
+           AND status = ANY ($5)
+         RETURNING status`,
+        [batchId, companyId, status, userId, allowed[status]]
+      );
+      if (upd.rows.length === 0) return { success: false, error: 'Batch not found or transition not allowed' };
+      let skipped = 0;
+      if (status === 'cancelled') {
+        const res = await pool.query(
+          `UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: أُلغيت الدفعة', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status IN ('queued', 'running')
+           RETURNING seq`,
+          [batchId, companyId]
+        );
+        skipped = res.rows.length;
+        await pool.query(
+          `UPDATE ai_job_batches SET skipped_count = skipped_count + $2, updated_at = NOW()
+           WHERE id = $1::uuid`,
+          [batchId, skipped]
+        );
+      }
+      return { success: true, data: { status, skipped } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Requeue failed items of a partial batch (attempts reset) and reopen it.
+  ipcMain.handle('ai:batch-retry-failed', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId } = payload;
+      if (!batchId) return { success: false, error: 'batchId is required' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const requeued = await pool.query(
+        `UPDATE ai_job_items SET status = 'queued', attempts = 0,
+           last_error = NULL, error_code = NULL, updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'failed'
+         RETURNING seq`,
+        [batchId, companyId]
+      );
+      if (requeued.rows.length === 0) return { success: false, error: 'No failed items to retry' };
+      await pool.query(
+        `UPDATE ai_job_batches SET status = 'running',
+           failed_count = failed_count - $2, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid
+           AND status IN ('partial', 'paused')`,
+        [batchId, requeued.rows.length, companyId, userId]
+      );
+      return { success: true, data: { requeued: requeued.rows.length } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Full batch state (header + items in seq order) for progress UI + resume.
+  ipcMain.handle('ai:batch-get', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId } = payload;
+      if (!batchId) return { success: false, error: 'batchId is required' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const header = await pool.query(
+        `SELECT id, kind, title, total_count, done_count, failed_count, skipped_count,
+                status, created_at, updated_at
+           FROM ai_job_batches
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid`,
+        [batchId, companyId, userId]
+      );
+      if (header.rows.length === 0) return { success: false, error: 'Batch not found' };
+      const items = await pool.query(
+        `SELECT id, seq, tool_name, args, after_seq, label, status, attempts,
+                last_error, error_code, result_ref
+           FROM ai_job_items
+          WHERE batch_id = $1::uuid AND company_id = $2::uuid
+          ORDER BY seq ASC`,
+        [batchId, companyId]
+      );
+      const h = header.rows[0];
+      return {
+        success: true,
+        data: {
+          id: h.id,
+          kind: h.kind,
+          title: h.title,
+          totalCount: Number(h.total_count) || 0,
+          doneCount: Number(h.done_count) || 0,
+          failedCount: Number(h.failed_count) || 0,
+          skippedCount: Number(h.skipped_count) || 0,
+          status: h.status,
+          createdAt: h.created_at,
+          updatedAt: h.updated_at,
+          items: items.rows.map((r) => ({
+            id: r.id,
+            seq: Number(r.seq),
+            toolName: r.tool_name,
+            args: typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {}),
+            afterSeq: r.after_seq === null ? null : Number(r.after_seq),
+            label: r.label || null,
+            status: r.status,
+            attempts: Number(r.attempts) || 0,
+            lastError: r.last_error,
+            errorCode: r.error_code,
+            resultRef: r.result_ref,
+          })),
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Batches of the caller (newest first) — powers resume-after-restart.
+  ipcMain.handle('ai:batch-list', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { status } = payload || {};
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const params = [companyId, userId];
+      let where = 'WHERE company_id = $1::uuid AND user_id = $2::uuid';
+      if (typeof status === 'string' && status) {
+        params.push(status.slice(0, 20));
+        where += ` AND status = $3`;
+      }
+      const res = await pool.query(
+        `SELECT id, kind, title, total_count, done_count, failed_count, skipped_count,
+                status, created_at, updated_at
+           FROM ai_job_batches ${where}
+          ORDER BY updated_at DESC
+          LIMIT 20`,
+        params
+      );
+      return {
+        success: true,
+        data: res.rows.map((h) => ({
+          id: h.id,
+          kind: h.kind,
+          title: h.title,
+          totalCount: Number(h.total_count) || 0,
+          doneCount: Number(h.done_count) || 0,
+          failedCount: Number(h.failed_count) || 0,
+          skippedCount: Number(h.skipped_count) || 0,
+          status: h.status,
+          createdAt: h.created_at,
+          updatedAt: h.updated_at,
+        })),
+      };
     } catch (err) {
       return { success: false, error: err.message };
     }

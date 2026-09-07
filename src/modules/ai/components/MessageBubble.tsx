@@ -16,7 +16,21 @@ import { cn } from '@/core/utils';
 import type { ChatMessage } from '../types';
 import type { Suggestion } from '../suggestions/suggestionEngine';
 import { ToolCallCard } from './ToolCallCard';
+import { BatchProgressCard } from './BatchProgressCard';
 import { RichText } from './RichText';
+import { formatAttachmentSize, hasAttachmentBlob, type AttachmentKind } from '../attachments';
+
+function chipIcon(kind: AttachmentKind) {
+  // Text-only glyphs keep the bubble light — no extra icon imports needed
+  // beyond the shared set; reuse a generic marker per kind.
+  switch (kind) {
+    case 'image': return '🖼️';
+    case 'pdf': return '📄';
+    case 'spreadsheet': return '📊';
+    case 'audio': return '🎙️';
+    case 'other': return '📎';
+  }
+}
 
 /**
  * Detect the dominant script of a text chunk for speech synthesis.
@@ -202,9 +216,50 @@ export const MessageBubble = memo(function MessageBubble({
           </div>
         )}
 
+        {/* Attachment chips — metadata persisted with the message; the binary
+            itself may have expired with the renderer session (thumbnail then
+            hides, extracted text stays in the conversation). */}
+        {isUser && message.attachments && message.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 justify-end">
+            {message.attachments.map((a) => {
+              const live = hasAttachmentBlob(a.id);
+              return (
+                <span
+                  key={a.id}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 max-w-full px-2.5 py-1.5 rounded-xl text-xs',
+                    'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300',
+                    'border border-zinc-200 dark:border-zinc-700'
+                  )}
+                  title={live ? a.name : `${a.name} — ${t('ai.attach.expired')}`}
+                >
+                  <span aria-hidden="true">{chipIcon(a.kind)}</span>
+                  <span className="truncate max-w-[140px]">{a.name}</span>
+                  <span className="text-zinc-400 dark:text-zinc-500 flex-shrink-0">
+                    {formatAttachmentSize(a.size)}
+                  </span>
+                  {!live && (
+                    <span className="text-amber-600 dark:text-amber-400 flex-shrink-0" aria-label={t('ai.attach.expired')}>
+                      ⏳
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         {/* Tool call card */}
         {message.toolCall && (
           <ToolCallCard toolCall={message.toolCall} onConfirm={onConfirm} />
+        )}
+
+        {/* Live batch progress — any card driving a batch (enqueue approval,
+            resume approval, or a resumed run) shows substance, not text. */}
+        {message.toolCall?.batchId && (
+          <div className="w-full">
+            <BatchProgressCard batchId={message.toolCall.batchId} />
+          </div>
         )}
 
         {/* Interactive suggestion chips — under assistant messages
