@@ -134,7 +134,7 @@ export async function extractSpreadsheet(file: File): Promise<SheetDraft> {
 export async function extractPdfText(file: File): Promise<{ text: string; pages: number }> {
   const pdfjs = await import('pdfjs-dist');
   const { getDocument, GlobalWorkerOptions } = pdfjs as unknown as {
-    getDocument: (opts: { data: ArrayBuffer }) => { promise: Promise<PdfDocument> };
+    getDocument: (opts: { data: ArrayBuffer }) => PdfLoadingTask;
     GlobalWorkerOptions: { workerSrc: string };
   };
   interface PdfPage {
@@ -143,14 +143,20 @@ export async function extractPdfText(file: File): Promise<{ text: string; pages:
   interface PdfDocument {
     numPages: number;
     getPage: (n: number) => Promise<PdfPage>;
-    destroy: () => Promise<void>;
+    /** v6 renamed teardown: cleanup() on the document, destroy() on the loading task. */
+    cleanup?: () => unknown;
+  }
+  interface PdfLoadingTask {
+    promise: Promise<PdfDocument>;
+    destroy?: () => Promise<void>;
   }
   if (!GlobalWorkerOptions.workerSrc) {
     const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
     GlobalWorkerOptions.workerSrc = (worker as { default: string }).default;
   }
   const buffer = await file.arrayBuffer();
-  const doc = await getDocument({ data: buffer }).promise;
+  const loadingTask = getDocument({ data: buffer }) as unknown as PdfLoadingTask;
+  const doc = await loadingTask.promise;
   try {
     const pages = Math.min(doc.numPages, ATTACHMENT_LIMITS.PDF_MAX_PAGES);
     const chunks: string[] = [];
@@ -162,7 +168,14 @@ export async function extractPdfText(file: File): Promise<{ text: string; pages:
     }
     return { text: chunks.join('\n'), pages: doc.numPages };
   } finally {
-    await doc.destroy().catch(() => {});
+    // Tear down the worker: destroy() lives on the loading task in v6
+    // (calling doc.destroy() throws "destroy is not a function").
+    try {
+      if (typeof loadingTask.destroy === 'function') await loadingTask.destroy();
+      else if (typeof doc.cleanup === 'function') await doc.cleanup();
+    } catch {
+      // cleanup is best-effort — never fail the extraction for it
+    }
   }
 }
 
