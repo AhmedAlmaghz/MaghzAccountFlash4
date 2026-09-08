@@ -20,16 +20,42 @@ function isBrowserIndexedDB(): boolean {
   return typeof indexedDB !== 'undefined';
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function openInstance(): Promise<PGlite> {
+  const dataDir = isBrowserIndexedDB() ? 'idb://maghzaccount-pglite' : undefined;
+  const instance = new PGlite({ dataDir });
+  await instance.waitReady;
+  return instance;
+}
+
 async function getInstance(): Promise<PGlite> {
   if (pglite) return pglite;
   if (initPromise) return initPromise;
 
+  // IndexedDB locks are transient by nature (second tab, slow disk, AV
+  // scan): retry a few times with backoff before declaring the database
+  // dead. Each attempt gets a FRESH promise so a poisoned one never sticks.
   initPromise = (async () => {
-    const dataDir = isBrowserIndexedDB() ? 'idb://maghzaccount-pglite' : undefined;
-    const instance = new PGlite({ dataDir });
-    await instance.waitReady;
-    pglite = instance;
-    return instance;
+    // NOTE: initPromise is nulled ONLY on final failure (see catch below).
+    // Nulling it between attempts would let a concurrent caller spawn a
+    // second instance mid-retry — two writers fighting over one IndexedDB.
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const instance = await openInstance();
+        pglite = instance;
+        return instance;
+      } catch (err) {
+        lastError = err;
+        if (attempt < 3) await sleep(attempt * 1000);
+      }
+    }
+    throw lastError instanceof Error
+      ? new Error(`PGlite init failed after 3 attempts: ${lastError.message}`)
+      : lastError;
   })();
 
   try {
@@ -208,7 +234,15 @@ async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?
     for (const migration of MIGRATIONS) {
       const existing = await db.query('SELECT 1 FROM __pglite_migrations WHERE name = $1 LIMIT 1', [migration.name]);
       if (existing.rows.length > 0) continue;
-      await db.exec(normalizeIdempotent(migration.sql));
+      // Name the file on failure — a bare PG error never tells WHICH of the
+      // 26 migrations broke the boot, leaving users with a dead error screen.
+      try {
+        await db.exec(normalizeIdempotent(migration.sql));
+      } catch (err) {
+        throw new Error(
+          `PGlite migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
       await db.query('INSERT INTO __pglite_migrations (name) VALUES ($1)', [migration.name]);
     }
 

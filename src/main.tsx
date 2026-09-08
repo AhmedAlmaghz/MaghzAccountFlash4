@@ -36,8 +36,16 @@ window.addEventListener('vite:preloadError', (event) => {
 // Initialize auth from localStorage
 initAuth();
 
-function DbErrorScreen({ onRetry }: { onRetry: () => void }) {
+function DbErrorScreen({ onRetry, detail }: { onRetry: () => void; detail?: string | null }) {
   const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const copyDetail = () => {
+    if (!detail) return;
+    navigator.clipboard?.writeText(detail).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  };
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4" dir="rtl">
       <div className="max-w-md w-full text-center space-y-6">
@@ -50,6 +58,22 @@ function DbErrorScreen({ onRetry }: { onRetry: () => void }) {
             {t('common.dbErrorDesc')}
           </p>
         </div>
+        {detail && (
+          <details className="text-start rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-slate-500 dark:text-slate-400">
+              {t('common.errorDetails')}
+            </summary>
+            <pre className="mt-2 max-h-40 overflow-auto text-[11px] leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words" dir="ltr">
+              {detail}
+            </pre>
+            <button
+              onClick={copyDetail}
+              className="mt-2 text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              {copied ? t('ai.messageActions.copied') : t('ai.messageActions.copy')}
+            </button>
+          </details>
+        )}
         <div className="flex flex-col gap-3 items-center">
           <Button variant="primary" leftIcon={<RefreshCw size={16} />} onClick={onRetry}>
             {t('common.retry')}
@@ -93,6 +117,7 @@ function App() {
   const setActiveCompany = useAppStore((state) => state.setActiveCompany);
   const completed = useOnboardingStore((state) => state.completed);
   const [dbError, setDbError] = useState(false);
+  const [dbErrorDetail, setDbErrorDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -104,6 +129,7 @@ function App() {
       try {
         setDbStatus('connecting', false);
         setDbError(false);
+        setDbErrorDetail(null);
 
         const adapter = await getDbAdapter();
         markStartup('adapter-ready');
@@ -115,6 +141,8 @@ function App() {
         if (!ping.success) {
           setDbStatus('error', false);
           setDbError(true);
+          // The real reason (migration name, lock, quota…) — never a bare screen.
+          setDbErrorDetail(`ping failed: ${(ping as { message?: string; error?: string }).message || (ping as { error?: string }).error || 'unknown'}`);
           markStartup('db-error');
           return;
         }
@@ -148,6 +176,10 @@ function App() {
         if (!cancelled) {
           setDbStatus('error', false);
           setDbError(true);
+          // The REAL error text — this is what turns "no database" from a
+          // mystery into a diagnosable report (migration name, lock, quota).
+          setDbErrorDetail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+          markStartup('db-error');
         }
       }
     }
@@ -162,7 +194,7 @@ function App() {
   }
 
   if (dbError) {
-    return <DbErrorScreen onRetry={() => setRetryKey(k => k + 1)} />;
+    return <DbErrorScreen onRetry={() => setRetryKey(k => k + 1)} detail={dbErrorDetail} />;
   }
 
   return <AppRouter />;

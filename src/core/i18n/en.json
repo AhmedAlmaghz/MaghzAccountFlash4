@@ -2989,6 +2989,7 @@
     "printReportFooter": "Report issued by maghzaccount-pro system",
     "currencyYer": "YER",
     "dbError": "Database Connection Error",
+    "errorDetails": "Error details (for support)",
     "dbErrorDesc": "PostgreSQL connection is required. Please ensure Electron and the database are running.",
     "retry": "Retry",
     "multiCurrency": "Multi-currency",

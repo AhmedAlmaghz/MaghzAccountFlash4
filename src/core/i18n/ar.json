@@ -2989,6 +2989,7 @@
     "printReportFooter": "تم إصدار هذا التقرير من نظام maghzaccount-pro",
     "currencyYer": "ر.ي",
     "dbError": "تعذر الاتصال بقاعدة البيانات",
+    "errorDetails": "تفاصيل الخطأ (للدعم الفني)",
     "dbErrorDesc": "النظام يتطلب اتصال PostgreSQL ليعمل. تأكد من تشغيل Electron وقاعدة البيانات.",
     "retry": "إعادة المحاولة",
     "multiCurrency": "متعدد العملات",
