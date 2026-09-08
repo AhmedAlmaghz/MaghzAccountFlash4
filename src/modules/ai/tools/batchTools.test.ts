@@ -112,6 +112,15 @@ describe('ai.enqueue_batch execute', () => {
     const out = (await enqueue.execute({ items: [] }, ctx)) as Record<string, unknown>;
     expect(out.error).toBeTruthy();
   });
+
+  it('hoists stray top-level params into args (customerId sibling)', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    await enqueue.execute({
+      items: [{ tool: 'sales.create_invoice', customerId: '{{c.id}}', args: { date: '2026-08-21' } }],
+    }, ctx);
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items[0];
+    expect(sent.args).toEqual({ customerId: '{{c.id}}', date: '2026-08-21' });
+  });
 });
 
 describe('ai.resume_batch execute', () => {

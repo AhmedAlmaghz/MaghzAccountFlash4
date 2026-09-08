@@ -207,6 +207,21 @@ const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*)(?:\.([A-Za-z0-9_]+))?\s*\}\
 
 export type RefOutputs = Map<string, Record<string, string | number | boolean>>;
 
+/**
+ * Primary id of a tool output. No tool in the registry returns a bare
+ * `id` — every creator returns `<entity>Id` first (supplierId, invoiceId,
+ * productId, voucherId, employeeId, …). Convention over configuration:
+ * exact `id` wins, otherwise the FIRST Id-suffixed key (creators always
+ * place the primary id first; related foreign ids follow).
+ */
+export function resolveOutputId(data: Record<string, string | number | boolean>): string | null {
+  if (typeof data.id === 'string' && data.id) return data.id;
+  for (const [k, v] of Object.entries(data)) {
+    if (typeof v === 'string' && v && /Id$/.test(k)) return v;
+  }
+  return null;
+}
+
 export type SubstituteResult =
   | { ok: true; args: Record<string, unknown> }
   | { ok: false; /** Arabic guidance when a reference cannot be resolved. */ error: string };
@@ -225,11 +240,12 @@ export function substituteRefs(
     if (REF_WHOLE_RE.test(s)) {
       const ref = s.slice(1);
       const data = outputs.get(ref);
-      if (!data || typeof data.id !== 'string' || !data.id) {
+      const id = data ? resolveOutputId(data) : null;
+      if (!id) {
         missing.add(ref);
         return s;
       }
-      return data.id;
+      return id;
     }
     return s.replace(REF_TEMPLATE_RE, (_m, ref: string, field?: string) => {
       const data = outputs.get(ref);
@@ -237,7 +253,9 @@ export function substituteRefs(
         missing.add(ref);
         return _m;
       }
-      const value = field ? data[field] : data.id;
+      // Explicit `.id` honors the same entity-id alias (no tool returns
+      // a bare `id` — creators return supplierId/invoiceId/…).
+      const value = !field || field.toLowerCase() === 'id' ? resolveOutputId(data) : data[field];
       if (value === undefined || value === null || value === '') {
         missing.add(field ? `${ref}.${field}` : ref);
         return _m;

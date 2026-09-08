@@ -82,13 +82,25 @@ export const batchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
       if (rawItems.length === 0) return { error: 'items فارغة — لا توجد عناصر للدفعة' };
-      const items = rawItems.map((it) => ({
-        tool: String(it.tool || ''),
-        args: (it.args && typeof it.args === 'object' ? it.args : {}) as Record<string, unknown>,
-        after: (it.after as number | string | undefined) ?? undefined,
-        ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,
-        label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
-      }));
+      // Hoist stray top-level params into args (the model sometimes emits
+      // e.g. customerId as a sibling of args). Liberal at the boundary —
+      // tools ignore unknown keys, but a silently DROPPED customerId would
+      // create a document without its party. args wins on conflict.
+      const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label']);
+      const items = rawItems.map((it) => {
+        const base = (it.args && typeof it.args === 'object' ? it.args : {}) as Record<string, unknown>;
+        const stray: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(it)) {
+          if (!KNOWN_ITEM_KEYS.has(k) && v !== undefined) stray[k] = v;
+        }
+        return {
+          tool: String(it.tool || ''),
+          args: { ...stray, ...base },
+          after: (it.after as number | string | undefined) ?? undefined,
+          ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,
+          label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
+        };
+      });
       const res = await enqueueBatch({
         companyId: ctx.companyId,
         userId: ctx.userId,

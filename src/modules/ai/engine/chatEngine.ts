@@ -11,7 +11,8 @@ import { isBatchActive, runBatch, batchProgressLine } from './batchRunner';
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
 import { getBatch } from '../api/batch';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
-import { renderErrorGuidance } from './errorTaxonomy';
+import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
+import { attachmentContextBlock } from './llmParts';
 import { resolveArgsForCard } from './cardResolvers';
 import { expandDialectText } from './dialectMap';
 import { resolveEntitiesInText } from '../entityResolver';
@@ -281,11 +282,23 @@ class ChatEngine {
    * Selects the skills that should be active given the latest user message.
    * Returns always-on skills (regardless of message) + trigger-based skills
    * matching the user text. Filtered by current tool visibility.
+   *
+   * Harness best practice — sticky triggers: the current turn's text plus
+   * the last few user turns keep domain skills alive across "استمر / تابع".
    */
   private activeSkillsForMessage(userText: string): Skill[] {
     ensureSkillsRegistered();
+    const recentUserTexts: string[] = [];
+    for (let i = this.history.length - 1; i >= 0 && recentUserTexts.length < 3; i++) {
+      const m = this.history[i];
+      if (m.role === 'user') {
+        const t = llmTextOf(m.content);
+        if (t) recentUserTexts.push(t);
+      }
+    }
+    const combined = [...recentUserTexts.reverse(), userText].join(' ');
     return selectActiveSkills({
-      userMessage: userText,
+      userMessage: combined,
       visibleTools: getVisibleTools(),
     });
   }
@@ -542,18 +555,25 @@ class ChatEngine {
         final.status === 'done' || final.status === 'partial' ? 'success' : 'error',
         line,
       );
-      store.addMessage({
-        role: 'assistant',
-        kind: final.status === 'done' ? 'text' : 'error',
-        content: final.status === 'done'
+      const finalContent =
+        final.status === 'done'
           ? `اكتملت الدفعة: ${line}`
           : final.status === 'partial'
             ? `اكتملت الدفعة جزئياً: ${line} — اسألني عن تفاصيل الفاشلة أو قل "أعد الفاشلة" لإعادة المحاولة`
-            : `توقفت الدفعة (${final.status}): ${line} — قل "تابع" للاستئناف في أي وقت`,
+            : `توقفت الدفعة (${final.status}): ${line} — قل "تابع" للاستئناف في أي وقت`;
+      store.addMessage({
+        role: 'assistant',
+        kind: final.status === 'done' ? 'text' : 'error',
+        content: finalContent,
       });
+      // Harness memory: the LLM must remember that this batch finished and
+      // how it finished — otherwise the next "استمر" has no completion to
+      // build on. Mirror the UI message into the LLM history.
+      this.history.push({ role: 'assistant', content: finalContent });
     } catch (e) {
       const errorText = e instanceof Error ? e.message : String(e);
       this.reportBatchProgress(messageId, 'error', errorText);
+      this.history.push({ role: 'assistant', content: errorText });
     }
   }
 
@@ -591,36 +611,48 @@ class ChatEngine {
     try {
       const got = await getBatch(batchId, { companyId: this.ctx.companyId, userId: this.ctx.userId });
       if (!got.success || !got.data) {
-        store.addMessage({ role: 'assistant', kind: 'error', content: got.error || 'الدفعة غير موجودة' });
+        const msg = got.error || 'الدفعة غير موجودة';
+        store.addMessage({ role: 'assistant', kind: 'error', content: msg });
+        this.history.push({ role: 'assistant', content: msg });
         return;
       }
       const detail = got.data;
       if (detail.status === 'done') {
-        store.addMessage({ role: 'assistant', kind: 'text', content: 'الدفعة مكتملة أصلاً — لا شيء لاستئنافه' });
+        const msg = 'الدفعة مكتملة أصلاً — لا شيء لاستئنافه';
+        store.addMessage({ role: 'assistant', kind: 'text', content: msg });
+        this.history.push({ role: 'assistant', content: msg });
         return;
       }
       if (detail.status === 'cancelled') {
-        store.addMessage({ role: 'assistant', kind: 'error', content: 'الدفعة ملغاة — أنشئ دفعة جديدة بدلاً من ذلك' });
+        const msg = 'الدفعة ملغاة — أنشئ دفعة جديدة بدلاً من ذلك';
+        store.addMessage({ role: 'assistant', kind: 'error', content: msg });
+        this.history.push({ role: 'assistant', content: msg });
         return;
       }
       if (detail.failedCount > 0) {
         const retry = await aiApi.batchRetryFailed(this.ctx.companyId, this.ctx.userId, batchId);
         if (!retry.success) {
-          store.addMessage({ role: 'assistant', kind: 'error', content: retry.error || 'فشل إعادة العناصر الفاشلة' });
+          const msg = retry.error || 'فشل إعادة العناصر الفاشلة';
+          store.addMessage({ role: 'assistant', kind: 'error', content: msg });
+          this.history.push({ role: 'assistant', content: msg });
           return;
         }
       } else if (detail.status === 'paused') {
         const unpause = await aiApi.batchSetStatus(this.ctx.companyId, this.ctx.userId, batchId, 'running');
         if (!unpause.success) {
-          store.addMessage({ role: 'assistant', kind: 'error', content: unpause.error || 'فشل إلغاء الإيقاف' });
+          const msg = unpause.error || 'فشل إلغاء الإيقاف';
+          store.addMessage({ role: 'assistant', kind: 'error', content: msg });
+          this.history.push({ role: 'assistant', content: msg });
           return;
         }
       }
+      const messageContent = `استئناف الدفعة: ${detail.title || batchId}`;
       const messageId = store.addMessage({
         role: 'assistant',
         kind: 'text',
-        content: `استئناف الدفعة: ${detail.title || batchId}`,
+        content: messageContent,
       });
+      this.history.push({ role: 'assistant', content: messageContent });
       this.abortRequested = false;
       await this.startBatchRun(batchId, messageId);
     } finally {
@@ -708,21 +740,26 @@ class ChatEngine {
    * Rebuild internal LLM history from the persisted ChatMessage[] so the
    * model has full conversation context when a saved session is resumed.
    *
-   * Text messages are restored directly. Successful tool-call sequences
-   * are reconstructed as assistant + tool pairs. Stale/error/pending tool
-   * calls are skipped — the LLM should not re-process failed operations.
+   * Harness best practice: the LLM must see the SAME history the user saw —
+   * including tool_calls + tool_results and attachment extractions — otherwise
+   * the next "استمر" has no memory of what was done. We reconstruct the full
+   * sequence from ChatMessages (UI store) and rely on buildMessages() to
+   * flatten it safely when thought_signature is absent (Gemini-safe).
    */
   restoreHistorySync(messages: ChatMessage[]): void {
     const history: LlmMessage[] = [];
 
     // Inject a fresh system prompt first so the LLM has current context
     // (company, currency, date, user info, available tools, active skills).
-    // Live context uses the last cached VAT fetch (best-effort on restore).
+    // Use the full recent user history to seed sticky trigger skills, not just
+    // the last message — otherwise "استمر" drops the domain skill.
     const tools = getVisibleTools();
-
-    // Find the most recent user message — use it to seed trigger-based skills
-    const lastUserText = [...messages].reverse().find((m) => m.role === 'user' && m.kind === 'text')?.content ?? '';
-    const activeSkills = this.activeSkillsForMessage(lastUserText);
+    const aggregatedUserText = messages
+      .filter((m) => m.role === 'user' && m.kind === 'text')
+      .slice(-3)
+      .map((m) => m.content)
+      .join(' ');
+    const activeSkills = this.activeSkillsForMessage(aggregatedUserText);
 
     const liveContext = this.liveContextCache?.data ?? {};
 
@@ -737,18 +774,71 @@ class ChatEngine {
 
     for (const msg of messages) {
       if (msg.role === 'user' && msg.kind === 'text') {
-        history.push({ role: 'user', content: msg.content });
+        // Attachments survive reload as metadata + extractedText — rebuild the
+        // same authoritative context blocks the original send used, so the LLM
+        // still sees file extractions after the binary expired.
+        let content: string | null = msg.content;
+        if (msg.attachments && msg.attachments.length > 0) {
+          const blocks = msg.attachments.map((a) =>
+            attachmentContextBlock(a.name, a.kind, a.extractedText),
+          );
+          content = [msg.content, ...blocks].filter(Boolean).join('\n\n');
+        }
+        history.push({ role: 'user', content });
       } else if (msg.role === 'assistant' && msg.kind === 'text') {
-        history.push({ role: 'assistant', content: msg.content });
+        if (msg.content) history.push({ role: 'assistant', content: msg.content });
+      } else if (msg.role === 'assistant' && msg.kind === 'error') {
+        if (msg.content) history.push({ role: 'assistant', content: msg.content });
+      } else if (msg.role === 'assistant' && msg.kind === 'tool' && msg.toolCall) {
+        const tc = msg.toolCall;
+        // Skip cards that never reached the LLM (should not happen after
+        // normalization, but guard anyway). Normalized stale cards become
+        // rejected/error and ARE kept — the LLM must see the outcome.
+        // Reconstruct the two-part sequence: assistant(tool_calls) + tool(result)
+        history.push({
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: tc.callId,
+              type: 'function',
+              function: {
+                name: tc.toolName,
+                arguments: JSON.stringify(tc.args ?? {}),
+              },
+            },
+          ],
+        });
+        let toolContent: string;
+        if (tc.status === 'success') {
+          toolContent = tc.resultSummary || '✅ تم بنجاح';
+        } else if (tc.status === 'error') {
+          const base = tc.resultSummary || 'خطأ غير معروف';
+          // Re-attach structured guidance so the LLM sees the same help the
+          // live runLoop injected — otherwise retried "استمر" has no fixHint.
+          try {
+            const cls = classifyToolError(base);
+            toolContent = `خطأ: ${base}\n${renderErrorGuidance(cls)}`;
+          } catch {
+            toolContent = `خطأ: ${base}`;
+          }
+        } else if (tc.status === 'rejected') {
+          toolContent = 'تم رفض العملية من المستخدم. لا تحاول التنفيذ مرة أخرى.';
+        } else {
+          // pending-confirmation / executing are normalized on load, but handle
+          toolContent = tc.resultSummary
+            ? `خطأ: ${tc.resultSummary}`
+            : 'انتهت الجلسة قبل تأكيد العملية — لم تُنفّذ';
+        }
+        history.push({ role: 'tool', content: toolContent, tool_call_id: tc.callId });
       }
-      // assistant 'tool' kind messages and their matching tool role messages
-      // are NOT reconstructed here because Gemini requires thought_signature
-      // on every tool_call in history, and we don't persist it in the compact
-      // ChatMessage shape.  The agent loop starts fresh from context provided
-      // by user text messages and the newly generated system prompt.
     }
 
     this.history = history;
+    // This restored history belongs to the currently active company (the
+    // persistence layer already scoped the load by companyId). Pin it so the
+    // tenant guard does not wipe it on the next send.
+    this.scopedCompanyId = this.ctx.companyId || null;
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────

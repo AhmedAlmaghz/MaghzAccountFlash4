@@ -3,6 +3,7 @@ import {
   resolveBatchItems,
   buildIdempotencyKey,
   extractOutputScalars,
+  resolveOutputId,
   stableStringify,
   nextRetryDelayMs,
   substituteRefs,
@@ -141,6 +142,37 @@ describe('substituteRefs', () => {
     const r = substituteRefs({ email: 'a@b.com', note: 'قابل @admin غداً' }, outputs);
     expect(r.ok).toBe(true);
     expect(r.args).toEqual({ email: 'a@b.com', note: 'قابل @admin غداً' });
+  });
+});
+
+describe('resolveOutputId', () => {
+  it('prefers exact id, else first Id-suffixed key (creator convention)', () => {
+    expect(resolveOutputId({ id: 'x', supplierId: 's' })).toBe('x');
+    expect(resolveOutputId({ created: true, supplierId: 's-1', name: 'مورد' })).toBe('s-1');
+    expect(resolveOutputId({ created: true, invoiceId: 'i-1', invoiceNumber: 'INV-1' })).toBe('i-1');
+    // foreign ids follow the primary — first wins, not the FK
+    expect(resolveOutputId({ created: true, adjustmentId: 'a-1', productId: 'p-9' })).toBe('a-1');
+    expect(resolveOutputId({ created: true, name: 'x' })).toBeNull();
+    expect(resolveOutputId({})).toBeNull();
+  });
+});
+
+describe('substituteRefs with entity-style outputs', () => {
+  const outputs = new Map([
+    ['sup_abo_elaz', { created: true, supplierId: 's-uuid-1', name: 'أبو العز' }],
+    ['emp1', { created: true, employeeId: 'e-uuid-9' }],
+  ]);
+
+  it('resolves {{ref.id}} via the entity-id alias', () => {
+    const r = substituteRefs({ supplierId: '{{sup_abo_elaz.id}}' }, outputs);
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ supplierId: 's-uuid-1' });
+  });
+
+  it('resolves bare @ref via the entity-id alias', () => {
+    const r = substituteRefs({ employeeId: '@emp1' }, outputs);
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ employeeId: 'e-uuid-9' });
   });
 });
 
