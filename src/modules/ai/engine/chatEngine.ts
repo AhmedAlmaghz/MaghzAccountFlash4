@@ -7,7 +7,7 @@ import { ensureToolsRegistered } from '../tools/index';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
-import { runBatch, batchProgressLine } from './batchRunner';
+import { isBatchActive, runBatch, batchProgressLine } from './batchRunner';
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
 import { getBatch } from '../api/batch';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
@@ -586,6 +586,7 @@ class ChatEngine {
   async resumeBatchById(batchId: string): Promise<void> {
     const store = this.store();
     if (store.isProcessing) return;
+    if (isBatchActive(batchId)) return; // already driven here — no second loop
     store.setProcessing(true);
     try {
       const got = await getBatch(batchId, { companyId: this.ctx.companyId, userId: this.ctx.userId });
@@ -1053,6 +1054,14 @@ class ChatEngine {
         });
       }
       this.history.push(assistantMsg);
+
+      // A streaming placeholder with no text content would linger as an
+      // empty bubble whenever the reply carries only tool calls (the
+      // toolCalls branch below never renders text). Remove it here; the
+      // text branch reuses it for the final sanitized content.
+      if (streamingId && !streamedContent) {
+        this.store().removeMessage(streamingId);
+      }
 
       // If no tool calls → final text response
       if (data.toolCalls.length === 0) {

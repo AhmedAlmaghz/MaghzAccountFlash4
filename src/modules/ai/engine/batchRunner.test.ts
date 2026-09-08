@@ -6,6 +6,7 @@ vi.mock('../api/index', () => ({
     batchItemDone: vi.fn(),
     batchItemFail: vi.fn(),
     batchGet: vi.fn(),
+    batchRecover: vi.fn(async () => ({ success: true, data: { recoveredFailed: 0, recoveredSkipped: 0, finalStatus: null } })),
   },
 }));
 
@@ -128,6 +129,38 @@ describe('runBatch', () => {
     await runBatch('c1', 'u1', 'b1', { shouldStop: () => ++calls > 1 });
     // first item executed, then stop checked before the second
     expect(mockedExec).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runBatch lifecycle guards', () => {
+  it('recovers stale running items before starting', async () => {
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
+    await runBatch('c1', 'u1', 'b1');
+    expect(mockedApi.batchRecover).toHaveBeenCalledWith('c1', 'u1', 'b1');
+  });
+
+  it('exits (no infinite loop) when the batch is paused', async () => {
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'paused' }) });
+    const final = await runBatch('c1', 'u1', 'b1');
+    expect(final?.status).toBe('paused');
+    expect(mockedApi.batchClaim).not.toHaveBeenCalled();
+  });
+
+  it('exits when the batch is cancelled', async () => {
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'cancelled' }) });
+    const final = await runBatch('c1', 'u1', 'b1');
+    expect(final?.status).toBe('cancelled');
+    expect(mockedExec).not.toHaveBeenCalled();
+  });
+
+  it('never stacks two workers on the same batch', async () => {
+    mockedApi.batchClaim.mockResolvedValue({ success: true, data: [] });
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'paused' }) });
+    const [a, b] = await Promise.all([runBatch('c1', 'u1', 'b1'), runBatch('c1', 'u1', 'b1')]);
+    expect(a?.status).toBe('paused');
+    expect(b?.status).toBe('paused');
+    // second call short-circuits to a refresh instead of a second loop
+    expect(mockedApi.batchRecover).toHaveBeenCalledTimes(1);
   });
 });
 

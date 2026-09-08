@@ -11,6 +11,7 @@ import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { Bot, History, Play, Sparkles, X } from 'lucide-react';
 import { findResumableBatches } from '../api/batch';
+import { isBatchActive } from '../engine/batchRunner';
 import type { JobBatchSummary } from '../api/batchTypes';
 import { extractSuggestions, type Suggestion } from '../suggestions/suggestionEngine';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
@@ -130,7 +131,9 @@ export function ChatPanel() {
     if (!companyId) return;
     let cancelled = false;
     void findResumableBatches().then((list) => {
-      if (!cancelled) setResumable(list);
+      // Hide batches this renderer already drives — resuming those would
+      // stack a second worker on the same queue.
+      if (!cancelled) setResumable(list.filter((b) => !isBatchActive(b.id)));
     });
     return () => {
       cancelled = true;

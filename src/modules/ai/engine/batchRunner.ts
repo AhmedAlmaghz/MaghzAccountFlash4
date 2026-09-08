@@ -30,6 +30,19 @@ export interface BatchRunCallbacks {
   shouldStop?: () => boolean;
 }
 
+/**
+ * Locally active workers (batchIds with a live runBatch loop in THIS
+ * renderer). Prevents double-driving the same batch (banner resume while
+ * the approval worker still runs) — the DB claim gate is the backstop,
+ * this is the cheap front-stop. Cleared when the loop exits for any reason.
+ */
+const activeBatches = new Set<string>();
+
+/** True while this renderer drives the batch — the resume banner hides these. */
+export function isBatchActive(batchId: string): boolean {
+  return activeBatches.has(batchId);
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -58,11 +71,46 @@ export async function runBatch(
   batchId: string,
   callbacks: BatchRunCallbacks = {},
 ): Promise<JobBatchDetail | null> {
+  if (activeBatches.has(batchId)) {
+    // A loop already drives this batch here — never stack a second one.
+    const existing = await refresh(companyId, userId, batchId);
+    return existing;
+  }
+  activeBatches.add(batchId);
+  try {
+    return await runBatchInner(companyId, userId, batchId, callbacks);
+  } finally {
+    activeBatches.delete(batchId);
+  }
+}
+
+async function runBatchInner(
+  companyId: string,
+  userId: string,
+  batchId: string,
+  callbacks: BatchRunCallbacks,
+): Promise<JobBatchDetail | null> {
+  // Crash recovery FIRST: items left 'running' by a dead worker would block
+  // their dependents forever (claim only takes queued). They are failed —
+  // never silently requeued, so a half-executed financial write can never
+  // run twice. Downstream dependents skip via the standard cascade.
+  try {
+    await aiApi.batchRecover(companyId, userId, batchId);
+  } catch {
+    // Recovery is best-effort (a hiccup here must not block the run —
+    // the claim gate still refuses unready items).
+  }
+
   let detail = await refresh(companyId, userId, batchId);
   if (!detail) return null;
 
   while (!isTerminalBatchStatus(detail.status)) {
     if (callbacks.shouldStop?.()) return detail;
+    if (detail.status === 'paused' || detail.status === 'cancelled') {
+      // Not runnable and never terminal-flipped by us — EXIT instead of
+      // spinning on empty claims forever (the pre-fix infinite loop).
+      return detail;
+    }
 
     const claim = await aiApi.batchClaim(companyId, userId, batchId, BATCH_CLAIM_LIMIT);
     if (!claim.success || !claim.data) {
@@ -72,13 +120,11 @@ export async function runBatch(
       continue;
     }
     if (claim.data.length === 0) {
-      // Nothing claimable: either finished (finalize flipped the header),
-      // paused/cancelled externally, or waiting on deps — re-read and decide.
+      // Nothing claimable right now (deps still executing elsewhere).
+      // Recover already failed the orphans above, so this is transient —
+      // wait one round, then re-read; a paused/cancelled header exits above.
+      await sleep(1500);
       detail = (await refresh(companyId, userId, batchId)) ?? detail;
-      if (!isTerminalBatchStatus(detail.status) && detail.status !== 'paused') {
-        await sleep(1500);
-        detail = (await refresh(companyId, userId, batchId)) ?? detail;
-      }
       continue;
     }
 

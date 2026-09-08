@@ -7,6 +7,7 @@ vi.mock('./index', () => ({
     batchList: vi.fn(),
     batchSetStatus: vi.fn(),
     batchRetryFailed: vi.fn(),
+    batchRecover: vi.fn(),
   },
 }));
 
@@ -18,6 +19,7 @@ import {
   listBatches,
   findResumableBatches,
   pauseBatch,
+  recoverBatch,
   retryFailedBatch,
   unpauseBatch,
 } from './batch';
@@ -163,6 +165,19 @@ describe('getBatch / listBatches / findResumableBatches', () => {
     const res = await retryFailedBatch('b1');
     expect(res).toEqual({ success: true, data: { requeued: 3 } });
     expect(mockedApi.batchRetryFailed).toHaveBeenCalledWith('c1', 'u1', 'b1');
+  });
+
+  it('recoverBatch forwards crash recovery with context', async () => {
+    mockedApi.batchRecover.mockResolvedValue({
+      success: true,
+      data: { recoveredFailed: 1, recoveredSkipped: 2, finalStatus: 'partial' },
+    });
+    const res = await recoverBatch('b1');
+    expect(res).toEqual({
+      success: true,
+      data: { recoveredFailed: 1, recoveredSkipped: 2, finalStatus: 'partial' },
+    });
+    expect(mockedApi.batchRecover).toHaveBeenCalledWith('c1', 'u1', 'b1');
   });
 
   it('surfaces bridge errors from status transitions honestly', async () => {

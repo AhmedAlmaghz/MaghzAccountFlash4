@@ -980,6 +980,69 @@ export const browserAiBridge = {
     }
   },
 
+  async batchRecover(payload: {
+    companyId: string; userId: string; batchId: string;
+  }): Promise<{ success: boolean; data?: { recoveredFailed: number; recoveredSkipped: number; finalStatus: string | null }; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const res = await adapter.query<{ failed: string; skipped: string }>(
+        `WITH RECURSIVE stale AS (
+           UPDATE ai_job_items SET status = 'failed',
+             last_error = 'توقف التنفيذ — انقطع الـ worker (تعطل الجلسة أو إغلاق التطبيق)',
+             error_code = 'INTERRUPTED', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+           RETURNING seq
+         ),
+         doomed(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND after_seq IN (SELECT seq FROM stale)
+           UNION
+           SELECT i.seq FROM ai_job_items i JOIN doomed d ON i.after_seq = d.seq
+           WHERE i.batch_id = $1::uuid
+         ),
+         skipped AS (
+           UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: توقف عنصر يعتمد عليه', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'queued'
+             AND seq IN (SELECT seq FROM doomed)
+           RETURNING seq
+         )
+         UPDATE ai_job_batches b
+            SET failed_count = failed_count + (SELECT COUNT(*) FROM stale),
+                skipped_count = skipped_count + (SELECT COUNT(*) FROM skipped),
+                updated_at = NOW()
+          WHERE b.id = $1::uuid AND b.company_id = $2::uuid AND b.user_id = $3::uuid
+            AND b.status IN ('pending', 'running', 'paused')
+         RETURNING (SELECT COUNT(*) FROM stale) AS failed,
+                   (SELECT COUNT(*) FROM skipped) AS skipped`,
+        [payload.batchId, payload.companyId, payload.userId]
+      );
+      if (!res.success) return { success: false, error: res.error };
+      const row = (res.rows || [])[0];
+      const fin = await adapter.query<{ status: string }>(
+        `UPDATE ai_job_batches
+            SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
+                updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+            AND NOT EXISTS (
+              SELECT 1 FROM ai_job_items
+              WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
+            )
+          RETURNING status`,
+        [payload.batchId, payload.companyId]
+      );
+      return {
+        success: true,
+        data: {
+          recoveredFailed: row ? Number(row.failed) || 0 : 0,
+          recoveredSkipped: row ? Number(row.skipped) || 0 : 0,
+          finalStatus: fin.rows && fin.rows[0] ? String(fin.rows[0].status) : null,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
   async batchRetryFailed(payload: {
     companyId: string; userId: string; batchId: string;
   }): Promise<{ success: boolean; data?: { requeued: number }; error?: string }> {

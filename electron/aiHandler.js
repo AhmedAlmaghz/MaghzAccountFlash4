@@ -1150,6 +1150,73 @@ export function registerAiHandlers() {
     }
   });
 
+  // Crash recovery: items stuck 'running' belong to a dead worker (reload /
+  // crash / killed tab). They are FAILED — never silently requeued, so a
+  // half-executed financial write can never run twice — and their transitive
+  // dependents skip via the standard cascade. No-op when nothing is stale.
+  // Called by the worker before every run (cheap when clean).
+  ipcMain.handle('ai:batch-recover', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId } = payload;
+      if (!batchId) return { success: false, error: 'batchId is required' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const res = await pool.query(
+        `WITH RECURSIVE stale AS (
+           UPDATE ai_job_items SET status = 'failed',
+             last_error = 'توقف التنفيذ — انقطع الـ worker (تعطل الجلسة أو إغلاق التطبيق)',
+             error_code = 'INTERRUPTED', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+           RETURNING seq
+         ),
+         doomed(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND after_seq IN (SELECT seq FROM stale)
+           UNION
+           SELECT i.seq FROM ai_job_items i JOIN doomed d ON i.after_seq = d.seq
+           WHERE i.batch_id = $1::uuid
+         ),
+         skipped AS (
+           UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: توقف عنصر يعتمد عليه', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'queued'
+             AND seq IN (SELECT seq FROM doomed)
+           RETURNING seq
+         )
+         UPDATE ai_job_batches b
+            SET failed_count = failed_count + (SELECT COUNT(*) FROM stale),
+                skipped_count = skipped_count + (SELECT COUNT(*) FROM skipped),
+                updated_at = NOW()
+          WHERE b.id = $1::uuid AND b.company_id = $2::uuid AND b.user_id = $3::uuid
+            AND b.status IN ('pending', 'running', 'paused')
+         RETURNING (SELECT COUNT(*) FROM stale) AS failed,
+                   (SELECT COUNT(*) FROM skipped) AS skipped`,
+        [batchId, companyId, userId]
+      );
+      const row = res.rows[0] || { failed: '0', skipped: '0' };
+      const finalStatus = await finalizeBatch(pool, batchId, companyId);
+      return {
+        success: true,
+        data: {
+          recoveredFailed: Number(row.failed) || 0,
+          recoveredSkipped: Number(row.skipped) || 0,
+          finalStatus,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Crash recovery: items stuck 'running' belong to a dead worker (reload /
+  // crash / killed tab). They are FAILED — never silently requeued, so a
+  // half-executed financial write can never run twice — and their transitive
+  // dependents skip via the standard cascade. No-op when nothing is stale.
+  // Called by the worker before every run (cheap when clean).
+  
   // Full batch state (header + items in seq order) for progress UI + resume.
   ipcMain.handle('ai:batch-get', async (event, payload = {}) => {
     try {

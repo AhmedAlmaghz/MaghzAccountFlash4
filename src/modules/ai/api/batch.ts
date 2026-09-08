@@ -123,6 +123,18 @@ export async function listBatches(status?: string, override?: BatchContextOverri
   return { success: true, data: res.data };
 }
 
+/** Crash recovery pass — fails stale running items, skips their dependents. */
+export async function recoverBatch(
+  batchId: string,
+  override?: BatchContextOverride,
+): Promise<{ success: boolean; data?: { recoveredFailed: number; recoveredSkipped: number; finalStatus: string | null }; error?: string }> {
+  const ctx = resolveContext(override);
+  if (!ctx) return { success: false, error: 'لا توجد شركة نشطة أو مستخدم مسجل' };
+  const res = await aiApi.batchRecover(ctx.companyId, ctx.userId, batchId);
+  if (!res.success || !res.data) return { success: false, error: res.error || 'فشل استرداد الدفعة' };
+  return { success: true, data: res.data };
+}
+
 /** Batches that can be resumed after a restart (running or paused). */
 export async function findResumableBatches(): Promise<JobBatchSummary[]> {
   const running = await listBatches('running');

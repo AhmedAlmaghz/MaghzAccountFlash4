@@ -235,6 +235,30 @@ describe('ChatEngine', () => {
     expect(card?.toolCall?.batchId).toBe('b1');
   });
 
+  it('leaves no empty bubble when a streamed reply carries only tool calls', async () => {
+    // Regression (2026-09-08 session): two empty assistant text bubbles
+    // lingered after batch cards — the streaming placeholder was only
+    // removed on the text path, never on the tool-calls path.
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    mocks.startStream.mockReturnValueOnce((async function* () {
+      // content chunks absent — tool call deltas only
+      yield { type: 'tool_call_delta', toolCall: { index: 0, id: 'w-9', function: { name: 'test.write', arguments: '{}' } } };
+      yield { type: 'finish', finishReason: 'tool_calls' };
+    })());
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+
+    await getChatEngine().send('نفذ');
+    await getChatEngine().resolveConfirmation('w-9', false);
+
+    const empties = useAiStore.getState().messages.filter(
+      (m) => m.role === 'assistant' && m.kind === 'text' && !m.content,
+    );
+    expect(empties).toEqual([]);
+  });
+
   it('records a rejected write call without executing it', async () => {
     mocks.resolveTool.mockReturnValue(tool('write'));
     mocks.complete
