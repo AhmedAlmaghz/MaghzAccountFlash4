@@ -170,6 +170,14 @@ async function callChatCompletion({ baseUrl, apiKey, model, messages, tools, tem
     try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
 
     if (!res.ok) {
+      // Quota/overload errors get an honest Arabic message (never a raw JSON
+      // dump): the batch worker keeps its state, so "تابع" later resumes.
+      if (res.status === 429) {
+        return { success: false, error: 'انتهت حصة الذكاء الاصطناعي مؤقتاً (429) — انتظر دقيقة ثم قل "تابع". الدفعات الجارية محفوظة وتُستأنف من حيث توقفت.' };
+      }
+      if (res.status === 503 || res.status === 529) {
+        return { success: false, error: `مزود الذكاء الاصطناعي مثقل حالياً (${res.status}) — انتظر قليلاً ثم أعد المحاولة. لا شيء نُفِّذ أو فُقد.` };
+      }
       const msg = data?.error?.message || data?.message || text?.slice(0, 300) || `HTTP ${res.status}`;
       return { success: false, error: `LLM provider error (${res.status}): ${msg}` };
     }
@@ -478,6 +486,15 @@ async function persistSession({ companyId, userId, sessionId, title, messages })
 // Attachments persist as metadata + extracted text (binaries never reach the
 // DB). Parse defensively — legacy rows and foreign payloads must not break
 // session loads.
+function parseResultData(raw) {
+  try {
+    const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+    return val;
+  } catch {
+    return undefined;
+  }
+}
 function parseMessageAttachments(raw) {
   try {
     const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -834,7 +851,8 @@ export function registerAiHandlers() {
       it.args !== null && typeof it.args === 'object' && !Array.isArray(it.args) &&
       typeof it.idempotency_key === 'string' && it.idempotency_key.trim() &&
       (it.after_seq === null || it.after_seq === undefined || Number.isInteger(it.after_seq)) &&
-      (it.label === undefined || it.label === null || typeof it.label === 'string')
+      (it.label === undefined || it.label === null || typeof it.label === 'string') &&
+      (it.ref === undefined || it.ref === null || typeof it.ref === 'string')
     );
   }
 
@@ -878,9 +896,9 @@ export function registerAiHandlers() {
         const placeholders = [];
         const params = [batchId, companyId];
         items.forEach((it, i) => {
-          const base = 2 + i * 6;
+          const base = 2 + i * 7;
           placeholders.push(
-            `($2::uuid, $1::uuid, $${base + 1}, $${base + 2}, $${base + 3}::jsonb, $${base + 4}, $${base + 5}, $${base + 6})`
+            `($2::uuid, $1::uuid, $${base + 1}, $${base + 2}, $${base + 3}::jsonb, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
           );
           params.push(
             i,
@@ -888,12 +906,13 @@ export function registerAiHandlers() {
             JSON.stringify(it.args),
             it.after_seq === null || it.after_seq === undefined ? null : it.after_seq,
             String(it.idempotency_key).slice(0, 200),
-            typeof it.label === 'string' && it.label ? it.label.slice(0, 200) : null
+            typeof it.label === 'string' && it.label ? it.label.slice(0, 200) : null,
+            typeof it.ref === 'string' && it.ref ? it.ref.slice(0, 100) : null
           );
         });
         const ins = await client.query(
           `INSERT INTO ai_job_items
-             (company_id, batch_id, seq, tool_name, args, after_seq, idempotency_key, label)
+             (company_id, batch_id, seq, tool_name, args, after_seq, idempotency_key, label, ref)
            VALUES ${placeholders.join(', ')}
            ON CONFLICT (batch_id, idempotency_key) DO NOTHING
            RETURNING id`,
@@ -951,7 +970,7 @@ export function registerAiHandlers() {
            WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid AND status = 'pending'
            RETURNING id
          )
-         SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.attempts
+         SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.ref, i.attempts
            FROM ai_job_items i JOIN updated ON updated.id = i.id
           ORDER BY i.seq`,
         [batchId, companyId, take, userId]
@@ -965,6 +984,8 @@ export function registerAiHandlers() {
           args: typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {}),
           afterSeq: r.after_seq === null ? null : Number(r.after_seq),
           label: r.label || null,
+          ref: r.ref || null,
+          resultData: null,
           attempts: Number(r.attempts) || 0,
         })),
       };
@@ -980,20 +1001,25 @@ export function registerAiHandlers() {
       if (!auth.ok) return auth;
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
-      const { batchId, itemId, resultRef } = payload;
+      const { batchId, itemId, resultRef, resultData } = payload;
       if (!batchId || !itemId) return { success: false, error: 'batchId and itemId are required' };
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
+      let resultJson = null;
+      try {
+        const raw = typeof resultData === 'string' ? resultData : JSON.stringify(resultData ?? null);
+        resultJson = raw && raw.length <= 2000 ? raw : null;
+      } catch { resultJson = null; }
       const upd = await pool.query(
         `WITH upd AS (
-           UPDATE ai_job_items SET status = 'done', result_ref = $4, updated_at = NOW()
+           UPDATE ai_job_items SET status = 'done', result_ref = $4, result_data = $6::jsonb, updated_at = NOW()
            WHERE id = $1::uuid AND batch_id = $2::uuid AND company_id = $3::uuid AND status = 'running'
            RETURNING id
          )
          UPDATE ai_job_batches b SET done_count = done_count + (SELECT COUNT(*) FROM upd), updated_at = NOW()
          WHERE b.id = $2::uuid AND b.company_id = $3::uuid AND b.user_id = $5::uuid
          RETURNING (SELECT COUNT(*) FROM upd) AS updated`,
-        [itemId, batchId, companyId, typeof resultRef === 'string' ? resultRef.slice(0, 200) : null, userId]
+        [itemId, batchId, companyId, typeof resultRef === 'string' ? resultRef.slice(0, 200) : null, userId, resultJson]
       );
       if (!upd.rows.length || Number(upd.rows[0].updated) === 0) {
         return { success: false, error: 'Item not found or not running' };
@@ -1237,8 +1263,8 @@ export function registerAiHandlers() {
       );
       if (header.rows.length === 0) return { success: false, error: 'Batch not found' };
       const items = await pool.query(
-        `SELECT id, seq, tool_name, args, after_seq, label, status, attempts,
-                last_error, error_code, result_ref
+        `SELECT id, seq, tool_name, args, after_seq, label, ref, status, attempts,
+                last_error, error_code, result_ref, result_data
            FROM ai_job_items
           WHERE batch_id = $1::uuid AND company_id = $2::uuid
           ORDER BY seq ASC`,
@@ -1265,11 +1291,13 @@ export function registerAiHandlers() {
             args: typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {}),
             afterSeq: r.after_seq === null ? null : Number(r.after_seq),
             label: r.label || null,
+            ref: r.ref || null,
             status: r.status,
             attempts: Number(r.attempts) || 0,
             lastError: r.last_error,
             errorCode: r.error_code,
             resultRef: r.result_ref,
+            resultData: parseResultData(r.result_data),
           })),
         },
       };

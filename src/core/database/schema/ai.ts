@@ -61,6 +61,8 @@ export const aiJobItems = pgTable('ai_job_items', {
   afterSeq: integer('after_seq'),
   idempotencyKey: varchar('idempotency_key', { length: 200 }).notNull(),
   label: varchar('label', { length: 200 }),
+  ref: varchar('ref', { length: 100 }),
+  resultData: jsonb('result_data'),
   status: varchar('status', { length: 20 }).notNull().default('queued'),
   attempts: integer('attempts').notNull().default(0),
   lastError: text('last_error'),

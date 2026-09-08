@@ -84,6 +84,7 @@ export async function enqueueBatch(
     after_seq: it.afterSeq,
     idempotency_key: it.idempotencyKey,
     label: it.label,
+    ref: it.ref,
   }));
 
   const sessionId = useAiStore.getState().sessionId;

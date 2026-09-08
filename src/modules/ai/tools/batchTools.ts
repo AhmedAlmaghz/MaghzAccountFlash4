@@ -37,7 +37,7 @@ export const batchTools: ToolDefinition[] = [
     name: 'ai.enqueue_batch',
     labelAr: 'إنشاء دفعة عمليات',
     descriptionAr:
-      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من 10 عمليات كتابية (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة). رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد.',
+      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من 10 عمليات كتابية (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة). رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد.',
     permission: 'ai.use',
     dangerLevel: 'write',
     parameters: {
@@ -173,10 +173,12 @@ export const batchTools: ToolDefinition[] = [
       const got = await getBatch(batchId, { companyId: ctx.companyId, userId: ctx.userId });
       if (!got.success || !got.data) return { error: got.error || 'الدفعة غير موجودة' };
       const d = got.data;
+      // Errors as STRINGS (never objects) — the card renderer and the LLM
+      // both choke on nested objects ([object Object] blindness, 2026-09-08).
       const errors = d.items
         .filter((i) => i.status === 'failed')
         .slice(0, 5)
-        .map((i) => ({ seq: i.seq, tool: i.toolName, error: i.lastError, code: i.errorCode }));
+        .map((i) => `#${i.seq} ${i.toolName}: ${i.lastError || '؟'}${i.errorCode ? ` (${i.errorCode})` : ''}`);
       return {
         batchId: d.id,
         title: d.title,

@@ -1360,11 +1360,24 @@ function renderObject(obj: Record<string, unknown>, title?: string): string {
     const icon = iconMap[k] ?? '•';
     const label = k.replace(/_/g, ' ');
     if (v !== null && v !== undefined) {
-      lines.push(`${icon} ${label}: ${String(v)}`);
+      // Nested objects/arrays must NEVER hit String() (yields the infamous
+      // "[object Object]") — render compact JSON instead.
+      const text = typeof v === 'object' ? safeJson(v) : String(v);
+      lines.push(`${icon} ${label}: ${text}`);
     }
   }
 
   return lines.join('\n');
+}
+
+/** Compact JSON for nested values inside cards — never String(obj). */
+function safeJson(v: unknown): string {
+  try {
+    const json = JSON.stringify(v);
+    return json.length <= 300 ? json : `${json.slice(0, 300)}…`;
+  } catch {
+    return '؟';
+  }
 }
 
 /**

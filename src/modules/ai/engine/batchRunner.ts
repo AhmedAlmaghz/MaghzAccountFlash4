@@ -1,9 +1,12 @@
 import { aiApi } from '../api/index';
 import { executeToolCall } from './toolExecutor';
 import {
+  extractOutputScalars,
   isTerminalBatchStatus,
   nextRetryDelayMs,
+  substituteRefs,
   summarizeBatchProgress,
+  type RefOutputs,
 } from './batchQueue';
 import type { JobBatchDetail } from '../api/batchTypes';
 import { BATCH_CLAIM_LIMIT } from '../api/batchTypes';
@@ -104,6 +107,29 @@ async function runBatchInner(
   let detail = await refresh(companyId, userId, batchId);
   if (!detail) return null;
 
+  // Completed outputs (persisted result_data) seed the substitution map, so
+  // resumed runs resolve refs exactly like fresh ones. Keyed by ref name
+  // AND by seq string ({{0.id}} also works).
+  const outputs: RefOutputs = new Map();
+  const seedOutputs = (d: JobBatchDetail | null) => {
+    if (!d) return;
+    for (const it of d.items ?? []) {
+      if (it.status === 'done' && it.resultData && Object.keys(it.resultData).length > 0) {
+        if (it.ref) outputs.set(it.ref, it.resultData);
+        outputs.set(String(it.seq), it.resultData);
+      }
+    }
+  };
+  const rememberOutput = (
+    item: { seq: number; ref?: string | null },
+    scalars: Record<string, string | number | boolean>,
+  ) => {
+    if (Object.keys(scalars).length === 0) return;
+    if (item.ref) outputs.set(item.ref, scalars);
+    outputs.set(String(item.seq), scalars);
+  };
+  seedOutputs(detail);
+
   while (!isTerminalBatchStatus(detail.status)) {
     if (callbacks.shouldStop?.()) return detail;
     if (detail.status === 'paused' || detail.status === 'cancelled') {
@@ -133,10 +159,29 @@ async function runBatchInner(
         detail = (await refresh(companyId, userId, batchId)) ?? detail;
         return detail;
       }
-      const outcome = await executeToolCall(item.toolName, item.args, { companyId, userId });
+      // Resolve {{ref}} / @ref placeholders against outputs captured so far
+      // (seeded from persisted result_data at run start, so resumes work).
+      const sub = substituteRefs(item.args, outputs);
+      if (!sub.ok) {
+        const failed = await aiApi.batchItemFail(
+          companyId, userId, batchId, item.id,
+          sub.error ?? 'مرجع غير متوفر',
+          'UNRESOLVED_REF',
+          false,
+        );
+        if (failed.success && failed.data?.finalStatus) {
+          detail = (await refresh(companyId, userId, batchId)) ?? detail;
+          callbacks.onProgress?.(detail);
+          return detail;
+        }
+        continue;
+      }
+      const outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
       if (outcome.ok) {
+        const scalars = extractOutputScalars(outcome.result);
+        rememberOutput(item, scalars);
         const done = await aiApi.batchItemDone(
-          companyId, userId, batchId, item.id, extractResultRef(outcome.result),
+          companyId, userId, batchId, item.id, extractResultRef(outcome.result), scalars,
         );
         if (done.success && done.data?.finalStatus) {
           detail = (await refresh(companyId, userId, batchId)) ?? detail;

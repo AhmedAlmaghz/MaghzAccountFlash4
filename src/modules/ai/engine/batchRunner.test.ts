@@ -62,7 +62,9 @@ describe('runBatch', () => {
 
     expect(mockedExec).toHaveBeenCalledTimes(2);
     expect(mockedExec).toHaveBeenCalledWith('sales.create_invoice', { x: 1 }, { companyId: 'c1', userId: 'u1' });
-    expect(mockedApi.batchItemDone).toHaveBeenCalledWith('c1', 'u1', 'b1', 'i1', 'INV-1');
+    expect(mockedApi.batchItemDone).toHaveBeenCalledWith(
+      'c1', 'u1', 'b1', 'i1', 'INV-1', { invoiceNumber: 'INV-1' },
+    );
     expect(final?.status).toBe('done');
     expect(progress.length).toBeGreaterThan(0);
   });
@@ -161,6 +163,49 @@ describe('runBatch lifecycle guards', () => {
     expect(b?.status).toBe('paused');
     // second call short-circuits to a refresh instead of a second loop
     expect(mockedApi.batchRecover).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ref substitution', () => {
+  it('substitutes {{ref.id}} from a completed dependency before executing', async () => {
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 'i1', seq: 0, toolName: 't.make', args: {}, afterSeq: null, ref: 'sup', attempts: 1 },
+        { id: 'i2', seq: 1, toolName: 't.use', args: { supplierId: '{{sup.id}}' }, afterSeq: 0, ref: null, attempts: 1 },
+      ] as never,
+    });
+    mockedExec
+      .mockResolvedValueOnce({ ok: true, result: { id: 's-1', name: 'مورد' } })
+      .mockResolvedValueOnce({ ok: true, result: {} });
+    mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
+
+    await runBatch('c1', 'u1', 'b1');
+
+    expect(mockedExec).toHaveBeenNthCalledWith(2, 't.use', { supplierId: 's-1' }, { companyId: 'c1', userId: 'u1' });
+    // outputs persisted via resultData on done
+    expect(mockedApi.batchItemDone).toHaveBeenCalledWith(
+      'c1', 'u1', 'b1', 'i1', 's-1', expect.objectContaining({ id: 's-1' }),
+    );
+  });
+
+  it('fails loudly with UNRESOLVED_REF when the ref is unknown', async () => {
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 'i9', seq: 0, toolName: 't.use', args: { supplierId: '{{ghost.id}}' }, afterSeq: null, ref: null, attempts: 1 },
+      ] as never,
+    });
+    mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: false, skipped: 0, finalStatus: null } });
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 0, failedCount: 1 }) });
+
+    await runBatch('c1', 'u1', 'b1');
+
+    expect(mockedExec).not.toHaveBeenCalled();
+    expect(mockedApi.batchItemFail).toHaveBeenCalledWith(
+      'c1', 'u1', 'b1', 'i9', expect.stringMatching(/ghost/), 'UNRESOLVED_REF', false,
+    );
   });
 });
 

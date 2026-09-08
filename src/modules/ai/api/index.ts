@@ -69,6 +69,7 @@ interface ElectronAI {
   batchClaim: (payload: { companyId: string; userId: string; batchId: string; limit?: number }) => Promise<IpcResult<JobBatchItem[]>>;
   batchItemDone: (payload: {
     companyId: string; userId: string; batchId: string; itemId: string; resultRef?: string | null;
+    resultData?: Record<string, string | number | boolean> | null;
   }) => Promise<IpcResult<{ finalStatus: string | null }>>;
   batchItemFail: (payload: {
     companyId: string; userId: string; batchId: string; itemId: string;
@@ -305,10 +306,11 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
 
   async batchItemDone(
     companyId: string, userId: string, batchId: string, itemId: string, resultRef?: string | null,
+    resultData?: Record<string, string | number | boolean> | null,
   ): Promise<IpcResult<{ finalStatus: string | null }>> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
-    return b.batchItemDone({ companyId, userId, batchId, itemId, resultRef });
+    return b.batchItemDone({ companyId, userId, batchId, itemId, resultRef, resultData });
   },
 
   async batchItemFail(

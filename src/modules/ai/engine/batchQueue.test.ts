@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveBatchItems,
   buildIdempotencyKey,
+  extractOutputScalars,
   stableStringify,
   nextRetryDelayMs,
+  substituteRefs,
   summarizeBatchProgress,
   isTerminalBatchStatus,
   MAX_ITEM_ATTEMPTS,
@@ -90,6 +92,71 @@ describe('resolveBatchItems', () => {
 
   it('rejects empty batches', () => {
     expect(resolveBatchItems([]).ok).toBe(false);
+  });
+});
+
+describe('substituteRefs', () => {
+  const outputs = new Map([
+    ['sup_abo_elaz', { id: 's-uuid-1', name: 'أبو العز' }],
+    ['emp1', { id: 'e-uuid-9' }],
+  ]);
+
+  it('resolves whole-value @ref to the output id', () => {
+    const r = substituteRefs({ supplierId: '@sup_abo_elaz' }, outputs);
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ supplierId: 's-uuid-1' });
+  });
+
+  it('resolves embedded {{ref.field}} templates', () => {
+    const r = substituteRefs(
+      { supplierId: '{{sup_abo_elaz.id}}', notes: 'مورد {{sup_abo_elaz.name}} معتمد' },
+      outputs,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ supplierId: 's-uuid-1', notes: 'مورد أبو العز معتمد' });
+  });
+
+  it('resolves inside nested arrays (invoice lines)', () => {
+    const r = substituteRefs(
+      { lines: [{ productId: '{{prod_1.id}}', quantity: 2 }] },
+      new Map([['prod_1', { id: 'p-1' }]]),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ lines: [{ productId: 'p-1', quantity: 2 }] });
+  });
+
+  it('fails loudly on unknown refs (never silently null)', () => {
+    const r = substituteRefs({ supplierId: '{{ghost.id}}' }, outputs);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/ghost/);
+    expect(r.error).toMatch(/after/);
+  });
+
+  it('fails on unknown bare @ref', () => {
+    const r = substituteRefs({ employeeId: '@emp9' }, outputs);
+    expect(r.ok).toBe(false);
+  });
+
+  it('leaves non-placeholder strings untouched (emails safe)', () => {
+    const r = substituteRefs({ email: 'a@b.com', note: 'قابل @admin غداً' }, outputs);
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ email: 'a@b.com', note: 'قابل @admin غداً' });
+  });
+});
+
+describe('extractOutputScalars', () => {
+  it('keeps scalar fields, drops nested objects, caps size', () => {
+    const out = extractOutputScalars({
+      id: 'x1', invoiceNumber: 'INV-1', total: 100, ok: true,
+      lines: [{ a: 1 }], nested: { b: 2 }, big: 'y'.repeat(500),
+    });
+    expect(out).toEqual({ id: 'x1', invoiceNumber: 'INV-1', total: 100, ok: true, big: 'y'.repeat(200) });
+  });
+
+  it('returns empty for non-objects', () => {
+    expect(extractOutputScalars(null)).toEqual({});
+    expect(extractOutputScalars('text')).toEqual({});
+    expect(extractOutputScalars([1])).toEqual({});
   });
 });
 

@@ -19,6 +19,8 @@ export interface JobBatchItemInput {
   idempotency_key: string;
   /** Human display note (direction badge…) — never executed. */
   label?: string | null;
+  /** Stable name later items address via {{ref}} / @ref. */
+  ref?: string | null;
 }
 
 export interface JobBatchSummary {
@@ -41,6 +43,8 @@ export interface JobBatchItem {
   args: Record<string, unknown>;
   afterSeq: number | null;
   label: string | null;
+  ref: string | null;
+  resultData: Record<string, string | number | boolean> | null;
   status: JobItemStatus;
   attempts: number;
   lastError: string | null;

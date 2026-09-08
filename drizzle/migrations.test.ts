@@ -820,6 +820,52 @@ describe('Migration 0024: AI job item labels', () => {
     const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/ai.ts'), 'utf-8');
     expect(schema).toMatch(/label: varchar\('label', \{ length: 200 \}\)/);
   });
+});
+
+describe('Migration 0025: AI job item refs + outputs', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0025_ai_job_ref_outputs.sql'), 'utf-8');
+
+  it('adds ref and result_data to ai_job_items', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE ai_job_items ADD COLUMN IF NOT EXISTS ref varchar\(100\)/);
+    expect(migrationSql).toMatch(/ALTER TABLE ai_job_items ADD COLUMN IF NOT EXISTS result_data jsonb/);
+  });
+
+  it('is idempotent (IF NOT EXISTS)', () => {
+    const adds = migrationSql.match(/ADD COLUMN/g) || [];
+    const guards = migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) || [];
+    expect(adds.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(adds.length);
+  });
+
+  it('journal registers 0025 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0025_ai_job_ref_outputs')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0025 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0025_ai_job_ref_outputs\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0025_ai_job_ref_outputs', sql: aiJobRefOutputs \}/);
+  });
+
+  it('Drizzle schema exposes ref and resultData on aiJobItems', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/ai.ts'), 'utf-8');
+    expect(schema).toMatch(/ref: varchar\('ref', \{ length: 100 \}\)/);
+    expect(schema).toMatch(/resultData: jsonb\('result_data'\)/);
+  });
+
+  it('both batch channels carry ref and result_data end to end', () => {
+    const main = readFileSync(join(process.cwd(), 'electron/aiHandler.js'), 'utf-8');
+    expect(main).toMatch(/idempotency_key, label, ref\)/);
+    expect(main).toMatch(/result_data = \$6::jsonb/);
+    expect(main).toMatch(/parseResultData\(r\.result_data\)/);
+    const bridge = readFileSync(join(process.cwd(), 'src/modules/ai/api/browserBridge.ts'), 'utf-8');
+    expect(bridge).toMatch(/idempotency_key, label, ref\)/);
+    expect(bridge).toMatch(/result_data = \$6::jsonb/);
+    expect(bridge).toMatch(/parseBatchResultData\(r\.result_data\)/);
+  });
+});
 
   it('both batch channels carry the label (create + get)', () => {
     const main = readFileSync(join(process.cwd(), 'electron/aiHandler.js'), 'utf-8');

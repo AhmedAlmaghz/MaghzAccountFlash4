@@ -158,6 +158,12 @@ async function callChatCompletion(opts: CallOptions): Promise<{ success: boolean
     try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
 
     if (!res.ok) {
+      if (res.status === 429) {
+        return { success: false, error: 'انتهت حصة الذكاء الاصطناعي مؤقتاً (429) — انتظر دقيقة ثم قل "تابع". الدفعات الجارية محفوظة وتُستأنف من حيث توقفت.' };
+      }
+      if (res.status === 503 || res.status === 529) {
+        return { success: false, error: `مزود الذكاء الاصطناعي مثقل حالياً (${res.status}) — انتظر قليلاً ثم أعد المحاولة. لا شيء نُفِّذ أو فُقد.` };
+      }
       const msg = data?.error?.message || data?.message || text?.slice(0, 300) || `HTTP ${res.status}`;
       return { success: false, error: `LLM provider error (${res.status}): ${msg}` };
     }
@@ -363,6 +369,16 @@ function isValidChatMessageAttachments(attachments: unknown): boolean {
           ATTACHMENT_KINDS.has(a.kind as string)
       ))
   );
+}
+
+function parseBatchResultData(raw: unknown): Record<string, string | number | boolean> | null {
+  try {
+    const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+    return val as Record<string, string | number | boolean>;
+  } catch {
+    return null;
+  }
 }
 
 function parseMessageAttachments(raw: unknown): ChatMessage['attachments'] {
@@ -747,13 +763,13 @@ export const browserAiBridge = {
       const placeholders: string[] = [];
       const params: unknown[] = [batchId, companyId];
       items.forEach((it, i) => {
-        const base = 2 + i * 6;
-        placeholders.push(`($2::uuid, $1::uuid, $${base + 1}, $${base + 2}, $${base + 3}::jsonb, $${base + 4}, $${base + 5}, $${base + 6})`);
-        params.push(i, it.tool_name.slice(0, 120), JSON.stringify(it.args), it.after_seq, it.idempotency_key.slice(0, 200), it.label ? it.label.slice(0, 200) : null);
+        const base = 2 + i * 7;
+        placeholders.push(`($2::uuid, $1::uuid, $${base + 1}, $${base + 2}, $${base + 3}::jsonb, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`);
+        params.push(i, it.tool_name.slice(0, 120), JSON.stringify(it.args), it.after_seq, it.idempotency_key.slice(0, 200), it.label ? it.label.slice(0, 200) : null, it.ref ? it.ref.slice(0, 100) : null);
       });
       const ins = await adapter.query<{ id: string }>(
         `INSERT INTO ai_job_items
-           (company_id, batch_id, seq, tool_name, args, after_seq, idempotency_key, label)
+           (company_id, batch_id, seq, tool_name, args, after_seq, idempotency_key, label, ref)
          VALUES ${placeholders.join(', ')}
          ON CONFLICT (batch_id, idempotency_key) DO NOTHING
          RETURNING id`,
@@ -771,7 +787,7 @@ export const browserAiBridge = {
       const take = Math.max(1, Math.min(Number(payload.limit) || 10, BATCH_CLAIM_LIMIT));
       const adapter = await getDbAdapter();
       const res = await adapter.query<{
-        id: string; seq: number; tool_name: string; args: unknown; after_seq: number | null; label: string | null; attempts: number;
+        id: string; seq: number; tool_name: string; args: unknown; after_seq: number | null; label: string | null; ref: string | null; attempts: number;
       }>(
         `WITH claimed AS (
            SELECT i.id FROM ai_job_items i
@@ -793,7 +809,7 @@ export const browserAiBridge = {
            FROM claimed WHERE u.id = claimed.id
            RETURNING u.id
          )
-         SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.attempts
+         SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.ref, i.attempts
            FROM ai_job_items i JOIN updated ON updated.id = i.id
           ORDER BY i.seq`,
         [payload.batchId, payload.companyId, take, payload.userId]
@@ -813,6 +829,8 @@ export const browserAiBridge = {
           args: (typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {})) as Record<string, unknown>,
           afterSeq: r.after_seq === null ? null : Number(r.after_seq),
           label: r.label || null,
+          ref: r.ref || null,
+          resultData: null,
           status: 'queued' as const,
           attempts: Number(r.attempts) || 0,
           lastError: null,
@@ -826,20 +844,25 @@ export const browserAiBridge = {
   },
 
   async batchItemDone(payload: {
-    companyId: string; userId: string; batchId: string; itemId: string; resultRef?: string | null;
+    companyId: string; userId: string; batchId: string; itemId: string; resultRef?: string | null; resultData?: Record<string, string | number | boolean> | null;
   }): Promise<{ success: boolean; data?: { finalStatus: string | null }; error?: string }> {
     try {
       const adapter = await getDbAdapter();
+      let resultJson: string | null = null;
+      try {
+        const raw = JSON.stringify(payload.resultData ?? null);
+        resultJson = raw && raw.length <= 2000 ? raw : null;
+      } catch { resultJson = null; }
       const upd = await adapter.query<{ updated: string }>(
         `WITH upd AS (
-           UPDATE ai_job_items SET status = 'done', result_ref = $4, updated_at = NOW()
+           UPDATE ai_job_items SET status = 'done', result_ref = $4, result_data = $6::jsonb, updated_at = NOW()
            WHERE id = $1::uuid AND batch_id = $2::uuid AND company_id = $3::uuid AND status = 'running'
            RETURNING id
          )
          UPDATE ai_job_batches b SET done_count = done_count + (SELECT COUNT(*) FROM upd), updated_at = NOW()
          WHERE b.id = $2::uuid AND b.company_id = $3::uuid AND b.user_id = $5::uuid
          RETURNING (SELECT COUNT(*) FROM upd) AS updated`,
-        [payload.itemId, payload.batchId, payload.companyId, payload.resultRef ? payload.resultRef.slice(0, 200) : null, payload.userId]
+        [payload.itemId, payload.batchId, payload.companyId, payload.resultRef ? payload.resultRef.slice(0, 200) : null, payload.userId, resultJson]
       );
       if (!upd.success || !upd.rows || Number(upd.rows[0].updated) === 0) {
         return { success: false, error: 'Item not found or not running' };
@@ -1092,11 +1115,11 @@ export const browserAiBridge = {
       }
       const items = await adapter.query<{
         id: string; seq: number; tool_name: string; args: unknown; after_seq: number | null;
-        label: string | null; status: string; attempts: number; last_error: string | null;
-        error_code: string | null; result_ref: string | null;
+        label: string | null; ref: string | null; status: string; attempts: number; last_error: string | null;
+        error_code: string | null; result_ref: string | null; result_data: unknown;
       }>(
-        `SELECT id, seq, tool_name, args, after_seq, label, status, attempts,
-                last_error, error_code, result_ref
+        `SELECT id, seq, tool_name, args, after_seq, label, ref, status, attempts,
+                last_error, error_code, result_ref, result_data
            FROM ai_job_items
           WHERE batch_id = $1::uuid AND company_id = $2::uuid
           ORDER BY seq ASC`,
@@ -1124,11 +1147,13 @@ export const browserAiBridge = {
             args: (typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {})) as Record<string, unknown>,
             afterSeq: r.after_seq === null ? null : Number(r.after_seq),
             label: r.label || null,
+            ref: r.ref || null,
             status: r.status as JobBatchItem['status'],
             attempts: Number(r.attempts) || 0,
             lastError: r.last_error,
             errorCode: r.error_code,
             resultRef: r.result_ref,
+            resultData: parseBatchResultData(r.result_data),
           })),
         },
       };

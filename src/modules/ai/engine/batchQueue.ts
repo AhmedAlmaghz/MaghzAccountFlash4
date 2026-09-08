@@ -43,6 +43,8 @@ export interface ResolvedBatchItem {
   afterSeq: number | null;
   idempotencyKey: string;
   label: string | null;
+  /** Stable name later items address via {{ref}} / @ref (null when anonymous). */
+  ref: string | null;
 }
 
 export type ResolveResult =
@@ -159,6 +161,7 @@ export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
       afterSeq: afterSeq[i],
       idempotencyKey: buildIdempotencyKey(item.tool, item.args),
       label: typeof item.label === 'string' ? item.label.slice(0, 200) : null,
+      ref: typeof item.ref === 'string' && item.ref.trim() ? item.ref.trim().slice(0, 100) : null,
     })),
   };
 }
@@ -178,6 +181,92 @@ export function nextRetryDelayMs(failures: number): number | null {
 
 /** Maximum execution attempts per item (1 initial + 3 retries). */
 export const MAX_ITEM_ATTEMPTS = 4;
+
+// ─── Cross-item reference substitution ─────────────────────────────────────
+// The model links items by semantic ref and addresses outputs as
+// {{ref.field}} (embedded) or @ref (whole value → the output id).
+// Resolved against outputs of COMPLETED items (persisted result_data),
+// so resume-after-restart resolves exactly like a fresh run.
+
+/** Whitelisted scalar outputs captured from a tool result (capped). */
+export function extractOutputScalars(result: unknown): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return out;
+  for (const [k, v] of Object.entries(result as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 20) break;
+    if (k.length > 50) continue;
+    if (typeof v === 'string' && v.trim()) out[k] = v.slice(0, 200);
+    else if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    else if (typeof v === 'boolean') out[k] = v;
+  }
+  return out;
+}
+
+const REF_WHOLE_RE = /^@([A-Za-z0-9_][\w-]*)$/;
+const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*)(?:\.([A-Za-z0-9_]+))?\s*\}\}/g;
+
+export type RefOutputs = Map<string, Record<string, string | number | boolean>>;
+
+export type SubstituteResult =
+  | { ok: true; args: Record<string, unknown> }
+  | { ok: false; /** Arabic guidance when a reference cannot be resolved. */ error: string };
+
+/**
+ * Deep-substitute {{ref}} / {{ref.field}} / @ref placeholders.
+ * Unknown refs fail LOUDLY (never silently null) with actionable guidance.
+ */
+export function substituteRefs(
+  args: Record<string, unknown>,
+  outputs: RefOutputs,
+): SubstituteResult {
+  const missing = new Set<string>();
+
+  const subString = (s: string): string => {
+    if (REF_WHOLE_RE.test(s)) {
+      const ref = s.slice(1);
+      const data = outputs.get(ref);
+      if (!data || typeof data.id !== 'string' || !data.id) {
+        missing.add(ref);
+        return s;
+      }
+      return data.id;
+    }
+    return s.replace(REF_TEMPLATE_RE, (_m, ref: string, field?: string) => {
+      const data = outputs.get(ref);
+      if (!data) {
+        missing.add(ref);
+        return _m;
+      }
+      const value = field ? data[field] : data.id;
+      if (value === undefined || value === null || value === '') {
+        missing.add(field ? `${ref}.${field}` : ref);
+        return _m;
+      }
+      return String(value);
+    });
+  };
+
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return subString(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = walk(val);
+      return out;
+    }
+    return v;
+  };
+
+  const resolved = walk(args) as Record<string, unknown>;
+  if (missing.size > 0) {
+    const names = [...missing].join('، ');
+    return {
+      ok: false,
+      error: `مرجع غير متوفر (${names}) — العنصر المنتج له لم يكتمل بعد أو فشل. أنشئه أولاً واربط هذا العنصر به عبر after، أو تحقق من نجاحه عبر ai.batch_status.`,
+    };
+  }
+  return { ok: true, args: resolved };
+}
 
 /** Arabic one-line progress summary for batch cards and messages. */
 export function summarizeBatchProgress(done: number, failed: number, skipped: number, total: number): string {
