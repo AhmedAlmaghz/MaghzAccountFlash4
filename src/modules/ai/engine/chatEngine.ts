@@ -140,6 +140,40 @@ const MAX_COMPLETION_TOKENS = 10240;
 const STREAM_TOTAL_TIMEOUT_MS = 120_000;
 
 /**
+ * Budget for the pre-LLM preamble (live settings read + entity resolution).
+ * These awaits run BEFORE the first provider byte and own NO timeout of
+ * their own — a wedged settings/DB read would spin the "thinking" indicator
+ * forever with zero chunks and zero errors. On expiry the send proceeds
+ * degraded (raw text, default context) instead of hanging.
+ */
+const PRE_LLM_DEADLINE_MS = 30_000;
+
+/**
+ * Race a promise against a wall clock. On expiry the loser is detached
+ * (late rejection swallowed) and `fallback` is returned — the caller
+ * proceeds degraded instead of hanging. Real rejections propagate.
+ */
+export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('__deadline__')), ms);
+  });
+  return Promise.race([
+    p.then(
+      (v) => { clearTimeout(timer); return v; },
+      (e) => { clearTimeout(timer); throw e; },
+    ),
+    timeout,
+  ]).catch((e) => {
+    if (e instanceof Error && e.message === '__deadline__') {
+      p.catch(() => { /* detached loser stays unobserved */ });
+      return fallback;
+    }
+    throw e;
+  });
+}
+
+/**
  * Remove fake tool-execution blocks that some models imitate from the
  * flattened-history format (e.g. `[تم تنفيذ: search.accounts] {...}` or
  * `[TOOL_RESULT: search.accounts] {...}`). A model writing one of these
@@ -331,6 +365,7 @@ class ChatEngine {
     this.ensureCompanyScope(this.ctx.companyId);
 
     store.setProcessing(true);
+    this.touchProgress();
 
     try {
       // Always (re)build the system prompt so trigger-based skills
@@ -338,7 +373,8 @@ class ChatEngine {
       // index 0 of history and is reused on every API call.
       const tools = getVisibleTools();
       const activeSkills = this.activeSkillsForMessage(text);
-      const liveContext = await this.fetchLiveContext();
+      // Deadline-guarded: a wedged settings read must degrade, not hang.
+      const liveContext = await deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {});
       const systemContent = buildSystemPrompt({ tools, activeSkills, liveContext });
 
       // Ensure history is a clean array — a previous crash may have left
@@ -376,8 +412,18 @@ class ChatEngine {
       }
 
       try {
-        const resolved = await resolveEntitiesInText(userText, this.ctx.companyId);
-        userText = resolved.text || userText;
+        // Deadline-guarded: a wedged entity/DB read must degrade to raw
+        // text, never hold the "thinking" spinner forever before the first
+        // provider byte.
+        const resolved = await deadlineOr(
+          resolveEntitiesInText(userText, this.ctx.companyId),
+          PRE_LLM_DEADLINE_MS,
+          null,
+        );
+        if (!resolved) {
+          console.warn('[ai] entity resolution timed out — proceeding with raw text');
+        } else {
+          userText = resolved.text || userText;
 
         if (resolved.corrections.length > 0 || dialectChanged.length > 0) {
           // Build user-friendly correction summary
@@ -399,6 +445,7 @@ class ChatEngine {
             lines.push(`- **${lbl}**: "${c.original}" ← "${c.corrected}"`);
           }
           correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n${lines.join('\n')}\n\n_تم تحديث طلبك بالمصطلحات والأسماء الصحيحة._`;
+          }
         }
       } catch {
         // Entity resolution is best-effort — never block the user's message
@@ -450,6 +497,7 @@ class ChatEngine {
   async resolveConfirmation(callId: string, approved: boolean): Promise<void> {
     const store = this.store();
     store.setProcessing(true);
+    this.touchProgress();
 
     try {
       const pending = this.pendingWriteCalls.find((c) => c.callId === callId);
@@ -602,6 +650,7 @@ class ChatEngine {
     status: 'executing' | 'success' | 'error',
     line: string,
   ): void {
+    this.touchProgress();
     const store = this.store();
     const hasCard = store.messages.some((m) => m.id === messageId && m.toolCall);
     if (hasCard) {
@@ -622,6 +671,7 @@ class ChatEngine {
     if (store.isProcessing) return;
     if (isBatchActive(batchId)) return; // already driven here — no second loop
     store.setProcessing(true);
+    this.touchProgress();
     try {
       const got = await getBatch(batchId, { companyId: this.ctx.companyId, userId: this.ctx.userId });
       if (!got.success || !got.data) {
@@ -725,6 +775,7 @@ class ChatEngine {
     streamedContent: boolean,
   ): Promise<void> {
     this.fabricationRetries++;
+    this.touchProgress();
 
     // Remove the fabricated bubble (streamed replies are already rendered).
     if (streamedContent && streamingId) {
@@ -1031,6 +1082,45 @@ class ChatEngine {
     return was;
   }
 
+  /**
+   * Stall heartbeat: the timestamp of the last OBSERVED forward progress
+   * (cycle start, streamed chunk, finished tool call, new iteration, batch
+   * progress report). The UI watchdog compares it against the clock — if the
+   * engine claims to be processing but nothing moved for longer than every
+   * legitimate timeout on the path (provider 90s, stream watchdog 120s),
+   * the cycle is genuinely wedged and must be force-recovered so the user
+   * can always type the next request.
+   */
+  lastProgressAt = 0;
+
+  touchProgress(): void {
+    this.lastProgressAt = Date.now();
+  }
+
+  stallSignature(): Record<string, unknown> {
+    return {
+      iterationCount: this.iterationCount,
+      historyLength: this.history.length,
+      pendingWrites: this.pendingWriteCalls.length,
+      msSinceProgress: Date.now() - this.lastProgressAt,
+    };
+  }
+
+  /**
+   * Force-recover a wedged cycle: stop any in-flight generation, clear the
+   * busy flag (which re-enables the input), and leave an honest message.
+   * Called ONLY by the UI stall watchdog — never by the engine itself.
+   */
+  recoverStuck(message: string): void {
+    const sig = this.stallSignature();
+    console.warn('[ai] stall watchdog: no engine progress for', sig.msSinceProgress, 'ms — forcing recovery', sig);
+    this.abortRequested = true;
+    this.failedWriteAttempts.clear();
+    this.store().addMessage({ role: 'assistant', kind: 'error', content: message });
+    this.store().setProcessing(false);
+    this.touchProgress();
+  }
+
   async runLoop(): Promise<void> {
     while (this.iterationCount < MAX_ITERATIONS) {
       // User pressed stop between turns — end the loop gracefully.
@@ -1040,6 +1130,7 @@ class ChatEngine {
       }
 
       this.iterationCount++;
+      this.touchProgress();
 
       const llmTools = toLlmTools(getVisibleTools());
 
@@ -1104,6 +1195,7 @@ class ChatEngine {
               return 'stopped';
             }
             chunks.push(chunk);
+            this.touchProgress();
             // Progressively update the text content as chunks arrive
             if (chunk.type === 'content' && chunk.content) {
               streamedContent = true;
@@ -1302,6 +1394,11 @@ class ChatEngine {
           tool_call_id: tc.id,
         });
       }
+
+      // Every finished tool call is forward progress (matters to the stall
+      // watchdog: a long chain of slow-but-completing tools must not look
+      // wedged).
+      this.touchProgress();
 
       // Handle write tools → emit confirmation cards and STOP loop.
       // IDENTICAL-RETRY GUARD: a write that already failed this send with the

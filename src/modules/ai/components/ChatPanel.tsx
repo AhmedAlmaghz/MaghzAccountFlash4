@@ -9,6 +9,7 @@ import { registerNavigator, unregisterNavigator, navigateTo } from '../engine/na
 import { useNavigate } from 'react-router-dom';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
+import { ProcessingStatus } from './ProcessingStatus';
 import { Bot, History, Play, Sparkles, X } from 'lucide-react';
 import { findResumableBatches } from '../api/batch';
 import { isBatchActive } from '../engine/batchRunner';
@@ -16,6 +17,14 @@ import type { JobBatchSummary } from '../api/batchTypes';
 import { extractSuggestions, type Suggestion } from '../suggestions/suggestionEngine';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { cn } from '@/core/utils';
+
+/**
+ * Stall ceiling: must exceed every legitimate timeout on the request path
+ * (provider 90s, renderer stream watchdog 120s) so only a genuinely wedged
+ * cycle — zero heartbeat for this long while "processing" — is recovered.
+ */
+const STALL_LIMIT_MS = 150_000;
+const STALL_CHECK_MS = 10_000;
 
 export function ChatPanel() {
   const { t } = useTranslation();
@@ -55,14 +64,42 @@ export function ChatPanel() {
     }
   }, [messages, isProcessing]);
 
-  // Persist conversation when a processing cycle finishes (true → false)
+  // Persist conversation when a processing cycle finishes (true → false).
+  // Also records cycle boundaries for the status pill (elapsed timer while
+  // busy, explicit "reply complete" notice right after).
+  const [processingStartedAt, setProcessingStartedAt] = useState<number | null>(null);
+  const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
   const wasProcessing = useRef(false);
   useEffect(() => {
-    if (wasProcessing.current && !isProcessing && messages.length > 0) {
-      void aiPersistence.saveCurrentSession();
+    if (!wasProcessing.current && isProcessing) {
+      setProcessingStartedAt(Date.now());
+    }
+    if (wasProcessing.current && !isProcessing) {
+      setLastCompletedAt(Date.now());
+      setProcessingStartedAt(null);
+      if (messages.length > 0) {
+        void aiPersistence.saveCurrentSession();
+      }
     }
     wasProcessing.current = isProcessing;
   }, [isProcessing, messages.length]);
+
+  // Stall watchdog: the engine touches its heartbeat on every chunk, tool
+  // completion and iteration. If it claims to be processing but nothing
+  // moved for longer than every legitimate timeout on the path (provider
+  // 90s, stream watchdog 120s), the cycle is genuinely wedged — force
+  // recovery so the input is re-enabled and the user can always type the
+  // next request instead of staring at an eternal spinner.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const st = useAiStore.getState();
+      if (!st.isProcessing) return;
+      if (Date.now() - getChatEngine().lastProgressAt > STALL_LIMIT_MS) {
+        getChatEngine().recoverStuck(t('ai.stalledRecovered'));
+      }
+    }, STALL_CHECK_MS);
+    return () => clearInterval(id);
+  }, [t]);
 
   // Auto-save on navigation away (beforeunload)
   useEffect(() => {
@@ -211,6 +248,7 @@ export function ChatPanel() {
         </div>
 
         {/* Input */}
+        <ProcessingStatus startedAt={processingStartedAt} completedAt={lastCompletedAt} />
         <ChatInput onSend={handleSend} onStop={handleStop} isProcessing={isProcessing} />
       </div>
     );
@@ -286,6 +324,7 @@ export function ChatPanel() {
       )}
 
       {/* Input */}
+      <ProcessingStatus startedAt={processingStartedAt} completedAt={lastCompletedAt} />
       <ChatInput onSend={handleSend} onStop={handleStop} isProcessing={isProcessing} />
     </div>
   );
