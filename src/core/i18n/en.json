@@ -2486,7 +2486,10 @@
       "saveError": "Error saving database settings",
       "connected": "Connected successfully",
       "connectionFailed": "Connection failed",
-      "current": "Current"
+      "current": "Current",
+      "desktopOnly": "Desktop app only",
+      "desktopOnlyShort": "Desktop only",
+      "postgresDescWeb": "On the web (Vercel) use PGlite — PostgreSQL server is desktop-only."
     },
     "company": {
       "title": "Company Info",

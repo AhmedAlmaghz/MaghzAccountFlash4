@@ -2486,7 +2486,10 @@
       "saveError": "حدث خطأ أثناء حفظ الإعدادات",
       "connected": "تم الاتصال بنجاح",
       "connectionFailed": "فشل الاتصال",
-      "current": "الحالية"
+      "current": "الحالية",
+      "desktopOnly": "متاح فقط في تطبيق سطح المكتب",
+      "desktopOnlyShort": "سطح المكتب فقط",
+      "postgresDescWeb": "على الويب (Vercel) استخدم PGlite — خادم PostgreSQL غير متاح في المتصفح."
     },
     "company": {
       "title": "بيانات الشركة",

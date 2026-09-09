@@ -111,6 +111,16 @@ export async function getDbAdapter(): Promise<DbAdapter> {
     }
   }
 
+  // Web (Vercel) has no Electron IPC and no HTTP bridge in production.
+  // Detecting this specific state gives a much clearer message than the
+  // generic one below — previously it said "تأكد من تشغيل Electron" even
+  // on vercel.app, which confused users who were correctly using PGlite.
+  if (mode === 'pg' && !isElectron() && !isE2E) {
+    throw new Error(
+      'وضع خادم PostgreSQL متاح فقط في تطبيق سطح المكتب (Electron). على الاستضافة السحابية (Vercel) اختر "PGlite محلي" — يعمل مباشرة في المتصفح بدون خادم.'
+    );
+  }
+
   throw new Error(
     'قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.'
   );

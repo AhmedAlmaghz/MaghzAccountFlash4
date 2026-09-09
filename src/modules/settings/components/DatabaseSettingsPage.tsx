@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Server, HardDrive, CheckCircle, XCircle, RefreshCw, Save } from 'lucide-react';
 import { Card, Button, Input, Can } from '@/core/ui/components';
-import { getDbAdapter, getDbMode, setDbMode, type DbMode } from '@/core/database/adapters';
+import { getDbAdapter, getDbMode, setDbMode, type DbMode, isElectron } from '@/core/database/adapters';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 
@@ -17,7 +17,14 @@ export const DatabaseSettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
 
-  const [mode, setMode] = useState<DbMode>(() => getDbMode());
+  const isDesktop = isElectron();
+  const [mode, setMode] = useState<DbMode>(() => {
+    const m = getDbMode();
+    // Auto-correct stale "pg" preference left over on the web — it can never
+    // work without Electron, and would otherwise show the error on every load.
+    if (m === 'pg' && !isDesktop) return 'pglite';
+    return m;
+  });
   const [pgConfig, setPgConfig] = useState({
     host: 'localhost',
     port: '5432',
@@ -141,31 +148,38 @@ export const DatabaseSettingsPage: React.FC = () => {
           </div>
         </button>
 
-        {/* PostgreSQL option */}
+        {/* PostgreSQL option — desktop only; on Vercel/web it is disabled */}
         <button
-          onClick={() => setMode('pg')}
+          onClick={() => isDesktop && setMode('pg')}
+          disabled={!isDesktop}
           className={`p-5 rounded-xl border-2 text-right transition-all flex items-start gap-4 ${
             mode === 'pg'
               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
               : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-          }`}
+          } ${!isDesktop ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title={!isDesktop ? t('settings.database.desktopOnly') : undefined}
         >
           <div className={`mt-0.5 ${mode === 'pg' ? 'text-primary-600' : 'text-slate-400'}`}>
             <Server size={24} />
           </div>
           <div className="flex-1">
-            <p className="font-bold text-slate-900 dark:text-slate-100">{t('settings.database.postgres')}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('settings.database.postgresDesc')}</p>
+            <p className="font-bold text-slate-900 dark:text-slate-100">
+              {t('settings.database.postgres')}
+              {!isDesktop && <span className="ms-2 text-[10px] font-normal text-slate-400">({t('settings.database.desktopOnlyShort')})</span>}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              {isDesktop ? t('settings.database.postgresDesc') : t('settings.database.postgresDescWeb')}
+            </p>
             <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
               <Database size={14} />
-              <span>{t('settings.database.serverRequired')}</span>
+              <span>{isDesktop ? t('settings.database.serverRequired') : t('settings.database.desktopOnly')}</span>
             </div>
           </div>
         </button>
       </div>
 
-      {/* PG connection form (only when PG selected) */}
-      {mode === 'pg' && (
+      {/* PG connection form (only when PG selected on desktop) */}
+      {mode === 'pg' && isDesktop && (
         <Card className="p-5">
           <div className="flex items-center gap-2 text-primary-600 dark:text-primary-400 mb-4">
             <Server size={16} />
