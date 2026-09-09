@@ -153,8 +153,7 @@ const PRE_LLM_DEADLINE_MS = 30_000;
  * (late rejection swallowed) and `fallback` is returned — the caller
  * proceeds degraded instead of hanging. Real rejections propagate.
  */
-export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
+export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {  let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<T>((_, reject) => {
     timer = setTimeout(() => reject(new Error('__deadline__')), ms);
   });
@@ -224,6 +223,28 @@ export function claimsBusinessAction(content: string): boolean {
 export function getChatEngine(): ChatEngine {
   if (!engineInstance) engineInstance = new ChatEngine();
   return engineInstance;
+}
+
+/**
+ * Send-phase trace: every send records its progress through a tiny ring
+ * buffer (press → context → entities → stream → first chunk → end), one
+ * console line per phase. When a user reports "pressed send and everything
+ * froze", the console shows EXACTLY which phase never completed — no more
+ * guessing between a dead UI, a wedged DB read, and a stalled provider.
+ */
+const SEND_TRACE_CAP = 60;
+const sendTrace: Array<{ at: number; phase: string }> = [];
+export function traceSend(phase: string): void {
+  sendTrace.push({ at: Date.now(), phase });
+  if (sendTrace.length > SEND_TRACE_CAP) sendTrace.splice(0, sendTrace.length - SEND_TRACE_CAP);
+  console.info(`[ai/send] ${phase}`);
+}
+/** Full phase history (oldest first) — also reachable live as window.__aiTrace. */
+export function getSendTrace(): Array<{ at: number; phase: string }> {
+  return sendTrace.slice();
+}
+if (typeof window !== 'undefined') {
+  (window as unknown as { __aiTrace?: unknown }).__aiTrace = getSendTrace;
 }
 
 /**
@@ -366,6 +387,22 @@ class ChatEngine {
 
     store.setProcessing(true);
     this.touchProgress();
+    traceSend('press-received');
+
+    // Optimistic UI: the user's bubble appears INSTANTLY, before the
+    // (deadline-guarded but still slow on weak transports) settings/entity
+    // preamble. Previously the bubble waited behind up to 60s of DB reads —
+    // pressing send looked completely dead.
+    const trimmedAttachments = trimAttachmentsToBudget(attachments);
+    store.addMessage({
+      role: 'user',
+      kind: 'text',
+      content: text,
+      ...(trimmedAttachments.length > 0
+        ? { attachments: trimmedAttachments.map((a) => a.meta) }
+        : {}),
+    });
+    traceSend('user-stored');
 
     try {
       // Always (re)build the system prompt so trigger-based skills
@@ -376,6 +413,7 @@ class ChatEngine {
       // Deadline-guarded: a wedged settings read must degrade, not hang.
       const liveContext = await deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {});
       const systemContent = buildSystemPrompt({ tools, activeSkills, liveContext });
+      traceSend('context-ready');
 
       // Ensure history is a clean array — a previous crash may have left
       // undefined holes (e.g. sparse array) that would throw on `m.role`.
@@ -450,21 +488,13 @@ class ChatEngine {
       } catch {
         // Entity resolution is best-effort — never block the user's message
       }
+      traceSend('entities-done');
 
-      // Append user message (original text visible in UI, corrected in LLM history).
+      // Append the (possibly corrected) user turn to the LLM history. The UI
+      // bubble was already stored optimistically at press time above.
       // Canonical extraction blocks ride with the wire content (chip = source
-      // of truth); the editable textarea draft is advisory. Binaries are
-      // trimmed to the per-send budget first (context-window protection).
-      const trimmedAttachments = trimAttachmentsToBudget(attachments);
+      // of truth); the editable textarea draft is advisory.
       this.history.push({ role: 'user', content: buildUserParts(userText, trimmedAttachments) });
-      store.addMessage({
-        role: 'user',
-        kind: 'text',
-        content: text,
-        ...(trimmedAttachments.length > 0
-          ? { attachments: trimmedAttachments.map((a) => a.meta) }
-          : {}),
-      });
 
       // If we corrected something, show a notification to the user
       if (correctionMsg) {
@@ -486,6 +516,7 @@ class ChatEngine {
       const errorText = e instanceof Error ? e.message : String(e);
       this.store().addMessage({ role: 'assistant', kind: 'error', content: errorText });
     } finally {
+      traceSend('cycle-end');
       this.store().setProcessing(false);
     }
   }
@@ -1157,6 +1188,7 @@ class ChatEngine {
       let streamedContent = false;
 
       try {
+        traceSend('stream-start');
         const streamGen = aiApi.startStream({
           companyId: this.ctx.companyId,
           messages: this.buildMessages(),
@@ -1210,8 +1242,8 @@ class ChatEngine {
             }
             chunks.push(chunk);
             this.touchProgress();
-            // Progressively update the text content as chunks arrive
             if (chunk.type === 'content' && chunk.content) {
+              if (!streamedContent) traceSend('first-chunk');
               streamedContent = true;
               contentAcc += chunk.content;
               scheduleFlush();
@@ -1223,6 +1255,7 @@ class ChatEngine {
           drainStream(),
           new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), STREAM_TOTAL_TIMEOUT_MS)),
         ]);
+        traceSend(`stream-end:${drainOutcome}`);
         if (drainOutcome === 'timeout') {
           void streamGen.return?.({ success: false, error: 'stream timeout' }).catch(() => {});
           throw new Error('انتهت مهلة البث (120 ثانية) دون اكتمال — تم التحويل للطلب المباشر');

@@ -32,8 +32,13 @@ vi.mock('@/core/database/adapters', () => ({
   isElectronPg: vi.fn(() => false),
 }));
 
-import { getChatEngine, deadlineOr } from './chatEngine';
+import { getChatEngine, deadlineOr, getSendTrace } from './chatEngine';
 import { useAiStore } from '../store';
+import { useAppStore } from '@/core/store';
+import { useAuthStore } from '@/modules/auth/store';
+import type { User } from '@/modules/auth/types';
+
+const user: User = { id: 'u1', username: 'tester', role: 'manager', isActive: true };
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -74,8 +79,7 @@ describe('stall heartbeat + recovery', () => {
     expect(Date.now() - engine.lastProgressAt).toBeLessThan(1000);
   });
 
-  it('recoverStuck clears the busy flag and leaves an honest message', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('recoverStuck clears the busy flag and leaves an honest message', () => {    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const engine = getChatEngine();
       useAiStore.getState().setProcessing(true);
@@ -95,5 +99,49 @@ describe('stall heartbeat + recovery', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('traces send phases in order and stores the user bubble optimistically', async () => {
+    useAuthStore.getState().logout();
+    useAuthStore.getState().login(user);
+    useAppStore.setState({
+      activeCompany: { id: '00000000-0000-0000-0000-000000000001', name: 'شركة الاختبار', currency: 'YER' },
+    });
+    const { complete, startStream } = mocks;
+    complete.mockReturnValue({
+      success: true,
+      data: { content: 'احتياطي', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+    startStream.mockReturnValue(
+      (async function* () {
+        yield { type: 'content', content: 'أهلا بك' };
+      })(),
+    );
+
+    await getChatEngine().send('مرحبا');
+
+    const phases = getSendTrace().map((e) => (e.phase.startsWith('stream-end') ? 'stream-end' : e.phase));
+    const order = [
+      'press-received',
+      'user-stored',
+      'context-ready',
+      'entities-done',
+      'stream-start',
+      'first-chunk',
+      'stream-end',
+      'cycle-end',
+    ];
+    let from = -1;
+    for (const phase of order) {
+      const idx = phases.indexOf(phase, from + 1);
+      expect(idx).toBeGreaterThan(from);
+      from = idx;
+    }
+    // Optimistic UI: the user's own bubble is first even though the preamble
+    // (settings/entities) runs after it.
+    const first = useAiStore.getState().messages[0];
+    expect(first.role).toBe('user');
+    expect(first.content).toBe('مرحبا');
+    expect(useAiStore.getState().isProcessing).toBe(false);
   });
 });
