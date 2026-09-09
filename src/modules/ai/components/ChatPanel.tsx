@@ -86,11 +86,12 @@ export function ChatPanel() {
     return () => clearInterval(interval);
   }, [messages.length]);
 
-  // Find the last user text for regenerate
+  // Find the last user text for regenerate — defensive against holes
   const lastUserText = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user' && messages[i].kind === 'text') {
-        return messages[i].content;
+      const m = messages[i];
+      if (m && m.role === 'user' && m.kind === 'text') {
+        return m.content;
       }
     }
     return null;
@@ -99,7 +100,8 @@ export function ChatPanel() {
   // Get the last assistant message for regenerate + suggestion chips
   const lastAssistantIndex = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'assistant') return i;
+      const m = messages[i];
+      if (m && m.role === 'assistant') return i;
     }
     return -1;
   }, [messages]);
@@ -148,7 +150,7 @@ export function ChatPanel() {
   const lastAssistantSuggestions = useMemo<Suggestion[]>(() => {
     if (lastAssistantIndex < 0 || isProcessing) return [];
     const msg = messages[lastAssistantIndex];
-    if (msg.role !== 'assistant' || msg.kind === 'error') return [];
+    if (!msg || msg.role !== 'assistant' || msg.kind === 'error') return [];
     return extractSuggestions(msg);
   }, [messages, lastAssistantIndex, isProcessing]);
 
@@ -220,7 +222,7 @@ export function ChatPanel() {
       {/* Messages scroll area — centered column, full width on mobile */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl w-full mx-auto px-3 sm:px-4 py-4 space-y-5">
-          {messages.map((msg, idx) => (
+          {messages.filter((m): m is NonNullable<typeof m> => !!m && typeof (m as { role?: unknown }).role === 'string').map((msg, idx) => (
             <MessageBubble
               key={msg.id}
               message={msg}

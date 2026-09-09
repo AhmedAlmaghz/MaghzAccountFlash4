@@ -291,10 +291,11 @@ class ChatEngine {
     const recentUserTexts: string[] = [];
     for (let i = this.history.length - 1; i >= 0 && recentUserTexts.length < 3; i++) {
       const m = this.history[i];
-      if (m.role === 'user') {
+      if (!m || m.role !== 'user') continue;
+      try {
         const t = llmTextOf(m.content);
         if (t) recentUserTexts.push(t);
-      }
+      } catch { /* ignore malformed content */ }
     }
     const combined = [...recentUserTexts.reverse(), userText].join(' ');
     return selectActiveSkills({
@@ -330,9 +331,12 @@ class ChatEngine {
       const liveContext = await this.fetchLiveContext();
       const systemContent = buildSystemPrompt({ tools, activeSkills, liveContext });
 
+      // Ensure history is a clean array — a previous crash may have left
+      // undefined holes (e.g. sparse array) that would throw on `m.role`.
+      this.history = (this.history || []).filter((m): m is LlmMessage => !!m && typeof (m as LlmMessage).role === 'string');
       if (this.history.length === 0) {
         this.history.push({ role: 'system', content: systemContent });
-      } else if (this.history[0].role === 'system') {
+      } else if (this.history[0]?.role === 'system') {
         // Update the system message in place so trigger skills reflect the
         // current user message (skills content is large; mutating in place
         // avoids duplicating blocks across turns).
@@ -755,9 +759,9 @@ class ChatEngine {
     // the last message — otherwise "استمر" drops the domain skill.
     const tools = getVisibleTools();
     const aggregatedUserText = messages
-      .filter((m) => m.role === 'user' && m.kind === 'text')
+      .filter((m) => m && m.role === 'user' && m.kind === 'text')
       .slice(-3)
-      .map((m) => m.content)
+      .map((m) => String(m.content || ''))
       .join(' ');
     const activeSkills = this.activeSkillsForMessage(aggregatedUserText);
 
@@ -773,22 +777,27 @@ class ChatEngine {
     });
 
     for (const msg of messages) {
+      if (!msg || typeof msg.role !== 'string') continue;
       if (msg.role === 'user' && msg.kind === 'text') {
         // Attachments survive reload as metadata + extractedText — rebuild the
         // same authoritative context blocks the original send used, so the LLM
         // still sees file extractions after the binary expired.
-        let content: string | null = msg.content;
+        let content: string | null = String(msg.content ?? '');
         if (msg.attachments && msg.attachments.length > 0) {
-          const blocks = msg.attachments.map((a) =>
-            attachmentContextBlock(a.name, a.kind, a.extractedText),
-          );
-          content = [msg.content, ...blocks].filter(Boolean).join('\n\n');
+          try {
+            const blocks = msg.attachments
+              .filter((a) => a && a.name && a.kind)
+              .map((a) => attachmentContextBlock(a.name, a.kind, a.extractedText));
+            content = [msg.content, ...blocks].filter(Boolean).join('\n\n');
+          } catch {
+            // attachment block is best-effort
+          }
         }
         history.push({ role: 'user', content });
       } else if (msg.role === 'assistant' && msg.kind === 'text') {
-        if (msg.content) history.push({ role: 'assistant', content: msg.content });
+        if (msg.content) history.push({ role: 'assistant', content: String(msg.content) });
       } else if (msg.role === 'assistant' && msg.kind === 'error') {
-        if (msg.content) history.push({ role: 'assistant', content: msg.content });
+        if (msg.content) history.push({ role: 'assistant', content: String(msg.content) });
       } else if (msg.role === 'assistant' && msg.kind === 'tool' && msg.toolCall) {
         const tc = msg.toolCall;
         // Skip cards that never reached the LLM (should not happen after
@@ -862,8 +871,15 @@ class ChatEngine {
    *     the following tool results must not be orphaned.
    */
   private windowedHistory(): LlmMessage[] {
-    const h = this.history;
-    if (h.length <= ChatEngine.CONTEXT_WINDOW_MESSAGES) return h;
+    // Defensive: filter any undefined / malformed entries that may have slipped
+    // in from a corrupted persisted session — the reported "Cannot read
+    // properties of undefined (reading 'role')" came from a hole here.
+    const h = (this.history || []).filter((m): m is LlmMessage => !!m && typeof (m as LlmMessage).role === 'string');
+    if (h.length <= ChatEngine.CONTEXT_WINDOW_MESSAGES) {
+      // keep filtered copy in place so the hole never resurfaces
+      if (h.length !== this.history.length) this.history = h;
+      return h;
+    }
 
     const system = h[0]?.role === 'system' ? [h[0]] : [];
     const rest = system.length ? h.slice(1) : h;
@@ -874,7 +890,7 @@ class ChatEngine {
     // Snap forward past orphaned tool results / dangling tool_call partners.
     while (start < rest.length) {
       const m = rest[start];
-      if (m.role === 'tool') { start++; continue; }              // orphaned result
+      if (!m || m.role === 'tool') { start++; continue; }              // orphaned result
       if (m.tool_calls && m.tool_calls.length > 0) { start++; continue; } // pair opener without its results yet
       break;
     }
@@ -940,6 +956,7 @@ class ChatEngine {
     let pendingCallNames: string[] | null = null; // function names to merge
 
     for (const m of history) {
+      if (!m || typeof m.role !== 'string') continue;
       if (m.role === 'tool') {
         // Pair with the preceding assistant tool_call message
         const names = pendingCallNames?.join(', ') ?? 'tools';
@@ -954,7 +971,11 @@ class ChatEngine {
       }
 
       if (m.tool_calls && m.tool_calls.length > 0) {
-        pendingPreText = llmTextOf(m.content);
+        try {
+          pendingPreText = llmTextOf(m.content);
+        } catch {
+          pendingPreText = null;
+        }
         pendingCallNames = m.tool_calls.map((tc) => tc.function?.name ?? 'tool');
         continue;
       }

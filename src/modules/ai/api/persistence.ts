@@ -20,7 +20,7 @@ const STALE_STATUS_MAP: Partial<Record<ToolCallStatus, ToolCallStatus>> = {
 };
 
 function normalizeLoadedMessages(messages: ChatMessage[]): ChatMessage[] {
-  return messages.map((m) => {
+  return messages.filter((m): m is ChatMessage => !!m && typeof m.role === 'string').map((m) => {
     if (!m.toolCall) return m;
     const staleTo = STALE_STATUS_MAP[m.toolCall.status];
     if (!staleTo) return m;
@@ -39,7 +39,7 @@ function normalizeLoadedMessages(messages: ChatMessage[]): ChatMessage[] {
 }
 
 function deriveTitle(messages: ChatMessage[]): string | null {
-  const firstUser = messages.find((m) => m.role === 'user' && m.content.trim());
+  const firstUser = messages.find((m) => m && m.role === 'user' && m.content?.trim());
   if (!firstUser) return null;
   const text = firstUser.content.trim().replace(/\s+/g, ' ');
   return text.length > 60 ? text.slice(0, 60) + '…' : text;
@@ -61,11 +61,12 @@ function currentContext(): { companyId: string; userId: string } | null {
 function snapshotFingerprint(sessionId: string | null, messages: ChatMessage[]): string {
   if (messages.length === 0) return `${sessionId ?? '∅'}|0`;
   const last = messages[messages.length - 1];
+  if (!last || typeof last.id !== 'string') return `${sessionId ?? '∅'}|${messages.length}|corrupt`;
   return [
     sessionId ?? '∅',
     messages.length,
     last.id,
-    last.content.length,
+    (last.content || '').length,
     last.toolCall?.status ?? '',
     last.attachments?.length ?? 0,
   ].join('|');
