@@ -382,6 +382,24 @@ async function runStream(opts: CallOptions & { streamId?: string }): Promise<voi
 
 // ─── Chat persistence ──────────────────────────────────────────────────────
 
+/**
+ * Cap for tool-call summaries written to storage. Rendered report tables can
+ * reach 100KB+ per card — rewriting all of them on EVERY autosave saturates
+ * slow transports (PGlite on the UI thread). The restore path shows the
+ * model the same text, and the engine's own LLM view is already capped at
+ * the same size (TOOL_RESULT_MAX_CHARS) — nothing of model value is lost.
+ */
+export const PERSIST_SUMMARY_MAX_CHARS = 4000;
+const PERSIST_TRUNC_MARKER = '\n…(تم اقتصاص الملخص عند الحفظ)';
+export function truncateForPersist(toolCall: ChatMessage['toolCall']): ChatMessage['toolCall'] {
+  if (!toolCall || typeof toolCall.resultSummary !== 'string') return toolCall;
+  if (toolCall.resultSummary.length <= PERSIST_SUMMARY_MAX_CHARS) return toolCall;
+  return {
+    ...toolCall,
+    resultSummary: toolCall.resultSummary.slice(0, PERSIST_SUMMARY_MAX_CHARS) + PERSIST_TRUNC_MARKER,
+  };
+}
+
 const ATTACHMENT_KINDS = new Set(['image', 'pdf', 'spreadsheet', 'audio', 'other']);
 
 function isValidChatMessageAttachments(attachments: unknown): boolean {
@@ -491,8 +509,11 @@ async function persistSession(payload: AiSaveSessionPayload): Promise<string> {
         m.role,
         m.kind,
         m.content || null,
-        m.toolCall ? JSON.stringify(m.toolCall) : null,
-        Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : null,
+        m.toolCall ? JSON.stringify(truncateForPersist(m.toolCall)) : null,
+        // attachments is NOT NULL DEFAULT '[]' — explicit NULL violates it
+        // on fresh databases (older DBs predate the constraint, which is why
+        // this only surfaced on new installs). Empty must serialize as '[]'.
+        Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : '[]',
         start + i,
         new Date(m.createdAt).toISOString()
       );

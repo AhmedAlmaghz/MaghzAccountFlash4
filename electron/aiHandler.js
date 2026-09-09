@@ -422,11 +422,25 @@ function messageRowParams(companyId, sid, m, sortOrder) {
     m.role,
     m.kind,
     m.content || null,
-    m.toolCall ? JSON.stringify(m.toolCall) : null,
-    Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : null,
+    m.toolCall ? JSON.stringify(truncateToolCallForPersist(m.toolCall)) : null,
+    // attachments is NOT NULL DEFAULT '[]' — explicit NULL violates it on
+    // fresh databases. Empty must serialize as '[]' (mirrors browserBridge).
+    Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : '[]',
     sortOrder,
     new Date(m.createdAt).toISOString(),
-];
+  ];
+}
+
+// Cap for tool-call summaries written to storage — mirrors truncateForPersist
+// in browserBridge.ts (both transports must agree). Rendered report tables
+// can reach 100KB+ per card; rewriting all of them on every autosave
+// saturates slow transports. Keep in sync on any change.
+const PERSIST_SUMMARY_MAX_CHARS = 4000;
+const PERSIST_TRUNC_MARKER = '\n…(تم اقتصاص الملخص عند الحفظ)';
+function truncateToolCallForPersist(toolCall) {
+  if (!toolCall || typeof toolCall.resultSummary !== 'string') return toolCall;
+  if (toolCall.resultSummary.length <= PERSIST_SUMMARY_MAX_CHARS) return toolCall;
+  return { ...toolCall, resultSummary: toolCall.resultSummary.slice(0, PERSIST_SUMMARY_MAX_CHARS) + PERSIST_TRUNC_MARKER };
 }
 
 /** Replace-all save: upsert session header, then rewrite its messages atomically.

@@ -40,6 +40,14 @@ function isElectronPg(): boolean {
 
 let adapter: DbAdapter | null = null;
 let adapterMode: DbMode | null = null;
+let lastPingAt = 0;
+/**
+ * Health-check TTL: pinging on EVERY acquisition doubled chat DB traffic
+ * (each entity searcher re-acquires → ~38 PGlite round-trips per message on
+ * a transport that runs on the UI thread). A recently-verified adapter is
+ * trusted; failures anywhere below still reset it.
+ */
+const PING_TTL_MS = 30_000;
 
 export async function getDbAdapter(): Promise<DbAdapter> {
   const mode = getDbMode();
@@ -51,9 +59,14 @@ export async function getDbAdapter(): Promise<DbAdapter> {
 
   // Reuse existing working adapter if mode hasn't changed
   if (adapter && adapterMode === mode) {
+    const now = Date.now();
+    if (now - lastPingAt < PING_TTL_MS) return adapter;
     try {
       const ping = await adapter.ping();
-      if (ping.success) return adapter;
+      if (ping.success) {
+        lastPingAt = now;
+        return adapter;
+      }
     } catch { /* stale */ }
     adapter = null;
   }
@@ -71,6 +84,7 @@ export async function getDbAdapter(): Promise<DbAdapter> {
         console.log('[DB Adapter] PGlite (PostgreSQL WASM) — local');
         adapter = pgliteAdapter;
         adapterMode = mode;
+        lastPingAt = Date.now();
         return adapter;
       }
     } catch (err) {
@@ -87,6 +101,7 @@ export async function getDbAdapter(): Promise<DbAdapter> {
         console.log('[DB Adapter] PostgreSQL via Electron IPC');
         adapter = electronPgAdapter;
         adapterMode = mode;
+        lastPingAt = Date.now();
         return adapter;
       }
     } catch (_err) {
@@ -104,6 +119,7 @@ export async function getDbAdapter(): Promise<DbAdapter> {
         console.log('[DB Adapter] PostgreSQL via Web bridge');
         adapter = electronPgAdapter;
         adapterMode = mode;
+        lastPingAt = Date.now();
         return adapter;
       }
     } catch (_err) {

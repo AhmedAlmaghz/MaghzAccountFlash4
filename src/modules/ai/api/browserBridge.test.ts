@@ -120,4 +120,52 @@ describe('browser AI bridge (PGlite)', () => {
 
     await browserAiBridge.deleteSession({ companyId, userId, sessionId: sid });
   }, 120000);
+
+  it('truncates giant tool summaries when persisting sessions', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    const userId = seed.adminId!;
+    useAuthStore.getState().login(
+      { id: userId, companyId, username: 'admin', email: 'admin@demo.ye', role: 'admin', isActive: true },
+      []
+    );
+
+    const big = 'س'.repeat(10000);
+    const save = await browserAiBridge.saveSession({
+      companyId,
+      userId,
+      title: 'جلسة ملخص ضخم',
+      messages: [
+        { id: 'm1', role: 'user', kind: 'text', content: 'تقرير', createdAt: Date.now() },
+        {
+          id: 'm2',
+          role: 'assistant',
+          kind: 'tool',
+          content: '',
+          createdAt: Date.now() + 1,
+          toolCall: {
+            callId: 'c1',
+            toolName: 'sales.invoices_detailed',
+            label: 'تقرير',
+            args: {},
+            status: 'success',
+            dangerLevel: 'read',
+            resultSummary: big,
+          },
+        },
+      ],
+    });
+    expect(save.success).toBe(true);
+    const sid = save.data!.sessionId;
+    const msgs = await browserAiBridge.getSessionMessages({ companyId, sessionId: sid });
+    expect(msgs.success).toBe(true);
+    // NOTE: storage ids are server-generated — locate by kind, not client id.
+    const toolMsg = msgs.data!.find((m) => m.kind === 'tool');
+    const summary = String(toolMsg?.toolCall?.resultSummary || '');
+    expect(summary.length).toBeLessThan(5000);
+    expect(summary).toContain('تم اقتصاص الملخص عند الحفظ');
+
+    await browserAiBridge.deleteSession({ companyId, userId, sessionId: sid });
+  }, 120000);
 });

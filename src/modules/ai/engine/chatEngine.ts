@@ -147,13 +147,15 @@ const STREAM_TOTAL_TIMEOUT_MS = 120_000;
  * degraded (raw text, default context) instead of hanging.
  */
 const PRE_LLM_DEADLINE_MS = 30_000;
-
 /**
  * Race a promise against a wall clock. On expiry the loser is detached
  * (late rejection swallowed) and `fallback` is returned — the caller
  * proceeds degraded instead of hanging. Real rejections propagate.
+ * The timeout is traced + warned with its label so the console tells slow
+ * (deadline-hit logged) apart from stuck (nothing logged at all).
  */
-export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {  let timer: ReturnType<typeof setTimeout>;
+export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T, label = 'op'): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<T>((_, reject) => {
     timer = setTimeout(() => reject(new Error('__deadline__')), ms);
   });
@@ -166,6 +168,8 @@ export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T): Promise<T
   ]).catch((e) => {
     if (e instanceof Error && e.message === '__deadline__') {
       p.catch(() => { /* detached loser stays unobserved */ });
+      console.warn(`[ai] deadline hit: ${label} — proceeding degraded`);
+      traceSend(`deadline-hit:${label}`);
       return fallback;
     }
     throw e;
@@ -410,8 +414,9 @@ class ChatEngine {
       // index 0 of history and is reused on every API call.
       const tools = getVisibleTools();
       const activeSkills = this.activeSkillsForMessage(text);
+      traceSend('prefix-sync-done');
       // Deadline-guarded: a wedged settings read must degrade, not hang.
-      const liveContext = await deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {});
+      const liveContext = await deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {}, 'live-context');
       const systemContent = buildSystemPrompt({ tools, activeSkills, liveContext });
       traceSend('context-ready');
 
@@ -457,6 +462,7 @@ class ChatEngine {
           resolveEntitiesInText(userText, this.ctx.companyId),
           PRE_LLM_DEADLINE_MS,
           null,
+          'entities',
         );
         if (!resolved) {
           console.warn('[ai] entity resolution timed out — proceeding with raw text');
