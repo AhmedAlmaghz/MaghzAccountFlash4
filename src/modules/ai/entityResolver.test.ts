@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveEntitiesInText, clearEntityCache } from './entityResolver';
+import { resolveEntitiesInText, clearEntityCache, needsEntityResolution } from './entityResolver';
 
 vi.mock('@/modules/sales/api', () => ({
   salesApi: {
@@ -179,5 +179,30 @@ describe('entityResolver — guarded auto-correction', () => {
 
     expect(res.corrections).toEqual([]);
     expect(res.text).toBe(text);
+  });
+});
+
+describe('needsEntityResolution — filler gate (no DB fan-out for follow-ups)', () => {
+  it('rejects pure follow-up fillers', () => {
+    expect(needsEntityResolution('استمر')).toBe(false);
+    expect(needsEntityResolution('تمام شكرا')).toBe(false);
+    expect(needsEntityResolution('نعم واصل')).toBe(false);
+    expect(needsEntityResolution('ok thanks')).toBe(false);
+    expect(needsEntityResolution('')).toBe(false);
+  });
+
+  it('accepts messages holding a namable token', () => {
+    expect(needsEntityResolution('أنشئ فاتورة')).toBe(true);
+    expect(needsEntityResolution('سجل فاتورة مبيعات لغدة')).toBe(true);
+    expect(needsEntityResolution('ما هو رصيد حساب المصروفات؟')).toBe(true);
+  });
+
+  it('filler-only follow-ups perform ZERO database queries', async () => {
+    const res = await resolveEntitiesInText('استمر', COMPANY);
+
+    expect(res.corrections).toEqual([]);
+    expect(res.text).toBe('استمر');
+    expect(vi.mocked(salesApi.getCustomersPaginated)).not.toHaveBeenCalled();
+    expect(vi.mocked(purchasesApi.getSuppliersPaginated)).not.toHaveBeenCalled();
   });
 });

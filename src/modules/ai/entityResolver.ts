@@ -632,12 +632,48 @@ const GENERIC_TOKENS = new Set([
 /** Max characters of a defined name zone to protect after a marker. */
 const DEFINITION_ZONE_MAX = 48;
 
+/**
+ * Chat-only tokens that can never reference an entity. A message made solely
+ * of these (e.g. "استمر"، "شكرا"، "تمام") has NOTHING to correct, so
+ * resolution returns immediately WITHOUT any DB query. Without this gate
+ * every follow-up turn paid the blind fan-out (~19 table queries per send);
+ * on slow transports (PGlite on the UI thread) that fan-out is what freezes
+ * the chat on the second message. Entries are NORMALISED (norm folds
+ * alef/hamza/teh-marbuta/alef-maqsura) to match scanned tokens.
+ */
+const CHAT_FILLER_WORDS = new Set([
+  'مرحبا', 'اهلا', 'هلا', 'السلام', 'عليكم', 'سلام',
+  'شكرا', 'مشكور', 'مشكورين', 'عفوا', 'تسلم', 'يسلمو',
+  'نعم', 'اجل', 'ايوه', 'ايه', 'تمام', 'طيب', 'حاضر', 'ابشر', 'سم',
+  'ممتاز', 'احسنت', 'رائع', 'جميل', 'جيد', 'عظيم', 'مذهل',
+  'واصل', 'كمل', 'اكمل', 'استمر', 'تابع', 'التالي', 'تالي', 'اذن', 'حسنا',
+  'اوك', 'اوكي', 'تمامم',
+  'ok', 'okay', 'yes', 'yeah', 'yep', 'thanks', 'thank', 'you', 'hi', 'hello', 'hey',
+  'continue', 'go', 'next', 'done',
+]);
+
+/** True when the message holds at least one token that could name an entity. */
+export function needsEntityResolution(text: string): boolean {
+  if (!text) return false;
+  for (const m of text.matchAll(/[^\s،,.\n؟?!]+/g)) {
+    const nw = norm(m[0]);
+    if (nw.length < 2) continue;
+    if (!/[\u0600-\u06FFa-zA-Z]/.test(nw)) continue;
+    if (!CHAT_FILLER_WORDS.has(nw)) return true;
+  }
+  return false;
+}
+
 export async function resolveEntitiesInText(
   text: string,
   companyId: string,
 ): Promise<ResolvedEntitiesResult> {
   const empty: ResolvedEntitiesResult = { all: [], highConfidence: [], corrections: [], text };
   if (!text || !companyId) return empty;
+
+  // Fast gate: filler-only follow-ups ("استمر"، "شكرا") skip the DB fan-out
+  // entirely — see CHAT_FILLER_WORDS.
+  if (!needsEntityResolution(text)) return empty;
 
   // ── 1. Protected zones: names being DEFINED ("اسمه X …") ──────────────
   const protectedSpans: Array<[number, number]> = [];

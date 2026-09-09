@@ -1093,6 +1093,15 @@ class ChatEngine {
    */
   lastProgressAt = 0;
 
+  /**
+   * Recovery generation: bumped by every recoverStuck(). Long-running async
+   * work (a provider call that finally resolves AFTER the watchdog already
+   * recovered the UI) captures the generation at entry and quietly abandons
+   * its results when it no longer matches — otherwise the late reply lands
+   * on top of the recovered state and confuses the next request.
+   */
+  recoveryCount = 0;
+
   touchProgress(): void {
     this.lastProgressAt = Date.now();
   }
@@ -1116,13 +1125,18 @@ class ChatEngine {
     console.warn('[ai] stall watchdog: no engine progress for', sig.msSinceProgress, 'ms — forcing recovery', sig);
     this.abortRequested = true;
     this.failedWriteAttempts.clear();
+    this.recoveryCount++;
     this.store().addMessage({ role: 'assistant', kind: 'error', content: message });
     this.store().setProcessing(false);
     this.touchProgress();
   }
 
   async runLoop(): Promise<void> {
+    // Orphaned work from before a watchdog recovery must die quietly —
+    // its results belong to a session the UI already moved past.
+    const myEpoch = this.recoveryCount;
     while (this.iterationCount < MAX_ITERATIONS) {
+      if (myEpoch !== this.recoveryCount) return;
       // User pressed stop between turns — end the loop gracefully.
       if (this.consumeAbort()) {
         this.emitStoppedNotice();
@@ -1227,6 +1241,7 @@ class ChatEngine {
         } else {
           // Empty stream — fall back to non-streaming, remove placeholder
           this.store().removeMessage(streamingId);
+          this.touchProgress();
           response = await aiApi.complete({
             companyId: this.ctx.companyId,
             messages: this.buildMessages(),
@@ -1234,12 +1249,14 @@ class ChatEngine {
             temperature: 0.2,
             maxTokens: MAX_COMPLETION_TOKENS,
           });
+          this.touchProgress();
         }
       } catch {
         // Streaming failed — remove placeholder, fall back to non-streaming
         if (streamingId) {
           this.store().removeMessage(streamingId);
         }
+        this.touchProgress();
         response = await aiApi.complete({
           companyId: this.ctx.companyId,
           messages: this.buildMessages(),
@@ -1247,7 +1264,12 @@ class ChatEngine {
           temperature: 0.2,
           maxTokens: MAX_COMPLETION_TOKENS,
         });
+        this.touchProgress();
       }
+
+      // A watchdog recovery happened while the provider call was in flight —
+      // drop its results instead of writing them over the recovered state.
+      if (myEpoch !== this.recoveryCount) return;
 
       if (!response.success || !response.data) {
         this.store().addMessage({
@@ -1364,6 +1386,8 @@ class ChatEngine {
           return { tc, outcome };
         })
       );
+      if (myEpoch !== this.recoveryCount) return;
+      this.touchProgress();
 
       for (const { tc, outcome } of readOutcomes) {
         const summary = outcome.ok ? summarizeResult(outcome.result) : (outcome.error ?? 'خطأ');

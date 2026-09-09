@@ -80,6 +80,7 @@ describe('stall heartbeat + recovery', () => {
       const engine = getChatEngine();
       useAiStore.getState().setProcessing(true);
       engine.lastProgressAt = Date.now() - 200_000;
+      const before = engine.recoveryCount;
 
       engine.recoverStuck('رسالة الاسترداد');
 
@@ -89,6 +90,7 @@ describe('stall heartbeat + recovery', () => {
       expect(last.role).toBe('assistant');
       expect(last.kind).toBe('error');
       expect(last.content).toBe('رسالة الاسترداد');
+      expect(engine.recoveryCount).toBe(before + 1);
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();
