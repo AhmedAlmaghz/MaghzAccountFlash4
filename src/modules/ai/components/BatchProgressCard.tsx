@@ -68,10 +68,29 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
   const active = detail !== null && !isTerminalBatchStatus(detail.status) && !TERMINAL.has(detail.status);
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => {
-      void load();
-    }, 3000);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // Sequential polling (never setInterval): the next poll is scheduled
+    // ONLY after the previous one settles. Overlapping polls under a slow
+    // DB pile up IPC/WASM work into a jank spiral that feels like a freeze.
+    // Hidden tabs don't poll at all.
+    const tick = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(tick, 3000);
+        return;
+      }
+      try {
+        await load();
+      } finally {
+        if (!cancelled) timer = setTimeout(tick, 3000);
+      }
+    };
+    timer = setTimeout(tick, 3000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [active, load]);
 
   const act = useCallback(async (name: string, fn: () => Promise<{ success: boolean; error?: string }>) => {

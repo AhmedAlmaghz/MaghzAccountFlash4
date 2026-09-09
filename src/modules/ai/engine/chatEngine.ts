@@ -130,6 +130,16 @@ const MAX_ITERATIONS = 10;
 const MAX_COMPLETION_TOKENS = 10240;
 
 /**
+ * Hard ceiling for one streaming round-trip. The main process already aborts
+ * provider stalls at 90s, but if the done-event itself is lost (dead IPC,
+ * destroyed sender, bridge glitch) the renderer's `for await` would wait
+ * FOREVER — isProcessing stuck, every later send ignored, app "frozen".
+ * This watchdog abandons the drain and falls through to the non-streaming
+ * fallback instead. Must exceed the main-process 90s abort.
+ */
+const STREAM_TOTAL_TIMEOUT_MS = 120_000;
+
+/**
  * Remove fake tool-execution blocks that some models imitate from the
  * flattened-history format (e.g. `[تم تنفيذ: search.accounts] {...}` or
  * `[TOOL_RESULT: search.accounts] {...}`). A model writing one of these
@@ -1074,29 +1084,50 @@ class ChatEngine {
           else setTimeout(run, 16);
         };
 
-        for await (const chunk of streamGen) {
-          // Stop button: finalize the partial text and end the request.
-          if (this.abortRequested) {
-            this.abortRequested = false;
-            // Drain the generator so its cleanup (listener removal) runs.
-            void streamGen.return?.({ success: false, error: 'stopped' }).catch(() => {});
-            if (streamedContent && streamingId) {
-              this.store().updateMessageContent(streamingId, stripImitationToolBlocks(contentAcc));
+        // Stream watchdog: race the drain against a hard ceiling. A stuck
+        // `for await` (lost done-event, dead IPC, hung provider) can NOT be
+        // freed by generator.return() — a pending next() stays pending — so
+        // the timed-out drain is ABANDONED, not awaited. Its late settlement,
+        // if any, only touches the placeholder id + local array: harmless
+        // after we fall through to the complete() fallback below.
+        // Returns 'stopped' when the user pressed stop mid-stream.
+        const drainStream = async (): Promise<'drained' | 'stopped'> => {
+          for await (const chunk of streamGen) {
+            // Stop button: finalize the partial text and end the request.
+            if (this.abortRequested) {
+              this.abortRequested = false;
+              // Drain the generator so its cleanup (listener removal) runs.
+              void streamGen.return?.({ success: false, error: 'stopped' }).catch(() => {});
+              if (streamedContent && streamingId) {
+                this.store().updateMessageContent(streamingId, stripImitationToolBlocks(contentAcc));
+              }
+              return 'stopped';
             }
-            this.store().addMessage({
-              role: 'assistant',
-              kind: 'text',
-              content: '⏹️ أوقفت التوليد بطلبك — المحتوى أعلاه جزئي.',
-            });
-            return;
+            chunks.push(chunk);
+            // Progressively update the text content as chunks arrive
+            if (chunk.type === 'content' && chunk.content) {
+              streamedContent = true;
+              contentAcc += chunk.content;
+              scheduleFlush();
+            }
           }
-          chunks.push(chunk);
-          // Progressively update the text content as chunks arrive
-          if (chunk.type === 'content' && chunk.content) {
-            streamedContent = true;
-            contentAcc += chunk.content;
-            scheduleFlush();
-          }
+          return 'drained';
+        };
+        const drainOutcome = await Promise.race([
+          drainStream(),
+          new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), STREAM_TOTAL_TIMEOUT_MS)),
+        ]);
+        if (drainOutcome === 'timeout') {
+          void streamGen.return?.({ success: false, error: 'stream timeout' }).catch(() => {});
+          throw new Error('انتهت مهلة البث (120 ثانية) دون اكتمال — تم التحويل للطلب المباشر');
+        }
+        if (drainOutcome === 'stopped') {
+          this.store().addMessage({
+            role: 'assistant',
+            kind: 'text',
+            content: '⏹️ أوقفت التوليد بطلبك — المحتوى أعلاه جزئي.',
+          });
+          return;
         }
 
         if (chunks.length > 0) {

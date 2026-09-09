@@ -24,10 +24,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Per-attempt ceiling for PGlite boot. `waitReady` has no built-in timeout —
+ * on an IDB lock or a thrashed disk it can stall forever, freezing the whole
+ * app at the spinner with zero feedback. The retry loop in getInstance turns
+ * this rejection into another attempt, then a named error.
+ */
+const PG_BOOT_TIMEOUT_MS = 30_000;
+
 async function openInstance(): Promise<PGlite> {
   const dataDir = isBrowserIndexedDB() ? 'idb://maghzaccount-pglite' : undefined;
   const instance = new PGlite({ dataDir });
-  await instance.waitReady;
+  await Promise.race([
+    instance.waitReady,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`PGlite boot timed out after ${PG_BOOT_TIMEOUT_MS / 1000}s (IndexedDB lock?)`)), PG_BOOT_TIMEOUT_MS),
+    ),
+  ]);
   return instance;
 }
 
