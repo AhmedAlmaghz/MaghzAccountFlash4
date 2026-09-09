@@ -74,4 +74,50 @@ describe('browser AI bridge (PGlite)', () => {
     const list2 = await browserAiBridge.listSessions({ companyId, userId });
     expect(list2.data?.find((x) => x.id === save.data!.sessionId)).toBeUndefined();
   }, 120000);
+
+  it('autosaves never clobber a user-renamed title', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    const userId = seed.adminId!;
+    useAuthStore.getState().login(
+      { id: userId, companyId, username: 'admin', email: 'admin@demo.ye', role: 'admin', isActive: true },
+      []
+    );
+
+    const first = await browserAiBridge.saveSession({
+      companyId,
+      userId,
+      title: 'عنوان تلقائي',
+      messages: [
+        { id: 'm1', role: 'user', kind: 'text', content: 'مرحبا', createdAt: Date.now() },
+      ],
+    });
+    expect(first.success).toBe(true);
+    const sid = first.data!.sessionId;
+
+    // User renames the session, then an autosave fires with a derived title:
+    const renamed = await browserAiBridge.renameSession({ companyId, userId, sessionId: sid, title: 'اسمي المخصص' });
+    expect(renamed.success).toBe(true);
+    const autosave = await browserAiBridge.saveSession({
+      companyId,
+      userId,
+      sessionId: sid,
+      title: 'عنوان مشتق جديد',
+      messages: [
+        { id: 'm1', role: 'user', kind: 'text', content: 'مرحبا', createdAt: Date.now() },
+        { id: 'm2', role: 'assistant', kind: 'text', content: 'أهلا بك', createdAt: Date.now() + 1 },
+      ],
+    });
+    expect(autosave.success).toBe(true);
+    expect(autosave.data?.sessionId).toBe(sid);
+
+    const list = await browserAiBridge.listSessions({ companyId, userId });
+    const s = list.data!.find((x) => x.id === sid);
+    expect(s).toBeDefined();
+    expect(s!.title).toBe('اسمي المخصص');
+    expect(s!.messageCount).toBe(2);
+
+    await browserAiBridge.deleteSession({ companyId, userId, sessionId: sid });
+  }, 120000);
 });

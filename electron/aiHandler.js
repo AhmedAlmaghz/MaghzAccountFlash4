@@ -426,10 +426,13 @@ function messageRowParams(companyId, sid, m, sortOrder) {
     Array.isArray(m.attachments) && m.attachments.length > 0 ? JSON.stringify(m.attachments) : null,
     sortOrder,
     new Date(m.createdAt).toISOString(),
-  ];
+];
 }
 
-/** Replace-all save: upsert session header, then rewrite its messages atomically. */
+/** Replace-all save: upsert session header, then rewrite its messages atomically.
+ * Title is written on INSERT only — renameSession is the sole title writer.
+ * Autosaves always rewrite title from deriveTitle, so writing it on UPDATE
+ * would silently clobber every user rename on the next background save. */
 async function persistSession({ companyId, userId, sessionId, title, messages }) {
   const pool = getPool();
   if (!pool) throw new Error('Database not available');
@@ -442,10 +445,10 @@ async function persistSession({ companyId, userId, sessionId, title, messages })
     if (sid) {
       const upd = await client.query(
         `UPDATE ai_chat_sessions
-            SET title = $3, message_count = $4, updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $5::uuid
+            SET message_count = $3, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid
         RETURNING id`,
-        [sid, companyId, title, messages.length, userId]
+        [sid, companyId, messages.length, userId]
       );
       if (upd.rows.length === 0) sid = null; // stale/foreign session — create new
     }
@@ -604,7 +607,10 @@ export function registerAiHandlers() {
       if (!isValidMessages(messages)) return { success: false, error: 'messages must be a non-empty array' };
       if (Array.isArray(tools) && tools.length > 50) return { success: false, error: 'too many tools' };
       if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)) return { success: false, error: 'invalid temperature' };
-      if (maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 4096)) return { success: false, error: 'invalid maxTokens' };
+      // Aligned with the renderer's unified MAX_COMPLETION_TOKENS (10240):
+      // long analytical reports legitimately need it; the provider enforces
+      // its own model maximum anyway.
+      if (maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 10240)) return { success: false, error: 'invalid maxTokens' };
 
       const settings = await readAiSettings(companyId);
       if (settings[ENABLED_SETTING] === 'false') {
@@ -630,43 +636,74 @@ export function registerAiHandlers() {
     }
   });
 
-  // Push-based streaming completion — chunks are sent individually via
-  // event.sender.send so the renderer can update the UI in real-time.
+  // Push-based streaming completion — chunks are sent individually so the
+  // renderer can update the UI in real-time. Every stream carries a unique
+  // renderer-generated id and talks on its OWN channels
+  // (ai:stream-chunk:<id> / ai:stream-done:<id>): a stale or abandoned
+  // stream (stop-then-resend, watchdog timeout) can never spray chunks into
+  // — or end — a newer stream on the old shared channels.
+  // Abandoned loops are stopped via 'ai:stop-stream' (checked per chunk)
+  // instead of running to the provider timeout and wasting sockets.
+  const cancelledStreams = new Set();
+  function cancelStream(id) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 64) return;
+    cancelledStreams.add(id);
+    if (cancelledStreams.size > 200) {
+      const oldest = cancelledStreams.values().next().value;
+      cancelledStreams.delete(oldest);
+    }
+  }
+  function isValidStreamId(id) {
+    return typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id);
+  }
+  ipcMain.on('ai:stop-stream', (event, payload = {}) => {
+    const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+    if (!auth.ok) return;
+    cancelStream(payload.streamId);
+  });
   ipcMain.on('ai:start-stream', async (event, payload = {}) => {
+    const streamId = isValidStreamId(payload.streamId) ? payload.streamId : null;
+    const chunkCh = streamId ? `ai:stream-chunk:${streamId}` : 'ai:stream-chunk';
+    const doneCh = streamId ? `ai:stream-done:${streamId}` : 'ai:stream-done';
+    const sendChunk = (chunk) => event.sender.send(chunkCh, chunk);
+    const sendDone = (result) => event.sender.send(doneCh, result);
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
       if (!auth.ok) {
-        event.sender.send('ai:stream-done', auth);
+        sendDone(auth);
         return;
       }
       const companyId = auth.session.user.companyId;
       const { messages, tools, temperature, maxTokens } = payload;
       if (!isValidMessages(messages)) {
-        event.sender.send('ai:stream-done', { success: false, error: 'messages must be a non-empty array' });
+        sendDone({ success: false, error: 'messages must be a non-empty array' });
         return;
       }
       if (Array.isArray(tools) && tools.length > 50) {
-        event.sender.send('ai:stream-done', { success: false, error: 'too many tools' });
+        sendDone({ success: false, error: 'too many tools' });
         return;
       }
       if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
-        event.sender.send('ai:stream-done', { success: false, error: 'invalid temperature' });
+        sendDone({ success: false, error: 'invalid temperature' });
         return;
       }
-      if (maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 4096)) {
-        event.sender.send('ai:stream-done', { success: false, error: 'invalid maxTokens' });
+      // Aligned with the renderer's unified MAX_COMPLETION_TOKENS (10240):
+      // long analytical reports legitimately need it; the provider enforces
+      // its own model maximum anyway.
+      if (maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 10240)) {
+        sendDone({ success: false, error: 'invalid maxTokens' });
         return;
       }
 
       const settings = await readAiSettings(companyId);
       if (settings[ENABLED_SETTING] === 'false') {
-        event.sender.send('ai:stream-done', { success: false, error: 'المساعد الذكي معطّل — فعّله من إعدادات الذكاء الاصطناعي' });
+        sendDone({ success: false, error: 'المساعد الذكي معطّل — فعّله من إعدادات الذكاء الاصطناعي' });
         return;
       }
 
       const apiKey = await resolveApiKey(companyId);
       if (!apiKey) {
-        event.sender.send('ai:stream-done', { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' });
+        sendDone({ success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' });
         return;
       }
 
@@ -681,11 +718,18 @@ export function registerAiHandlers() {
       });
 
       for await (const chunk of stream) {
-        event.sender.send('ai:stream-chunk', chunk);
+        // Renderer moved on (stop button / watchdog timeout): stop provider
+        // traffic instead of spraying chunks into nobody — or worse, into a
+        // NEWER stream sharing the channel.
+        if (streamId && cancelledStreams.has(streamId)) {
+          cancelledStreams.delete(streamId);
+          return;
+        }
+        sendChunk(chunk);
       }
-      event.sender.send('ai:stream-done', { success: true });
+      sendDone({ success: true });
     } catch (err) {
-      event.sender.send('ai:stream-done', { success: false, error: err.message });
+      sendDone({ success: false, error: err.message });
     }
   });
 

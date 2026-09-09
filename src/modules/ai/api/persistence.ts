@@ -96,8 +96,15 @@ async function runSave(): Promise<void> {
     messages: snapshot,
   });
   if (res.success && res.data?.sessionId) {
-    setSessionId(res.data.sessionId);
-    lastSavedFingerprint = snapshotFingerprint(res.data.sessionId, snapshot);
+    // Stamp the id ONLY if the store still holds the conversation we saved.
+    // handleNewChat/handleSelectSession fire-and-forget a save and switch
+    // immediately; stamping afterwards would attach the OLD session id to the
+    // NEW conversation, and the next save would then DELETE the old session's
+    // messages and overwrite its row — sessions silently merging/dying.
+    if (useAiStore.getState().sessionId === sessionId) {
+      setSessionId(res.data.sessionId);
+      lastSavedFingerprint = snapshotFingerprint(res.data.sessionId, snapshot);
+    }
   }
 }
 

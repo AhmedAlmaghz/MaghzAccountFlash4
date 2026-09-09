@@ -53,10 +53,25 @@ interface ElectronAI {
     tools?: LlmTool[];
     temperature?: number;
     maxTokens?: number;
+    streamId?: string;
   }) => void;
   onStreamChunk: (callback: StreamChunkCallback) => void;
   onStreamDone: (callback: StreamDoneCallback) => void;
   removeStreamListeners: () => void;
+  /**
+   * Per-stream subscription (preferred over the legacy global trio above).
+   * Each stream gets its own channel/handlers so a stale or abandoned stream
+   * can never deliver chunks into — or wipe the listeners of — another one.
+   * Returns an unsubscribe function. Optional for bridges that predate it
+   * (e2e stub, older preloads) — the generator falls back to the legacy path.
+   */
+  subscribeStream?: (
+    streamId: string,
+    onChunk: StreamChunkCallback,
+    onDone: StreamDoneCallback,
+  ) => () => void;
+  /** Ask the host to abort a live stream early (stops provider traffic). */
+  stopStream?: (payload: { streamId: string }) => void;
   listSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<AiChatSessionSummary[]>>;
   getSessionMessages: (payload: { companyId: string; sessionId: string }) => Promise<IpcResult<ChatMessage[]>>;
   saveSession: (payload: AiSaveSessionPayload) => Promise<IpcResult<{ sessionId: string }>>;
@@ -104,6 +119,18 @@ function loadBrowserBridge() {
 function bridge(): ElectronAI | null {
   if (typeof window !== 'undefined' && window.electronAI) return window.electronAI;
   return null;
+}
+
+/**
+ * Unique stream id (crypto when available — randomUUID is undefined in
+ * insecure browsing contexts, hence the fallback).
+ */
+function newStreamId(): string {
+  try {
+    const c = globalThis.crypto as Crypto | undefined;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  } catch { /* fall through to the Math fallback */ }
+  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /**
@@ -177,11 +204,52 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     temperature?: number;
     maxTokens?: number;
   }): AsyncGenerator<LlmStreamChunk, { success: boolean; error?: string }, void> {
+    // Unique id per stream: isolates concurrent/stale streams (stop-then-
+    // resend, watchdog-abandoned loops) so late chunks from stream A can
+    // never land in stream B's queue or end it prematurely.
+    const streamId = newStreamId();
     let b: ElectronAI | null = null;
     let done = false;
     let doneResult: { success: boolean; error?: string } = { success: false, error: 'stream ended unexpectedly' };
     const queue: LlmStreamChunk[] = [];
     let resolveNext: ((value: LlmStreamChunk | { __done__: true; result: { success: boolean; error?: string } }) => void) | null = null;
+    let unsubscribe: (() => void) | null = null;
+    let settled = false;
+
+    const routeChunk = (chunk: LlmStreamChunk) => {
+      if (resolveNext) {
+        const r = resolveNext;
+        resolveNext = null;
+        r(chunk);
+      } else {
+        queue.push(chunk);
+      }
+    };
+    const routeDone = (result: { success: boolean; error?: string }) => {
+      done = true;
+      doneResult = result;
+      if (resolveNext) {
+        const r = resolveNext;
+        resolveNext = null;
+        r({ __done__: true, result });
+      }
+    };
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (unsubscribe) {
+        try { unsubscribe(); } catch { /* ignore */ }
+        unsubscribe = null;
+      } else if (b) {
+        try { b.removeStreamListeners(); } catch { /* ignore */ }
+      }
+      resolveNext = null;
+    };
+    // Tell the host to stop provider traffic for an abandoned stream.
+    // Fire-and-forget: never block generator teardown on IPC.
+    const cancelRemote = () => {
+      try { b?.stopStream?.({ streamId }); } catch { /* ignore */ }
+    };
 
     const generator: AsyncGenerator<LlmStreamChunk, { success: boolean; error?: string }, void> = {
       [Symbol.asyncIterator]() {
@@ -189,6 +257,7 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
       },
       async next() {
         // Lazily resolve the bridge on first pull (allows async init).
+        // Listeners are registered BEFORE startStream so no chunk is missed.
         if (!b) {
           b = await getEffectiveBridge();
           if (!b) {
@@ -197,7 +266,14 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
               done: true;
             };
           }
-          b.startStream(payload);
+          if (typeof b.subscribeStream === 'function') {
+            unsubscribe = b.subscribeStream(streamId, routeChunk, routeDone);
+          } else {
+            // Legacy bridges (older preloads, e2e stub): shared channel.
+            b.onStreamChunk(routeChunk);
+            b.onStreamDone(routeDone);
+          }
+          b.startStream({ ...payload, streamId });
         }
 
         while (true) {
@@ -206,54 +282,30 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
             return { value: chunk, done: false };
           }
           if (done) {
-            b.removeStreamListeners();
+            cleanup();
             return { value: doneResult, done: true } as { value: { success: boolean; error?: string }; done: true };
           }
           const item = await new Promise<LlmStreamChunk | { __done__: true; result: { success: boolean; error?: string } }>(
             (resolve) => { resolveNext = resolve; }
           );
           if ('__done__' in item) {
-            b.removeStreamListeners();
+            cleanup();
             return { value: item.result, done: true };
           }
           return { value: item, done: false };
         }
       },
       async return() {
-        if (b) b.removeStreamListeners();
-        resolveNext = null;
+        cleanup();
+        cancelRemote();
         return { value: { success: false, error: 'stream cancelled' }, done: true };
       },
       async throw(err) {
-        if (b) b.removeStreamListeners();
-        resolveNext = null;
+        cleanup();
+        cancelRemote();
         return { value: { success: false, error: String(err) }, done: true };
       },
     };
-
-    // Register listeners immediately so no chunks are missed while the
-    // bridge resolves asynchronously.
-    void getEffectiveBridge().then((resolved) => {
-      if (!resolved) return;
-      resolved.onStreamChunk((chunk) => {
-        if (resolveNext) {
-          const r = resolveNext;
-          resolveNext = null;
-          r(chunk);
-        } else {
-          queue.push(chunk);
-        }
-      });
-      resolved.onStreamDone((result) => {
-        done = true;
-        doneResult = result;
-        if (resolveNext) {
-          const r = resolveNext;
-          resolveNext = null;
-          r({ __done__: true, result });
-        }
-      });
-    });
 
     return generator;
   },

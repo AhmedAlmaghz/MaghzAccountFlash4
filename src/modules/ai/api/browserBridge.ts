@@ -105,6 +105,18 @@ async function readAiSettings(companyId: string): Promise<Record<string, string>
   return map;
 }
 
+/** Settings read with a hard ceiling: a wedged local DB must surface an
+ * honest error, never an eternal spinner with no chunks and no done. */
+const SETTINGS_TIMEOUT_MS = 15_000;
+async function readAiSettingsFast(companyId: string): Promise<Record<string, string>> {
+  return await Promise.race([
+    readAiSettings(companyId),
+    new Promise<Record<string, string>>((_, reject) =>
+      setTimeout(() => reject(new Error('انتهت مهلة قراءة إعدادات الذكاء الاصطناعي — تحقق من قاعدة البيانات المحلية وحاول مجدداً')), SETTINGS_TIMEOUT_MS),
+    ),
+  ]);
+}
+
 async function upsertAiSetting(companyId: string, key: string, value: string): Promise<void> {
   const adapter = await getDbAdapter();
   await adapter.query(
@@ -217,19 +229,33 @@ function safeParseArgs(raw: unknown): Record<string, unknown> {
 type ChunkCallback = (chunk: LlmStreamChunk) => void;
 type DoneCallback = (result: { success: boolean; error?: string }) => void;
 
-let chunkCallback: ChunkCallback | null = null;
-let doneCallback: DoneCallback | null = null;
-let streamAbort: AbortController | null = null;
+// Per-stream routing: each stream owns its handlers + AbortController so a
+// stale/abandoned stream can never deliver into — or abort — another one.
+// The 'legacy' key preserves the old singleton behavior for callers that
+// predate stream ids.
+const streamSubs = new Map<string, { onChunk?: ChunkCallback; onDone?: DoneCallback }>();
+const streamControllers = new Map<string, AbortController>();
+const LEGACY_STREAM_KEY = 'legacy';
 
-function emitChunk(chunk: LlmStreamChunk): void {
-  if (chunkCallback) chunkCallback(chunk);
+function emitChunk(chunk: LlmStreamChunk, streamId?: string): void {
+  const sub = streamSubs.get(streamId || LEGACY_STREAM_KEY);
+  if (sub?.onChunk) sub.onChunk(chunk);
 }
 
-function emitDone(result: { success: boolean; error?: string }): void {
-  if (doneCallback) doneCallback(result);
+function emitDone(result: { success: boolean; error?: string }, streamId?: string): void {
+  const sub = streamSubs.get(streamId || LEGACY_STREAM_KEY);
+  if (sub?.onDone) sub.onDone(result);
 }
 
-async function runStream(opts: CallOptions): Promise<void> {
+function trackController(streamId: string | undefined, controller: AbortController): void {
+  streamControllers.set(streamId || LEGACY_STREAM_KEY, controller);
+}
+
+function untrackController(streamId: string | undefined): void {
+  streamControllers.delete(streamId || LEGACY_STREAM_KEY);
+}
+
+async function runStream(opts: CallOptions & { streamId?: string }): Promise<void> {
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: opts.messages,
@@ -244,7 +270,7 @@ async function runStream(opts: CallOptions): Promise<void> {
   }
 
   const controller = new AbortController();
-  streamAbort = controller;
+  trackController(opts.streamId, controller);
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/chat/completions`, {
@@ -260,7 +286,7 @@ async function runStream(opts: CallOptions): Promise<void> {
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       const msg = text?.slice(0, 300) || `HTTP ${res.status}`;
-      emitDone({ success: false, error: `LLM provider error (${res.status}): ${msg}` });
+      emitDone({ success: false, error: `LLM provider error (${res.status}): ${msg}` }, opts.streamId);
       return;
     }
 
@@ -302,32 +328,35 @@ async function runStream(opts: CallOptions): Promise<void> {
             if (chunk.usage) finalUsage = chunk.usage;
 
             if (delta.content) {
-              emitChunk({ type: 'content', content: delta.content });
+              emitChunk({ type: 'content', content: delta.content }, opts.streamId);
             }
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
-                emitChunk({
-                  type: 'tool_call_delta',
-                  toolCall: {
-                    index: tc.index ?? 0,
-                    id: tc.id,
-                    function: tc.function
-                      ? {
-                          name: tc.function.name,
-                          arguments: tc.function.arguments,
-                          thought_signature: tc.function.thought_signature,
-                        } as { name?: string; arguments?: string; thought_signature?: string }
-                      : undefined,
+                emitChunk(
+                  {
+                    type: 'tool_call_delta',
+                    toolCall: {
+                      index: tc.index ?? 0,
+                      id: tc.id,
+                      function: tc.function
+                        ? {
+                            name: tc.function.name,
+                            arguments: tc.function.arguments,
+                            thought_signature: tc.function.thought_signature,
+                          } as { name?: string; arguments?: string; thought_signature?: string }
+                        : undefined,
+                    },
                   },
-                });
+                  opts.streamId,
+                );
               }
             }
             const ts = delta.thought_signature || chunk.thought_signature || choice?.thought_signature;
             if (ts) {
-              emitChunk({ type: 'tool_call_extra', thoughtSignature: ts });
+              emitChunk({ type: 'tool_call_extra', thoughtSignature: ts }, opts.streamId);
             }
             if (finishReason) {
-              emitChunk({ type: 'finish', finishReason, usage: finalUsage });
+              emitChunk({ type: 'finish', finishReason, usage: finalUsage }, opts.streamId);
             }
           } catch {
             // ignore malformed chunks
@@ -338,16 +367,16 @@ async function runStream(opts: CallOptions): Promise<void> {
       reader.releaseLock();
     }
 
-    emitDone({ success: true });
+    emitDone({ success: true }, opts.streamId);
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
-      emitDone({ success: false, error: 'انتهت مهلة الاتصال بمزود الذكاء الاصطناعي (timeout)' });
+      emitDone({ success: false, error: 'انتهت مهلة الاتصال بمزود الذكاء الاصطناعي (timeout)' }, opts.streamId);
     } else {
-      emitDone({ success: false, error: `تعذر الاتصال بمزود الذكاء الاصطناعي: ${(err as Error).message}` });
+      emitDone({ success: false, error: `تعذر الاتصال بمزود الذكاء الاصطناعي: ${(err as Error).message}` }, opts.streamId);
     }
   } finally {
     clearTimeout(timer);
-    streamAbort = null;
+    untrackController(opts.streamId);
   }
 }
 
@@ -413,13 +442,16 @@ async function persistSession(payload: AiSaveSessionPayload): Promise<string> {
   const safeTitle = typeof title === 'string' ? title.slice(0, 200) : null;
 
   let sid: string | null = sessionId || null;
+  // Title is written on INSERT only: renameSession is the sole title writer
+  // (autosaves always rewrite title from deriveTitle, so updating it here
+  // would silently clobber every user rename on the next background save).
   if (sid) {
     const upd = await adapter.query(
       `UPDATE ai_chat_sessions
-          SET title = $3, message_count = $4, updated_at = NOW()
-        WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $5::uuid
+          SET message_count = $3, updated_at = NOW()
+        WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $4::uuid
         RETURNING id`,
-      [sid, companyId, safeTitle, messages.length, userId]
+      [sid, companyId, messages.length, userId]
     );
     if (!upd.success || !upd.rows || upd.rows.length === 0) sid = null;
   }
@@ -482,7 +514,7 @@ async function persistSession(payload: AiSaveSessionPayload): Promise<string> {
 export const browserAiBridge = {
   async getConfig(companyId: string): Promise<{ success: boolean; data?: AiPublicConfig; error?: string }> {
     try {
-      const settings = await readAiSettings(companyId);
+      const settings = await readAiSettingsFast(companyId);
       const apiKey = settings[KEY_SETTING] || null;
       return {
         success: true,
@@ -523,7 +555,7 @@ export const browserAiBridge = {
     apiKey?: string;
   }): Promise<{ success: boolean; data?: { model: string }; error?: string }> {
     try {
-      const settings = await readAiSettings(payload.companyId);
+      const settings = await readAiSettingsFast(payload.companyId);
       const apiKey = payload.apiKey || settings[KEY_SETTING];
       if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
       const baseUrl = payload.baseUrl || settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
@@ -551,7 +583,7 @@ export const browserAiBridge = {
     maxTokens?: number;
   }): Promise<{ success: boolean; data?: LlmCompletionData; error?: string }> {
     try {
-      const settings = await readAiSettings(payload.companyId);
+      const settings = await readAiSettingsFast(payload.companyId);
       const apiKey = settings[KEY_SETTING];
       if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
       const baseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
@@ -577,13 +609,17 @@ export const browserAiBridge = {
     tools?: LlmTool[];
     temperature?: number;
     maxTokens?: number;
+    streamId?: string;
   }): void {
     void (async () => {
       try {
-        const settings = await readAiSettings(payload.companyId);
+        // A wedged local DB must never hang the chat silently (no chunks, no
+        // done, spinner forever): bound the settings read, then let the
+        // provider call's own timeout own the rest of the budget.
+        const settings = await readAiSettingsFast(payload.companyId);
         const apiKey = settings[KEY_SETTING];
         if (!apiKey) {
-          emitDone({ success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' });
+          emitDone({ success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' }, payload.streamId);
           return;
         }
         const baseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
@@ -596,28 +632,57 @@ export const browserAiBridge = {
           tools: payload.tools,
           temperature: payload.temperature,
           maxTokens: payload.maxTokens,
+          streamId: payload.streamId,
         });
       } catch (err) {
-        emitDone({ success: false, error: (err as Error).message });
+        emitDone({ success: false, error: (err as Error).message }, payload.streamId);
       }
     })();
   },
 
   onStreamChunk(callback: ChunkCallback): void {
-    chunkCallback = callback;
+    const prev = streamSubs.get(LEGACY_STREAM_KEY) || {};
+    streamSubs.set(LEGACY_STREAM_KEY, { ...prev, onChunk: callback });
   },
 
   onStreamDone(callback: DoneCallback): void {
-    doneCallback = callback;
+    const prev = streamSubs.get(LEGACY_STREAM_KEY) || {};
+    streamSubs.set(LEGACY_STREAM_KEY, { ...prev, onDone: callback });
   },
 
   removeStreamListeners(): void {
-    chunkCallback = null;
-    doneCallback = null;
-    if (streamAbort) {
-      try { streamAbort.abort(); } catch { /* ignore */ }
-      streamAbort = null;
+    streamSubs.delete(LEGACY_STREAM_KEY);
+    const controller = streamControllers.get(LEGACY_STREAM_KEY);
+    if (controller) {
+      try { controller.abort(); } catch { /* ignore */ }
+      streamControllers.delete(LEGACY_STREAM_KEY);
     }
+  },
+
+  /**
+   * Per-stream subscription: routes only this stream's chunks/done to the
+   * handlers. Returns an unsubscribe that also aborts the stream's fetch.
+   */
+  subscribeStream(streamId: string, onChunk: ChunkCallback, onDone: DoneCallback): () => void {
+    streamSubs.set(streamId, { onChunk, onDone });
+    return () => {
+      streamSubs.delete(streamId);
+      const controller = streamControllers.get(streamId);
+      if (controller) {
+        try { controller.abort(); } catch { /* ignore */ }
+        streamControllers.delete(streamId);
+      }
+    };
+  },
+
+  /** Abort a single live stream without touching the others. */
+  stopStream(payload: { streamId: string }): void {
+    const controller = streamControllers.get(payload.streamId);
+    if (controller) {
+      try { controller.abort(); } catch { /* ignore */ }
+      streamControllers.delete(payload.streamId);
+    }
+    streamSubs.delete(payload.streamId);
   },
 
   async listSessions(payload: { companyId: string; userId: string }): Promise<{ success: boolean; data?: AiChatSessionSummary[]; error?: string }> {

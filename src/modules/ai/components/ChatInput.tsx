@@ -221,7 +221,13 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
   const handleSend = useCallback(() => {
     if (speech.isListening) speech.stop();
     const trimmed = value.trim();
-    if ((!trimmed && attachments.length === 0) || disabled || isProcessing) return;
+    // While the engine is busy the request would be silently dropped by the
+    // isProcessing guard — tell the user why instead of swallowing Enter.
+    if (isProcessing) {
+      useToastStore.getState().addToast('info', t('ai.busySend'));
+      return;
+    }
+    if ((!trimmed && attachments.length === 0) || disabled) return;
     const outgoing = attachmentsRef.current;
     onSend(trimmed, outgoing);
     // Binaries are single-use: the send consumed them (engine holds dataUrls
@@ -236,7 +242,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [value, attachments.length, disabled, isProcessing, onSend, speech]);
+  }, [value, attachments.length, disabled, isProcessing, onSend, speech, t]);
 
   // ── Keyboard handling ──────────────────────────────────────────────────────
 

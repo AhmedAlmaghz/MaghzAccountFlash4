@@ -208,8 +208,24 @@ contextBridge.exposeInMainWorld('electronAI', {
   saveConfig: (payload) => ipcRenderer.invoke('ai:save-config', { ...payload, sessionToken }),
   testConnection: (payload) => ipcRenderer.invoke('ai:test-connection', { ...payload, sessionToken }),
   complete: (payload) => ipcRenderer.invoke('ai:complete', { ...payload, sessionToken }),
-  // Push-based streaming — start the stream, then listen for chunks and done events
+  // Push-based streaming — each stream gets a unique id and its own IPC
+  // channels so a stale/abandoned stream can never deliver chunks into, or
+  // wipe the listeners of, another one (stop-then-resend used to corrupt
+  // the new stream via the old shared 'ai:stream-chunk' channel).
   startStream: (payload) => ipcRenderer.send('ai:start-stream', { ...payload, sessionToken }),
+  subscribeStream: (streamId, onChunk, onDone) => {
+    const chunkCh = `ai:stream-chunk:${streamId}`;
+    const doneCh = `ai:stream-done:${streamId}`;
+    const chunkFn = (_event, chunk) => onChunk(chunk);
+    const doneFn = (_event, result) => onDone(result);
+    ipcRenderer.on(chunkCh, chunkFn);
+    ipcRenderer.on(doneCh, doneFn);
+    return () => {
+      ipcRenderer.removeListener(chunkCh, chunkFn);
+      ipcRenderer.removeListener(doneCh, doneFn);
+    };
+  },
+  stopStream: (payload) => ipcRenderer.send('ai:stop-stream', { ...payload, sessionToken }),
   onStreamChunk: (callback) => ipcRenderer.on('ai:stream-chunk', (_event, chunk) => callback(chunk)),
   onStreamDone: (callback) => ipcRenderer.on('ai:stream-done', (_event, result) => callback(result)),
   removeStreamListeners: () => {

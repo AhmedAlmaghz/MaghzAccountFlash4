@@ -234,6 +234,7 @@
     "newChat": "New Chat",
     "inputPlaceholder": "Type your request... e.g., What are this month's total sales?",
     "stopGeneration": "Stop generating",
+    "busySend": "Wait for the current reply to finish — or stop it with the stop button before sending a new request",
     "send": "Send",
     "thinking": "Thinking...",
     "executingTool": "Executing: {{tool}}",
