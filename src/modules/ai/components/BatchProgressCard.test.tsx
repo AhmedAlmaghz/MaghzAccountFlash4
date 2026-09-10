@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { BatchProgressCard } from './BatchProgressCard';
-import { getBatch, pauseBatch, cancelBatch, retryFailedBatch, unpauseBatch } from '../api/batch';
+import { getBatch, listBatches, pauseBatch, cancelBatch, retryFailedBatch, unpauseBatch } from '../api/batch';
 import { useAppStore } from '@/core/store';
 import type { JobBatchDetail } from '../api/batchTypes';
 
 vi.mock('../api/batch', () => ({
   getBatch: vi.fn(),
+  listBatches: vi.fn(),
   pauseBatch: vi.fn(),
   unpauseBatch: vi.fn(),
   cancelBatch: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('../api/batch', () => ({
 }));
 
 const mockedGet = vi.mocked(getBatch);
+const mockedList = vi.mocked(listBatches);
 
 function detail(over: Partial<JobBatchDetail> = {}): JobBatchDetail {
   return {
@@ -38,11 +40,19 @@ function detail(over: Partial<JobBatchDetail> = {}): JobBatchDetail {
   };
 }
 
+/** Header-only summary (what listBatches returns — counts, no items). */
+function header(over: Partial<Record<string, unknown>> = {}) {
+  const { items: _items, ...rest } = detail();
+  return { ...rest, ...over };
+}
+
 describe('BatchProgressCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useAppStore.setState({ language: 'ar' });
     mockedGet.mockResolvedValue({ success: true, data: detail() });
+    // Header poll default: batch visible, still running — merges without reload.
+    mockedList.mockResolvedValue({ success: true, data: [{ ...header(), status: 'running' }] });
   });
 
   it('renders title, status, counts and progress', async () => {
@@ -103,5 +113,50 @@ describe('BatchProgressCard', () => {
     mockedGet.mockResolvedValue({ success: false, error: 'down' });
     render(<BatchProgressCard batchId="b1" />);
     expect(await screen.findByText(/تعذّر قراءة حالة الدفعة/)).toBeTruthy();
+  });
+
+  it('polls header-only and merges counts without full re-reads', async () => {
+    vi.useFakeTimers();
+    try {
+      mockedList.mockResolvedValue({
+        success: true,
+        data: [{ ...header(), status: 'running', doneCount: 9 }],
+      });
+      render(<BatchProgressCard batchId="b1" />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText('دفعة الفواتير')).toBeTruthy();
+      expect(mockedGet).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+      // Header merged into the live card…
+      expect(mockedList).toHaveBeenCalled();
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('90');
+      // …without a second full items re-read.
+      expect(mockedGet).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reloads full detail once on terminal flip', async () => {
+    vi.useFakeTimers();
+    try {
+      mockedList.mockResolvedValue({
+        success: true,
+        data: [{ ...header(), status: 'done', doneCount: 10, failedCount: 0 }],
+      });
+      render(<BatchProgressCard batchId="b1" />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText('دفعة الفواتير')).toBeTruthy();
+      // The final paint must reflect terminal items, not the stale mount copy.
+      mockedGet.mockResolvedValue({
+        success: true,
+        data: detail({ status: 'done', doneCount: 10, failedCount: 0 }),
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+      expect(mockedGet).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('مكتملة')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

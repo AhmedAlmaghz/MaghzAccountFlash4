@@ -8,7 +8,7 @@ import {
   summarizeBatchProgress,
   type RefOutputs,
 } from './batchQueue';
-import type { JobBatchDetail } from '../api/batchTypes';
+import type { JobBatchDetail, JobBatchSummary } from '../api/batchTypes';
 import { BATCH_CLAIM_LIMIT } from '../api/batchTypes';
 
 /**
@@ -66,6 +66,49 @@ async function refresh(
 ): Promise<JobBatchDetail | null> {
   const res = await aiApi.batchGet(companyId, userId, batchId);
   return res.success && res.data ? res.data : null;
+}
+
+/**
+ * Header-only sync — the UI-thread-saturation fix.
+ *
+ * The old loop re-read the FULL batch detail (every item WITH its args JSON)
+ * after EVERY finished item: O(N²) parsing on the renderer's main thread,
+ * where PGlite itself also executes. A 500-item invoice batch parsed its own
+ * half-megabyte payload 500 times while the user typed — the tab froze.
+ *
+ * Progress needs only counts + status, so steady-state tracking is LOCAL
+ * (done/failed/skipped are incremented from the item outcomes, mirroring the
+ * SQL counters exactly) and the DB is consulted header-only via batchList
+ * (LIMIT 20, no items) purely to notice EXTERNAL transitions the worker did
+ * not cause itself: user pause/cancel, or terminal flip. Counts merge with
+ * max() — mid-run they are monotonic, and max() also absorbs any
+ * read-your-write lag from the just-committed item statements.
+ */
+async function syncHeader(
+  companyId: string, userId: string, batchId: string, detail: JobBatchDetail,
+): Promise<JobBatchDetail> {
+  try {
+    const list = await aiApi.batchList(companyId, userId);
+    const found: JobBatchSummary | undefined =
+      list.success && list.data ? list.data.find((b) => b.id === batchId) : undefined;
+    if (!found) return (await refresh(companyId, userId, batchId)) ?? detail;
+    return {
+      ...detail,
+      status: found.status,
+      totalCount: Math.max(detail.totalCount, found.totalCount),
+      doneCount: Math.max(detail.doneCount, found.doneCount),
+      failedCount: Math.max(detail.failedCount, found.failedCount),
+      skippedCount: Math.max(detail.skippedCount, found.skippedCount),
+      updatedAt: found.updatedAt,
+    };
+  } catch {
+    return detail;
+  }
+}
+
+/** Macrotask gap so input/paint interleave with back-to-back heavy items. */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 export async function runBatch(
@@ -131,7 +174,10 @@ async function runBatchInner(
   seedOutputs(detail);
 
   while (!isTerminalBatchStatus(detail.status)) {
-    if (callbacks.shouldStop?.()) return detail;
+    if (callbacks.shouldStop?.()) {
+      detail = (await refresh(companyId, userId, batchId)) ?? detail;
+      return detail;
+    }
     if (detail.status === 'paused' || detail.status === 'cancelled') {
       // Not runnable and never terminal-flipped by us — EXIT instead of
       // spinning on empty claims forever (the pre-fix infinite loop).
@@ -140,25 +186,37 @@ async function runBatchInner(
 
     const claim = await aiApi.batchClaim(companyId, userId, batchId, BATCH_CLAIM_LIMIT);
     if (!claim.success || !claim.data) {
-      // Claim failed (DB hiccup) — back off one round and re-read the header.
+      // Claim failed (DB hiccup) — back off one round and re-check the
+      // header (cheap). No full re-read: nothing could have progressed
+      // without a successful claim.
       await sleep(2000);
-      detail = (await refresh(companyId, userId, batchId)) ?? detail;
+      detail = await syncHeader(companyId, userId, batchId, detail);
+      if (isTerminalBatchStatus(detail.status)) {
+        detail = (await refresh(companyId, userId, batchId)) ?? detail;
+        callbacks.onProgress?.(detail);
+        return detail;
+      }
       continue;
     }
     if (claim.data.length === 0) {
       // Nothing claimable right now (deps still executing elsewhere).
       // Recover already failed the orphans above, so this is transient —
-      // wait one round, then re-read; a paused/cancelled header exits above.
+      // wait one round, then re-check the header; a paused/cancelled
+      // header exits at the loop top.
       await sleep(1500);
-      detail = (await refresh(companyId, userId, batchId)) ?? detail;
+      detail = await syncHeader(companyId, userId, batchId, detail);
+      if (isTerminalBatchStatus(detail.status)) {
+        detail = (await refresh(companyId, userId, batchId)) ?? detail;
+        callbacks.onProgress?.(detail);
+        return detail;
+      }
       continue;
     }
 
     for (const item of claim.data) {
-      if (callbacks.shouldStop?.()) {
-        detail = (await refresh(companyId, userId, batchId)) ?? detail;
-        return detail;
-      }
+      // Cooperative gap: back-to-back heavy writes (invoice + journal +
+      // stock on the UI-thread PGlite) must not starve input/paint.
+      await yieldToUi();
       // Resolve {{ref}} / @ref placeholders against outputs captured so far
       // (seeded from persisted result_data at run start, so resumes work).
       const sub = substituteRefs(item.args, outputs);
@@ -174,42 +232,70 @@ async function runBatchInner(
           callbacks.onProgress?.(detail);
           return detail;
         }
-        continue;
-      }
-      const outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
-      if (outcome.ok) {
-        const scalars = extractOutputScalars(outcome.result);
-        rememberOutput(item, scalars);
-        const done = await aiApi.batchItemDone(
-          companyId, userId, batchId, item.id, extractResultRef(outcome.result), scalars,
-        );
-        if (done.success && done.data?.finalStatus) {
-          detail = (await refresh(companyId, userId, batchId)) ?? detail;
+        if (failed.success) {
+          detail.failedCount += 1;
+          detail.skippedCount += failed.data?.skipped ?? 0;
           callbacks.onProgress?.(detail);
-          return detail;
         }
       } else {
-        const retryable = outcome.errorClass ? outcome.errorClass.retryable : true;
-        const failed = await aiApi.batchItemFail(
-          companyId, userId, batchId, item.id,
-          outcome.error ?? 'خطأ غير معروف',
-          outcome.errorClass?.code ?? null,
-          retryable,
-        );
-        if (failed.success && failed.data?.retried) {
-          // Back off per the shared schedule before the next claim round.
-          const delay = nextRetryDelayMs(item.attempts + 1) ?? 0;
-          if (delay > 0) await sleep(Math.min(delay, 10_000));
+        const outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
+        if (outcome.ok) {
+          const scalars = extractOutputScalars(outcome.result);
+          rememberOutput(item, scalars);
+          const done = await aiApi.batchItemDone(
+            companyId, userId, batchId, item.id, extractResultRef(outcome.result), scalars,
+          );
+          if (done.success && done.data?.finalStatus) {
+            detail = (await refresh(companyId, userId, batchId)) ?? detail;
+            callbacks.onProgress?.(detail);
+            return detail;
+          }
+          if (done.success) {
+            detail.doneCount += 1;
+            callbacks.onProgress?.(detail);
+          }
+        } else {
+          const retryable = outcome.errorClass ? outcome.errorClass.retryable : true;
+          const failed = await aiApi.batchItemFail(
+            companyId, userId, batchId, item.id,
+            outcome.error ?? 'خطأ غير معروف',
+            outcome.errorClass?.code ?? null,
+            retryable,
+          );
+          if (failed.success && failed.data?.retried) {
+            // Back off per the shared schedule before the next claim round.
+            const delay = nextRetryDelayMs(item.attempts + 1) ?? 0;
+            if (delay > 0) await sleep(Math.min(delay, 10_000));
+          }
+          if (failed.success && failed.data?.finalStatus) {
+            detail = (await refresh(companyId, userId, batchId)) ?? detail;
+            callbacks.onProgress?.(detail);
+            return detail;
+          }
+          if (failed.success && !failed.data?.retried) {
+            detail.failedCount += 1;
+            detail.skippedCount += failed.data?.skipped ?? 0;
+            callbacks.onProgress?.(detail);
+          }
         }
-        if (failed.success && failed.data?.finalStatus) {
-          detail = (await refresh(companyId, userId, batchId)) ?? detail;
-          callbacks.onProgress?.(detail);
-          return detail;
-        }
+      }
+      // Stop is honored BETWEEN items (after the current one finishes),
+      // never by abandoning an item mid-execution.
+      if (callbacks.shouldStop?.()) {
+        detail = (await refresh(companyId, userId, batchId)) ?? detail;
+        return detail;
       }
     }
 
-    detail = (await refresh(companyId, userId, batchId)) ?? detail;
+    // End of claim round: header-only sync (pause/cancel detection + exact
+    // counts) instead of a full items re-read. The full detail is fetched
+    // once at start (ref seeding) and once at terminal close.
+    detail = await syncHeader(companyId, userId, batchId, detail);
+    if (isTerminalBatchStatus(detail.status)) {
+      detail = (await refresh(companyId, userId, batchId)) ?? detail;
+      callbacks.onProgress?.(detail);
+      return detail;
+    }
     callbacks.onProgress?.(detail);
   }
 

@@ -17,11 +17,13 @@
 -- not reference it (see wizardTools.ts transfer_stock).
 
 -- Step 1: fold each duplicate group's total quantity into its survivor row.
+-- NOTE: MIN(uuid) does not exist in PostgreSQL, so compare via id::text
+-- (lexicographically deterministic survivor per key).
 UPDATE stock s
 SET quantity = g.total,
     updated_at = NOW()
 FROM (
-  SELECT company_id, product_id, warehouse_id, SUM(quantity) AS total, MIN(id) AS keep_id
+  SELECT company_id, product_id, warehouse_id, SUM(quantity) AS total, MIN(id::text)::uuid AS keep_id
   FROM stock
   GROUP BY company_id, product_id, warehouse_id
   HAVING COUNT(*) > 1
@@ -30,10 +32,10 @@ WHERE s.id = g.keep_id;
 --> statement-breakpoint
 
 -- Step 2: delete every non-survivor row of a duplicated key.
--- (Single-row groups: the row IS its group's MIN(id) → kept.)
+-- (Single-row groups: the row IS its group's MIN(id::text) → kept.)
 DELETE FROM stock
 WHERE id NOT IN (
-  SELECT MIN(id) FROM stock GROUP BY company_id, product_id, warehouse_id
+  SELECT MIN(id::text)::uuid FROM stock GROUP BY company_id, product_id, warehouse_id
 );
 --> statement-breakpoint
 

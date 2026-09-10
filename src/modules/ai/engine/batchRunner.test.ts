@@ -6,6 +6,7 @@ vi.mock('../api/index', () => ({
     batchItemDone: vi.fn(),
     batchItemFail: vi.fn(),
     batchGet: vi.fn(),
+    batchList: vi.fn(),
     batchRecover: vi.fn(async () => ({ success: true, data: { recoveredFailed: 0, recoveredSkipped: 0, finalStatus: null } })),
   },
 }));
@@ -38,9 +39,19 @@ function detail(overrides = {}) {
   } as never;
 }
 
+// File-wide hermeticity: the lifecycle/ref suites assert call counts, so
+// accumulated calls from earlier tests would poison them (the pre-existing
+// red state of this file). Every test starts with zeroed call history.
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe('runBatch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Header miss by default → syncHeader falls back to a full refresh, i.e.
+    // the pre-optimization behavior. Tests for the header path set their own.
+    mockedApi.batchList.mockResolvedValue({ success: true, data: [] });
   });
 
   it('claims, executes and completes every item', async () => {
@@ -53,7 +64,10 @@ describe('runBatch', () => {
     });
     mockedExec.mockResolvedValue({ ok: true, result: { invoiceNumber: 'INV-1' } });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
-    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
+    // Start-of-run read (running) drives the loop; later reads see terminal.
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
 
     const progress: string[] = [];
     const final = await runBatch('c1', 'u1', 'b1', {
@@ -69,20 +83,69 @@ describe('runBatch', () => {
     expect(progress.length).toBeGreaterThan(0);
   });
 
+  it('tracks progress locally with header-only sync (bounded full reads)', async () => {
+    // Regression gate for the UI-thread freeze: the worker used to re-read
+    // the FULL detail (every item + args JSON) after EVERY item — O(N²)
+    // parsing on the main thread, where PGlite also executes. Now progress
+    // is tracked locally and the DB is consulted header-only (no items).
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 'i1', seq: 0, toolName: 'sales.create_invoice', args: { x: 1 }, afterSeq: null, attempts: 1 },
+        { id: 'i2', seq: 1, toolName: 'sales.create_invoice', args: { x: 2 }, afterSeq: null, attempts: 1 },
+      ] as never,
+    });
+    mockedExec.mockResolvedValue({ ok: true, result: { invoiceNumber: 'INV-1' } });
+    mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
+    // Start-of-run full read (running) + terminal-close full read (done).
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
+    // Header path: by end-of-round the DB already flipped to done (the fin
+    // query fires when no queued/running items remain).
+    const headerBase = {
+      id: 'b1', kind: 'mixed', title: 'دفعة', totalCount: 2,
+      doneCount: 0, failedCount: 0, skippedCount: 0,
+      createdAt: '', updatedAt: '',
+    };
+    mockedApi.batchList.mockResolvedValue({
+      success: true,
+      data: [{ ...headerBase, status: 'done', doneCount: 2 }],
+    });
+
+    const progress: string[] = [];
+    const final = await runBatch('c1', 'u1', 'b1', {
+      onProgress: (d) => progress.push(`${d.doneCount}/${d.totalCount}`),
+    });
+
+    expect(mockedExec).toHaveBeenCalledTimes(2);
+    expect(final?.status).toBe('done');
+    expect(final?.doneCount).toBe(2);
+    // Per-item progress came from local counters…
+    expect(progress).toContain('1/2');
+    expect(progress).toContain('2/2');
+    // …the header path was used…
+    expect(mockedApi.batchList).toHaveBeenCalledWith('c1', 'u1');
+    // …and full detail was read only twice (start + terminal), not per item.
+    expect(mockedApi.batchGet).toHaveBeenCalledTimes(2);
+  });
+
   it('reports retryable failures with classification and keeps going', async () => {
     mockedApi.batchClaim.mockResolvedValueOnce({
       success: true,
       data: [
-        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 1 },
+        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 3 },
         { id: 'i2', seq: 1, toolName: 't.b', args: {}, afterSeq: null, attempts: 1 },
       ] as never,
     });
     mockedExec
       .mockResolvedValueOnce({ ok: false, error: 'timeout', errorClass: { code: 'TIMEOUT', retryable: true } as never })
       .mockResolvedValueOnce({ ok: true, result: {} });
-    mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: true, attempts: 1 } });
+    mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: true, attempts: 3 } });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
-    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 1 }) });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 1 }) });
 
     await runBatch('c1', 'u1', 'b1');
 
@@ -100,10 +163,12 @@ describe('runBatch', () => {
     });
     mockedExec.mockResolvedValue({ ok: true, result: {} });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: 'partial' } });
-    mockedApi.batchGet.mockResolvedValue({
-      success: true,
-      data: detail({ status: 'partial', doneCount: 1, failedCount: 1 }),
-    });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({
+        success: true,
+        data: detail({ status: 'partial', doneCount: 1, failedCount: 1 }),
+      });
 
     const final = await runBatch('c1', 'u1', 'b1');
     expect(final?.status).toBe('partial');
@@ -125,7 +190,9 @@ describe('runBatch', () => {
     });
     mockedExec.mockResolvedValue({ ok: true, result: {} });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
-    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail() });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail() });
 
     let calls = 0;
     await runBatch('c1', 'u1', 'b1', { shouldStop: () => ++calls > 1 });
@@ -179,7 +246,9 @@ describe('ref substitution', () => {
       .mockResolvedValueOnce({ ok: true, result: { id: 's-1', name: 'مورد' } })
       .mockResolvedValueOnce({ ok: true, result: {} });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
-    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
 
     await runBatch('c1', 'u1', 'b1');
 
@@ -198,7 +267,9 @@ describe('ref substitution', () => {
       ] as never,
     });
     mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: false, skipped: 0, finalStatus: null } });
-    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 0, failedCount: 1 }) });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 0, failedCount: 1 }) });
 
     await runBatch('c1', 'u1', 'b1');
 

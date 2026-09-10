@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
  * the next rename cannot land on one side only.
  */
 
-const root = resolve(__dirname, '../../../../..');
+const root = resolve(__dirname, '../../../..');
 const electronHandler = readFileSync(resolve(root, 'electron/aiHandler.js'), 'utf-8');
 const browserBridge = readFileSync(resolve(root, 'src/modules/ai/api/browserBridge.ts'), 'utf-8');
 

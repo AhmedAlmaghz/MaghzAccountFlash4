@@ -301,7 +301,7 @@ export const AppRouter: React.FC = () => {
                   level by ai.settings, not just the sidebar entry, so a
                   settings.view-only user cannot reach the key form by URL. */}
               <Route element={<PermissionRoute permission="ai.settings" />}>
-                <Route path="ai" element={withSuspense(AiSettingsPage)} />
+                <Route path="/settings/ai" element={withSuspense(AiSettingsPage)} />
               </Route>
             </Route>
 

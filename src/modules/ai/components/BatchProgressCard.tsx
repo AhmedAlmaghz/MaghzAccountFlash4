@@ -1,15 +1,16 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ListChecks, Loader2, Pause, Play, RotateCcw, XCircle } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 import {
   cancelBatch,
   getBatch,
+  listBatches,
   pauseBatch,
   retryFailedBatch,
   unpauseBatch,
 } from '../api/batch';
-import type { JobBatchDetail, JobBatchItem, JobBatchStatus } from '../api/batchTypes';
+import type { JobBatchDetail, JobBatchItem, JobBatchStatus, JobBatchSummary } from '../api/batchTypes';
 import { isTerminalBatchStatus } from '../engine/batchQueue';
 
 function itemDot(status: JobBatchItem['status']): string {
@@ -56,6 +57,7 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
     if (res.success && res.data) {
       setDetail(res.data);
       setFailed(false);
+      lastSeenRef.current = { status: res.data.status, failedCount: res.data.failedCount };
     } else {
       setFailed(true);
     }
@@ -64,6 +66,35 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Last header state seen — drives "fetch full detail only when something
+  // worth showing changed" decisions in the header poll below.
+  const lastSeenRef = useRef<{ status: JobBatchStatus; failedCount: number } | null>(null);
+
+  /** Merge header counts/status into the rendered detail (no items churn). */
+  const mergeHeader = useCallback((h: JobBatchSummary) => {
+    setDetail((prev) => {
+      if (!prev) return prev;
+      if (
+        prev.status === h.status &&
+        prev.doneCount === h.doneCount &&
+        prev.failedCount === h.failedCount &&
+        prev.skippedCount === h.skippedCount &&
+        prev.totalCount === h.totalCount
+      ) {
+        return prev; // no visible change — skip the re-render entirely
+      }
+      return {
+        ...prev,
+        status: h.status,
+        totalCount: h.totalCount,
+        doneCount: h.doneCount,
+        failedCount: h.failedCount,
+        skippedCount: h.skippedCount,
+        updatedAt: h.updatedAt,
+      };
+    });
+  }, []);
 
   const active = detail !== null && !isTerminalBatchStatus(detail.status) && !TERMINAL.has(detail.status);
   useEffect(() => {
@@ -74,6 +105,13 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
     // ONLY after the previous one settles. Overlapping polls under a slow
     // DB pile up IPC/WASM work into a jank spiral that feels like a freeze.
     // Hidden tabs don't poll at all.
+    //
+    // Header-only polling: the full detail (every item WITH its args JSON)
+    // is re-parsed on the UI thread, where PGlite itself executes — for a
+    // 500-item batch that is a half-megabyte parse every 3s on top of the
+    // worker's own queries. The header (counts + status, no items) is all
+    // the live card needs; full detail reloads only when something worth
+    // displaying changed (new failures, terminal flip, user expands tasks).
     const tick = async () => {
       if (cancelled) return;
       if (typeof document !== 'undefined' && document.hidden) {
@@ -81,7 +119,23 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
         return;
       }
       try {
-        await load();
+        const res = await listBatches();
+        const found = res.success && res.data ? res.data.find((b) => b.id === batchId) : undefined;
+        if (!found) {
+          await load(); // fell out of the LIMIT-20 window — full read fallback
+        } else {
+          const prev = lastSeenRef.current;
+          mergeHeader(found);
+          lastSeenRef.current = { status: found.status, failedCount: found.failedCount };
+          if (
+            (!prev || !isTerminalBatchStatus(prev.status)) &&
+            isTerminalBatchStatus(found.status)
+          ) {
+            await load(); // terminal flip — final items paint once
+          } else if (prev && found.failedCount > prev.failedCount) {
+            await load(); // new failures — refresh the error texts
+          }
+        }
       } finally {
         if (!cancelled) timer = setTimeout(tick, 3000);
       }
@@ -91,7 +145,7 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [active, load]);
+  }, [active, load, mergeHeader, batchId]);
 
   const act = useCallback(async (name: string, fn: () => Promise<{ success: boolean; error?: string }>) => {
     setBusy(name);
@@ -185,7 +239,12 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
       {(detail.items ?? []).length > 0 && (
         <div className="border-t border-zinc-100 dark:border-zinc-700/60 pt-2">
           <button
-            onClick={() => setShowTasks((v) => !v)}
+            onClick={() => {
+              // Opening the list needs per-item states the header poll
+              // deliberately skips — fetch full detail on demand.
+              if (!showTasks) void load();
+              setShowTasks((v) => !v);
+            }}
             className="w-full flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
             aria-expanded={showTasks}
           >

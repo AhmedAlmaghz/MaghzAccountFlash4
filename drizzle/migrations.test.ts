@@ -884,3 +884,35 @@ describe('Migration 0025: AI job item refs + outputs', () => {
     expect(bridge).toMatch(/parseMessageAttachments\(r\.attachments\)/);
   });
 });
+
+describe('Migration 0026: stock unique index', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0026_stock_unique_index.sql'), 'utf-8');
+
+  it('never calls MIN(uuid) directly (PostgreSQL has no min(uuid))', () => {
+    expect(migrationSql).not.toMatch(/MIN\(\s*id\s*\)/);
+    expect(migrationSql).toMatch(/MIN\(id::text\)::uuid/);
+  });
+
+  it('creates the unique index the transfer upsert targets', () => {
+    expect(migrationSql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS "stock_company_product_warehouse_uidx"/);
+    expect(migrationSql).toMatch(/ON stock \(company_id, product_id, warehouse_id\)/);
+  });
+
+  it('journal registers 0026 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0026_stock_unique_index')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0026 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0026_stock_unique_index\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0026_stock_unique_index', sql: stockUniqueIndex \}/);
+  });
+
+  it('Drizzle schema exposes the unique index on stock', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/inventory.ts'), 'utf-8');
+    expect(schema).toMatch(/uniqueIndex\('stock_company_product_warehouse_uidx'\)/);
+  });
+});
+

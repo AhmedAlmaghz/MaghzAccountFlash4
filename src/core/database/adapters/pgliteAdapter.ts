@@ -159,6 +159,7 @@ import aiJobQueue from '@root/drizzle/0022_ai_job_queue.sql?raw';
 import aiChatAttachments from '@root/drizzle/0023_ai_chat_attachments.sql?raw';
 import aiJobItemLabels from '@root/drizzle/0024_ai_job_item_labels.sql?raw';
 import aiJobRefOutputs from '@root/drizzle/0025_ai_job_ref_outputs.sql?raw';
+import stockUniqueIndex from '@root/drizzle/0026_stock_unique_index.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -187,6 +188,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0023_ai_chat_attachments', sql: aiChatAttachments },
   { name: '0024_ai_job_item_labels', sql: aiJobItemLabels },
   { name: '0025_ai_job_ref_outputs', sql: aiJobRefOutputs },
+  { name: '0026_stock_unique_index', sql: stockUniqueIndex },
 ];
 
 /**

@@ -60,7 +60,10 @@ describe('batchTools registration', () => {
     expect(s).toContain('معكوس ← مشتريات');
   });
 
-  it('enqueue lists every task with dependencies and overflow', () => {
+  it('enqueue lists every task with dependencies (no hidden items ≤60)', () => {
+    // Anti-injection contract (Phase 94): one approval consents to every
+    // item, so the card must show every item — hiding tasks behind an
+    // overflow line let crafted attachments bury financial mutations.
     const items = Array.from({ length: 10 }, (_, i) => ({
       tool: 'sales.create_invoice',
       args: {},
@@ -69,8 +72,19 @@ describe('batchTools registration', () => {
     const s = enqueue.summarizeArgs!({ items });
     expect(s).toContain('المهام:');
     expect(s).toContain('1. sales.create_invoice');
+    expect(s).toContain('10. sales.create_invoice');
     expect(s).toContain('← بعد #1');
-    expect(s).toContain('… و 2 مهمة أخرى');
+    expect(s).not.toContain('مهمة أخرى');
+    expect(s).not.toContain('مهمة إضافية');
+  });
+
+  it('enqueue caps the preview at 60 with an explicit overflow tail', () => {
+    const items = Array.from({ length: 65 }, () => ({ tool: 'sales.create_invoice', args: {} }));
+    const s = enqueue.summarizeArgs!({ items });
+    expect(s).toContain('60. sales.create_invoice');
+    expect(s).not.toContain('61. sales.create_invoice');
+    expect(s).toContain('5 مهمة إضافية');
+    expect(s).toContain('دفعة كبيرة');
   });
 });
 
