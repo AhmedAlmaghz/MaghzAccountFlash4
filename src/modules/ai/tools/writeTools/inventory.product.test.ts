@@ -17,7 +17,7 @@ vi.mock('@/core/database/adapters', () => ({
 
 import { inventoryWriteTools } from './inventory';
 import { inventoryApi } from '@/modules/inventory/api';
-import { getNextDocumentNumber } from '@/core/api';
+import { getNextDocumentNumber, getUnits } from '@/core/api';
 import { getDbAdapter } from '@/core/database/adapters';
 import type { ToolContext } from '../../types';
 
@@ -154,5 +154,59 @@ describe('inventory.update_product — name alias (no silent drop)', () => {
       ctx.userId,
       expect.objectContaining({ nameAr: 'اسم جديد' }),
     );
+  });
+});
+
+describe('inventory.create_product — unit catalog validation (transcript regression)', () => {
+  const CATALOG = [
+    { id: 'u-shd', nameAr: 'شدة', nameEn: 'Shadah', code: 'SHD', isActive: true },
+    { id: 'u-dzn', nameAr: 'درزن', nameEn: 'Dozen', code: 'DZ', isActive: true },
+  ];
+
+  beforeEach(() => {
+    vi.mocked(getUnits).mockResolvedValue({ success: true, data: CATALOG } as never);
+  });
+
+  // Real session 2026-09-10: the model passed `unitName: "شدة"` while the
+  // tool only read `unit` — every product silently landed on 'piece'.
+  it('accepts `unitName` and stores the canonical catalog name', async () => {
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'شوكلاتة', salePrice: 10800, costPrice: 10000, unitName: 'شدة' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ unit: 'شدة' }),
+    );
+  });
+
+  it('rejects unknown unit names loudly instead of defaulting silently', async () => {
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'شوكلاتة', salePrice: 10800, unitName: 'برميل ضخم' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(String(res.error)).toContain('غير موجودة في الكتالوج');
+    expect(mockedApi.createProduct).not.toHaveBeenCalled();
+  });
+
+  it('keeps the piece default when no unit is given (no catalog round-trip)', async () => {
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'شوكلاتة', salePrice: 10800 },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+    expect(vi.mocked(getUnits)).not.toHaveBeenCalled();
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ unit: 'piece' }),
+    );
+  });
+
+  it('validates the unit on update too', async () => {
+    const res = (await findTool('inventory.update_product').execute(
+      { productId: 'prod-1', unitName: 'وحدة وهمية' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(String(res.error)).toContain('غير موجودة في الكتالوج');
+    expect(mockedApi.updateProduct).not.toHaveBeenCalled();
   });
 });

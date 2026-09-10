@@ -12,6 +12,40 @@ import { normalizeArabic } from '@/core/utils/normalizeArabic';
 import { getUnits } from '@/core/api';
 
 /**
+ * Validate a unit NAME against the company catalog and return its canonical
+ * form. Products store the unit as a name string — accepting any free text
+ * silently produced rows with unit='piece' for شدة/درزن/... (real session:
+ * every product landed on the default). Unknown names fail LOUDLY with
+ * guidance instead of corrupting master data; absent names keep 'piece'.
+ */
+async function resolveUnitName(
+  companyId: string,
+  rawUnit: string | undefined,
+): Promise<{ unit: string } | { error: string }> {
+  const name = str(rawUnit);
+  if (!name) return { unit: 'piece' };
+  let catalog: Array<{ nameAr?: string; nameEn?: string; code?: string; isActive?: boolean }> = [];
+  try {
+    const res = await getUnits(companyId);
+    if (!res || !res.success || !res.data) return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };
+    catalog = res.data;
+  } catch {
+    return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };
+  }
+  const norm = normalizeArabic(name).replace(/^(ال|لل)/, '');
+  const hit = catalog.find(
+    (u) =>
+      u.isActive !== false &&
+      [u.nameAr || '', u.nameEn || '', u.code || ''].some((c) => {
+        const cn = normalizeArabic(c).replace(/^(ال|لل)/, '');
+        return !!cn && cn === norm;
+      }),
+  );
+  if (!hit) return { error: `الوحدة "${name}" غير موجودة في الكتالوج — ابحث بـ search.units أو أنشئها من الإعدادات (وحدات القياس) أولاً` };
+  return { unit: hit.nameAr || name };
+}
+
+/**
  * Resolve a catalog unit by human name ("كرتون") to its units.id.
  * Tolerates alef/yeh/teh variants and the ال prefix — returns null when
  * the unit does not exist so the tool can guide the model to create it.
@@ -64,7 +98,8 @@ export const inventoryWriteTools: ToolDefinition[] = [
         salePrice: { type: 'number', description: 'سعر البيع' },
         costPrice: { type: 'number', description: 'سعر التكلفة (افتراضي 0 — يقبل purchasePrice كبديل)' },
         purchasePrice: { type: 'number', description: 'بديل لـ costPrice' },
-        unit: { type: 'string', description: 'الوحدة (افتراضي piece)' },
+        unit: { type: 'string', description: 'اسم الوحدة من الكتالوج (يُتحقق منها — ابحث بـ search.units أولاً؛ افتراضي piece)' },
+        unitName: { type: 'string', description: 'بديل لـ unit' },
         barcode: { type: 'string' },
         sku: { type: 'string', description: 'رمز SKU' },
         openingStockQty: { type: 'number', description: 'كمية المخزون الافتتاحي (تُقيَّم بسعر التكلفة وتُرحّل تلقائياً — يقبل initialStockQuantity كبديل)' },
@@ -81,7 +116,8 @@ export const inventoryWriteTools: ToolDefinition[] = [
     summarizeArgs: (a) => {
       const r = a as Record<string, unknown>;
       const nm = r.nameAr ?? r.name;
-      return `إنشاء منتج جديد: ${nm} — سعر البيع: ${r.salePrice}${r.openingStockQty ?? r.initialStockQuantity ? ` — مخزون افتتاحي: ${r.openingStockQty ?? r.initialStockQuantity}` : ''}${r.productTypeName ? ` — النوع: ${r.productTypeName}` : ''}`;
+      const un = r.unit ?? r.unitName;
+      return `إنشاء منتج جديد: ${nm} — سعر البيع: ${r.salePrice}${un ? ` — الوحدة: ${un}` : ''}${r.openingStockQty ?? r.initialStockQuantity ? ` — مخزون افتتاحي: ${r.openingStockQty ?? r.initialStockQuantity}` : ''}${r.productTypeName ? ` — النوع: ${r.productTypeName}` : ''}`;
     },
     execute: async (args, ctx) => {
       // Human-name alias: suppliers/customers tools take plain `name`, so the
@@ -90,6 +126,12 @@ export const inventoryWriteTools: ToolDefinition[] = [
       const salePrice = num(args.salePrice);
       if (!nameAr) return { error: 'اسم المنتج مطلوب (nameAr أو name)' };
       if (salePrice < 0) return { error: 'سعر البيع لا يمكن أن يكون سالباً' };
+
+      // Unit alias + catalog validation: the model passes `unitName`
+      // ("شدة") while the row stores `unit` — and free text used to land
+      // silently on the 'piece' default. Unknown names fail loudly.
+      const unitResolved = await resolveUnitName(ctx.companyId, str(args.unit) ?? str(args.unitName));
+      if ('error' in unitResolved) return { error: unitResolved.error };
 
       // Resolve product type if mentioned by name. Matches Arabic name,
       // English name AND code (FG/RAW…) — the model may pass any of them
@@ -138,7 +180,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
         code,
         nameAr,
         ...(str(args.nameEn) ? { nameEn: str(args.nameEn) } : {}),
-        unit: str(args.unit) || 'piece',
+        unit: unitResolved.unit,
         barcode: str(args.barcode),
         ...(str(args.sku) ? { sku: str(args.sku) } : {}),
         costPrice,
@@ -233,7 +275,8 @@ export const inventoryWriteTools: ToolDefinition[] = [
         nameAr: { type: 'string', description: 'الاسم بالعربية (يقبل name كبديل)' },
         name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
-        unit: { type: 'string', description: 'الوحدة' },
+        unit: { type: 'string', description: 'الوحدة من الكتالوج (تُتحقق — ابحث بـ search.units أولاً)' },
+        unitName: { type: 'string', description: 'بديل لـ unit' },
         barcode: { type: 'string' },
         sku: { type: 'string' },
         salePrice: { type: 'number', description: 'سعر البيع' },
@@ -254,7 +297,11 @@ export const inventoryWriteTools: ToolDefinition[] = [
       if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
       else if (args.name !== undefined) data.nameAr = str(args.name);
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      if (args.unit !== undefined) data.unit = str(args.unit);
+      if (args.unit !== undefined || args.unitName !== undefined) {
+        const resolved = await resolveUnitName(ctx.companyId, str(args.unit) ?? str(args.unitName));
+        if ('error' in resolved) return { error: resolved.error };
+        data.unit = resolved.unit;
+      }
       if (args.barcode !== undefined) data.barcode = str(args.barcode);
       if (args.sku !== undefined) data.sku = str(args.sku);
       if (args.salePrice !== undefined) data.salePrice = num(args.salePrice);

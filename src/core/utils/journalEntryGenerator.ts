@@ -93,7 +93,8 @@ async function findAccountByCode(companyId: string, code: string): Promise<strin
   return null;
 }
 
-async function getDefaultAccountId(companyId: string, functionKey: string): Promise<string | null> {
+/** Resolve a default_accounts entry to a GL account id (with hardcoded-code fallback). Exported for AI voucher tools. */
+export async function getDefaultAccountId(companyId: string, functionKey: string): Promise<string | null> {
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ account_id: string }>(
     `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = $2`,

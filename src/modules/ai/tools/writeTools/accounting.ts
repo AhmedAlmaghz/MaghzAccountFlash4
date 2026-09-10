@@ -1,7 +1,10 @@
 import type { ToolDefinition } from '../../types';
-import { getNextDocumentNumber } from '@/core/api';
+import { getNextDocumentNumber, getCashBoxes } from '@/core/api';
+import type { CashBox } from '@/core/types';
 import { accountingApi } from '@/modules/accounting/api';
 import type { Account } from '@/modules/accounting/types';
+import { getDefaultAccountId } from '@/core/utils/journalEntryGenerator';
+import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
 import {
   num,
   str,
@@ -20,6 +23,119 @@ import { localToday } from '../../engine/dateUtils';
 function today(): string {
   // LOCAL calendar day — UTC "today" is yesterday for GMT+3 between 00:00-03:00
   return localToday();
+}
+
+/**
+ * Context-aware posting resolution for vouchers.
+ *
+ * User contract: the agent must UNDERSTAND from the free text (description /
+ * notes / reference) which expense account or cash box a voucher refers to,
+ * and only fall back to company defaults when it cannot. Explicit ids always
+ * win; every automatic choice is disclosed in the tool result (`via`).
+ */
+
+/** Best token-aware similarity between free text and one candidate key. */
+function tokenBestScore(text: string, key: string): number {
+  const nq = normalizeArabic(text);
+  if (!nq) return 0;
+  const keyN = normalizeArabic(key);
+  let best = fuzzyMatchScore(nq, keyN);
+  for (const t of new Set(nq.split(/\s+/).filter((x) => x.length >= 2))) {
+    const s = fuzzyMatchScore(t, keyN);
+    if (s > best) best = s;
+  }
+  return best;
+}
+
+function flatAccounts(list: Account[]): Account[] {
+  const out: Account[] = [];
+  const walk = (rows: Account[]) => {
+    for (const a of rows) {
+      out.push(a);
+      if (a.children?.length) walk(a.children);
+    }
+  };
+  walk(list);
+  return out;
+}
+
+export interface ResolvedExpense {
+  id: string;
+  name: string;
+  via: 'explicit' | 'matched' | 'default';
+}
+
+/**
+ * Resolve the expense account: explicit id → fuzzy-match the free text
+ * against leaf expense accounts (≥0.5) → default_misc_expense → honest error
+ * only when nothing exists at all.
+ */
+export async function resolveExpenseAccount(
+  companyId: string,
+  explicitId: string | undefined,
+  hintText: string,
+): Promise<ResolvedExpense | { error: string }> {
+  if (explicitId) return { id: explicitId, name: '', via: 'explicit' };
+  const fail = (error: string) => ({ error });
+  try {
+    const accRes = await accountingApi.getAccounts(companyId);
+    if (!accRes.success || !accRes.data) return fail('تعذر جلب شجرة الحسابات');
+    const flat = flatAccounts(accRes.data);
+    const expenses = flat.filter((a) => a.type === 'expense' && !a.isGroup && a.isActive !== false);
+    let best: Account | null = null;
+    let bestScore = 0;
+    for (const a of expenses) {
+      const s = tokenBestScore(hintText, `${a.code ?? ''} ${a.nameAr} ${a.nameEn ?? ''}`);
+      if (s > bestScore) { bestScore = s; best = a; }
+    }
+    if (best && bestScore >= 0.5) return { id: best.id, name: best.nameAr, via: 'matched' };
+    const defId = await getDefaultAccountId(companyId, 'default_misc_expense');
+    if (defId) {
+      const def = flat.find((a) => a.id === defId);
+      return { id: defId, name: def ? def.nameAr : 'المصروفات المتنوعة', via: 'default' };
+    }
+    return fail('تعذر تحديد حساب المصروف تلقائياً ولا يوجد حساب مصروف افتراضي — مرر expenseAccountId (من search.accounts) أو عيّن الحساب الافتراضي من الإعدادات');
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : 'فشل حل حساب المصروف');
+  }
+}
+
+export interface ResolvedBox {
+  id: string;
+  name: string;
+  via: 'explicit' | 'matched' | 'default';
+}
+
+/**
+ * Resolve the treasury: explicit box → fuzzy-match the free text
+ * ("حوالة من محفظة جيب" → the "محفظة جيب" box) → the default_cash-linked
+ * box, else the first active box. Returns null only when the company has no
+ * boxes at all — callers then keep the legacy undefined path (the journal
+ * generator itself falls back to the default_cash GL account).
+ */
+export async function resolveCashBox(
+  companyId: string,
+  explicitId: string | undefined,
+  hintText: string,
+): Promise<ResolvedBox | null> {
+  if (explicitId) return { id: explicitId, name: '', via: 'explicit' };
+  try {
+    const res = await getCashBoxes(companyId);
+    const boxes = (res.success && res.data ? res.data : []).filter((b) => b.isActive !== false);
+    if (boxes.length === 0) return null;
+    let best: CashBox | null = null;
+    let bestScore = 0;
+    for (const b of boxes) {
+      const s = tokenBestScore(hintText, `${b.name ?? ''} ${b.code ?? ''}`);
+      if (s > bestScore) { bestScore = s; best = b; }
+    }
+    if (best && bestScore >= 0.5) return { id: best.id, name: best.name ?? '', via: 'matched' };
+    const defAcc = await getDefaultAccountId(companyId, 'default_cash');
+    const def = (defAcc && boxes.find((b) => b.accountId === defAcc)) || boxes[0];
+    return { id: def.id, name: def.name ?? '', via: 'default' };
+  } catch {
+    return null;
+  }
 }
 export const accountingWriteTools: ToolDefinition[] = [
   // ─── ─── Accounting (vouchers) ─────────────────────────────────────────────── ───
@@ -84,46 +200,67 @@ export const accountingWriteTools: ToolDefinition[] = [
   {
     name: 'accounting.create_payment_voucher',
     labelAr: 'إنشاء سند صرف',
-    descriptionAr: 'ينشئ سند صرف مرحّل — لمورد (يُحدَّث رصيده تلقائياً) أو لمصروف مباشر عبر expenseAccountId دون مورد. استخدم search.suppliers أو search.accounts (نوع مصروف) أولاً.',
+    descriptionAr: 'ينشئ سند صرف مرحّل — لمورد (يُحدَّث رصيده تلقائياً) أو لمصروف مباشر عبر expenseAccountId دون مورد. إن غاب الحساب والخزنة حُددا تلقائياً من البيان (ثم الافتراضي) ويُكشف القرار في النتيجة. استخدم search.suppliers أو search.accounts (نوع مصروف) أولاً.',
     permission: 'accounting.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers) — إلزامي ما لم يُمرَّر expenseAccountId' },
-        expenseAccountId: { type: 'string', description: 'حساب المصروف للمصروفات المباشرة بلا مورد (من search.accounts)' },
+        expenseAccountId: { type: 'string', description: 'حساب المصروف للمصروفات المباشرة بلا مورد (من search.accounts — يُستنتج من البيان ثم الافتراضي عند غيابه)' },
         amount: { type: 'number', description: 'المبلغ المدفوع' },
-        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يحدد حساب الخزنة' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يُستنتج من البيان ثم الافتراضية عند غيابه' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
         reference: { type: 'string', description: 'رقم الشيك/الحوالة الورقية إن وُجد — يُسجَّل في الملاحظات' },
-        notes: { type: 'string' },
+        notes: { type: 'string', description: 'بيان/ملاحظات' },
+        description: { type: 'string', description: 'بديل لـ notes — يُستخدم نصه أيضاً في فهم الحساب والخزنة' },
       },
       required: ['amount'],
     },
     summarizeArgs: (a) => {
       const r = a as Record<string, unknown>;
       const method = r.paymentMethod === 'bank' ? 'بنك' : r.paymentMethod === 'check' ? 'شيك' : 'نقداً';
-      const party = r.supplierId ? ` — مورد: ${String(r.supplierId).slice(0, 8)}…` : r.expenseAccountId ? ' — مصروف مباشر' : '';
+      const party = r.supplierId
+        ? ` — مورد: ${String(r.supplierId).slice(0, 8)}…`
+        : r.expenseAccountId
+          ? ' — مصروف مباشر'
+          : ' — مصروف: الحساب والخزنة تلقائياً من البيان (أو الافتراضي)';
       return `إنشاء سند صرف مرحّل بمبلغ ${r.amount} (${method})${party}`;
     },
     execute: async (args, ctx) => {
       const supplierId = str(args.supplierId);
-      const expenseAccountId = str(args.expenseAccountId);
       const amount = num(args.amount);
-      // Parity with the UI + API: supplier OR expense account (the old
-      // supplier-only gate turned every general expense into a dead end).
-      if (!supplierId && !expenseAccountId) return { error: 'supplierId أو expenseAccountId مطلوب — للمصروفات العامة بلا مورد مرر expenseAccountId (من search.accounts نوع مصروف)' };
       if (amount <= 0) return { error: 'المبلغ يجب أن يكون أكبر من صفر' };
       const method = str(args.paymentMethod);
       if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
       const reference = str(args.reference);
-      const notesCombined = [str(args.notes), reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
+      const description = str(args.description);
+      const notesCombined = [str(args.notes), description, reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
+      const hintText = [description, str(args.notes), reference].filter(Boolean).join(' ');
+
+      // Expense side: explicit id, else understood from context, else default.
+      let expenseAccountId = str(args.expenseAccountId);
+      let expenseNote = '';
+      if (!supplierId) {
+        if (expenseAccountId) {
+          expenseNote = 'مصروف مباشر بالحساب المحدد';
+        } else {
+          const resolved = await resolveExpenseAccount(ctx.companyId, undefined, hintText);
+          if ('error' in resolved) return { error: resolved.error };
+          expenseAccountId = resolved.id;
+          expenseNote = resolved.via === 'matched'
+            ? `سُجل على حساب المصروف: ${resolved.name} (مطابق تلقائياً من البيان)`
+            : `سُجل على حساب المصروف الافتراضي: ${resolved.name}`;
+        }
+      }
+      if (!supplierId && !expenseAccountId) return { error: 'supplierId أو expenseAccountId مطلوب' };
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'payment_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
 
-      const cashBoxId2 = str(args.cashBoxId);
+      const box = await resolveCashBox(ctx.companyId, str(args.cashBoxId), hintText);
+      const cashBoxId = box?.id;
       const res = await accountingApi.createPaymentVoucher(
         {
           companyId: ctx.companyId,
@@ -134,7 +271,7 @@ export const accountingWriteTools: ToolDefinition[] = [
           amount,
           amountApplied: 0,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
-          cashBoxId: cashBoxId2 || undefined,
+          cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
           status: 'posted',
         },
@@ -143,7 +280,13 @@ export const accountingWriteTools: ToolDefinition[] = [
       if (!res.success) return { error: res.error || 'فشل إنشاء السند' };
       return {
         created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
-        journalPosted: true, note: supplierId ? 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً' : 'القيد المزدوج أُنشئ (مدين حساب المصروف / دائن الخزنة)', ...(reference ? { reference } : {}),
+        journalPosted: true,
+        note: supplierId
+          ? 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً'
+          : expenseNote || 'القيد المزدوج أُنشئ (مدين حساب المصروف / دائن الخزنة)',
+        ...(expenseAccountId && !supplierId ? { expenseAccountId } : {}),
+        ...(box && box.via !== 'explicit' && box.name ? { cashBoxName: box.name } : {}),
+        ...(reference ? { reference } : {}),
       };
     },
   },
@@ -151,33 +294,51 @@ export const accountingWriteTools: ToolDefinition[] = [
   {
     name: 'accounting.create_expense_voucher',
     labelAr: 'سند مصروف عام',
-    descriptionAr: 'ينشئ سند صرف لمصروف عام غير مرتبط بمورد — يُرحّل تلقائياً ويُنشأ القيد (مدين حساب المصروف / دائن الخزنة). استخدم search.accounts (ابحث عن مصروف) و search.cash_boxes أولاً.',
+    descriptionAr: 'ينشئ سند صرف لمصروف عام غير مرتبط بمورد — يُرحّل تلقائياً ويُنشأ القيد (مدين حساب المصروف / دائن الخزنة). إن غاب الحساب والخزنة حُددا تلقائياً من البيان (ثم الافتراضي) ويُكشف القرار في النتيجة. استخدم search.accounts (ابحث عن مصروف) و search.cash_boxes أولاً.',
     permission: 'accounting.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        expenseAccountId: { type: 'string', description: 'معرف حساب المصروف (من search.accounts — نوع مصروف، ورقة)' },
+        expenseAccountId: { type: 'string', description: 'معرف حساب المصروف (من search.accounts — نوع مصروف، ورقة — يُستنتج من البيان ثم الافتراضي عند غيابه)' },
         amount: { type: 'number', description: 'مبلغ المصروف' },
-        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — تحدد الخزنة التي يُخصم منها' },
+        cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — تُستنتج من البيان ثم الافتراضية عند غيابها' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash — bank تعني حوالة/محفظة)' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         reference: { type: 'string', description: 'رقم المرجع الورقي إن وُجد' },
         notes: { type: 'string', description: 'بيان/ملاحظات' },
+        description: { type: 'string', description: 'بديل لـ notes — يُستخدم نصه أيضاً في فهم الحساب والخزنة' },
       },
-      required: ['expenseAccountId', 'amount'],
+      required: ['amount'],
     },
-    summarizeArgs: (a) => `سند مصروف عام بمبلغ ${(a as Record<string, unknown>).amount} على حساب ${String((a as Record<string, unknown>).expenseAccountId || '').slice(0, 8)}…`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      const acct = r.expenseAccountId
+        ? `على حساب ${String(r.expenseAccountId).slice(0, 8)}…`
+        : 'الحساب والخزنة تلقائياً من البيان (أو الافتراضي)';
+      return `سند مصروف عام بمبلغ ${r.amount} ${acct}`;
+    },
     execute: async (args, ctx) => {
-      const expenseAccountId = str(args.expenseAccountId);
       const amount = num(args.amount);
-      if (!expenseAccountId) return { error: 'expenseAccountId مطلوب — استخدم search.accounts (ابحث عن حساب مصروف) أولاً' };
       if (amount <= 0) return { error: 'المبلغ يجب أن يكون أكبر من صفر' };
       const method = str(args.paymentMethod);
       if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
-      const cashBoxId = str(args.cashBoxId);
       const reference = str(args.reference);
-      const notesCombined = [str(args.notes), reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
+      const description = str(args.description);
+      const notesCombined = [str(args.notes), description, reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
+      const hintText = [description, str(args.notes), reference].filter(Boolean).join(' ');
+
+      const resolved = await resolveExpenseAccount(ctx.companyId, str(args.expenseAccountId), hintText);
+      if ('error' in resolved) return { error: resolved.error };
+      const expenseAccountId = resolved.id;
+      const expenseNote = resolved.via === 'explicit'
+        ? 'القيد أُنشئ: مدين حساب المصروف / دائن الخزنة'
+        : resolved.via === 'matched'
+          ? `القيد أُنشئ: مدين ${resolved.name} (مطابق تلقائياً من البيان) / دائن الخزنة`
+          : `القيد أُنشئ: مدين ${resolved.name} (الحساب الافتراضي للمصروفات) / دائن الخزنة`;
+
+      const box = await resolveCashBox(ctx.companyId, str(args.cashBoxId), hintText);
+      const cashBoxId = box?.id;
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'payment_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
@@ -200,8 +361,11 @@ export const accountingWriteTools: ToolDefinition[] = [
       );
       if (!res.success) return { error: res.error || 'فشل إنشاء سند المصروف' };
       return {
-        created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, expenseAccountId, status: 'posted',
-        journalPosted: true, note: 'القيد أُنشئ: مدين حساب المصروف / دائن الخزنة', ...(reference ? { reference } : {}),
+        created: true, voucherId: res.id, voucherNumber: docNumber.number, amount,
+        expenseAccountId, expenseAccountName: resolved.name, resolvedVia: resolved.via,
+        ...(box && box.name ? { cashBoxName: box.name } : {}),
+        status: 'posted',
+        journalPosted: true, note: expenseNote, ...(reference ? { reference } : {}),
       };
     },
   },

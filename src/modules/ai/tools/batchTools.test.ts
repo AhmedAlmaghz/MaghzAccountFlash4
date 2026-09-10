@@ -38,6 +38,13 @@ describe('batchTools registration', () => {
     expect(getTool('ai.enqueue_batch')).toBeUndefined(); // not auto-registered here
   });
 
+  it('directs multi-operation requests (>2 writes) to one-approval batches', () => {
+    // User contract: more than two write operations in one chat request must
+    // go through ai.enqueue_batch (one approval click), never as scattered
+    // single calls. Pinned in both the tool description and prompt rule 38.
+    expect(enqueue.descriptionAr).toContain('عمليتين');
+  });
+
   it('enqueue summarizes substance (count + tools + links)', () => {
     const s = enqueue.summarizeArgs!({
       items: [

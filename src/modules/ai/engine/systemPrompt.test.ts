@@ -112,6 +112,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('لا تكرر نفس الأداة');
   });
 
+  it('routes multi-operation requests (>2 writes) to one-approval batches (rule 38)', () => {
+    // User contract: any chat request with more than TWO write operations
+    // must go through ai.enqueue_batch — one approval click, never scattered
+    // single calls.
+    const prompt = buildSystemPrompt({ tools: [] });
+    expect(prompt).toContain('أكثر من عمليتين');
+    expect(prompt).toContain('ai.enqueue_batch');
+  });
+
   it('forbids imitating the internal tool-result format in replies', () => {
     const prompt = buildSystemPrompt({ tools: [] });
     expect(prompt).toContain('[تم تنفيذ: ...]');
