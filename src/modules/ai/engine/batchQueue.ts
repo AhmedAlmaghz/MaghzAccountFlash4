@@ -115,7 +115,7 @@ export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
   for (let i = 0; i < inputs.length; i++) {
     const after = inputs[i].after;
     if (after === undefined || after === null) continue;
-    let target: number | null = null;
+    let target: number;
     if (typeof after === 'number') {
       target = after;
     } else if (typeof after === 'string') {

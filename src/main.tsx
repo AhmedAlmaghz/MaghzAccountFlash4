@@ -107,7 +107,6 @@ function markStartup(phase: string): void {
   startupMarks[phase] = Math.round(performance.now() - startupT0);
   if (phase === 'company-loaded' || phase === 'db-error') {
     const parts = Object.entries(startupMarks).map(([k, v]) => `${k}=${v}ms`).join(' ');
-    // eslint-disable-next-line no-console
     console.info(`[startup] ${parts}`);
   }
 }

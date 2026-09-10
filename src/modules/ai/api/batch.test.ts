@@ -16,7 +16,6 @@ import {
   cancelBatch,
   enqueueBatch,
   getBatch,
-  listBatches,
   findResumableBatches,
   pauseBatch,
   recoverBatch,

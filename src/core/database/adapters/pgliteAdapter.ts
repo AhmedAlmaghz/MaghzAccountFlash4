@@ -255,7 +255,8 @@ async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?
         await db.exec(normalizeIdempotent(migration.sql));
       } catch (err) {
         throw new Error(
-          `PGlite migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`
+          `PGlite migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
         );
       }
       await db.query('INSERT INTO __pglite_migrations (name) VALUES ($1)', [migration.name]);
