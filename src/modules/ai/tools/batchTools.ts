@@ -37,7 +37,7 @@ export const batchTools: ToolDefinition[] = [
     name: 'ai.enqueue_batch',
     labelAr: 'إنشاء دفعة عمليات',
     descriptionAr:
-      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من 10 عمليات كتابية (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة). رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد.',
+      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من 10 عمليات كتابية (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة). رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. شكل كل عنصر حصراً: {"tool": "<domain.verb>", "args": {...}, "after"?: رقم/اسم, "ref"?: "اسم", "label"?: "وصف"} — مثال: {"items": [{"tool": "sales.create_invoice", "args": {"customerId": "..."}}]}. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد.',
     permission: 'ai.use',
     dangerLevel: 'write',
     parameters: {
@@ -55,7 +55,10 @@ export const batchTools: ToolDefinition[] = [
     },
     summarizeArgs: (a) => {
       const items = Array.isArray(a.items) ? a.items as Array<Record<string, unknown>> : [];
-      const tools = [...new Set(items.map((i) => String(i.tool || '?')))].slice(0, 3).join('، ');
+      // Same shape tolerance as execute(): the model sometimes emits
+      // {name, type, data} — the card must show the real tool, never '?'.
+      const toolOf = (i: Record<string, unknown>) => String(i.tool || i.type || '?');
+      const tools = [...new Set(items.map((i) => toolOf(i)))].slice(0, 3).join('، ');
       const linked = items.filter((i) => i.after !== undefined && i.after !== null).length;
       const linkNote = linked > 0 ? ` — ${linked} مرتبطة` : '';
       const labels = items
@@ -72,16 +75,17 @@ export const batchTools: ToolDefinition[] = [
       // item up to 60 with its args summary; beyond that sample + count.
       const MAX_PREVIEW = 60;
       const argBit = (it: Record<string, unknown>): string => {
-        const inner = (it.args && typeof it.args === 'object' ? it.args : {}) as Record<string, unknown>;
+        const rawArgs = it.args ?? it.data;
+        const inner = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
         const bits: string[] = [];
         for (const key of ['name', 'customer', 'supplier', 'product', 'invoiceNumber', 'total', 'amount', 'quantity', 'description', 'title']) {
-          const v = inner[key];
+          const v = inner[key] ?? (key === 'name' && typeof it.name === 'string' ? it.name : undefined);
           if (v !== undefined && v !== null && String(v).trim()) bits.push(`${key}: ${String(v).slice(0, 30)}`);
         }
         return bits.length > 0 ? ` {${bits.join(', ')}}` : '';
       };
       const shown = items.slice(0, MAX_PREVIEW).map((it, i) => {
-        const tool = String(it.tool || '?');
+        const tool = toolOf(it);
         const label = typeof it.label === 'string' && it.label.trim()
           ? ` — ${it.label.trim().slice(0, 60)}`
           : '';
@@ -100,15 +104,19 @@ export const batchTools: ToolDefinition[] = [
       // e.g. customerId as a sibling of args). Liberal at the boundary —
       // tools ignore unknown keys, but a silently DROPPED customerId would
       // create a document without its party. args wins on conflict.
-      const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label']);
+      // Shape aliases: the model occasionally emits {name, type, data}
+      // instead of {tool, args} — normalize (type→tool, data→args) so the
+      // batch fails only on genuinely unknown tools, never on a renamed key.
+      const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label', 'type', 'data']);
       const items = rawItems.map((it) => {
-        const base = (it.args && typeof it.args === 'object' ? it.args : {}) as Record<string, unknown>;
+        const rawArgs = it.args ?? it.data;
+        const base = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
         const stray: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(it)) {
           if (!KNOWN_ITEM_KEYS.has(k) && v !== undefined) stray[k] = v;
         }
         return {
-          tool: String(it.tool || ''),
+          tool: String(it.tool || it.type || ''),
           args: { ...stray, ...base },
           after: (it.after as number | string | undefined) ?? undefined,
           ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,

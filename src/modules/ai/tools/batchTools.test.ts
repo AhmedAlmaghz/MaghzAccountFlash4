@@ -135,6 +135,37 @@ describe('ai.enqueue_batch execute', () => {
     const sent = mockedApi.batchCreate.mock.calls[0][0].items[0];
     expect(sent.args).toEqual({ customerId: '{{c.id}}', date: '2026-08-21' });
   });
+
+  it('normalizes the {name, type, data} item shape (transcript regression)', async () => {
+    // Real session 2026-09-10: the model emitted items as
+    // {name, type, data} instead of {tool, args} and the batch died with
+    // "أداة غير معروفة" although every tool was valid.
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [{
+        name: 'فاتورة عميل',
+        type: 'sales.create_invoice',
+        data: { customerId: 'cust-1', total: 50000 },
+      }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.error).toBeUndefined();
+    expect(out.batchId).toBe('b1');
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items[0];
+    expect(sent.tool_name).toBe('sales.create_invoice');
+    expect(sent.args).toEqual({
+      name: 'فاتورة عميل',
+      customerId: 'cust-1',
+      total: 50000,
+    });
+  });
+
+  it('shows real tool names on the card for the alias shape (no blind ?)', async () => {
+    const s = enqueue.summarizeArgs!({
+      items: [{ name: 'أرز بسمتي', type: 'sales.create_invoice', data: { total: 50000 } }],
+    });
+    expect(s).toContain('sales.create_invoice');
+    expect(s).not.toContain('?');
+  });
 });
 
 describe('ai.resume_batch execute', () => {

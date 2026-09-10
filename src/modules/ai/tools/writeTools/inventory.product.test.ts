@@ -1,0 +1,133 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('@/modules/inventory/api', () => ({
+  inventoryApi: {
+    createProduct: vi.fn(),
+    updateProduct: vi.fn(),
+    getWarehouses: vi.fn(),
+  },
+}));
+vi.mock('@/core/api', () => ({
+  getNextDocumentNumber: vi.fn(),
+}));
+
+import { inventoryWriteTools } from './inventory';
+import { inventoryApi } from '@/modules/inventory/api';
+import { getNextDocumentNumber } from '@/core/api';
+import type { ToolContext } from '../../types';
+
+const ctx: ToolContext = {
+  companyId: '00000000-0000-0000-0000-000000000001',
+  userId: '00000000-0000-0000-0000-000000000002',
+};
+
+interface TestableTool {
+  summarizeArgs?: (a: Record<string, unknown>) => string;
+  execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
+}
+
+function findTool(name: string): TestableTool {
+  const t = inventoryWriteTools.find((x) => x.name === name);
+  if (!t || !t.execute) throw new Error(`tool ${name} not found`);
+  return t as unknown as TestableTool;
+}
+
+const mockedApi = vi.mocked(inventoryApi, true);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getNextDocumentNumber).mockResolvedValue({ success: true, number: 'PRD-0100' } as never);
+  mockedApi.createProduct.mockResolvedValue({ success: true, id: 'prod-1' });
+  mockedApi.getWarehouses.mockResolvedValue({ success: true, data: [{ id: 'wh-1' }] } as never);
+  mockedApi.updateProduct.mockResolvedValue({ success: true });
+});
+
+describe('inventory.create_product — human-name aliases (transcript regression)', () => {
+  // Real session 2026-09-10: the model passed plain `name` (like the
+  // supplier/customer tools accept) and all 10 products failed with
+  // "اسم المنتج مطلوب" although the name was right there in args.
+  it('accepts plain `name` as an alias for nameAr', async () => {
+    const res = (await findTool('inventory.create_product').execute(
+      { name: 'شوكلاتة سويت مون صغير', salePrice: 10800, costPrice: 10000 },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ nameAr: 'شوكلاتة سويت مون صغير' }),
+    );
+  });
+
+  it('maps purchasePrice → costPrice and forwards sku/minStock/nameEn', async () => {
+    const res = (await findTool('inventory.create_product').execute(
+      {
+        nameAr: 'أرز بسمتي',
+        salePrice: 55000,
+        purchasePrice: 45000,
+        sku: 'PRD-001',
+        nameEn: 'Basmati Rice',
+        minStockLevel: 6,
+      },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nameAr: 'أرز بسمتي',
+        costPrice: 45000,
+        sku: 'PRD-001',
+        nameEn: 'Basmati Rice',
+        minStock: 6,
+      }),
+    );
+  });
+
+  it('honors an explicit warehouseId instead of auto-picking', async () => {
+    await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100, openingStockQty: 4, warehouseId: 'wh-9' },
+      ctx,
+    );
+    expect(mockedApi.getWarehouses).not.toHaveBeenCalled();
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ openingStockQty: 4, openingWarehouseId: 'wh-9' }),
+    );
+  });
+
+  it('auto-picks the first warehouse only when none is given', async () => {
+    await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100, initialStockQuantity: 4 },
+      ctx,
+    );
+    expect(mockedApi.getWarehouses).toHaveBeenCalled();
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ openingStockQty: 4, openingWarehouseId: 'wh-1' }),
+    );
+  });
+
+  it('shows the real name on the approval card (never undefined)', () => {
+    const s = findTool('inventory.create_product').summarizeArgs!({ name: 'شوكلاتة', salePrice: 100 });
+    expect(s).toContain('شوكلاتة');
+    expect(s).not.toContain('undefined');
+  });
+
+  it('still rejects a product with no name at all', async () => {
+    const res = (await findTool('inventory.create_product').execute({ salePrice: 100 }, ctx)) as Record<string, unknown>;
+    expect(res.error).toMatch(/اسم المنتج مطلوب/);
+    expect(mockedApi.createProduct).not.toHaveBeenCalled();
+  });
+});
+
+describe('inventory.update_product — name alias (no silent drop)', () => {
+  it('maps plain `name` to nameAr instead of ignoring it', async () => {
+    const res = (await findTool('inventory.update_product').execute(
+      { productId: 'prod-1', name: 'اسم جديد' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.updated).toBe(true);
+    expect(mockedApi.updateProduct).toHaveBeenCalledWith(
+      'prod-1',
+      ctx.companyId,
+      ctx.userId,
+      expect.objectContaining({ nameAr: 'اسم جديد' }),
+    );
+  });
+});

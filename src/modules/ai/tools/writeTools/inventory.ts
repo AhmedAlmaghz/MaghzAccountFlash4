@@ -58,22 +58,36 @@ export const inventoryWriteTools: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        nameAr: { type: 'string', description: 'اسم المنتج بالعربية (إلزامي)' },
+        nameAr: { type: 'string', description: 'اسم المنتج بالعربية (إلزامي — يقبل name كبديل)' },
+        name: { type: 'string', description: 'بديل لـ nameAr (يُستخدم عند غيابه)' },
+        nameEn: { type: 'string', description: 'اسم المنتج بالإنجليزية' },
         salePrice: { type: 'number', description: 'سعر البيع' },
-        costPrice: { type: 'number', description: 'سعر التكلفة (افتراضي 0)' },
+        costPrice: { type: 'number', description: 'سعر التكلفة (افتراضي 0 — يقبل purchasePrice كبديل)' },
+        purchasePrice: { type: 'number', description: 'بديل لـ costPrice' },
         unit: { type: 'string', description: 'الوحدة (افتراضي piece)' },
         barcode: { type: 'string' },
-        openingStockQty: { type: 'number', description: 'كمية المخزون الافتتاحي (تُقيَّم بسعر التكلفة وتُرحّل تلقائياً)' },
+        sku: { type: 'string', description: 'رمز SKU' },
+        openingStockQty: { type: 'number', description: 'كمية المخزون الافتتاحي (تُقيَّم بسعر التكلفة وتُرحّل تلقائياً — يقبل initialStockQuantity كبديل)' },
+        initialStockQuantity: { type: 'number', description: 'بديل لـ openingStockQty' },
+        minStock: { type: 'number', description: 'حد الطلب/المخزون الأدنى (يقبل minStockLevel كبديل)' },
+        minStockLevel: { type: 'number', description: 'بديل لـ minStock' },
+        warehouseId: { type: 'string', description: 'مستودع الرصيد الافتتاحي (افتراضي: أول مستودع)' },
         productTypeId: { type: 'string', description: 'معرف نوع المنتج (من search.product_types — اذكره مثل: منتج نهائي، خامة، خدمة)' },
         productTypeName: { type: 'string', description: 'اسم نوع المنتج نصاً (بديل — سيُبحث تلقائياً مثل: منتج نهائي)' },
       },
       required: ['nameAr', 'salePrice'],
     },
-    summarizeArgs: (a) => `إنشاء منتج جديد: ${a.nameAr} — سعر البيع: ${a.salePrice}${a.openingStockQty ? ` — مخزون افتتاحي: ${a.openingStockQty}` : ''}${(a as Record<string, unknown>).productTypeName ? ` — النوع: ${(a as Record<string, unknown>).productTypeName}` : ''}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      const nm = r.nameAr ?? r.name;
+      return `إنشاء منتج جديد: ${nm} — سعر البيع: ${r.salePrice}${r.openingStockQty ?? r.initialStockQuantity ? ` — مخزون افتتاحي: ${r.openingStockQty ?? r.initialStockQuantity}` : ''}${r.productTypeName ? ` — النوع: ${r.productTypeName}` : ''}`;
+    },
     execute: async (args, ctx) => {
-      const nameAr = str(args.nameAr);
+      // Human-name alias: suppliers/customers tools take plain `name`, so the
+      // model naturally passes `name` here too — map it instead of failing.
+      const nameAr = str(args.nameAr) ?? str(args.name);
       const salePrice = num(args.salePrice);
-      if (!nameAr) return { error: 'اسم المنتج مطلوب' };
+      if (!nameAr) return { error: 'اسم المنتج مطلوب (nameAr أو name)' };
       if (salePrice < 0) return { error: 'سعر البيع لا يمكن أن يكون سالباً' };
 
       // Resolve product type if mentioned by name
@@ -95,11 +109,12 @@ export const inventoryWriteTools: ToolDefinition[] = [
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد كود المنتج' };
       const code = docNumber.number;
 
-      // Opening stock needs a warehouse — auto-pick the first one when the
-      // caller didn't specify (mirrors manufacturing completion behaviour).
-      const openingQty = num(args.openingStockQty);
-      let openingWarehouseId: string | undefined;
-      if (openingQty > 0) {
+      // Opening stock needs a warehouse — honor an explicit warehouseId,
+      // auto-pick the first one only when the caller didn't specify (mirrors
+      // manufacturing completion behaviour).
+      const openingQty = num(args.openingStockQty) || num(args.initialStockQuantity);
+      let openingWarehouseId: string | undefined = str(args.warehouseId);
+      if (openingQty > 0 && !openingWarehouseId) {
         const wh = await inventoryApi.getWarehouses(ctx.companyId);
         openingWarehouseId = wh.success && wh.data && wh.data.length > 0 ? wh.data[0].id : undefined;
         if (!openingWarehouseId) {
@@ -107,14 +122,19 @@ export const inventoryWriteTools: ToolDefinition[] = [
         }
       }
 
+      const costPrice = num(args.costPrice) || num(args.purchasePrice);
+      const minStockRaw = args.minStock ?? args.minStockLevel;
       const res = await inventoryApi.createProduct({
         companyId: ctx.companyId,
         code,
         nameAr,
+        ...(str(args.nameEn) ? { nameEn: str(args.nameEn) } : {}),
         unit: str(args.unit) || 'piece',
         barcode: str(args.barcode),
-        costPrice: num(args.costPrice),
+        ...(str(args.sku) ? { sku: str(args.sku) } : {}),
+        costPrice,
         salePrice,
+        ...(minStockRaw !== undefined ? { minStock: num(minStockRaw) } : {}),
         isActive: true,
         createdBy: ctx.userId,
         ...(productTypeId ? { productTypeId } : {}),
@@ -131,7 +151,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
         ...(openingQty > 0
           ? {
               openingStockQty: openingQty,
-              openingValue: round2(openingQty * num(args.costPrice)),
+              openingValue: round2(openingQty * costPrice),
               openingPosted: !!openingWarehouseId,
               note: openingWarehouseId ? 'المخزون الافتتاحي رُحّل تلقائياً (مدين المخزون / دائن الأرصدة الافتتاحية)' : undefined,
             }
@@ -201,7 +221,8 @@ export const inventoryWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         productId: { type: 'string', description: 'معرف المنتج (من inventory.get_products)' },
-        nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        nameAr: { type: 'string', description: 'الاسم بالعربية (يقبل name كبديل)' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
         unit: { type: 'string', description: 'الوحدة' },
         barcode: { type: 'string' },
@@ -212,12 +233,17 @@ export const inventoryWriteTools: ToolDefinition[] = [
       },
       required: ['productId'],
     },
-    summarizeArgs: (a) => `تعديل منتج: ${String((a as Record<string, unknown>).productId || '').slice(0, 8)}…${(a as Record<string, unknown>).nameAr ? ` — الاسم: ${(a as Record<string, unknown>).nameAr}` : ''}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      const nm = r.nameAr ?? r.name;
+      return `تعديل منتج: ${String(r.productId || '').slice(0, 8)}…${nm ? ` — الاسم: ${nm}` : ''}`;
+    },
     execute: async (args, ctx) => {
       const productId = str(args.productId);
       if (!productId) return { error: 'productId مطلوب' };
       const data: Record<string, unknown> = {};
       if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
+      else if (args.name !== undefined) data.nameAr = str(args.name);
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.unit !== undefined) data.unit = str(args.unit);
       if (args.barcode !== undefined) data.barcode = str(args.barcode);
