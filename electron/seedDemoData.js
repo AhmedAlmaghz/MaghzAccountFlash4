@@ -163,15 +163,14 @@ const HR_POLICY_SETTINGS = [
 
 const BRANCHES = [
   { code: 'HQ',  name: 'الفرع الرئيسي - صنعاء', address: 'صنعاء - شارع الستين' },
-  { code: 'HD',  name: 'فرع الحديدة',           address: 'الحديدة - شارع صنعاء' },
-  { code: 'AD',  name: 'فرع عدن',                address: 'عدن - المنصورة' },
+
 ];
 
 const COST_CENTERS = [
   { code: 'HQ',      name_ar: 'الفرع الرئيسي',  name_en: 'Main Branch',         type: 'branch',     budget: 0 },
-  { code: 'CC-SAL',  name_ar: 'قسم المبيعات',   name_en: 'Sales Department',    type: 'department', budget: 1500000 },
-  { code: 'CC-PRD',  name_ar: 'قسم الإنتاج',    name_en: 'Production Department', type: 'department', budget: 2500000 },
-  { code: 'CC-EXP',  name_ar: 'مشروع التوسع',   name_en: 'Expansion Project',   type: 'project',    budget: 8000000 },
+  { code: 'CC-SAL',  name_ar: 'قسم المبيعات',   name_en: 'Sales Department',    type: 'department', budget: 0 },
+  { code: 'CC-PRD',  name_ar: 'قسم الإنتاج',    name_en: 'Production Department', type: 'department', budget: 0 },
+  { code: 'CC-EXP',  name_ar: 'مشروع التوسع',   name_en: 'Expansion Project',   type: 'project',    budget: 0 },
 ];
 
 const PAYROLL_COMPONENTS = [
@@ -219,8 +218,7 @@ const PRODUCTS = [
 
 const WAREHOUSES = [
   { code: 'WH-MAIN', name: 'المستودع الرئيسي - صنعاء' },
-  { code: 'WH-HD',   name: 'مستودع الحديدة' },
-  { code: 'WH-AD',   name: 'مستودع عدن' },
+  
 ];
 
 const CUSTOMERS = [

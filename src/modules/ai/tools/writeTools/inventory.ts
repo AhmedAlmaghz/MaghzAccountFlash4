@@ -24,7 +24,7 @@ async function resolveUnitName(
 ): Promise<{ unit: string } | { error: string }> {
   const name = str(rawUnit);
   if (!name) return { unit: 'piece' };
-  let catalog: Array<{ nameAr?: string; nameEn?: string; code?: string; isActive?: boolean }> = [];
+  let catalog: Array<{ nameAr?: string; nameEn?: string; code?: string; isActive?: boolean }>;
   try {
     const res = await getUnits(companyId);
     if (!res || !res.success || !res.data) return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };

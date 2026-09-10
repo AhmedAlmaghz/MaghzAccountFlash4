@@ -27,9 +27,9 @@ export const VatSettingsPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
-  const [formData, setFormData] = useState<Partial<VatType>>({ name: '', rate: 15, isActive: true });
-  const [invoiceShowDiscount, setInvoiceShowDiscount] = useState(true);
-  const [invoiceShowVat, setInvoiceShowVat] = useState(true);
+  const [formData, setFormData] = useState<Partial<VatType>>({ name: '', rate: 15, isActive: false });
+  const [invoiceShowDiscount, setInvoiceShowDiscount] = useState(false);
+  const [invoiceShowVat, setInvoiceShowVat] = useState(false);
   const [invoiceSettingsLoading, setInvoiceSettingsLoading] = useState(false);
 
   const loadData = async () => {
