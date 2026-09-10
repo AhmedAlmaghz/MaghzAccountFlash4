@@ -38,7 +38,6 @@ vi.mock('@/core/database/adapters', () => ({
 }));
 
 import { getChatEngine } from './chatEngine';
-import { useAiStore } from '../store';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import type { User } from '@/modules/auth/types';
@@ -98,11 +97,18 @@ describe('ChatEngine memory — restoreHistorySync', () => {
 
     const payload = mocks.complete.mock.calls[0][0];
     const history = payload.messages as Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }>;
-    // system + user(الشجاع) + assistant(tool_calls) + tool(result) + assistant(text) + user(السؤال)
-    const roles = history.map((m) => m.role);
-    expect(roles).toContain('tool');
-    expect(history.some((m) => m.role === 'assistant' && Array.isArray((m as never)['tool_calls']))).toBe(true);
-    expect(history.some((m) => m.role === 'tool' && String(m.content).includes('sup-1'))).toBe(true);
+    // system + user(الشجاع) + flattened tool memory + assistant(text) + user(السؤال).
+    // Without thought_signature the harness FLATTENS tool_call/tool pairs
+    // into assistant text (Gemini-safe) — no raw 'tool' role on the wire,
+    // but the outcome (tool name + result) must survive verbatim.
+    // (Matched on the unique result payload — the system prompt itself
+    // mentions the [TOOL_RESULT:] fence in rule 17.)
+    const flat = history.find(
+      (m) => typeof m.content === 'string' && m.content.includes('sup-1'),
+    );
+    expect(flat).toBeDefined();
+    expect(String(flat!.content)).toContain('[TOOL_RESULT:');
+    expect(String(flat!.content)).toContain('purchases.create_supplier');
   });
 
   it('restores user attachments as context blocks so file extractions survive reload', async () => {
@@ -145,7 +151,10 @@ describe('ChatEngine memory — restoreHistorySync', () => {
     const payload = mocks.complete.mock.calls[0][0];
     const userMsgs = payload.messages.filter((m: { role: string }) => m.role === 'user');
     const firstUser = userMsgs[0] as { content: string };
-    expect(String(firstUser.content)).toContain('[مرفق: فاتورة.pdf');
+    // Injection-framed fence (Package B): name + extracted text travel inside
+    // BEGIN/END_ATTACHMENT, never as a bare "[مرفق: ...]" line.
+    expect(String(firstUser.content)).toContain('BEGIN_ATTACHMENT');
+    expect(String(firstUser.content)).toContain('فاتورة.pdf');
     expect(String(firstUser.content)).toContain('المورد: الشجاع');
   });
 
@@ -181,8 +190,13 @@ describe('ChatEngine memory — restoreHistorySync', () => {
     await engine.send('استمر');
 
     const payload = mocks.complete.mock.calls[0][0];
-    const toolMsg = payload.messages.find((m: { role: string; tool_call_id?: string }) => m.tool_call_id === 'call-err');
+    // Flattened like any tool outcome: the failed call survives as assistant
+    // text carrying the error plus the structured fix guidance.
+    const toolMsg = payload.messages.find((m: { role: string; content: string | null }) =>
+      typeof m.content === 'string' && m.content.includes('hr.save_attendance'),
+    );
     expect(toolMsg).toBeDefined();
     expect(String(toolMsg.content)).toContain('خطأ:');
+    expect(String(toolMsg.content)).toContain('08:00');
   });
 });

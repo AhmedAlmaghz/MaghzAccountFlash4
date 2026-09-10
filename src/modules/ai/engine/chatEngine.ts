@@ -379,7 +379,7 @@ class ChatEngine {
   private activeSkillsForMessage(userText: string): Skill[] {
     ensureSkillsRegistered();
     const recentUserTexts: string[] = [];
-    for (let i = this.history.length - 1; i >= 0 && recentUserTexts.length < 3; i++) {
+    for (let i = this.history.length - 1; i >= 0 && recentUserTexts.length < 3; i--) {
       const m = this.history[i];
       if (!m || m.role !== 'user') continue;
       try {
@@ -1007,7 +1007,10 @@ class ChatEngine {
     const system = h[0]?.role === 'system' ? [h[0]] : [];
     const rest = system.length ? h.slice(1) : h;
 
-    let start = rest.length - (ChatEngine.CONTEXT_WINDOW_MESSAGES - system.length);
+    // Reserve one slot for the digest block so system + digest + tail never
+    // exceed the budget. (When nothing is dropped there is no digest and the
+    // fast path above already returned.)
+    let start = rest.length - (ChatEngine.CONTEXT_WINDOW_MESSAGES - system.length - 1);
     if (start < 0) start = 0;
 
     // Progressive summary: compress everything the window drops into one
@@ -1015,11 +1018,20 @@ class ChatEngine {
     let prefix: LlmMessage[] = [];
     if (start > 0) {
       const digest = extractiveDigest(rest.slice(0, start));
-      if (digest) prefix = [digestMessage(digest)];
-      start = 0; // the digest now represents the prefix — window from the top
+      if (digest) {
+        prefix = [digestMessage(digest)];
+      } else {
+        // Nothing worth remembering — reclaim the reserved slot.
+        start = Math.max(0, rest.length - (ChatEngine.CONTEXT_WINDOW_MESSAGES - system.length));
+      }
+      // Snap to a safe boundary: never START on an orphaned tool result
+      // (its assistant tool_call partner was just dropped). Tool results
+      // arrive contiguously after their call, so advancing past them keeps
+      // every pair on the same side of the cut. Never drop the tail itself.
+      while (start < rest.length - 1 && rest[start]?.role === 'tool') start++;
     }
 
-    return [...system, ...prefix, ...rest];
+    return [...system, ...prefix, ...rest.slice(start)];
   }
 
   /**
