@@ -869,7 +869,7 @@ describe('Migration 0025: AI job item refs + outputs', () => {
 
   it('both batch channels carry the label (create + get)', () => {
     const main = readFileSync(join(process.cwd(), 'electron/aiHandler.js'), 'utf-8');
-    expect(main).toMatch(/after_seq, idempotency_key, label\)/);
+    expect(main).toMatch(/after_seq, idempotency_key, label, ref\)/);
     expect(main).toMatch(/label: r\.label \|\| null/);
     const bridge = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
     void bridge;
