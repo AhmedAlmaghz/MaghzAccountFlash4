@@ -77,6 +77,7 @@ interface ElectronAI {
   saveSession: (payload: AiSaveSessionPayload) => Promise<IpcResult<{ sessionId: string }>>;
   renameSession: (payload: { sessionId: string; title: string; companyId?: string; userId?: string }) => Promise<IpcResult<void>>;
   deleteSession: (payload: { companyId: string; userId: string; sessionId: string }) => Promise<IpcResult<void>>;
+  purgeOldSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<{ purged: number; retentionDays: number }>>;
   batchCreate: (payload: {
     companyId: string; userId: string; title?: string | null; kind?: string;
     sessionId?: string | null; items: JobBatchItemInput[];
@@ -338,6 +339,18 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.deleteSession({ companyId, userId, sessionId });
+  },
+
+  /**
+   * PII retention: delete the caller's own sessions older than the
+   * retention window (default 90 days; ai.retention_days setting; 0=keep).
+   * Called opportunistically when the chat page opens — transcripts carry
+   * customer names/balances and must not linger forever.
+   */
+  async purgeOldSessions(companyId: string, userId: string): Promise<IpcResult<{ purged: number; retentionDays: number }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.purgeOldSessions({ companyId, userId });
   },
 
   // ─── Job queue (ONE approval for MANY tool calls) ────────────────────────

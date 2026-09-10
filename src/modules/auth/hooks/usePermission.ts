@@ -57,6 +57,11 @@ export function useCanAccessModule(module: Module): boolean {
   const state = useAuthStore.getState();
   if (!state.user) return false;
   if (state.user.role === 'super_admin') return true;
+  // The AI module defines 'ai.use'/'ai.settings' — NOT the *.view/*.own/*.create
+  // family the generic check below looks for. Without this branch every
+  // non-super_admin with 'ai.use' (manager/accountant/sales_rep fallbacks)
+  // saw the sidebar item but was bounced off the /ai route to '/'.
+  if (module === 'ai') return state.hasPermission('ai.use');
   if (state.hasPermission(`${module}.view` as Permission)) return true;
   if (state.hasPermission(`${module}.own` as Permission)) return true;
   if (state.hasPermission(`${module}.create` as Permission)) return true;

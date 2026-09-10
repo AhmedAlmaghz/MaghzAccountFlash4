@@ -176,7 +176,7 @@ export function SessionsDrawer({ onSelect, onDelete, onRename, currentSessionId 
       <div className="flex-1 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800">
         {filtered.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-zinc-400 dark:text-zinc-500">
-            {search ? t('ai.sessions.empty') : t('ai.sessions.empty')}
+            {search ? t('ai.sessions.noResults') : t('ai.sessions.empty')}
           </div>
         ) : (
           groups.map((group) => (

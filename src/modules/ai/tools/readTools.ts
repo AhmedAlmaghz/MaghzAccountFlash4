@@ -1,5 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { localToday, localMonthStart } from '../engine/dateUtils';
+import { guardSqlQuery } from '../security/sqlGuard';
+import { getDbAdapter } from '@/core/database/adapters';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { accountingApi } from '@/modules/accounting/api';
@@ -7,6 +9,14 @@ import { inventoryApi } from '@/modules/inventory/api';
 import { crmApi } from '@/modules/crm/api';
 import { hrApi } from '@/modules/hr/api';
 import { useAppStore } from '@/core/store';
+
+/** SELECT-only guarded query (same guard the report tools use). */
+async function guardedQuery(sql: string, params: unknown[]): Promise<{ success: boolean; rows?: Array<Record<string, unknown>>; error?: string }> {
+  const verdict = guardSqlQuery(sql);
+  if (!verdict.ok) return { success: false, error: verdict.error };
+  const adapter = await getDbAdapter();
+  return adapter.query(sql, params as []) as unknown as { success: boolean; rows?: Array<Record<string, unknown>>; error?: string };
+}
 
 /**
  * Read-only tools (dangerLevel: 'read') — execute immediately without
@@ -62,21 +72,28 @@ export const readTools: ToolDefinition[] = [
       const from = typeof args.fromDate === 'string' ? args.fromDate : localMonthStart();
       const to = typeof args.toDate === 'string' ? args.toDate : localToday();
 
-      const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, 500, {});
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الفواتير' };
-
-      const inRange = res.data.items.filter(
-        (inv) => inv.status !== 'cancelled' && inv.date >= from && inv.date <= to
+      // DB-side aggregate. The old client-side filter (500 newest invoices →
+      // filter in JS) silently returned WRONG totals for any range older
+      // than the newest 500 invoices.
+      const res = await guardedQuery(
+        `SELECT COUNT(*)::int AS invoice_count,
+                COALESCE(SUM(total_amount), 0) AS total_sales,
+                COALESCE(SUM(paid_amount), 0) AS total_paid
+         FROM sales_invoices
+         WHERE company_id = $1::uuid AND status != 'cancelled'
+           AND date BETWEEN $2 AND $3`,
+        [ctx.companyId, from, to],
       );
-      const total = inRange.reduce((s, i) => s + num(i.totalAmount), 0);
-      const paid = inRange.reduce((s, i) => s + num(i.paidAmount), 0);
+      if (!res.success || !res.rows) return { error: res.error || 'فشل جلب ملخص المبيعات' };
+      const row = res.rows[0] || {};
+      const total = num(row.total_sales);
+      const paid = num(row.total_paid);
       return {
         period: { from, to },
-        invoiceCount: inRange.length,
+        invoiceCount: num(row.invoice_count),
         totalSales: Math.round(total * 100) / 100,
         totalPaid: Math.round(paid * 100) / 100,
         totalOutstanding: Math.round((total - paid) * 100) / 100,
-        note: res.data.total > 500 ? 'البيانات تشمل أول 500 فاتورة فقط' : undefined,
       };
     },
   },
@@ -311,29 +328,6 @@ export const readTools: ToolDefinition[] = [
       };
     },
   },
-  {
-    name: 'inventory.get_low_stock',
-    labelAr: 'المنتجات منخفضة المخزون',
-    descriptionAr: 'يعرض المنتجات التي وصلت أو انخفضت عن حد التنبيه في المخزون.',
-    permission: 'inventory.view',
-    dangerLevel: 'read',
-    parameters: EMPTY_PARAMS,
-    execute: async (_args, ctx) => {
-      const res = await inventoryApi.getStockDetailed(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المخزون' };
-      const low = res.data.filter((s) => num(s.minStockAlert) > 0 && num(s.quantity) <= num(s.minStockAlert));
-      return {
-        lowStockCount: low.length,
-        items: low.slice(0, 25).map((s) => ({
-          product: s.productName,
-          code: s.productCode,
-          warehouse: s.warehouseName,
-          quantity: s.quantity,
-          minAlert: s.minStockAlert,
-        })),
-      };
-    },
-  },
 
   // ─── CRM ─────────────────────────────────────────────────────────────────
   {
@@ -415,17 +409,20 @@ export const readTools: ToolDefinition[] = [
       let filtered = res.data;
       if (status) filtered = filtered.filter((t) => t.status === status);
       if (priority) filtered = filtered.filter((t) => t.priority === priority);
-      const todayStr = new Date(new Date().toDateString());
+      // Lexicographic YYYY-MM-DD compare — no Date parsing, no UTC shift.
+      const todayStr = localToday();
+      const isOverdue = (t: { status?: string; dueDate?: string | null }) =>
+        t.status === 'pending' && typeof t.dueDate === 'string' && !!t.dueDate && t.dueDate < todayStr;
       return {
         total: filtered.length,
-        overdue: filtered.filter((t) => t.status === 'pending' && t.dueDate && new Date(t.dueDate) < todayStr).length,
+        overdue: filtered.filter(isOverdue).length,
         tasks: filtered.slice(0, 20).map((t) => ({
           id: t.id,
           title: t.title,
           status: t.status,
           priority: t.priority,
           dueDate: t.dueDate,
-          overdue: t.status === 'pending' && !!t.dueDate && new Date(t.dueDate) < todayStr,
+          overdue: isOverdue(t),
           assignedTo: t.assignedName,
           leadId: t.leadId,
           opportunityId: t.opportunityId,
@@ -518,136 +515,6 @@ export const readTools: ToolDefinition[] = [
           quantity: p.quantity,
           costPrice: p.costPrice,
           lineValue: Math.round(num(p.quantity) * num(p.costPrice) * 100) / 100,
-        })),
-      };
-    },
-  },
-  {
-    name: 'read.low_stock_alert',
-    labelAr: 'تنبيه المخزون المنخفض',
-    descriptionAr: 'يعرض المنتجات التي وصلت أو انخفضت عن حد التنبيه في المخزون.',
-    permission: 'ai.use',
-    dangerLevel: 'read',
-    parameters: EMPTY_PARAMS,
-    execute: async (_args, ctx) => {
-      const res = await inventoryApi.getStockDetailed(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المخزون' };
-      const low = res.data.filter((s) => num(s.minStockAlert) > 0 && num(s.quantity) <= num(s.minStockAlert));
-      return {
-        lowStockCount: low.length,
-        items: low.slice(0, 25).map((s) => ({
-          product: s.productName,
-          code: s.productCode,
-          warehouse: s.warehouseName,
-          quantity: s.quantity,
-          minAlert: s.minStockAlert,
-        })),
-      };
-    },
-  },
-  {
-    name: 'read.sales_analysis',
-    labelAr: 'تحليل المبيعات',
-    descriptionAr: 'يحلل المبيعات حسب المنتج والعميل والفترة. يمكن تحديد الفترة والحد الأعلى للنتائج.',
-    permission: 'ai.use',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        fromDate: { type: 'string', description: 'تاريخ البداية YYYY-MM-DD (اختياري)' },
-        toDate: { type: 'string', description: 'تاريخ النهاية YYYY-MM-DD (اختياري)' },
-        limit: { type: 'number', description: 'عدد النتائج (افتراضي 10، أقصى 25)' },
-      },
-    },
-    execute: async (args, ctx) => {
-      const limit = Math.min(Math.max(num(args.limit) || 10, 1), 25);
-      const from = typeof args.fromDate === 'string' ? args.fromDate : localMonthStart();
-      const to = typeof args.toDate === 'string' ? args.toDate : localToday();
-      const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, 200, {});
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المبيعات' };
-      const inRange = res.data.items.filter((i) => i.status !== 'cancelled' && i.date >= from && i.date <= to);
-      const total = inRange.reduce((s, i) => s + num(i.totalAmount), 0);
-      const byCustomer = new Map<string, { count: number; total: number }>();
-      for (const inv of inRange) {
-        const key = inv.customer?.name || 'غير معروف';
-        const prev = byCustomer.get(key) || { count: 0, total: 0 };
-        byCustomer.set(key, { count: prev.count + 1, total: prev.total + num(inv.totalAmount) });
-      }
-      const topCustomers = [...byCustomer.entries()]
-        .map(([name, v]) => ({ customer: name, invoices: v.count, total: Math.round(v.total * 100) / 100 }))
-        .sort((a, b) => b.total - a.total)
-        .slice(0, limit);
-      return {
-        period: { from, to },
-        invoiceCount: inRange.length,
-        totalSales: Math.round(total * 100) / 100,
-        averagePerInvoice: inRange.length ? Math.round((total / inRange.length) * 100) / 100 : 0,
-        topCustomers,
-      };
-    },
-  },
-  {
-    name: 'read.customer_statement',
-    labelAr: 'كشف حساب عميل',
-    descriptionAr: 'يعرض كشف حساب تفصيلي لعميل (الفواتير والسندات والرصيد التراكمي). يتطلب customerId.',
-    permission: 'ai.use',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        customerId: { type: 'string', description: 'معرف العميل (UUID)' },
-      },
-      required: ['customerId'],
-    },
-    execute: async (args, ctx) => {
-      const customerId = String(args.customerId || '');
-      if (!customerId) return { error: 'customerId مطلوب' };
-      const res = await salesApi.getCustomerStatement(customerId, ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الكشف' };
-      const rows = res.data;
-      return {
-        rowsCount: rows.length,
-        finalBalance: rows.length > 0 ? rows[rows.length - 1].balance : 0,
-        statement: rows.slice(-30).map((r) => ({
-          date: r.date,
-          type: r.documentType,
-          number: r.documentNumber,
-          debit: r.debit,
-          credit: r.credit,
-          balance: r.balance,
-        })),
-      };
-    },
-  },
-  {
-    name: 'read.supplier_statement',
-    labelAr: 'كشف حساب مورد',
-    descriptionAr: 'يعرض كشف حساب تفصيلي لمورد (الفواتير والسندات والرصيد التراكمي). يتطلب supplierId.',
-    permission: 'ai.use',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        supplierId: { type: 'string', description: 'معرف المورد (UUID)' },
-      },
-      required: ['supplierId'],
-    },
-    execute: async (args, ctx) => {
-      const supplierId = String(args.supplierId || '');
-      if (!supplierId) return { error: 'supplierId مطلوب' };
-      const res = await purchasesApi.getSupplierStatement(supplierId, ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الكشف' };
-      const rows = res.data;
-      return {
-        rowsCount: rows.length,
-        finalBalance: rows.length > 0 ? rows[rows.length - 1].balance : 0,
-        statement: rows.slice(-30).map((r) => ({
-          date: r.date,
-          type: r.type,
-          number: r.documentNumber,
-          debit: r.debit,
-          credit: r.credit,
-          balance: r.balance,
         })),
       };
     },
@@ -765,102 +632,6 @@ export const readTools: ToolDefinition[] = [
           reason: e.reason,
           status: e.status,
         })),
-      };
-    },
-  },
-  {
-    name: 'read.ar_aging',
-    labelAr: 'أعمار ذمم العملاء',
-    descriptionAr: 'يعرض تحليل أعمار الذمم المدينة (المستحق على العملاء حسب الفترات: 0-30، 31-60، 61-90، +90 يوم).',
-    permission: 'ai.use',
-    dangerLevel: 'read',
-    parameters: EMPTY_PARAMS,
-    execute: async (_args, ctx) => {
-      const res = await salesApi.getCustomerArAging(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الذمم' };
-      const customers = res.data.slice(0, 20).map((c) => ({
-        customer: c.customerName,
-        totalDue: c.totalDue,
-        buckets: Object.fromEntries(c.buckets.map((b) => [b.period, b.amount])),
-      }));
-      return {
-        totalOutstanding: Math.round(res.data.reduce((s, c) => s + num(c.totalDue), 0) * 100) / 100,
-        customersCount: res.data.length,
-        topCustomers: customers,
-      };
-    },
-  },
-  {
-    name: 'read.ap_aging',
-    labelAr: 'أعمار ذمم الموردين',
-    descriptionAr: 'يعرض إجمالي المبالغ المستحقة للموردين (ذمم المشتريات غير المسددة).',
-    permission: 'ai.use',
-    dangerLevel: 'read',
-    parameters: EMPTY_PARAMS,
-    execute: async (_args, ctx) => {
-      const res = await purchasesApi.getApAgingTotal(ctx.companyId);
-      if (!res.success) return { error: res.error || 'فشل الجلب' };
-      return { totalOutstandingToSuppliers: res.total ?? 0 };
-    },
-  },
-  {
-    name: 'read.balance_sheet',
-    labelAr: 'الميزانية العمومية',
-    descriptionAr: 'يعرض الميزانية العمومية (قائمة المركز المالي) — الأصول، الخصوم، حقوق الملكية حتى تاريخ معين.',
-    permission: 'accounting.view',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        asOfDate: { type: 'string', description: 'تاريخ القطع (YYYY-MM-DD) — اختياري، افتراضي اليوم' },
-      },
-    },
-    execute: async (args, ctx) => {
-      const res = await accountingApi.getBalanceSheet(ctx.companyId, args.asOfDate ? String(args.asOfDate) : undefined);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الميزانية' };
-      const assets = res.data.filter((a) => a.type === 'asset') || [];
-      const liabilities = res.data.filter((a) => a.type === 'liability') || [];
-      const equity = res.data.filter((a) => a.type === 'equity') || [];
-      return {
-        asOfDate: args.asOfDate || localToday(),
-        totalAssets: Math.round(assets.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100,
-        totalLiabilities: Math.round(liabilities.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100,
-        totalEquity: Math.round(equity.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100,
-        assets: assets.slice(0, 15).map((a) => ({ code: a.code, name: a.nameAr || a.nameEn, balance: a.balance })),
-        liabilities: liabilities.slice(0, 15).map((a) => ({ code: a.code, name: a.nameAr || a.nameEn, balance: a.balance })),
-        equity: equity.slice(0, 10).map((a) => ({ code: a.code, name: a.nameAr || a.nameEn, balance: a.balance })),
-      };
-    },
-  },
-  {
-    name: 'read.profit_loss',
-    labelAr: 'قائمة الدخل (أرباح/خسائر)',
-    descriptionAr: 'يعرض قائمة الدخل لفترة محددة — الإيرادات والمصروفات وصافي الربح/الخسارة.',
-    permission: 'accounting.view',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        startDate: { type: 'string', description: 'تاريخ البداية YYYY-MM-DD (اختياري)' },
-        endDate: { type: 'string', description: 'تاريخ النهاية YYYY-MM-DD (اختياري)' },
-      },
-    },
-    execute: async (args, ctx) => {
-      const startDate = typeof args.startDate === 'string' ? args.startDate : undefined;
-      const endDate = typeof args.endDate === 'string' ? args.endDate : undefined;
-      const res = await accountingApi.getProfitLoss(ctx.companyId, startDate, endDate);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب قائمة الدخل' };
-      const income = res.data.filter((a) => a.type === 'revenue') || [];
-      const expenses = res.data.filter((a) => a.type === 'expense') || [];
-      const totalIncome = Math.round(income.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100;
-      const totalExpenses = Math.round(expenses.reduce((s, a) => s + Number(a.balance || 0), 0) * 100) / 100;
-      return {
-        period: { start: startDate || 'بداية العام', end: endDate || 'اليوم' },
-        totalIncome,
-        totalExpenses,
-        netProfit: Math.round((totalIncome - totalExpenses) * 100) / 100,
-        incomeItems: income.slice(0, 15).map((a) => ({ code: a.code, name: a.nameAr || a.nameEn, amount: a.balance })),
-        expenseItems: expenses.slice(0, 15).map((a) => ({ code: a.code, name: a.nameAr || a.nameEn, amount: a.balance })),
       };
     },
   },

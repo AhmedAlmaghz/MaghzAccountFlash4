@@ -28,3 +28,15 @@ export function localMonthStart(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
+
+/**
+ * Parse a YYYY-MM-DD string into LOCAL month/year numbers.
+ * `new Date('2026-08-12')` parses as UTC midnight — in GMT-5 that becomes
+ * 11 August local, so getMonth()/getFullYear() read the WRONG day's month.
+ * Splitting the string directly has no timezone dependency at all.
+ */
+export function localDateParts(dateStr: string): { month: number; year: number; day: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr || '').trim());
+  if (!m) return null;
+  return { year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) };
+}

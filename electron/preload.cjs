@@ -244,6 +244,7 @@ contextBridge.exposeInMainWorld('electronAI', {
   saveSession: (payload) => ipcRenderer.invoke('ai:save-session', { ...payload, sessionToken }),
   renameSession: (payload) => ipcRenderer.invoke('ai:rename-session', { ...payload, sessionToken }),
   deleteSession: (payload) => ipcRenderer.invoke('ai:delete-session', { ...payload, sessionToken }),
+  purgeOldSessions: () => ipcRenderer.invoke('ai:purge-old-sessions', { sessionToken }),
   batchCreate: (payload) => ipcRenderer.invoke('ai:batch-create', { ...payload, sessionToken }),
   batchClaim: (payload) => ipcRenderer.invoke('ai:batch-claim', { ...payload, sessionToken }),
   batchItemDone: (payload) => ipcRenderer.invoke('ai:batch-item-done', { ...payload, sessionToken }),

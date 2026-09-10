@@ -116,8 +116,8 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
                 : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100',
               'hover:bg-white/60 dark:hover:bg-white/10'
             )}
-            title="نسخ"
-            aria-label="نسخ"
+            title={t('ai.card.copy')}
+            aria-label={t('ai.card.copy')}
           >
             {copied ? <Check size={12} /> : <Copy size={12} />}
           </button>
@@ -130,7 +130,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
               'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100',
               'hover:bg-white/60 dark:hover:bg-white/10'
             )}
-            aria-label={expanded ? 'إغلاق التفاصيل' : 'عرض التفاصيل'}
+            aria-label={expanded ? t('ai.card.hideDetails') : t('ai.card.showDetails')}
           >
             {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
@@ -156,12 +156,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
         <div className="px-3 pb-2 border-t border-black/10 dark:border-white/10">
           <div className="mt-2 space-y-1">
             <div>
-              <span className="font-medium text-zinc-600 dark:text-zinc-400">الأداة: </span>
+              <span className="font-medium text-zinc-600 dark:text-zinc-400">{t('ai.card.tool')} </span>
               <span className="text-zinc-800 dark:text-zinc-200 font-mono">{toolCall.toolName}</span>
             </div>
             {Object.keys(toolCall.args).length > 0 && (
               <div>
-                <span className="font-medium text-zinc-600 dark:text-zinc-400">المعاملات: </span>
+                <span className="font-medium text-zinc-600 dark:text-zinc-400">{t('ai.card.args')} </span>
                 <pre className="mt-1 p-2 rounded-lg bg-zinc-950/5 dark:bg-white/10 text-[11px] font-mono overflow-x-auto text-zinc-800 dark:text-zinc-200">
                   {JSON.stringify(toolCall.args, null, 2)}
                 </pre>
@@ -169,7 +169,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
             )}
             {toolCall.resultSummary && (
               <div>
-                <span className="font-medium text-zinc-600 dark:text-zinc-400">النتيجة: </span>
+                <span className="font-medium text-zinc-600 dark:text-zinc-400">{t('ai.card.result')} </span>
                 <div className="mt-1 text-zinc-800 dark:text-zinc-200 text-[11px] leading-relaxed">
                   {formattedResult}
                 </div>

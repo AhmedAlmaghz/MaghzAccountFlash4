@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
+import { useAuthStore } from '@/modules/auth/store';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
 import { aiApi } from '../api';
 import { aiPersistence } from '../api/persistence';
@@ -64,6 +65,16 @@ export default function AiChatPage() {
     check();
     return () => { cancelled = true; };
   }, [company?.id]);
+
+  // PII retention sweep (fire-and-forget): transcripts carry customer names
+  // and balances — old ones are purged per the retention window (default 90
+  // days) whenever the chat page opens. Never blocks the UI.
+  useEffect(() => {
+    const companyId = useAppStore.getState().activeCompany?.id;
+    const userId = useAuthStore.getState().user?.id;
+    if (!companyId || !userId) return;
+    void aiApi.purgeOldSessions(companyId, userId).catch(() => { /* best-effort sweep */ });
+  }, []);
 
   // Close export dropdown on outside click
   useEffect(() => {

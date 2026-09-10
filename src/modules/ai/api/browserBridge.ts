@@ -49,7 +49,9 @@ const MODEL_SETTING = 'ai.model';
 const ENABLED_SETTING = 'ai.enabled';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+// Real Gemini catalog model — see electron/aiHandler.js (kept in sync by
+// providerDefaults.test.ts). 'gemini-3.5-flash-lite' never existed.
+const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
 const REQUEST_TIMEOUT_MS = 90000;
 const TEST_TIMEOUT_MS = 30000;
 
@@ -817,6 +819,28 @@ export const browserAiBridge = {
     }
   },
 
+  /** PII retention — mirrors ai:purge-old-sessions (default 90 days). */
+  async purgeOldSessions(payload: { companyId: string; userId: string }): Promise<{ success: boolean; data?: { purged: number; retentionDays: number }; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const settings = await readAiSettings(payload.companyId);
+      const days = Number(settings['ai.retention_days']);
+      const retention = Number.isFinite(days) && days > 0 ? days : 90;
+      const result = await adapter.query(
+        `DELETE FROM ai_chat_sessions
+          WHERE company_id = $1::uuid AND user_id = $2::uuid
+            AND updated_at < NOW() - ($3::int * INTERVAL '1 day')
+         RETURNING id`,
+        [payload.companyId, payload.userId, retention]
+      );
+      if (!result.success) return { success: false, error: result.error };
+      const purged = result.rows ? result.rows.length : 0;
+      return { success: true, data: { purged, retentionDays: retention } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
   // ─── Job queue (mirrors the ai:batch-* IPC channels) ────────────────────
   // Same SQL shapes as electron/aiHandler.js — single-user browser DB, so
   // sequential adapter.query calls replace the main-process transactions.
@@ -994,15 +1018,15 @@ export const browserAiBridge = {
       if (payload.retryable !== false && attempts < BATCH_MAX_ATTEMPTS) {
         await adapter.query(
           `UPDATE ai_job_items SET status = 'queued', last_error = $2, error_code = $3, updated_at = NOW()
-           WHERE id = $1::uuid`,
-          [payload.itemId, safeError, safeCode]
+           WHERE id = $1::uuid AND company_id = $4::uuid`,
+          [payload.itemId, safeError, safeCode, payload.companyId]
         );
         return { success: true, data: { retried: true, attempts } };
       }
       await adapter.query(
         `UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
-         WHERE id = $1::uuid`,
-        [payload.itemId, safeError, safeCode]
+         WHERE id = $1::uuid AND company_id = $4::uuid`,
+        [payload.itemId, safeError, safeCode, payload.companyId]
       );
       const skipped = await adapter.query<{ seq: number }>(
         `WITH RECURSIVE doomed(seq) AS (
@@ -1079,8 +1103,8 @@ export const browserAiBridge = {
         skipped = res.rows ? res.rows.length : 0;
         await adapter.query(
           `UPDATE ai_job_batches SET skipped_count = skipped_count + $2, updated_at = NOW()
-           WHERE id = $1::uuid`,
-          [payload.batchId, skipped]
+           WHERE id = $1::uuid AND company_id = $3::uuid`,
+          [payload.batchId, skipped, payload.companyId]
         );
       }
       return { success: true, data: { status: payload.status, skipped } };

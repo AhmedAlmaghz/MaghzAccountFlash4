@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { getDbAdapter } from '@/core/database/adapters';
 import { guardSqlQuery } from '../security/sqlGuard';
-import { localToday, localTodayOr, localMonthStart } from '../engine/dateUtils';
+import { localToday, localTodayOr, localMonthStart, localDateParts } from '../engine/dateUtils';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { accountingApi } from '@/modules/accounting/api';
 import { accountingService } from '@/modules/accounting/services';
@@ -597,7 +597,7 @@ export const reportTools: ToolDefinition[] = [
 
       if (!res.success) return { error: res.error || 'فشل جلب العملاء' };
       const customers = (res.rows || []).map((r: Record<string, unknown>) => ({
-        name: r.name_ar, code: r.code, phone: r.phone,
+        name: r.name, code: r.code, phone: r.phone,
         invoiceCount: num(r.invoice_count), revenue: Math.round(num(r.total_revenue) * 100) / 100,
         outstanding: Math.round(num(r.total_outstanding) * 100) / 100,
         lastInvoice: r.last_invoice_date,
@@ -783,7 +783,7 @@ export const reportTools: ToolDefinition[] = [
       return {
         period: { from, to },
         suppliers: (res.rows || []).map((r: Record<string, unknown>) => ({
-          name: r.name_ar, code: r.code,
+          name: r.name, code: r.code,
           invoiceCount: num(r.invoice_count),
           totalPurchases: Math.round(num(r.total_purchases) * 100) / 100,
           outstanding: Math.round(num(r.total_outstanding) * 100) / 100,
@@ -1074,7 +1074,7 @@ export const reportTools: ToolDefinition[] = [
       const [kpiRes, costsRes] = await Promise.all([
         manufacturingApi.getManufacturingKpis(ctx.companyId),
         guardedQuery(`
-          SELECT wo.id, wo.order_number, wo.status, wo.planned_qty, wo.produced_qty, wo.total_cost,
+          SELECT wo.id, wo.order_number, wo.status, wo.quantity, wo.produced_quantity, wo.total_cost,
                  p.name_ar AS product_name, wo.created_at
           FROM work_orders wo
           LEFT JOIN products p ON wo.product_id = p.id
@@ -1086,8 +1086,8 @@ export const reportTools: ToolDefinition[] = [
 
       const orders = (costsRes.rows || []).map((r: Record<string, unknown>) => ({
         orderNumber: r.order_number, productName: r.product_name,
-        status: r.status, plannedQty: num(r.planned_qty),
-        producedQty: num(r.produced_qty), totalCost: num(r.total_cost),
+        status: r.status, plannedQty: num(r.quantity),
+        producedQty: num(r.produced_quantity), totalCost: num(r.total_cost),
         date: r.created_at,
       }));
 
@@ -1121,13 +1121,13 @@ export const reportTools: ToolDefinition[] = [
       
 
       const res = await guardedQuery(`
-        SELECT wo.id, wo.order_number, wo.planned_qty, wo.produced_qty, wo.total_cost,
+        SELECT wo.id, wo.order_number, wo.quantity, wo.produced_quantity, wo.total_cost,
                p.name_ar AS product_name,
-               COALESCE(wc.actual_qty, 0) AS actual_qty,
+               COALESCE(wc.actual_quantity, 0) AS actual_qty,
                COALESCE(wc.planned_quantity, 0) AS planned_qty_line,
                COALESCE(wc.unit_cost, 0) AS unit_cost,
-               (COALESCE(wc.actual_qty, 0) - COALESCE(wc.planned_quantity, 0)) AS qty_variance,
-               (COALESCE(wc.actual_qty, 0) * COALESCE(wc.unit_cost, 0))
+               (COALESCE(wc.actual_quantity, 0) - COALESCE(wc.planned_quantity, 0)) AS qty_variance,
+               (COALESCE(wc.actual_quantity, 0) * COALESCE(wc.unit_cost, 0))
                - (COALESCE(wc.planned_quantity, 0) * COALESCE(wc.unit_cost, 0)) AS cost_variance
         FROM work_orders wo
         LEFT JOIN products p ON wo.product_id = p.id
@@ -1212,9 +1212,11 @@ export const reportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const dateStr = typeof args.date === 'string' && args.date ? args.date : localToday();
-      const target = new Date(dateStr);
-      const month = target.getMonth() + 1;
-      const year = target.getFullYear();
+      // Parse locally (no UTC shift): new Date('YYYY-MM-DD') is UTC midnight
+      // and reads the wrong month/year in western timezones.
+      const parts = localDateParts(dateStr);
+      if (!parts) return { error: 'صيغة التاريخ غير صحيحة — استخدم YYYY-MM-DD' };
+      const { month, year } = parts;
 
       const res = await hrApi.getAttendance(ctx.companyId, month, year);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب تقرير الحضور' };

@@ -34,6 +34,9 @@ export default function AiSettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [showKey, setShowKey] = useState(false);
+  // Browser/PGlite mode stores the API key UNENCRYPTED in the local settings
+  // table (no OS safeStorage outside Electron) — warn the user explicitly.
+  const isBrowserMode = typeof window !== 'undefined' && !(window as { electronAI?: unknown }).electronAI;
 
   // Form state
   const [provider, setProvider] = useState('openai');
@@ -90,6 +93,10 @@ export default function AiSettingsPage() {
       } else {
         addToast('error', res.error || t('ai.errors.generic'));
       }
+    } catch (err) {
+      // Previously escaped with only `finally` — a thrown IPC error left the
+      // user with no feedback at all.
+      addToast('error', err instanceof Error ? err.message : t('ai.errors.generic'));
     } finally {
       setSaving(false);
     }
@@ -251,6 +258,12 @@ export default function AiSettingsPage() {
           <p className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 leading-relaxed">
             🔒 {t('ai.settings.securityNote')}
           </p>
+          {/* Browser-mode warning: no OS keychain encryption outside Electron */}
+          {isBrowserMode && (
+            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-xl p-3 leading-relaxed">
+              ⚠️ {t('ai.settings.browserKeyWarning')}
+            </p>
+          )}
         </div>
 
         {/* Actions */}

@@ -24,7 +24,7 @@ export const aiChatMessages = pgTable('ai_chat_messages', {
   content: text('content'),
   toolCall: jsonb('tool_call'),
   // Attachment metadata + extracted text only — binaries live in the
-  // renderer's registry/OPFS (see modules/ai/attachments). Persisted so the
+  // renderer registry (see modules/ai/attachments). Persisted so the
   // conversation stays meaningful after the binary expires.
   attachments: jsonb('attachments').notNull().default([]),
   sortOrder: integer('sort_order').notNull(),

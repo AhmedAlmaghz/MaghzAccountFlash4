@@ -183,6 +183,13 @@
       "when": 1797800000000,
       "tag": "0025_ai_job_ref_outputs",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1797900000000,
+      "tag": "0026_stock_unique_index",
+      "breakpoints": true
     }
   ]
 }

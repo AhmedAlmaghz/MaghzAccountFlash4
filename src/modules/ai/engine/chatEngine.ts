@@ -4,11 +4,13 @@ import { aiApi } from '../api';
 import { useAiStore } from '../store';
 import { getVisibleTools, toLlmTools } from '../tools/registry';
 import { ensureToolsRegistered } from '../tools/index';
+import { routeToolsForCycle } from './toolRouter';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
 import { isBatchActive, runBatch, batchProgressLine } from './batchRunner';
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
+import { extractiveDigest, digestMessage } from './summarizer';
 import { getBatch } from '../api/batch';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
@@ -147,6 +149,13 @@ const STREAM_TOTAL_TIMEOUT_MS = 120_000;
  * degraded (raw text, default context) instead of hanging.
  */
 const PRE_LLM_DEADLINE_MS = 30_000;
+
+/**
+ * Backoff before the single transient-provider retry (429/503/529/lost
+ * stream). Long enough for quota windows to ease and overload to drain,
+ * short enough that the user does not stare at a frozen chat.
+ */
+const TRANSIENT_RETRY_DELAY_MS = 15_000;
 /**
  * Race a promise against a wall clock. On expiry the loser is detached
  * (late rejection swallowed) and `fallback` is returned — the caller
@@ -293,6 +302,15 @@ class ChatEngine {
   private failedWriteAttempts = new Map<string, number>();
   private static readonly WRITE_RETRY_LIMIT = 2;
 
+  /**
+   * Adaptive tool-routing state (per `send()` invocation): names of tools
+   * the model actually called that were NOT advertised this cycle. The
+   * router re-injects them next iteration so a mis-routed intent degrades
+   * to one wasted turn, never a hard failure. RBAC is never bypassed —
+   * the router only ever narrows `getVisibleTools()`.
+   */
+  private extraAdvertisedTools = new Set<string>();
+
   /** Stable key for a (toolName, args) pair — key order must not matter. */
   private static writeAttemptKey(toolName: string, args: unknown): string {
     const stable = (v: unknown): unknown => {
@@ -337,7 +355,10 @@ class ChatEngine {
     try {
       const tax = await getInvoiceTaxConfig(companyId);
       const data: LiveCompanyContext = {
-        ...(tax.vatRate > 0 ? { vatRate: tax.vatRate } : {}),
+        // vatUnset ⇒ settings unreadable: the rate is UNKNOWN, not zero —
+        // omit it so the prompt tells the model to ASK the user instead of
+        // booking VAT on a guess (the write layer books 0 in that case).
+        ...(tax.vatRate > 0 && !tax.vatUnset ? { vatRate: tax.vatRate } : {}),
         vatOnInvoices: tax.showVat,
       };
       this.liveContextCache = { at: now, data };
@@ -515,6 +536,7 @@ class ChatEngine {
       this.successfulWritesThisSend.clear();
       this.fabricationRetries = 0;
       this.failedWriteAttempts.clear();
+      this.extraAdvertisedTools.clear();
       this.abortRequested = false; // fresh request — previous stop is consumed
 
       await this.runLoop();
@@ -966,7 +988,10 @@ class ChatEngine {
    *   - the slice never STARTS on a `tool` message (its assistant tool_call
    *     partner must come with it);
    *   - the slice never STARTS mid-pair after an assistant(tool_calls) —
-   *     the following tool results must not be orphaned.
+   *     the following tool results must not be orphaned;
+   *   - the DROPPED prefix is compressed into one digest message so the
+   *     business memory of earlier turns (created documents, resolved
+   *     entities, user decisions) survives long sessions.
    */
   private windowedHistory(): LlmMessage[] {
     // Defensive: filter any undefined / malformed entries that may have slipped
@@ -985,15 +1010,16 @@ class ChatEngine {
     let start = rest.length - (ChatEngine.CONTEXT_WINDOW_MESSAGES - system.length);
     if (start < 0) start = 0;
 
-    // Snap forward past orphaned tool results / dangling tool_call partners.
-    while (start < rest.length) {
-      const m = rest[start];
-      if (!m || m.role === 'tool') { start++; continue; }              // orphaned result
-      if (m.tool_calls && m.tool_calls.length > 0) { start++; continue; } // pair opener without its results yet
-      break;
+    // Progressive summary: compress everything the window drops into one
+    // small context block instead of losing it outright.
+    let prefix: LlmMessage[] = [];
+    if (start > 0) {
+      const digest = extractiveDigest(rest.slice(0, start));
+      if (digest) prefix = [digestMessage(digest)];
+      start = 0; // the digest now represents the prefix — window from the top
     }
 
-    return [...system, ...rest.slice(start)];
+    return [...system, ...prefix, ...rest];
   }
 
   /**
@@ -1172,6 +1198,9 @@ class ChatEngine {
     // Orphaned work from before a watchdog recovery must die quietly —
     // its results belong to a session the UI already moved past.
     const myEpoch = this.recoveryCount;
+    // One transient-failure retry per stretch (reset on success): 429/503/529
+    // or a lost stream get a single backoff retry, not an error dead-end.
+    let retriedOnce = false;
     while (this.iterationCount < MAX_ITERATIONS) {
       if (myEpoch !== this.recoveryCount) return;
       // User pressed stop between turns — end the loop gracefully.
@@ -1183,7 +1212,13 @@ class ChatEngine {
       this.iterationCount++;
       this.touchProgress();
 
-      const llmTools = toLlmTools(getVisibleTools());
+      // Intent-routed tool selection: ALWAYS-ON core + domain groups matched
+      // against the user's recent messages + tools the model already called
+      // (adaptive expansion). Bounded ≤ MAX_ADVERTISED_TOOLS — the full
+      // registry (~265 tools) would be rejected by the main-process guard
+      // (cap 128) and by the providers themselves.
+      const routed = routeToolsForCycle(this.history, this.extraAdvertisedTools);
+      const llmTools = toLlmTools(routed.tools);
 
       // Try push-based streaming first, then fall back to non-streaming
       let response: { success: boolean; data?: LlmCompletionData; error?: string };
@@ -1310,7 +1345,29 @@ class ChatEngine {
       // drop its results instead of writing them over the recovered state.
       if (myEpoch !== this.recoveryCount) return;
 
+      // ── Transient-provider retry (once) ─────────────────────────────
+      // 429 (quota) / 503 / 529 (provider overload) / a lost stream are
+      // TEMPORARY: one backoff retry recovers most of them instead of
+      // dumping a dead-end error on the user. Anything else (auth, model,
+      // validation) fails fast — retrying it would only burn quota.
       if (!response.success || !response.data) {
+        const errText = String(response.error ?? '');
+        const transient =
+          /\b(429|503|529)\b/.test(errText) ||
+          /انتهت مهلة البث|انتهت حصة|overloaded|timeout/i.test(errText);
+        if (transient && !retriedOnce) {
+          retriedOnce = true;
+          traceSend('transient-retry');
+          this.store().addMessage({
+            role: 'assistant',
+            kind: 'text',
+            content: '⏳ ازدحام مؤقت لدى المزوّد — إعادة محاولة واحدة بعد 15 ثانية… (حالة الدفعة إن وُجدت محفوظة)',
+          });
+          await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS));
+          if (myEpoch !== this.recoveryCount) return;
+          this.iterationCount--; // this turn did not consume an iteration
+          continue;
+        }
         this.store().addMessage({
           role: 'assistant',
           kind: 'error',
@@ -1318,6 +1375,9 @@ class ChatEngine {
         });
         return;
       }
+      // A successful response resets the one-shot retry budget for the NEXT
+      // transient failure later in the same conversation.
+      retriedOnce = false;
 
       const data = response.data;
 
@@ -1410,6 +1470,10 @@ class ChatEngine {
       const writeCalls: typeof data.toolCalls = [];
 
       for (const tc of data.toolCalls) {
+        // Adaptive expansion: a registered tool the model called but the
+        // router didn't advertise joins the next iteration's set — routing
+        // mistakes cost one turn, not a failure.
+        if (resolveTool(tc.name)) this.extraAdvertisedTools.add(tc.name);
         const tool = resolveTool(tc.name);
         if (tool && tool.dangerLevel === 'read') {
           readCalls.push(tc);
@@ -1684,12 +1748,24 @@ function safeJson(v: unknown): string {
 
 /**
  * Format a numeric value with commas and a currency symbol suffix.
+ * Uses the ACTIVE company's currency — the old hardcoded ' ر.ي' mislabeled
+ * every amount for companies operating in USD/SAR/AED (the system prompt
+ * itself says the currency may be anything).
  */
 function fmtCurrency(v: unknown): string {
   const n = typeof v === 'number' ? v : Number(v);
   if (!isFinite(n) || isNaN(n)) return String(v ?? '');
-  return n.toLocaleString('ar-YE') + ' ر.ي';
+  const currency = useAppStore.getState().activeCompany?.currency || 'YER';
+  const symbol = CURRENCY_LABELS[currency] ?? currency;
+  return n.toLocaleString('ar-YE') + ` ${symbol}`;
 }
+
+/** Compact label per currency code (falls back to the raw code). */
+const CURRENCY_LABELS: Record<string, string> = {
+  YER: 'ر.ي', SAR: 'ر.س', USD: '$', AED: 'د.إ', EGP: 'ج.م', KWD: 'د.ك',
+  QAR: 'ر.ق', OMR: 'ر.ع', BHD: 'د.ب', JOD: 'د.أ', IQD: 'د.ع',
+  EUR: '€', GBP: '£', TRY: '₺',
+};
 
 /**
  * Convert a raw tool result into a beautifully formatted, human-readable string

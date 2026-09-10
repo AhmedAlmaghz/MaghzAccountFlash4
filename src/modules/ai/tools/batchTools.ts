@@ -64,20 +64,34 @@ export const batchTools: ToolDefinition[] = [
         .slice(0, 3);
       const labelNote = labels.length > 0 ? ` — ${labels.join('؛ ')}` : '';
       const head = `دفعة ${items.length} عملية (${tools}${items.length > 0 && tools.split('، ').length >= 3 ? '…' : ''})${linkNote}${labelNote}`;
-      // Task preview — the approval card renders argsSummary verbatim, so the
-      // user sees WHAT runs before consenting (never a bare count).
-      const PREVIEW = 8;
-      const shown = items.slice(0, PREVIEW).map((it, i) => {
+      // Full task preview — the approval card renders argsSummary verbatim
+      // and ONE click here consents to every item, so hiding items behind
+      // "… و N مهمة أخرى" (old preview cap: 8) made bulk prompt-injection
+      // cheap: a crafted attachment could bury hundreds of financial
+      // mutations behind a card that mostly said "and 492 more". Show every
+      // item up to 60 with its args summary; beyond that sample + count.
+      const MAX_PREVIEW = 60;
+      const argBit = (it: Record<string, unknown>): string => {
+        const inner = (it.args && typeof it.args === 'object' ? it.args : {}) as Record<string, unknown>;
+        const bits: string[] = [];
+        for (const key of ['name', 'customer', 'supplier', 'product', 'invoiceNumber', 'total', 'amount', 'quantity', 'description', 'title']) {
+          const v = inner[key];
+          if (v !== undefined && v !== null && String(v).trim()) bits.push(`${key}: ${String(v).slice(0, 30)}`);
+        }
+        return bits.length > 0 ? ` {${bits.join(', ')}}` : '';
+      };
+      const shown = items.slice(0, MAX_PREVIEW).map((it, i) => {
         const tool = String(it.tool || '?');
         const label = typeof it.label === 'string' && it.label.trim()
-          ? ` — ${it.label.trim().slice(0, 40)}`
+          ? ` — ${it.label.trim().slice(0, 60)}`
           : '';
         const dep = it.after !== undefined && it.after !== null ? ` ← بعد #${typeof it.after === 'number' ? it.after + 1 : it.after}` : '';
-        return `${i + 1}. ${tool}${label}${dep}`;
+        return `${i + 1}. ${tool}${label}${argBit(it)}${dep}`;
       });
       const rest = items.length - shown.length;
-      const tail = rest > 0 ? `\n… و ${rest} مهمة أخرى` : '';
-      return items.length > 0 ? `${head}\nالمهام:\n${shown.join('\n')}${tail}` : head;
+      const tail = rest > 0 ? `\n… وعلاوة على ذلك ${rest} مهمة إضافية — اطلب القائمة الكاملة قبل الموافقة إن أردت` : '';
+      const warn = items.length > 20 ? `\n⚠️ دفعة كبيرة (${items.length} عملية) برخصة واحدة — راجع كل سطر بعناية قبل الموافقة.` : '';
+      return items.length > 0 ? `${head}${warn}\nالمهام:\n${shown.join('\n')}${tail}` : head;
     },
     execute: async (args, ctx) => {
       const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];

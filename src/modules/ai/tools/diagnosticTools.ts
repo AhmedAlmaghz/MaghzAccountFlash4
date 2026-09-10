@@ -62,7 +62,7 @@ export const diagnosticTools: ToolDefinition[] = [
         `SELECT i.id, i.invoice_number, i.status, i.total_amount, i.paid_amount,
                 i.payment_type, i.cash_box_id, i.vat_amount, i.company_id,
                 (SELECT ${partyTable}.name FROM ${partyTable} WHERE ${partyTable}.id = i.${partyCol}) AS party_name,
-                (SELECT cb.name_ar FROM cash_boxes cb WHERE cb.id = i.cash_box_id) AS cash_box_name,
+                (SELECT cb.name FROM cash_boxes cb WHERE cb.id = i.cash_box_id) AS cash_box_name,
                 (SELECT cb.account_id FROM cash_boxes cb WHERE cb.id = i.cash_box_id) AS cash_box_account
          FROM ${table} i
          WHERE i.id = $1::uuid AND i.company_id = $2::uuid`,

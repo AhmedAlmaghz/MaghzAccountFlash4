@@ -175,7 +175,7 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
         <ul className="space-y-1">
           {failedItems.map((i) => (
             <li key={i.id} className="text-[11px] text-danger-600 dark:text-danger-400 truncate" title={i.lastError ?? ''}>
-              #{i.seq} {i.toolName}: {i.lastError || '؟'}
+              #{i.seq} {i.toolName}: {i.lastError || t('ai.card.unknown')}
             </li>
           ))}
         </ul>

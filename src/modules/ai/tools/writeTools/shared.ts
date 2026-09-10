@@ -45,20 +45,32 @@ export function summarizeDocLines(label: string, lines: unknown): string {
   return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
 }
 
-/** Fetch the company VAT rate (falls back to 15%). */
-export async function getVatRate(companyId: string): Promise<number> {
+/**
+ * Fetch the company VAT rate. Returns null when settings are unreadable —
+ * callers must NOT invent a rate (the old silent 15% fallback booked
+ * phantom VAT for Yemeni companies where no VAT applies at all).
+ */
+export async function getVatRate(companyId: string): Promise<number | null> {
   const res = await coreApi.getVatSettings(companyId);
-  const rate = res.success && res.data ? num(res.data.vatRate) : 0;
-  return rate > 0 ? rate : 15;
+  if (!res.success || !res.data) return null;
+  const rate = num(res.data.vatRate);
+  return rate > 0 ? rate : null;
 }
 
 export interface InvoiceTaxConfig {
-  /** Effective VAT rate — 0 when the company disabled VAT on invoices. */
+  /** Effective VAT rate — 0 when the company disabled VAT on invoices OR when settings are unreadable. */
   vatRate: number;
   /** Mirrors settings `invoice.showVat` (default true). */
   showVat: boolean;
   /** Mirrors settings `invoice.showDiscount` (default true). */
   showDiscount: boolean;
+  /**
+   * True when the VAT rate could NOT be read from settings. The tool layer
+   * then books NO VAT (never the old silent 15% fallback — the system
+   * prompt explicitly forbids assuming 15%) and the engine omits the rate
+   * from live context so the model must ask the user instead.
+   */
+  vatUnset: boolean;
 }
 
 /**
@@ -70,6 +82,7 @@ export interface InvoiceTaxConfig {
 export async function getInvoiceTaxConfig(companyId: string): Promise<InvoiceTaxConfig> {
   let showVat = true;
   let showDiscount = true;
+  let settingsUnread = false;
   try {
     const adapter = await getDbAdapter();
     const res = await adapter.query<{ key: string; value: string }>(
@@ -81,12 +94,31 @@ export async function getInvoiceTaxConfig(companyId: string): Promise<InvoiceTax
         if (row.key === 'invoice.showVat') showVat = row.value === 'true';
         if (row.key === 'invoice.showDiscount') showDiscount = row.value === 'true';
       }
+    } else {
+      settingsUnread = true;
     }
   } catch {
-    // unreadable settings — fall back to visible (previous behavior)
+    // unreadable settings — fall back to visible (previous behavior), but
+    // flag it so the VAT rate is never invented downstream.
+    settingsUnread = true;
   }
-  const vatRate = showVat ? await getVatRate(companyId) : 0;
-  return { vatRate, showVat, showDiscount };
+  if (!showVat) return { vatRate: 0, showVat, showDiscount, vatUnset: false };
+  // Unreadable show-flags OR unreadable VAT setting ⇒ unknown rate: book
+  // ZERO (never a phantom 15%) and flag it so the model asks the user.
+  let rate: number | null = null;
+  if (!settingsUnread) {
+    try {
+      rate = await getVatRate(companyId);
+    } catch {
+      rate = null;
+    }
+  }
+  return {
+    vatRate: rate ?? 0,
+    showVat,
+    showDiscount,
+    vatUnset: rate === null,
+  };
 }
 
 export interface RawLine {

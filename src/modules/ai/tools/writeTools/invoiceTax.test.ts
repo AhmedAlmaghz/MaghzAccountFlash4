@@ -47,6 +47,7 @@ import { getInvoiceTaxConfig } from './shared';
 import { getDbAdapter } from '@/core/database/adapters';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
+import { coreApi } from '@/modules/core/api';
 import type { ToolContext } from '../../types';
 
 const ctx: ToolContext = {
@@ -93,6 +94,7 @@ describe('getInvoiceTaxConfig', () => {
       vatRate: 15,
       showVat: true,
       showDiscount: true,
+      vatUnset: false,
     });
   });
 
@@ -102,6 +104,7 @@ describe('getInvoiceTaxConfig', () => {
       vatRate: 0,
       showVat: false,
       showDiscount: true,
+      vatUnset: false,
     });
   });
 
@@ -110,6 +113,20 @@ describe('getInvoiceTaxConfig', () => {
     await expect(getInvoiceTaxConfig(ctx.companyId)).resolves.toMatchObject({
       showVat: true,
       showDiscount: false,
+    });
+  });
+
+  it('NEVER invents 15% when the VAT settings read fails', async () => {
+    // Regression pin: the old getVatRate silently fell back to 15% on a
+    // failed settings read — booking phantom VAT for companies (Yemen)
+    // where no VAT applies. Unknown rate ⇒ 0 + vatUnset=true (model asks).
+    mockInvoiceSettings(true, true);
+    vi.mocked(coreApi.getVatSettings).mockResolvedValueOnce({ success: false, error: 'db down' } as never);
+    await expect(getInvoiceTaxConfig(ctx.companyId)).resolves.toEqual({
+      vatRate: 0,
+      showVat: true,
+      showDiscount: true,
+      vatUnset: true,
     });
   });
 });

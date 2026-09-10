@@ -14,8 +14,10 @@
 
 const AI_ALLOWED_TABLES = [
   // settings / core, read-any reference tables
+  // ('banks' was dropped by migration 0002_drop_banks_unify_cash — do not re-add;
+  //  'inventory_transfers' never existed — the real table is 'warehouse_transfers'.)
   'roles', 'audit_logs', 'settings', 'companies', 'branches', 'currencies', 'units',
-  'banks', 'cash_boxes', 'vat_settings', 'default_accounts', 'document_sequences',
+  'cash_boxes', 'vat_settings', 'default_accounts', 'document_sequences',
   // users (needed for report joins like "created_by_name")
   'users',
   // accounting
@@ -25,10 +27,11 @@ const AI_ALLOWED_TABLES = [
   'quotations', 'quotation_lines', 'customers',
   // purchases
   'purchase_invoices', 'purchase_invoice_lines', 'purchase_orders', 'purchase_order_lines',
+  'purchase_returns', 'purchase_return_lines',
   'suppliers',
   // inventory
   'products', 'product_types', 'product_categories', 'product_product_categories', 'stock', 'stock_movements', 'stock_adjustments',
-  'warehouses', 'inventory_transfers', 'units',
+  'warehouses', 'warehouse_transfers', 'warehouse_transfer_lines',
   // manufacturing
   'boms', 'bom_lines', 'work_orders', 'work_order_consumptions',
   // hr

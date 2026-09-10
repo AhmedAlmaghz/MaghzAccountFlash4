@@ -296,6 +296,11 @@ export const AppRouter: React.FC = () => {
                 <Route path="database" element={withSuspense(DatabaseSettingsPage)} />
                 <Route path="users" element={withSuspense(UsersSettingsPage)} />
                 <Route path="reset" element={withSuspense(ResetOnboardingPage)} />
+              </Route>
+              {/* AI settings configure provider API keys — gated at the ROUTE
+                  level by ai.settings, not just the sidebar entry, so a
+                  settings.view-only user cannot reach the key form by URL. */}
+              <Route element={<PermissionRoute permission="ai.settings" />}>
                 <Route path="ai" element={withSuspense(AiSettingsPage)} />
               </Route>
             </Route>

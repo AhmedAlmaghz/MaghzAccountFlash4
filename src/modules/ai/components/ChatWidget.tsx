@@ -52,8 +52,9 @@ export function ChatWidget() {
   // Global keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Cmd/Ctrl+K — toggle widget
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      // Ctrl/Cmd+Shift+K — toggle widget. Plain Ctrl+K belongs to the command
+      // palette (both used to fire on the same key and opened BOTH overlays).
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsOpen((prev) => !prev);
         return;
@@ -92,7 +93,7 @@ export function ChatWidget() {
             'bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-6 left-4 lg:left-6',
             'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift hover:scale-105'
           )}
-          title={t('ai.widget.open') + ' (Ctrl+K)'}
+          title={t('ai.widget.open') + ' (Ctrl+Shift+K)'}
           aria-label={t('ai.widget.open')}
         >
           <Bot size={24} />

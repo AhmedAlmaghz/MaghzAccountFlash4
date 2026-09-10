@@ -64,6 +64,16 @@ export function ChatPanel() {
     }
   }, [messages, isProcessing]);
 
+  // Autosave failure banner: a silently failed save loses the whole
+  // conversation on close with no hint why the history drawer is empty.
+  // Sticky banner — cleared only when a later save succeeds.
+  const [saveFailed, setSaveFailed] = useState(false);
+  const runAutosave = useCallback(() => {
+    void aiPersistence.saveCurrentSession().then((ok) => {
+      setSaveFailed(!ok);
+    });
+  }, []);
+
   // Persist conversation when a processing cycle finishes (true → false).
   // Also records cycle boundaries for the status pill (elapsed timer while
   // busy, explicit "reply complete" notice right after).
@@ -78,11 +88,11 @@ export function ChatPanel() {
       setLastCompletedAt(Date.now());
       setProcessingStartedAt(null);
       if (messages.length > 0) {
-        void aiPersistence.saveCurrentSession();
+        runAutosave();
       }
     }
     wasProcessing.current = isProcessing;
-  }, [isProcessing, messages.length]);
+  }, [isProcessing, messages.length, runAutosave]);
 
   // Stall watchdog: the engine touches its heartbeat on every chunk, tool
   // completion and iteration. If it claims to be processing but nothing
@@ -117,11 +127,9 @@ export function ChatPanel() {
   // Periodic auto-save every 60 seconds while there are messages
   useEffect(() => {
     if (messages.length === 0) return;
-    const interval = setInterval(() => {
-      void aiPersistence.saveCurrentSession();
-    }, 60000);
+    const interval = setInterval(runAutosave, 60000);
     return () => clearInterval(interval);
-  }, [messages.length]);
+  }, [messages.length, runAutosave]);
 
   // Find the last user text for regenerate — defensive against holes
   const lastUserText = useMemo(() => {
@@ -257,6 +265,12 @@ export function ChatPanel() {
   // ── Messages view ────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full min-h-0 bg-zinc-50/50 dark:bg-zinc-900">
+      {/* Autosave failure — sticky until a later save succeeds */}
+      {saveFailed && (
+        <div className="mx-3 mt-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {t('ai.errors.saveFailed')}
+        </div>
+      )}
       {/* Messages scroll area — centered column, full width on mobile */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl w-full mx-auto px-3 sm:px-4 py-4 space-y-5">

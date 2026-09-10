@@ -344,6 +344,7 @@
       "saved": "Settings saved successfully",
       "save": "Save Settings",
       "securityNote": "The key is stored encrypted in the database and never leaves this device. Requests go through the main process only.",
+      "browserKeyWarning": "You are running in browser mode: OS encryption is unavailable here, so the API key will be stored UNENCRYPTED in the local database. Use a dedicated, rotatable key for this mode only.",
       "presets": {
         "gemini": "Gemini",
         "openai": "OpenAI",
@@ -357,7 +358,17 @@
       "generic": "An error occurred while processing your request",
       "maxIterations": "Stopped after several attempts — try simplifying the request",
       "emptyMessage": "Type a message first",
-      "notAvailable": "AI Assistant is only available in the desktop app"
+      "notAvailable": "AI Assistant is only available in the desktop app",
+      "saveFailed": "⚠️ Auto-saving the conversation failed — it may be lost on close. Retries every minute."
+    },
+    "card": {
+      "copy": "Copy",
+      "hideDetails": "Hide details",
+      "showDetails": "Show details",
+      "tool": "Tool:",
+      "args": "Arguments:",
+      "result": "Result:",
+      "unknown": "?"
     },
     "messageActions": {
       "copy": "Copy",
@@ -372,6 +383,7 @@
     "sessions": {
       "title": "Conversation History",
       "empty": "No previous conversations",
+      "noResults": "No conversations match your search",
       "delete": "Delete",
       "untitled": "Untitled",
       "searchPlaceholder": "Search conversations...",

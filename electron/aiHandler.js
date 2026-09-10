@@ -24,7 +24,11 @@ const MODEL_SETTING = 'ai.model';
 const ENABLED_SETTING = 'ai.enabled';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+// Real model in the Gemini catalog (the old default 'gemini-3.5-flash-lite'
+// does not exist — every unconfigured install 404'd until the user set a
+// model by hand). Keep in sync with src/modules/ai/api/browserBridge.ts
+// (enforced by providerDefaults.test.ts).
+const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
 const REQUEST_TIMEOUT_MS = 90000;
 const TEST_TIMEOUT_MS = 30000;
 
@@ -77,6 +81,38 @@ async function upsertAiSetting(companyId, key, value) {
   );
 }
 
+// ─── Provider call budget ────────────────────────────────────────────────────
+// Per-user hourly cap on provider calls. Without it a stuck renderer (or a
+// tool loop that slips past MAX_ITERATIONS in a buggy future) can issue
+// unlimited paid calls. Default 120/hour; override via the ai.rate_limit_hour
+// setting ('0' disables the limiter). Sliding window of timestamps.
+const AI_RATE_LIMIT_HOUR = 120;
+const userCallLog = new Map(); // userId → number[] (epoch ms)
+
+function withinRateLimit(userId, settings) {
+  const cap = Number(settings['ai.rate_limit_hour']) || AI_RATE_LIMIT_HOUR;
+  if (cap <= 0) return true; // explicitly disabled
+  const now = Date.now();
+  const hourAgo = now - 3600_000;
+  const log = (userCallLog.get(userId) || []).filter((t) => t > hourAgo);
+  if (log.length >= cap) {
+    userCallLog.set(userId, log);
+    return false;
+  }
+  log.push(now);
+  userCallLog.set(userId, log);
+  if (userCallLog.size > 500) {
+    // drop the oldest entries entirely (long-gone sessions)
+    const oldestKey = userCallLog.keys().next().value;
+    userCallLog.delete(oldestKey);
+  }
+  return true;
+}
+
+function rateLimitMessage() {
+  return 'انتهت حصة الذكاء الاصطناعي لهذا المستخدم خلال الساعة (120 طلباً) — انتظر قليلاً ثم أعد المحاولة. يمكن للمسؤول رفع الحد من إعدادات ai.rate_limit_hour.';
+}
+
 // ─── API key management ─────────────────────────────────────────────────────
 
 function encryptApiKey(plain) {
@@ -101,16 +137,21 @@ function decryptApiKey(stored) {
 }
 
 async function resolveApiKey(companyId) {
-  // Priority 1: environment variable (never stored anywhere).
-  if (process.env.AI_API_KEY) return process.env.AI_API_KEY;
+  // Priority 1: encrypted per-company value (isolated quota/cost per tenant).
   // Priority 2: in-memory cache (avoids repeated keychain prompts).
   const cachedApiKey = cachedApiKeys.get(companyId);
   if (cachedApiKey) return cachedApiKey;
-  // Priority 3: encrypted value in the settings table.
   const settings = await readAiSettings(companyId);
   const decrypted = decryptApiKey(settings[KEY_SETTING]);
-  if (decrypted) cachedApiKeys.set(companyId, decrypted);
-  return decrypted;
+  if (decrypted) {
+    cachedApiKeys.set(companyId, decrypted);
+    return decrypted;
+  }
+  // Priority 3: AI_API_KEY env var — a shared fallback across ALL companies.
+  // Per-company keys must win over it, otherwise one env key silently
+  // routes every tenant's traffic (and bills) to a single account.
+  if (process.env.AI_API_KEY) return process.env.AI_API_KEY;
+  return null;
 }
 
 function maskKey(key) {
@@ -539,17 +580,21 @@ export function registerAiHandlers() {
       const settings = await readAiSettings(companyId);
       const envKey = process.env.AI_API_KEY || null;
       const storedKey = settings[KEY_SETTING] ? decryptApiKey(settings[KEY_SETTING]) : null;
-      const apiKey = envKey || storedKey;
+      // Resolution priority (see resolveApiKey): the per-company stored key
+      // wins over the shared env fallback — display must reflect that.
+      const apiKey = storedKey || envKey;
       return {
         success: true,
         data: {
-          provider: settings[PROVIDER_SETTING] || 'openai',
+          // Match browserBridge's default — the default base URL IS Gemini's
+          // OpenAI-compatible endpoint, so 'gemini' is the honest label.
+          provider: settings[PROVIDER_SETTING] || 'gemini',
           baseUrl: settings[BASE_URL_SETTING] || DEFAULT_BASE_URL,
           model: settings[MODEL_SETTING] || DEFAULT_MODEL,
           enabled: settings[ENABLED_SETTING] !== 'false',
           hasApiKey: Boolean(apiKey),
-          maskedKey: maskKey(envKey || storedKey),
-          keySource: envKey ? 'env' : storedKey ? 'db' : null,
+          maskedKey: maskKey(storedKey || envKey),
+          keySource: storedKey ? 'db' : envKey ? 'env' : null,
         },
       };
     } catch (err) {
@@ -619,7 +664,11 @@ export function registerAiHandlers() {
       const companyId = auth.session.user.companyId;
       const { messages, tools, temperature, maxTokens } = payload;
       if (!isValidMessages(messages)) return { success: false, error: 'messages must be a non-empty array' };
-      if (Array.isArray(tools) && tools.length > 50) return { success: false, error: 'too many tools' };
+      // Hard backstop only — the renderer's tool router advertises ≤48 tools
+      // per cycle; this cap exists so a routing regression can never push
+      // the full ~250-tool registry to the provider (which rejects oversized
+      // tool lists outright).
+      if (Array.isArray(tools) && tools.length > 128) return { success: false, error: 'too many tools' };
       if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)) return { success: false, error: 'invalid temperature' };
       // Aligned with the renderer's unified MAX_COMPLETION_TOKENS (10240):
       // long analytical reports legitimately need it; the provider enforces
@@ -629,6 +678,9 @@ export function registerAiHandlers() {
       const settings = await readAiSettings(companyId);
       if (settings[ENABLED_SETTING] === 'false') {
         return { success: false, error: 'المساعد الذكي معطّل — فعّله من إعدادات الذكاء الاصطناعي' };
+      }
+      if (!withinRateLimit(auth.session.user.id, settings)) {
+        return { success: false, error: rateLimitMessage() };
       }
 
       const apiKey = await resolveApiKey(companyId);
@@ -659,9 +711,19 @@ export function registerAiHandlers() {
   // Abandoned loops are stopped via 'ai:stop-stream' (checked per chunk)
   // instead of running to the provider timeout and wasting sockets.
   const cancelledStreams = new Set();
-  function cancelStream(id) {
-    if (typeof id !== 'string' || id.length === 0 || id.length > 64) return;
+  // streamId → userId of the session that STARTED the stream. Cancellation
+  // is ownership-checked: without this, ANY 'ai.use' session could kill
+  // another user's (or another window's) in-flight stream — an in-app DoS.
+  const streamOwners = new Map();
+  function cancelStream(id, userId) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 64) return false;
+    const owner = streamOwners.get(id);
+    if (owner !== undefined && owner !== userId) return false;
     cancelledStreams.add(id);
+    return true;
+  }
+  function forgetStream(id) {
+    streamOwners.delete(id);
     if (cancelledStreams.size > 200) {
       const oldest = cancelledStreams.values().next().value;
       cancelledStreams.delete(oldest);
@@ -673,27 +735,35 @@ export function registerAiHandlers() {
   ipcMain.on('ai:stop-stream', (event, payload = {}) => {
     const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
     if (!auth.ok) return;
-    cancelStream(payload.streamId);
+    if (!cancelStream(payload.streamId, auth.session.user.id)) return;
+    forgetStream(payload.streamId);
   });
   ipcMain.on('ai:start-stream', async (event, payload = {}) => {
     const streamId = isValidStreamId(payload.streamId) ? payload.streamId : null;
     const chunkCh = streamId ? `ai:stream-chunk:${streamId}` : 'ai:stream-chunk';
     const doneCh = streamId ? `ai:stream-done:${streamId}` : 'ai:stream-done';
     const sendChunk = (chunk) => event.sender.send(chunkCh, chunk);
-    const sendDone = (result) => event.sender.send(doneCh, result);
+    const sendDone = (result) => {
+      if (streamId) forgetStream(streamId);
+      event.sender.send(doneCh, result);
+    };
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
       if (!auth.ok) {
         sendDone(auth);
         return;
       }
+      // Register ownership BEFORE the first chunk so a stop request racing
+      // the start is already covered by the ownership check.
+      if (streamId) streamOwners.set(streamId, auth.session.user.id);
       const companyId = auth.session.user.companyId;
       const { messages, tools, temperature, maxTokens } = payload;
       if (!isValidMessages(messages)) {
         sendDone({ success: false, error: 'messages must be a non-empty array' });
         return;
       }
-      if (Array.isArray(tools) && tools.length > 50) {
+      // Hard backstop (see ai:complete) — renderer tool router caps at 48.
+      if (Array.isArray(tools) && tools.length > 128) {
         sendDone({ success: false, error: 'too many tools' });
         return;
       }
@@ -712,6 +782,10 @@ export function registerAiHandlers() {
       const settings = await readAiSettings(companyId);
       if (settings[ENABLED_SETTING] === 'false') {
         sendDone({ success: false, error: 'المساعد الذكي معطّل — فعّله من إعدادات الذكاء الاصطناعي' });
+        return;
+      }
+      if (!withinRateLimit(auth.session.user.id, settings)) {
+        sendDone({ success: false, error: rateLimitMessage() });
         return;
       }
 
@@ -737,6 +811,7 @@ export function registerAiHandlers() {
         // NEWER stream sharing the channel.
         if (streamId && cancelledStreams.has(streamId)) {
           cancelledStreams.delete(streamId);
+          forgetStream(streamId);
           return;
         }
         sendChunk(chunk);
@@ -826,6 +901,34 @@ export function registerAiHandlers() {
       const safeTitle = typeof title === 'string' ? title.slice(0, 200) : null;
       const sid = await persistSession({ companyId, userId, sessionId, title: safeTitle, messages });
       return { success: true, data: { sessionId: sid } };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // PII retention: delete the caller's OWN sessions older than the retention
+  // window (default 90 days, configurable via ai.retention_days, '0' = keep
+  // forever). Transcripts carry customer names, balances and attachment
+  // text — without a TTL they linger in the database indefinitely.
+  ipcMain.handle('ai:purge-old-sessions', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return auth;
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const settings = await readAiSettings(companyId);
+      const days = Number(settings['ai.retention_days']);
+      const retention = Number.isFinite(days) && days > 0 ? days : 90;
+      const res = await pool.query(
+        `DELETE FROM ai_chat_sessions
+          WHERE company_id = $1::uuid AND user_id = $2::uuid
+            AND updated_at < NOW() - ($3::int * INTERVAL '1 day')
+         RETURNING id`,
+        [companyId, userId, retention]
+      );
+      return { success: true, data: { purged: res.rows.length, retentionDays: retention } };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1117,15 +1220,15 @@ export function registerAiHandlers() {
       if (retryable !== false && attempts < 4) {
         await pool.query(
           `UPDATE ai_job_items SET status = 'queued', last_error = $2, error_code = $3, updated_at = NOW()
-           WHERE id = $1::uuid`,
-          [itemId, safeError, safeCode]
+           WHERE id = $1::uuid AND company_id = $4::uuid`,
+          [itemId, safeError, safeCode, companyId]
         );
         return { success: true, data: { retried: true, attempts } };
       }
       await pool.query(
         `UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
-         WHERE id = $1::uuid`,
-        [itemId, safeError, safeCode]
+         WHERE id = $1::uuid AND company_id = $4::uuid`,
+        [itemId, safeError, safeCode, companyId]
       );
       const skipped = await pool.query(
         `WITH RECURSIVE doomed(seq) AS (
@@ -1192,8 +1295,8 @@ export function registerAiHandlers() {
         skipped = res.rows.length;
         await pool.query(
           `UPDATE ai_job_batches SET skipped_count = skipped_count + $2, updated_at = NOW()
-           WHERE id = $1::uuid`,
-          [batchId, skipped]
+           WHERE id = $1::uuid AND company_id = $3::uuid`,
+          [batchId, skipped, companyId]
         );
       }
       return { success: true, data: { status, skipped } };

@@ -386,9 +386,11 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
-      const res = await salesApi.getQuotations(ctx.companyId);
+      // Paginated window instead of the old full-table fetch (getQuotations
+      // returned EVERY quotation to the renderer and filtered in JS).
+      const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, 100, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
+      const matches = res.data.items
         .filter((q) =>
           q.quotationNumber.toLowerCase().includes(cleanQuery) ||
           normalizeQuery(q.customer?.name || '').includes(cleanQuery)
@@ -439,9 +441,12 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
-      const res = await salesApi.getInvoices(ctx.companyId);
+      // Paginated window instead of the old full-table fetch (getInvoices
+      // returned EVERY invoice to the renderer — thousands of rows on real
+      // datasets — then filtered in JS).
+      const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, 100, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
+      const matches = res.data.items
         .filter((inv) => {
           const n = (inv.invoiceNumber || '').toLowerCase();
           const c = normalizeQuery(inv.customer?.name || '');
@@ -471,9 +476,10 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
-      const res = await purchasesApi.getInvoices(ctx.companyId);
+      // Paginated window instead of the old full-table fetch.
+      const res = await purchasesApi.getInvoicesPaginated(ctx.companyId, 1, 100, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
+      const matches = res.data.items
         .filter((inv) => {
           const n = (inv.invoiceNumber || '').toLowerCase();
           const s = normalizeQuery(inv.supplier?.name || '');
@@ -787,13 +793,16 @@ export const searchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const res = await accountingApi.getTransactionsPaginated(ctx.companyId, 1, 8);
+      const cleanQuery = normalizeQuery(query);
+      // Window widened 8 → 200: the old 8-row window made any reference
+      // older than the newest 8 transactions permanently unfindable.
+      const res = await accountingApi.getTransactionsPaginated(ctx.companyId, 1, 200);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
       const matches = items
         .filter((t) =>
-          (t.reference || '').toLowerCase().includes(query) ||
-          (t.description || '').toLowerCase().includes(query)
+          normalizeQuery(t.reference || '').includes(cleanQuery) ||
+          normalizeQuery(t.description || '').includes(cleanQuery)
         )
         .slice(0, 8);
       return {

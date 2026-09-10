@@ -73,17 +73,17 @@ function snapshotFingerprint(sessionId: string | null, messages: ChatMessage[]):
 }
 
 let lastSavedFingerprint: string | null = null;
-let saveInFlight: Promise<void> | null = null;
+let saveInFlight: Promise<boolean> | null = null;
 let saveRequestedWhileInFlight = false;
 
-async function runSave(): Promise<void> {
+async function runSave(): Promise<boolean> {
   const ctx = currentContext();
-  if (!ctx) return;
+  if (!ctx) return false;
   const { messages, sessionId, setSessionId } = useAiStore.getState();
-  if (messages.length === 0) return;
+  if (messages.length === 0) return false;
 
   const fingerprint = snapshotFingerprint(sessionId, messages);
-  if (fingerprint === lastSavedFingerprint) return;
+  if (fingerprint === lastSavedFingerprint) return true;
 
   const title = deriveTitle(messages);
   const snapshot = messages;
@@ -95,7 +95,13 @@ async function runSave(): Promise<void> {
     title,
     messages: snapshot,
   });
-  if (res.success && res.data?.sessionId) {
+  if (!res.success) {
+    // Surface instead of swallowing: an autosave that silently fails loses
+    // the whole conversation on close with no hint why the history is empty.
+    console.error('[ai/persistence] session save failed:', res.error);
+    return false;
+  }
+  if (res.data?.sessionId) {
     // Stamp the id ONLY if the store still holds the conversation we saved.
     // handleNewChat/handleSelectSession fire-and-forget a save and switch
     // immediately; stamping afterwards would attach the OLD session id to the
@@ -106,6 +112,7 @@ async function runSave(): Promise<void> {
       lastSavedFingerprint = snapshotFingerprint(res.data.sessionId, snapshot);
     }
   }
+  return true;
 }
 
 export const aiPersistence = {
@@ -114,20 +121,23 @@ export const aiPersistence = {
    * safe: snapshots the store synchronously, skips when unchanged, and
    * serializes overlapping calls (one in flight + one queued) so a slow save
    * is never duplicated but fresh data is never dropped either.
+   * Returns false when the save failed (the caller may surface a warning).
    */
-  async saveCurrentSession(): Promise<void> {
+  async saveCurrentSession(): Promise<boolean> {
     if (saveInFlight) {
       saveRequestedWhileInFlight = true;
       return saveInFlight;
     }
-    const run = (async () => {
+    const run = (async (): Promise<boolean> => {
+      let ok = true;
       try {
-        await runSave();
+        ok = (await runSave()) && ok;
         // A newer state arrived while saving → persist it too (once).
         while (saveRequestedWhileInFlight) {
           saveRequestedWhileInFlight = false;
-          await runSave();
+          ok = (await runSave()) && ok;
         }
+        return ok;
       } finally {
         saveInFlight = null;
       }

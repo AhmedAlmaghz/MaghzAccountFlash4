@@ -466,10 +466,13 @@ export const wizardTools: ToolDefinition[] = [
         return { error: 'فشل إنقاص المخزون من المستودع المصدر' };
       }
 
-      // Step 2: Add to destination (insert if not exists, update if exists)
+      // Step 2: Add to destination (insert if not exists, update if exists).
+      // stock has NO created_at column — only updated_at (0000_init.sql).
+      // The unique index on (company_id, product_id, warehouse_id) is
+      // created by migration 0026.
       const addRes = await adapter.query(
-        `INSERT INTO stock (company_id, product_id, warehouse_id, quantity, created_at, updated_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, NOW(), NOW())
+        `INSERT INTO stock (company_id, product_id, warehouse_id, quantity, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, NOW())
          ON CONFLICT (company_id, product_id, warehouse_id)
          DO UPDATE SET quantity = stock.quantity + $4::numeric, updated_at = NOW()`,
         [ctx.companyId, productId, toWarehouseId, quantity]

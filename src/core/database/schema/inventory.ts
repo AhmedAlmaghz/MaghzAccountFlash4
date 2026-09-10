@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey, uniqueIndex } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 import { productTypes, units } from './settings';
 
@@ -85,6 +85,9 @@ export const warehouses = pgTable('warehouses', {
 });
 
 // ─── Stock (Inventory Quantities) ─────────────────────────────────────────────
+// Unique index (migration 0026): the AI transfer wizard and inventory flows
+// upsert destination rows with ON CONFLICT (company_id, product_id,
+// warehouse_id) — this index is the target of that clause.
 export const stock = pgTable('stock', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
@@ -93,7 +96,9 @@ export const stock = pgTable('stock', {
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   minStockAlert: numeric('min_stock_alert', { precision: 18, scale: 4 }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-});
+}, (t) => [
+  uniqueIndex('stock_company_product_warehouse_uidx').on(t.companyId, t.productId, t.warehouseId),
+]);
 
 // ─── Stock Movements ──────────────────────────────────────────────────────────
 export const stockMovements = pgTable('stock_movements', {
