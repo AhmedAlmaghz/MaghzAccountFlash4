@@ -9,11 +9,16 @@ vi.mock('@/modules/inventory/api', () => ({
 }));
 vi.mock('@/core/api', () => ({
   getNextDocumentNumber: vi.fn(),
+  getUnits: vi.fn(),
+}));
+vi.mock('@/core/database/adapters', () => ({
+  getDbAdapter: vi.fn(),
 }));
 
 import { inventoryWriteTools } from './inventory';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
+import { getDbAdapter } from '@/core/database/adapters';
 import type { ToolContext } from '../../types';
 
 const ctx: ToolContext = {
@@ -113,6 +118,26 @@ describe('inventory.create_product — human-name aliases (transcript regression
     const res = (await findTool('inventory.create_product').execute({ salePrice: 100 }, ctx)) as Record<string, unknown>;
     expect(res.error).toMatch(/اسم المنتج مطلوب/);
     expect(mockedApi.createProduct).not.toHaveBeenCalled();
+  });
+
+  it('resolves productType by code or English name, not just Arabic', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue({
+      query: vi.fn(async () => ({
+        success: true,
+        rows: [
+          { id: 'type-fg', name_ar: 'منتج نهائي', name_en: 'Finished Goods', code: 'FG' },
+          { id: 'type-raw', name_ar: 'مواد خام', name_en: 'Raw Materials', code: 'RAW' },
+        ],
+      })),
+    } as never);
+    const byCode = (await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100, productType: 'raw' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(byCode.created).toBe(true);
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ productTypeId: 'type-raw' }),
+    );
   });
 });
 

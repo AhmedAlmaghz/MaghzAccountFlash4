@@ -163,6 +163,29 @@ describe('AI search tools — fuzzy matching against DB rows', () => {
       const byBarcode = await findTool('search.products').execute({ query: '6281234' }, ctx);
       expect((byBarcode as { matches: { id: string }[] }).matches.map((m) => m.id)).toContain('p1');
     });
+
+    it('finds a multi-word partial that is NOT a contiguous substring (transcript regression)', async () => {
+      // Real session 2026-09-10: "شوكلاتة صغير" never appears verbatim
+      // ("شوكلاتة سويت مون صغير 65جم…") — whole-string fuzzy scored < 0.35
+      // and the agent retried the same dead query 4 times. Token-aware
+      // scoring finds it via the individual words.
+      vi.mocked(inventoryApi.getProductsPaginated).mockResolvedValue({
+        success: true,
+        data: {
+          items: [
+            { id: 'p-small', code: 'PRD-0008', nameAr: 'شوكلاتة سويت مون صغير 65جم 1×24', nameEn: '', salePrice: 10800, costPrice: 10000, quantity: 4, barcode: '', sku: '' },
+            { id: 'p-big', code: 'PRD-0009', nameAr: 'شوكلاتة سويت مون كبير 125جم 1×12', nameEn: '', salePrice: 10800, costPrice: 10000, quantity: 4, barcode: '', sku: '' },
+          ],
+          total: 2, page: 1, pageSize: 200, totalPages: 1,
+        },
+      });
+
+      const result = await findTool('search.products').execute({ query: 'شوكلاتة صغير' }, ctx);
+      const ids = (result as { matches: { id: string }[] }).matches.map((m) => m.id);
+      expect(ids).toContain('p-small');
+      // Exact-phrase product ranks first
+      expect(ids[0]).toBe('p-small');
+    });
   });
 
   describe('search.suppliers', () => {

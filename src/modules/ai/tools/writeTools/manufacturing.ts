@@ -32,11 +32,12 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         notes: { type: 'string' },
         lines: {
           type: 'array',
-          description: 'المواد المكوّنة للتركيبة مع كمياتها وتكاليفها (يجب أن تكون أنواعها مواد أولية/خام)',
+          description: 'المواد المكوّنة للتركيبة مع كمياتها وتكاليفها (يجب أن تكون أنواعها مواد أولية/خام — يقبل items كبديل لـ lines)',
           items: {
             type: 'object',
             properties: {
-              materialId: { type: 'string', description: 'معرف المادة الخام (من search.products)' },
+              materialId: { type: 'string', description: 'معرف المادة الخام (من search.products — يقبل productId كبديل)' },
+              productId: { type: 'string', description: 'بديل لـ materialId' },
               quantity: { type: 'number', description: 'الكمية اللازمة لدفعة واحدة' },
               unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب تلقائياُ من سعر تكلفة المنتج)' },
             },
@@ -46,12 +47,17 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       },
       required: ['productId', 'lines'],
     },
-    summarizeArgs: (a) => `إنشاء تركيبة لمنتج: ${String((a as Record<string, unknown>).productId || '').slice(0, 8)}… بعدد مواد: ${Array.isArray((a as Record<string, unknown>).lines) ? ((a as Record<string, unknown>).lines as unknown[]).length : 0}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      const arr = (Array.isArray(r.lines) ? r.lines : Array.isArray(r.items) ? r.items : []) as unknown[];
+      return `إنشاء تركيبة لمنتج: ${String(r.productId || '').slice(0, 8)}… بعدد مواد: ${arr.length}`;
+    },
     execute: async (args, ctx) => {
       const productId = str(args.productId);
       if (!productId) return { error: 'productId مطلوب' };
-      const rawLines = args.lines;
-      if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير مادة واحدة على الأقل في lines' };
+      const rawInput = args.lines ?? args.items;
+      const rawLines = Array.isArray(rawInput) ? rawInput : [];
+      if (rawLines.length === 0) return { error: 'يجب تمرير مادة واحدة على الأقل في lines' };
       const lines: { materialId: string; quantity: number; unitCost: number }[] = [];
       // Cache product costs to auto-fill missing unitCost
       let productCache: Map<string, number> | null = null;
@@ -66,8 +72,10 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         return productCache.get(pid) ?? 0;
       }
       for (const item of rawLines) {
-        const materialId = str((item as Record<string, unknown>).materialId);
-        const quantity = num((item as Record<string, unknown>).quantity);
+        const rec = item as Record<string, unknown>;
+        // Same human-key alias as invoice lines: the model passes productId.
+        const materialId = str(rec.materialId) ?? str(rec.productId);
+        const quantity = num(rec.quantity);
         let unitCost = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : undefined;
         if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products للحصول عليه' };
         if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
@@ -102,9 +110,10 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        productId: { type: 'string', description: 'معرف المنتج المراد تصنيعه (من search.products)' },
+        productId: { type: 'string', description: 'معرف المنتج المراد تصنيعه (من search.products — يُشتق تلقائياً من bomId عند غيابه)' },
         bomId: { type: 'string', description: 'معرف شجرة المنتج (اختياري — إن تٌرك فارغاُ يجب تمرير lines يدوياُ)' },
-        quantity: { type: 'number', description: 'عدد دفعات الـ BOM المطلوب إنتاجها (افتراضي 1)' },
+        quantity: { type: 'number', description: 'عدد دفعات الـ BOM المطلوب إنتاجها (افتراضي 1 — يقبل plannedQuantity كبديل)' },
+        plannedQuantity: { type: 'number', description: 'بديل لـ quantity' },
         supervisorId: { type: 'string', description: 'معرف مسؤول الإنتاج من الموظفين (اختياري — من search.employees)' },
         batchNumber: { type: 'string', description: 'رقم الدفعة (اختياري — يٌولَّد تلقائياُ بصيغة YYYYMMDD-NNN إن لم يٌمرر)' },
         productionCosts: {
@@ -120,8 +129,10 @@ export const manufacturingWriteTools: ToolDefinition[] = [
             required: ['category', 'amount'],
           },
         },
-        plannedStartDate: { type: 'string', description: 'تاريخ البدء المخطط YYYY-MM-DD (اختياري)' },
-        plannedEndDate: { type: 'string', description: 'تاريخ الانتهاء المخطط YYYY-MM-DD (اختياري)' },
+        plannedStartDate: { type: 'string', description: 'تاريخ البدء المخطط YYYY-MM-DD (اختياري — يقبل startDate كبديل)' },
+        plannedEndDate: { type: 'string', description: 'تاريخ الانتهاء المخطط YYYY-MM-DD (اختياري — يقبل endDate كبديل)' },
+        startDate: { type: 'string', description: 'بديل لـ plannedStartDate' },
+        endDate: { type: 'string', description: 'بديل لـ plannedEndDate' },
         notes: { type: 'string' },
         lines: {
           type: 'array',
@@ -139,27 +150,37 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       },
       required: ['productId', 'quantity'],
     },
-    summarizeArgs: (a) => `إنشاء أمر تشغيل لإنتاج ${(a as Record<string, unknown>).quantity ?? ''} دفعة من ${String((a as Record<string, unknown>).productId || '').slice(0, 8)}…`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      return `إنشاء أمر تشغيل لإنتاج ${r.quantity ?? r.plannedQuantity ?? ''} دفعة من ${String(r.productId || '').slice(0, 8)}…`;
+    },
 
     execute: async (args, ctx) => {
-      const productId = str(args.productId);
-      if (!productId) return { error: 'productId مطلوب' };
-      const quantity = num(args.quantity);
-      if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
+      // Human-key aliases: the model says plannedQuantity/startDate/endDate.
+      const quantity = num(args.quantity) || num(args.plannedQuantity);
+      if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر (quantity أو plannedQuantity)' };
 
+      const bomId = str(args.bomId);
+      let productId = str(args.productId);
+      // Derive the product (and missing lines) from the BOM — the caller
+      // often names only the tree, as in "أنتج بالشجرة رقم كذا".
       let rawLines = args.lines as unknown[] | undefined;
-      // Auto-derive lines from BOM when not supplied
-      if ((!rawLines || rawLines.length === 0) && str(args.bomId)) {
-        const bomRes = await manufacturingApi.getBomById(str(args.bomId)!, ctx.companyId);
+      if (bomId && (!productId || !rawLines || rawLines.length === 0)) {
+        const bomRes = await manufacturingApi.getBomById(bomId, ctx.companyId);
         if (!bomRes.success || !bomRes.data) return { error: bomRes.error || 'تعذر جلب الشجرة المحددة — تحقق من bomId' };
-        rawLines = bomRes.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.quantity * quantity, unitCost: l.unitCost ?? 0 }));
-        if (rawLines.length === 0) return { error: 'الشجرة المختارة بلا مواد — لا يمكن إنشاء أمر تشغيل' };
+        if (!productId) productId = str((bomRes.data.bom as unknown as Record<string, unknown>).productId);
+        if (!rawLines || rawLines.length === 0) {
+          rawLines = bomRes.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.quantity * quantity, unitCost: l.unitCost ?? 0 }));
+          if (rawLines.length === 0) return { error: 'الشجرة المختارة بلا مواد — لا يمكن إنشاء أمر تشغيل' };
+        }
       }
+      if (!productId) return { error: 'productId مطلوب — أو مرر bomId لاشتقاق المنتج والمواد معاً' };
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير lines أو bomId صالح لاشتقاق المواد' };
       const lines: { materialId: string; plannedQuantity: number; unitCost: number }[] = [];
       for (const item of rawLines) {
-        const materialId = str((item as Record<string, unknown>).materialId);
-        const pq = num((item as Record<string, unknown>).plannedQuantity);
+        const rec = item as Record<string, unknown>;
+        const materialId = str(rec.materialId) ?? str(rec.productId);
+        const pq = num(rec.plannedQuantity);
         const uc = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : 0;
         if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products' };
         if (pq <= 0) return { error: 'plannedQuantity يجب أن تكون أكبر من صفر' };
@@ -189,13 +210,13 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         companyId: ctx.companyId,
         orderNumber: docNumber.number,
         productId,
-        bomId: str(args.bomId),
+        bomId,
         quantity,
         status: 'planned',
         supervisorId: str(args.supervisorId),
         batchNumber: str(args.batchNumber),
-        plannedStartDate: str(args.plannedStartDate),
-        plannedEndDate: str(args.plannedEndDate),
+        plannedStartDate: str(args.plannedStartDate) ?? str(args.startDate),
+        plannedEndDate: str(args.plannedEndDate) ?? str(args.endDate),
         totalCost,
         productionCosts,
         notes: str(args.notes),

@@ -56,8 +56,9 @@ export const batchTools: ToolDefinition[] = [
     summarizeArgs: (a) => {
       const items = Array.isArray(a.items) ? a.items as Array<Record<string, unknown>> : [];
       // Same shape tolerance as execute(): the model sometimes emits
-      // {name, type, data} — the card must show the real tool, never '?'.
-      const toolOf = (i: Record<string, unknown>) => String(i.tool || i.type || '?');
+      // {name, type, data} or {action, payload} — the card must show the
+      // real tool, never '?'.
+      const toolOf = (i: Record<string, unknown>) => String(i.tool || i.type || i.action || '?');
       const tools = [...new Set(items.map((i) => toolOf(i)))].slice(0, 3).join('، ');
       const linked = items.filter((i) => i.after !== undefined && i.after !== null).length;
       const linkNote = linked > 0 ? ` — ${linked} مرتبطة` : '';
@@ -75,7 +76,7 @@ export const batchTools: ToolDefinition[] = [
       // item up to 60 with its args summary; beyond that sample + count.
       const MAX_PREVIEW = 60;
       const argBit = (it: Record<string, unknown>): string => {
-        const rawArgs = it.args ?? it.data;
+        const rawArgs = it.args ?? it.data ?? it.payload;
         const inner = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
         const bits: string[] = [];
         for (const key of ['name', 'customer', 'supplier', 'product', 'invoiceNumber', 'total', 'amount', 'quantity', 'description', 'title']) {
@@ -104,19 +105,22 @@ export const batchTools: ToolDefinition[] = [
       // e.g. customerId as a sibling of args). Liberal at the boundary —
       // tools ignore unknown keys, but a silently DROPPED customerId would
       // create a document without its party. args wins on conflict.
-      // Shape aliases: the model occasionally emits {name, type, data}
-      // instead of {tool, args} — normalize (type→tool, data→args) so the
-      // batch fails only on genuinely unknown tools, never on a renamed key.
-      const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label', 'type', 'data']);
+      // Shape aliases: the model emits item shapes from several conventions
+      // ({tool,args} canonical; {name,type,data} and {action,payload,ref}
+      // seen in real sessions) — normalize (type|action→tool,
+      // data|payload→args) so the batch fails only on genuinely unknown
+      // tools, never on a renamed key. Stray siblings (e.g. name) still
+      // hoist into args below.
+      const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label', 'type', 'data', 'action', 'payload']);
       const items = rawItems.map((it) => {
-        const rawArgs = it.args ?? it.data;
+        const rawArgs = it.args ?? it.data ?? it.payload;
         const base = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
         const stray: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(it)) {
           if (!KNOWN_ITEM_KEYS.has(k) && v !== undefined) stray[k] = v;
         }
         return {
-          tool: String(it.tool || it.type || ''),
+          tool: String(it.tool || it.type || it.action || ''),
           args: { ...stray, ...base },
           after: (it.after as number | string | undefined) ?? undefined,
           ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,

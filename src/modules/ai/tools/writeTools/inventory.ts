@@ -74,6 +74,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
         warehouseId: { type: 'string', description: 'مستودع الرصيد الافتتاحي (افتراضي: أول مستودع)' },
         productTypeId: { type: 'string', description: 'معرف نوع المنتج (من search.product_types — اذكره مثل: منتج نهائي، خامة، خدمة)' },
         productTypeName: { type: 'string', description: 'اسم نوع المنتج نصاً (بديل — سيُبحث تلقائياً مثل: منتج نهائي)' },
+        productType: { type: 'string', description: 'بديل لـ productTypeName (يقبل الاسم العربي/الإنجليزي/الكود)' },
       },
       required: ['nameAr', 'salePrice'],
     },
@@ -90,16 +91,24 @@ export const inventoryWriteTools: ToolDefinition[] = [
       if (!nameAr) return { error: 'اسم المنتج مطلوب (nameAr أو name)' };
       if (salePrice < 0) return { error: 'سعر البيع لا يمكن أن يكون سالباً' };
 
-      // Resolve product type if mentioned by name
+      // Resolve product type if mentioned by name. Matches Arabic name,
+      // English name AND code (FG/RAW…) — the model may pass any of them
+      // (e.g. productType "finished"/"raw" from a batch payload).
       let productTypeId = str(args.productTypeId);
-      const productTypeName = str(args.productTypeName);
+      const productTypeName = str(args.productTypeName) ?? str(args.productType);
       if (!productTypeId && productTypeName) {
         try {
-          const typesRes = await getDbAdapter().then(adapter => adapter.query(`SELECT id, name_ar FROM product_types WHERE company_id = $1 AND is_active = true`, [ctx.companyId]));
+          const typesRes = await getDbAdapter().then(adapter => adapter.query(`SELECT id, name_ar, name_en, code FROM product_types WHERE company_id = $1 AND is_active = true`, [ctx.companyId]));
           if (typesRes.success && typesRes.rows) {
             const norm = (s: string) => s.replace(/[أإآ]/g, 'ا').replace(/[ةه]/g, 'ه').toLowerCase().trim();
             const target = norm(productTypeName);
-            const found = (typesRes.rows as Record<string, unknown>[]).find(r => norm(String(r.name_ar || '')) === target || String(r.name_ar || '').includes(productTypeName) || target.includes(norm(String(r.name_ar || ''))));
+            const hit = (v: unknown) => {
+              const n = norm(String(v || ''));
+              return !!n && (n === target || n.includes(target) || target.includes(n));
+            };
+            const found = (typesRes.rows as Record<string, unknown>[]).find(r =>
+              hit(r.name_ar) || hit(r.name_en) || String(r.code || '').trim().toLowerCase() === target,
+            );
             if (found) productTypeId = String(found.id);
           }
         } catch {}

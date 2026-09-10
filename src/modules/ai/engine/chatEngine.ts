@@ -1834,7 +1834,8 @@ function compactToolResultForLlm(result: unknown): string {
   return json.slice(0, TOOL_RESULT_MAX_CHARS) + '\n…(نتيجة كبيرة تم اقتصاصها)';
 }
 
-function summarizeResult(result: unknown): string {
+/** Human-readable one-liner for a tool outcome (approval cards + history). Exported for unit tests. */
+export function summarizeResult(result: unknown): string {
   if (result === null || result === undefined) return '✅ تم بنجاح';
 
   if (typeof result === 'string') return result;
@@ -1858,7 +1859,13 @@ function summarizeResult(result: unknown): string {
       };
       if (matches.length === 0) {
         const tip = suggestion ? `\n\n💡 ${String(suggestion)}` : '';
-        return `❌ لا توجد نتائج.${tip}`;
+        // Fallback suggestions (e.g. search.accounts expense alternatives)
+        // must be VISIBLE on the card — an alternatives list buried only in
+        // the model context gets ignored, and the user never sees options.
+        const alts = Array.isArray(obj.suggestions) && (obj.suggestions as unknown[]).length > 0
+          ? `\n\n🔀 بدائل مقترحة:\n${(obj.suggestions as Record<string, unknown>[]).slice(0, 6).map((s, i) => `${i + 1}. ${String(s.name ?? s.label ?? s.id ?? '')}${s.code || s.id ? ` (${String(s.code ?? s.id)})` : ''}`).join('\n')}${obj.suggestionNote ? `\n${String(obj.suggestionNote)}` : ''}`
+          : (obj.suggestionNote ? `\n\n💡 ${String(obj.suggestionNote)}` : '');
+        return `❌ لا توجد نتائج.${tip}${alts}`;
       }
       const table = renderTable(matches, `🔍 تم العثور على ${totalMatches ?? matches.length} نتيجة`);
       if (suggestion) return `${table}\n\n💡 ${String(suggestion)}`;

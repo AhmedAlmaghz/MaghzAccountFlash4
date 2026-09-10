@@ -84,13 +84,14 @@ export const accountingWriteTools: ToolDefinition[] = [
   {
     name: 'accounting.create_payment_voucher',
     labelAr: 'إنشاء سند صرف',
-    descriptionAr: 'ينشئ سند صرف مرحّل لدفع مبلغ لمورد — يُنشأ القيد المحاسبي ويُحدَّث رصيد المورد تلقائياً. استخدم search.suppliers أولاً.',
+    descriptionAr: 'ينشئ سند صرف مرحّل — لمورد (يُحدَّث رصيده تلقائياً) أو لمصروف مباشر عبر expenseAccountId دون مورد. استخدم search.suppliers أو search.accounts (نوع مصروف) أولاً.',
     permission: 'accounting.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
+        supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers) — إلزامي ما لم يُمرَّر expenseAccountId' },
+        expenseAccountId: { type: 'string', description: 'حساب المصروف للمصروفات المباشرة بلا مورد (من search.accounts)' },
         amount: { type: 'number', description: 'المبلغ المدفوع' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يحدد حساب الخزنة' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
@@ -98,13 +99,21 @@ export const accountingWriteTools: ToolDefinition[] = [
         reference: { type: 'string', description: 'رقم الشيك/الحوالة الورقية إن وُجد — يُسجَّل في الملاحظات' },
         notes: { type: 'string' },
       },
-      required: ['supplierId', 'amount'],
+      required: ['amount'],
     },
-    summarizeArgs: (a) => `إنشاء سند صرف مرحّل بمبلغ ${a.amount} (${a.paymentMethod === 'bank' ? 'بنك' : a.paymentMethod === 'check' ? 'شيك' : 'نقداً'})`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      const method = r.paymentMethod === 'bank' ? 'بنك' : r.paymentMethod === 'check' ? 'شيك' : 'نقداً';
+      const party = r.supplierId ? ` — مورد: ${String(r.supplierId).slice(0, 8)}…` : r.expenseAccountId ? ' — مصروف مباشر' : '';
+      return `إنشاء سند صرف مرحّل بمبلغ ${r.amount} (${method})${party}`;
+    },
     execute: async (args, ctx) => {
       const supplierId = str(args.supplierId);
+      const expenseAccountId = str(args.expenseAccountId);
       const amount = num(args.amount);
-      if (!supplierId) return { error: 'supplierId مطلوب — استخدم search.suppliers أولاً' };
+      // Parity with the UI + API: supplier OR expense account (the old
+      // supplier-only gate turned every general expense into a dead end).
+      if (!supplierId && !expenseAccountId) return { error: 'supplierId أو expenseAccountId مطلوب — للمصروفات العامة بلا مورد مرر expenseAccountId (من search.accounts نوع مصروف)' };
       if (amount <= 0) return { error: 'المبلغ يجب أن يكون أكبر من صفر' };
       const method = str(args.paymentMethod);
       if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
@@ -120,7 +129,8 @@ export const accountingWriteTools: ToolDefinition[] = [
           companyId: ctx.companyId,
           voucherNumber: docNumber.number,
           date: str(args.date) || today(),
-          supplierId,
+          supplierId: supplierId || undefined,
+          expenseAccountId: expenseAccountId || undefined,
           amount,
           amountApplied: 0,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
@@ -133,7 +143,7 @@ export const accountingWriteTools: ToolDefinition[] = [
       if (!res.success) return { error: res.error || 'فشل إنشاء السند' };
       return {
         created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
-        journalPosted: true, note: 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً', ...(reference ? { reference } : {}),
+        journalPosted: true, note: supplierId ? 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً' : 'القيد المزدوج أُنشئ (مدين حساب المصروف / دائن الخزنة)', ...(reference ? { reference } : {}),
       };
     },
   },

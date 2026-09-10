@@ -24,7 +24,8 @@ export const hrWriteTools: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        fullName: { type: 'string', description: 'الاسم الكامل (إلزامي)' },
+        fullName: { type: 'string', description: 'الاسم الكامل (إلزامي — يقبل name كبديل)' },
+        name: { type: 'string', description: 'بديل لـ fullName' },
         employeeNumber: { type: 'string', description: 'رقم الموظف (اختياري — يُولّد تلقائياً)' },
         nationalId: { type: 'string', description: 'الرقم الوطني' },
         phone: { type: 'string' },
@@ -37,10 +38,15 @@ export const hrWriteTools: ToolDefinition[] = [
       },
       required: ['fullName', 'hireDate', 'baseSalary'],
     },
-    summarizeArgs: (a) => `إنشاء موظف: ${a.fullName} — راتب: ${a.baseSalary}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      return `إنشاء موظف: ${r.fullName ?? r.name} — راتب: ${r.baseSalary}`;
+    },
     execute: async (args, ctx) => {
-      const fullName = str(args.fullName);
-      if (!fullName) return { error: 'الاسم الكامل مطلوب' };
+      // Same human-name alias as suppliers/customers/products: the model
+      // passes plain `name` — map it instead of failing on fullName.
+      const fullName = str(args.fullName) ?? str(args.name);
+      if (!fullName) return { error: 'الاسم الكامل مطلوب (fullName أو name)' };
       const hireDate = str(args.hireDate);
       if (!hireDate) return { error: 'تاريخ التوظيف مطلوب' };
       const baseSalary = num(args.baseSalary);
@@ -152,7 +158,8 @@ export const hrWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         employeeId: { type: 'string', description: 'معرف الموظف (من search.employees)' },
-        fullName: { type: 'string', description: 'الاسم الكامل' },
+        fullName: { type: 'string', description: 'الاسم الكامل (يقبل name كبديل)' },
+        name: { type: 'string', description: 'بديل لـ fullName' },
         phone: { type: 'string' },
         email: { type: 'string' },
         position: { type: 'string', description: 'المسمى الوظيفي' },
@@ -162,12 +169,16 @@ export const hrWriteTools: ToolDefinition[] = [
       },
       required: ['employeeId'],
     },
-    summarizeArgs: (a) => `تعديل موظف: ${String(a.employeeId).slice(0, 8)}…${a.fullName ? ` — ${a.fullName}` : ''}${a.departmentId ? ' (ربط بقسم)' : ''}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      return `تعديل موظف: ${String(r.employeeId).slice(0, 8)}…${r.fullName ?? r.name ? ` — ${r.fullName ?? r.name}` : ''}${r.departmentId ? ' (ربط بقسم)' : ''}`;
+    },
     execute: async (args, ctx) => {
       const employeeId = str(args.employeeId);
       if (!employeeId) return { error: 'employeeId مطلوب — استخدم search.employees أولاً' };
       const data: Record<string, unknown> = {};
       if (args.fullName !== undefined) data.fullName = str(args.fullName);
+      else if (args.name !== undefined) data.fullName = str(args.name);
       if (args.phone !== undefined) data.phone = str(args.phone);
       if (args.email !== undefined) data.email = str(args.email);
       if (args.position !== undefined) data.position = str(args.position);

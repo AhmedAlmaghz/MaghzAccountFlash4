@@ -102,11 +102,13 @@ export const searchTools: ToolDefinition[] = [
       if (!query) return { error: 'نص البحث مطلوب' };
       const res = await salesApi.getCustomersPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = findAllFuzzyMatches(
+      // Token-aware matching (same as search.accounts): multi-word requests
+      // ("شوكلاتة صغير") almost never appear verbatim inside entity names —
+      // per-token scoring finds them while exact hits still rank highest.
+      const matches = fuzzySearch(
         query,
         res.data.items,
         (c) => `${c.name} ${c.phone ?? ''} ${c.code ?? ''}`,
-        0.35,
       ).slice(0, 8);
       return {
         matches: matches.map((m) => ({
@@ -131,11 +133,10 @@ export const searchTools: ToolDefinition[] = [
       if (!query) return { error: 'نص البحث مطلوب' };
       const res = await purchasesApi.getSuppliersPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = findAllFuzzyMatches(
+      const matches = fuzzySearch(
         query,
         res.data.items,
         (s) => `${s.name} ${s.phone ?? ''} ${s.code ?? ''}`,
-        0.35,
       ).slice(0, 8);
       return {
         matches: matches.map((m) => ({
@@ -167,11 +168,10 @@ export const searchTools: ToolDefinition[] = [
           typeUsage = new Map(typesRes.data.map((pt) => [pt.id, { usage: pt.usage || 'other', name: pt.nameAr || '' }]));
         }
       } catch {}
-      const matches = findAllFuzzyMatches(
+      const matches = fuzzySearch(
         query,
         res.data.items,
         (p) => `${p.nameAr ?? ''} ${p.nameEn ?? ''} ${p.code ?? ''} ${p.barcode ?? ''} ${p.sku ?? ''}`,
-        0.35,
       ).slice(0, 8);
       return {
         matches: matches.map((m) => {
