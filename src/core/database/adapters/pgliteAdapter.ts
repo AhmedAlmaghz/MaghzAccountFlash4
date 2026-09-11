@@ -452,9 +452,9 @@ const BRANCHES: Array<{ code: string; name: string; address: string }> = [
 
 const COST_CENTERS: Array<{ code: string; name_ar: string; name_en: string; type: string; budget: number }> = [
   { code: 'HQ', name_ar: 'الإدارة العامة', name_en: 'Head Office', type: 'branch', budget: 0 },
-  { code: 'CC-SAL', name_ar: 'مركز الرواتب', name_en: 'Salaries Center', type: 'department', budget: 1500000 },
-  { code: 'CC-PRD', name_ar: 'مركز الإنتاج', name_en: 'Production Center', type: 'department', budget: 2500000 },
-  { code: 'CC-EXP', name_ar: 'مركز المصروفات', name_en: 'Expenses Center', type: 'project', budget: 8000000 },
+  { code: 'CC-SAL', name_ar: 'مركز الرواتب', name_en: 'Salaries Center', type: 'department', budget: 0 },
+  { code: 'CC-PRD', name_ar: 'مركز الإنتاج', name_en: 'Production Center', type: 'department', budget: 0 },
+  { code: 'CC-EXP', name_ar: 'مركز المصروفات', name_en: 'Expenses Center', type: 'project', budget: 0 },
 ];
 
 const PAYROLL_COMPONENTS: Array<{
