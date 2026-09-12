@@ -3,6 +3,8 @@ import { useAuthStore } from '@/modules/auth/store';
 import { aiApi } from './index';
 import { useAiStore } from '../store';
 import type { AiChatSessionSummary, ChatMessage, ToolCallStatus } from '../types';
+import ar from '@/core/i18n/ar.json';
+import en from '@/core/i18n/en.json';
 
 /**
  * Chat persistence helpers — renderer-side wrappers around the ai:* IPC
@@ -19,6 +21,20 @@ const STALE_STATUS_MAP: Partial<Record<ToolCallStatus, ToolCallStatus>> = {
   executing: 'error',
 };
 
+/**
+ * P3 fix: locale-aware lookup without the React hook (this module runs
+ * outside components). The old hardcoded Arabic strings were untranslated
+ * for EN users and invisible to the i18n balance test.
+ */
+function pt(key: 'staleRejected' | 'staleError'): string {
+  const lang = useAppStore.getState().language;
+  const dict = (lang === 'en' ? en : ar) as Record<string, unknown>;
+  const ai = (dict.ai || {}) as Record<string, unknown>;
+  const sessions = (ai.sessions || {}) as Record<string, unknown>;
+  const v = sessions[key];
+  return typeof v === 'string' ? v : key;
+}
+
 function normalizeLoadedMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m): m is ChatMessage => !!m && typeof m.role === 'string').map((m) => {
     if (!m.toolCall) return m;
@@ -30,9 +46,7 @@ function normalizeLoadedMessages(messages: ChatMessage[]): ChatMessage[] {
         ...m.toolCall,
         status: staleTo,
         resultSummary:
-          staleTo === 'rejected'
-            ? 'انتهت الجلسة قبل تأكيد العملية — لم تُنفّذ'
-            : 'انقطع التنفيذ عند إغلاق الجلسة السابقة',
+          staleTo === 'rejected' ? pt('staleRejected') : pt('staleError'),
       },
     };
   });
@@ -75,25 +89,34 @@ function snapshotFingerprint(sessionId: string | null, messages: ChatMessage[]):
 let lastSavedFingerprint: string | null = null;
 let saveInFlight: Promise<boolean> | null = null;
 let saveRequestedWhileInFlight = false;
+/** Snapshot captured synchronously by the newest saveCurrentSession call. */
+let pendingSnapshot: { messages: ChatMessage[]; sessionId: string | null } | null = null;
 
-async function runSave(): Promise<boolean> {
+async function runSave(snapshot?: { messages: ChatMessage[]; sessionId: string | null }): Promise<boolean> {
   const ctx = currentContext();
   if (!ctx) return false;
-  const { messages, sessionId, setSessionId } = useAiStore.getState();
+  // P2 fix: use the snapshot captured SYNCHRONOUSLY at request time when
+  // provided. The old code re-read the store at execution time, so a
+  // session-switch (reset + loadSession) landing between request and
+  // execution made the queued re-run persist the WRONG conversation
+  // (empty → old chat never saved; or the newly-loaded session rewritten).
+  const store = useAiStore.getState();
+  const messages = snapshot?.messages ?? store.messages;
+  const sessionId = snapshot ? snapshot.sessionId : store.sessionId;
+  const setSessionId = store.setSessionId;
   if (messages.length === 0) return false;
 
   const fingerprint = snapshotFingerprint(sessionId, messages);
   if (fingerprint === lastSavedFingerprint) return true;
 
   const title = deriveTitle(messages);
-  const snapshot = messages;
 
   const res = await aiApi.saveSession({
     companyId: ctx.companyId,
     userId: ctx.userId,
     sessionId,
     title,
-    messages: snapshot,
+    messages,
   });
   if (!res.success) {
     // Surface instead of swallowing: an autosave that silently fails loses
@@ -109,7 +132,7 @@ async function runSave(): Promise<boolean> {
     // messages and overwrite its row — sessions silently merging/dying.
     if (useAiStore.getState().sessionId === sessionId) {
       setSessionId(res.data.sessionId);
-      lastSavedFingerprint = snapshotFingerprint(res.data.sessionId, snapshot);
+      lastSavedFingerprint = snapshotFingerprint(res.data.sessionId, messages);
     }
   }
   return true;
@@ -124,6 +147,10 @@ export const aiPersistence = {
    * Returns false when the save failed (the caller may surface a warning).
    */
   async saveCurrentSession(): Promise<boolean> {
+    // Snapshot SYNCHRONOUSLY — a session switch (reset/load) between this
+    // call and the actual save must not change what gets persisted.
+    const store = useAiStore.getState();
+    pendingSnapshot = { messages: store.messages, sessionId: store.sessionId };
     if (saveInFlight) {
       saveRequestedWhileInFlight = true;
       return saveInFlight;
@@ -131,11 +158,15 @@ export const aiPersistence = {
     const run = (async (): Promise<boolean> => {
       let ok = true;
       try {
-        ok = (await runSave()) && ok;
+        const first = pendingSnapshot;
+        pendingSnapshot = null;
+        ok = (await runSave(first ?? undefined)) && ok;
         // A newer state arrived while saving → persist it too (once).
         while (saveRequestedWhileInFlight) {
           saveRequestedWhileInFlight = false;
-          ok = (await runSave()) && ok;
+          const next = pendingSnapshot;
+          pendingSnapshot = null;
+          ok = (await runSave(next ?? undefined)) && ok;
         }
         return ok;
       } finally {

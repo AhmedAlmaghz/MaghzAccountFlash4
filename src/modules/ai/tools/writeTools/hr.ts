@@ -74,7 +74,7 @@ export const hrWriteTools: ToolDefinition[] = [
         terminationDate: undefined,
         baseSalary,
         isActive: true,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء الموظف' };
       return { created: true, employeeId: res.id, fullName, employeeNumber: empNumber };
     },
@@ -257,7 +257,7 @@ export const hrWriteTools: ToolDefinition[] = [
         endDate,
         reason: str(args.reason),
         status: 'pending' as const,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء طلب الإجازة' };
       return { created: true, leaveId: res.id, employeeId, leaveType, startDate, endDate, days: res.days };
     },
@@ -380,7 +380,7 @@ export const hrWriteTools: ToolDefinition[] = [
         reason,
         status: 'draft',
         notes: str(args.notes),
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء حساب نهاية الخدمة' };
       return { created: true, endOfServiceId: res.id, employeeId, terminationDate, eosAmount: res.eosAmount, serviceYears: res.serviceYears };
     },

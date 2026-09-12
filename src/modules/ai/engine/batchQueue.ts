@@ -202,19 +202,138 @@ export function extractOutputScalars(result: unknown): Record<string, string | n
   return out;
 }
 
+/** result_data column budget (chars of JSON). Mirrors both transports. */
+export const RESULT_DATA_JSON_BUDGET = 2000;
+
+/**
+ * P3 fix: shrink a scalars object to fit RESULT_DATA_JSON_BUDGET WITHOUT
+ * nulling it. The old code stored NULL for anything over budget — in-run
+ * substitution still worked (live map), but resume-after-restart seeds ONLY
+ * from result_data, so dependents died with UNRESOLVED_REF although their
+ * parent had succeeded. Priority: id-ish keys first (refs resolve from
+ * them), then shortest values; numbers/booleans are cheap and kept.
+ */
+export function truncateScalarsForPersist(
+  data: Record<string, string | number | boolean> | null | undefined,
+): Record<string, string | number | boolean> | null {
+  if (!data || typeof data !== 'object') return null;
+  const entries = Object.entries(data);
+  if (entries.length === 0) return null;
+  const rank = ([k]: [string, unknown]): number => {
+    if (k === 'id') return 0;
+    if (/Id$/.test(k)) return 1;
+    if (/Number$/.test(k)) return 2;
+    return 3;
+  };
+  const sorted = [...entries].sort((a, b) => rank(a) - rank(b) || String(a[1]).length - String(b[1]).length);
+  const out: Record<string, string | number | boolean> = {};
+  for (const [k, v] of sorted) {
+    const trial = { ...out, [k]: v };
+    let json: string;
+    try {
+      json = JSON.stringify(trial);
+    } catch {
+      continue;
+    }
+    if (json.length <= RESULT_DATA_JSON_BUDGET) {
+      out[k] = v;
+    } else if (typeof v === 'string' && rank([k, v]) <= 2) {
+      // Id-ish keys are too valuable to drop: truncate the VALUE instead.
+      const room = RESULT_DATA_JSON_BUDGET - JSON.stringify(out).length - k.length - 8;
+      if (room > 12) out[k] = v.slice(0, room);
+    }
+    // Non-id keys that don't fit are dropped (documented, loud in tests).
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 const REF_WHOLE_RE = /^@([A-Za-z0-9_][\w-]*)$/;
 const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*)(?:\.([A-Za-z0-9_]+))?\s*\}\}/g;
 
 export type RefOutputs = Map<string, Record<string, string | number | boolean>>;
 
 /**
- * Primary id of a tool output. No tool in the registry returns a bare
- * `id` — every creator returns `<entity>Id` first (supplierId, invoiceId,
- * productId, voucherId, employeeId, …). Convention over configuration:
- * exact `id` wins, otherwise the FIRST Id-suffixed key (creators always
- * place the primary id first; related foreign ids follow).
+ * P0-7 fix: explicit primary-key annotation per tool. "First Id-suffixed key
+ * wins" is convention-over-configuration — any tool result shaped
+ * `{ customerId, invoiceId }` (echoing input ids) or `{ bomId, workOrderId }`
+ * silently bound @ref to the WRONG entity, and a dependent then wrote against
+ * the wrong foreign key (a voucher applied to the wrong invoice = data
+ * corruption, not an error message). Resolution order:
+ *   1. explicit PRIMARY_ID_FIELD[toolName] when the ref is annotated,
+ *   2. exact `id`,
+ *   3. first Id-suffixed key (legacy fallback — kept for unannotated tools,
+ *      still correct only as long as creators put the primary id first).
+ * Annotation lives with the queue (not the tools) so the contract is
+ * enforced in one auditable place.
  */
-export function resolveOutputId(data: Record<string, string | number | boolean>): string | null {
+const PRIMARY_ID_FIELD: Record<string, string> = {
+  // sales
+  'sales.create_invoice': 'invoiceId',
+  'sales.create_quotation': 'quotationId',
+  'sales.create_sales_return': 'returnId',
+  'sales.create_customer': 'customerId',
+  'sales.create_and_post_invoice': 'invoiceId',
+  // purchases
+  'purchases.create_invoice': 'invoiceId',
+  'purchases.create_purchase_order': 'orderId',
+  'purchases.create_purchase_return': 'returnId',
+  'purchases.create_supplier': 'supplierId',
+  'purchases.create_and_post_invoice': 'invoiceId',
+  // accounting
+  'accounting.create_receipt_voucher': 'voucherId',
+  'accounting.create_payment_voucher': 'voucherId',
+  'accounting.create_expense_voucher': 'voucherId',
+  'accounting.create_journal_entry': 'transactionId',
+  // inventory
+  'inventory.create_product': 'productId',
+  'inventory.create_warehouse': 'warehouseId',
+  'inventory.create_category': 'categoryId',
+  'inventory.create_product_unit': 'unitRowId',
+  'inventory.create_stock_adjustment': 'adjustmentId',
+  'inventory.create_stock_transfer': 'transferId',
+  // crm
+  'crm.create_lead': 'leadId',
+  'crm.create_opportunity': 'opportunityId',
+  'crm.create_task': 'taskId',
+  'crm.create_activity': 'activityId',
+  'crm.convert_lead_to_customer': 'customerId',
+  'crm.qualify_lead': 'opportunityId',
+  // hr
+  'hr.create_employee': 'employeeId',
+  'hr.create_leave': 'leaveId',
+  'hr.create_end_of_service': 'eosId',
+  'hr.generate_payroll_run': 'payrollRunId',
+  // manufacturing
+  'manufacturing.create_bom': 'bomId',
+  'manufacturing.create_work_order': 'workOrderId',
+  // settings
+  'settings.create_product_type': 'productTypeId',
+  'settings.create_unit': 'unitId',
+  'settings.create_cash_box': 'cashBoxId',
+  'settings.create_cost_center': 'costCenterId',
+  'settings.create_payroll_component': 'componentId',
+};
+
+/**
+ * Extract the tool name from a ref key. Ref keys are model-chosen semantic
+ * names ("sup1", "inv1"); the OUTPUTS map is keyed by ref, so the tool
+ * annotation is carried INSIDE the captured scalars as the tool result's
+ * own key set. Since we cannot know the tool from the ref name alone, the
+ * caller passes the producing tool's name via the ref→tool map below.
+ */
+// (kept simple: substituteRefs tracks ref→toolName when items carry it; when
+// unknown, the explicit map is skipped and the documented fallback order
+// applies.)
+
+export function resolveOutputId(
+  data: Record<string, string | number | boolean>,
+  sourceTool?: string,
+): string | null {
+  if (sourceTool) {
+    const field = PRIMARY_ID_FIELD[sourceTool];
+    const v = field ? data[field] : undefined;
+    if (typeof v === 'string' && v) return v;
+  }
   if (typeof data.id === 'string' && data.id) return data.id;
   for (const [k, v] of Object.entries(data)) {
     if (typeof v === 'string' && v && /Id$/.test(k)) return v;
@@ -229,18 +348,26 @@ export type SubstituteResult =
 /**
  * Deep-substitute {{ref}} / {{ref.field}} / @ref placeholders.
  * Unknown refs fail LOUDLY (never silently null) with actionable guidance.
+ * `refTools` maps ref → producing tool name so resolveOutputId can honor
+ * the explicit PRIMARY_ID_FIELD annotation (P0-7) instead of relying purely
+ * on the "first Id-suffixed key" convention.
  */
 export function substituteRefs(
   args: Record<string, unknown>,
   outputs: RefOutputs,
+  refTools?: Map<string, string>,
 ): SubstituteResult {
   const missing = new Set<string>();
+  /** Escape `$` in replacement values — String.replace interprets `$&`, `$'`,
+   * `` $` ``, `$1`… inside the replacer's RETURN as replacement patterns
+   * (Phase 86 lesson): a resolved value containing `$` corrupted the args. */
+  const asLiteral = (v: string): string => v.replace(/\$/g, '$$$$');
 
   const subString = (s: string): string => {
     if (REF_WHOLE_RE.test(s)) {
       const ref = s.slice(1);
       const data = outputs.get(ref);
-      const id = data ? resolveOutputId(data) : null;
+      const id = data ? resolveOutputId(data, refTools?.get(ref)) : null;
       if (!id) {
         missing.add(ref);
         return s;
@@ -253,14 +380,16 @@ export function substituteRefs(
         missing.add(ref);
         return _m;
       }
-      // Explicit `.id` honors the same entity-id alias (no tool returns
+      // Explicit `.id` honors the same entity-id annotation (no tool returns
       // a bare `id` — creators return supplierId/invoiceId/…).
-      const value = !field || field.toLowerCase() === 'id' ? resolveOutputId(data) : data[field];
+      const value = !field || field.toLowerCase() === 'id'
+        ? resolveOutputId(data, refTools?.get(ref))
+        : data[field];
       if (value === undefined || value === null || value === '') {
         missing.add(field ? `${ref}.${field}` : ref);
         return _m;
       }
-      return String(value);
+      return asLiteral(String(value));
     });
   };
 

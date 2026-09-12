@@ -52,7 +52,7 @@ export const crmWriteTools: ToolDefinition[] = [
         estimatedValue: args.estimatedValue !== undefined ? num(args.estimatedValue) : undefined,
         status: 'new',
         rating: 'warm',
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء العميل المحتمل' };
       return { created: true, leadId: res.id, name };
     },
@@ -87,7 +87,7 @@ export const crmWriteTools: ToolDefinition[] = [
         probability: args.probability !== undefined ? num(args.probability) : undefined,
         leadId: str(args.leadId) || undefined,
         customerId: str(args.customerId) || undefined,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء الفرصة' };
       return { created: true, opportunityId: res.id, name };
     },
@@ -122,7 +122,7 @@ export const crmWriteTools: ToolDefinition[] = [
         dueDate: str(args.dueDate),
         priority: (priority as 'low' | 'medium' | 'high') || 'medium',
         status: 'pending',
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء المهمة' };
       return { created: true, taskId: res.id, title };
     },
@@ -166,7 +166,7 @@ export const crmWriteTools: ToolDefinition[] = [
         leadId: str(args.leadId),
         opportunityId: str(args.opportunityId),
         customerId: str(args.customerId),
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل تسجيل النشاط' };
       return { created: true, activityId: res.id, subject, type: activityType };
     },
@@ -183,7 +183,7 @@ export const crmWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         leadId: { type: 'string', description: 'معرف العميل المحتمل (من crm.get_leads)' },
-        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'converted', 'lost'], description: 'الحالة الجديدة' },
+        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'lost'], description: 'الحالة الجديدة (للتحويل إلى عميل استخدم crm.convert_lead_to_customer)' },
         rating: { type: 'string', enum: ['hot', 'warm', 'cold'], description: 'التقييم (اختياري)' },
         notes: { type: 'string', description: 'ملاحظات' },
       },
@@ -195,6 +195,14 @@ export const crmWriteTools: ToolDefinition[] = [
       const status = str(args.status);
       if (!leadId) return { error: 'leadId مطلوب' };
       if (!status || !['new', 'contacted', 'qualified', 'converted', 'lost'].includes(status)) return { error: 'حالة غير صحيحة' };
+      // P2 fix: 'converted' is owned by the atomic convertLeadToCustomer CTE
+      // (creates the customer + flips the lead + optional first opportunity
+      // in one transaction). Setting it via plain updateLead marks the lead
+      // converted with NO customer created — corrupting funnel KPIs and
+      // blocking the real conversion (idempotent guard rejects later).
+      if (status === 'converted') {
+        return { error: 'التحويل إلى عميل يتم عبر crm.convert_lead_to_customer فقط (ينشئ العميل + يحوّل الحالة ذرّياً) — لا يمكن تعيين converted مباشرة' };
+      }
       const data: Record<string, unknown> = { status };
       const rating = str(args.rating);
       if (rating && ['hot', 'warm', 'cold'].includes(rating)) data.rating = rating;
@@ -464,7 +472,10 @@ export const crmWriteTools: ToolDefinition[] = [
       if (args.dueDate !== undefined) data.dueDate = String(args.dueDate);
       if (args.priority !== undefined) data.priority = str(args.priority);
       if (args.status !== undefined) data.status = str(args.status);
-      if (args.notes !== undefined) data.notes = str(args.notes);
+      // P1 fix: tasks have NO notes column (zod strips it, the API never
+      // forwards it) — map to description like complete_task does, instead
+      // of vanishing silently (the Phase-34 updateOpportunity-notes class).
+      if (args.notes !== undefined) data.description = str(args.notes);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل' };
       const res = await crmApi.updateTask(taskId, ctx.companyId, data);
       if (!res.success) return { error: res.error || 'فشل تعديل المهمة' };

@@ -29,6 +29,9 @@ export * from './crm';
 // Vouchers (Receipts and Payments)
 export * from './vouchers';
 
+// POS (Cashier Shifts, POS Payments)
+export * from './pos';
+
 // Settings (Document Sequences, Product Types, Units, Default Accounts)
 export * from './settings';
 

@@ -581,7 +581,7 @@ export const purchasesApi = {
     companyId: string,
     page: number,
     pageSize: number,
-    filters?: { status?: string; supplierId?: string }
+    filters?: { status?: string; supplierId?: string; invoiceNumber?: string }
   ): Promise<PaginatedQueryResult<PurchaseInvoice>> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
@@ -598,6 +598,12 @@ export const purchasesApi = {
       if (filters?.supplierId) {
         params.push(filters.supplierId);
         conditions.push(`i.supplier_id = $${params.length}`);
+      }
+      // P2: server-side document-number search (mirrors sales) — ASCII
+      // codes need no Arabic normalization; ILIKE is exact here.
+      if (filters?.invoiceNumber) {
+        params.push(filters.invoiceNumber);
+        conditions.push(`i.invoice_number ILIKE '%' || $${params.length} || '%'`);
       }
       const where = conditions.join(' AND ');
 
@@ -1240,6 +1246,21 @@ export const purchasesApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // P2 fix: posted returns already moved stock + JE + party balance —
+      // flipping status (e.g. posted → cancelled) while those effects stand
+      // corrupts the books. Draft edits only (posting goes via postReturn).
+      if (data.status !== undefined) {
+        const cur = await adapter.query<{ status: string }>(
+          `SELECT status FROM purchase_returns WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [id, companyId]
+        );
+        if (!cur.success) return { success: false, error: cur.error };
+        const curStatus = String(cur.rows?.[0]?.status ?? '');
+        if (!curStatus) return { success: false, error: 'Return not found' };
+        if (curStatus !== 'draft') {
+          return { success: false, error: 'Cannot change status of a posted return.' };
+        }
+      }
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;

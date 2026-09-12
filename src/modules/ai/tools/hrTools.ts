@@ -201,7 +201,9 @@ export const hrTools: ToolDefinition[] = [
     name: 'settings.get_payroll_components',
     labelAr: 'قائمة مكونات الرواتب',
     descriptionAr: 'قائمة مكونات الرواتب النشطة (بدلات/استقطاعات) التي يستخدمها النظام تلقائياً في حساب مسيرات الرواتب.',
-    permission: 'settings.view',
+    // P2 decision: component names + types + defaultAmounts reveal the pay
+    // structure — HR data end-to-end. Gated hr.view (not settings.view).
+    permission: 'hr.view',
     dangerLevel: 'read',
     parameters: { type: 'object', properties: {} },
     execute: async (_args, ctx) => {

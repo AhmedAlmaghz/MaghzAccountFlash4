@@ -565,7 +565,7 @@ export const salesApi = {
     companyId: string,
     page: number,
     pageSize: number,
-    filters?: { status?: string; customerId?: string; createdBy?: string }
+    filters?: { status?: string; customerId?: string; createdBy?: string; invoiceNumber?: string }
   ): Promise<PaginatedQueryResult<SalesInvoice>> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
@@ -578,6 +578,7 @@ export const salesApi = {
           status: filters?.status,
           customerId: filters?.customerId,
           createdBy: filters?.createdBy,
+          invoiceNumber: filters?.invoiceNumber,
         });
         if (!result.success) return { success: false, error: result.error };
         const rows = result.rows || [];
@@ -600,6 +601,13 @@ export const salesApi = {
       if (filters?.createdBy) {
         params.push(filters.createdBy);
         conditions.push(`(i.created_by = $${params.length} OR i.created_by IS NULL)`);
+      }
+      // P2: server-side document-number search — invoice numbers are ASCII
+      // codes (no Arabic-normalization trap), so ILIKE here is exact where
+      // the client-side fuzzy window (newest 200) went blind beyond it.
+      if (filters?.invoiceNumber) {
+        params.push(filters.invoiceNumber);
+        conditions.push(`i.invoice_number ILIKE '%' || $${params.length} || '%'`);
       }
       const where = conditions.join(' AND ');
 
@@ -1397,6 +1405,24 @@ export const salesApi = {
         return result.success ? { success: true } : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
+      // P2 fix (mirrors the RPC guard): posted returns already moved stock +
+      // JE + party balance — editing lines or flipping status corrupts all
+      // three while they stand. Draft edits only (posting via postReturn).
+      if (data.lines !== undefined || data.status !== undefined) {
+        const cur = await adapter.query<{ status: string }>(
+          `SELECT status FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [id, companyId]
+        );
+        if (!cur.success) return { success: false, error: cur.error };
+        const curStatus = String(cur.rows?.[0]?.status ?? '');
+        if (!curStatus) return { success: false, error: 'Return not found' };
+        if (curStatus !== 'draft' && data.lines !== undefined) {
+          return { success: false, error: 'Cannot modify lines of a posted return.' };
+        }
+        if (curStatus !== 'draft' && data.status !== undefined) {
+          return { success: false, error: 'Cannot change status of a posted return.' };
+        }
+      }
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;

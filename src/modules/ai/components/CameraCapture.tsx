@@ -28,9 +28,22 @@ export const CameraCapture = memo(function CameraCapture({ open, onClose, onCapt
     streamRef.current = null;
   }, []);
 
+  // P3 fix: every preview blob URL must be revoked exactly once. The old
+  // code revoked only on the explicit X/confirm/retake paths — the
+  // open→false branch and the unmount cleanup dropped the URL without
+  // revoking (leaked blob per capture), and re-capture overwrote it.
+  const previewRef = useRef<string | null>(null);
+  const clearPreview = useCallback(() => {
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current);
+      previewRef.current = null;
+    }
+    setPreview(null);
+  }, []);
+
   useEffect(() => {
     if (!open) {
-      setPreview(null);
+      clearPreview();
       setError(null);
       stopStream();
       return;
@@ -63,8 +76,14 @@ export const CameraCapture = memo(function CameraCapture({ open, onClose, onCapt
     return () => {
       cancelled = true;
       stopStream();
+      // Unmount while a preview is showing (parent closed us without the
+      // X path): revoke here or the blob leaks with no owner left.
+      if (previewRef.current) {
+        URL.revokeObjectURL(previewRef.current);
+        previewRef.current = null;
+      }
     };
-  }, [open, stopStream, t]);
+  }, [open, stopStream, t, clearPreview]);
 
   const handleCapture = useCallback(() => {
     const video = videoRef.current;
@@ -78,7 +97,10 @@ export const CameraCapture = memo(function CameraCapture({ open, onClose, onCapt
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
+        // Revoke any previous preview before replacing it (re-capture).
+        if (previewRef.current) URL.revokeObjectURL(previewRef.current);
         const url = URL.createObjectURL(blob);
+        previewRef.current = url;
         setPreview(url);
       },
       'image/jpeg',
@@ -92,25 +114,22 @@ export const CameraCapture = memo(function CameraCapture({ open, onClose, onCapt
       const res = await fetch(preview);
       const blob = await res.blob();
       const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      URL.revokeObjectURL(preview);
-      setPreview(null);
+      clearPreview();
       onCapture(file);
       onClose();
     } catch {
       useToastStore.getState().addToast('error', t('ai.attach.unreadable'));
     }
-  }, [preview, onCapture, onClose, t]);
+  }, [preview, onCapture, onClose, t, clearPreview]);
 
   const handleRetake = useCallback(() => {
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(null);
-  }, [preview]);
+    clearPreview();
+  }, [clearPreview]);
 
   const handleClose = useCallback(() => {
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(null);
+    clearPreview();
     onClose();
-  }, [preview, onClose]);
+  }, [clearPreview, onClose]);
 
   if (!open) return null;
 

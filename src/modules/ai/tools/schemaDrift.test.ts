@@ -102,18 +102,29 @@ describe('AI tools schema-drift gate (CI)', () => {
   it('no tool SQL references a column the schema does not have', async () => {
     const drifts: Drift[] = [];
 
-    // Which tool files embed SQL — keep the list explicit so a new SQL file
-    // must be added deliberately (and this line fails as a reminder if the
-    // glob misses nothing).
-    const toolFiles = [
-      'reportTools.ts',
-      'detailedReportTools.ts',
-      'diagnosticTools.ts',
-      'wizardTools.ts',
-    ];
+    // Which tool files embed SQL — discovered by GLOB (not a hardcoded
+    // list) so the Phase-77 split (writeTools/*.ts ×8) and batchTools can
+    // never silently fall outside the gate again. Every .ts file under
+    // tools/ EXCEPT pure test/contract files is scanned; files without
+    // SQL-looking fragments cost nothing.
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const toolsDir = resolve(root, 'src/modules/ai/tools');
+    const toolFiles: string[] = [];
+    const walk = (dir: string, prefix: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full, `${prefix}${entry}/`);
+        } else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) {
+          toolFiles.push(`${prefix}${entry}`);
+        }
+      }
+    };
+    walk(toolsDir, '');
 
     for (const f of toolFiles) {
-      const path = resolve(root, 'src/modules/ai/tools', f);
+      const path = resolve(toolsDir, f);
       const src = readFileSync(path, 'utf-8');
 
       // SQL fragments: template literals passed to guardedQuery / adapter.query

@@ -93,7 +93,7 @@ export function ChatWidget() {
             'bottom-[calc(5.5rem+env(safe-area-inset-bottom))] lg:bottom-6 left-4 lg:left-6',
             'bg-gradient-to-br from-primary-500 to-primary-700 text-white hover:shadow-lift hover:scale-105'
           )}
-          title={t('ai.widget.open') + ' (Ctrl+Shift+K)'}
+          title={t('ai.widget.openWithShortcut')}
           aria-label={t('ai.widget.open')}
         >
           <Bot size={24} />

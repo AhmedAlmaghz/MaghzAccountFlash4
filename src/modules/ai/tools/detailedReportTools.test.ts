@@ -1,13 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/modules/sales/api', () => ({
-  salesApi: {
-    getQuotationsPaginated: vi.fn(),
-  },
+vi.mock('@/core/database/adapters', () => ({
+  getDbAdapter: vi.fn(),
 }));
 
 import { detailedReportTools } from './detailedReportTools';
-import { salesApi } from '@/modules/sales/api';
+import { getDbAdapter } from '@/core/database/adapters';
 import type { ToolContext } from '../types';
 
 const ctx: ToolContext = {
@@ -19,62 +17,57 @@ function findTool(name: string) {
   return detailedReportTools.find((t) => t.name === name);
 }
 
+function mockAdapter(detRows: unknown[], aggRow: unknown) {
+  vi.mocked(getDbAdapter).mockResolvedValue({
+    query: vi.fn(async (sql: string) => {
+      if (/SUM\(q\.total_amount\)/.test(sql)) return { success: true, rows: [aggRow] };
+      return { success: true, rows: detRows };
+    }),
+  } as never);
+}
+
 /**
  * Regression for the P0 audit finding (2026-09):
  * `sales.quotations_detailed` used to call salesApi.getInvoicesPaginated —
  * it fetched SALES INVOICES and re-labelled them as quotations. The user
  * asked for a quotations report and silently got invoice data.
+ *
+ * P2 follow-up (2026-09-11): the paginated-API version filtered dates
+ * CLIENT-side over a 200-row window — old quotations vanished with
+ * totalValue 0. The tool now runs det+agg SQL server-side like its
+ * siblings; these tests pin the SQL contract instead of the API call.
  */
-describe('sales.quotations_detailed (wrong-API regression)', () => {
+describe('sales.quotations_detailed (wrong-API + client-filter regression)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('calls getQuotationsPaginated — never getInvoicesPaginated', async () => {
+  it('queries the quotations table (never sales_invoices) with server-side dates', async () => {
     const tool = findTool('sales.quotations_detailed');
     expect(tool).toBeDefined();
 
-    vi.mocked(salesApi.getQuotationsPaginated).mockResolvedValue({
-      success: true,
-      data: { items: [], total: 0, page: 1, pageSize: 50, totalPages: 1 },
-    } as never);
-
+    mockAdapter([], { total: 0, cnt: 0 });
     await tool!.execute({ fromDate: '2026-09-01', toDate: '2026-09-30' }, ctx);
 
-    expect(salesApi.getQuotationsPaginated).toHaveBeenCalledTimes(1);
-    expect(salesApi.getQuotationsPaginated).toHaveBeenCalledWith(
-      ctx.companyId,
-      1,
-      expect.any(Number),
-      expect.objectContaining({ status: undefined, customerId: undefined }),
-    );
-    expect((salesApi as unknown as Record<string, unknown>).getInvoicesPaginated).toBeUndefined();
+    const adapter = await vi.mocked(getDbAdapter)();
+    const queries = vi.mocked(adapter.query).mock.calls.map((c) => String(c[0]));
+    expect(queries.some((q) => /FROM quotations q/.test(q))).toBe(true);
+    expect(queries.some((q) => /q\.date BETWEEN/.test(q))).toBe(true);
+    expect(queries.some((q) => /sales_invoices/.test(q))).toBe(false);
   });
 
-  it('maps QUOTATION fields (quotationNumber/expiryDate/customer.name) — not invoice fields', async () => {
+  it('maps QUOTATION fields (quotation_number/expiry_date/customer_name) — not invoice fields', async () => {
     const tool = findTool('sales.quotations_detailed');
     expect(tool).toBeDefined();
 
-    vi.mocked(salesApi.getQuotationsPaginated).mockResolvedValue({
-      success: true,
-      data: {
-        items: [{
-          id: 'q1',
-          quotationNumber: 'QTN-0042',
-          customerId: 'c1',
-          customer: { id: 'c1', name: 'شركة الأمل', balance: 0, isActive: true },
-          date: '2026-09-10',
-          expiryDate: '2026-09-20',
-          totalAmount: 150000,
-          status: 'draft',
-          lines: [],
-        }],
-        total: 1,
-        page: 1,
-        pageSize: 50,
-        totalPages: 1,
-      },
-    } as never);
+    mockAdapter(
+      [{
+        quotation_number: 'QTN-0042', customer_name: 'شركة الأمل',
+        date: '2026-09-10', expiry_date: '2026-09-20',
+        total_amount: 150000, status: 'draft', created_by_name: null,
+      }],
+      { total: 150000, cnt: 1 },
+    );
 
     const res = (await tool!.execute(
       { fromDate: '2026-09-01', toDate: '2026-09-30' },
@@ -89,19 +82,30 @@ describe('sales.quotations_detailed (wrong-API regression)', () => {
     expect(quotes[0].status).toBe('draft');
   });
 
-  it('forwards status and customerId filters to the paginated API', async () => {
+  it('computes totals server-side (aggregate query, not a JS reduce over a window)', async () => {
     const tool = findTool('sales.quotations_detailed');
-    vi.mocked(salesApi.getQuotationsPaginated).mockResolvedValue({
-      success: true,
-      data: { items: [], total: 0, page: 1, pageSize: 50, totalPages: 1 },
-    } as never);
+    mockAdapter([], { total: 987654, cnt: 42 });
+
+    const res = (await tool!.execute(
+      { fromDate: '2020-01-01', toDate: '2020-12-31' },
+      ctx,
+    )) as Record<string, unknown>;
+
+    // Zero detail rows, but the AGGREGATE still reports the period total —
+    // the old client-side reduce would have returned 0 unconditionally.
+    expect(res.totalValue).toBe(987654);
+    expect(res.count).toBe(0);
+  });
+
+  it('forwards status and customerId filters into the SQL', async () => {
+    const tool = findTool('sales.quotations_detailed');
+    mockAdapter([], { total: 0, cnt: 0 });
 
     await tool!.execute({ status: 'accepted', customerId: 'cust-9' }, ctx);
-    expect(salesApi.getQuotationsPaginated).toHaveBeenCalledWith(
-      ctx.companyId,
-      1,
-      expect.any(Number),
-      { status: 'accepted', customerId: 'cust-9' },
-    );
+
+    const adapter = await vi.mocked(getDbAdapter)();
+    const queries = vi.mocked(adapter.query).mock.calls.map((c) => String(c[0]));
+    expect(queries.some((q) => /q\.status=/.test(q))).toBe(true);
+    expect(queries.some((q) => /q\.customer_id=/.test(q))).toBe(true);
   });
 });

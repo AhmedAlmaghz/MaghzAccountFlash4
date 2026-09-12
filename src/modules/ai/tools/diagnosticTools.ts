@@ -119,18 +119,17 @@ export const diagnosticTools: ToolDefinition[] = [
       }
 
       // 3. Company-level default accounts for the posting sides.
-      const defaultsRes = await guardedQuery(
-        `SELECT function_key FROM default_accounts WHERE company_id = $1::uuid`,
-        [ctx.companyId],
-      );
-      const defaults = new Set(
-        ((defaultsRes.rows || []) as Array<Record<string, unknown>>).map((r) => String(r.function_key)),
-      );
-      const arKey = kind === 'sales' ? 'default_ar' : 'default_ap';
-      const revKey = kind === 'sales' ? 'default_sales' : 'default_inventory';
+      // P1 fix: resolve through getDefaultAccountId() (default_accounts row
+      // + hardcoded-code fallback), NOT raw key presence. The old code
+      // checked nonexistent keys ('default_ar'/'default_ap' — the real keys
+      // are 'default_debtors'/'default_creditors') so EVERY healthy draft
+      // reported a blocking defect and canPost was always false. And even
+      // with correct keys, presence alone is the wrong test: posting
+      // succeeds via fallback when no row exists.
+      const { getDefaultAccountId } = await import('@/core/utils/journalEntryGenerator');
       const need: Array<[string, string]> = [
-        [arKey, kind === 'sales' ? 'حساب المدينين التجاريين' : 'حساب الدائنين التجاريين'],
-        [revKey, kind === 'sales' ? 'حساب المبيعات' : 'حساب المخزون'],
+        [kind === 'sales' ? 'default_debtors' : 'default_creditors', kind === 'sales' ? 'حساب المدينين التجاريين' : 'حساب الدائنين التجاريين'],
+        [kind === 'sales' ? 'default_sales' : 'default_inventory', kind === 'sales' ? 'حساب المبيعات' : 'حساب المخزون'],
       ];
       if (kind === 'sales' && num(inv.vat_amount) > 0) {
         need.push(['default_vat_output', 'حساب ضريبة المخرجات']);
@@ -139,10 +138,17 @@ export const diagnosticTools: ToolDefinition[] = [
         need.push(['default_vat_input', 'حساب ضريبة المدخلات']);
       }
       for (const [key, human] of need) {
-        if (!defaults.has(key)) {
+        // Resolve through the row-or-fallback (never a bare key check).
+        let resolved: string | null;
+        try {
+          resolved = await getDefaultAccountId(ctx.companyId, key);
+        } catch {
+          resolved = null;
+        }
+        if (!resolved) {
           blockers.push({
             issue: `${human} غير معيّن`,
-            detail: `المفتاح ${key} غير موجود في الحسابات الافتراضية للشركة — قيد الترحيل يحتاجه.`,
+            detail: `تعذّر حل ${key} (لا صف في الحسابات الافتراضية ولا حساب احتياطي بالكود) — قيد الترحيل يحتاجه.`,
             fix: `عيّن الحساب من شاشة الحسابات الافتراضية (أو settings.update_default_account)، ثم أعد الترحيل.`,
             blocking: true,
           });
@@ -201,6 +207,10 @@ export const diagnosticTools: ToolDefinition[] = [
 
       // Per-transaction debit/credit sums — a transaction is unbalanced when
       // the two sums differ by more than a cent.
+      // P2 fix: t.date is timestamptz — a bare BETWEEN lands the end bound
+      // at midnight, silently excluding evening rows of the final day (the
+      // diagnostic could report "balanced" while the missing rows were the
+      // unbalanced ones). Cast to date like every sibling query.
       const res = await guardedQuery(
         `SELECT t.id, t.reference, t.description, t.date, t.status,
                 COALESCE(SUM(je.debit), 0)  AS total_debit,
@@ -208,7 +218,7 @@ export const diagnosticTools: ToolDefinition[] = [
                 COUNT(je.id)::int           AS entry_count
          FROM transactions t
          LEFT JOIN journal_entries je ON je.transaction_id = t.id
-         WHERE t.company_id = $1::uuid AND t.date BETWEEN $2 AND $3
+         WHERE t.company_id = $1::uuid AND t.date::date BETWEEN $2 AND $3
          GROUP BY t.id, t.reference, t.description, t.date, t.status
          ORDER BY t.date DESC
          LIMIT 500`,

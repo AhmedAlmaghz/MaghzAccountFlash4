@@ -46,7 +46,7 @@ export async function enqueueBatch(
   opts: EnqueueBatchOptions & BatchContextOverride,
 ): Promise<{
   success: boolean;
-  data?: { batchId: string; total: number };
+  data?: { batchId: string; total: number; inserted: number; deduped: number };
   error?: string;
 }> {
   const ctx = resolveContext(opts);
@@ -97,7 +97,12 @@ export async function enqueueBatch(
     items: payloadItems,
   });
   if (!res.success || !res.data) return { success: false, error: res.error || 'فشل إنشاء الدفعة' };
-  return { success: true, data: { batchId: res.data.batchId, total: res.data.total } };
+  // P2: surface dedup honestly — intra-payload idempotency collisions drop
+  // duplicates (ON CONFLICT DO NOTHING); total/inserted now both reflect the
+  // DEDUPED count from the transports, and `deduped` tells the model how
+  // many of its items were exact duplicates.
+  const inserted = res.data.inserted ?? res.data.total;
+  return { success: true, data: { batchId: res.data.batchId, total: res.data.total, inserted, deduped: Math.max(0, opts.items.length - inserted) } };
 }
 
 export async function getBatch(batchId: string, override?: BatchContextOverride): Promise<{

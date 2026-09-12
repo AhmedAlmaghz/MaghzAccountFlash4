@@ -241,7 +241,10 @@ async function searchCashBoxes(query: string, companyId: string): Promise<Entity
   if (!cached) {
     const res = await coreApi.getCashBoxes(companyId);
     if (!res.success || !res.data) return [];
-    cached = res.data.map((c) => toMatch(c, 'cashBox', 'خزنة', { balance: 'balance' }));
+    // P2 fix: names/ids only — the old map copied `balance` into cached
+    // match data, exposing cash-box balances through a settings.view-gated
+    // path. Correction needs identity, never money.
+    cached = res.data.map((c) => toMatch(c, 'cashBox', 'خزنة', {}));
     cacheSet(key, cached);
   }
   return rankMatches(query, cached);
@@ -510,7 +513,11 @@ const ENTITY_PERMISSIONS: Record<EntityType, string> = {
   employee: 'hr.view',
   product: 'inventory.view',
   warehouse: 'inventory.view',
-  cashBox: 'settings.view',
+  // P2 fix: unified with search.cash_boxes (accounting.view). The old
+  // settings.view gate is granted far more widely, and the resolver copied
+  // `balance` into match data — cash-box balances reachable without
+  // accounting.view through prefetch/autocomplete paths.
+  cashBox: 'accounting.view',
   invoice: 'sales.view',
   purchaseInvoice: 'purchases.view',
   quotation: 'sales.view',
@@ -525,7 +532,13 @@ const ENTITY_PERMISSIONS: Record<EntityType, string> = {
 };
 
 function canSee(type: EntityType): boolean {
-  return useAuthStore.getState().hasPermission(ENTITY_PERMISSIONS[type] ?? 'ai.use');
+  // P2 fix: FAIL CLOSED. The old `?? 'ai.use'` fallback auto-exposed any
+  // future EntityType added without a map entry to EVERY AI user. An
+  // unmapped type is now invisible until explicitly gated (safe default;
+  // add the entry alongside the new searcher).
+  const perm = ENTITY_PERMISSIONS[type];
+  if (!perm) return false;
+  return useAuthStore.getState().hasPermission(perm);
 }
 
 /** RBAC-filtered searcher list for UI-facing lookups (autocomplete/prefetch). */

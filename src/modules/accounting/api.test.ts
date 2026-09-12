@@ -242,6 +242,57 @@ describe('accountingApi.createReceiptVoucher with payment application', () => {
   });
 });
 
+describe('accountingApi.deleteTransaction — draft-only guard (P1 regression)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects deletion of POSTED transactions (reversal workflow, never DELETE)', async () => {
+    // P1: deleting a posted transaction cascades its JEs and retroactively
+    // changes SUM(journal_entries) while the balance mirror keeps the bump.
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) {
+        return { success: true, rows: [{ status: 'posted' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.deleteTransaction(
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000001',
+    );
+    expect(res.success).toBe(false);
+    expect(String(res.error)).toMatch(/عكسي|مرحّل/);
+    expect(adapter.query).not.toHaveBeenCalledWith(
+      expect.stringMatching(/^DELETE FROM transactions/),
+      expect.anything(),
+    );
+  });
+
+  it('allows deletion of DRAFT transactions', async () => {
+    let deleteCalled = false;
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) {
+        return { success: true, rows: [{ status: 'draft' }] };
+      }
+      if (sql.startsWith('DELETE')) {
+        deleteCalled = true;
+        return { success: true, rows: [] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.deleteTransaction(
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000001',
+    );
+    expect(res.success).toBe(true);
+    expect(deleteCalled).toBe(true);
+  });
+});
+
 describe('accountingApi.deleteReceiptVoucher with applied payment protection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -599,8 +650,26 @@ describe('accountingApi.createAccount — FK safety for created_by/updated_by', 
       '',
       { nameAr: 'حساب محدث' },
     );
-    expect(capturedSql).toMatch(/updated_by = \$9::uuid/);
-    expect(capturedParams[8]).toBeNull();
+    // P1: dynamic-SET — only the provided column is SET (plus audit cols);
+    // omitted columns (code/type/…) are never nulled.
+    expect(capturedSql).toMatch(/name_ar = \$1/);
+    expect(capturedSql).not.toMatch(/code = \$/);
+    expect(capturedSql).not.toMatch(/type = \$/);
+    expect(capturedSql).toMatch(/updated_by = \$\d+::uuid/);
+    expect(capturedParams).toContain(null); // userIdOrNull
+    expect(capturedParams).toContain('حساب محدث');
+  });
+
+  it('updateAccount rejects empty updates instead of writing NULLs everywhere', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await accountingApi.updateAccount(
+      'acc-uuid',
+      '00000000-0000-0000-0000-000000000001',
+      '',
+      {},
+    );
+    expect(res.success).toBe(false);
   });
 });
 

@@ -19,7 +19,7 @@ async function guardedQuery(sql: string, params: unknown[]): Promise<{ success: 
 }
 
 /**
- * Read-only tools (dangerLevel: 'read') — execute immediately without
+ * Read-only tools (dangerLevel: 'read') â€” execute immediately without
  * confirmation. Results are intentionally compact (field-picked, row-capped)
  * to keep LLM context small.
  */
@@ -32,17 +32,17 @@ function num(v: unknown): number {
 }
 
 export const readTools: ToolDefinition[] = [
-  // ─── Company ─────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Company â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'core.get_company_info',
-    labelAr: 'معلومات الشركة',
-    descriptionAr: 'يعرض معلومات الشركة الحالية: الاسم، العملة الافتراضية، الرقم الضريبي. استخدمه للإجابة عن أسئلة بيانات الشركة.',
+    labelAr: 'ظ…ط¹ظ„ظˆظ…ط§طھ ط§ظ„ط´ط±ظƒط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ…ط¹ظ„ظˆظ…ط§طھ ط§ظ„ط´ط±ظƒط© ط§ظ„ط­ط§ظ„ظٹط©: ط§ظ„ط§ط³ظ…طŒ ط§ظ„ط¹ظ…ظ„ط© ط§ظ„ط§ظپطھط±ط§ط¶ظٹط©طŒ ط§ظ„ط±ظ‚ظ… ط§ظ„ط¶ط±ظٹط¨ظٹ. ط§ط³طھط®ط¯ظ…ظ‡ ظ„ظ„ط¥ط¬ط§ط¨ط© ط¹ظ† ط£ط³ط¦ظ„ط© ط¨ظٹط§ظ†ط§طھ ط§ظ„ط´ط±ظƒط©.',
     permission: 'core.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async () => {
       const company = useAppStore.getState().activeCompany;
-      if (!company) return { error: 'لا توجد شركة نشطة' };
+      if (!company) return { error: 'ظ„ط§ طھظˆط¬ط¯ ط´ط±ظƒط© ظ†ط´ط·ط©' };
       return {
         name: company.name,
         nameEn: company.nameEn,
@@ -54,25 +54,25 @@ export const readTools: ToolDefinition[] = [
     },
   },
 
-  // ─── Sales ───────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Sales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'sales.get_sales_summary',
-    labelAr: 'ملخص المبيعات',
-    descriptionAr: 'يعطي ملخص المبيعات لفترة زمنية: عدد الفواتير، إجمالي المبيعات، المدفوع، المستحق. التواريخ اختيارية بصيغة YYYY-MM-DD — الوضع الافتراضي: الشهر الحالي.',
+    labelAr: 'ظ…ظ„ط®طµ ط§ظ„ظ…ط¨ظٹط¹ط§طھ',
+    descriptionAr: 'ظٹط¹ط·ظٹ ظ…ظ„ط®طµ ط§ظ„ظ…ط¨ظٹط¹ط§طھ ظ„ظپطھط±ط© ط²ظ…ظ†ظٹط©: ط¹ط¯ط¯ ط§ظ„ظپظˆط§طھظٹط±طŒ ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط¨ظٹط¹ط§طھطŒ ط§ظ„ظ…ط¯ظپظˆط¹طŒ ط§ظ„ظ…ط³طھط­ظ‚. ط§ظ„طھظˆط§ط±ظٹط® ط§ط®طھظٹط§ط±ظٹط© ط¨طµظٹط؛ط© YYYY-MM-DD â€” ط§ظ„ظˆط¶ط¹ ط§ظ„ط§ظپطھط±ط§ط¶ظٹ: ط§ظ„ط´ظ‡ط± ط§ظ„ط­ط§ظ„ظٹ.',
     permission: 'sales.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        fromDate: { type: 'string', description: 'تاريخ البداية YYYY-MM-DD (اختياري — افتراضياً بداية الشهر الحالي)' },
-        toDate: { type: 'string', description: 'تاريخ النهاية YYYY-MM-DD (اختياري — افتراضياً اليوم)' },
+        fromDate: { type: 'string', description: 'طھط§ط±ظٹط® ط§ظ„ط¨ط¯ط§ظٹط© YYYY-MM-DD (ط§ط®طھظٹط§ط±ظٹ â€” ط§ظپطھط±ط§ط¶ظٹط§ظ‹ ط¨ط¯ط§ظٹط© ط§ظ„ط´ظ‡ط± ط§ظ„ط­ط§ظ„ظٹ)' },
+        toDate: { type: 'string', description: 'طھط§ط±ظٹط® ط§ظ„ظ†ظ‡ط§ظٹط© YYYY-MM-DD (ط§ط®طھظٹط§ط±ظٹ â€” ط§ظپطھط±ط§ط¶ظٹط§ظ‹ ط§ظ„ظٹظˆظ…)' },
       },
     },
     execute: async (args, ctx) => {
       const from = typeof args.fromDate === 'string' ? args.fromDate : localMonthStart();
       const to = typeof args.toDate === 'string' ? args.toDate : localToday();
 
-      // DB-side aggregate. The old client-side filter (500 newest invoices →
+      // DB-side aggregate. The old client-side filter (500 newest invoices â†’
       // filter in JS) silently returned WRONG totals for any range older
       // than the newest 500 invoices.
       const res = await guardedQuery(
@@ -84,7 +84,7 @@ export const readTools: ToolDefinition[] = [
            AND date BETWEEN $2 AND $3`,
         [ctx.companyId, from, to],
       );
-      if (!res.success || !res.rows) return { error: res.error || 'فشل جلب ملخص المبيعات' };
+      if (!res.success || !res.rows) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ظ…ظ„ط®طµ ط§ظ„ظ…ط¨ظٹط¹ط§طھ' };
       const row = res.rows[0] || {};
       const total = num(row.total_sales);
       const paid = num(row.total_paid);
@@ -99,22 +99,22 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'sales.get_invoices',
-    labelAr: 'فواتير المبيعات',
-    descriptionAr: 'يعرض قائمة فواتير المبيعات (رقم الفاتورة، العميل، التاريخ، الإجمالي، المدفوع، الحالة). يمكن التصفية حسب الحالة.',
+    labelAr: 'ظپظˆط§طھظٹط± ط§ظ„ظ…ط¨ظٹط¹ط§طھ',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ظپظˆط§طھظٹط± ط§ظ„ظ…ط¨ظٹط¹ط§طھ (ط±ظ‚ظ… ط§ظ„ظپط§طھظˆط±ط©طŒ ط§ظ„ط¹ظ…ظٹظ„طŒ ط§ظ„طھط§ط±ظٹط®طŒ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹطŒ ط§ظ„ظ…ط¯ظپظˆط¹طŒ ط§ظ„ط­ط§ظ„ط©). ظٹظ…ظƒظ† ط§ظ„طھطµظپظٹط© ط­ط³ط¨ ط§ظ„ط­ط§ظ„ط©.',
     permission: 'sales.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        status: { type: 'string', enum: ['draft', 'posted', 'paid', 'partially_paid', 'cancelled'], description: 'تصفية حسب الحالة (اختياري)' },
-        limit: { type: 'number', description: 'عدد النتائج (افتراضي 10، أقصى 25)' },
+        status: { type: 'string', enum: ['draft', 'posted', 'paid', 'partially_paid', 'cancelled'], description: 'طھطµظپظٹط© ط­ط³ط¨ ط§ظ„ط­ط§ظ„ط© (ط§ط®طھظٹط§ط±ظٹ)' },
+        limit: { type: 'number', description: 'ط¹ط¯ط¯ ط§ظ„ظ†طھط§ط¦ط¬ (ط§ظپطھط±ط§ط¶ظٹ 10طŒ ط£ظ‚طµظ‰ 25)' },
       },
     },
     execute: async (args, ctx) => {
       const limit = Math.min(Math.max(num(args.limit) || 10, 1), 25);
       const status = typeof args.status === 'string' && args.status ? args.status : undefined;
       const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, limit, { status });
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الفواتير' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظپظˆط§طھظٹط±' };
       return {
         total: res.data.total,
         invoices: res.data.items.map((i) => ({
@@ -131,14 +131,14 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'sales.get_ar_aging',
-    labelAr: 'أعمار ذمم العملاء',
-    descriptionAr: 'يعرض المبالغ المستحقة على العملاء مقسمة حسب فترات التأخير (0-30، 31-60، 61-90، +90 يوم).',
+    labelAr: 'ط£ط¹ظ…ط§ط± ط°ظ…ظ… ط§ظ„ط¹ظ…ظ„ط§ط،',
+    descriptionAr: 'ظٹط¹ط±ط¶ ط§ظ„ظ…ط¨ط§ظ„ط؛ ط§ظ„ظ…ط³طھط­ظ‚ط© ط¹ظ„ظ‰ ط§ظ„ط¹ظ…ظ„ط§ط، ظ…ظ‚ط³ظ…ط© ط­ط³ط¨ ظپطھط±ط§طھ ط§ظ„طھط£ط®ظٹط± (0-30طŒ 31-60طŒ 61-90طŒ +90 ظٹظˆظ…).',
     permission: 'sales.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
       const res = await salesApi.getCustomerArAging(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الذمم' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ط°ظ…ظ…' };
       const customers = res.data.slice(0, 20).map((c) => ({
         customer: c.customerName,
         totalDue: c.totalDue,
@@ -153,22 +153,22 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'sales.get_customer_statement',
-    labelAr: 'كشف حساب عميل',
-    descriptionAr: 'يعرض كشف حساب عميل محدد (الفواتير والسندات والرصيد). يتطلب معرف العميل customerId — استخدم أداة search.customers لإيجاده من الاسم.',
+    labelAr: 'ظƒط´ظپ ط­ط³ط§ط¨ ط¹ظ…ظٹظ„',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظƒط´ظپ ط­ط³ط§ط¨ ط¹ظ…ظٹظ„ ظ…ط­ط¯ط¯ (ط§ظ„ظپظˆط§طھظٹط± ظˆط§ظ„ط³ظ†ط¯ط§طھ ظˆط§ظ„ط±طµظٹط¯). ظٹطھط·ظ„ط¨ ظ…ط¹ط±ظپ ط§ظ„ط¹ظ…ظٹظ„ customerId â€” ط§ط³طھط®ط¯ظ… ط£ط¯ط§ط© search.customers ظ„ط¥ظٹط¬ط§ط¯ظ‡ ظ…ظ† ط§ظ„ط§ط³ظ….',
     permission: 'sales.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        customerId: { type: 'string', description: 'معرف العميل (UUID)' },
+        customerId: { type: 'string', description: 'ظ…ط¹ط±ظپ ط§ظ„ط¹ظ…ظٹظ„ (UUID)' },
       },
       required: ['customerId'],
     },
     execute: async (args, ctx) => {
       const customerId = String(args.customerId || '');
-      if (!customerId) return { error: 'customerId مطلوب' };
+      if (!customerId) return { error: 'customerId ظ…ط·ظ„ظˆط¨' };
       const res = await salesApi.getCustomerStatement(customerId, ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الكشف' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظƒط´ظپ' };
       const rows = res.data;
       return {
         rowsCount: rows.length,
@@ -185,25 +185,25 @@ export const readTools: ToolDefinition[] = [
     },
   },
 
-  // ─── Purchases ───────────────────────────────────────────────────────────
+  // â”€â”€â”€ Purchases â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'purchases.get_invoices',
-    labelAr: 'فواتير المشتريات',
-    descriptionAr: 'يعرض قائمة فواتير المشتريات (الرقم، المورد، التاريخ، الإجمالي، الحالة). يمكن التصفية حسب الحالة.',
+    labelAr: 'ظپظˆط§طھظٹط± ط§ظ„ظ…ط´طھط±ظٹط§طھ',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ظپظˆط§طھظٹط± ط§ظ„ظ…ط´طھط±ظٹط§طھ (ط§ظ„ط±ظ‚ظ…طŒ ط§ظ„ظ…ظˆط±ط¯طŒ ط§ظ„طھط§ط±ظٹط®طŒ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹطŒ ط§ظ„ط­ط§ظ„ط©). ظٹظ…ظƒظ† ط§ظ„طھطµظپظٹط© ط­ط³ط¨ ط§ظ„ط­ط§ظ„ط©.',
     permission: 'purchases.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
         status: { type: 'string', enum: ['draft', 'posted', 'paid', 'partially_paid', 'cancelled'] },
-        limit: { type: 'number', description: 'عدد النتائج (افتراضي 10، أقصى 25)' },
+        limit: { type: 'number', description: 'ط¹ط¯ط¯ ط§ظ„ظ†طھط§ط¦ط¬ (ط§ظپطھط±ط§ط¶ظٹ 10طŒ ط£ظ‚طµظ‰ 25)' },
       },
     },
     execute: async (args, ctx) => {
       const limit = Math.min(Math.max(num(args.limit) || 10, 1), 25);
       const status = typeof args.status === 'string' && args.status ? args.status : undefined;
       const res = await purchasesApi.getInvoicesPaginated(ctx.companyId, 1, limit, { status });
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الفواتير' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظپظˆط§طھظٹط±' };
       return {
         total: res.data.total,
         invoices: res.data.items.map((i) => ({
@@ -220,29 +220,29 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'purchases.get_ap_aging_total',
-    labelAr: 'إجمالي مستحقات الموردين',
-    descriptionAr: 'يعطي إجمالي المبالغ المستحقة للموردين (ذمم المشتريات غير المسددة).',
+    labelAr: 'ط¥ط¬ظ…ط§ظ„ظٹ ظ…ط³طھط­ظ‚ط§طھ ط§ظ„ظ…ظˆط±ط¯ظٹظ†',
+    descriptionAr: 'ظٹط¹ط·ظٹ ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط¨ط§ظ„ط؛ ط§ظ„ظ…ط³طھط­ظ‚ط© ظ„ظ„ظ…ظˆط±ط¯ظٹظ† (ط°ظ…ظ… ط§ظ„ظ…ط´طھط±ظٹط§طھ ط؛ظٹط± ط§ظ„ظ…ط³ط¯ط¯ط©).',
     permission: 'purchases.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
       const res = await purchasesApi.getApAgingTotal(ctx.companyId);
-      if (!res.success) return { error: res.error || 'فشل الجلب' };
+      if (!res.success) return { error: res.error || 'ظپط´ظ„ ط§ظ„ط¬ظ„ط¨' };
       return { totalOutstandingToSuppliers: res.total ?? 0 };
     },
   },
 
-  // ─── Accounting ──────────────────────────────────────────────────────────
+  // â”€â”€â”€ Accounting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'accounting.get_trial_balance',
-    labelAr: 'ميزان المراجعة',
-    descriptionAr: 'يعرض ميزان المراجعة: إجمالي المدين والدائن وأكبر الحسابات رصيداً. استخدمه للأسئلة المالية العامة.',
+    labelAr: 'ظ…ظٹط²ط§ظ† ط§ظ„ظ…ط±ط§ط¬ط¹ط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ…ظٹط²ط§ظ† ط§ظ„ظ…ط±ط§ط¬ط¹ط©: ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظ…ط¯ظٹظ† ظˆط§ظ„ط¯ط§ط¦ظ† ظˆط£ظƒط¨ط± ط§ظ„ط­ط³ط§ط¨ط§طھ ط±طµظٹط¯ط§ظ‹. ط§ط³طھط®ط¯ظ…ظ‡ ظ„ظ„ط£ط³ط¦ظ„ط© ط§ظ„ظ…ط§ظ„ظٹط© ط§ظ„ط¹ط§ظ…ط©.',
     permission: 'accounting.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
       const res = await accountingApi.getTrialBalance(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الميزان' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظ…ظٹط²ط§ظ†' };
       const rows = res.data.map((r) => ({
         code: r.accountCode,
         name: r.accountName,
@@ -261,22 +261,22 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'accounting.get_profit_loss',
-    labelAr: 'قائمة الدخل',
-    descriptionAr: 'يعرض قائمة الدخل (الإيرادات والمصروفات وصافي الربح) لفترة زمنية. التواريخ اختيارية بصيغة YYYY-MM-DD.',
+    labelAr: 'ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„ (ط§ظ„ط¥ظٹط±ط§ط¯ط§طھ ظˆط§ظ„ظ…طµط±ظˆظپط§طھ ظˆطµط§ظپظٹ ط§ظ„ط±ط¨ط­) ظ„ظپطھط±ط© ط²ظ…ظ†ظٹط©. ط§ظ„طھظˆط§ط±ظٹط® ط§ط®طھظٹط§ط±ظٹط© ط¨طµظٹط؛ط© YYYY-MM-DD.',
     permission: 'accounting.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        fromDate: { type: 'string', description: 'YYYY-MM-DD (اختياري)' },
-        toDate: { type: 'string', description: 'YYYY-MM-DD (اختياري)' },
+        fromDate: { type: 'string', description: 'YYYY-MM-DD (ط§ط®طھظٹط§ط±ظٹ)' },
+        toDate: { type: 'string', description: 'YYYY-MM-DD (ط§ط®طھظٹط§ط±ظٹ)' },
       },
     },
     execute: async (args, ctx) => {
       const from = typeof args.fromDate === 'string' ? args.fromDate : undefined;
       const to = typeof args.toDate === 'string' ? args.toDate : undefined;
       const res = await accountingApi.getProfitLoss(ctx.companyId, from, to);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب قائمة الدخل' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ظ‚ط§ط¦ظ…ط© ط§ظ„ط¯ط®ظ„' };
       const rows = res.data.map((a) => ({
         code: a.code,
         name: a.nameAr || a.nameEn || '',
@@ -295,25 +295,25 @@ export const readTools: ToolDefinition[] = [
     },
   },
 
-  // ─── Inventory ───────────────────────────────────────────────────────────
+  // â”€â”€â”€ Inventory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'inventory.get_products',
-    labelAr: 'قائمة المنتجات',
-    descriptionAr: 'يعرض قائمة المنتجات (الكود، الاسم، سعر البيع، سعر التكلفة، الكمية). يمكن البحث بالاسم أو الكود.',
+    labelAr: 'ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…ظ†طھط¬ط§طھ',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…ظ†طھط¬ط§طھ (ط§ظ„ظƒظˆط¯طŒ ط§ظ„ط§ط³ظ…طŒ ط³ط¹ط± ط§ظ„ط¨ظٹط¹طŒ ط³ط¹ط± ط§ظ„طھظƒظ„ظپط©طŒ ط§ظ„ظƒظ…ظٹط©). ظٹظ…ظƒظ† ط§ظ„ط¨ط­ط« ط¨ط§ظ„ط§ط³ظ… ط£ظˆ ط§ظ„ظƒظˆط¯.',
     permission: 'inventory.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        search: { type: 'string', description: 'نص البحث (اختياري)' },
-        limit: { type: 'number', description: 'عدد النتائج (افتراضي 10، أقصى 25)' },
+        search: { type: 'string', description: 'ظ†طµ ط§ظ„ط¨ط­ط« (ط§ط®طھظٹط§ط±ظٹ)' },
+        limit: { type: 'number', description: 'ط¹ط¯ط¯ ط§ظ„ظ†طھط§ط¦ط¬ (ط§ظپطھط±ط§ط¶ظٹ 10طŒ ط£ظ‚طµظ‰ 25)' },
       },
     },
     execute: async (args, ctx) => {
       const limit = Math.min(Math.max(num(args.limit) || 10, 1), 25);
       const search = typeof args.search === 'string' && args.search ? args.search : undefined;
       const res = await inventoryApi.getProductsPaginated(ctx.companyId, 1, limit, { search });
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المنتجات' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظ…ظ†طھط¬ط§طھ' };
       return {
         total: res.data.total,
         products: res.data.items.map((p) => ({
@@ -329,11 +329,11 @@ export const readTools: ToolDefinition[] = [
     },
   },
 
-  // ─── CRM ─────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ CRM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'crm.get_leads',
-    labelAr: 'العملاء المحتملين',
-    descriptionAr: 'يعرض قائمة العملاء المحتملين (الاسم، الهاتف، الحالة، التقييم، القيمة المتوقعة).',
+    labelAr: 'ط§ظ„ط¹ظ…ظ„ط§ط، ط§ظ„ظ…ط­طھظ…ظ„ظٹظ†',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ط§ظ„ط¹ظ…ظ„ط§ط، ط§ظ„ظ…ط­طھظ…ظ„ظٹظ† (ط§ظ„ط§ط³ظ…طŒ ط§ظ„ظ‡ط§طھظپطŒ ط§ظ„ط­ط§ظ„ط©طŒ ط§ظ„طھظ‚ظٹظٹظ…طŒ ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…طھظˆظ‚ط¹ط©).',
     permission: 'crm.view',
     dangerLevel: 'read',
     parameters: {
@@ -344,7 +344,7 @@ export const readTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const res = await crmApi.getLeads(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب العملاء' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ط¹ظ…ظ„ط§ط،' };
       const status = typeof args.status === 'string' && args.status ? args.status : undefined;
       const filtered = status ? res.data.filter((l) => l.status === status) : res.data;
       return {
@@ -363,14 +363,14 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'crm.get_opportunities',
-    labelAr: 'الفرص البيعية',
-    descriptionAr: 'يعرض الفرص البيعية وقيمة خط الأنابيب (pipeline) حسب المرحلة.',
+    labelAr: 'ط§ظ„ظپط±طµ ط§ظ„ط¨ظٹط¹ظٹط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ ط§ظ„ظپط±طµ ط§ظ„ط¨ظٹط¹ظٹط© ظˆظ‚ظٹظ…ط© ط®ط· ط§ظ„ط£ظ†ط§ط¨ظٹط¨ (pipeline) ط­ط³ط¨ ط§ظ„ظ…ط±ط­ظ„ط©.',
     permission: 'crm.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
       const res = await crmApi.getOpportunities(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الفرص' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظپط±طµ' };
       const open = res.data.filter((o) => o.stage !== 'won' && o.stage !== 'lost');
       const pipelineValue = open.reduce((s, o) => s + num(o.value), 0);
       const weighted = open.reduce((s, o) => s + num(o.value) * (num(o.probability) / 100), 0);
@@ -390,8 +390,8 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'crm.get_tasks',
-    labelAr: 'مهام المتابعة',
-    descriptionAr: 'يعرض قائمة مهام المتابعة (العنوان، الأولوية، الحالة، تاريخ الاستحقاق، هل متأخرة). يمكن الفلترة بالحالة والأولوية.',
+    labelAr: 'ظ…ظ‡ط§ظ… ط§ظ„ظ…طھط§ط¨ط¹ط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ظ…ظ‡ط§ظ… ط§ظ„ظ…طھط§ط¨ط¹ط© (ط§ظ„ط¹ظ†ظˆط§ظ†طŒ ط§ظ„ط£ظˆظ„ظˆظٹط©طŒ ط§ظ„ط­ط§ظ„ط©طŒ طھط§ط±ظٹط® ط§ظ„ط§ط³طھط­ظ‚ط§ظ‚طŒ ظ‡ظ„ ظ…طھط£ط®ط±ط©). ظٹظ…ظƒظ† ط§ظ„ظپظ„طھط±ط© ط¨ط§ظ„ط­ط§ظ„ط© ظˆط§ظ„ط£ظˆظ„ظˆظٹط©.',
     permission: 'crm.view',
     dangerLevel: 'read',
     parameters: {
@@ -403,13 +403,13 @@ export const readTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const res = await crmApi.getTasks(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المهام' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظ…ظ‡ط§ظ…' };
       const status = typeof args.status === 'string' && args.status ? args.status : undefined;
       const priority = typeof args.priority === 'string' && args.priority ? args.priority : undefined;
       let filtered = res.data;
       if (status) filtered = filtered.filter((t) => t.status === status);
       if (priority) filtered = filtered.filter((t) => t.priority === priority);
-      // Lexicographic YYYY-MM-DD compare — no Date parsing, no UTC shift.
+      // Lexicographic YYYY-MM-DD compare â€” no Date parsing, no UTC shift.
       const todayStr = localToday();
       const isOverdue = (t: { status?: string; dueDate?: string | null }) =>
         t.status === 'pending' && typeof t.dueDate === 'string' && !!t.dueDate && t.dueDate < todayStr;
@@ -433,8 +433,8 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'crm.get_activities',
-    labelAr: 'سجل الأنشطة',
-    descriptionAr: 'يعرض سجل أنشطة التواصل (اتصالات، اجتماعات، زيارات). يمكن الفلترة بالنوع.',
+    labelAr: 'ط³ط¬ظ„ ط§ظ„ط£ظ†ط´ط·ط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ ط³ط¬ظ„ ط£ظ†ط´ط·ط© ط§ظ„طھظˆط§طµظ„ (ط§طھطµط§ظ„ط§طھطŒ ط§ط¬طھظ…ط§ط¹ط§طھطŒ ط²ظٹط§ط±ط§طھ). ظٹظ…ظƒظ† ط§ظ„ظپظ„طھط±ط© ط¨ط§ظ„ظ†ظˆط¹.',
     permission: 'crm.view',
     dangerLevel: 'read',
     parameters: {
@@ -445,7 +445,7 @@ export const readTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const res = await crmApi.getActivities(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأنشطة' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ط£ظ†ط´ط·ط©' };
       const type = typeof args.type === 'string' && args.type ? args.type : undefined;
       const filtered = type ? res.data.filter((a) => a.type === type) : res.data;
       return {
@@ -465,17 +465,17 @@ export const readTools: ToolDefinition[] = [
     },
   },
 
-  // ─── HR ──────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ HR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'hr.get_employees',
-    labelAr: 'قائمة الموظفين',
-    descriptionAr: 'يعرض قائمة الموظفين (الرقم، الاسم، القسم، المنصب، الراتب الأساسي، الحالة).',
+    labelAr: 'ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…ظˆط¸ظپظٹظ†',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ‚ط§ط¦ظ…ط© ط§ظ„ظ…ظˆط¸ظپظٹظ† (ط§ظ„ط±ظ‚ظ…طŒ ط§ظ„ط§ط³ظ…طŒ ط§ظ„ظ‚ط³ظ…طŒ ط§ظ„ظ…ظ†طµط¨طŒ ط§ظ„ط±ط§طھط¨ ط§ظ„ط£ط³ط§ط³ظٹطŒ ط§ظ„ط­ط§ظ„ط©).',
     permission: 'hr.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
       const res = await hrApi.getEmployees(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الموظفين' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظ…ظˆط¸ظپظٹظ†' };
       const active = res.data.filter((e) => e.isActive);
       return {
         totalEmployees: res.data.length,
@@ -493,17 +493,19 @@ export const readTools: ToolDefinition[] = [
     },
   },
 
-  // ─── AI Analytics Read Tools ─────────────────────────────────────────────
+  // â”€â”€â”€ AI Analytics Read Tools â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'read.inventory_valuation',
-    labelAr: 'تقييم المخزون',
-    descriptionAr: 'يعرض تقييم المخزون: إجمالي قيمة المخزون حسب المنتج مع سعر التكلفة والكمية والقيمة الإجمالية لكل منتج.',
-    permission: 'ai.use',
+    labelAr: 'طھظ‚ظٹظٹظ… ط§ظ„ظ…ط®ط²ظˆظ†',
+    descriptionAr: 'ظٹط¹ط±ط¶ طھظ‚ظٹظٹظ… ط§ظ„ظ…ط®ط²ظˆظ†: ط¥ط¬ظ…ط§ظ„ظٹ ظ‚ظٹظ…ط© ط§ظ„ظ…ط®ط²ظˆظ† ط­ط³ط¨ ط§ظ„ظ…ظ†طھط¬ ظ…ط¹ ط³ط¹ط± ط§ظ„طھظƒظ„ظپط© ظˆط§ظ„ظƒظ…ظٹط© ظˆط§ظ„ظ‚ظٹظ…ط© ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹط© ظ„ظƒظ„ ظ…ظ†طھط¬.',
+    // P0-6 fix: this tool reads module data gated by inventory.view — ai.use alone
+    // leaked it to every AI user (e.g. sales_rep without hr.view).
+    permission: 'inventory.view',
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
       const res = await inventoryApi.getProducts(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب المخزون' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ظ…ط®ط²ظˆظ†' };
       const withStock = res.data.filter((p) => num(p.quantity) > 0 || num(p.costPrice) > 0);
       const totalValue = withStock.reduce((s, p) => s + num(p.quantity) * num(p.costPrice), 0);
       return {
@@ -521,22 +523,24 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'read.employee_payroll_history',
-    labelAr: 'سجل رواتب الموظف',
-    descriptionAr: 'يعرض سجل مسيرات الرواتب لموظف معين مع التفاصيل (الراتب الأساسي، البدلات، الخصومات، صافي الراتب). يمكن تحديد الموظف أو عرض آخر المسيرات.',
-    permission: 'ai.use',
+    labelAr: 'ط³ط¬ظ„ ط±ظˆط§طھط¨ ط§ظ„ظ…ظˆط¸ظپ',
+    descriptionAr: 'ظٹط¹ط±ط¶ ط³ط¬ظ„ ظ…ط³ظٹط±ط§طھ ط§ظ„ط±ظˆط§طھط¨ ظ„ظ…ظˆط¸ظپ ظ…ط¹ظٹظ† ظ…ط¹ ط§ظ„طھظپط§طµظٹظ„ (ط§ظ„ط±ط§طھط¨ ط§ظ„ط£ط³ط§ط³ظٹطŒ ط§ظ„ط¨ط¯ظ„ط§طھطŒ ط§ظ„ط®طµظˆظ…ط§طھطŒ طµط§ظپظٹ ط§ظ„ط±ط§طھط¨). ظٹظ…ظƒظ† طھط­ط¯ظٹط¯ ط§ظ„ظ…ظˆط¸ظپ ط£ظˆ ط¹ط±ط¶ ط¢ط®ط± ط§ظ„ظ…ط³ظٹط±ط§طھ.',
+    // P0-6 fix: this tool reads module data gated by hr.view — ai.use alone
+    // leaked it to every AI user (e.g. sales_rep without hr.view).
+    permission: 'hr.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        employeeId: { type: 'string', description: 'معرف الموظف (UUID، اختياري — إذا لم يُحدد يعرض آخر 6 مسيرات)' },
-        limit: { type: 'number', description: 'عدد مسيرات الرواتب (افتراضي 6، أقصى 12)' },
+        employeeId: { type: 'string', description: 'ظ…ط¹ط±ظپ ط§ظ„ظ…ظˆط¸ظپ (UUIDطŒ ط§ط®طھظٹط§ط±ظٹ â€” ط¥ط°ط§ ظ„ظ… ظٹظڈط­ط¯ط¯ ظٹط¹ط±ط¶ ط¢ط®ط± 6 ظ…ط³ظٹط±ط§طھ)' },
+        limit: { type: 'number', description: 'ط¹ط¯ط¯ ظ…ط³ظٹط±ط§طھ ط§ظ„ط±ظˆط§طھط¨ (ط§ظپطھط±ط§ط¶ظٹ 6طŒ ط£ظ‚طµظ‰ 12)' },
       },
     },
     execute: async (args, ctx) => {
       const limit = Math.min(Math.max(num(args.limit) || 6, 1), 12);
       const employeeId = args.employeeId ? String(args.employeeId) : undefined;
       const res = await hrApi.getPayrollRuns(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب مسيرات الرواتب' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ظ…ط³ظٹط±ط§طھ ط§ظ„ط±ظˆط§طھط¨' };
       const runs = res.data
         .sort((a, b) => b.year - a.year || b.month - a.month)
         .slice(0, limit);
@@ -561,15 +565,17 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'read.attendance_summary',
-    labelAr: 'ملخص الحضور',
-    descriptionAr: 'يعرض ملخص الحضور والانصراف لفترة محددة (عدد الحاضرين، الغائبين، المتأخرين، في إجازة ونسبة الحضور). يمكن تحديد الشهر والسنة.',
-    permission: 'ai.use',
+    labelAr: 'ظ…ظ„ط®طµ ط§ظ„ط­ط¶ظˆط±',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ…ظ„ط®طµ ط§ظ„ط­ط¶ظˆط± ظˆط§ظ„ط§ظ†طµط±ط§ظپ ظ„ظپطھط±ط© ظ…ط­ط¯ط¯ط© (ط¹ط¯ط¯ ط§ظ„ط­ط§ط¶ط±ظٹظ†طŒ ط§ظ„ط؛ط§ط¦ط¨ظٹظ†طŒ ط§ظ„ظ…طھط£ط®ط±ظٹظ†طŒ ظپظٹ ط¥ط¬ط§ط²ط© ظˆظ†ط³ط¨ط© ط§ظ„ط­ط¶ظˆط±). ظٹظ…ظƒظ† طھط­ط¯ظٹط¯ ط§ظ„ط´ظ‡ط± ظˆط§ظ„ط³ظ†ط©.',
+    // P0-6 fix: this tool reads module data gated by hr.view — ai.use alone
+    // leaked it to every AI user (e.g. sales_rep without hr.view).
+    permission: 'hr.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        month: { type: 'number', description: 'رقم الشهر (1-12، افتراضي الشهر الحالي)' },
-        year: { type: 'number', description: 'السنة (افتراضي السنة الحالية)' },
+        month: { type: 'number', description: 'ط±ظ‚ظ… ط§ظ„ط´ظ‡ط± (1-12طŒ ط§ظپطھط±ط§ط¶ظٹ ط§ظ„ط´ظ‡ط± ط§ظ„ط­ط§ظ„ظٹ)' },
+        year: { type: 'number', description: 'ط§ظ„ط³ظ†ط© (ط§ظپطھط±ط§ط¶ظٹ ط§ظ„ط³ظ†ط© ط§ظ„ط­ط§ظ„ظٹط©)' },
       },
     },
     execute: async (args, ctx) => {
@@ -577,7 +583,7 @@ export const readTools: ToolDefinition[] = [
       const month = num(args.month) || (now.getMonth() + 1);
       const year = num(args.year) || now.getFullYear();
       const res = await hrApi.getAttendance(ctx.companyId, month, year);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الحضور' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ط§ظ„ط­ط¶ظˆط±' };
       const records = res.data;
       const present = records.filter((r) => r.status === 'present').length;
       const absent = records.filter((r) => r.status === 'absent').length;
@@ -603,23 +609,29 @@ export const readTools: ToolDefinition[] = [
   },
   {
     name: 'read.end_of_service',
-    labelAr: 'مكافأة نهاية الخدمة',
-    descriptionAr: 'يعرض تفاصيل مكافأة نهاية الخدمة للموظفين (الراتب الأخير، سنوات الخدمة، قيمة المكافأة، سبب الاستحقاق، الحالة). يمكن التصفية بمعرف الموظف.',
-    permission: 'ai.use',
+    labelAr: 'ظ…ظƒط§ظپط£ط© ظ†ظ‡ط§ظٹط© ط§ظ„ط®ط¯ظ…ط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ طھظپط§طµظٹظ„ ظ…ظƒط§ظپط£ط© ظ†ظ‡ط§ظٹط© ط§ظ„ط®ط¯ظ…ط© ظ„ظ„ظ…ظˆط¸ظپظٹظ† (ط§ظ„ط±ط§طھط¨ ط§ظ„ط£ط®ظٹط±طŒ ط³ظ†ظˆط§طھ ط§ظ„ط®ط¯ظ…ط©طŒ ظ‚ظٹظ…ط© ط§ظ„ظ…ظƒط§ظپط£ط©طŒ ط³ط¨ط¨ ط§ظ„ط§ط³طھط­ظ‚ط§ظ‚طŒ ط§ظ„ط­ط§ظ„ط©). ظٹظ…ظƒظ† ط§ظ„طھطµظپظٹط© ط¨ظ…ط¹ط±ظپ ط§ظ„ظ…ظˆط¸ظپ.',
+    // P0-6 fix: this tool reads module data gated by hr.view — ai.use alone
+    // leaked it to every AI user (e.g. sales_rep without hr.view).
+    permission: 'hr.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
       properties: {
-        employeeId: { type: 'string', description: 'معرف الموظف (UUID، اختياري)' },
+        employeeId: { type: 'string', description: 'ظ…ط¹ط±ظپ ط§ظ„ظ…ظˆط¸ظپ (UUIDطŒ ط§ط®طھظٹط§ط±ظٹ)' },
       },
     },
     execute: async (args, ctx) => {
       const employeeId = args.employeeId ? String(args.employeeId) : undefined;
       const res = await hrApi.getEndOfServices(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب نهاية الخدمة' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ظ†ظ‡ط§ظٹط© ط§ظ„ط®ط¯ظ…ط©' };
       let filtered = res.data;
       if (employeeId) filtered = filtered.filter((e) => e.employeeId === employeeId);
-      const totalEos = filtered.reduce((s, e) => s + num(e.eosAmount), 0);
+      // P3 fix: total only approved/paid rows (real liabilities). The old
+      // sum swept drafts (estimates) and cancelled rows into totalEosAmount.
+      const totalEos = filtered
+        .filter((e) => e.status === 'approved' || e.status === 'paid')
+        .reduce((s, e) => s + num(e.eosAmount), 0);
       return {
         totalCalculations: filtered.length,
         totalEosAmount: Math.round(totalEos * 100) / 100,
@@ -635,17 +647,17 @@ export const readTools: ToolDefinition[] = [
       };
     },
   },
-  // ─── HR: KPIs ────────────────────────────────────────────────────────────
+  // â”€â”€â”€ HR: KPIs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'read.hr_kpis',
-    labelAr: 'مؤشرات الموارد البشرية',
-    descriptionAr: 'يعرض مؤشرات HR الرئيسية: عدد الموظفين، نسبة الحضور، إجمالي مسيرات الرواتب، إلخ.',
+    labelAr: 'ظ…ط¤ط´ط±ط§طھ ط§ظ„ظ…ظˆط§ط±ط¯ ط§ظ„ط¨ط´ط±ظٹط©',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ…ط¤ط´ط±ط§طھ HR ط§ظ„ط±ط¦ظٹط³ظٹط©: ط¹ط¯ط¯ ط§ظ„ظ…ظˆط¸ظپظٹظ†طŒ ظ†ط³ط¨ط© ط§ظ„ط­ط¶ظˆط±طŒ ط¥ط¬ظ…ط§ظ„ظٹ ظ…ط³ظٹط±ط§طھ ط§ظ„ط±ظˆط§طھط¨طŒ ط¥ظ„ط®.',
     permission: 'hr.view',
     dangerLevel: 'read',
     parameters: { type: 'object', properties: {}, required: [] },
     execute: async (_args, ctx) => {
       const res = await hrApi.getHrKpis(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب مؤشرات HR' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ظ…ط¤ط´ط±ط§طھ HR' };
       return {
         totalEmployees: res.data.totalEmployees,
         activeEmployees: res.data.activeEmployees,
@@ -654,17 +666,17 @@ export const readTools: ToolDefinition[] = [
       };
     },
   },
-  // ─── Inventory: KPIs ─────────────────────────────────────────────────────
+  // â”€â”€â”€ Inventory: KPIs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   {
     name: 'read.inventory_kpis',
-    labelAr: 'مؤشرات المخزون',
-    descriptionAr: 'يعرض مؤشرات المخزون الرئيسية: قيمة المخزون، عدد المنتجات منخفضة المخزون، عدد المستودعات، عدد حركات المخزون.',
+    labelAr: 'ظ…ط¤ط´ط±ط§طھ ط§ظ„ظ…ط®ط²ظˆظ†',
+    descriptionAr: 'ظٹط¹ط±ط¶ ظ…ط¤ط´ط±ط§طھ ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ط±ط¦ظٹط³ظٹط©: ظ‚ظٹظ…ط© ط§ظ„ظ…ط®ط²ظˆظ†طŒ ط¹ط¯ط¯ ط§ظ„ظ…ظ†طھط¬ط§طھ ظ…ظ†ط®ظپط¶ط© ط§ظ„ظ…ط®ط²ظˆظ†طŒ ط¹ط¯ط¯ ط§ظ„ظ…ط³طھظˆط¯ط¹ط§طھطŒ ط¹ط¯ط¯ ط­ط±ظƒط§طھ ط§ظ„ظ…ط®ط²ظˆظ†.',
     permission: 'inventory.view',
     dangerLevel: 'read',
     parameters: { type: 'object', properties: {}, required: [] },
     execute: async (_args, ctx) => {
       const res = await inventoryApi.getInventoryKpis(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب مؤشرات المخزون' };
+      if (!res.success || !res.data) return { error: res.error || 'ظپط´ظ„ ط¬ظ„ط¨ ظ…ط¤ط´ط±ط§طھ ط§ظ„ظ…ط®ط²ظˆظ†' };
       return res.data;
     },
   },

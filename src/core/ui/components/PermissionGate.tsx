@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuthStore } from '@/modules/auth/store';
 import type { Permission } from '@/modules/auth/types';
 
-type Module = 'accounting' | 'inventory' | 'sales' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings';
+type Module = 'accounting' | 'inventory' | 'sales' | 'pos' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings';
 type Action = 'view' | 'create' | 'edit' | 'delete' | 'post' | 'export';
 
 function checkPermissionSet(

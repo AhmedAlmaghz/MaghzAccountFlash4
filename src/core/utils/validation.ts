@@ -28,13 +28,16 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { succe
   return { success: false, error: errors };
 }
 
-// ─── Multi-unit line snapshot (shared by all 6 document line schemas) ────
+// â”€â”€â”€ Multi-unit line snapshot (shared by all 6 document line schemas) â”€â”€â”€â”€
 // unitId = chosen product_units row; unitFactor = frozen factor;
 // baseQuantity = qty in base unit (server recomputes if missing).
 export const lineUnitFields = {
   unitId: uuidSchema.optional(),
   unitFactor: z.number().positive().optional(),
   baseQuantity: currencyAmountSchema.optional(),
+  // Display-only snapshot of the resolved unit name — the tool layer fills
+  // it after resolveLineUnits; zod must not strip it (U2 regression guard).
+  unitName: z.string().max(80).optional(),
 };
 
 export const idCompanySchema = z.object({
@@ -42,7 +45,7 @@ export const idCompanySchema = z.object({
   companyId: companyIdSchema,
 });
 
-// ─── Company profile (shared by onboarding, settings page, and seed) ────────
+// â”€â”€â”€ Company profile (shared by onboarding, settings page, and seed) â”€â”€â”€â”€â”€â”€â”€â”€
 // Single source of truth for which company fields the app accepts and their
 // limits. Column sizes mirror drizzle/0000_init.sql (companies table).
 export const companyProfileSchema = z.object({
@@ -393,7 +396,7 @@ export const createStockTransferSchema = z.object({
     quantity: currencyAmountSchema.positive(),
   })).optional(),
 }).refine(d => d.fromWarehouseId !== d.toWarehouseId, {
-  message: 'مستودع المصدر والوجهة يجب أن يكونا مختلفين',
+  message: 'ظ…ط³طھظˆط¯ط¹ ط§ظ„ظ…طµط¯ط± ظˆط§ظ„ظˆط¬ظ‡ط© ظٹط¬ط¨ ط£ظ† ظٹظƒظˆظ†ط§ ظ…ط®طھظ„ظپظٹظ†',
   path: ['toWarehouseId'],
 });
 
@@ -588,4 +591,64 @@ export const createWorkOrderSchema = z.object({
     plannedQuantity: currencyAmountSchema,
     unitCost: currencyAmountSchema.optional(),
   })).optional(),
+});
+
+// â”€â”€â”€ POS module (ظ†ظ‚ط§ط· ط§ظ„ط¨ظٹط¹) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const openPosShiftSchema = z.object({
+  companyId: companyIdSchema,
+  cashBoxId: uuidSchema,
+  openingAmount: currencyAmountSchema,
+});
+
+export const closePosShiftSchema = z.object({
+  id: uuidSchema,
+  companyId: companyIdSchema,
+  countedAmount: currencyAmountSchema,
+  notes: z.string().max(1000).optional(),
+});
+
+export const posCheckoutSchema = z.object({
+  companyId: companyIdSchema,
+  shiftId: uuidSchema,
+  customerId: uuidSchema.nullable().optional().or(z.literal('')),
+  cashBoxId: uuidSchema,
+  subtotal: currencyAmountSchema,
+  discountAmount: currencyAmountSchema.optional(),
+  vatAmount: currencyAmountSchema.optional(),
+  totalAmount: currencyAmountSchema,
+  cashAmount: currencyAmountSchema,
+  creditAmount: currencyAmountSchema,
+  currencyCode: z.string().length(3).optional(),
+  notes: z.string().max(2000).optional(),
+  lines: z.array(z.object({
+    productId: uuidSchema,
+    quantity: currencyAmountSchema,
+    ...lineUnitFields,
+    unitPrice: currencyAmountSchema,
+    discountPercent: percentageSchema.optional(),
+    vatPercent: percentageSchema.optional(),
+    lineTotal: currencyAmountSchema,
+  })).min(1),
+}).refine((d) => Math.abs(d.cashAmount + d.creditAmount - d.totalAmount) < 0.0001, {
+  message: 'cash + credit must equal total',
+}).refine((d) => d.cashAmount > 0 || d.creditAmount > 0, {
+  message: 'payment amount required',
+}).refine((d) => {
+  if (d.creditAmount > 0) {
+    const cid = d.customerId;
+    if (!cid || cid === '00000000-0000-0000-0000-000000000000' || (typeof cid === 'string' && cid.trim() === '')) return false;
+  }
+  return true;
+}, {
+  message: 'customer required for credit',
+});
+
+export const posSettingsSchema = z.object({
+  companyId: companyIdSchema,
+  defaultCashBoxId: uuidSchema.nullable().optional(),
+  receiptFooter: z.string().max(500).optional().or(z.literal('')),
+  autoPrint: z.boolean().optional(),
+  allowPriceEdit: z.boolean().optional(),
+  allowDiscount: z.boolean().optional(),
+  allowNegativeStock: z.boolean().optional(),
 });

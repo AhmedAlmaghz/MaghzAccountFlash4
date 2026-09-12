@@ -58,7 +58,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         balance: 0,
         openingBalance: openingBalance > 0 ? openingBalance : undefined,
         isActive: true,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء المورد' };
       return {
         created: true,
@@ -138,8 +138,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
         cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
         notes: str(args.notes),
         lines,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء الفاتورة' };
+      const mismatchNotesPur = resolved.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote);
       return {
         created: true,
         invoiceId: res.id,
@@ -149,6 +150,8 @@ export const purchasesWriteTools: ToolDefinition[] = [
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
+        ...(tax.vatUnset && tax.showVat ? { vatUnset: true, vatUnsetNote: 'تعذر قراءة نسبة الضريبة من الإعدادات — سُجلت بدون ضريبة؛ أكّد النسبة مع المستخدم إن لزم' } : {}),
+        ...(mismatchNotesPur.length > 0 ? { priceMismatchNotes: mismatchNotesPur } : {}),
         note: paymentType === 'cash'
           ? 'فاتورة مشتريات نقدية (مسودة) — استخدم purchases.post_invoice لترحيلها؛ سيُخصم المبلغ من الخزنة لا من ذمة المورد'
           : undefined,
@@ -220,9 +223,10 @@ export const purchasesWriteTools: ToolDefinition[] = [
         status: 'draft',
         notes: str(args.notes),
         lines,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء الأمر' };
-      return { created: true, orderId: res.id, orderNumber: docNumber.number, totalAmount };
+      const mismatchNotesOrd = resolvedOrder.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote);
+      return { created: true, orderId: res.id, orderNumber: docNumber.number, totalAmount, ...(mismatchNotesOrd.length > 0 ? { priceMismatchNotes: mismatchNotesOrd } : {}) };
     },
   },
 
@@ -297,8 +301,9 @@ export const purchasesWriteTools: ToolDefinition[] = [
         status: 'draft',
         notes: str(args.notes),
         lines,
-      });
+      }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء المردود' };
+      const mismatchNotesRetP = resolvedRet.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote);
       return {
         created: true,
         returnId: res.id,
@@ -307,6 +312,8 @@ export const purchasesWriteTools: ToolDefinition[] = [
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجل المردود بدون ضريبة' }),
+        ...(tax.vatUnset && tax.showVat ? { vatUnset: true, vatUnsetNote: 'تعذر قراءة نسبة الضريبة من الإعدادات — سُجل بدون ضريبة؛ أكّد النسبة مع المستخدم إن لزم' } : {}),
+        ...(mismatchNotesRetP.length > 0 ? { priceMismatchNotes: mismatchNotesRetP } : {}),
       };
     },
   },
@@ -426,8 +433,26 @@ export const purchasesWriteTools: ToolDefinition[] = [
         if (s && !['draft', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون draft أو cancelled' };
         data.status = s;
       }
-      if (args.discountAmount !== undefined) data.discountAmount = num(args.discountAmount);
-      if (args.paidAmount !== undefined) data.paidAmount = num(args.paidAmount);
+      // P2 fix (mirrors sales.update_invoice): range-check amount edits
+      // against the CURRENT invoice — unguarded writes desync totals or
+      // book overpayments the create path rejects.
+      if (args.discountAmount !== undefined || args.paidAmount !== undefined) {
+        const cur = await purchasesApi.getInvoiceById(invoiceId, ctx.companyId);
+        if (!cur.success || !cur.data) return { error: cur.error || 'تعذّر جلب الفاتورة الحالية للتحقق' };
+        const total = Number(cur.data.totalAmount) || 0;
+        if (args.discountAmount !== undefined) {
+          const d = num(args.discountAmount);
+          if (d < 0) return { error: 'مبلغ الخصم لا يمكن أن يكون سالباً' };
+          if (d > total) return { error: `مبلغ الخصم (${d}) يتجاوز إجمالي الفاتورة (${total})` };
+          data.discountAmount = d;
+        }
+        if (args.paidAmount !== undefined) {
+          const p = num(args.paidAmount);
+          if (p < 0) return { error: 'المبلغ المدفوع لا يمكن أن يكون سالباً' };
+          if (p > total) return { error: `المبلغ المدفوع (${p}) يتجاوز إجمالي الفاتورة (${total}) — دفعة زائدة مرفوضة` };
+          data.paidAmount = p;
+        }
+      }
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
       const res = await purchasesApi.updateInvoice(invoiceId, ctx.companyId, data);
       if (!res.success) return { error: res.error || 'فشل تعديل الفاتورة' };

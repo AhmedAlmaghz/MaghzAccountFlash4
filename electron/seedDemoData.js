@@ -497,6 +497,8 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
     { type: 'sales_invoice',     prefix: 'INV-',  start: 1, current: 0,  pad: 6 },
     { type: 'sales_return',      prefix: 'SRT-',  start: 1, current: 0,  pad: 4 },
     { type: 'quotation',         prefix: 'QOT-',  start: 1, current: 0,  pad: 4 },
+    // POS
+    { type: 'pos_receipt',       prefix: 'POS-',  start: 1, current: 0,  pad: 6 },
     // Purchases
     { type: 'purchase_order',    prefix: 'PO-',   start: 1, current: 0,  pad: 6 },
     { type: 'purchase_invoice',  prefix: 'PINV-', start: 1, current: 0,  pad: 4 },
@@ -1122,6 +1124,24 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
        SELECT $1::uuid, $2::date, $3::uuid, $4::uuid, $5::numeric, $6::numeric, $7::numeric, 0, $8::text, $9::text, $10::uuid, $10::uuid
        WHERE NOT EXISTS (SELECT 1 FROM stock_adjustments WHERE company_id = $1::uuid AND product_id = $3::uuid AND date = $2::date);`,
       [companyId, today, prodInfos[0].id, warehouseId, 100, 98, -2, 'جرد دوري', 'posted', adminId]
+    );
+  }
+
+  // ─── 32. POS demo shift (closed, with difference) ────────────────────────
+  console.log('[SEED] Inserting POS demo shift...');
+  const boxRes = await client.query(
+    `SELECT id FROM cash_boxes WHERE company_id = $1::uuid AND is_active = true ORDER BY created_at ASC LIMIT 1`,
+    [companyId]
+  );
+  const cashBoxId = boxRes.rows[0]?.id;
+  if (cashBoxId) {
+    // A CLOSED demo shift so the shifts history page has something to show.
+    // open → collect 45,200 cash → counted 45,000 → shortage 200.
+    await client.query(
+      `INSERT INTO pos_shifts (company_id, cash_box_id, user_id, opening_amount, closing_amount, expected_amount, difference, status, opened_at, closed_at, notes, created_by, updated_by)
+       SELECT $1::uuid, $2::uuid, $3::uuid, 10000, 45000, 55200, -200, 'closed', NOW() - INTERVAL '1 day', NOW() - INTERVAL '20 hours', 'وردية تجريبية', $3::uuid, $3::uuid
+       WHERE NOT EXISTS (SELECT 1 FROM pos_shifts WHERE company_id = $1::uuid AND notes = 'وردية تجريبية');`,
+      [companyId, cashBoxId, adminId]
     );
   }
 

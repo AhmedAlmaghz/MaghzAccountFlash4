@@ -212,7 +212,7 @@ export default function AiSettingsPage() {
                   type="button"
                   onClick={() => setShowKey(!showKey)}
                   className="pointer-events-auto cursor-pointer text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
-                  aria-label={showKey ? t('ai.settings.apiKey') : t('ai.settings.apiKey')}
+                  aria-label={showKey ? t('ai.settings.hideApiKey') : t('ai.settings.showApiKey')}
                 >
                   {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>

@@ -306,4 +306,54 @@ describe('AI search tools — fuzzy matching against DB rows', () => {
       expect(salesApi.getCustomersPaginated).not.toHaveBeenCalled();
     });
   });
+
+  describe('return searches — permission-scoped split (P0-9 regression)', () => {
+    // The old combined search.returns queried BOTH return kinds under
+    // sales.view alone — purchase-return supplier names leaked. The split
+    // tools each hit exactly one API and resolve entityName from the
+    // customer/supplier OBJECT (mapReturnRow returns objects, not strings;
+    // the old String(obj) never matched a name search and displayed
+    // "[object Object]").
+    it('search.sales_returns hits only the sales API and reads the customer object', async () => {
+      vi.mocked(salesApi.getReturns).mockResolvedValue({
+        success: true,
+        data: [
+          { id: 'r1', returnNumber: 'SRT-0001', status: 'posted', totalAmount: 500, customer: { id: 'c1', name: 'CUST-ALAMAL' } },
+        ],
+      } as never);
+
+      const result = (await findTool('search.sales_returns').execute({ query: 'ALAMAL' }, ctx)) as {
+        matches: Array<{ id: string; entityName: string }>;
+        totalMatches: number;
+      };
+
+      expect(purchasesApi.getReturns).not.toHaveBeenCalled();
+      expect(result.totalMatches).toBe(1);
+      expect(result.matches[0]).toMatchObject({ id: 'r1', entityName: 'CUST-ALAMAL' });
+      expect(result.matches[0].entityName).not.toContain('[object Object]');
+    });
+
+    it('search.purchase_returns hits only the purchases API and reads the supplier object', async () => {
+      vi.mocked(purchasesApi.getReturns).mockResolvedValue({
+        success: true,
+        data: [
+          { id: 'r2', returnNumber: 'PRT-0001', status: 'draft', totalAmount: 900, supplier: { id: 's1', name: 'SUP-NUKHBA' } },
+        ],
+      } as never);
+
+      const result = (await findTool('search.purchase_returns').execute({ query: 'NUKHBA' }, ctx)) as {
+        matches: Array<{ id: string; entityName: string }>;
+        totalMatches: number;
+      };
+
+      expect(salesApi.getReturns).not.toHaveBeenCalled();
+      expect(result.totalMatches).toBe(1);
+      expect(result.matches[0]).toMatchObject({ id: 'r2', entityName: 'SUP-NUKHBA' });
+    });
+
+    it('the two tools are gated by their owning modules (no cross-leak)', () => {
+      expect(findTool('search.sales_returns').permission).toBe('sales.view');
+      expect(findTool('search.purchase_returns').permission).toBe('purchases.view');
+    });
+  });
 });

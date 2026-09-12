@@ -156,4 +156,118 @@ describe('AI tools contract gate (CI)', () => {
     );
     expect(violations.map((v) => v.name)).toEqual([]);
   });
+
+  // ─── READ-tool permission policy (P0-6/P0-8 class — 2026-09-11 audit) ───
+  // Four read tools leaked HR/inventory data on ai.use alone, and
+  // search.returns leaked purchase data on sales.view. This rule pins the
+  // module→permission contract so the class can never regress:
+  //   1. NO read tool is gated by ai.use alone (meta/self tools allowlisted).
+  //   2. A tool whose NAME/domain maps to a module must hold that module's
+  //      .view (documented exceptions for genuine cross-module tools).
+  it('no READ tool is gated by ai.use alone (documented meta allowlist)', () => {
+    // Tools that read ONLY the user's own data or pure meta/navigation and
+    // are therefore legitimately open to every ai.use holder.
+    const AI_USE_READ_ALLOWLIST = new Set([
+      'ai.classify_document', // reads own-company identity only
+      'ai.batch_status',     // own batches only (user+company scoped)
+      'app.list_pages',      // navigation catalog (permission-filtered)
+      'app.navigate',        // navigation (guard-checked target)
+      'core.get_company_info', // own company metadata
+    ]);
+    const violations = tools
+      .filter((t) => t.dangerLevel === 'read')
+      .filter((t) => t.permission === 'ai.use' && !AI_USE_READ_ALLOWLIST.has(t.name));
+    expect(
+      violations.map((v) => `${v.name} -> ${v.permission}`),
+      'ai.use alone must never gate a data-reading tool — require the data-owning module\'s .view',
+    ).toEqual([]);
+  });
+
+  it('read tools whose domain names a module hold that module\'s .view', () => {
+    // domain prefix → the permission every reader of that domain's data
+    // must hold. Exceptions: cross-module hybrids documented inline.
+    const DOMAIN_VIEW: Record<string, string> = {
+      sales: 'sales.view',
+      purchases: 'purchases.view',
+      inventory: 'inventory.view',
+      hr: 'hr.view',
+      crm: 'crm.view',
+      manufacturing: 'manufacturing.view',
+      accounting: 'accounting.view',
+      settings: 'settings.view',
+      reports: 'reports.view',
+      read: '', // routed below by tool name (see READ_TOOL_VIEW)
+    };
+    // Tools in the `read.` namespace that touch a specific module's data.
+    const READ_TOOL_VIEW: Record<string, string> = {
+      'read.inventory_valuation': 'inventory.view',
+      'read.employee_payroll_history': 'hr.view',
+      'read.attendance_summary': 'hr.view',
+      'read.end_of_service': 'hr.view',
+      'read.hr_kpis': 'hr.view',
+      'read.inventory_kpis': 'inventory.view',
+    };
+    // search.* by ENTITY — the searched entity's owning module must grant.
+    const SEARCH_ENTITY_VIEW: Record<string, string> = {
+      customers: 'sales.view', suppliers: 'purchases.view', products: 'inventory.view',
+      product_units: 'inventory.view', accounts: 'accounting.view', leads: 'crm.view',
+      opportunities: 'crm.view', employees: 'hr.view', quotations: 'sales.view',
+      warehouses: 'inventory.view', sales_invoices: 'sales.view',
+      purchase_invoices: 'purchases.view', purchase_orders: 'purchases.view',
+      sales_returns: 'sales.view', purchase_returns: 'purchases.view',
+      boms: 'manufacturing.view', work_orders: 'manufacturing.view',
+      receipt_vouchers: 'accounting.view', payment_vouchers: 'accounting.view',
+      tasks: 'crm.view', activities: 'crm.view', journal_entries: 'accounting.view',
+      stock_movements: 'inventory.view', attendance: 'hr.view', leaves: 'hr.view',
+      payroll_runs: 'hr.view', end_of_services: 'hr.view',
+      stock_adjustments: 'inventory.view', stock_transfers: 'inventory.view',
+      cash_boxes: 'accounting.view', cost_centers: 'accounting.view',
+      units: 'inventory.view', product_types: 'inventory.view',
+      categories: 'inventory.view', departments: 'hr.view',
+    };
+    // Deliberate cross-module readers (documented in code at each tool):
+    // VAT filing spans sales+purchases (owned by accounting), and payroll
+    // components are HR-owned settings. Any NEW entry here needs the same
+    // inline justification — the default is domain==permission.
+    const CROSS_MODULE_ALLOWLIST: Record<string, string> = {
+      'sales.vat_summary': 'accounting.view',
+      'settings.get_payroll_components': 'hr.view',
+    };
+    const violations: string[] = [];
+    for (const t of tools.filter((x) => x.dangerLevel === 'read')) {
+      const parts = t.name.split('.');
+      const domain = parts[0];
+      // read.* namespace: explicit map only
+      if (domain === 'read') {
+        const want = READ_TOOL_VIEW[t.name];
+        if (want && t.permission !== want) {
+          violations.push(`${t.name} -> ${t.permission} (want ${want})`);
+        }
+        continue;
+      }
+      // search.*: entity (the part after "search.") maps to the owner module
+      if (domain === 'search') {
+        const entity = parts[1] ?? '';
+        const want = SEARCH_ENTITY_VIEW[entity];
+        if (want && t.permission !== want) {
+          violations.push(`${t.name} -> ${t.permission} (want ${want})`);
+        }
+        continue;
+      }
+      // plain domain tools (sales.xxx, hr.xxx…)
+      const want = DOMAIN_VIEW[domain];
+      if (want && t.permission !== want && !t.permission.startsWith('reports.')) {
+        // exceptions: dashboard hybrids gate per-block at runtime (reports.view)
+        if (t.name !== 'reports.dashboard') {
+          const allowed = CROSS_MODULE_ALLOWLIST[t.name];
+          if (allowed) {
+            if (t.permission !== allowed) violations.push(`${t.name} -> ${t.permission} (want ${allowed})`);
+          } else {
+            violations.push(`${t.name} -> ${t.permission} (want ${want})`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
 });

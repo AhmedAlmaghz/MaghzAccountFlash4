@@ -161,6 +161,7 @@ describe('inventory.create_product — unit catalog validation (transcript regre
   const CATALOG = [
     { id: 'u-shd', nameAr: 'شدة', nameEn: 'Shadah', code: 'SHD', isActive: true },
     { id: 'u-dzn', nameAr: 'درزن', nameEn: 'Dozen', code: 'DZ', isActive: true },
+    { id: 'u-pc', nameAr: 'حبة', nameEn: 'Piece', code: 'PC', isActive: true },
   ];
 
   beforeEach(() => {
@@ -189,13 +190,33 @@ describe('inventory.create_product — unit catalog validation (transcript regre
     expect(mockedApi.createProduct).not.toHaveBeenCalled();
   });
 
-  it('keeps the piece default when no unit is given (no catalog round-trip)', async () => {
+  it('resolves the piece default FROM the catalog so ensureBaseProductUnit can match it', async () => {
+    // Regression (U1): the raw 'piece' literal matched neither name_ar nor
+    // code in ensureBaseProductUnit's JOIN → every AI product created without
+    // a unit ended with NO product_units row and later invoice lines
+    // silently degraded to factor=1. The default must now come from the
+    // catalog (English "Piece" → Arabic حبة → code PC).
     const res = (await findTool('inventory.create_product').execute(
       { nameAr: 'شوكلاتة', salePrice: 10800 },
       ctx,
     )) as Record<string, unknown>;
     expect(res.created).toBe(true);
-    expect(vi.mocked(getUnits)).not.toHaveBeenCalled();
+    expect(vi.mocked(getUnits)).toHaveBeenCalled();
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ unit: 'حبة' }),
+    );
+  });
+
+  it('falls back to the legacy piece literal only when the catalog has no piece unit', async () => {
+    vi.mocked(getUnits).mockResolvedValue({
+      success: true,
+      data: [{ id: 'u-ton', nameAr: 'طن', nameEn: 'Ton', code: 'TON', isActive: true }],
+    } as never);
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100 },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
     expect(mockedApi.createProduct).toHaveBeenCalledWith(
       expect.objectContaining({ unit: 'piece' }),
     );

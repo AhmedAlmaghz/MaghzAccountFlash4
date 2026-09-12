@@ -71,7 +71,11 @@ async function fetchInvoiceAnalysis(companyId: string, from: string, to: string)
     const code = String(r.currency_code || 'YER');
     const entry = currencyMap.get(code) || { amount: 0, baseAmount: 0, count: 0 };
     entry.amount += num(r.total_amount);
-    entry.baseAmount += num(r.base_currency_amount || r.total_amount);
+    // P3 fix: `||` treated a stored 0 base amount as absent and substituted
+    // the FOREIGN-currency total into the base-equivalent sum (mixed
+    // denominations). `??` only falls back on null/undefined.
+    const base = (r.base_currency_amount ?? r.total_amount) as unknown;
+    entry.baseAmount += num(base);
     entry.count += 1;
     currencyMap.set(code, entry);
   }
@@ -296,7 +300,7 @@ export const reportTools: ToolDefinition[] = [
                t.created_at, u.full_name AS created_by_name
         FROM transactions t
         LEFT JOIN users u ON t.created_by = u.id
-        WHERE t.company_id = $1::uuid AND t.date BETWEEN $2 AND $3
+        WHERE t.company_id = $1::uuid AND t.date::date BETWEEN $2 AND $3
       `;
       const params: unknown[] = [ctx.companyId, from, to];
       if (status) { params.push(status); sql += ` AND t.status = $${params.length}`; }
@@ -483,8 +487,12 @@ export const reportTools: ToolDefinition[] = [
   {
     name: 'sales.vat_summary',
     labelAr: 'ملخص ضريبة القيمة المضافة',
-    descriptionAr: 'يعرض ملخص ضريبة القيمة المضافة لفترة: إجمالي المبيعات الخاضعة للضريبة، إجمالي الضريبة، صافي المستحق.',
-    permission: 'sales.view',
+    descriptionAr: 'يعرض ملخص ضريبة القيمة المضافة للفترة: ضريبة المخرجات والمدخلات والصافي. وظيفة محاسبية تمتد على المبيعات والمشتريات معاً.',
+    // P2 decision: VAT filing is accounting's job and this tool aggregates
+    // BOTH sales output-VAT and purchase input-VAT — sales.view alone would
+    // expose purchase-side aggregates. Gated accounting.view (documented
+    // cross-module read, like diagnose.posting_blockers below).
+    permission: 'accounting.view',
     dangerLevel: 'read',
     parameters: {
       type: 'object',
@@ -689,8 +697,13 @@ export const reportTools: ToolDefinition[] = [
       if (!stmtRes.success) return { error: stmtRes.error || 'فشل جلب كشف الحساب' };
       const stmt = stmtRes.data || [];
 
-      const totalDebit = stmt.filter(r => r.type === 'invoice').reduce((s, r) => s + num(r.debit), 0);
-      const totalCredit = stmt.filter(r => r.type === 'payment').reduce((s, r) => s + num(r.credit), 0);
+      // P2 fix: sum ALL row types (mirrors sales.customer_statement). The old
+      // code filtered to invoice/payment only, so `outstanding` diverged from
+      // the statement's own running balance whenever an opening balance or a
+      // posted return existed (the unified statement starts with an OPENING
+      // row per the Phase-72 rule).
+      const totalDebit = stmt.reduce((s, r) => s + num(r.debit), 0);
+      const totalCredit = stmt.reduce((s, r) => s + num(r.credit), 0);
 
       let agingBuckets: { label: string; amount: number }[] = [];
       if (agingRes.success && agingRes.data) {
@@ -1180,19 +1193,37 @@ export const reportTools: ToolDefinition[] = [
       const month = num(args.month) || (now.getMonth() + 1);
       const year = num(args.year) || now.getFullYear();
 
-      const res = await hrApi.getPayrollRunsPaginated(ctx.companyId, 1, 50, {});
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب مسيرات الرواتب' };
+      // P2 fix: the old code fetched the newest 50 runs via the paginated
+      // API (no month/year filter exists) then filtered CLIENT-side — a
+      // company with >50 runs silently lost older months (count: 0,
+      // totalAmount: 0 for any month pushed out of the window). Month/year
+      // are now pushed into SQL with a server-side aggregate.
+      const [det, agg] = await Promise.all([
+        guardedQuery(
+          `SELECT pr.status, pr.total_amount,
+                  (SELECT COUNT(*)::int FROM payroll_lines pl WHERE pl.payroll_run_id = pr.id) AS employee_count
+           FROM payroll_runs pr
+           WHERE pr.company_id = $1::uuid AND pr.month = $2 AND pr.year = $3
+           ORDER BY pr.created_at DESC LIMIT 50`,
+          [ctx.companyId, month, year]
+        ),
+        guardedQuery(
+          `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*)::int AS cnt
+           FROM payroll_runs WHERE company_id = $1::uuid AND month = $2 AND year = $3`,
+          [ctx.companyId, month, year]
+        ),
+      ]);
+      if (!det.success) return { error: det.error || 'فشل جلب مسيرات الرواتب' };
 
-      const filtered = res.data.items.filter(r => r.month === month && r.year === year);
-      const totalAmount = filtered.reduce((s, r) => s + (r.totalAmount || 0), 0);
-
+      const rows = (det.rows || []) as Array<Record<string, unknown>>;
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
         month, year,
-        count: filtered.length,
-        totalAmount: Math.round(totalAmount * 100) / 100,
-        runs: filtered.map(r => ({
-          status: r.status, totalAmount: r.totalAmount,
-          employeeCount: r.lines?.length || 0,
+        count: num(a.cnt),
+        totalAmount: Math.round(num(a.total) * 100) / 100,
+        runs: rows.map((r) => ({
+          status: r.status, totalAmount: num(r.total_amount),
+          employeeCount: num(r.employee_count),
         })),
       };
     },
@@ -1261,7 +1292,11 @@ export const reportTools: ToolDefinition[] = [
       const res = await guardedQuery(`
         SELECT l.status, COUNT(*)::int AS count, COALESCE(SUM(l.days), 0) AS total_days
         FROM leaves l
-        WHERE l.company_id = $1::uuid AND l.created_at::date BETWEEN $2 AND $3
+        WHERE l.company_id = $1::uuid
+          -- P3 fix: attribute by LEAVE PERIOD overlap, not filing date. The
+          -- old created_at filter missed leaves filed earlier for this
+          -- period (and counted leaves filed now for a future vacation).
+          AND l.start_date <= $3 AND l.end_date >= $2
         GROUP BY l.status
       `, [ctx.companyId, from, to]);
 
@@ -1288,30 +1323,39 @@ export const reportTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: EMPTY_PARAMS,
     execute: async (_args, ctx) => {
-      const [empRes, hrKpiRes] = await Promise.all([
-        hrApi.getEmployeesPaginated(ctx.companyId, 1, 200, {}),
+      // P2 fix: the old code averaged base_salary over the newest 200
+      // employees client-side — silently wrong past 200 staff. AVG + GROUP
+      // BY now run in SQL (mirrors crm.rep_performance); the paginated API
+      // is only used for the active-count sample below when KPIs are down.
+      const [agg, dept, hrKpiRes] = await Promise.all([
+        guardedQuery(
+          `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_active IS NOT FALSE)::int AS active,
+                  COALESCE(AVG(base_salary), 0) AS avg_salary
+           FROM employees WHERE company_id = $1::uuid`,
+          [ctx.companyId]
+        ),
+        guardedQuery(
+          `SELECT COALESCE(d.name, e.department_id::text, 'بدون قسم') AS dept_name, COUNT(*)::int AS cnt
+           FROM employees e LEFT JOIN departments d ON d.id = e.department_id
+           WHERE e.company_id = $1::uuid GROUP BY dept_name ORDER BY cnt DESC`,
+          [ctx.companyId]
+        ),
         hrApi.getHrKpis(ctx.companyId),
       ]);
+      if (!agg.success) return { error: agg.error || 'فشل جلب تقرير الموظفين' };
 
-      const employees = empRes.success && empRes.data ? empRes.data.items : [];
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
+      const departments = ((dept.rows || []) as Array<Record<string, unknown>>).map((r) => ({
+        name: String(r.dept_name || 'بدون قسم'),
+        count: num(r.cnt),
+      }));
       const hrKpi = hrKpiRes.data;
 
-      const deptMap = new Map<string, number>();
-      for (const e of employees) {
-        const d = String(e.departmentName || e.departmentId || 'بدون قسم');
-        deptMap.set(d, (deptMap.get(d) || 0) + 1);
-      }
-
-      const activeCount = employees.filter(e => e.isActive !== false).length;
-      const avgSalary = employees.length > 0
-        ? employees.reduce((s, e) => s + (e.baseSalary || 0), 0) / employees.length
-        : 0;
-
       return {
-        totalEmployees: hrKpi?.totalEmployees || employees.length,
-        activeEmployees: activeCount,
-        departments: Array.from(deptMap.entries()).map(([name, count]) => ({ name, count })),
-        averageBaseSalary: Math.round(avgSalary * 100) / 100,
+        totalEmployees: hrKpi?.totalEmployees ?? num(a.total),
+        activeEmployees: num(a.active),
+        departments,
+        averageBaseSalary: Math.round(num(a.avg_salary) * 100) / 100,
       };
     },
   },
@@ -1496,7 +1540,12 @@ export const reportTools: ToolDefinition[] = [
                   u.full_name AS assigned_name, t.lead_id, t.opportunity_id
              FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id
             WHERE t.company_id = $1::uuid AND t.status = 'pending' AND t.due_date = CURRENT_DATE
-            ORDER BY t.priority DESC LIMIT 20`,
+            -- P2 fix: priority is text (low/medium/high) — lexicographic DESC
+            -- yields medium → low → high, burying HIGH tasks (and LIMIT 20
+            -- drops them entirely when busy). Rank explicitly like the
+            -- overdue branch does in JS below.
+            ORDER BY CASE t.priority WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC,
+                     t.due_date ASC LIMIT 20`,
           [ctx.companyId]
         ),
         guardedQuery(
@@ -1668,8 +1717,18 @@ export const reportTools: ToolDefinition[] = [
           break;
       }
 
-      // Current period queries
-      const [salesRes, purchasesRes, receiptsRes, paymentsRes, productRes, customerRes, supplierRes, hrKpiRes, manufacturingRes, lowStockRes] = await Promise.all([
+      // P0-8 fix: the HR block (employee count) and manufacturing block are
+      // module-sensitive data. reports.view alone must NOT expose them (a
+      // reports viewer without hr.view would read payroll-adjacent KPIs) —
+      // gate each block at runtime exactly like the dashboard page does.
+      const useAuthStore = (await import('@/modules/auth/store')).useAuthStore;
+      const canSeeHr = useAuthStore.getState().hasPermission('hr.view');
+      const canSeeManufacturing = useAuthStore.getState().hasPermission('manufacturing.view');
+      const { lowStockCount } = await (async () => {
+        const lowStockRes = await guardedQuery(`SELECT COUNT(*)::int AS count FROM stock WHERE company_id = $1::uuid AND quantity <= min_stock_alert`, [ctx.companyId]);
+        return { lowStockCount: num(lowStockRes.rows?.[0]?.count || 0) };
+      })();
+      const [salesRes, purchasesRes, receiptsRes, paymentsRes, productRes, customerRes, supplierRes, hrKpiRes, manufacturingRes] = await Promise.all([
         guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue, COUNT(*)::int AS count FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
         guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
         guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
@@ -1677,9 +1736,8 @@ export const reportTools: ToolDefinition[] = [
         guardedQuery(`SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM customers WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM suppliers WHERE company_id = $1::uuid`, [ctx.companyId]),
-        hrApi.getHrKpis(ctx.companyId),
-        manufacturingApi.getManufacturingKpis(ctx.companyId),
-        guardedQuery(`SELECT COUNT(*)::int AS count FROM stock WHERE company_id = $1::uuid AND quantity <= min_stock_alert`, [ctx.companyId]),
+        canSeeHr ? hrApi.getHrKpis(ctx.companyId) : Promise.resolve({ success: false } as { success: boolean; data?: Record<string, unknown> }),
+        canSeeManufacturing ? manufacturingApi.getManufacturingKpis(ctx.companyId) : Promise.resolve({ success: false } as { success: boolean; data?: Record<string, unknown> }),
       ]);
 
       const revenue = num(salesRes.rows?.[0]?.revenue || 0);
@@ -1719,15 +1777,24 @@ export const reportTools: ToolDefinition[] = [
           products: num(productRes.rows?.[0]?.count || 0),
           customers: num(customerRes.rows?.[0]?.count || 0),
           suppliers: num(supplierRes.rows?.[0]?.count || 0),
-          employees: hrKpiRes.data?.totalEmployees || 0,
-          lowStockItems: num(lowStockRes.rows?.[0]?.count || 0),
+          // hr.view holders only — employee counts are HR data.
+          ...(canSeeHr ? { employees: hrKpiRes.data?.totalEmployees || 0 } : {}),
+          lowStockItems: lowStockCount,
         },
-        manufacturing: manufacturingRes.data ? {
-          totalWorkOrders: manufacturingRes.data.totalWorkOrders,
-          activeOrders: manufacturingRes.data.activeOrders,
-          completedOrders: manufacturingRes.data.completedOrders,
-          totalProductionCost: Math.round(manufacturingRes.data.totalProductionCost * 100) / 100,
-        } : undefined,
+        // manufacturing.view holders only — production KPIs are module data.
+        ...(canSeeManufacturing && manufacturingRes.data ? {
+          manufacturing: {
+            totalWorkOrders: manufacturingRes.data.totalWorkOrders,
+            activeOrders: manufacturingRes.data.activeOrders,
+            completedOrders: manufacturingRes.data.completedOrders,
+            totalProductionCost: Math.round(num(manufacturingRes.data.totalProductionCost) * 100) / 100,
+          },
+        } : {}),
+        // Disclosure so the model explains WHY a block is missing instead of
+        // hallucinating zeros.
+        permissionsNote: !canSeeHr || !canSeeManufacturing
+          ? `بعض المؤشرات حُجبت لصلاحياتك (${!canSeeHr ? 'موارد بشرية ' : ''}${!canSeeManufacturing ? 'تصنيع' : ''} — تحتاج ${!canSeeHr ? 'hr.view ' : ''}${!canSeeManufacturing ? 'manufacturing.view' : ''})`
+          : undefined,
       };
     },
   },

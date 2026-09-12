@@ -123,10 +123,24 @@ function parseBlocks(text: string): Block[] {
       }
       const dataLines = tableLines.filter((l) => !/^\|[\s\-:]+\|$/.test(l.trim()));
       if (dataLines.length >= 2) {
-        const headers = dataLines[0].split('|').map((h) => h.trim()).filter(Boolean);
-        const rows = dataLines.slice(1).map((r) =>
-          r.split('|').map((c) => c.trim()).filter(Boolean)
-        );
+        // P3 fix: split + slice(1,-1) preserves EMPTY cells. The old
+        // filter(Boolean) dropped them, shifting every later column left
+        // whenever the model emitted a blank cell.
+        const cells = (l: string): string[] => {
+          const parts = l.split('|').map((c) => c.trim());
+          // Drop the empty strings from the leading/trailing pipes only.
+          if (parts.length > 0 && parts[0] === '') parts.shift();
+          if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+          return parts;
+        };
+        const headers = cells(dataLines[0]);
+        const colCount = headers.length;
+        const rows = dataLines.slice(1).map((r) => {
+          const row = cells(r);
+          // Normalize ragged rows so columns never shift mid-table.
+          while (row.length < colCount) row.push('');
+          return row.slice(0, colCount);
+        });
         blocks.push({ type: 'table', headers, rows });
       } else {
         blocks.push({ type: 'paragraph', content: tableLines.join('\n') });

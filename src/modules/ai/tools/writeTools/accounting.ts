@@ -751,7 +751,11 @@ export const accountingWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const voucherId = str(args.voucherId);
       if (!voucherId) return { error: 'voucherId مطلوب' };
-      const res = await accountingApi.updateReceiptVoucher(voucherId, ctx.companyId, ctx.userId, { status: 'posted' });
+      // P0-4 fix: a bare status UPDATE flips the column with ZERO accounting
+      // effect (no JE, no party-balance move, no invoice allocation) — a
+      // "posted" voucher invisible to the general ledger. The real posting
+      // pipeline is postVoucher(): JE + balance + allocation, atomically.
+      const res = await accountingApi.postVoucher(voucherId, ctx.companyId, 'receipt', ctx.userId);
       if (!res.success) return { error: res.error || 'فشل ترحيل سند القبض' };
       return { posted: true, voucherId, status: 'posted' };
     },
@@ -774,7 +778,8 @@ export const accountingWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const voucherId = str(args.voucherId);
       if (!voucherId) return { error: 'voucherId مطلوب' };
-      const res = await accountingApi.updatePaymentVoucher(voucherId, ctx.companyId, ctx.userId, { status: 'posted' });
+      // P0-4 fix: same as receipt — postVoucher() is the only honest posting path.
+      const res = await accountingApi.postVoucher(voucherId, ctx.companyId, 'payment', ctx.userId);
       if (!res.success) return { error: res.error || 'فشل ترحيل سند الصرف' };
       return { posted: true, voucherId, status: 'posted' };
     },

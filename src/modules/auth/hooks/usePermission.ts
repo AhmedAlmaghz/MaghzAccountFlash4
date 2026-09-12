@@ -25,7 +25,7 @@ export function useHasRole(roles: string[]): boolean {
   return useAuthStore.getState().hasRole(roles);
 }
 
-type Module = 'core' | 'accounting' | 'inventory' | 'sales' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings' | 'ai';
+type Module = 'core' | 'accounting' | 'inventory' | 'sales' | 'pos' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings' | 'ai';
 
 export function useCanView(module: Module): boolean {
   return usePermission(`${module}.view` as Permission);

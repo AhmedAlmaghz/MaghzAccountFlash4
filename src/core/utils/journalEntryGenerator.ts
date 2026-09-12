@@ -223,6 +223,58 @@ export function buildSalesInvoicePostingStatements(
   ];
 }
 
+/**
+ * POS sale posting — the MIXED-aware extension of the sales invoice entry.
+ *
+ * A POS checkout may split the total between cash collected now (into the
+ * cashier's cash box) and credit handed to the customer (Debtors):
+ *   Dr cash-box GL account  = cashAmount
+ *   Dr Debtors              = creditAmount
+ *   Cr Sales                = subtotal
+ *   Cr VAT payable          = vatAmount
+ *
+ * cashAmount = total reproduces buildSalesInvoicePostingStatements' cash
+ * behaviour exactly (Dr box / Cr sales+VAT); creditAmount = total reproduces
+ * the credit behaviour (Dr debtors). Zero-amount legs are skipped so the
+ * journal stays clean on pure cash/credit sales.
+ */
+export function buildPosSalePostingStatements(
+  companyId: string,
+  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null },
+  ids: { debtors: string; sales: string; vat: string }
+): TxStatement[] {
+  const { receiptNumber, cashAmount, creditAmount, cashAccountId, subtotal, vatAmount, totalAmount, date } = sale;
+  const debitLines: JournalEntryLine[] = [];
+  if (cashAmount > 0) {
+    debitLines.push({
+      accountId: cashAccountId || ids.debtors, // no box account? fall back like salesApi
+      debit: cashAmount,
+      credit: 0,
+      memo: `نقدية نقطة بيع ${receiptNumber}`,
+    });
+  }
+  if (creditAmount > 0) {
+    debitLines.push({ accountId: ids.debtors, debit: creditAmount, credit: 0, memo: `آجل نقطة بيع ${receiptNumber}` });
+  }
+  // Degenerate guard: zero-total sale still needs a balanced pair to post.
+  if (debitLines.length === 0) {
+    debitLines.push({ accountId: ids.debtors, debit: 0, credit: 0, memo: `نقطة بيع ${receiptNumber}` });
+  }
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: receiptNumber,
+      description: `قيد تلقائي - إيصال نقطة بيع ${receiptNumber}`,
+      date,
+      totalAmount,
+      entries: [
+        ...debitLines,
+        { accountId: ids.sales, debit: 0, credit: subtotal, memo: `إيرادات نقطة بيع ${receiptNumber}` },
+        { accountId: ids.vat, debit: 0, credit: vatAmount, memo: `ضريبة نقطة بيع ${receiptNumber}` },
+      ],
+    }),
+  ];
+}
+
 export function buildPurchaseInvoicePostingStatements(
   companyId: string,
   invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number; paymentType?: string; cashAccountSubstitute?: string | null },

@@ -2,12 +2,14 @@ import { getDbAdapter } from '@/core/database/adapters';
 import { runTransaction } from '@/core/database/tx';
 import { buildReceiptVoucherStatements, buildPaymentVoucherStatements } from '@/core/utils/journalEntryGenerator';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
-import { safeUserId } from '@/core/utils/userIdValidator';
-import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
+import { safeUserId } from '@/core/utils/userIdValidator';import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { accountingService } from './services';
 import type { Account, Transaction, JournalEntry, TrialBalanceRow, LedgerRow, ReceiptVoucher, PaymentVoucher } from './types';
+
+/** LOCAL calendar day — a UTC date is yesterday for GMT+3 between 00:00–03:00. */
+const localToday = (): string => toDateString(new Date()) ?? '';
 
 export const accountingApi = {
   // ─── Chart of Accounts ────────────────────────────────────────────────────
@@ -139,9 +141,35 @@ export const accountingApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
       const userIdOrNull = userId && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(userId) ? userId : null;
+      // P1 fix: dynamic-SET. The old full-column UPDATE wrote every omitted
+      // field as NULL/undefined — toggling only isActive via the AI tool
+      // (whose contract promises "empty fields won't be modified") nulled
+      // nameAr/code/type. Only provided keys are SET; `balance` is never
+      // writable here (ledger mirror, updated by posting flows only).
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let n = 1;
+      const push = (col: string, v: unknown, cast?: string) => {
+        fields.push(`${col} = $${n}${cast ?? ''}`);
+        values.push(v);
+        n += 1;
+      };
+      if (data.nameAr !== undefined) push('name_ar', data.nameAr);
+      if (data.nameEn !== undefined) push('name_en', data.nameEn);
+      if (data.code !== undefined) push('code', data.code);
+      if (data.parentId !== undefined) push('parent_id', data.parentId || null, '::uuid');
+      if (data.type !== undefined) push('type', data.type);
+      if (data.nature !== undefined) push('nature', data.nature);
+      if (data.isGroup !== undefined) push('is_group', data.isGroup);
+      if (data.isActive !== undefined) push('is_active', data.isActive);
+      if (fields.length === 0) return { success: false, error: 'لا توجد حقول للتعديل' };
+      fields.push('updated_at = NOW()');
+      fields.push(`updated_by = $${n}::uuid`);
+      values.push(userIdOrNull);
+      values.push(id, companyId);
       return await adapter.query(
-        `UPDATE accounts SET name_ar = $1, name_en = $2, code = $3, parent_id = $4, type = $5, nature = $6, is_group = $7, is_active = $8, updated_at = NOW(), updated_by = $9::uuid WHERE id = $10 AND company_id = $11`,
-        [data.nameAr, data.nameEn, data.code, data.parentId, data.type, data.nature, data.isGroup, data.isActive, userIdOrNull, id, companyId]
+        `UPDATE accounts SET ${fields.join(', ')} WHERE id = $${n + 1} AND company_id = $${n + 2}`,
+        values
       );
     } catch (e) {
       return { success: false, error: String(e) };
@@ -377,6 +405,23 @@ export const accountingApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // P1 fix: draft-only guard at the API layer. Deleting a POSTED
+      // transaction cascades its journal_entries (FK CASCADE) and
+      // retroactively changes SUM(journal_entries) — the declared single
+      // source of truth — while the accounts.balance mirror keeps the stale
+      // bump. The UI disables delete for posted rows; the API must too
+      // (the AI tool is otherwise less safe than the UI). Posted entries
+      // are corrected with a REVERSAL entry, never a DELETE.
+      const cur = await adapter.query<{ status: string }>(
+        `SELECT status FROM transactions WHERE id = $1 AND company_id = $2`,
+        [id, companyId]
+      );
+      if (!cur.success) return { success: false, error: cur.error };
+      const status = String(cur.rows?.[0]?.status ?? '');
+      if (!status) return { success: false, error: 'القيد غير موجود' };
+      if (status !== 'draft') {
+        return { success: false, error: 'لا يمكن حذف قيد مرحّل — أنشئ قيداً عكسياً بدلاً من الحذف' };
+      }
       return await adapter.query(`DELETE FROM transactions WHERE id = $1 AND company_id = $2`, [id, companyId]);
     } catch (e) {
       return { success: false, error: String(e) };
@@ -1027,9 +1072,11 @@ export const accountingApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       
-      // Service requires both dates
-      const effectiveStartDate = startDate || new Date().toISOString().split('T')[0];
-      const effectiveEndDate = endDate || new Date().toISOString().split('T')[0];
+      // Service requires both dates (LOCAL defaults — UTC "today" is
+      // yesterday for GMT+3 between 00:00–03:00, which made the default P&L
+      // cover a single wrong day instead of a sensible range).
+      const effectiveStartDate = startDate || localToday();
+      const effectiveEndDate = endDate || localToday();
       
       const result = await accountingService.getProfitLoss(effectiveStartDate, effectiveEndDate);
       

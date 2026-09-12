@@ -53,6 +53,8 @@ export const DELETE_ORDER: PlannedTable[] = [
   // delete before both masters (units is RESTRICT-referenced).
   C('product_units'),
   // documents & operations (children of masters)
+  C('pos_payments'),
+  C('pos_shifts'),
   C('sales_returns'),
   C('sales_invoices'),
   C('quotations'),
@@ -145,8 +147,10 @@ const INSERT_TABLES = [
   'opportunities',
   'tasks',
   'activities',
+  'pos_shifts',
   'quotations',
   'sales_invoices',
+  'pos_payments',
   'sales_returns',
   'purchase_orders',
   'purchase_invoices',

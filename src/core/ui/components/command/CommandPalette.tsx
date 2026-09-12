@@ -18,6 +18,7 @@ import {
   BarChart3,
   Settings,
   Bot,
+  ScanBarcode,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -32,6 +33,7 @@ const MODULE_ICONS: Record<PaletteModule, LucideIcon> = {
   accounting: Calculator,
   inventory: Package,
   sales: ShoppingCart,
+  pos: ScanBarcode,
   purchases: Store,
   manufacturing: Factory,
   hr: Users,
@@ -46,6 +48,7 @@ const MODULE_ORDER: PaletteModule[] = [
   'accounting',
   'inventory',
   'sales',
+  'pos',
   'purchases',
   'manufacturing',
   'hr',

@@ -196,6 +196,75 @@ describe('ChatEngine', () => {
     expect(messages[2].content).toBe('تم إنشاء المستند');
   });
 
+  it('P0-2: blocks a new send while a confirmation card is pending (no wire corruption)', async () => {
+    // A new user turn after a dangling assistant(tool_calls) broke the wire
+    // protocol permanently (provider 400s until reset) or made the model
+    // re-issue the same write. send() must refuse loudly instead.
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: {
+        content: '',
+        toolCalls: [{ id: 'write-2', name: 'test.write', arguments: { amount: 700 } }],
+        finishReason: 'tool_calls',
+        usage: null,
+      },
+    });
+
+    await getChatEngine().send('أنشئ مستنداً');
+    const completeCallsBefore = mocks.complete.mock.calls.length;
+
+    await getChatEngine().send('رسالة جديدة قبل التأكيد');
+    // No new LLM call was made…
+    expect(mocks.complete.mock.calls.length).toBe(completeCallsBefore);
+    // …and the user was told why, honestly.
+    const last = useAiStore.getState().messages.at(-1);
+    expect(last?.role).toBe('assistant');
+    expect(last?.kind).toBe('error');
+    expect(String(last?.content)).toMatch(/تأكيد|بطاق/);
+
+    // Resolving the card still works afterwards.
+    mocks.executeToolCall.mockResolvedValueOnce({ ok: true, result: { id: 'x' } });
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+    await getChatEngine().resolveConfirmation('write-2', true);
+    expect(mocks.executeToolCall).toHaveBeenCalledOnce();
+  });
+
+  it('P0-2: inserts the tool result right after its partner assistant(tool_calls)', async () => {    // Tail-appending produced "[assistant(tc)] → user → [tool]" wires that
+    // providers reject forever. The result must sit at partner index + 1.
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    mocks.executeToolCall.mockResolvedValueOnce({ ok: true, result: { id: 'x' } });
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'write-3', name: 'test.write', arguments: {} }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+
+    await getChatEngine().send('أنشئ');
+    await getChatEngine().resolveConfirmation('write-3', true);
+
+    const history = (getChatEngine() as unknown as { history: Array<{ role: string; tool_calls?: Array<{ id?: string }>; tool_call_id?: string }> }).history;
+    const partnerIdx = history.findIndex(
+      (m) => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.some((tc) => tc?.id === 'write-3'),
+    );
+    expect(partnerIdx).toBeGreaterThanOrEqual(0);
+    const next = history[partnerIdx + 1];
+    expect(next?.role).toBe('tool');
+    expect(next?.tool_call_id).toBe('write-3');
+  });
+
   it('pins batchId and starts the worker when an approved write returns startBatchRun', async () => {
     // Regression for the invisible-batch bug: the approval card computed
     // argsSummary but never rendered it, and nothing proved that approving a
@@ -501,6 +570,49 @@ describe('ChatEngine', () => {
       expect(messages[messages.length - 1].content).toContain('INV-0001');
       expect(mocks.complete).toHaveBeenCalledTimes(1);
     });
+
+    it('P1: an honest follow-up summary of an EARLIER real write passes the guard', async () => {
+      // Turn 1 executes a real write whose result contains PV-000123.
+      // Turn 2 (fresh send, empty successfulWrites) honestly summarizes it.
+      // The old per-send guard deleted the true summary as "fabrication" and
+      // pressured the model to re-execute → duplicate document. The history
+      // cross-check must let evidence-backed claims through.
+      mocks.resolveTool.mockReturnValue(tool('write'));
+      mocks.executeToolCall.mockResolvedValueOnce({
+        ok: true,
+        result: { voucherId: 'v-9', voucherNumber: 'PV-000123', posted: true },
+      });
+      mocks.complete
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            content: '',
+            toolCalls: [{ id: 'w-ev', name: 'test.write', arguments: { amount: 50 } }],
+            finishReason: 'tool_calls',
+            usage: null,
+          },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'تم إنشاء السند PV-000123', toolCalls: [], finishReason: 'stop', usage: null },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'نعم — قمت بإنشاء سند الصرف PV-000123 وهو مرحّل.', toolCalls: [], finishReason: 'stop', usage: null },
+        });
+
+      const engine = getChatEngine();
+      await engine.send('أنشئ سند صرف');
+      await engine.resolveConfirmation('w-ev', true);
+      await engine.send('شو صار بالسند؟');
+
+      const messages = useAiStore.getState().messages;
+      const last = messages[messages.length - 1];
+      expect(last.content).toContain('PV-000123');
+      // …and it was NOT replaced by a fabrication correction
+      expect(String(last.content)).not.toContain('تنبيه نظام');
+      expect(mocks.executeToolCall).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows provider errors as assistant error messages', async () => {
@@ -570,6 +682,31 @@ describe('ChatEngine', () => {
     expect(toolCall.function.name).toBe('test.read');
   });
 
+  it('P1: a failed stream done-result is NOT presented as success (falls back honestly)', async () => {
+    // The provider aborted mid-report (90s abort/timeout surface as
+    // done={success:false}) AFTER delivering partial chunks. The old code
+    // (`for await` discards the done value) presented the truncation as a
+    // complete success. Now the engine must route to the non-streaming
+    // fallback instead.
+    mocks.startStream.mockReturnValueOnce((async function* () {
+      yield { type: 'content', content: 'تقرير جزئي…' };
+      return { success: false, error: 'provider timeout at 90s' };
+    })());
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: { content: 'التقرير الكامل بعد إعادة المحاولة', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+
+    await getChatEngine().send('اعرض التقرير');
+
+    expect(mocks.complete).toHaveBeenCalledOnce();
+    const texts = useAiStore.getState().messages.filter(
+      (m) => m.role === 'assistant' && m.kind === 'text',
+    );
+    expect(texts).toHaveLength(1);
+    expect(texts[0].content).toBe('التقرير الكامل بعد إعادة المحاولة');
+  });
+
   it('does NOT spread name/arguments from tc.function over the top-level values', async () => {
     // Defensive: even if tc.function contains stale name/arguments, we should
     // not allow them to override the authoritative top-level values.
@@ -598,6 +735,10 @@ describe('ChatEngine', () => {
     // response. We need to inspect the history directly. Pull via a fresh send.
     // Since this test only ran one send and got a text response with tool_calls,
     // we check the assistant message in messages via a second turn:
+    // (P0-2: a new send is blocked while a card is pending — resolve the
+    // pending unknown-tool card first so the second turn can proceed.)
+    const pendingId = 'read-2';
+    await getChatEngine().resolveConfirmation(pendingId, false);
     mocks.complete.mockResolvedValueOnce({
       success: true,
       data: { content: 'النهاية', toolCalls: [], finishReason: 'stop', usage: null },

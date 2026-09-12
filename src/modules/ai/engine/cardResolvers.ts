@@ -64,6 +64,25 @@ const RESOLVERS: Record<string, IdResolver> = {
   },
 };
 
+/**
+ * Resolve a product_units row id (the `unitId` inside document lines and
+ * the flat `unitId` arg) to "الوحدة: كرتون (×12)" so the approval card
+ * shows WHICH unit each line will use — the user consents to substance,
+ * never a blind factor.
+ */
+async function resolveUnitRow(unitRowId: string, productId: string | undefined, ctx: ToolContext): Promise<string | null> {
+  try {
+    if (productId) {
+      const res = await inventoryApi.getProductUnits(productId, ctx.companyId);
+      if (res.success && res.data) {
+        const u = res.data.find((x) => x.id === unitRowId);
+        if (u) return `الوحدة: ${u.unitName || ''}${u.factor > 1 ? ` (×${u.factor})` : ''}`.trim() || null;
+      }
+    }
+  } catch { /* best-effort */ }
+  return null;
+}
+
 /** Fields whose values are UUID ids to resolve (per tool arg name). */
 const ID_FIELDS = new Set([
   'customerId', 'supplierId', 'employeeId', 'leadId', 'opportunityId', 'productId',
@@ -96,18 +115,32 @@ export async function resolveArgsForCard(
     );
   }
 
-  // lines[] arrays carry productId per line — resolve each unique product once.
+  // lines[] arrays carry productId per line — resolve each unique product
+  // once, plus the line's unitId (product_units row) so the card shows the
+  // resolved unit ("الوحدة: كرتون (×12)") instead of a blind factor.
   if (Array.isArray(args.lines)) {
     const productIds = new Set<string>();
+    const unitJobs: Array<{ unitRowId: string; productId: string }> = [];
     for (const l of args.lines as Array<Record<string, unknown>>) {
       const pid = typeof l?.productId === 'string' ? l.productId.trim() : '';
       if (pid) productIds.add(pid);
+      const uid = typeof l?.unitId === 'string' ? l.unitId.trim() : '';
+      if (uid && pid) unitJobs.push({ unitRowId: uid, productId: pid });
     }
     for (const pid of productIds) {
       if (seen.has(`productId:${pid}`)) continue;
       seen.add(`productId:${pid}`);
       jobs.push(
         RESOLVERS.productId(pid, ctx).then((label) => {
+          if (label && !labels.includes(label)) labels.push(label);
+        }).catch(() => { /* best-effort */ }),
+      );
+    }
+    for (const uj of unitJobs) {
+      if (seen.has(`unitRow:${uj.unitRowId}`)) continue;
+      seen.add(`unitRow:${uj.unitRowId}`);
+      jobs.push(
+        resolveUnitRow(uj.unitRowId, uj.productId, ctx).then((label) => {
           if (label && !labels.includes(label)) labels.push(label);
         }).catch(() => { /* best-effort */ }),
       );

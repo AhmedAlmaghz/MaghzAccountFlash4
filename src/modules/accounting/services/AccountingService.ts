@@ -1,7 +1,11 @@
 import { BaseService } from '@/core/services/BaseService';
 import { transactionManager } from '@/core/services/TransactionManager';
 import { immutableRecordGuard } from '@/core/services/ImmutableRecordGuard';
+import { toDateString } from '@/core/utils/mapPgRow';
 import { z } from 'zod';
+
+/** LOCAL calendar day — a UTC date is yesterday for GMT+3 between 00:00–03:00. */
+const localToday = (): string => toDateString(new Date()) ?? new Date().toISOString().split('T')[0];
 
 // Validation schemas
 const CreateAccountSchema = z.object({
@@ -295,7 +299,7 @@ export class AccountingService extends BaseService {
 
     return this.executeWithErrorHandling(async () => {
       const companyId = this.getCompanyId();
-      const date = asOfDate || new Date().toISOString().split('T')[0];
+      const date = asOfDate || localToday();
 
       const result = await this.query(
         `SELECT
@@ -338,7 +342,7 @@ export class AccountingService extends BaseService {
 
     return this.executeWithErrorHandling(async () => {
       const companyId = this.getCompanyId();
-      const date = asOfDate || new Date().toISOString().split('T')[0];
+      const date = asOfDate || localToday();
 
       const result = await this.query(
         `SELECT

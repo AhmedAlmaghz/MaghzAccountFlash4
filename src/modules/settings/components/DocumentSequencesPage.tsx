@@ -21,6 +21,7 @@ export const DocumentSequencesPage: React.FC = () => {
     sales_invoice: t('settings.documentTypes.salesInvoice'),
     sales_return: t('settings.documentTypes.salesReturn'),
     quotation: t('settings.documentTypes.quotation'),
+    pos_receipt: t('settings.documentTypes.posReceipt'),
     // Purchases
     purchase_invoice: t('settings.documentTypes.purchaseInvoice'),
     purchase_return: t('settings.documentTypes.purchaseReturn'),

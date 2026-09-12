@@ -256,7 +256,7 @@ export const inventoryApi = {
         `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
          SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
            FROM products p
-           JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
+           JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit OR u.name_en = p.unit)
           WHERE p.id = $1::uuid AND p.company_id = $2::uuid
             AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)`,
         [productId, companyId]
@@ -640,6 +640,24 @@ export const inventoryApi = {
       const fromId = String((hdr.rows[0] as Record<string, unknown>).from_warehouse_id);
       const toId = String((hdr.rows[0] as Record<string, unknown>).to_warehouse_id);
       const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      // Atomic floor FIRST: abort the whole transaction when any line
+      // exceeds source stock. A JS pre-check alone races (concurrent
+      // transfers / manufacturing issues between check and commit) and could
+      // drive stock negative. The CASE raises division_by_zero on shortfall
+      // → the adapter rolls the transaction back; NOTHING is half-moved
+      // (no movements, no stock change, status stays draft). Callers map
+      // the cryptic PG error to a friendly shortage message.
+      // NOTE: the denominator MUST be a runtime aggregate, never the
+      // constant 1/0 — PostgreSQL constant-folds 1/0 at PLAN time and would
+      // abort EVERY transfer (proven live: sufficient case threw too).
+      tx.push({
+        sql: `SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM warehouse_transfer_lines wtl
+                LEFT JOIN stock s ON s.company_id = $2::uuid AND s.product_id = wtl.product_id AND s.warehouse_id = $3::uuid
+               WHERE wtl.transfer_id = $1::uuid AND COALESCE(s.quantity, 0) < wtl.quantity
+              ) THEN 1 / (SELECT COUNT(*) FROM warehouse_transfer_lines WHERE transfer_id = $1::uuid AND 1 = 0) ELSE 1 END AS stock_floor_ok`,
+        params: [id, companyId, fromId],
+      });
       // Ensure destination stock rows exist
       tx.push({
         sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)

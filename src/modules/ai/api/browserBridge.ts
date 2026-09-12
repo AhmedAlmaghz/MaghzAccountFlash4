@@ -819,12 +819,16 @@ export const browserAiBridge = {
     }
   },
 
-  /** PII retention — mirrors ai:purge-old-sessions (default 90 days). */
-  async purgeOldSessions(payload: { companyId: string; userId: string }): Promise<{ success: boolean; data?: { purged: number; retentionDays: number }; error?: string }> {
+  /** PII retention — mirrors ai:purge-old-sessions (default 90 days, '0' = keep forever). */
+  async purgeOldSessions(payload: { companyId: string; userId: string }): Promise<{ success: boolean; data?: { purged: number; retentionDays: number; keptForever?: boolean }; error?: string }> {
     try {
       const adapter = await getDbAdapter();
       const settings = await readAiSettings(payload.companyId);
       const days = Number(settings['ai.retention_days']);
+      // P1 fix (mirrors aiHandler): an explicit '0' opts out of deletion.
+      if (Number.isFinite(days) && days === 0) {
+        return { success: true, data: { purged: 0, retentionDays: 0, keptForever: true } };
+      }
       const retention = Number.isFinite(days) && days > 0 ? days : 90;
       const result = await adapter.query(
         `DELETE FROM ai_chat_sessions
@@ -886,25 +890,44 @@ export const browserAiBridge = {
         params
       );
       if (!ins.success) return { success: false, error: ins.error };
-      return { success: true, data: { batchId, total: items.length, inserted: (ins.rows || []).length } };
+      const inserted = (ins.rows || []).length;
+      // P2 fix (mirrors aiHandler): total_count must equal the DEDUPED
+      // insert count, not items.length — intra-payload idempotency
+      // collisions silently drop duplicates while the header kept the
+      // pre-dedupe count (phantom "remaining" on done batches).
+      await adapter.query(
+        `UPDATE ai_job_batches SET total_count = $2, updated_at = NOW() WHERE id = $1::uuid`,
+        [batchId, inserted]
+      );
+      return { success: true, data: { batchId, total: inserted, inserted } };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
   },
 
-  async batchClaim(payload: { companyId: string; userId: string; batchId: string; limit?: number }): Promise<{ success: boolean; data?: JobBatchItem[]; error?: string }> {
+  async batchClaim(payload: { companyId: string; userId: string; batchId: string; limit?: number; workerId?: string }): Promise<{ success: boolean; data?: JobBatchItem[]; error?: string }> {
     try {
       const take = Math.max(1, Math.min(Number(payload.limit) || 10, BATCH_CLAIM_LIMIT));
+      const workerId = typeof payload.workerId === 'string' && payload.workerId ? payload.workerId.slice(0, 64) : null;
       const adapter = await getDbAdapter();
       const res = await adapter.query<{
         id: string; seq: number; tool_name: string; args: unknown; after_seq: number | null; label: string | null; ref: string | null; attempts: number;
       }>(
-        `WITH claimed AS (
+        // Lease protocol (migration 0028): the `touched` CTE refreshes THIS
+        // worker's own running leases every round (no extra channel), and
+        // `updated` stamps new claims with (workerId, +30min). Recover only
+        // fails EXPIRED leases — never a live worker's in-flight items.
+        `WITH touched AS (
+           UPDATE ai_job_items SET claim_expires_at = NOW() + INTERVAL '30 minutes', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+             AND $5::varchar IS NOT NULL AND claimed_by = $5::varchar
+         ),
+         claimed AS (
            SELECT i.id FROM ai_job_items i
            WHERE i.batch_id = $1::uuid AND i.company_id = $2::uuid AND i.status = 'queued'
              AND i.attempts < 4
              AND (i.after_seq IS NULL OR i.after_seq IN (
-               SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND status = 'done'
+               SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'done'
              ))
              AND EXISTS (
                SELECT 1 FROM ai_job_batches b
@@ -915,14 +938,17 @@ export const browserAiBridge = {
            FOR UPDATE SKIP LOCKED
          ),
          updated AS (
-           UPDATE ai_job_items u SET status = 'running', attempts = u.attempts + 1, updated_at = NOW()
+           UPDATE ai_job_items u SET status = 'running', attempts = u.attempts + 1,
+             claimed_by = $5::varchar,
+             claim_expires_at = CASE WHEN $5::varchar IS NULL THEN NULL ELSE NOW() + INTERVAL '30 minutes' END,
+             updated_at = NOW()
            FROM claimed WHERE u.id = claimed.id
            RETURNING u.id
          )
          SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.ref, i.attempts
            FROM ai_job_items i JOIN updated ON updated.id = i.id
           ORDER BY i.seq`,
-        [payload.batchId, payload.companyId, take, payload.userId]
+        [payload.batchId, payload.companyId, take, payload.userId, workerId]
       );
       if (!res.success) return { success: false, error: res.error };
       await adapter.query(
@@ -960,7 +986,12 @@ export const browserAiBridge = {
       const adapter = await getDbAdapter();
       let resultJson: string | null = null;
       try {
-        const raw = JSON.stringify(payload.resultData ?? null);
+        // P3 fix: truncate (ids first) instead of nulling oversized payloads
+        // — NULL result_data orphaned dependents on resume (UNRESOLVED_REF
+        // despite a succeeded parent).
+        const { truncateScalarsForPersist } = await import('../engine/batchQueue');
+        const shrunk = truncateScalarsForPersist(payload.resultData);
+        const raw = JSON.stringify(shrunk);
         resultJson = raw && raw.length <= 2000 ? raw : null;
       } catch { resultJson = null; }
       const upd = await adapter.query<{ updated: string }>(
@@ -1011,7 +1042,6 @@ export const browserAiBridge = {
       if (!cur.success || !cur.rows || cur.rows.length === 0) {
         return { success: false, error: 'Item not found or not running' };
       }
-      const failedSeq = Number(cur.rows[0].seq);
       const attempts = Number(cur.rows[0].attempts) || 0;
       const safeError = (payload.error || 'خطأ غير معروف').slice(0, 2000);
       const safeCode = payload.errorCode ? payload.errorCode.slice(0, 40) : null;
@@ -1023,32 +1053,42 @@ export const browserAiBridge = {
         );
         return { success: true, data: { retried: true, attempts } };
       }
-      await adapter.query(
-        `UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
-         WHERE id = $1::uuid AND company_id = $4::uuid`,
-        [payload.itemId, safeError, safeCode, payload.companyId]
-      );
-      const skipped = await adapter.query<{ seq: number }>(
-        `WITH RECURSIVE doomed(seq) AS (
-           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND after_seq = $2
+      // P2 fix: fail + doomed-skip + counters in ONE statement (was three
+      // separate queries — a crash between the fail UPDATE and the skip left
+      // queued orphans with a failed parent that nothing could ever clean:
+      // unclaimable, invisible to recover, stuck running forever).
+      const done = await adapter.query<{ failed_n: string; skipped_n: string }>(
+        `WITH RECURSIVE failed AS (
+           UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
+           WHERE id = $1::uuid AND company_id = $4::uuid AND status = 'running'
+           RETURNING seq
+         ),
+         doomed(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $5::uuid AND after_seq IN (SELECT seq FROM failed)
            UNION
            SELECT i.seq FROM ai_job_items i JOIN doomed d ON i.after_seq = d.seq
-           WHERE i.batch_id = $1::uuid
+           WHERE i.batch_id = $5::uuid
+         ),
+         skipped AS (
+           UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: فشل عنصر يعتمد عليه', updated_at = NOW()
+           WHERE batch_id = $5::uuid AND company_id = $4::uuid AND status = 'queued'
+             AND seq IN (SELECT seq FROM doomed)
+           RETURNING seq
+         ),
+         cnt AS (
+           UPDATE ai_job_batches SET failed_count = failed_count + (SELECT COUNT(*) FROM failed),
+             skipped_count = skipped_count + (SELECT COUNT(*) FROM skipped), updated_at = NOW()
+           WHERE id = $5::uuid AND company_id = $4::uuid AND user_id = $6::uuid
          )
-         UPDATE ai_job_items SET status = 'skipped',
-           last_error = 'تخطي: فشل عنصر يعتمد عليه', updated_at = NOW()
-         WHERE batch_id = $1::uuid AND company_id = $3::uuid AND status = 'queued'
-           AND seq IN (SELECT seq FROM doomed)
-         RETURNING seq`,
-        [payload.batchId, failedSeq, payload.companyId]
+         SELECT (SELECT COUNT(*) FROM failed) AS failed_n, (SELECT COUNT(*) FROM skipped) AS skipped_n`,
+        [payload.itemId, safeError, safeCode, payload.companyId, payload.batchId, payload.userId]
       );
-      const skippedCount = skipped.rows ? skipped.rows.length : 0;
-      await adapter.query(
-        `UPDATE ai_job_batches SET failed_count = failed_count + 1,
-           skipped_count = skipped_count + $2, updated_at = NOW()
-         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid`,
-        [payload.batchId, skippedCount, payload.companyId, payload.userId]
-      );
+      if (!done.success) return { success: false, error: done.error };
+      const skippedCount = Number(done.rows?.[0]?.skipped_n || 0);
+      if (Number(done.rows?.[0]?.failed_n || 0) === 0) {
+        return { success: false, error: 'Item not found or not running' };
+      }
       const fin = await adapter.query<{ status: string }>(
         `UPDATE ai_job_batches
             SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
@@ -1093,10 +1133,15 @@ export const browserAiBridge = {
       }
       let skipped = 0;
       if (payload.status === 'cancelled') {
+        // P1 fix: park QUEUED items only. 'running' items belong to a live
+        // worker's in-flight chunk — flipping them to skipped while the
+        // write executes produced ledger-vs-record lies (executed but
+        // recorded skipped). In-flight items finish honestly via itemDone;
+        // with 10-item chunks at most ~9 complete after a cancel.
         const res = await adapter.query(
           `UPDATE ai_job_items SET status = 'skipped',
              last_error = 'تخطي: أُلغيت الدفعة', updated_at = NOW()
-           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status IN ('queued', 'running')
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'queued'
            RETURNING seq`,
           [payload.batchId, payload.companyId]
         );
@@ -1124,6 +1169,11 @@ export const browserAiBridge = {
              last_error = 'توقف التنفيذ — انقطع الـ worker (تعطل الجلسة أو إغلاق التطبيق)',
              error_code = 'INTERRUPTED', updated_at = NOW()
            WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+             -- Lease gate (migration 0028): only EXPIRED leases are dead.
+             -- A live worker refreshes its lease every claim round, so its
+             -- in-flight items are never failed by a second window's recover.
+             -- NULL-lease rows (pre-migration) are treated as expired.
+             AND (claim_expires_at IS NULL OR claim_expires_at < NOW())
            RETURNING seq
          ),
          doomed(seq) AS (
@@ -1178,7 +1228,7 @@ export const browserAiBridge = {
 
   async batchRetryFailed(payload: {
     companyId: string; userId: string; batchId: string;
-  }): Promise<{ success: boolean; data?: { requeued: number }; error?: string }> {
+  }): Promise<{ success: boolean; data?: { requeued: number; unskipped: number }; error?: string }> {
     try {
       const adapter = await getDbAdapter();
       const requeued = await adapter.query(
@@ -1191,14 +1241,32 @@ export const browserAiBridge = {
       if (!requeued.success || !requeued.rows || requeued.rows.length === 0) {
         return { success: false, error: requeued.success ? 'No failed items to retry' : requeued.error };
       }
+      // P2 fix (mirrors aiHandler): reverse the doomed cascade — un-skip
+      // skipped items whose chain now resolves to done-or-queued.
+      const unskipped = await adapter.query(
+        `WITH RECURSIVE revived(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'skipped'
+             AND (after_seq IS NULL OR after_seq IN (SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status IN ('done', 'queued')))
+           UNION
+           SELECT i.seq FROM ai_job_items i JOIN revived r ON i.after_seq = r.seq
+           WHERE i.batch_id = $1::uuid AND i.company_id = $2::uuid AND i.status = 'skipped'
+         )
+         UPDATE ai_job_items SET status = 'queued', attempts = 0,
+           last_error = NULL, error_code = NULL, updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'skipped'
+           AND seq IN (SELECT seq FROM revived)
+         RETURNING seq`,
+        [payload.batchId, payload.companyId]
+      );
+      const unskippedCount = unskipped.success && unskipped.rows ? unskipped.rows.length : 0;
       await adapter.query(
         `UPDATE ai_job_batches SET status = 'running',
-           failed_count = failed_count - $2, updated_at = NOW()
-         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid
+           failed_count = failed_count - $2, skipped_count = skipped_count - $3, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $4::uuid AND user_id = $5::uuid
            AND status IN ('partial', 'paused')`,
-        [payload.batchId, requeued.rows.length, payload.companyId, payload.userId]
+        [payload.batchId, requeued.rows.length, unskippedCount, payload.companyId, payload.userId]
       );
-      return { success: true, data: { requeued: requeued.rows.length } };
+      return { success: true, data: { requeued: requeued.rows.length, unskipped: unskippedCount } };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

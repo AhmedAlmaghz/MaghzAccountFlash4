@@ -68,6 +68,11 @@ export const aiJobItems = pgTable('ai_job_items', {
   lastError: text('last_error'),
   errorCode: varchar('error_code', { length: 40 }),
   resultRef: varchar('result_ref', { length: 200 }),
+  // Claim lease (migration 0028): which renderer worker owns this running
+  // item and when its lease expires. batchRecover only fails EXPIRED leases
+  // (dead workers) — never a live worker's in-flight items.
+  claimedBy: varchar('claimed_by', { length: 64 }),
+  claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(sql`now()`),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().default(sql`now()`),
 });

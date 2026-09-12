@@ -176,14 +176,17 @@ export function routeToolsForCycle(messages: LlmMessage[], extraToolNames: Reado
     if (visibleByName.has(name)) selected.add(name);
   }
 
-  // Intent-based domain routing.
+  // Intent-based domain routing. Matched groups are recorded IN ORDER so
+  // relevance ordering below can prioritize them.
   const intentText = recentUserText(messages, INTENT_LOOKBACK);
   let routedByIntent = false;
+  const matchedGroups: DomainGroup[] = [];
   if (intentText.trim().length > 0) {
     for (const group of DOMAIN_GROUPS) {
       const matches = group.keywords.some((k) => intentText.includes(k));
       if (!matches) continue;
       routedByIntent = true;
+      matchedGroups.push(group);
       for (const t of visible) {
         if (group.prefixes.some((p) => t.name.startsWith(p))) selected.add(t.name);
       }
@@ -195,9 +198,51 @@ export function routeToolsForCycle(messages: LlmMessage[], extraToolNames: Reado
     if (visibleByName.has(name)) selected.add(name);
   }
 
-  // Stable, deterministic ordering for the wire (helps provider-side caching
-  // and makes test snapshots readable).
-  const ordered = visible.filter((t) => selected.has(t.name));
+  // P1 fix: relevance-ordered slicing. The old code sliced by REGISTRY
+  // insertion order, so a broad intent ("تقارير" → ~150 tools across 9
+  // domains) kept the first 48 registered — all reads/searches/sales — and
+  // silently dropped the very hr./crm./manufacturing. tools the intent had
+  // routed. Ordering now:
+  //   tier 0 — ALWAYS-ON core (navigation, batching, classify…): protected,
+  //            the model must never lose these mid-conversation;
+  //   tier 1 — intent-matched domains, ROUND-ROBIN interleaved by domain
+  //            (declaration order), so every routed domain stays
+  //            REPRESENTED instead of the first domains eating the cap;
+  //   tier 2 — adaptive extras outside any matched domain.
+  // Within a tier the registry order is preserved (still deterministic for
+  // provider caching).
+  const inAlwaysOn = (name: string): boolean => (ALWAYS_ON_TOOLS as readonly string[]).includes(name);
+  const domainTierOf = (name: string): number => {
+    for (let g = 0; g < DOMAIN_GROUPS.length; g++) {
+      if (DOMAIN_GROUPS[g].prefixes.some((p) => name.startsWith(p))) return g;
+    }
+    return -1;
+  };
+  const matchedDomainSet = new Set(matchedGroups.flatMap((g) => g.prefixes));
+  const inMatchedDomain = (name: string): boolean =>
+    matchedDomainSet.size > 0 && [...matchedDomainSet].some((p) => name.startsWith(p));
+  // Position of each tool among its own domain-tier peers (registry order).
+  const posInTier = new Map<string, number>();
+  {
+    const counters = new Map<string, number>();
+    for (const t of visible) {
+      if (!selected.has(t.name)) continue;
+      const key = inAlwaysOn(t.name) ? 'core' : inMatchedDomain(t.name) ? `d${domainTierOf(t.name)}` : 'adaptive';
+      const n = counters.get(key) ?? 0;
+      counters.set(key, n + 1);
+      posInTier.set(t.name, n);
+    }
+  }
+  const tierOf = (name: string): number => {
+    if (inAlwaysOn(name)) return 0;
+    if (inMatchedDomain(name)) return 1;
+    return 2;
+  };
+  const ordered = visible
+    .filter((t) => selected.has(t.name))
+    .map((t, idx) => ({ t, tier: tierOf(t.name), pos: posInTier.get(t.name) ?? idx, idx }))
+    .sort((a, b) => a.tier - b.tier || (a.tier === 1 ? (a.pos - b.pos || a.idx - b.idx) : (a.idx - b.idx)))
+    .map((x) => x.t);
   const capped = ordered.length > MAX_ADVERTISED_TOOLS ? ordered.slice(0, MAX_ADVERTISED_TOOLS) : ordered;
   const dropped = ordered.length - capped.length;
 

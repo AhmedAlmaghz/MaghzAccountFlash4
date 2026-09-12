@@ -173,9 +173,30 @@ export const searchTools: ToolDefinition[] = [
         res.data.items,
         (p) => `${p.nameAr ?? ''} ${p.nameEn ?? ''} ${p.code ?? ''} ${p.barcode ?? ''} ${p.sku ?? ''}`,
       ).slice(0, 8);
+      // U7: surface each product's default sale/purchase unit so the model
+      // knows how a unit-less quantity will be interpreted (a carton default
+      // means "3" debits 36 base units) and which price matches that unit.
+      const unitCache = new Map<string, { defaultSaleUnit?: string; defaultPurchaseUnit?: string; defaultSaleFactor?: number; defaultPurchaseFactor?: number }>();
+      await Promise.all(matches.map(async (m) => {
+        try {
+          const u = await inventoryApi.getProductUnits(m.item.id, ctx.companyId);
+          if (u.success && u.data) {
+            const { defaultSaleUnit, defaultPurchaseUnit } = await import('@/core/utils/unitConversion');
+            const ds = defaultSaleUnit(u.data);
+            const dp = defaultPurchaseUnit(u.data);
+            unitCache.set(m.item.id, {
+              defaultSaleUnit: ds?.unitName,
+              defaultSaleFactor: ds?.factor,
+              defaultPurchaseUnit: dp?.unitName,
+              defaultPurchaseFactor: dp?.factor,
+            });
+          }
+        } catch { /* best-effort enrichment */ }
+      }));
       return {
         matches: matches.map((m) => {
           const pt = m.item.productTypeId ? typeUsage.get(m.item.productTypeId) : undefined;
+          const du = unitCache.get(m.item.id) || {};
           return {
             id: m.item.id,
             code: m.item.code,
@@ -186,6 +207,13 @@ export const searchTools: ToolDefinition[] = [
             unit: m.item.unit,
             usage: pt?.usage ?? 'other',
             productTypeName: pt?.name ?? '',
+            defaultSaleUnit: du.defaultSaleUnit,
+            defaultSaleFactor: du.defaultSaleFactor,
+            defaultPurchaseUnit: du.defaultPurchaseUnit,
+            defaultPurchaseFactor: du.defaultPurchaseFactor,
+            ...(du.defaultSaleFactor && du.defaultSaleFactor !== 1
+              ? { unitNote: `الكمية بلا unitId تُفسَّر بوحدة ${du.defaultSaleUnit} (×${du.defaultSaleFactor})` }
+              : {}),
           };
         }),
         totalMatches: matches.length,
@@ -279,7 +307,6 @@ export const searchTools: ToolDefinition[] = [
           isGroup: m.item.isGroup,
         })),
         totalMatches: matches.length,
-        ...(matches.length === 0 ? { suggestion: 'جرّب كلمة واحدة من اسم الحساب، مثلاً: مصروف أو انترنت' } : {}),
       };
     },
   },
@@ -388,7 +415,12 @@ export const searchTools: ToolDefinition[] = [
       const cleanQuery = normalizeQuery(query);
       // Paginated window instead of the old full-table fetch (getQuotations
       // returned EVERY quotation to the renderer and filtered in JS).
-      const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, 100, {});
+      // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200), consistent with every
+      // other fuzzy search in this file. An invoice older than the newest
+      // 100 was unfindable by number and the agent reported it as
+      // nonexistent. (Server-side number search is the real fix for
+      // thousand-row datasets — tracked, not done here.)
+      const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const matches = res.data.items
         .filter((q) =>
@@ -444,24 +476,44 @@ export const searchTools: ToolDefinition[] = [
       // Paginated window instead of the old full-table fetch (getInvoices
       // returned EVERY invoice to the renderer — thousands of rows on real
       // datasets — then filtered in JS).
-      const res = await salesApi.getInvoicesPaginated(ctx.companyId, 1, 100, {});
-      if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data.items
-        .filter((inv) => {
-          const n = (inv.invoiceNumber || '').toLowerCase();
-          const c = normalizeQuery(inv.customer?.name || '');
-          return n.includes(cleanQuery) || c.includes(cleanQuery);
-        })
-        .slice(0, 8);
+      // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200) — see quotations note.
+      // Plus a server-side number pass when the query looks like a document
+      // number (contains a digit): the fuzzy window only sees the newest 200
+      // rows, so an old INV-0007 was unfindable and reported nonexistent.
+      // Numbers are ASCII — ILIKE needs no Arabic normalization. Results
+      // merge below, deduped by id, name-matches first.
+      const looksLikeNumber = /\d/.test(query);
+      const [fuzzyRes, numberRes] = await Promise.all([
+        salesApi.getInvoicesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, {}),
+        looksLikeNumber
+          ? salesApi.getInvoicesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, { invoiceNumber: query })
+          : Promise.resolve({ success: true as const, data: null }),
+      ]);
+      if (!fuzzyRes.success || !fuzzyRes.data) return { error: fuzzyRes.error || 'فشل البحث' };
+      const seen = new Set<string>();
+      const matches: typeof fuzzyRes.data.items = [];
+      const push = (inv: (typeof fuzzyRes.data.items)[number]) => {
+        if (seen.has(inv.id)) return;
+        seen.add(inv.id);
+        matches.push(inv);
+      };
+      for (const inv of fuzzyRes.data.items) {
+        const n = (inv.invoiceNumber || '').toLowerCase();
+        const c = normalizeQuery(inv.customer?.name || '');
+        if (n.includes(cleanQuery) || c.includes(cleanQuery)) push(inv);
+      }
+      const numberItems = numberRes.success && numberRes.data ? numberRes.data.items : [];
+      for (const inv of numberItems) push(inv);
+      const out = matches.slice(0, 8);
       return {
-        matches: matches.map((inv) => ({
+        matches: out.map((inv) => ({
           id: inv.id,
           invoiceNumber: inv.invoiceNumber,
           customerName: inv.customer?.name,
           status: inv.status,
           totalAmount: inv.totalAmount,
         })),
-        totalMatches: matches.length,
+        totalMatches: out.length,
       };
     },
   },
@@ -477,24 +529,41 @@ export const searchTools: ToolDefinition[] = [
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
       // Paginated window instead of the old full-table fetch.
-      const res = await purchasesApi.getInvoicesPaginated(ctx.companyId, 1, 100, {});
-      if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data.items
-        .filter((inv) => {
-          const n = (inv.invoiceNumber || '').toLowerCase();
-          const s = normalizeQuery(inv.supplier?.name || '');
-          return n.includes(cleanQuery) || s.includes(cleanQuery);
-        })
-        .slice(0, 8);
+      // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200) — see quotations note.
+      // Plus a server-side number pass for digit-bearing queries (mirrors
+      // search.sales_invoices): old PINV- numbers live beyond any window.
+      const looksLikeNumber = /\d/.test(query);
+      const [fuzzyRes, numberRes] = await Promise.all([
+        purchasesApi.getInvoicesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, {}),
+        looksLikeNumber
+          ? purchasesApi.getInvoicesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, { invoiceNumber: query })
+          : Promise.resolve({ success: true as const, data: null }),
+      ]);
+      if (!fuzzyRes.success || !fuzzyRes.data) return { error: fuzzyRes.error || 'فشل البحث' };
+      const seen = new Set<string>();
+      const matches: typeof fuzzyRes.data.items = [];
+      const push = (inv: (typeof fuzzyRes.data.items)[number]) => {
+        if (seen.has(inv.id)) return;
+        seen.add(inv.id);
+        matches.push(inv);
+      };
+      for (const inv of fuzzyRes.data.items) {
+        const n = (inv.invoiceNumber || '').toLowerCase();
+        const s = normalizeQuery(inv.supplier?.name || '');
+        if (n.includes(cleanQuery) || s.includes(cleanQuery)) push(inv);
+      }
+      const numberItems = numberRes.success && numberRes.data ? numberRes.data.items : [];
+      for (const inv of numberItems) push(inv);
+      const out = matches.slice(0, 8);
       return {
-        matches: matches.map((inv) => ({
+        matches: out.map((inv) => ({
           id: inv.id,
           invoiceNumber: inv.invoiceNumber,
           supplierName: inv.supplier?.name,
           status: inv.status,
           totalAmount: inv.totalAmount,
         })),
-        totalMatches: matches.length,
+        totalMatches: out.length,
       };
     },
   },
@@ -542,7 +611,9 @@ export const searchTools: ToolDefinition[] = [
       if (!query) return { error: 'نص البحث مطلوب' };
       const res = await manufacturingApi.getBoms(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = fuzzySearch(query, res.data, (b) => `${b.productName || ''} ${b.version} ${b.id}`).slice(0, 8).map((m) => m.item);
+      // P3 fix: the match key no longer includes the row UUID — hex-ish
+      // queries could score against it (noise), and it never helps recall.
+      const matches = fuzzySearch(query, res.data, (b) => `${b.productName || ''} ${b.version}`).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((b) => ({
           id: b.id,
@@ -627,7 +698,10 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
-      const res = await accountingApi.getReceiptVouchersPaginated(ctx.companyId, 1, 8, { status: undefined });
+      // Window widened 8 → 200 (same fix as search.journal_entries): a
+      // voucher older than the 8 newest was permanently unfindable and the
+      // model reported existing vouchers as nonexistent.
+      const res = await accountingApi.getReceiptVouchersPaginated(ctx.companyId, 1, 200, { status: undefined });
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
       const matches = items
@@ -659,7 +733,8 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
-      const res = await accountingApi.getPaymentVouchersPaginated(ctx.companyId, 1, 8, { status: undefined });
+      // Window widened 8 → 200 (same fix as search.journal_entries).
+      const res = await accountingApi.getPaymentVouchersPaginated(ctx.companyId, 1, 200, { status: undefined });
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
       const matches = items
@@ -742,45 +817,59 @@ export const searchTools: ToolDefinition[] = [
     },
   },
   {
-    name: 'search.returns',
-    labelAr: 'بحث عن مردود',
-    descriptionAr: 'يبحث عن مردودات (مبيعات ومشتريات) برقم المردود أو اسم العميل/المورد ويعيد معرفها (id) ونوعها.',
+    // P0-9 fix: the old combined search.returns searched BOTH return kinds
+    // under sales.view alone — purchase-return supplier names, statuses and
+    // amounts leaked to users without purchases.view. Split into two
+    // permission-scoped tools; also fix the [object Object] entityName bug
+    // (mapReturnRow returns customer/supplier as OBJECTS — String(obj)
+    // never matched a name search).
+    name: 'search.sales_returns',
+    labelAr: 'بحث عن مردود مبيعات',
+    descriptionAr: 'يبحث عن مردودات المبيعات برقم المردود أو اسم العميل ويعيد معرفها (id) وحالتها ومبلغها.',
     permission: 'sales.view',
     dangerLevel: 'read',
-    parameters: searchParam('رقم المردود أو اسم العميل أو المورد'),
+    parameters: searchParam('رقم مردود المبيعات أو اسم العميل'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
       const cleanQuery = normalizeQuery(query);
-      const [salesResult, purchaseResult] = await Promise.all([
-        salesApi.getReturns(ctx.companyId),
-        purchasesApi.getReturns(ctx.companyId),
-      ]);
-      const combined: Array<{
-        id: string; returnNumber: string; entityName: string; type: 'sales' | 'purchase'; status: string; totalAmount: number;
-      }> = [];
-      if (salesResult.success && salesResult.data) {
-        for (const r of salesResult.data) {
-          const n = (r.returnNumber || '').toLowerCase();
-          const c = normalizeQuery(String(r.customer ?? ''));
-          if (n.includes(cleanQuery) || c.includes(cleanQuery)) {
-            combined.push({ id: r.id, returnNumber: r.returnNumber || '', entityName: String(r.customer ?? ''), type: 'sales', status: r.status, totalAmount: r.totalAmount });
-          }
+      const res = await salesApi.getReturns(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      const combined: Array<{ id: string; returnNumber: string; entityName: string; status: string; totalAmount: number }> = [];
+      for (const r of res.data) {
+        const n = (r.returnNumber || '').toLowerCase();
+        const cName = r.customer && typeof r.customer === 'object' ? String((r.customer as { name?: string }).name ?? '') : String(r.customer ?? '');
+        const c = normalizeQuery(cName);
+        if (n.includes(cleanQuery) || c.includes(cleanQuery)) {
+          combined.push({ id: r.id, returnNumber: r.returnNumber || '', entityName: cName, status: r.status, totalAmount: r.totalAmount });
         }
       }
-      if (purchaseResult.success && purchaseResult.data) {
-        for (const r of purchaseResult.data) {
-          const n = (r.returnNumber || '').toLowerCase();
-          const s = normalizeQuery(String(r.supplier ?? ''));
-          if (n.includes(cleanQuery) || s.includes(cleanQuery)) {
-            combined.push({ id: r.id, returnNumber: r.returnNumber || '', entityName: String(r.supplier ?? ''), type: 'purchase', status: r.status, totalAmount: r.totalAmount });
-          }
+      return { matches: combined.slice(0, 8), totalMatches: combined.length };
+    },
+  },
+  {
+    name: 'search.purchase_returns',
+    labelAr: 'بحث عن مردود مشتريات',
+    descriptionAr: 'يبحث عن مردودات المشتريات برقم المردود أو اسم المورد ويعيد معرفها (id) وحالتها ومبلغها.',
+    permission: 'purchases.view',
+    dangerLevel: 'read',
+    parameters: searchParam('رقم مردود المشتريات أو اسم المورد'),
+    execute: async (args, ctx) => {
+      const query = String(args.query || '').trim();
+      if (!query) return { error: 'نص البحث مطلوب' };
+      const cleanQuery = normalizeQuery(query);
+      const res = await purchasesApi.getReturns(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      const combined: Array<{ id: string; returnNumber: string; entityName: string; status: string; totalAmount: number }> = [];
+      for (const r of res.data) {
+        const n = (r.returnNumber || '').toLowerCase();
+        const sName = r.supplier && typeof r.supplier === 'object' ? String((r.supplier as { name?: string }).name ?? '') : String(r.supplier ?? '');
+        const s = normalizeQuery(sName);
+        if (n.includes(cleanQuery) || s.includes(cleanQuery)) {
+          combined.push({ id: r.id, returnNumber: r.returnNumber || '', entityName: sName, status: r.status, totalAmount: r.totalAmount });
         }
       }
-      return {
-        matches: combined.slice(0, 8),
-        totalMatches: combined.length,
-      };
+      return { matches: combined.slice(0, 8), totalMatches: combined.length };
     },
   },
   {
@@ -829,13 +918,17 @@ export const searchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim().toLowerCase();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const res = await inventoryApi.getInventoryTransactionsPaginated(ctx.companyId, 1, 8);
+      // Window widened 8 → 200 (same fix as search.journal_entries), and
+      // product-name matching routed through normalizeQuery like every other
+      // search in this file (raw toLowerCase missed ة/أ variants).
+      const cleanQuery = normalizeQuery(query);
+      const res = await inventoryApi.getInventoryTransactionsPaginated(ctx.companyId, 1, 200);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
       const matches = items
         .filter((m) =>
-          (m.productName || '').toLowerCase().includes(query) ||
-          m.type.toLowerCase().includes(query)
+          normalizeQuery(m.productName || '').includes(cleanQuery) ||
+          m.type.toLowerCase().includes(cleanQuery)
         )
         .slice(0, 8);
       return {
@@ -861,8 +954,24 @@ export const searchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const now = new Date();
-      const res = await hrApi.getAttendance(ctx.companyId, now.getMonth() + 1, now.getFullYear());
+      // P2 fix: a date-like token in the query (2026-08-15) selects that
+      // month's records — the old code always searched the CURRENT month,
+      // so past-date queries silently returned empty despite existing data.
+      const { localDateParts } = await import('../engine/dateUtils');
+      const dateTok = query.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+      let month: number;
+      let year: number;
+      if (dateTok) {
+        const parts = localDateParts(`${dateTok[1]}-${dateTok[2].padStart(2, '0')}-${dateTok[3].padStart(2, '0')}`);
+        const now = new Date();
+        month = parts ? parts.month : now.getMonth() + 1;
+        year = parts ? parts.year : now.getFullYear();
+      } else {
+        const now = new Date();
+        month = now.getMonth() + 1;
+        year = now.getFullYear();
+      }
+      const res = await hrApi.getAttendance(ctx.companyId, month, year);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const matches = fuzzySearch(
         query,
@@ -950,8 +1059,11 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       const res = await settingsApi.getProductTypes(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب التصنيفات' };
+      // P3 fix: Arabic-normalized matching like every other search in this
+      // file — raw toLowerCase missed ة/أ variants (e.g. query "فئه" vs "فئة").
+      const cleanQuery = normalizeQuery(query);
       const matches = res.data
-        .filter((t) => !query || (t.nameAr || '').toLowerCase().includes(query) || (t.nameEn || '').toLowerCase().includes(query))
+        .filter((t) => !query || normalizeQuery(t.nameAr || '').includes(cleanQuery) || normalizeQuery(t.nameEn || '').includes(cleanQuery))
         .slice(0, 8);
       return {
         matches: matches.map((t) => ({ id: t.id, nameAr: t.nameAr, nameEn: t.nameEn, code: t.code, isActive: t.isActive })),
@@ -971,8 +1083,10 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       const res = await settingsApi.getUnits(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الوحدات' };
+      // P3 fix: same Arabic normalization as product_types above.
+      const cleanQuery = normalizeQuery(query);
       const matches = res.data
-        .filter((u) => !query || (u.nameAr || '').toLowerCase().includes(query) || (u.nameEn || '').toLowerCase().includes(query))
+        .filter((u) => !query || normalizeQuery(u.nameAr || '').includes(cleanQuery) || normalizeQuery(u.nameEn || '').includes(cleanQuery))
         .slice(0, 8);
       return {
         matches: matches.map((u) => ({ id: u.id, nameAr: u.nameAr, nameEn: u.nameEn, code: u.code, conversionFactor: u.conversionFactor, isActive: u.isActive })),
@@ -1013,8 +1127,10 @@ export const searchTools: ToolDefinition[] = [
       const query = String(args.query || '').trim().toLowerCase();
       const res = await settingsApi.getCostCenters(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب مراكز التكلفة' };
+      // P3 fix: same Arabic normalization as product_types above.
+      const cleanQuery = normalizeQuery(query);
       const matches = res.data
-        .filter((c) => !query || (c.nameAr || '').toLowerCase().includes(query) || (c.nameEn || '').toLowerCase().includes(query))
+        .filter((c) => !query || normalizeQuery(c.nameAr || '').includes(cleanQuery) || normalizeQuery(c.nameEn || '').includes(cleanQuery))
         .slice(0, 8);
       return {
         matches: matches.map((c) => ({ id: c.id, nameAr: c.nameAr, nameEn: c.nameEn, code: c.code, type: c.type, isActive: c.isActive })),

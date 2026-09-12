@@ -145,6 +145,11 @@ export function useSpeechRecognition(lang: string): UseSpeechRecognition {
             restart.onerror = rec.onerror;
             restart.onend = rec.onend;
             recognitionRef.current = restart;
+            // P2 fix: a new recognition session restarts event.results
+            // indices at 0 — WITHOUT resetting the finalized set, the first
+            // N finalized segments of the new session are all suppressed as
+            // "already emitted" and the user's spoken words silently vanish.
+            finalizedIdxRef.current = new Set();
             restart.start();
             // Engine restart resets interim results — a new interim session
             // begins; nothing to flush since finals already went through.

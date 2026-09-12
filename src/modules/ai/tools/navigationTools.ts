@@ -62,7 +62,10 @@ export const PAGE_CATALOG: PageEntry[] = [
   { key: 'reports.customer_statement', labelAr: 'كشف حساب عميل', path: '/reports/customer-statement', permission: 'reports.view' },
   // Settings
   { key: 'settings.company', labelAr: 'بيانات الشركة', path: '/settings/company', permission: 'settings.view' },
-  { key: 'settings.ai', labelAr: 'إعدادات الذكاء الاصطناعي', path: '/settings/ai', permission: 'settings.view' },
+  // P2 fix: the route guard requires ai.settings (not settings.view) — the
+  // old entry let the agent "successfully" navigate a settings.view-only
+  // user into a guard bounce back to /. Match the route.
+  { key: 'settings.ai', labelAr: 'إعدادات الذكاء الاصطناعي', path: '/settings/ai', permission: 'ai.settings' },
 ];
 
 function accessiblePages(): PageEntry[] {
