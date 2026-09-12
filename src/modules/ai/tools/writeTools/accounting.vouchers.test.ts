@@ -4,6 +4,7 @@ vi.mock('@/modules/accounting/api', () => ({
   accountingApi: {
     createPaymentVoucher: vi.fn(),
     getAccounts: vi.fn(),
+    postVoucher: vi.fn(),
   },
 }));
 vi.mock('@/core/api', () => ({
@@ -165,5 +166,42 @@ describe('accounting.create_payment_voucher — expense path without supplier', 
       expect.objectContaining({ supplierId: 'sup-1' }),
       expect.anything(),
     );
+  });
+});
+
+describe('accounting.post_*_voucher — real posting pipeline (P0-4 regression)', () => {
+  // A bare status UPDATE flipped the column with ZERO accounting effect (no
+  // JE, no party-balance move, no invoice allocation) while showing the
+  // voucher as "posted" in every list. The tools must call postVoucher().
+  beforeEach(() => {
+    mockedApi.postVoucher.mockResolvedValue({ success: true } as never);
+  });
+
+  it('posts receipt vouchers through postVoucher (receipt)', async () => {
+    const res = (await findTool('accounting.post_receipt_voucher').execute(
+      { voucherId: 'rv-1' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.posted).toBe(true);
+    expect(mockedApi.postVoucher).toHaveBeenCalledWith('rv-1', ctx.companyId, 'receipt', ctx.userId);
+  });
+
+  it('posts payment vouchers through postVoucher (payment)', async () => {
+    const res = (await findTool('accounting.post_payment_voucher').execute(
+      { voucherId: 'pv-1' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.posted).toBe(true);
+    expect(mockedApi.postVoucher).toHaveBeenCalledWith('pv-1', ctx.companyId, 'payment', ctx.userId);
+  });
+
+  it('surfaces posting failures honestly (no fake posted:true)', async () => {
+    mockedApi.postVoucher.mockResolvedValueOnce({ success: false, error: 'رصيد الخزنة لا يكفي' } as never);
+    const res = (await findTool('accounting.post_receipt_voucher').execute(
+      { voucherId: 'rv-9' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.posted).toBeUndefined();
+    expect(String(res.error)).toContain('رصيد الخزنة لا يكفي');
   });
 });

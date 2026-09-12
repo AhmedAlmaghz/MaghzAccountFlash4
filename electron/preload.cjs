@@ -189,6 +189,19 @@ contextBridge.exposeInMainWorld('electronDB', {
     deleteReturn: (payload) => ipcRenderer.invoke('db:rpc:sales.deleteReturn', { ...payload, sessionToken }),
     postReturn: (payload) => ipcRenderer.invoke('db:rpc:sales.postReturn', { ...payload, sessionToken }),
   },
+  // POS typed RPC (module 13). Session-derived companyId + cashier userId.
+  // Checkout stays renderer-composed (journal machinery) and ships through
+  // the guarded transaction channel; these cover products, shifts, Z-report.
+  pos: {
+    getProducts: (payload = {}) => ipcRenderer.invoke('db:rpc:pos.getProducts', { ...payload, sessionToken }),
+    getActiveShift: (payload = {}) => ipcRenderer.invoke('db:rpc:pos.getActiveShift', { ...payload, sessionToken }),
+    openShift: (payload) => ipcRenderer.invoke('db:rpc:pos.openShift', { ...payload, sessionToken }),
+    closeShift: (payload) => ipcRenderer.invoke('db:rpc:pos.closeShift', { ...payload, sessionToken }),
+    getShiftsPaginated: (payload) => ipcRenderer.invoke('db:rpc:pos.getShiftsPaginated', { ...payload, sessionToken }),
+    getShiftSummary: (payload) => ipcRenderer.invoke('db:rpc:pos.getShiftSummary', { ...payload, sessionToken }),
+    getShiftInvoices: (payload) => ipcRenderer.invoke('db:rpc:pos.getShiftInvoices', { ...payload, sessionToken }),
+    getReceipt: (payload) => ipcRenderer.invoke('db:rpc:pos.getReceipt', { ...payload, sessionToken }),
+  },
   // Session-derived company scoping (Phase 4 slice 3). The renderer sends
   // no company id — the main process uses the authenticated session.
   core: {

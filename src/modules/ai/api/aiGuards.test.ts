@@ -24,11 +24,17 @@ describe('AI operational guards (rate-limit + purge + VAT-null)', () => {
   it('rate limiter: 120/hour sliding window, per user+company, configurable via ai.rate_limit_hour', () => {
     expect(main).toContain('AI_RATE_LIMIT_HOUR = 120');
     expect(main).toContain('ai.rate_limit_hour');
-    expect(main).toContain('withinRateLimit');
+    // Peek/record split: failures and timeouts must not burn quota.
+    expect(main).toContain('isRateLimited');
+    expect(main).toContain('recordProviderCall');
     // Sliding window of timestamps, not a naive counter
     expect(main).toContain('3600_000');
     // Arabic honesty message on exhaustion
     expect(main).toContain('انتهت حصة الذكاء الاصطناعي');
+  });
+
+  it('API key cache expires (no serve-forever after external rotation)', () => {
+    expect(main).toContain('API_KEY_CACHE_TTL_MS');
   });
 
   it('PII purge channel exists on both layers with retention default 90 days', () => {
@@ -36,6 +42,15 @@ describe('AI operational guards (rate-limit + purge + VAT-null)', () => {
     expect(bridge).toContain('purgeOldSessions');
     // Retention window default (0 = keep forever is the documented opt-out)
     expect(main + bridge).toContain('90');
+  });
+
+  it("P1: retention '0' (keep forever) short-circuits deletion on both layers", () => {
+    // The old `days > 0 ? days : 90` deleted transcripts against an explicit
+    // opt-out. Both transports must return early with purged: 0.
+    for (const [, src] of [['main', main], ['bridge', bridge]] as const) {
+      expect(src).toMatch(/days === 0/);
+      expect(src).toMatch(/keptForever/);
+    }
   });
 
   it('batch updates stay tenant-scoped (company_id on every PK write)', () => {

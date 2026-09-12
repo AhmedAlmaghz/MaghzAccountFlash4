@@ -59,7 +59,10 @@ export const ProcessingStatus = memo(function ProcessingStatus({ startedAt, comp
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800">
           <Loader2 size={12} className="animate-spin" />
           {t('ai.executing')}
-          <span className="tabular-nums text-primary-500 dark:text-primary-400">
+          {/* P3 fix: the per-second tick re-announced to screen readers
+              every second. Sighted users see the timer; SR users get the
+              single "executing" announcement from the live region. */}
+          <span aria-hidden="true" className="tabular-nums text-primary-500 dark:text-primary-400">
             {formatElapsed(Date.now() - startedAt)}
           </span>
         </span>

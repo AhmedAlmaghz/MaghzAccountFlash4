@@ -10,6 +10,8 @@ import {
   summarizeBatchProgress,
   isTerminalBatchStatus,
   MAX_ITEM_ATTEMPTS,
+  truncateScalarsForPersist,
+  RESULT_DATA_JSON_BUDGET,
 } from './batchQueue';
 
 describe('resolveBatchItems', () => {
@@ -155,6 +157,20 @@ describe('resolveOutputId', () => {
     expect(resolveOutputId({ created: true, name: 'x' })).toBeNull();
     expect(resolveOutputId({})).toBeNull();
   });
+
+  it('P0-7: honors the explicit PRIMARY_ID_FIELD annotation over key order', () => {
+    // A result echoing an input id BEFORE the primary must NOT rebind @ref
+    // to the echo (this silently wrote dependents against the wrong FK).
+    const echoedFirst = { customerId: 'echoed-c1', voucherId: 'real-v9', created: true };
+    expect(resolveOutputId(echoedFirst, 'accounting.create_receipt_voucher')).toBe('real-v9');
+    const reversed = { invoiceId: 'real-i7', customerId: 'echoed-c1', created: true };
+    expect(resolveOutputId(reversed, 'sales.create_invoice')).toBe('real-i7');
+  });
+
+  it('P0-7: falls back to convention for unannotated tools (backward compatible)', () => {
+    expect(resolveOutputId({ created: true, invoiceId: 'i-1' }, 'some.unknown_tool')).toBe('i-1');
+    expect(resolveOutputId({ created: true, invoiceId: 'i-1' })).toBe('i-1');
+  });
 });
 
 describe('substituteRefs with entity-style outputs', () => {
@@ -176,8 +192,7 @@ describe('substituteRefs with entity-style outputs', () => {
   });
 });
 
-describe('extractOutputScalars', () => {
-  it('keeps scalar fields, drops nested objects, caps size', () => {
+describe('extractOutputScalars', () => {  it('keeps scalar fields, drops nested objects, caps size', () => {
     const out = extractOutputScalars({
       id: 'x1', invoiceNumber: 'INV-1', total: 100, ok: true,
       lines: [{ a: 1 }], nested: { b: 2 }, big: 'y'.repeat(500),
@@ -239,5 +254,41 @@ describe('progress helpers', () => {
     expect(isTerminalBatchStatus('running')).toBe(false);
     expect(isTerminalBatchStatus('paused')).toBe(false);
     expect(isTerminalBatchStatus('pending')).toBe(false);
+  });
+});
+
+describe('truncateScalarsForPersist (P3 — no more NULL-on-overflow)', () => {
+  it('passes small payloads through untouched', () => {
+    const data = { created: true, invoiceId: 'i-1', total: 500 };
+    expect(truncateScalarsForPersist(data)).toEqual(data);
+  });
+
+  it('returns null for empty/null input (same as the old NULL path)', () => {
+    expect(truncateScalarsForPersist(null)).toBeNull();
+    expect(truncateScalarsForPersist({})).toBeNull();
+  });
+
+  it('keeps id-ish keys and drops long non-id values when over budget', () => {
+    const data: Record<string, string | number | boolean> = {
+      invoiceId: 'inv-uuid-1234',
+      customerId: 'cust-uuid-5678',
+      notes: 'x'.repeat(3000),
+      extra: 'y'.repeat(500),
+    };
+    const out = truncateScalarsForPersist(data)!;
+    expect(out).not.toBeNull();
+    expect(JSON.stringify(out).length).toBeLessThanOrEqual(RESULT_DATA_JSON_BUDGET);
+    // Ids survive (refs resolve after restart); the novels do not.
+    expect(out.invoiceId).toBe('inv-uuid-1234');
+    expect(out.customerId).toBe('cust-uuid-5678');
+    expect(out.notes).toBeUndefined();
+  });
+
+  it('truncates (not drops) an oversized id value', () => {
+    const data = { invoiceId: 'i'.repeat(3000) };
+    const out = truncateScalarsForPersist(data)!;
+    expect(JSON.stringify(out).length).toBeLessThanOrEqual(RESULT_DATA_JSON_BUDGET);
+    expect(typeof out.invoiceId).toBe('string');
+    expect((out.invoiceId as string).length).toBeGreaterThan(12);
   });
 });

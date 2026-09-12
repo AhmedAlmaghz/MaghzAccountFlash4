@@ -5,6 +5,7 @@ vi.mock('@/modules/inventory/api', () => ({
     createProductUnit: vi.fn(),
     updateProductUnit: vi.fn(),
     deleteProductUnit: vi.fn(),
+    getProductUnits: vi.fn(),
   },
 }));
 vi.mock('@/core/api', () => ({
@@ -41,6 +42,15 @@ const CATALOG = [
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getUnits).mockResolvedValue({ success: true, data: CATALOG } as never);
+  // Base row used by the U6 price-suggestion path (base price × factor).
+  vi.mocked(inventoryApi.getProductUnits).mockResolvedValue({
+    success: true,
+    data: [{
+      id: 'pu-base', companyId: ctx.companyId, productId: 'prod-1', unitId: 'u-piece',
+      factor: 1, salePrice: 1000, purchasePrice: 800, isBase: true,
+      isDefaultSale: false, isDefaultPurchase: false, unitName: 'حبة',
+    }] as never,
+  });
 });
 
 describe('inventory.create_product_unit', () => {
@@ -83,6 +93,31 @@ describe('inventory.create_product_unit', () => {
     expect(res.created).toBe(true);
     expect(vi.mocked(inventoryApi.createProductUnit)).toHaveBeenCalledWith(
       expect.objectContaining({ unitId: 'u-carton' }),
+    );
+  });
+
+  it('suggests omitted prices from the base unit price × factor instead of 0 (U6)', async () => {
+    vi.mocked(inventoryApi.createProductUnit).mockResolvedValue({ success: true, id: 'pu-2' } as never);
+    const res = (await findTool('inventory.create_product_unit').execute(
+      { productId: 'prod-1', unitName: 'كرتون', factor: 12 },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+    // base sale 1000 / purchase 800 × 12 → 12000 / 9600
+    expect(vi.mocked(inventoryApi.createProductUnit)).toHaveBeenCalledWith(
+      expect.objectContaining({ salePrice: 12000, purchasePrice: 9600 }),
+    );
+    expect(String(res.priceNote)).toContain('اقْتُرِحت');
+  });
+
+  it('never overwrites explicitly passed prices with the suggestion', async () => {
+    vi.mocked(inventoryApi.createProductUnit).mockResolvedValue({ success: true, id: 'pu-3' } as never);
+    await findTool('inventory.create_product_unit').execute(
+      { productId: 'prod-1', unitName: 'كرتون', factor: 12, salePrice: 35000 },
+      ctx,
+    );
+    expect(vi.mocked(inventoryApi.createProductUnit)).toHaveBeenCalledWith(
+      expect.objectContaining({ salePrice: 35000, purchasePrice: 9600 }),
     );
   });
 });

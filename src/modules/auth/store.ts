@@ -78,6 +78,7 @@ const FALLBACK_PERMISSIONS: Record<string, Permission[]> = {
     'core.view', 'accounting.view', 'accounting.create', 'accounting.edit', 'accounting.post',
     'inventory.view', 'inventory.create', 'inventory.edit',
     'sales.view', 'sales.create', 'sales.edit', 'sales.post',
+    'pos.view', 'pos.create', 'pos.edit', 'pos.post',
     'purchases.view', 'purchases.create', 'purchases.edit',
     'manufacturing.view', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post',
     'reports.view', 'reports.export',
@@ -96,6 +97,7 @@ const FALLBACK_PERMISSIONS: Record<string, Permission[]> = {
   ],
   sales_rep: [
     'sales.own', 'sales.create', 'sales.edit',
+    'pos.own', 'pos.create', 'pos.post',
     'inventory.own',
     'crm.own', 'crm.create', 'crm.edit',
     'reports.view',
@@ -103,7 +105,7 @@ const FALLBACK_PERMISSIONS: Record<string, Permission[]> = {
   ],
   viewer: [
     'core.view', 'accounting.view', 'inventory.view', 'sales.view',
-    'purchases.view', 'manufacturing.view', 'reports.view',
+    'purchases.view', 'manufacturing.view', 'pos.view', 'reports.view',
   ],
 };
 

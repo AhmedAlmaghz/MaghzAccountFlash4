@@ -57,7 +57,12 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
   const [cameraOpen, setCameraOpen] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const attachmentsRef = useRef<PreparedAttachment[]>([]);
-  attachmentsRef.current = attachments;
+  // P2 fix: never assign refs during render (react-hooks/refs + concurrent
+  // re-render hazard — two files resolving in the same tick could both read
+  // a stale ref and slip past the pending-duplicate check).
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
 
   const appendDraft = useCallback((block: string) => {
     setValue((v) => (v ? `${v.replace(/\s+$/, '')}\n\n${block}` : block));
@@ -76,14 +81,19 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
     if (list.length === 0) return;
     setExtracting(true);
     try {
+      // P2 fix: seed ONCE per drop and extend synchronously as each file
+      // resolves. The old code rebuilt the set from the (possibly stale)
+      // ref on every iteration — two files resolving in the same tick both
+      // saw the pre-drop state and slipped past the duplicate check.
+      const seen = new Set(attachmentsRef.current.map((a) => a.meta.sha256));
       for (const file of list) {
-        const pending = new Set(attachmentsRef.current.map((a) => a.meta.sha256));
         try {
-          const { attachment, duplicateOfPending } = await processAttachmentFile(file, pending);
+          const { attachment, duplicateOfPending } = await processAttachmentFile(file, seen);
           if (duplicateOfPending) {
             useToastStore.getState().addToast('error', t('ai.attach.duplicateInInput'));
             continue;
           }
+          seen.add(attachment.meta.sha256);
           if (sessionHashes().has(attachment.meta.sha256)) {
             useToastStore.getState().addToast('error', t('ai.attach.alreadyInSession'));
           }
@@ -254,9 +264,14 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         handleSend();
       }
 
-      // Escape — clear input
+      // Escape — clear input AND attachments. The old code cleared only the
+      // text while the chips (the source of truth at send time) stayed put:
+      // the textarea looked empty, the send button stayed enabled, and the
+      // user transmitted files they believed they had discarded.
       if (e.key === 'Escape') {
         setValue('');
+        for (const a of attachmentsRef.current) dropAttachmentBlob(a.meta.id);
+        setAttachments([]);
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto';
         }

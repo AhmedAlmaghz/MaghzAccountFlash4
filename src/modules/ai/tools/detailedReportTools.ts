@@ -2,7 +2,6 @@ import type { ToolDefinition } from '../types';
 import { getDbAdapter } from '@/core/database/adapters';
 import { guardSqlQuery } from '../security/sqlGuard';
 import { localTodayOr, localMonthStart } from '../engine/dateUtils';
-import { salesApi } from '@/modules/sales/api';
 
 async function guardedQuery(sql: string, params: unknown[]) {
   const check = guardSqlQuery(sql);
@@ -101,22 +100,37 @@ export const detailedReportTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
+      // P2 fix: the old code fetched the newest N quotations via the
+      // paginated API (no date filter exists there) then filtered dates
+      // CLIENT-side — any quotation older than the window vanished with
+      // totalValue: 0 even when hundreds matched. Same det+agg SQL pattern
+      // as the sibling tools: dates and totals computed server-side.
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
-      const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, limit, {
-        status: typeof args.status === 'string' ? args.status : undefined,
-        customerId: typeof args.customerId === 'string' ? args.customerId : undefined,
-      });
-      if (!res.success || !res.data) return { error: 'فشل جلب عروض الأسعار' };
-      const filtered = res.data.items.filter((q) => q.date >= from && q.date <= to);
-      const totalVal = filtered.reduce((s, q) => s + (num(q.totalAmount) || 0), 0);
+      const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
+      const cnd: string[] = ['q.company_id=$1::uuid', 'q.date BETWEEN $2 AND $3'];
+      const p: unknown[] = [ctx.companyId, from, to];
+      if (typeof args.status === 'string' && args.status) { p.push(args.status); cnd.push(`q.status=$${p.length}`); }
+      if (typeof args.customerId === 'string' && args.customerId) { p.push(args.customerId); cnd.push(`q.customer_id=$${p.length}::uuid`); }
+      if (typeof args.createdBy === 'string' && args.createdBy) { p.push(args.createdBy); cnd.push(`q.created_by=$${p.length}::uuid`); }
+      const w = cnd.join(' AND ');
+      p.push(limit);
+
+      const [det, agg] = await Promise.all([
+        guardedQuery(`SELECT q.quotation_number,q.date,q.expiry_date,q.total_amount,q.status,c.name AS customer_name,u.full_name AS created_by_name FROM quotations q LEFT JOIN customers c ON q.customer_id=c.id LEFT JOIN users u ON q.created_by=u.id WHERE ${w} ORDER BY q.date ${sDir} LIMIT $${p.length}`, p),
+        guardedQuery(`SELECT COALESCE(SUM(q.total_amount),0) AS total,COUNT(*)::int AS cnt FROM quotations q WHERE ${w}`, p.slice(0, -1)),
+      ]);
+      if (!det.success) return { error: 'فشل جلب عروض الأسعار' };
+      const rows = (det.rows || []).map((r: Record<string, unknown>) => ({
+        number: String(r.quotation_number), customer: String(r.customer_name || ''),
+        date: String(r.date), expiryDate: String(r.expiry_date || ''), total: num(r.total_amount), status: String(r.status),
+        createdBy: String(r.created_by_name || ''),
+      }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
-        period: { from, to }, totalDatabase: res.data.total, filteredCount: filtered.length,
-        totalValue: Math.round(totalVal * 100) / 100,
-        quotations: filtered.map((q) => ({
-          number: String(q.quotationNumber), customer: String(q.customer?.name || ''),
-          date: String(q.date), expiryDate: String(q.expiryDate || ''), total: num(q.totalAmount), status: String(q.status),
-        })),
+        period: { from, to }, count: rows.length,
+        totalValue: Math.round(num(a.total) * 100) / 100,
+        quotations: rows,
       };
     },
   },
@@ -137,7 +151,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
-      const cnd: string[] = ['sr.company_id=$1::uuid', 'sr.date BETWEEN $2 AND $3'];
+      const cnd: string[] = ['sr.company_id=$1::uuid', 'sr.date BETWEEN $2 AND $3', "sr.status!='cancelled'"];
       const p: unknown[] = [ctx.companyId, from, to];
       if (typeof args.customerId === 'string' && args.customerId) { p.push(args.customerId); cnd.push(`sr.customer_id=$${p.length}::uuid`); }
       if (typeof args.createdBy === 'string' && args.createdBy) { p.push(args.createdBy); cnd.push(`sr.created_by=$${p.length}::uuid`); }
@@ -327,7 +341,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
-      const cnd: string[] = ['po.company_id=$1::uuid', 'po.date BETWEEN $2 AND $3'];
+      const cnd: string[] = ['po.company_id=$1::uuid', 'po.date BETWEEN $2 AND $3', "po.status!='cancelled'"];
       const p: unknown[] = [ctx.companyId, from, to];
       if (typeof args.supplierId === 'string' && args.supplierId) { p.push(args.supplierId); cnd.push(`po.supplier_id=$${p.length}::uuid`); }
       if (typeof args.status === 'string' && args.status) { p.push(args.status); cnd.push(`po.status=$${p.length}`); }
@@ -364,7 +378,7 @@ export const detailedReportTools: ToolDefinition[] = [
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
-      const cnd: string[] = ['pr.company_id=$1::uuid', 'pr.date BETWEEN $2 AND $3'];
+      const cnd: string[] = ['pr.company_id=$1::uuid', 'pr.date BETWEEN $2 AND $3', "pr.status!='cancelled'"];
       const p: unknown[] = [ctx.companyId, from, to];
       if (typeof args.supplierId === 'string' && args.supplierId) { p.push(args.supplierId); cnd.push(`pr.supplier_id=$${p.length}::uuid`); }
       if (typeof args.createdBy === 'string' && args.createdBy) { p.push(args.createdBy); cnd.push(`pr.created_by=$${p.length}::uuid`); }
@@ -532,7 +546,7 @@ export const detailedReportTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const limit = Math.min(Math.max(num(args.limit) || 50, 5), 200);
-      const sf = ((args.sortField || 'quantity') === 'value') ? 'stock_value' : (args.sortField === 'sku') ? 'p.code' : 's.quantity';
+      const sf = ((args.sortField || 'quantity') === 'value') ? 'stock_value' : (args.sortField === 'sku') ? 'p.sku' : 's.quantity';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const cnd: string[] = ['s.company_id=$1::uuid'];
       const p: unknown[] = [ctx.companyId];
@@ -617,9 +631,9 @@ export const detailedReportTools: ToolDefinition[] = [
          FROM stock_movements sm
          LEFT JOIN products p ON sm.product_id=p.id
          LEFT JOIN warehouses w ON sm.warehouse_id=w.id
-         LEFT JOIN sales_invoices si ON sm.reference IS NOT NULL AND sm.type='out' AND sm.reference=si.id::text
+         LEFT JOIN sales_invoices si ON sm.reference IS NOT NULL AND sm.type='out' AND sm.reference=si.invoice_number AND si.company_id=sm.company_id
          LEFT JOIN customers c ON si.customer_id=c.id
-         LEFT JOIN purchase_invoices pi ON sm.reference IS NOT NULL AND sm.type='in' AND sm.reference=pi.id::text
+         LEFT JOIN purchase_invoices pi ON sm.reference IS NOT NULL AND sm.type='in' AND sm.reference=pi.invoice_number AND pi.company_id=sm.company_id
          LEFT JOIN suppliers s ON pi.supplier_id=s.id
          WHERE sm.company_id=$1::uuid AND DATE(sm.created_at) BETWEEN $2 AND $3
          ORDER BY sm.created_at ${sDir} LIMIT $4`, [ctx.companyId, from, to, limit]);
@@ -662,9 +676,9 @@ export const detailedReportTools: ToolDefinition[] = [
          FROM stock_movements sm
          LEFT JOIN products p ON sm.product_id=p.id
          LEFT JOIN warehouses w ON sm.warehouse_id=w.id
-         LEFT JOIN sales_invoices si ON sm.reference IS NOT NULL AND sm.type='out' AND sm.reference=si.id::text
+         LEFT JOIN sales_invoices si ON sm.reference IS NOT NULL AND sm.type='out' AND sm.reference=si.invoice_number AND si.company_id=sm.company_id
          LEFT JOIN customers c ON si.customer_id=c.id
-         LEFT JOIN purchase_invoices pi ON sm.reference IS NOT NULL AND sm.type='in' AND sm.reference=pi.id::text
+         LEFT JOIN purchase_invoices pi ON sm.reference IS NOT NULL AND sm.type='in' AND sm.reference=pi.invoice_number AND pi.company_id=sm.company_id
          LEFT JOIN suppliers s ON pi.supplier_id=s.id
          WHERE ${w} ORDER BY sm.created_at ${sDir} LIMIT $${p.length}`, p);
       if (!res.success) return { error: res.error || 'فشل' };

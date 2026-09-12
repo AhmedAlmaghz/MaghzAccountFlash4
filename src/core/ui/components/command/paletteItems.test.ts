@@ -6,9 +6,9 @@ const allPerms = () => true;
 const perm = (granted: string[]) => (p: string) => granted.includes(p);
 
 describe('paletteItems registry', () => {
-  it('covers all 11 modules', () => {
+  it('covers all 12 modules', () => {
     const modules = new Set(paletteItems.map((i) => i.module));
-    expect(modules.size).toBe(11);
+    expect(modules.size).toBe(12);
   });
 
   it('has unique ids and paths', () => {

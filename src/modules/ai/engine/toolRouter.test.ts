@@ -121,4 +121,23 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     const routed = routeToolsForCycle([userMsg('مرحبا')]);
     expect(describeRouting(routed)).toBeNull();
   });
+
+  it('P1: intent-routed domains stay represented when the cap slices (round-robin)', () => {
+    // Old behavior sliced by REGISTRY insertion order: a broad intent kept
+    // the first 48 registered tools (reads/searches/sales) and silently
+    // dropped the hr./crm./manufacturing. tools the intent had routed.
+    // New order: always-on core, then intent domains ROUND-ROBIN, then rest.
+    seedRegistry();
+    for (let i = 0; i < 50; i++) registerTool(makeTool(`reports.extra_${i}`, 'reports.view'));
+    // Broad intent matches the 9-domain group → massive overflow forces a cut
+    const routed = routeToolsForCycle([userMsg('تقرير تحليل شامل قارن النمو')]);
+    expect(routed.dropped).toBeGreaterThan(0);
+    const names = routed.tools.map((t) => t.name);
+    // hr tools (registered deep at positions 35-54) must survive the cut
+    expect(names).toContain('hr.tool_0');
+    expect(names).toContain('hr.tool_1');
+    // …and the always-on core is protected too
+    expect(names).toContain('app.navigate');
+    expect(names).toContain('ai.enqueue_batch');
+  });
 });

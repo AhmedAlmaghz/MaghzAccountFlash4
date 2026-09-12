@@ -160,6 +160,8 @@ import aiChatAttachments from '@root/drizzle/0023_ai_chat_attachments.sql?raw';
 import aiJobItemLabels from '@root/drizzle/0024_ai_job_item_labels.sql?raw';
 import aiJobRefOutputs from '@root/drizzle/0025_ai_job_ref_outputs.sql?raw';
 import stockUniqueIndex from '@root/drizzle/0026_stock_unique_index.sql?raw';
+import posModule from '@root/drizzle/0027_pos_module.sql?raw';
+import aiJobItemLeases from '@root/drizzle/0028_ai_job_item_leases.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -189,6 +191,8 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0024_ai_job_item_labels', sql: aiJobItemLabels },
   { name: '0025_ai_job_ref_outputs', sql: aiJobRefOutputs },
   { name: '0026_stock_unique_index', sql: stockUniqueIndex },
+  { name: '0027_pos_module', sql: posModule },
+  { name: '0028_ai_job_item_leases', sql: aiJobItemLeases },
 ];
 
 /**
@@ -1249,12 +1253,18 @@ export const pgliteAdapter: DbAdapter = {
 
   async updateCompany(data: any, updatedBy?: string) {
     if (!data?.id) return { success: false, error: 'Company id required' };
+    // P1 fix: COALESCE every optional column (mirrors the Electron RPC) —
+    // sparse payloads (e.g. AI update_company sending only {name}) preserve
+    // the rest instead of nulling them.
     return this.query(
-      `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7,
-              logo_url = $8, date_format = $9, decimal_places = $10::numeric, calendar = $11, fiscal_year_start = $12::date,
+      `UPDATE companies SET name = $1, name_en = COALESCE($2, name_en), currency = COALESCE($3, currency),
+              tax_number = COALESCE($4, tax_number), address = COALESCE($5, address), phone = COALESCE($6, phone),
+              email = COALESCE($7, email), logo_url = COALESCE($8, logo_url), date_format = COALESCE($9, date_format),
+              decimal_places = COALESCE($10::numeric, decimal_places), calendar = COALESCE($11, calendar),
+              fiscal_year_start = COALESCE($12::date, fiscal_year_start),
               updated_by = $13, updated_at = NOW() WHERE id = $14`,
       [data.name, data.nameEn ?? null, data.currency ?? null, data.taxNumber ?? null, data.address ?? null, data.phone ?? null,
-       data.email ?? null, data.logoUrl ?? null, data.dateFormat ?? null, data.decimalPlaces ?? 2, data.calendar ?? 'gregorian',
+       data.email ?? null, data.logoUrl ?? null, data.dateFormat ?? null, data.decimalPlaces ?? null, data.calendar ?? null,
        data.fiscalYearStart ?? null, updatedBy || null, data.id]
     );
   },

@@ -14,6 +14,8 @@ interface AiChatState {
   addMessage: (msg: Omit<ChatMessage, 'id' | 'createdAt'>) => string;
   updateMessageContent: (messageId: string, content: string) => void;
   removeMessage: (messageId: string) => void;
+  /** Drop every message after (and including) the given index — used by regenerate. */
+  truncateMessages: (keepCount: number) => void;
   updateToolCall: (messageId: string, patch: Partial<PendingToolCall>) => void;
   setProcessing: (value: boolean) => void;
   clearMessages: () => void;
@@ -43,6 +45,11 @@ export const useAiStore = create<AiChatState>()((set) => ({
   removeMessage: (messageId) =>
     set((state) => ({
       messages: state.messages.filter((m) => m.id !== messageId),
+    })),
+
+  truncateMessages: (keepCount) =>
+    set((state) => ({
+      messages: keepCount <= 0 ? [] : state.messages.slice(0, keepCount),
     })),
 
   updateToolCall: (messageId, patch) =>

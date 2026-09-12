@@ -61,6 +61,12 @@ const CustomersPage = React.lazy(() => import('@/modules/sales/components/Custom
 const QuotationsPage = React.lazy(() => import('@/modules/sales/components/QuotationsPage'));
 const SalesReturnsPage = React.lazy(() => import('@/modules/sales/components/SalesReturnsPage'));
 
+// POS pages — terminal is a full-screen shell OUTSIDE AppLayout (no sidebar)
+const PosTerminalPage = React.lazy(() => import('@/modules/pos/components/PosTerminalPage'));
+const PosShiftsPage = React.lazy(() => import('@/modules/pos/components/PosShiftsPage'));
+const PosSettingsPage = React.lazy(() => import('@/modules/pos/components/PosSettingsPage'));
+const PosReportsPage = React.lazy(() => import('@/modules/pos/components/PosReportsPage'));
+
 // Purchases sub-pages
 const PurchaseInvoicesPage = React.lazy(() => import('@/modules/purchases/components/PurchaseInvoicesPage'));
 const PurchaseOrdersPage = React.lazy(() => import('@/modules/purchases/components/PurchaseOrdersPage'));
@@ -139,7 +145,7 @@ const ProtectedRoute = () => {
   return <Outlet />;
 };
 
-type Module = 'core' | 'accounting' | 'inventory' | 'sales' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings' | 'ai';
+type Module = 'core' | 'accounting' | 'inventory' | 'sales' | 'pos' | 'purchases' | 'manufacturing' | 'hr' | 'crm' | 'reports' | 'settings' | 'ai';
 
 // Route-level RBAC guard. Hiding a menu item is not protection — the URL is
 // still reachable directly. Each module's pages are wrapped so a user without
@@ -309,7 +315,23 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="ai" />}>
               <Route path="/ai" element={withSuspense(AiChatPage)} />
             </Route>
+
+            {/* POS management pages (inside the app shell) */}
+            <Route element={<PermissionRoute module="pos" />}>
+              <Route path="/pos/shifts" element={withSuspense(PosShiftsPage)} />
+              <Route path="/pos/reports" element={withSuspense(PosReportsPage)} />
+              <Route path="/pos/settings" element={withSuspense(PosSettingsPage)} />
+            </Route>
           </Route>
+        </Route>
+
+        {/* POS terminal — a FULL-SCREEN shell that is a SIBLING of the
+            AppLayout route (own h-dvh layout, no sidebar/header), still under
+            ProtectedRoute + PermissionRoute. Listed AFTER the AppLayout block
+            so /pos/shifts and /pos/settings keep matching their in-shell
+            routes above. */}
+        <Route element={<PermissionRoute module="pos" />}>
+          <Route path="/pos" element={withSuspense(PosTerminalPage)} />
         </Route>
       </Routes>
     </Router>

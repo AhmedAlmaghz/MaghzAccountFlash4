@@ -44,6 +44,10 @@ export const salesInvoices = pgTable('sales_invoices', {
   status: varchar('status', { length: 20 }).default('draft'),
   paymentType: varchar('payment_type', { length: 10 }).notNull().default('credit'),
   cashBoxId: uuid('cash_box_id'),
+  // POS receipt marker (separates POS sales in every list/report) + the
+  // cashier shift that produced it (SET NULL keeps history if shift removed).
+  isPos: boolean('is_pos').notNull().default(false),
+  shiftId: uuid('shift_id'),
   notes: text('notes'),
   attachments: jsonb('attachments').default([]).notNull(),
   createdBy: uuid('created_by'),

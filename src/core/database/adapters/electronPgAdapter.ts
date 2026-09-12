@@ -149,6 +149,20 @@ export interface ElectronDB extends PreloadDB {
     deleteReturn(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     postReturn(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
+  // POS typed RPC (module 13). Session-derived companyId + cashier userId.
+  // checkout itself stays renderer-composed (journal machinery) and ships
+  // through the guarded transaction channel; these cover products, shifts
+  // and Z-report reads/writes.
+  pos?: {
+    getProducts(payload?: { search?: string; limit?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getActiveShift(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    openShift(payload: { cashBoxId: string; openingAmount: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    closeShift(payload: { id: string; countedAmount: number; notes?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getShiftsPaginated(payload: { page: number; pageSize: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getShiftSummary(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getShiftInvoices(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReceipt(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
   // Session-derived company scoping (Phase 4 slice 3). No company id in
   // payload; the main process uses the authenticated session. The renderer
   // can never reference another company's row.
@@ -241,6 +255,7 @@ type ElectronRpcSurface = NonNullable<Required<ElectronDB>['accounting']>
   & NonNullable<Required<ElectronDB>['manufacturing']>
   & NonNullable<Required<ElectronDB>['hr']>
   & NonNullable<Required<ElectronDB>['sales']>
+  & NonNullable<Required<ElectronDB>['pos']>
   & NonNullable<Required<ElectronDB>['core']>;
 
 function getRPC(): ElectronRpcSurface {
@@ -253,9 +268,10 @@ function getRPC(): ElectronRpcSurface {
     const mfg = db.manufacturing;
     const hr = db.hr;
     const sales = db.sales;
+    const pos = db.pos;
     const core = db.core;
-    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !core) {
-      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/core)');
+    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !core) {
+      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/core)');
     }
     return {
       ...acc,
@@ -265,6 +281,7 @@ function getRPC(): ElectronRpcSurface {
       ...mfg,
       ...hr,
       ...sales,
+      ...pos,
       ...core,
     } as ElectronRpcSurface;
   }

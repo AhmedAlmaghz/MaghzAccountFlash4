@@ -134,6 +134,7 @@ describe('create_and_post wizards — cash support', () => {
 
   it('rolls back the draft when posting fails (cash or credit)', async () => {
     vi.mocked(salesApi.postInvoice).mockResolvedValue({ success: false, error: 'sequence' } as never);
+    vi.mocked(salesApi.deleteInvoice).mockResolvedValue({ success: true } as never);
     const tool = findTool('sales.create_and_post_invoice')!;
     const res = (await tool.execute(
       { customerId: 'c-1', lines: LINES, paymentType: 'cash', cashBoxId: 'cb-1' },
@@ -141,5 +142,19 @@ describe('create_and_post wizards — cash support', () => {
     )) as Record<string, unknown>;
     expect(res.error).toMatch(/فشل الترحيل/);
     expect(salesApi.deleteInvoice).toHaveBeenCalledWith('inv-1', ctx.companyId);
+    // P2: the rollback result is verified, not asserted blindly.
+    expect(res.rolledBack).toBe(true);
+  });
+
+  it('reports honestly when the rollback delete itself fails', async () => {
+    vi.mocked(salesApi.postInvoice).mockResolvedValue({ success: false, error: 'sequence' } as never);
+    vi.mocked(salesApi.deleteInvoice).mockResolvedValue({ success: false, error: 'locked' } as never);
+    const tool = findTool('sales.create_and_post_invoice')!;
+    const res = (await tool.execute(
+      { customerId: 'c-1', lines: LINES, paymentType: 'cash', cashBoxId: 'cb-1' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.rolledBack).toBe(false);
+    expect(String(res.error)).toMatch(/يدوياً/);
   });
 });

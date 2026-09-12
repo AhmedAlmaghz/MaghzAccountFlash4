@@ -3,6 +3,7 @@ import { aiApi } from '../api/index';
 import { enqueueBatch, getBatch, listBatches } from '../api/batch';
 import { summarizeBatchProgress } from '../engine/batchQueue';
 import { BATCH_CREATE_CHUNK } from '../api/batchTypes';
+import { isBatchActive } from '../engine/batchRunner';
 
 /**
  * Batch tools — ONE approval for MANY operations.
@@ -135,10 +136,15 @@ export const batchTools: ToolDefinition[] = [
         items,
       });
       if (!res.success || !res.data) return { error: res.error || 'فشل إنشاء الدفعة' };
+      // P2: disclose dedup — exact-duplicate items are dropped by the
+      // idempotency key (ON CONFLICT DO NOTHING); the model must know its
+      // batch shrank instead of wondering where items went.
+      const deduped = res.data.deduped ?? 0;
       return {
         batchId: res.data.batchId,
         total: res.data.total,
-        summary: `أُنشئت الدفعة (${res.data.total} عملية) — ستبدأ فور موافقتك، وتستطيع متابعة التقدم لحظة بلحظة`,
+        ...(deduped > 0 ? { deduped, dedupNote: `أُسقط ${deduped} عنصراً مكرراً تماماً (نفس الأداة والوسائط) — لن تُنفَّذ مرتين` } : {}),
+        summary: `أُنشئت الدفعة (${res.data.total} عملية${deduped > 0 ? ` بعد إسقاط ${deduped} مكرر` : ''}) — ستبدأ فور موافقتك، وتستطيع متابعة التقدم لحظة بلحظة`,
         startBatchRun: res.data.batchId,
       };
     },
@@ -161,6 +167,18 @@ export const batchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const batchId = str(args.batchId);
       if (!batchId) return { error: 'batchId مطلوب — استخدم ai.batch_status لعرض الدفعات' };
+      // P1 fix: a worker may already drive this batch in THIS renderer (the
+      // card shows live progress). Re-approving "resume" must not report a
+      // fresh resume — and must not request a second worker loop. Report
+      // honestly with no startBatchRun (runBatch would short-circuit anyway,
+      // but the model/user deserve the truth, not "resumed").
+      if (isBatchActive(batchId)) {
+        return {
+          batchId,
+          alreadyRunning: true,
+          summary: 'الدفعة تعمل حالياً في هذه الجلسة — تقدّمها ظاهر على بطاقتها، لا حاجة لاستئناف.',
+        };
+      }
       const got = await aiApi.batchGet(ctx.companyId, ctx.userId, batchId);
       if (!got.success || !got.data) return { error: got.error || 'الدفعة غير موجودة' };
       const detail = got.data;

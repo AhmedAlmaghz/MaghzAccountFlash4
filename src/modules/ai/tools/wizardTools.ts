@@ -139,9 +139,14 @@ export const wizardTools: ToolDefinition[] = [
       // Step 2: Post the invoice
       const postRes = await salesApi.postInvoice(invoiceId, ctx.companyId);
       if (!postRes.success) {
-        // Rollback: delete the draft invoice
-        await salesApi.deleteInvoice(invoiceId, ctx.companyId);
-        return { error: `تم إنشاء الفاتورة لكن فشل الترحيل: ${postRes.error}. تم التراجع عن الإنشاء.` };
+        // Rollback: delete the draft invoice (P2: verified — an unchecked
+        // delete that fails leaves an orphan draft the model thinks is gone).
+        const rb = await salesApi.deleteInvoice(invoiceId, ctx.companyId);
+        return {
+          error: `تم إنشاء الفاتورة لكن فشل الترحيل: ${postRes.error}.` +
+            (rb.success ? ' تم التراجع عن الإنشاء.' : ` تعذّر حذف المسودة تلقائياً — راجع الفاتورة ${docNumber.number} يدوياً.`),
+          rolledBack: rb.success === true,
+        };
       }
 
       return {
@@ -156,6 +161,9 @@ export const wizardTools: ToolDefinition[] = [
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
+        ...(resolved.some((l) => l.priceMismatchNote)
+          ? { priceMismatchNotes: resolved.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote) }
+          : {}),
         note: paymentType === 'cash'
           ? 'فاتورة نقدية مرحّلة — المبلغ مُقيَّد على الخزنة ولا يوجد دين على العميل'
           : undefined,
@@ -240,8 +248,12 @@ export const wizardTools: ToolDefinition[] = [
       // Step 2: Post the invoice
       const postRes = await purchasesApi.postInvoice(invoiceId, ctx.companyId);
       if (!postRes.success) {
-        await purchasesApi.deleteInvoice(invoiceId, ctx.companyId);
-        return { error: `تم إنشاء الفاتورة لكن فشل الترحيل: ${postRes.error}. تم التراجع عن الإنشاء.` };
+        const rb = await purchasesApi.deleteInvoice(invoiceId, ctx.companyId);
+        return {
+          error: `تم إنشاء الفاتورة لكن فشل الترحيل: ${postRes.error}.` +
+            (rb.success ? ' تم التراجع عن الإنشاء.' : ` تعذّر حذف المسودة تلقائياً — راجع الفاتورة ${docNumber.number} يدوياً.`),
+          rolledBack: rb.success === true,
+        };
       }
 
       return {
@@ -256,6 +268,9 @@ export const wizardTools: ToolDefinition[] = [
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
+        ...(resolved.some((l) => l.priceMismatchNote)
+          ? { priceMismatchNotes: resolved.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote) }
+          : {}),
         note: paymentType === 'cash'
           ? 'فاتورة مشتريات نقدية مرحّلة — المبلغ مُخصم من الخزنة ولا توجد ذمة للمورد'
           : undefined,
@@ -361,8 +376,16 @@ export const wizardTools: ToolDefinition[] = [
       });
       if (!oppRes.success) {
         // Compensating rollback: restore the lead's previous status.
-        await crmApi.updateLead(leadId, ctx.companyId, { status: lead.status });
-        return { error: oppRes.error || 'فشل إنشاء الفرصة — تم التراجع عن التأهيل', step: 'opportunity', rolledBack: true };
+        // P2 fix: verify the compensation — an unchecked restore that fails
+        // leaves the lead qualified with no opportunity while the model
+        // believes everything was rolled back.
+        const rb = await crmApi.updateLead(leadId, ctx.companyId, { status: lead.status });
+        return {
+          error: oppRes.error || 'فشل إنشاء الفرصة' + (rb.success ? ' — تم التراجع عن التأهيل' : ' — وتعذّر التراجع عن التأهيل (راجع حالة العميل يدوياً)'),
+          step: 'opportunity',
+          rolledBack: rb.success === true,
+          ...(rb.success ? {} : { cleanupError: rb.error || 'unknown' }),
+        };
       }
 
       // Step 3: follow-up task due in N days (rolled back on failure).
@@ -380,9 +403,18 @@ export const wizardTools: ToolDefinition[] = [
         opportunityId: oppRes.id,
       });
       if (!taskRes.success) {
-        if (oppRes.id) await crmApi.deleteOpportunity(oppRes.id, ctx.companyId);
-        await crmApi.updateLead(leadId, ctx.companyId, { status: lead.status });
-        return { error: taskRes.error || 'فشل إنشاء مهمة المتابعة — تم التراجع الكامل', step: 'task', rolledBack: true };
+        const rbOpp = oppRes.id ? await crmApi.deleteOpportunity(oppRes.id, ctx.companyId) : { success: true };
+        const rbLead = await crmApi.updateLead(leadId, ctx.companyId, { status: lead.status });
+        const fullyRolledBack = rbOpp.success === true && rbLead.success === true;
+        return {
+          error: taskRes.error || 'فشل إنشاء مهمة المتابعة' +
+            (fullyRolledBack
+              ? ' — تم التراجع الكامل'
+              : ` — تراجع جزئي (حذف الفرصة: ${rbOpp.success ? 'تم' : 'فشل'}، استعادة العميل: ${rbLead.success ? 'تمت' : 'فشلت'}) — راجع السجلات يدوياً`),
+          step: 'task',
+          rolledBack: fullyRolledBack,
+          ...(!fullyRolledBack ? { cleanupError: [rbOpp.success ? null : rbOpp.error, rbLead.success ? null : rbLead.error].filter(Boolean).join('; ') || 'unknown' } : {}),
+        };
       }
 
       return {
@@ -409,7 +441,9 @@ export const wizardTools: ToolDefinition[] = [
         productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
         fromWarehouseId: { type: 'string', description: 'معرف المستودع المصدر (من search.warehouses)' },
         toWarehouseId: { type: 'string', description: 'معرف المستودع الوجهة (من search.warehouses)' },
-        quantity: { type: 'number', description: 'الكمية المنقولة' },
+        quantity: { type: 'number', description: 'الكمية المنقولة (بالوحدة المذكورة أو الأساسية)' },
+        unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري' },
+        unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
       },
       required: ['productId', 'fromWarehouseId', 'toWarehouseId', 'quantity'],
     },
@@ -426,18 +460,38 @@ export const wizardTools: ToolDefinition[] = [
       if (fromWarehouseId === toWarehouseId) return { error: 'لا يمكن التحويل لنفس المستودع' };
       if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
 
+      // M4: transfer_lines carries NO unit columns — resolve any named unit
+      // to base HERE (same contract as inventory.create_stock_transfer).
+      const { resolveBaseQty } = await import('./writeTools/shared');
+      const unitId = str(args.unitId);
+      const unitName = str(args.unitName);
+      let baseQty = quantity;
+      let unitNote: string | undefined;
+      if (unitId || unitName) {
+        const resolved = await resolveBaseQty(ctx.companyId, productId, quantity, { unitId, unitName });
+        if ('error' in resolved) return { error: resolved.error };
+        baseQty = resolved.baseQuantity;
+        if (resolved.factor !== 1) {
+          unitNote = `${quantity} ${resolved.unitName || ''} ≈ ${baseQty} بالأساسية`;
+        }
+      }
+
       // Use the internal adapter directly for this multi-step operation
       const { getDbAdapter } = await import('@/core/database/adapters');
       const adapter = await getDbAdapter();
 
-      // Check source stock before creating any document
+      // Friendly pre-check with an atomic floor: SELECT-then-UPDATE races
+      // (concurrent transfers / manufacturing issues) could drive stock
+      // negative, so completeStockTransfer ALSO enforces the floor INSIDE
+      // its transaction (guard SELECT aborts everything on shortfall) —
+      // this message is just the early, readable refusal.
       const srcCheck = await adapter.query(
         'SELECT quantity FROM stock WHERE product_id = $1::uuid AND warehouse_id = $2::uuid AND company_id = $3::uuid',
         [productId, fromWarehouseId, ctx.companyId]
       );
       const currentQty = Number(srcCheck.rows?.[0]?.quantity ?? 0);
-      if (currentQty < quantity) {
-        return { error: `الكمية غير متوفرة في المستودع المصدر. المتاح: ${currentQty}، المطلوب: ${quantity}` };
+      if (currentQty < baseQty) {
+        return { error: `الكمية غير متوفرة في المستودع المصدر. المتاح: ${currentQty}، المطلوب: ${baseQty}${unitNote ? ` (${unitNote})` : ''}` };
       }
 
       // Generate a sequential transfer number and create the numbered document
@@ -449,43 +503,36 @@ export const wizardTools: ToolDefinition[] = [
         toWarehouseId,
         date: today(),
         transferNumber: trfNum.number,
-        notes: `تحويل تلقائي عبر المساعد: ${quantity} وحدة`,
-        status: 'completed',
-        lines: [{ productId, quantity }],
+        notes: `تحويل تلقائي عبر المساعد: ${baseQty} وحدة${unitNote ? ` (${unitNote})` : ''}`,
+        status: 'draft',
+        lines: [{ productId, quantity: baseQty }],
       });
-      if (!docRes.success) return { error: docRes.error || 'فشل إنشاء مستند التحويل' };
+      if (!docRes.success || !docRes.id) return { error: docRes.error || 'فشل إنشاء مستند التحويل' };
 
-      // Step 1: Deduct from source
-      const deductRes = await adapter.query(
-        `UPDATE stock SET quantity = quantity - $1::numeric, updated_at = NOW()
-         WHERE product_id = $2::uuid AND warehouse_id = $3::uuid AND company_id = $4::uuid`,
-        [quantity, productId, fromWarehouseId, ctx.companyId]
-      );
-      if (!deductRes.success) {
+      // P1 fix: the old code hand-rolled deduct/add UPDATEs here — no
+      // stock_movements rows (the movements register stayed blind), a
+      // check-then-act race with no floor, and a manual rollback whose own
+      // failure was unchecked. completeStockTransfer() is ONE atomic
+      // transaction: ensure-destination + 2 movement rows + both stock
+      // updates + floor guard + status flip. On failure the draft survives
+      // honestly (retryable via inventory.post_stock_transfer... delete +
+      // recreate), never a half-moved limbo.
+      const doneRes = await inventoryApi.completeStockTransfer(String(docRes.id), ctx.companyId);
+      if (!doneRes.success) {
         await inventoryApi.deleteStockTransfer(String(docRes.id), ctx.companyId);
-        return { error: 'فشل إنقاص المخزون من المستودع المصدر' };
-      }
-
-      // Step 2: Add to destination (insert if not exists, update if exists).
-      // stock has NO created_at column — only updated_at (0000_init.sql).
-      // The unique index on (company_id, product_id, warehouse_id) is
-      // created by migration 0026.
-      const addRes = await adapter.query(
-        `INSERT INTO stock (company_id, product_id, warehouse_id, quantity, updated_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, NOW())
-         ON CONFLICT (company_id, product_id, warehouse_id)
-         DO UPDATE SET quantity = stock.quantity + $4::numeric, updated_at = NOW()`,
-        [ctx.companyId, productId, toWarehouseId, quantity]
-      );
-      if (!addRes.success) {
-        // Rollback: restore source + remove the numbered document
-        await adapter.query(
-          `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW()
-           WHERE product_id = $2::uuid AND warehouse_id = $3::uuid AND company_id = $4::uuid`,
-          [quantity, productId, fromWarehouseId, ctx.companyId]
-        );
-        await inventoryApi.deleteStockTransfer(String(docRes.id), ctx.companyId);
-        return { error: `فشل إضافة المخزون للمستودع الوجهة. تم التراجع: ${addRes.error}` };
+        // The atomic floor fires as PG "division by zero" — translate it to
+        // the shortage message with FRESH numbers (stock moved since the
+        // pre-check above); anything else passes through verbatim.
+        const rawErr = doneRes.error || 'سبب غير معروف';
+        if (/division by zero/i.test(rawErr)) {
+          const fresh = await adapter.query(
+            'SELECT quantity FROM stock WHERE product_id = $1::uuid AND warehouse_id = $2::uuid AND company_id = $3::uuid',
+            [productId, fromWarehouseId, ctx.companyId]
+          );
+          const freshQty = Number(fresh.rows?.[0]?.quantity ?? 0);
+          return { error: `الكمية غير متوفرة في المستودع المصدر (تغيّرت أثناء التنفيذ). المتاح الآن: ${freshQty}، المطلوب: ${baseQty} — حُذفت المسودة (${trfNum.number}) تلقائياً` };
+        }
+        return { error: `أُنشئ مستند التحويل (${trfNum.number}) لكن فشل التنفيذ: ${rawErr} — حُذفت المسودة تلقائياً` };
       }
 
       return {
@@ -495,8 +542,9 @@ export const wizardTools: ToolDefinition[] = [
         productId,
         fromWarehouseId,
         toWarehouseId,
-        quantity,
-        note: `تم تحويل ${quantity} وحدة بنجاح — رقم التحويل: ${trfNum.number}`,
+        quantity: baseQty,
+        ...(unitNote ? { unitConversion: unitNote } : {}),
+        note: `تم تحويل ${baseQty} وحدة بنجاح — رقم التحويل: ${trfNum.number}`,
       };
     },
   },
@@ -550,11 +598,18 @@ export const wizardTools: ToolDefinition[] = [
       if (!postRes.success) {
         // REAL ROLLBACK: deletePayrollRun exists now (draft-only) — clean up
         // the orphan draft instead of leaving a half-finished state behind.
-        await hrApi.deletePayrollRun(payrollId, ctx.companyId, ctx.userId);
+        // P2 fix: check the compensation result — asserting a rollback that
+        // never happened violates the honesty contract (the draft would sit
+        // there while the model believes it was cleaned up).
+        const rb = await hrApi.deletePayrollRun(payrollId, ctx.companyId, ctx.userId);
         return {
           success: false,
-          error: `فشل ترحيل مسير الرواتب: ${postRes.error || 'سبب غير معروف'} — حُذف المسير المسودة تلقائياً (استرجاع كامل).`,
-          rolledBack: true,
+          error: `فشل ترحيل مسير الرواتب: ${postRes.error || 'سبب غير معروف'} — ` +
+            (rb.success
+              ? 'حُذف المسير المسودة تلقائياً (استرجاع كامل).'
+              : `تعذّر حذف المسودة تلقائياً (${rb.error || 'سبب غير معروف'}) — احذف المسودة ${payrollId} يدوياً من شاشة الرواتب.`),
+          rolledBack: rb.success === true,
+          ...(rb.success ? {} : { cleanupError: rb.error || 'unknown' }),
         };
       }
 
@@ -659,9 +714,17 @@ export const wizardTools: ToolDefinition[] = [
       // Step 2: Post the transaction
       const postRes = await accountingApi.postTransaction(transactionId, ctx.companyId);
       if (!postRes.success) {
-        // Rollback: delete the draft transaction
-        await accountingApi.deleteTransaction(transactionId, ctx.companyId);
-        return { error: `تم إنشاء القيد لكن فشل الترحيل: ${postRes.error}. تم التراجع عن الإنشاء.` };
+        // Rollback: delete the draft transaction. NOTE: createTransaction
+        // posts immediately today, so a posted entry can NOT be deleted
+        // (draft-only guard) — check the result and report honestly instead
+        // of asserting a rollback that never happened.
+        const rb = await accountingApi.deleteTransaction(transactionId, ctx.companyId);
+        return {
+          error: `تم إنشاء القيد لكن فشل الترحيل: ${postRes.error}.` +
+            (rb.success
+              ? ' تم التراجع عن الإنشاء.'
+              : ' تعذّر التراجع التلقائي (القيد مرحّل ولا يُحذف) — عالجه بقيد عكسي من شاشة القيود.'),
+        };
       }
 
       return {

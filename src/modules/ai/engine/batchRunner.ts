@@ -1,5 +1,6 @@
 import { aiApi } from '../api/index';
 import { executeToolCall } from './toolExecutor';
+import { getTool } from '../tools/registry';
 import {
   extractOutputScalars,
   isTerminalBatchStatus,
@@ -130,6 +131,17 @@ export async function runBatch(
   }
 }
 
+/** Unique id per worker run — stamps claim leases (migration 0028) so a
+ *  second window's recover can tell OUR in-flight items from a dead
+ *  worker's orphans. */
+function newWorkerId(): string {
+  try {
+    const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+    if (c?.randomUUID) return `w-${c.randomUUID()}`;
+  } catch { /* fall through */ }
+  return `w-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffff).toString(36)}`;
+}
+
 async function runBatchInner(
   companyId: string,
   userId: string,
@@ -152,26 +164,48 @@ async function runBatchInner(
 
   // Completed outputs (persisted result_data) seed the substitution map, so
   // resumed runs resolve refs exactly like fresh ones. Keyed by ref name
-  // AND by seq string ({{0.id}} also works).
+  // AND by seq string ({{0.id}} also works). refTools carries ref → tool
+  // name so resolveOutputId honors the explicit PRIMARY_ID_FIELD annotation
+  // (P0-7) instead of the "first Id-suffixed key" convention alone.
   const outputs: RefOutputs = new Map();
+  const refTools = new Map<string, string>();
   const seedOutputs = (d: JobBatchDetail | null) => {
     if (!d) return;
     for (const it of d.items ?? []) {
       if (it.status === 'done' && it.resultData && Object.keys(it.resultData).length > 0) {
-        if (it.ref) outputs.set(it.ref, it.resultData);
+        if (it.ref) {
+          outputs.set(it.ref, it.resultData);
+          refTools.set(it.ref, it.toolName);
+        }
         outputs.set(String(it.seq), it.resultData);
+        refTools.set(String(it.seq), it.toolName);
       }
     }
   };
   const rememberOutput = (
-    item: { seq: number; ref?: string | null },
+    item: { seq: number; ref?: string | null; toolName?: string },
     scalars: Record<string, string | number | boolean>,
   ) => {
     if (Object.keys(scalars).length === 0) return;
-    if (item.ref) outputs.set(item.ref, scalars);
+    if (item.ref) {
+      outputs.set(item.ref, scalars);
+      if (item.toolName) refTools.set(item.ref, item.toolName);
+    }
     outputs.set(String(item.seq), scalars);
+    if (item.toolName) refTools.set(String(item.seq), item.toolName);
   };
   seedOutputs(detail);
+  // P1 fix: consecutive empty claim rounds with no DB error used to spin at
+  // 1.5s forever (e.g. a wedged 'running' item). Cap the streak; a handful
+  // of consecutive empty rounds means nothing is progressing — exit with
+  // the honest current detail instead of burning the thread.
+  let emptyClaimStreak = 0;
+  const EMPTY_CLAIM_STREAK_LIMIT = 20;
+  // Claim-lease owner for this run (migration 0028). Every batchClaim call
+  // below carries it: new claims are stamped, and our own running leases
+  // are refreshed each round — so a concurrent recover in another window
+  // only fails EXPIRED (dead-worker) rows, never our in-flight items.
+  const workerId = newWorkerId();
 
   while (!isTerminalBatchStatus(detail.status)) {
     if (callbacks.shouldStop?.()) {
@@ -184,7 +218,7 @@ async function runBatchInner(
       return detail;
     }
 
-    const claim = await aiApi.batchClaim(companyId, userId, batchId, BATCH_CLAIM_LIMIT);
+    const claim = await aiApi.batchClaim(companyId, userId, batchId, BATCH_CLAIM_LIMIT, workerId);
     if (!claim.success || !claim.data) {
       // Claim failed (DB hiccup) — back off one round and re-check the
       // header (cheap). No full re-read: nothing could have progressed
@@ -202,7 +236,12 @@ async function runBatchInner(
       // Nothing claimable right now (deps still executing elsewhere).
       // Recover already failed the orphans above, so this is transient —
       // wait one round, then re-check the header; a paused/cancelled
-      // header exits at the loop top.
+      // header exits at the loop top. A persistent streak (wedged running
+      // item no worker owns) exits instead of spinning forever.
+      emptyClaimStreak += 1;
+      if (emptyClaimStreak >= EMPTY_CLAIM_STREAK_LIMIT) {
+        return detail;
+      }
       await sleep(1500);
       detail = await syncHeader(companyId, userId, batchId, detail);
       if (isTerminalBatchStatus(detail.status)) {
@@ -212,6 +251,7 @@ async function runBatchInner(
       }
       continue;
     }
+    emptyClaimStreak = 0;
 
     for (const item of claim.data) {
       // Cooperative gap: back-to-back heavy writes (invoice + journal +
@@ -219,7 +259,12 @@ async function runBatchInner(
       await yieldToUi();
       // Resolve {{ref}} / @ref placeholders against outputs captured so far
       // (seeded from persisted result_data at run start, so resumes work).
-      const sub = substituteRefs(item.args, outputs);
+      // NOTE: pause/cancel is honored at chunk boundaries (loop top +
+      // end-of-round sync) — chunks are intentionally small
+      // (BATCH_CLAIM_LIMIT=10) so a user cancel waits at most ~9 more
+      // items, never ~99. A per-item header check was tried and rejected:
+      // it added N extra round-trips per chunk for no real gain.
+      const sub = substituteRefs(item.args, outputs, refTools);
       if (!sub.ok) {
         const failed = await aiApi.batchItemFail(
           companyId, userId, batchId, item.id,
@@ -253,18 +298,41 @@ async function runBatchInner(
           if (done.success) {
             detail.doneCount += 1;
             callbacks.onProgress?.(detail);
+          } else {
+            // P1 fix: a failed itemDone used to be a SILENT no-op (the write
+            // executed but the row was flipped by a concurrent cancel/pause
+            // or a transient DB error) — the loop kept executing the rest of
+            // the chunk and the counters lied. Treat it as a hard stop:
+            // re-read the header and bail this round so the next round (or
+            // the honest terminal state) reflects reality.
+            console.warn(`[ai-batch] batchItemDone failed for seq ${item.seq}: ${done.error ?? 'unknown'}`);
+            detail = await syncHeader(companyId, userId, batchId, detail);
+            break;
           }
         } else {
-          const retryable = outcome.errorClass ? outcome.errorClass.retryable : true;
+          // P1 fix: for WRITE tools a timeout abandons (not aborts) the
+          // promise — the underlying write may still commit at any moment,
+          // so re-running the item would create a duplicate financial
+          // document. Mark it permanently failed instead of retrying; the
+          // honest result_data record + audit trail keep the truth.
+          const isTimeout = outcome.errorClass?.code === 'TIMEOUT';
+          const toolDef = getTool(item.toolName);
+          const isWrite = toolDef?.dangerLevel === 'write';
+          const retryable = isTimeout && isWrite
+            ? false
+            : outcome.errorClass ? outcome.errorClass.retryable : true;
           const failed = await aiApi.batchItemFail(
             companyId, userId, batchId, item.id,
             outcome.error ?? 'خطأ غير معروف',
-            outcome.errorClass?.code ?? null,
+            outcome.errorClass?.code ?? (isTimeout && isWrite ? 'TIMEOUT_WRITE' : null),
             retryable,
           );
           if (failed.success && failed.data?.retried) {
             // Back off per the shared schedule before the next claim round.
-            const delay = nextRetryDelayMs(item.attempts + 1) ?? 0;
+            // P3 fix: item.attempts is post-claim-increment (includes the
+            // just-failed attempt) — passing attempts+1 shifted the whole
+            // schedule one slot and made the 5-min tier unreachable.
+            const delay = nextRetryDelayMs(item.attempts) ?? 0;
             if (delay > 0) await sleep(Math.min(delay, 10_000));
           }
           if (failed.success && failed.data?.finalStatus) {

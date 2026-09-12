@@ -6,6 +6,7 @@ import {
   num,
   str,
   round2,
+  resolveBaseQty,
 } from './shared';
 
 /**
@@ -32,14 +33,16 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         notes: { type: 'string' },
         lines: {
           type: 'array',
-          description: 'المواد المكوّنة للتركيبة مع كمياتها وتكاليفها (يجب أن تكون أنواعها مواد أولية/خام — يقبل items كبديل لـ lines)',
+          description: 'المواد المكوّنة للتركيبة مع كمياتها وتكاليفها (يجب أن تكون أنواعها مواد أولية/خام — يقبل items كبديل لـ lines). الكميات بالوحدة الأساسية ما لم تُذكر وحدة.',
           items: {
             type: 'object',
             properties: {
               materialId: { type: 'string', description: 'معرف المادة الخام (من search.products — يقبل productId كبديل)' },
               productId: { type: 'string', description: 'بديل لـ materialId' },
-              quantity: { type: 'number', description: 'الكمية اللازمة لدفعة واحدة' },
-              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تُجلب تلقائياُ من سعر تكلفة المنتج)' },
+              quantity: { type: 'number', description: 'الكمية اللازمة لدفعة واحدة (بالوحدة المذكورة أو الأساسية)' },
+              unitId: { type: 'string', description: 'معرف وحدة المادة (من search.product_units) — اختياري' },
+              unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
+              unitCost: { type: 'number', description: 'تكلفة الوحدة المذكورة (اختياري — تُجلب تلقائياُ من سعر تكلفة المنتج)' },
             },
             required: ['materialId', 'quantity'],
           },
@@ -80,7 +83,23 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products للحصول عليه' };
         if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
         if (unitCost === undefined || unitCost < 0) unitCost = await getProductCost(materialId);
-        lines.push({ materialId, quantity, unitCost });
+        // M4: bom_lines carries NO unit columns — quantities are BASE. A
+        // named unit is resolved + converted here (qty × factor); a named
+        // unitCost is the price OF THAT UNIT, so it is converted back to
+        // base (÷ factor) to keep the invariant cost_base × qty_base.
+        const lineUnitId = str(rec.unitId);
+        const lineUnitName = str(rec.unitName);
+        let baseQty = quantity;
+        let baseCost = unitCost;
+        if (lineUnitId || lineUnitName) {
+          const resolved = await resolveBaseQty(ctx.companyId, materialId, quantity, { unitId: lineUnitId, unitName: lineUnitName });
+          if ('error' in resolved) return { error: resolved.error };
+          baseQty = resolved.baseQuantity;
+          if (resolved.factor !== 1 && (item as Record<string, unknown>).unitCost !== undefined) {
+            baseCost = round2(unitCost / resolved.factor);
+          }
+        }
+        lines.push({ materialId, quantity: baseQty, unitCost: baseCost });
       }
       const totalCost = round2(lines.reduce((s, l) => s + l.quantity * l.unitCost, 0));
       const outputQuantity = num(args.outputQuantity) > 0 ? num(args.outputQuantity) : 1;
@@ -136,13 +155,15 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         notes: { type: 'string' },
         lines: {
           type: 'array',
-          description: 'المواد المستهلكة (اختياري إذا مررت bomId — تٌشتق تلقائياُ من الشجرة)',
+          description: 'المواد المستهلكة (اختياري إذا مررت bomId — تٌشتق تلقائياُ من الشجرة). الكميات بالوحدة الأساسية ما لم تُذكر وحدة.',
           items: {
             type: 'object',
             properties: {
               materialId: { type: 'string', description: 'معرف المادة (من search.products)' },
-              plannedQuantity: { type: 'number', description: 'الكمية المخطط استهلاكها' },
-              unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري — تٌجلب من الشجرة/سعر التكلفة)' },
+              plannedQuantity: { type: 'number', description: 'الكمية المخطط استهلاكها (بالوحدة المذكورة أو الأساسية)' },
+              unitId: { type: 'string', description: 'معرف وحدة المادة (من search.product_units) — اختياري' },
+              unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
+              unitCost: { type: 'number', description: 'تكلفة الوحدة المذكورة (اختياري — تٌجلب من الشجرة/سعر التكلفة)' },
             },
             required: ['materialId', 'plannedQuantity'],
           },
@@ -184,7 +205,21 @@ export const manufacturingWriteTools: ToolDefinition[] = [
         const uc = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : 0;
         if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products' };
         if (pq <= 0) return { error: 'plannedQuantity يجب أن تكون أكبر من صفر' };
-        lines.push({ materialId, plannedQuantity: pq, unitCost: uc });
+        // M4: consumptions carry NO unit columns — a named unit resolves +
+        // converts here (cost ÷ factor keeps the base invariant, as in BOMs).
+        const lineUnitId = str(rec.unitId);
+        const lineUnitName = str(rec.unitName);
+        let basePq = pq;
+        let baseUc = uc;
+        if (lineUnitId || lineUnitName) {
+          const resolved = await resolveBaseQty(ctx.companyId, materialId, pq, { unitId: lineUnitId, unitName: lineUnitName });
+          if ('error' in resolved) return { error: resolved.error };
+          basePq = resolved.baseQuantity;
+          if (resolved.factor !== 1 && (item as Record<string, unknown>).unitCost !== undefined) {
+            baseUc = round2(uc / resolved.factor);
+          }
+        }
+        lines.push({ materialId, plannedQuantity: basePq, unitCost: baseUc });
       }
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'work_order');
@@ -274,7 +309,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         bomId: { type: 'string', description: 'معرف التركيبة (من manufacturing.get_boms)' },
-        status: { type: 'string', enum: ['active', 'inactive', 'draft'], description: 'الحالة الجديدة' },
+        status: { type: 'string', enum: ['active', 'inactive'], description: 'الحالة الجديدة (تُربط بـ isActive — لا عمود status)' },
         notes: { type: 'string', description: 'ملاحظات جديدة' },
       },
       required: ['bomId'],
@@ -285,9 +320,12 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       if (!bomId) return { error: 'bomId مطلوب' };
       const data: Record<string, unknown> = {};
       if (args.status !== undefined) {
+        // P1 fix: BOMs have NO status column (only is_active) — the old code
+        // forwarded data.status which updateBom never reads: disabling a BOM
+        // via the agent was a silent no-op returning { updated: true }.
         const s = str(args.status);
-        if (s && !['active', 'inactive', 'draft'].includes(s)) return { error: 'الحالة يجب أن تكون active أو inactive أو draft' };
-        data.status = s;
+        if (s && !['active', 'inactive'].includes(s)) return { error: 'الحالة يجب أن تكون active أو inactive (التعطيل عبر isActive)' };
+        data.isActive = s === 'active';
       }
       if (args.notes !== undefined) data.notes = str(args.notes);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
@@ -332,10 +370,10 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         workOrderId: { type: 'string', description: 'معرف أمر التشغيل (من manufacturing.get_work_orders)' },
-        quantity: { type: 'number', description: 'الكمية الجديدة' },
+        quantity: { type: 'number', description: 'الكمية الجديدة (عدد الدفعات — تُعاد تحجيم سطور المواد تناسبياً تلقائياً)' },
         status: { type: 'string', enum: ['planned', 'in_progress', 'completed', 'cancelled'], description: 'الحالة الجديدة' },
         notes: { type: 'string', description: 'ملاحظات جديدة' },
-        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري)' },
+        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (يُربط بـ plannedEndDate — لا عمود dueDate)' },
       },
       required: ['workOrderId'],
     },
@@ -344,18 +382,49 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       const workOrderId = str(args.workOrderId);
       if (!workOrderId) return { error: 'workOrderId مطلوب' };
       const data: Record<string, unknown> = {};
-      if (args.quantity !== undefined) data.quantity = num(args.quantity);
+      if (args.quantity !== undefined) {
+        const q = num(args.quantity);
+        if (!(q > 0)) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
+        data.quantity = q;
+      }
       if (args.status !== undefined) {
         const s = str(args.status);
         if (s && !['planned', 'in_progress', 'completed', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون planned أو in_progress أو completed أو cancelled' };
         data.status = s;
       }
       if (args.notes !== undefined) data.notes = str(args.notes);
-      if (args.dueDate !== undefined) data.dueDate = String(args.dueDate);
+      // P1 fix: work_orders has NO dueDate column (it is plannedEndDate) —
+      // the old data.dueDate vanished silently.
+      if (args.dueDate !== undefined) data.plannedEndDate = String(args.dueDate);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
-      const res = await manufacturingApi.updateWorkOrder(workOrderId, ctx.companyId, undefined, data);
+      // P2 fix: quantity is the BOM batch count — the material lines scale
+      // with it. Editing quantity alone desynced materials from batches
+      // (10 batches with materials for 5) and skipped the total_cost
+      // recompute. Rescale the CURRENT lines proportionally and send them
+      // together (mirrors the UI, which always sends lines). Orders past
+      // planned freeze their lines — the API rejects honestly then.
+      if (data.quantity !== undefined) {
+        const cur = await manufacturingApi.getWorkOrderById(workOrderId, ctx.companyId);
+        if (!cur.success || !cur.data) return { error: cur.error || 'تعذّر جلب أمر التشغيل الحالي' };
+        const oldQty = Number(cur.data.workOrder.quantity) || 0;
+        if (!(oldQty > 0)) return { error: 'تعذّر تحديد الكمية الحالية لأمر التشغيل' };
+        const ratio = Number(data.quantity) / oldQty;
+        const currentLines = cur.data.lines || [];
+        if (currentLines.length === 0) {
+          return { error: 'أمر التشغيل بلا سطور مواد — احذفه وأنشئ أمراً جديداً بالكمية المطلوبة' };
+        }
+        data.lines = currentLines.map((l) => ({
+          ...l,
+          plannedQuantity: Math.round(((Number(l.plannedQuantity) || 0) * ratio) * 10000) / 10000,
+        }));
+      }
+      const res = await manufacturingApi.updateWorkOrder(workOrderId, ctx.companyId, ctx.userId, data);
       if (!res.success) return { error: res.error || 'فشل تعديل أمر التشغيل' };
-      return { updated: true, workOrderId };
+      return {
+        updated: true,
+        workOrderId,
+        ...(data.quantity !== undefined ? { quantityRescaled: true, note: 'أُعيد تحجيم سطور المواد تناسبياً مع الكمية الجديدة' } : {}),
+      };
     },
   },
 

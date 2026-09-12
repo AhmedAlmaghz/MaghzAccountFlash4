@@ -80,7 +80,14 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
 
   const handleCopy = useCallback(() => {
     const text = `Tool: ${toolCall.toolName}\nArgs: ${JSON.stringify(toolCall.args, null, 2)}\n${toolCall.resultSummary ? `Result: ${toolCall.resultSummary}` : ''}`;
-    navigator.clipboard.writeText(text);
+    // P3 fix: clipboard may reject (permissions, non-secure context) — an
+    // unhandled rejection crashes error boundaries in some shells.
+    try {
+      const p = navigator.clipboard.writeText(text) as unknown as Promise<void> | undefined;
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      /* best-effort only */
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [toolCall]);
@@ -138,7 +145,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
 
         {/* Status badge */}
         <span className={cn('text-[10px] font-medium', config.color)}>
-          {isPending ? t('ai.confirmTitle') : isExecuting ? t('ai.executingTool', { tool: '' }).replace(': ', '') : t(config.labelKey)}
+          {isPending ? t('ai.confirmTitle') : isExecuting ? t('ai.executingShort') : t(config.labelKey)}
         </span>
       </div>
 
@@ -253,17 +260,22 @@ function renderTableFromLines(lines: string[]): React.ReactNode {
   }
 
   const headerLine = dataLines[0];
-  const headers = headerLine
-    .split('|')
-    .map((h) => h.trim())
-    .filter(Boolean);
+  // P3 fix (mirrors RichText): preserve EMPTY cells — filter(Boolean)
+  // dropped them and shifted every later column left. Strip only the
+  // leading/trailing pipe artifacts, then normalize ragged rows.
+  const cells = (line: string): string[] => {
+    const parts = line.split('|').map((c) => c.trim());
+    if (parts.length > 0 && parts[0] === '') parts.shift();
+    if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+    return parts;
+  };
+  const headers = cells(headerLine);
 
-  const rows = dataLines.slice(1).map((rowLine) =>
-    rowLine
-      .split('|')
-      .map((c) => c.trim())
-      .filter(Boolean),
-  );
+  const rows = dataLines.slice(1).map((rowLine) => {
+    const row = cells(rowLine);
+    while (row.length < headers.length) row.push('');
+    return row.slice(0, headers.length);
+  });
 
   return (
     <div className="overflow-x-auto my-1">

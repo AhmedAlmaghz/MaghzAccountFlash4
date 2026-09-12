@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
+import { Link, useLocation, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard,
   Calculator,
   Package,
   ShoppingCart,
+  ScanBarcode,
   Store,
   Factory,
   Users,
@@ -42,6 +43,7 @@ import { useAuthStore } from '@/modules/auth/store';
 import { useCanAccessModule } from '@/modules/auth/hooks/usePermission';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useIsMobile, useBodyScrollLock, useEscapeKey } from '@/core/hooks/useResponsive';
+import { useSessionHeartbeat } from '@/core/hooks/useSessionHeartbeat';
 import { cn } from '@/core/utils';
 import type { Permission } from '@/modules/auth/types';
 
@@ -54,6 +56,7 @@ type ModuleId =
   | 'accounting'
   | 'inventory'
   | 'sales'
+  | 'pos'
   | 'purchases'
   | 'manufacturing'
   | 'hr'
@@ -119,6 +122,19 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.sales.customers', path: '/sales/customers' },
       { labelKey: 'sidebar.sales.quotations', path: '/sales/quotations' },
       { labelKey: 'sidebar.sales.returns', path: '/sales/returns' },
+    ],
+  },
+  {
+    id: 'pos',
+    labelKey: 'sidebar.pos.title',
+    icon: ScanBarcode,
+    path: '/pos',
+    module: 'pos',
+    children: [
+      { labelKey: 'sidebar.pos.terminal', path: '/pos' },
+      { labelKey: 'sidebar.pos.shifts', path: '/pos/shifts' },
+      { labelKey: 'sidebar.pos.reports', path: '/pos/reports' },
+      { labelKey: 'sidebar.pos.settings', path: '/pos/settings' },
     ],
   },
   {
@@ -239,6 +255,7 @@ const menuItems: MenuItem[] = [
 const bottomTabCandidates: { id: string; labelKey: string; icon: React.ComponentType<{ size?: number; className?: string }>; path: string; module: ModuleId }[] = [
   { id: 'dashboard', labelKey: 'sidebar.dashboard', icon: LayoutDashboard, path: '/', module: 'core' },
   { id: 'sales', labelKey: 'sidebar.sales.title', icon: ShoppingCart, path: '/sales', module: 'sales' },
+  { id: 'pos', labelKey: 'sidebar.pos.title', icon: ScanBarcode, path: '/pos', module: 'pos' },
   { id: 'purchases', labelKey: 'sidebar.purchases.title', icon: Store, path: '/purchases', module: 'purchases' },
   { id: 'inventory', labelKey: 'sidebar.inventory.title', icon: Package, path: '/inventory', module: 'inventory' },
   { id: 'manufacturing', labelKey: 'sidebar.manufacturing.title', icon: Factory, path: '/manufacturing', module: 'manufacturing' },
@@ -372,7 +389,7 @@ const SidebarContent: React.FC<{ sidebarOpen: boolean; onNavigate?: () => void }
   const groups = useMemo(
     () => [
       { ids: ['dashboard', 'ai'] },
-      { ids: ['sales', 'purchases', 'inventory', 'manufacturing'] },
+      { ids: ['sales', 'pos', 'purchases', 'inventory', 'manufacturing'] },
       { ids: ['accounting', 'hr', 'crm'] },
       { ids: ['reports'] },
       { ids: ['settings'] },
@@ -491,7 +508,7 @@ const MobileDrawerNav: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) =
   const groups = useMemo(
     () => [
       { ids: ['dashboard', 'ai'] },
-      { ids: ['sales', 'purchases', 'inventory', 'manufacturing'] },
+      { ids: ['sales', 'pos', 'purchases', 'inventory', 'manufacturing'] },
       { ids: ['accounting', 'hr', 'crm'] },
       { ids: ['reports'] },
       { ids: ['settings'] },
@@ -677,13 +694,13 @@ export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => vo
 
 export const AppLayout = () => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const recordActivity = useAuthStore((state) => state.recordActivity);
-  const checkSession = useAuthStore((state) => state.checkSession);
-  const navigate = useNavigate();
   const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isMobile = useIsMobile();
+  // Idle-timeout heartbeat (activity listeners + 60s session check) — shared
+  // with the full-screen POS terminal via useSessionHeartbeat.
+  useSessionHeartbeat(true);
   // The AI chat page renders as a full-screen app (its own bottom nav in
   // mobile) — strip the main padding and hide the global bottom tabs there.
   const isAiChatRoute = location.pathname === '/ai';
@@ -829,30 +846,6 @@ export const AppLayout = () => {
     ],
     [],
   );
-
-  const handleActivity = useCallback(() => {
-    if (isAuthenticated) {
-      recordActivity();
-    }
-  }, [isAuthenticated, recordActivity]);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
-    events.forEach((event) => window.addEventListener(event, handleActivity, { passive: true }));
-
-    const interval = setInterval(() => {
-      if (!checkSession()) {
-        navigate('/login');
-      }
-    }, 60000);
-
-    return () => {
-      events.forEach((event) => window.removeEventListener(event, handleActivity));
-      clearInterval(interval);
-    };
-  }, [isAuthenticated, handleActivity, checkSession, navigate]);
 
   // Close drawer when resizing up to desktop
   useEffect(() => {

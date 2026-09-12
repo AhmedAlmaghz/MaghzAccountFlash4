@@ -6,38 +6,73 @@ import {
   num,
   str,
   round2,
+  resolveBaseQty,
 } from './shared';
 import { localToday } from '../../engine/dateUtils';
 import { normalizeArabic } from '@/core/utils/normalizeArabic';
 import { getUnits } from '@/core/api';
+
+/** Normalized comparison key for catalog unit matching (alef/teh variants + ال prefix). */
+function unitNorm(s: unknown): string {
+  return normalizeArabic(String(s || '')).replace(/^(ال|لل)/, '');
+}
+
+async function fetchUnitCatalog(
+  companyId: string,
+): Promise<Array<{ nameAr?: string; nameEn?: string; code?: string; isActive?: boolean }> | { error: string }> {
+  try {
+    const res = await getUnits(companyId);
+    if (!res || !res.success || !res.data) return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };
+    return res.data;
+  } catch {
+    return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };
+  }
+}
 
 /**
  * Validate a unit NAME against the company catalog and return its canonical
  * form. Products store the unit as a name string — accepting any free text
  * silently produced rows with unit='piece' for شدة/درزن/... (real session:
  * every product landed on the default). Unknown names fail LOUDLY with
- * guidance instead of corrupting master data; absent names keep 'piece'.
+ * guidance instead of corrupting master data.
+ *
+ * Absent names resolve the piece unit FROM THE CATALOG (حبة/PC/Piece) — the
+ * raw 'piece' literal matched neither `name_ar` nor `code` in
+ * ensureBaseProductUnit's JOIN, so every AI product created without a unit
+ * ended with NO product_units row at all (silent 0-row INSERT) and every
+ * later invoice line silently degraded to factor=1. Falling back to the
+ * legacy 'piece' literal only when the catalog has no piece-equivalent.
  */
 async function resolveUnitName(
   companyId: string,
   rawUnit: string | undefined,
 ): Promise<{ unit: string } | { error: string }> {
   const name = str(rawUnit);
-  if (!name) return { unit: 'piece' };
-  let catalog: Array<{ nameAr?: string; nameEn?: string; code?: string; isActive?: boolean }>;
-  try {
-    const res = await getUnits(companyId);
-    if (!res || !res.success || !res.data) return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };
-    catalog = res.data;
-  } catch {
-    return { error: 'تعذر التحقق من الوحدة — أعد المحاولة' };
+  const catalog = await fetchUnitCatalog(companyId);
+  if ('error' in catalog) {
+    // Unreadable catalog: only fail when a name was explicitly given (loud
+    // contract for user-specified units); the absent-name default keeps the
+    // legacy literal so creation never blocks on a settings read.
+    if (!name) return { unit: 'piece' };
+    return { error: catalog.error };
   }
-  const norm = normalizeArabic(name).replace(/^(ال|لل)/, '');
+  if (!name) {
+    const piece = catalog.find(
+      (u) => u.isActive !== false && unitNorm(u.nameEn) === 'piece',
+    );
+    // Prefer: English name "Piece" → Arabic حبة → code PC
+    const byEn = piece;
+    const byAr = catalog.find((u) => u.isActive !== false && ['حبه', 'حبه'].includes(unitNorm(u.nameAr)));
+    const byCode = catalog.find((u) => u.isActive !== false && String(u.code || '').toUpperCase() === 'PC');
+    const hit = byEn ?? byAr ?? byCode;
+    return { unit: (hit && (hit.nameAr || hit.nameEn)) || 'piece' };
+  }
+  const norm = unitNorm(name);
   const hit = catalog.find(
     (u) =>
       u.isActive !== false &&
       [u.nameAr || '', u.nameEn || '', u.code || ''].some((c) => {
-        const cn = normalizeArabic(c).replace(/^(ال|لل)/, '');
+        const cn = unitNorm(c);
         return !!cn && cn === norm;
       }),
   );
@@ -98,7 +133,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
         salePrice: { type: 'number', description: 'سعر البيع' },
         costPrice: { type: 'number', description: 'سعر التكلفة (افتراضي 0 — يقبل purchasePrice كبديل)' },
         purchasePrice: { type: 'number', description: 'بديل لـ costPrice' },
-        unit: { type: 'string', description: 'اسم الوحدة من الكتالوج (يُتحقق منها — ابحث بـ search.units أولاً؛ افتراضي piece)' },
+        unit: { type: 'string', description: 'اسم الوحدة من الكتالوج (يُتحقق منها — ابحث بـ search.units أولاً؛ افتراضي: حبة/piece من الكتالوج)' },
         unitName: { type: 'string', description: 'بديل لـ unit' },
         barcode: { type: 'string' },
         sku: { type: 'string', description: 'رمز SKU' },
@@ -223,8 +258,10 @@ export const inventoryWriteTools: ToolDefinition[] = [
       properties: {
         productId: { type: 'string', description: 'معرف المنتج (من inventory.get_products)' },
         warehouseId: { type: 'string', description: 'معرف المستودع' },
-        systemQty: { type: 'number', description: 'الكمية في النظام' },
-        actualQty: { type: 'number', description: 'الكمية الفعلية (الجرد)' },
+        systemQty: { type: 'number', description: 'الكمية في النظام (بالوحدة المذكورة أو الأساسية)' },
+        actualQty: { type: 'number', description: 'الكمية الفعلية — الجرد (بالوحدة المذكورة أو الأساسية)' },
+        unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري؛ بدونه الكميات بالأساسية' },
+        unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
         unitCost: { type: 'number', description: 'تكلفة الوحدة (اختياري)' },
         reason: { type: 'string', description: 'سبب التسوية' },
       },
@@ -236,13 +273,32 @@ export const inventoryWriteTools: ToolDefinition[] = [
       const warehouseId = str(args.warehouseId);
       if (!productId) return { error: 'productId مطلوب — استخدم inventory.get_products أولاً' };
       if (!warehouseId) return { error: 'warehouseId مطلوب' };
-      const systemQty = num(args.systemQty);
-      const actualQty = num(args.actualQty);
+      // M4: stock_adjustments carries NO unit columns — quantities are BASE.
+      // Resolve any named unit here so "جرد 3 كراتين" doesn't book 3 pieces.
+      const unitId = str(args.unitId);
+      const unitName = str(args.unitName);
+      let systemQty = num(args.systemQty);
+      let actualQty = num(args.actualQty);
+      let unitNote: string | undefined;
+      if (unitId || unitName) {
+        const rSys = await resolveBaseQty(ctx.companyId, productId, systemQty, { unitId, unitName });
+        if ('error' in rSys) return { error: rSys.error };
+        const rAct = await resolveBaseQty(ctx.companyId, productId, actualQty, { unitId, unitName });
+        if ('error' in rAct) return { error: rAct.error };
+        systemQty = rSys.baseQuantity;
+        actualQty = rAct.baseQuantity;
+        if (rSys.factor !== 1) unitNote = `الكميات حُوّلت من ${rSys.unitName || ''} (×${rSys.factor}) للأساسية`;
+      }
       const difference = round2(actualQty - systemQty);
 
       const adjNum = await getNextDocumentNumber(ctx.companyId, 'stock_adjustment');
       if (!adjNum.success || !adjNum.number) return { error: adjNum.error || 'فشل توليد رقم التسوية' };
 
+      // P0-5 fix: the bare INSERT with status:'posted' bypassed the entire
+      // posting pipeline — zero stock_movements, zero journal entry, zero
+      // stock update, and the row could never be properly posted later
+      // (postStockAdjustment accepts draft/approved only). Create as DRAFT
+      // then run the real atomic posting (movements + JE + stock set).
       const res = await inventoryApi.createStockAdjustment({
         companyId: ctx.companyId,
         date: today(),
@@ -253,11 +309,29 @@ export const inventoryWriteTools: ToolDefinition[] = [
         difference,
         unitCost: args.unitCost !== undefined ? num(args.unitCost) : undefined,
         reason: str(args.reason) || '',
-        status: 'posted',
+        status: 'draft',
         adjustmentNumber: adjNum.number,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء التسوية' };
-      return { created: true, adjustmentId: res.id, productId, difference, status: 'posted' };
+      const postRes = await inventoryApi.postStockAdjustment(res.id!, ctx.companyId);
+      if (!postRes.success) {
+        return {
+          error: `أُنشئت التسوية كمسودة (${adjNum.number}) لكن فشل الترحيل: ${postRes.error || 'سبب غير معروف'} — يمكنك معاودة الترحيل بـ inventory.post_stock_adjustment بعد معالجة السبب`,
+          adjustmentId: res.id,
+          status: 'draft',
+        };
+      }
+      return {
+        created: true,
+        posted: true,
+        adjustmentId: res.id,
+        adjustmentNumber: adjNum.number,
+        productId,
+        difference,
+        status: 'posted',
+        ...(unitNote ? { unitConversion: unitNote } : {}),
+        note: 'التسوية مرحّلة — حركة المخزون والقيد المحاسبي أُنشئا ذرّياً',
+      };
     },
   },
 
@@ -529,12 +603,14 @@ export const inventoryWriteTools: ToolDefinition[] = [
         notes: { type: 'string', description: 'ملاحظات' },
         lines: {
           type: 'array',
-          description: 'الأصناف المنقولة مع الكميات',
+          description: 'الأصناف المنقولة مع الكميات (الكميات بالوحدة الأساسية ما لم تُذكر وحدة — مرر unitName مثل كرتون وسيُحوَّل تلقائياً)',
           items: {
             type: 'object',
             properties: {
               productId: { type: 'string', description: 'معرف المنتج (من inventory.get_products)' },
-              quantity: { type: 'number', description: 'الكمية المنقولة' },
+              quantity: { type: 'number', description: 'الكمية المنقولة (بالوحدة المذكورة أو الأساسية)' },
+              unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري' },
+              unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
             },
             required: ['productId', 'quantity'],
           },
@@ -554,13 +630,29 @@ export const inventoryWriteTools: ToolDefinition[] = [
       if (fromWarehouseId === toWarehouseId) return { error: 'المستودع المصدر والهدف يجب أن يكونا مختلفين' };
       const rawLines = args.lines;
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير صنف واحد على الأقل في lines' };
+      // M4: transfer_lines carries NO unit columns (quantities are implicitly
+      // BASE). Resolve any named unit to base here — the model must never
+      // hand-convert (2 كرتون → 24) with no tooling and no error.
       const lines: { productId: string; quantity: number }[] = [];
+      const unitNotes: string[] = [];
       for (const item of rawLines) {
         const productId = str((item as Record<string, unknown>).productId);
         const quantity = num((item as Record<string, unknown>).quantity);
         if (!productId) return { error: 'كل صنف يحتاج productId — استخدم inventory.get_products أولاً' };
         if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
-        lines.push({ productId, quantity });
+        const r = item as Record<string, unknown>;
+        const unitId = str(r.unitId);
+        const unitName = str(r.unitName);
+        if (unitId || unitName) {
+          const resolved = await resolveBaseQty(ctx.companyId, productId, quantity, { unitId, unitName });
+          if ('error' in resolved) return { error: resolved.error };
+          lines.push({ productId, quantity: resolved.baseQuantity });
+          if (resolved.factor !== 1) {
+            unitNotes.push(`${quantity} ${resolved.unitName || ''} ≈ ${resolved.baseQuantity} بالأساسية`);
+          }
+        } else {
+          lines.push({ productId, quantity });
+        }
       }
       const trfNum = await getNextDocumentNumber(ctx.companyId, 'inventory_transfer');
       if (!trfNum.success || !trfNum.number) return { error: trfNum.error || 'فشل توليد رقم التحويل' };
@@ -576,7 +668,14 @@ export const inventoryWriteTools: ToolDefinition[] = [
         lines,
       });
       if (!res.success) return { error: res.error || 'فشل إنشاء التحويل' };
-      return { created: true, transferId: res.id, fromWarehouseId, toWarehouseId, linesCount: lines.length };
+      return {
+        created: true,
+        transferId: res.id,
+        fromWarehouseId,
+        toWarehouseId,
+        linesCount: lines.length,
+        ...(unitNotes.length > 0 ? { unitConversions: unitNotes } : {}),
+      };
     },
   },
 
@@ -722,20 +821,47 @@ export const inventoryWriteTools: ToolDefinition[] = [
       if (!(factor > 0)) return { error: 'factor يجب أن يكون أكبر من صفر (كرتون 12 حبة ← 12)' };
       const unitId = await resolveCatalogUnitId(ctx.companyId, unitName);
       if (!unitId) return { error: `الوحدة "${unitName}" غير موجودة في الإعدادات — أنشئها أولاً من صفحة الوحدات ثم أعد المحاولة` };
+      // U6: omitted prices used to land on 0 (poisoning later quotes/checks).
+      // Suggest from the product's BASE unit-row price × factor — the base row
+      // mirrors the card prices (same math as the UI's ProductUnitsSection).
+      let salePrice = args.salePrice !== undefined ? num(args.salePrice) : 0;
+      let purchasePrice = args.purchasePrice !== undefined ? num(args.purchasePrice) : 0;
+      if (args.salePrice === undefined || args.purchasePrice === undefined) {
+        const unitsRes = await inventoryApi.getProductUnits(productId, ctx.companyId);
+        if (unitsRes.success && unitsRes.data) {
+          const { baseUnit, suggestUnitPrice } = await import('@/core/utils/unitConversion');
+          const base = baseUnit(unitsRes.data);
+          if (base) {
+            if (args.salePrice === undefined) salePrice = round2(suggestUnitPrice(base.salePrice, factor));
+            if (args.purchasePrice === undefined) purchasePrice = round2(suggestUnitPrice(base.purchasePrice, factor));
+          }
+        }
+      }
       const res = await inventoryApi.createProductUnit({
         companyId: ctx.companyId,
         productId,
         unitId,
         factor,
-        salePrice: args.salePrice !== undefined ? num(args.salePrice) : 0,
-        purchasePrice: args.purchasePrice !== undefined ? num(args.purchasePrice) : 0,
+        salePrice,
+        purchasePrice,
         barcode: str(args.barcode),
         isBase: false,
         isDefaultSale: Boolean(args.isDefaultSale),
         isDefaultPurchase: Boolean(args.isDefaultPurchase),
       });
       if (!res.success) return { error: res.error || 'فشل إضافة الوحدة' };
-      return { created: true, unitRowId: res.id, productId, unitName, factor };
+      return {
+        created: true,
+        unitRowId: res.id,
+        productId,
+        unitName,
+        factor,
+        salePrice,
+        purchasePrice,
+        ...(args.salePrice === undefined || args.purchasePrice === undefined
+          ? { priceNote: 'الأسعار غير المحددة اقْتُرِحت من سعر الوحدة الأساسية × العامل' }
+          : {}),
+      };
     },
   },
   {

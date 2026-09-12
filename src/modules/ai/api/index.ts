@@ -82,7 +82,7 @@ interface ElectronAI {
     companyId: string; userId: string; title?: string | null; kind?: string;
     sessionId?: string | null; items: JobBatchItemInput[];
   }) => Promise<IpcResult<{ batchId: string; total: number; inserted: number }>>;
-  batchClaim: (payload: { companyId: string; userId: string; batchId: string; limit?: number }) => Promise<IpcResult<JobBatchItem[]>>;
+  batchClaim: (payload: { companyId: string; userId: string; batchId: string; limit?: number; workerId?: string }) => Promise<IpcResult<JobBatchItem[]>>;
   batchItemDone: (payload: {
     companyId: string; userId: string; batchId: string; itemId: string; resultRef?: string | null;
     resultData?: Record<string, string | number | boolean> | null;
@@ -363,10 +363,10 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     return b.batchCreate(payload);
   },
 
-  async batchClaim(companyId: string, userId: string, batchId: string, limit?: number): Promise<IpcResult<JobBatchItem[]>> {
+  async batchClaim(companyId: string, userId: string, batchId: string, limit?: number, workerId?: string): Promise<IpcResult<JobBatchItem[]>> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
-    return b.batchClaim({ companyId, userId, batchId, limit });
+    return b.batchClaim({ companyId, userId, batchId, limit, workerId });
   },
 
   async batchItemDone(

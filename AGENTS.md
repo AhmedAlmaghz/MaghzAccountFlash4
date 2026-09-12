@@ -22,7 +22,7 @@
 
 ---
 
-## 2. الوحدات المنفصلة (11 Modules)
+## 2. الوحدات المنفصلة (13 Modules)
 
 | # | الوحدة | المجلد | الوصف |
 |---|--------|--------|-------|
@@ -38,6 +38,7 @@
 | 10 | **علاقات العملاء (CRM)** | `modules/crm/` | فرص، مهام، مكالمات |
 | 11 | **التقارير (Reports)** | `modules/reports/` | Dashboard، تقارير مركزية، تحليلات |
 | 12 | **الوكيل الذكي (AI Harness)** | `modules/ai/` + `electron/aiHandler.js` | مساعد "مغزى": ~256 أداة function-calling، موجّه أدوات ≤48/دورة، كتابات بتأكيد بشري fail-closed، حارس تلفيق، طوابير دفعات، مرفقات متعددة الوسائط، ملخص سياق، Purge للـ PII |
+| 13 | **نقاط البيع (POS)** | `modules/pos/` | شاشة كاشير هجينة (باركود+لمس) بملء الشاشة خارج AppLayout، ورديات (فتح/إغلاق/فرق صندوق/تقرير Z)، دفع نقدي+آجل+مختلط بإيصال POS- بترقيم مستقل، checkout ذري واحد (فاتورة+قيد+مخزون+دفعات+رصيد) على sales_invoices بعمودي is_pos/shift_id |
 
 ---
 
@@ -4581,3 +4582,33 @@ npx drizzle-kit migrate
 *آخر تحديث: 2026-09-07 | الإصدار: maghzaccount-pro v0.14.2 (الحزمة A: طوابير الوكيل)*
 *آخر تحديث: 2026-09-06 | الإصدار: maghzaccount-pro v0.14.0 (تعدد الوحدات)*
 *آخر تحديث: 2026-09-05 | الإصدار: maghzaccount-pro v0.13.11 (سلسلة package.json)*
+
+### المرحلة POS v1: وحدة نقاط البيع (Migration 0027)
+- **النموذج**: مبيعات POS تُخزَّن في `sales_invoices` نفسها (is_pos=true + shift_id) بترقيم مستقل `pos_receipt` (POS- pad 6) — كل تقارير المبيعات والترحيل تعمل فوراً بدون تكرار منطق
+- **الجداول الجديدة**: `pos_shifts` (partial unique index: وردية واحدة مفتوحة لكل كاشير `WHERE status='open'`) + `pos_payments` (سجل دفعات كل إيصال — أساس Z وفرق الصندوق)
+- **Checkout الذري**: `posApi.checkout()` = معاملة واحدة: CTE فاتورة+أسطر (is_pos, shift_id, snapshotLineUnit) → pos_payments (نقدي/آجل) → قيد `buildPosSalePostingStatements` (Dr صندوق الكاشير للنقدي + Dr 11201 للآجل / Cr 41101 + Cr 21301) → stock (ensure/out/decrement بنفس SQL postInvoice) → flip الحالة (paid عند عدم متبقٍ، وإلا posted + customers.balance) — **مسار واحد للنقلين** (مثل postInvoice)
+- **دفع مختلط**: payment_type='cash' عند السداد الكامل (توحيد شارات UI)، وإلا 'credit' مع paid_amount=النقدي
+- **حرس SQL للكاشير**: `readPermissions` (جديد — مرآة writePermissions) في `assertSqlAuthorized`؛ قواعد: products/product_units يقرأها pos.view/own، transactions/journal_entries/stock/customers تُكتب بـ pos.create/post (cross-module مثل manufacturing)، sales_invoices تُكتب بـ pos.create/post — **تحقق بمحاكاة 16 سيناريو** (كاشير يُمكنه checkout كامل ويُمنع من GL قراءة/منتجات كتابة/موردين)
+- **RBAC 'pos'**: Module union في 4 مواضع (usePermission/router/layout/PermissionGate) + Permission union + PERMISSION_GROUPS + FALLBACK_PERMISSIONS (sales_rep = كاشير: pos.own/create/post)
+- **الشاشة الكاملة**: `/pos` مسار **شقيق لـ AppLayout** تحت ProtectedRoute+PermissionRoute (own h-dvh shell، بلا sidebar) — النبض عبر `useSessionHeartbeat` المستخرج من AppLayout
+- **البحث/الباركود**: `barcodeScanner.onScan()` (keyboard-wedge — POS أول مستهلك) + استعلام مدمج `posApi.getProducts` (name_ar/en/barcode/sku/code ILIKE + SUM(stock)) — `findProductByCode` يقارن بـ String() لأن mapRows يحوّل الباركود الرقمي النقي إلى Number
+- **الورديات**: openShift (guard رسالة ودية قبل partial index) / closeShift (expected = opening + SUM(cash) و difference محسوبة SQL-side في RPC / JS-side في fallback) / getShiftSummary (تقرير Z من invoices+payments) — فرق الصندوق **تقريري فقط** في v1 (بلا قيد JE تلقائي)
+- **الإيصال**: `receipt.ts` — قالب 80mm RTL (Cairo) عبر window.print + ESC/POS موجود في thermalPrinter.ts (dead code لـ v1.1)
+- **i18n**: قسم `pos` (102 مفتاحاً متوازناً ar/en) + `sidebar.pos` + `settings.documentTypes.posReceipt`
+- **الاختصارات**: F2 بحث، F9 دفع، F10 تعليق سلة — مستمع يدوي بنمط CommandPalette (Ctrl+K غير نشط خارج AppLayout)
+- **e2e POS — 4/4 ✓**: مواصفات `19-pos.spec.ts` (صفحة ورديات + إعدادات + شاشة كاملة بلا sidebar + تدفق كامل فتح→بيع→دفع→إغلاق)
+- **قواعد إضافية**: `settings` بمفاتيح `pos.*` (صندوق افتراضي/تذييل/طباعة تلقائية/تعديل سعر/خصم/سماح نفاد) — seed قسم 32 (وردية تجريبية مغلقة بفرق -200) — e2e `19-pos.spec.ts`
+
+### قواعد ذهبية مضافة (POS)
+- **كل namespace جديد في `window.electronDB` يجب أن يُضاف لـ e2e shim** (`vite-e2e-plugin.ts`) — `getRPC()` في electronPgAdapter يرمي إن نقص أي سطح → الشاشة الحمراء "تعذر الاتصال" لكل التطبيق في وضع e2e، لا للوحدة الجديدة فقط
+- **`text=` في Playwright يطابق جزءاً من النص**: "وردية مفتوحة" تطابق عنوان البوابة "لا توجد وردية مفتوحة"! استخدم مؤشراً غير غامض ("وردية مفتوحة ·") أو أكّد اختفاء الحالة المعاكسة (toBeHidden)
+- **zod `.optional()` لا يقبل null**: تمرير `unitId: null` من الواجهة يفشل التحقق قبل المعاملة — أرسل `undefined` عند الغياب
+- **ToastContainer خارج AppLayout**: كل شاشة كاملة خارج الـ shell تحتاج مضيف توست خاص — بدونها رسائل النجاح/الخطأ تضيع بصمت (اكتشفتها e2e: الـ checkout نجح والتوست غائب)
+- **fail-safe في hooks الحالة الحرجة**: `useActivePosShift` لا يصفّر الوردية عند فشل RPC عابر — فقط إجابة نجاح "لا وردية" تمسحها؛ فشل الشبكة يجب ألا يطرد الكاشير
+- **`.find()` أولوية القواعد في SQL_MODULE_TABLE_RULES**: القاعدة الأولى المطابقة للجدول تفوز — أي قاعدة خاصة (pos) يجب دمجها في القاعدة العامة نفسها أو وضعها قبلها، وليس بعدها
+- **`readPermissions` مرآة `writePermissions`**: للقراءات cross-module (كاشير يقرأ products/بصلاحيات pos فقط) — الافتراضي يبقى module.view/own
+- **الشاشة الكاملة = مسار شقيق لا متداخل**: route بجوار `<Route element={<AppLayout/>}>` وليس داخلها — الشرط: ProtectedRoute ثم PermissionRoute module='pos'
+- **نبض الجلسة مشترك**: `useSessionHeartbeat(enabled)` — أي مسار خارج AppLayout يجب أن يستدعيه وإلا لا تنتهي الجلسة بالخمول
+- **`computeCartTotals` مصدر واحد**: كل حساب سلة (شاشة/اختبار) عبره — roundMoney في كل خطوة، خصم سطري ثم VAT
+- **باركود رقمي ≠ string بعد mapRows**: قارن بـ `String(v).trim()` دائماً في lookups الباركود
+- **الكمية المختلطة = نقدي مُقلَّد + آجل**: cashPart = total − credit (المستلم يغطيه والباقي يُحسب client-side قبل الإرسال)

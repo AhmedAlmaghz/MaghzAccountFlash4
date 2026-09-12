@@ -57,7 +57,8 @@ export const settingsWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         name: { type: 'string', description: 'اسم الشركة' },
-        taxId: { type: 'string', description: 'الرقم الضريبي' },
+        taxNumber: { type: 'string', description: 'الرقم الضريبي (يقبل taxId كبديل)' },
+        taxId: { type: 'string', description: 'بديل لـ taxNumber' },
         address: { type: 'string', description: 'العنوان' },
         phone: { type: 'string', description: 'رقم الهاتف' },
         email: { type: 'string', description: 'البريد الإلكتروني' },
@@ -67,7 +68,11 @@ export const settingsWriteTools: ToolDefinition[] = [
     execute: async (args) => {
       const data: Record<string, unknown> = {};
       if (args.name !== undefined) data.name = str(args.name);
-      if (args.taxId !== undefined) data.taxId = str(args.taxId);
+      // P1 fix: the Company field is taxNumber — the old data.taxId was
+      // never read by any update path, so the tax number could never be set
+      // through the agent. Accept both spellings.
+      if (args.taxNumber !== undefined) data.taxNumber = str(args.taxNumber);
+      else if (args.taxId !== undefined) data.taxNumber = str(args.taxId);
       if (args.address !== undefined) data.address = str(args.address);
       if (args.phone !== undefined) data.phone = str(args.phone);
       if (args.email !== undefined) data.email = str(args.email);
@@ -106,7 +111,10 @@ export const settingsWriteTools: ToolDefinition[] = [
       if (args.phone !== undefined) data.phone = str(args.phone);
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
-      const res = await coreApi.updateBranch(branchId, ctx.companyId, data);
+      // P0-3 fix: the real signature is updateBranch(companyId, id, …) — the
+      // swapped (branchId, companyId) form passed validation (both UUIDs) and
+      // silently updated 0 rows while reporting { updated: true }.
+      const res = await coreApi.updateBranch(ctx.companyId, branchId, data, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل تعديل الفرع' };
       return { updated: true, branchId };
     },

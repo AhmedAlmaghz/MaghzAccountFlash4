@@ -113,7 +113,7 @@ export const MessageBubble = memo(function MessageBubble({
 
     const lang = detectSpeechLang(speakableText) ?? 'ar';
     const utter = new SpeechSynthesisUtterance(speakableText);
-    utter.lang = lang === 'ar' ? 'ar-SA' : 'en-US';
+    utter.lang = lang === 'ar' ? 'ar-YE' : 'en-US';
     utter.rate = 1.0;
     utter.pitch = 1.0;
 
@@ -173,10 +173,13 @@ export const MessageBubble = memo(function MessageBubble({
               className={cn(
                 'px-4 py-3 rounded-2xl text-sm leading-relaxed',
                 isUser
-                  ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white rounded-br-md shadow-lift'
+                  // P2 fix: logical corners (rounded-ee) instead of physical
+                  // (rounded-br) — the app defaults to dir="rtl", where the
+                  // physical corner points AWAY from the avatar.
+                  ? 'bg-gradient-to-br from-primary-600 to-primary-700 text-white rounded-ee-md shadow-lift'
                   : message.kind === 'error'
-                    ? 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800 rounded-bl-md'
-                    : 'bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200/70 dark:border-zinc-700 shadow-card rounded-bl-md'
+                    ? 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800 rounded-es-md'
+                    : 'bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-200/70 dark:border-zinc-700 shadow-card rounded-es-md'
               )}
             >
               {message.kind === 'error' && <AlertCircle size={14} className="inline ms-1 -mt-0.5" />}

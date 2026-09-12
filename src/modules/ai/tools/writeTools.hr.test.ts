@@ -101,6 +101,7 @@ describe('hr.create_employee — plain `name` alias (transcript regression)', ()
     expect(res.created).toBe(true);
     expect(vi.mocked(hrApi.createEmployee)).toHaveBeenCalledWith(
       expect.objectContaining({ fullName: 'أحمد صالح' }),
+      ctx.userId,
     );
   });
 

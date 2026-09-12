@@ -406,6 +406,22 @@ class ChatEngine {
 
     if (store.isProcessing) return;
 
+    // P0-2 fix: unresolved write-confirmation cards must be answered BEFORE a
+    // new user turn. A new turn pushed after a dangling assistant(tool_calls)
+    // (no tool result yet) permanently breaks the wire protocol — providers
+    // reject "assistant message with tool_calls must be followed by tool
+    // messages" on EVERY subsequent request until reset(); on the flatten
+    // path the model re-reads "no result yet" and re-issues the same write
+    // (duplicate document). Block loudly instead of corrupting the session.
+    if (this.pendingWriteCalls.length > 0) {
+      store.addMessage({
+        role: 'assistant',
+        kind: 'error',
+        content: 'توجد عمليات بانتظار تأكيدك — وافق أو ارفض بطاقات التأكيد أعلاه قبل إرسال رسالة جديدة.',
+      });
+      return;
+    }
+
     // Tenant guard: a company switch since the last send discards the old
     // tenant's LLM history before anything reads it.
     this.ensureCompanyScope(this.ctx.companyId);
@@ -550,24 +566,89 @@ class ChatEngine {
   }
 
   /**
+   * Cross-check a business-action claim against EVIDENCE: does any claimed
+   * document number appear in a successful write tool result already present
+   * in history? An honest follow-up summary of an earlier real write ("شو
+   * صار؟" → "أنشأت PV-000123") must pass the anti-fabrication guard instead
+   * of being deleted as a lie (which pressured the model to re-execute and
+   * mint duplicates). Only claims with ZERO supporting evidence correct.
+   */
+  private claimMatchesExecutedWrite(content: string): boolean {
+    const claimed = new Set<string>();
+    const re = new RegExp(DOC_NUMBER_RE.source, 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      claimed.add(m[0].toUpperCase());
+    }
+    if (claimed.size === 0) return false;
+    const squash = (s: string): string => s.replace(/[\s-]+/g, '');
+    for (const h of this.history) {
+      if (h.role !== 'tool' || typeof h.content !== 'string') continue;
+      // Failure results start with "خطأ:" / rejection text — only success
+      // payloads count as evidence.
+      if (/^\s*(خطأ:|تم رفض العملية)/.test(h.content)) continue;
+      const flat = h.content.toUpperCase();
+      const flatSquashed = squash(flat);
+      for (const doc of claimed) {
+        // Match raw AND separator-insensitive ("PV-000123" ≡ "PV 000123")
+        // — comparing only squashed forms broke the common hyphenated case.
+        if (doc && (flat.includes(doc) || flatSquashed.includes(squash(doc)))) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Insert a tool result RIGHT AFTER its partner assistant(tool_calls)
+   * message instead of the history tail. OpenAI-compatible providers require
+   * the tool response to immediately follow its tool_call; appending at the
+   * tail (after newer user/assistant turns) produced a dangling call → a
+   * "tool message after user message" wire that providers reject forever.
+   * The partner is located by scanning back for the assistant message that
+   * carries this exact callId; fallback = tail (previous behaviour).
+   */
+  private pushToolResultAfterPartner(callId: string, content: string): void {
+    const msg = { role: 'tool' as const, content, tool_call_id: callId };
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const m = this.history[i];
+      if (m.role !== 'assistant') continue;
+      const calls = (m as { tool_calls?: Array<{ id?: string }> }).tool_calls;
+      if (Array.isArray(calls) && calls.some((tc) => tc && tc.id === callId)) {
+        this.history.splice(i + 1, 0, msg);
+        return;
+      }
+    }
+    this.history.push(msg);
+  }
+
+  /**
    * Called by the UI when the user clicks confirm or reject on a pending
    * write tool call. Resumes the agent loop with the tool result (or rejection).
    */
   async resolveConfirmation(callId: string, approved: boolean): Promise<void> {
     const store = this.store();
+
+    // Idempotency: prune the pending call BEFORE any await. The UI hides the
+    // buttons on the synchronous status flip, but main-thread saturation can
+    // process a second queued activation before React flushes — the old
+    // "prune after execute" window executed the same financial write twice.
+    const pending = this.pendingWriteCalls.find((c) => c.callId === callId);
+    if (!pending) return;
+    const messageId = store.messages.find((m) => m.toolCall?.callId === callId)?.id;
+    if (!messageId) {
+      this.pendingWriteCalls = this.pendingWriteCalls.filter((c) => c.callId !== callId);
+      return;
+    }
+    this.pendingWriteCalls = this.pendingWriteCalls.filter((c) => c.callId !== callId);
+    if (store.messages.find((m) => m.id === messageId)?.toolCall?.status === 'executing') return;
+
     store.setProcessing(true);
     this.touchProgress();
 
     try {
-      const pending = this.pendingWriteCalls.find((c) => c.callId === callId);
-      if (!pending) return;
-
-      const messageId = store.messages.find((m) => m.toolCall?.callId === callId)?.id;
-      if (!messageId) return;
+      store.updateToolCall(messageId, { status: 'executing' });
 
       if (approved) {
-        // Execute the write tool
-        store.updateToolCall(messageId, { status: 'executing' });
 
         const outcome = await executeToolCall(pending.toolName, pending.args, this.ctx);
 
@@ -590,12 +671,9 @@ class ChatEngine {
             void this.startBatchRun(batchId, messageId);
           }
 
-          // Add tool result to LLM history
-          this.history.push({
-            role: 'tool',
-            content: JSON.stringify(outcome.result),
-            tool_call_id: callId,
-          });
+          // Add tool result to LLM history — immediately after its partner
+          // assistant(tool_calls) message, never at the tail.
+          this.pushToolResultAfterPartner(callId, JSON.stringify(outcome.result));
         } else {
           store.updateToolCall(messageId, {
             status: 'error',
@@ -611,11 +689,7 @@ class ChatEngine {
           // (classification + reason + fixHint) so the next reply guides the
           // user to the resolution instead of repeating the raw error.
           const guidance = outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : '';
-          this.history.push({
-            role: 'tool',
-            content: `خطأ: ${outcome.error}${guidance}`,
-            tool_call_id: callId,
-          });
+          this.pushToolResultAfterPartner(callId, `خطأ: ${outcome.error}${guidance}`);
         }
       } else {
         // Rejected
@@ -624,15 +698,8 @@ class ChatEngine {
           resultSummary: 'تم رفض العملية من المستخدم',
         });
 
-        this.history.push({
-          role: 'tool',
-          content: 'تم رفض العملية من المستخدم. لا تحاول التنفيذ مرة أخرى.',
-          tool_call_id: callId,
-        });
+        this.pushToolResultAfterPartner(callId, 'تم رفض العملية من المستخدم. لا تحاول التنفيذ مرة أخرى.');
       }
-
-      // Clean up pending
-      this.pendingWriteCalls = this.pendingWriteCalls.filter((c) => c.callId !== callId);
 
       // OpenAI-compatible providers require one tool response per emitted call.
       // Resume only after every pending write call has been resolved.
@@ -796,6 +863,58 @@ class ChatEngine {
   }
 
   /**
+   * Regenerate the last assistant reply. Removes the previous user/assistant
+   * pair from BOTH the UI transcript and the LLM history, then re-sends the
+   * same user text as a fresh turn. (The old UI-only path called send()
+   * directly, duplicating the user bubble in the transcript AND doubling the
+   * turn inside the 30-message context window — every click added another
+   * copy and confused the model. The old assistant reply is dropped too,
+   * never kept alongside its replacement.)
+   * No-op while processing or when no previous user turn exists.
+   */
+  async regenerate(): Promise<void> {
+    const store = this.store();
+    if (store.isProcessing || this.pendingWriteCalls.length > 0) return;
+    const messages = store.messages;
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m && m.role === 'user' && m.kind === 'text') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx < 0) return;
+    const text = String(messages[lastUserIdx]?.content ?? '');
+    if (!text.trim()) return;
+    // Drop the user turn and everything after it (its assistant reply,
+    // cards, follow-ups) from the transcript…
+    store.truncateMessages(lastUserIdx);
+    // …and the matching tail from the LLM history (system prompt at [0]
+    // is preserved; drop trailing user/assistant/tool turns).
+    const h = this.history.length;
+    const isUserTurn = (idx: number): boolean => {
+      const m = this.history[idx];
+      return !!m && m.role === 'user';
+    };
+    // Find the last user turn in LLM history and cut from there.
+    let cutAt = -1;
+    for (let i = h - 1; i >= 0; i--) {
+      if (isUserTurn(i)) {
+        cutAt = i;
+        break;
+      }
+    }
+    if (cutAt > 0) {
+      this.history = this.history.slice(0, cutAt);
+    } else if (cutAt === 0) {
+      // Only the system message may precede it — keep index 0 intact.
+      this.history = this.history.slice(0, this.history[0]?.role === 'system' ? 1 : 0);
+    }
+    await this.send(text);
+  }
+
+  /**
    * Company-switch guard: the engine is a singleton, but its history belongs
    * to ONE tenant. When the active company changes mid-session, the old
    * conversation's context (entities, documents, VAT rate) silently leaks into
@@ -818,6 +937,13 @@ class ChatEngine {
     this.successfulWritesThisSend.clear();
     this.failedWriteAttempts.clear();
     this.liveContextCache = null;
+    // P1 fix (cross-tenant transcript leak): the store's sessionId still
+    // points at the OLD company's session row. The next save would UPDATE
+    // that row's company scope check to 0 rows and then INSERT a brand-new
+    // session under the NEW company containing the ENTIRE old-tenant
+    // transcript (customer names, balances, tool args). Detach first — the
+    // next save creates a fresh session under the current tenant.
+    this.store().setSessionId(null);
   }
 
   /**
@@ -1231,6 +1357,16 @@ class ChatEngine {
       // (cap 128) and by the providers themselves.
       const routed = routeToolsForCycle(this.history, this.extraAdvertisedTools);
       const llmTools = toLlmTools(routed.tools);
+      // P1: the cap drop used to be silent — a broad intent could lose the
+      // very tools it routed (sliced by registration order). With relevance
+      // ordering the intent domains survive; log the remainder honestly so a
+      // "model never calls X" report starts from the routing line, not a guess.
+      if (routed.dropped > 0) {
+        console.warn(
+          `[ai] tool-router dropped ${routed.dropped} tools this cycle ` +
+          `(routedByIntent=${routed.routedByIntent}); advertised=${routed.tools.length}`,
+        );
+      }
 
       // Try push-based streaming first, then fall back to non-streaming
       let response: { success: boolean; data?: LlmCompletionData; error?: string };
@@ -1281,8 +1417,28 @@ class ChatEngine {
         // if any, only touches the placeholder id + local array: harmless
         // after we fall through to the complete() fallback below.
         // Returns 'stopped' when the user pressed stop mid-stream.
+        //
+        // P1 fix: the loop is driven with manual next() (not `for await`)
+        // so the generator's DONE VALUE is captured. The main process ends
+        // an aborted stream with {success:false, error} (90s provider abort,
+        // timeouts) — `for await` silently discarded that value, so a
+        // half-delivered report became a successful final response with
+        // finishReason:null. Now a failed done-result routes to the honest
+        // complete() fallback instead of presenting truncation as success.
+        // Holder object (not a captured `let`): TS keeps a `= null`
+        // initializer narrowing across closures, which would make the check
+        // below "unreachable" (never). Property narrowing is reset by the
+        // `await Promise.race` below, so the declared type applies there.
+        const streamDoneBox: { result: { success: boolean; error?: string } | null } = { result: null };
         const drainStream = async (): Promise<'drained' | 'stopped'> => {
-          for await (const chunk of streamGen) {
+          for (;;) {
+            const step = await streamGen.next();
+            if (step.done) {
+              const doneValue = step.value as unknown as { success: boolean; error?: string } | undefined;
+              streamDoneBox.result = doneValue ?? null;
+              return 'drained';
+            }
+            const chunk = step.value;
             // Stop button: finalize the partial text and end the request.
             if (this.abortRequested) {
               this.abortRequested = false;
@@ -1302,7 +1458,6 @@ class ChatEngine {
               scheduleFlush();
             }
           }
-          return 'drained';
         };
         const drainOutcome = await Promise.race([
           drainStream(),
@@ -1322,7 +1477,32 @@ class ChatEngine {
           return;
         }
 
-        if (chunks.length > 0) {
+        // P1 (paired with the drain fix above): a failed done-result means
+        // the provider aborted mid-report (timeout/overload) — the partial
+        // chunks must NOT be presented as a complete success. Route to the
+        // honest non-streaming fallback; the transient-retry below still
+        // applies to its error text.
+        if (streamDoneBox.result && !streamDoneBox.result.success) {
+          if (streamingId) {
+            this.store().removeMessage(streamingId);
+          }
+          this.touchProgress();
+          // The failed stream's partial text died with its placeholder: reset
+          // the streaming flags so the fallback below renders its FRESH
+          // content as a NEW bubble instead of updating the removed one
+          // (which would silently swallow the answer).
+          streamingId = null;
+          streamedContent = false;
+          contentAcc = '';
+          response = await aiApi.complete({
+            companyId: this.ctx.companyId,
+            messages: this.buildMessages(),
+            tools: llmTools.length > 0 ? llmTools : undefined,
+            temperature: 0.2,
+            maxTokens: MAX_COMPLETION_TOKENS,
+          });
+          this.touchProgress();
+        } else if (chunks.length > 0) {
           response = { success: true, data: reconstructResponseFromChunks(chunks) };
         } else {
           // Empty stream — fall back to non-streaming, remove placeholder
@@ -1446,7 +1626,15 @@ class ChatEngine {
         // imitate earlier success summaries with invented document numbers —
         // those replies are removed and the model is forced to either call
         // the real tool or honestly say nothing was done.
-        if (this.successfulWritesThisSend.size === 0 && claimsBusinessAction(raw)) {
+        //
+        // P1 fix: the guard used to be scoped to THIS send only — an honest
+        // follow-up summary ("أنشأت PV-000123 وهو مرحّل") after a REAL write
+        // in an earlier turn was deleted as "fabrication" and the model was
+        // told its true statement was a lie, pressuring it to RE-EXECUTE
+        // (duplicate document). Before correcting, cross-check the claimed
+        // document number against successful write tool results already in
+        // history — a claim matching real evidence passes through.
+        if (this.successfulWritesThisSend.size === 0 && claimsBusinessAction(raw) && !this.claimMatchesExecutedWrite(raw)) {
           await this.correctFabricatedReply(streamingId, streamedContent);
           return;
         }
@@ -1546,7 +1734,7 @@ class ChatEngine {
       // stop instead of asking the user to approve the doomed call again.
       if (writeCalls.length > 0) {
         this.pendingWriteCalls = [];
-        const exhausted: Array<{ name: string; error: string }> = [];
+        const exhausted: Array<{ callId: string; name: string; error: string }> = [];
         const confirmable: typeof writeCalls = [];
 
         for (const tc of writeCalls) {
@@ -1554,6 +1742,7 @@ class ChatEngine {
           const failures = this.failedWriteAttempts.get(key) ?? 0;
           if (failures >= ChatEngine.WRITE_RETRY_LIMIT) {
             exhausted.push({
+              callId: tc.id,
               name: tc.name,
               error: `توقف تلقائي: استدعاء ${tc.name} بنفس المعطيات فشل ${failures} مرات — لن يُطلب موافقتك مجدداً على نفس العملية. عدّل المعطيات أو نفّذها من الشاشة مباشرة.`,
             });
@@ -1563,11 +1752,13 @@ class ChatEngine {
         }
 
         for (const ex of exhausted) {
-          this.history.push({
-            role: 'tool',
-            content: `خطأ: ${ex.error}`,
-            tool_call_id: `exhausted-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          });
+          // P1 fix: push the error with the REAL tool_call_id. The old code
+          // minted a synthetic `exhausted-<ts>` id that matches NOTHING in
+          // the partner assistant(tool_calls) message — providers reject the
+          // orphan pair with a 400 on every subsequent request (the guard
+          // designed to SAVE the session killed it instead). Insert right
+          // after the partner like every other tool result.
+          this.pushToolResultAfterPartner(ex.callId, `خطأ: ${ex.error}`);
           this.store().addMessage({
             role: 'assistant',
             kind: 'error',

@@ -54,7 +54,10 @@ const configuredProviderHosts = (process.env.AI_ALLOWED_HOSTS || '')
 for (const host of configuredProviderHosts) DEFAULT_PROVIDER_HOSTS.add(host);
 
 // In-memory cache of decrypted API keys, isolated per company.
-const cachedApiKeys = new Map();
+// Entries carry a timestamp and expire after 15 minutes: a key rotated
+// outside save-config previously served until process restart.
+const cachedApiKeys = new Map(); // companyId -> { key, at }
+const API_KEY_CACHE_TTL_MS = 15 * 60_000;
 
 // ─── Settings persistence (via shared pg pool) ──────────────────────────────
 
@@ -89,24 +92,30 @@ async function upsertAiSetting(companyId, key, value) {
 const AI_RATE_LIMIT_HOUR = 120;
 const userCallLog = new Map(); // userId → number[] (epoch ms)
 
-function withinRateLimit(userId, settings) {
-  const cap = Number(settings['ai.rate_limit_hour']) || AI_RATE_LIMIT_HOUR;
-  if (cap <= 0) return true; // explicitly disabled
+function pruneRateLog(userId) {
   const now = Date.now();
   const hourAgo = now - 3600_000;
   const log = (userCallLog.get(userId) || []).filter((t) => t > hourAgo);
-  if (log.length >= cap) {
-    userCallLog.set(userId, log);
-    return false;
-  }
-  log.push(now);
   userCallLog.set(userId, log);
   if (userCallLog.size > 500) {
     // drop the oldest entries entirely (long-gone sessions)
     const oldestKey = userCallLog.keys().next().value;
     userCallLog.delete(oldestKey);
   }
-  return true;
+  return { log, now };
+}
+function isRateLimited(userId, settings) {
+  const cap = Number(settings['ai.rate_limit_hour']) || AI_RATE_LIMIT_HOUR;
+  if (cap <= 0) return false; // explicitly disabled
+  const { log } = pruneRateLog(userId);
+  return log.length >= cap;
+}
+// Recorded ONLY on successful provider completions — failures, timeouts
+// and validation rejections must not burn the hourly budget.
+function recordProviderCall(userId) {
+  const { log, now } = pruneRateLog(userId);
+  log.push(now);
+  userCallLog.set(userId, log);
 }
 
 function rateLimitMessage() {
@@ -139,12 +148,13 @@ function decryptApiKey(stored) {
 async function resolveApiKey(companyId) {
   // Priority 1: encrypted per-company value (isolated quota/cost per tenant).
   // Priority 2: in-memory cache (avoids repeated keychain prompts).
-  const cachedApiKey = cachedApiKeys.get(companyId);
-  if (cachedApiKey) return cachedApiKey;
+  const cachedEntry = cachedApiKeys.get(companyId);
+  if (cachedEntry && Date.now() - cachedEntry.at < API_KEY_CACHE_TTL_MS) return cachedEntry.key;
+  if (cachedEntry) cachedApiKeys.delete(companyId); // stale — refetch below
   const settings = await readAiSettings(companyId);
   const decrypted = decryptApiKey(settings[KEY_SETTING]);
   if (decrypted) {
-    cachedApiKeys.set(companyId, decrypted);
+    cachedApiKeys.set(companyId, { key: decrypted, at: Date.now() });
     return decrypted;
   }
   // Priority 3: AI_API_KEY env var — a shared fallback across ALL companies.
@@ -398,11 +408,19 @@ async function* callChatCompletionStream({
 // ─── Provider HTTP calls (non-streaming, kept for test-connection) ───────────
 
 function isValidMessages(messages) {
+  // P0-1 fix: the composed system prompt (rules + always-on skills + tool
+  // inventory) measures ~22-29K chars. The flat 20K per-message cap rejected
+  // EVERY Electron AI request with the misleading "messages must be a
+  // non-empty array" error while the browser path (no such validation)
+  // worked. The system message is engine-composed (never user input), so it
+  // gets its own generous ceiling; conversation messages keep 20K.
+  const SYSTEM_MESSAGE_MAX = 48_000;
   return (
     Array.isArray(messages) &&
     messages.length > 0 && messages.length <= 100 &&
     messages.every((m) => m && typeof m.role === 'string' &&
-      (typeof m.content !== 'string' || m.content.length <= 20_000))
+      (typeof m.content !== 'string' ||
+        m.content.length <= (m.role === 'system' ? SYSTEM_MESSAGE_MAX : 20_000)))
   );
 }
 
@@ -427,13 +445,14 @@ function isValidChatMessageAttachments(attachments) {
 function isValidChatMessages(messages) {
   return (
     Array.isArray(messages) &&
+    messages.length > 0 &&
     messages.every(
       (m) =>
         m &&
         typeof m.id === 'string' &&
         (m.role === 'user' || m.role === 'assistant') &&
         (m.kind === 'text' || m.kind === 'tool' || m.kind === 'error') &&
-        typeof m.createdAt === 'number' &&
+        typeof m.createdAt === 'number' && Number.isFinite(m.createdAt) &&
         isValidChatMessageAttachments(m.attachments)
     )
   );
@@ -553,6 +572,15 @@ function parseResultData(raw) {
     return undefined;
   }
 }
+function parseItemArgs(raw) {
+  try {
+    const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!val || typeof val !== 'object' || Array.isArray(val)) return {};
+    return val;
+  } catch {
+    return {};
+  }
+}
 function parseMessageAttachments(raw) {
   try {
     const val = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -575,7 +603,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:get-config', async (event, { sessionToken } = {}) => {
     try {
       const auth = authenticateIpcSession(event, sessionToken, { permission: 'settings.view' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const settings = await readAiSettings(companyId);
       const envKey = process.env.AI_API_KEY || null;
@@ -606,7 +634,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:save-config', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'settings.edit' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const { provider, baseUrl, model, apiKey, enabled } = payload;
 
@@ -617,11 +645,15 @@ export function registerAiHandlers() {
 
       if (typeof apiKey === 'string' && apiKey.trim()) {
         await upsertAiSetting(companyId, KEY_SETTING, encryptApiKey(apiKey.trim()));
-        cachedApiKeys.set(companyId, apiKey.trim());
+        cachedApiKeys.set(companyId, { key: apiKey.trim(), at: Date.now() });
       } else if (apiKey === '') {
         // Explicit empty string clears the key.
         await upsertAiSetting(companyId, KEY_SETTING, '');
         cachedApiKeys.delete(companyId);
+      } else if (typeof apiKey === 'string') {
+        // Whitespace-only: ambiguous between save and clear — refuse
+        // loudly instead of silently doing nothing.
+        return { success: false, error: 'مفتاح API فارغ (مسافات فقط) — أدخل مفتاحاً صالحاً أو اترك الحقل فارغاً تماماً للإبقاء على الحالي' };
       }
 
       return { success: true };
@@ -634,7 +666,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:test-connection', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'settings.edit' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const { baseUrl, model, apiKey } = payload;
       const key = apiKey || (await resolveApiKey(companyId));
@@ -660,7 +692,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:complete', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const { messages, tools, temperature, maxTokens } = payload;
       if (!isValidMessages(messages)) return { success: false, error: 'messages must be a non-empty array' };
@@ -679,7 +711,7 @@ export function registerAiHandlers() {
       if (settings[ENABLED_SETTING] === 'false') {
         return { success: false, error: 'المساعد الذكي معطّل — فعّله من إعدادات الذكاء الاصطناعي' };
       }
-      if (!withinRateLimit(auth.session.user.id, settings)) {
+      if (isRateLimited(auth.session.user.id, settings)) {
         return { success: false, error: rateLimitMessage() };
       }
 
@@ -688,7 +720,7 @@ export function registerAiHandlers() {
         return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
       }
 
-      return await callChatCompletion({
+      const completion = await callChatCompletion({
         baseUrl: settings[BASE_URL_SETTING] || DEFAULT_BASE_URL,
         apiKey,
         model: settings[MODEL_SETTING] || DEFAULT_MODEL,
@@ -697,6 +729,8 @@ export function registerAiHandlers() {
         temperature,
         maxTokens,
       });
+      if (completion.success) recordProviderCall(auth.session.user.id);
+      return completion;
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -742,15 +776,22 @@ export function registerAiHandlers() {
     const streamId = isValidStreamId(payload.streamId) ? payload.streamId : null;
     const chunkCh = streamId ? `ai:stream-chunk:${streamId}` : 'ai:stream-chunk';
     const doneCh = streamId ? `ai:stream-done:${streamId}` : 'ai:stream-done';
-    const sendChunk = (chunk) => event.sender.send(chunkCh, chunk);
+    // P1 fix: the window can be destroyed mid-stream (close/navigate).
+    // event.sender.send then throws "Object has been destroyed" — and the
+    // old catch block called sendDone() again, throwing INSIDE the catch
+    // (unhandled rejection on every mid-stream close + leaked provider
+    // socket). Guard every send; a dead sender also ends the loop early
+    // instead of spraying chunks into nobody.
+    const senderAlive = () => { try { return !event.sender.isDestroyed(); } catch { return false; } };
+    const sendChunk = (chunk) => { if (senderAlive()) event.sender.send(chunkCh, chunk); };
     const sendDone = (result) => {
       if (streamId) forgetStream(streamId);
-      event.sender.send(doneCh, result);
+      if (senderAlive()) event.sender.send(doneCh, result);
     };
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
       if (!auth.ok) {
-        sendDone(auth);
+        sendDone({ success: false, error: auth.error });
         return;
       }
       // Register ownership BEFORE the first chunk so a stop request racing
@@ -784,7 +825,7 @@ export function registerAiHandlers() {
         sendDone({ success: false, error: 'المساعد الذكي معطّل — فعّله من إعدادات الذكاء الاصطناعي' });
         return;
       }
-      if (!withinRateLimit(auth.session.user.id, settings)) {
+      if (isRateLimited(auth.session.user.id, settings)) {
         sendDone({ success: false, error: rateLimitMessage() });
         return;
       }
@@ -806,9 +847,13 @@ export function registerAiHandlers() {
       });
 
       for await (const chunk of stream) {
-        // Renderer moved on (stop button / watchdog timeout): stop provider
-        // traffic instead of spraying chunks into nobody — or worse, into a
-        // NEWER stream sharing the channel.
+        // Renderer moved on (stop button / watchdog timeout) or the window
+        // died: stop provider traffic instead of spraying chunks into
+        // nobody — or worse, into a NEWER stream sharing the channel.
+        if (!senderAlive()) {
+          if (streamId) forgetStream(streamId);
+          return;
+        }
         if (streamId && cancelledStreams.has(streamId)) {
           cancelledStreams.delete(streamId);
           forgetStream(streamId);
@@ -816,6 +861,7 @@ export function registerAiHandlers() {
         }
         sendChunk(chunk);
       }
+      recordProviderCall(auth.session.user.id);
       sendDone({ success: true });
     } catch (err) {
       sendDone({ success: false, error: err.message });
@@ -826,7 +872,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:list-sessions', async (event, { sessionToken } = {}) => {
     try {
       const auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const pool = getPool();
@@ -858,7 +904,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:get-session-messages', async (event, { sessionToken, sessionId } = {}) => {
     try {
       const auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       if (!sessionId) return { success: false, error: 'sessionId is required' };
@@ -893,7 +939,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:save-session', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { sessionId, title, messages } = payload;
@@ -913,13 +959,19 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:purge-old-sessions', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
       const settings = await readAiSettings(companyId);
       const days = Number(settings['ai.retention_days']);
+      // P1 fix: the documented keep-forever opt-out. The old
+      // `days > 0 ? days : 90` turned an explicit '0' into 90 and
+      // deleted transcripts against the admin's stated intent.
+      if (Number.isFinite(days) && days === 0) {
+        return { success: true, data: { purged: 0, retentionDays: 0, keptForever: true } };
+      }
       const retention = Number.isFinite(days) && days > 0 ? days : 90;
       const res = await pool.query(
         `DELETE FROM ai_chat_sessions
@@ -940,7 +992,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:rename-session', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { sessionId, title } = payload;
@@ -966,7 +1018,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:delete-session', async (event, { sessionToken, sessionId } = {}) => {
     try {
       const auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       if (!sessionId) return { success: false, error: 'sessionId is required' };
@@ -989,18 +1041,21 @@ export function registerAiHandlers() {
   // like the chat channels above — never trusted from the payload.
 
   // Flip a running batch to done/partial once nothing is queued or running.
-  async function finalizeBatch(pool, batchId, companyId) {
+  // P3 defense-in-depth: the terminal flip is additionally scoped to the
+  // caller's own row. All callers verified company+user already; this only
+  // makes a cross-user flip impossible rather than merely unreachable.
+  async function finalizeBatch(pool, batchId, companyId, userId) {
     const res = await pool.query(
       `UPDATE ai_job_batches
           SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
               updated_at = NOW()
-        WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+        WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid AND status = 'running'
           AND NOT EXISTS (
             SELECT 1 FROM ai_job_items
             WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
           )
         RETURNING status`,
-      [batchId, companyId]
+      [batchId, companyId, userId || null]
     );
     return res.rows.length > 0 ? res.rows[0].status : null;
   }
@@ -1022,7 +1077,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-create', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { title, kind, sessionId, items } = payload;
@@ -1079,8 +1134,17 @@ export function registerAiHandlers() {
            RETURNING id`,
           params
         );
+        // P2 fix: total_count must equal the DEDUPED insert count, not
+        // items.length. Intra-payload idempotency collisions (same
+        // tool+args twice) silently dropped the duplicate while the header
+        // kept the pre-dedupe count — progress math then showed phantom
+        // 'remaining' on a done batch forever.
+        await client.query(
+          `UPDATE ai_job_batches SET total_count = $2, updated_at = NOW() WHERE id = $1::uuid`,
+          [batchId, ins.rows.length]
+        );
         await client.query('COMMIT');
-        return { success: true, data: { batchId, total: items.length, inserted: ins.rows.length } };
+        return { success: true, data: { batchId, total: ins.rows.length, inserted: ins.rows.length } };
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         throw err;
@@ -1097,7 +1161,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-claim', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId, limit } = payload;
@@ -1110,9 +1174,9 @@ export function registerAiHandlers() {
            SELECT i.id FROM ai_job_items i
            WHERE i.batch_id = $1::uuid AND i.company_id = $2::uuid AND i.status = 'queued'
              AND i.attempts < 4
-             AND (i.after_seq IS NULL OR i.after_seq IN (
-               SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND status = 'done'
-             ))
+              AND (i.after_seq IS NULL OR i.after_seq IN (
+                SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'done'
+              ))
              AND EXISTS (
                SELECT 1 FROM ai_job_batches b
                WHERE b.id = $1::uuid AND b.company_id = $2::uuid
@@ -1121,8 +1185,20 @@ export function registerAiHandlers() {
            ORDER BY i.seq LIMIT $3
            FOR UPDATE SKIP LOCKED
          ),
-         updated AS (
-           UPDATE ai_job_items u SET status = 'running', attempts = u.attempts + 1, updated_at = NOW()
+         -- Lease protocol (migration 0028): touched refreshes THIS
+         -- worker's own running leases every round (no extra channel);
+         -- updated stamps new claims with (workerId, +30min). Recover
+         -- only fails EXPIRED leases, never a live worker's items.
+    touched AS (
+           UPDATE ai_job_items SET claim_expires_at = NOW() + INTERVAL '30 minutes', updated_at = NOW()
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+             AND $5::varchar IS NOT NULL AND claimed_by = $5::varchar
+         ),
+    updated AS (
+           UPDATE ai_job_items u SET status = 'running', attempts = u.attempts + 1,
+             claimed_by = $5::varchar,
+             claim_expires_at = CASE WHEN $5::varchar IS NULL THEN NULL ELSE NOW() + INTERVAL '30 minutes' END,
+             updated_at = NOW()
            FROM claimed WHERE u.id = claimed.id
            RETURNING u.id
          ),
@@ -1134,7 +1210,7 @@ export function registerAiHandlers() {
          SELECT i.id, i.seq, i.tool_name, i.args, i.after_seq, i.label, i.ref, i.attempts
            FROM ai_job_items i JOIN updated ON updated.id = i.id
           ORDER BY i.seq`,
-        [batchId, companyId, take, userId]
+        (()=>{ const w = typeof payload.workerId === 'string' && payload.workerId ? String(payload.workerId).slice(0, 64) : null; return [batchId, companyId, take, userId, w]; })()
       );
       return {
         success: true,
@@ -1142,11 +1218,15 @@ export function registerAiHandlers() {
           id: r.id,
           seq: Number(r.seq),
           toolName: r.tool_name,
-          args: typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {}),
+          args: parseItemArgs(r.args),
           afterSeq: r.after_seq === null ? null : Number(r.after_seq),
           label: r.label || null,
           ref: r.ref || null,
           resultData: null,
+          status: 'running',
+          lastError: null,
+          errorCode: null,
+          resultRef: null,
           attempts: Number(r.attempts) || 0,
         })),
       };
@@ -1159,16 +1239,34 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-item-done', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId, itemId, resultRef, resultData } = payload;
       if (!batchId || !itemId) return { success: false, error: 'batchId and itemId are required' };
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
+      // P3 fix: truncate (ids first) instead of nulling oversized payloads.
+      // Mirrors truncateScalarsForPersist() in src/modules/ai/engine/
+      // batchQueue.ts (the canonical version — keep the two in sync).
+      // NULL result_data orphaned dependents on resume (UNRESOLVED_REF
+      // despite a succeeded parent).
       let resultJson = null;
       try {
-        const raw = typeof resultData === 'string' ? resultData : JSON.stringify(resultData ?? null);
+        const srcObj = typeof resultData === 'string' ? JSON.parse(resultData) : (resultData ?? null);
+        const rankKey = (k) => (k === 'id' ? 0 : /Id$/.test(k) ? 1 : /Number$/.test(k) ? 2 : 3);
+        const entries = (srcObj && typeof srcObj === 'object' && !Array.isArray(srcObj)) ? Object.entries(srcObj) : [];
+        entries.sort((a, b) => rankKey(a[0]) - rankKey(b[0]) || String(a[1]).length - String(b[1]).length);
+        const shrunk = {};
+        for (const [k, v] of entries) {
+          const trial = JSON.stringify({ ...shrunk, [k]: v });
+          if (trial.length <= 2000) { shrunk[k] = v; continue; }
+          if (typeof v === 'string' && rankKey(k) <= 2) {
+            const room = 2000 - JSON.stringify(shrunk).length - k.length - 8;
+            if (room > 12) shrunk[k] = v.slice(0, room);
+          }
+        }
+        const raw = Object.keys(shrunk).length > 0 ? JSON.stringify(shrunk) : null;
         resultJson = raw && raw.length <= 2000 ? raw : null;
       } catch { resultJson = null; }
       const upd = await pool.query(
@@ -1185,7 +1283,7 @@ export function registerAiHandlers() {
       if (!upd.rows.length || Number(upd.rows[0].updated) === 0) {
         return { success: false, error: 'Item not found or not running' };
       }
-      const finalStatus = await finalizeBatch(pool, batchId, companyId);
+      const finalStatus = await finalizeBatch(pool, batchId, companyId, userId);
       return { success: true, data: { finalStatus } };
     } catch (err) {
       return { success: false, error: err.message };
@@ -1198,7 +1296,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-item-fail', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId, itemId, error, errorCode, retryable } = payload;
@@ -1213,7 +1311,6 @@ export function registerAiHandlers() {
         [itemId, batchId, companyId, userId]
       );
       if (cur.rows.length === 0) return { success: false, error: 'Item not found or not running' };
-      const failedSeq = Number(cur.rows[0].seq);
       const attempts = Number(cur.rows[0].attempts) || 0;
       const safeError = typeof error === 'string' ? error.slice(0, 2000) : 'خطأ غير معروف';
       const safeCode = typeof errorCode === 'string' ? errorCode.slice(0, 40) : null;
@@ -1225,33 +1322,44 @@ export function registerAiHandlers() {
         );
         return { success: true, data: { retried: true, attempts } };
       }
-      await pool.query(
-        `UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
-         WHERE id = $1::uuid AND company_id = $4::uuid`,
-        [itemId, safeError, safeCode, companyId]
-      );
-      const skipped = await pool.query(
-        `WITH RECURSIVE doomed(seq) AS (
-           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND after_seq = $2
+      // P2 fix: fail + doomed-skip + counters in ONE statement (was three
+      // separate queries — a crash between the fail UPDATE and the skip
+      // left queued orphans with a failed parent that nothing could ever
+      // clean: unclaimable, invisible to recover, stuck running forever).
+      // The embedded status guard + failed_n check preserve the
+      // 'not running' contract when a concurrent actor moved the row.
+      const doneRes = await pool.query(
+        `WITH RECURSIVE failed AS (
+           UPDATE ai_job_items SET status = 'failed', last_error = $2, error_code = $3, updated_at = NOW()
+           WHERE id = $1::uuid AND company_id = $4::uuid AND status = 'running'
+           RETURNING seq
+         ),
+         doomed(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $5::uuid AND after_seq IN (SELECT seq FROM failed)
            UNION
            SELECT i.seq FROM ai_job_items i JOIN doomed d ON i.after_seq = d.seq
-           WHERE i.batch_id = $1::uuid
+           WHERE i.batch_id = $5::uuid
+         ),
+         skipped AS (
+           UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: فشل عنصر يعتمد عليه', updated_at = NOW()
+           WHERE batch_id = $5::uuid AND company_id = $4::uuid AND status = 'queued'
+             AND seq IN (SELECT seq FROM doomed)
+           RETURNING seq
+         ),
+         cnt AS (
+           UPDATE ai_job_batches SET failed_count = failed_count + (SELECT COUNT(*) FROM failed),
+             skipped_count = skipped_count + (SELECT COUNT(*) FROM skipped), updated_at = NOW()
+           WHERE id = $5::uuid AND company_id = $4::uuid AND user_id = $6::uuid
          )
-         UPDATE ai_job_items SET status = 'skipped',
-           last_error = 'تخطي: فشل عنصر يعتمد عليه', updated_at = NOW()
-         WHERE batch_id = $1::uuid AND company_id = $3::uuid AND status = 'queued'
-           AND seq IN (SELECT seq FROM doomed)
-         RETURNING seq`,
-        [batchId, failedSeq, companyId]
+         SELECT (SELECT COUNT(*) FROM failed) AS failed_n, (SELECT COUNT(*) FROM skipped) AS skipped_n`,
+        [itemId, safeError, safeCode, companyId, batchId, userId]
       );
-      await pool.query(
-        `UPDATE ai_job_batches SET failed_count = failed_count + 1,
-           skipped_count = skipped_count + $2, updated_at = NOW()
-         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid`,
-        [batchId, skipped.rows.length, companyId, userId]
-      );
-      const finalStatus = await finalizeBatch(pool, batchId, companyId);
-      return { success: true, data: { retried: false, skipped: skipped.rows.length, finalStatus } };
+      const failedN = Number(doneRes.rows?.[0]?.failed_n || 0);
+      const skippedN = Number(doneRes.rows?.[0]?.skipped_n || 0);
+      if (failedN === 0) return { success: false, error: 'Item not found or not running' };
+      const finalStatus = await finalizeBatch(pool, batchId, companyId, userId);
+      return { success: true, data: { retried: false, skipped: skippedN, finalStatus } };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1262,7 +1370,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-set-status', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId, status } = payload;
@@ -1285,10 +1393,14 @@ export function registerAiHandlers() {
       if (upd.rows.length === 0) return { success: false, error: 'Batch not found or transition not allowed' };
       let skipped = 0;
       if (status === 'cancelled') {
+        // P1 fix: park QUEUED items only — running items belong to a live
+        // worker's in-flight chunk; flipping them to skipped while the write
+        // executes produced ledger-vs-record lies. In-flight items finish
+        // honestly via itemDone (bounded: 10-item chunks).
         const res = await pool.query(
           `UPDATE ai_job_items SET status = 'skipped',
              last_error = 'تخطي: أُلغيت الدفعة', updated_at = NOW()
-           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status IN ('queued', 'running')
+           WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'queued'
            RETURNING seq`,
           [batchId, companyId]
         );
@@ -1309,7 +1421,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-retry-failed', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId } = payload;
@@ -1324,14 +1436,36 @@ export function registerAiHandlers() {
         [batchId, companyId]
       );
       if (requeued.rows.length === 0) return { success: false, error: 'No failed items to retry' };
+      // P2 fix: reverse the doomed cascade. The fail path transitively
+      // SKIPPED every dependent of the failed items; requeueing the failed
+      // ones alone left the whole downstream chain skipped FOREVER (the
+      // user had to rebuild the batch by hand). Un-skip every skipped item
+      // whose dependency chain now resolves to done-or-queued (all failed
+      // ancestors were just requeued above, so only genuinely-blocked
+      // items — e.g. depending on a still-running row — stay skipped).
+      const unskipped = await pool.query(
+        `WITH RECURSIVE revived(seq) AS (
+           SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'skipped'
+             AND (after_seq IS NULL OR after_seq IN (SELECT seq FROM ai_job_items WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status IN ('done', 'queued')))
+           UNION
+           SELECT i.seq FROM ai_job_items i JOIN revived r ON i.after_seq = r.seq
+           WHERE i.batch_id = $1::uuid AND i.company_id = $2::uuid AND i.status = 'skipped'
+         )
+         UPDATE ai_job_items SET status = 'queued', attempts = 0,
+           last_error = NULL, error_code = NULL, updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'skipped'
+           AND seq IN (SELECT seq FROM revived)
+         RETURNING seq`,
+        [batchId, companyId]
+      );
       await pool.query(
         `UPDATE ai_job_batches SET status = 'running',
-           failed_count = failed_count - $2, updated_at = NOW()
-         WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid
+           failed_count = failed_count - $2, skipped_count = skipped_count - $3, updated_at = NOW()
+         WHERE id = $1::uuid AND company_id = $4::uuid AND user_id = $5::uuid
            AND status IN ('partial', 'paused')`,
-        [batchId, requeued.rows.length, companyId, userId]
+        [batchId, requeued.rows.length, unskipped.rows.length, companyId, userId]
       );
-      return { success: true, data: { requeued: requeued.rows.length } };
+      return { success: true, data: { requeued: requeued.rows.length, unskipped: unskipped.rows.length } };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -1345,7 +1479,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-recover', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId } = payload;
@@ -1358,6 +1492,8 @@ export function registerAiHandlers() {
              last_error = 'توقف التنفيذ — انقطع الـ worker (تعطل الجلسة أو إغلاق التطبيق)',
              error_code = 'INTERRUPTED', updated_at = NOW()
            WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+            -- Lease gate (migration 0028): only EXPIRED leases are dead workers.
+            AND (claim_expires_at IS NULL OR claim_expires_at < NOW())
            RETURNING seq
          ),
          doomed(seq) AS (
@@ -1384,7 +1520,7 @@ export function registerAiHandlers() {
         [batchId, companyId, userId]
       );
       const row = res.rows[0] || { failed: '0', skipped: '0' };
-      const finalStatus = await finalizeBatch(pool, batchId, companyId);
+      const finalStatus = await finalizeBatch(pool, batchId, companyId, userId);
       return {
         success: true,
         data: {
@@ -1398,17 +1534,11 @@ export function registerAiHandlers() {
     }
   });
 
-  // Crash recovery: items stuck 'running' belong to a dead worker (reload /
-  // crash / killed tab). They are FAILED — never silently requeued, so a
-  // half-executed financial write can never run twice — and their transitive
-  // dependents skip via the standard cascade. No-op when nothing is stale.
-  // Called by the worker before every run (cheap when clean).
-  
   // Full batch state (header + items in seq order) for progress UI + resume.
   ipcMain.handle('ai:batch-get', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { batchId } = payload;
@@ -1449,7 +1579,7 @@ export function registerAiHandlers() {
             id: r.id,
             seq: Number(r.seq),
             toolName: r.tool_name,
-            args: typeof r.args === 'string' ? JSON.parse(r.args) : (r.args || {}),
+            args: parseItemArgs(r.args),
             afterSeq: r.after_seq === null ? null : Number(r.after_seq),
             label: r.label || null,
             ref: r.ref || null,
@@ -1471,7 +1601,7 @@ export function registerAiHandlers() {
   ipcMain.handle('ai:batch-list', async (event, payload = {}) => {
     try {
       const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
-      if (!auth.ok) return auth;
+      if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const userId = auth.session.user.id;
       const { status } = payload || {};

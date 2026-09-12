@@ -67,11 +67,16 @@ export function SessionsDrawer({ onSelect, onDelete, onRename, currentSessionId 
   const filtered = useMemo(() => {
     if (!search.trim()) return sessions;
     const q = search.trim().toLowerCase();
-    return sessions.filter(
-      (s) =>
-        (s.title && s.title.toLowerCase().includes(q)) ||
-        q === '',
-    );
+    // P3 fix: untitled sessions (title null/empty — e.g. single-exchange
+    // chats before the first save) were excluded from search entirely, and
+    // the `|| q === ''` clause was dead code (unreachable inside the
+    // non-empty branch). Match on title OR fall back to the session id
+    // prefix so every session is findable.
+    return sessions.filter((s) => {
+      const title = (s.title || '').toLowerCase();
+      if (title.includes(q)) return true;
+      return String(s.id || '').toLowerCase().startsWith(q.replace(/^#/, ''));
+    });
   }, [sessions, search]);
 
   const groups = useMemo<GroupedSessions[]>(() => {

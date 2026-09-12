@@ -5,6 +5,7 @@ export type PaletteModule =
   | 'accounting'
   | 'inventory'
   | 'sales'
+  | 'pos'
   | 'purchases'
   | 'manufacturing'
   | 'hr'
@@ -58,6 +59,11 @@ export const paletteItems: PaletteItem[] = [
   { id: 'sales-customers', labelKey: 'sidebar.sales.customers', path: '/sales/customers', module: 'sales', keywords: ['customers', 'clients', 'عملاء'] },
   { id: 'sales-quotations', labelKey: 'sidebar.sales.quotations', path: '/sales/quotations', module: 'sales', keywords: ['quotation', 'quote', 'عروض'] },
   { id: 'sales-returns', labelKey: 'sidebar.sales.returns', path: '/sales/returns', module: 'sales', keywords: ['returns', 'مرتجع'] },
+
+  // POS
+  { id: 'pos-terminal', labelKey: 'sidebar.pos.terminal', path: '/pos', module: 'pos', keywords: ['pos', 'cashier', 'نقطة بيع', 'كاشير', 'بيع'] },
+  { id: 'pos-shifts', labelKey: 'sidebar.pos.shifts', path: '/pos/shifts', module: 'pos', keywords: ['shifts', 'ورديات', 'وردية'] },
+  { id: 'pos-settings', labelKey: 'sidebar.pos.settings', path: '/pos/settings', module: 'pos', keywords: ['pos settings', 'إعدادات نقطة بيع'] },
 
   // Purchases
   { id: 'purchases', labelKey: 'sidebar.purchases.title', path: '/purchases', module: 'purchases', keywords: ['purchases', 'مشتريات'] },

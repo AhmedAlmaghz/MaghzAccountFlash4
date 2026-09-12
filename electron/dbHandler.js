@@ -1,4 +1,4 @@
-﻿import { ipcMain, app } from 'electron';
+import { ipcMain, app } from 'electron';
 import pg from 'pg';
 import { randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
 import fs from 'fs';
@@ -116,6 +116,7 @@ const FALLBACK_PERMISSIONS = {
     'core.view', 'accounting.view', 'accounting.create', 'accounting.edit', 'accounting.post',
     'inventory.view', 'inventory.create', 'inventory.edit',
     'sales.view', 'sales.create', 'sales.edit', 'sales.post',
+    'pos.view', 'pos.create', 'pos.edit', 'pos.post',
     'purchases.view', 'purchases.create', 'purchases.edit',
     'manufacturing.view', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post',
     'reports.view', 'reports.export',
@@ -134,6 +135,7 @@ const FALLBACK_PERMISSIONS = {
   ],
   sales_rep: [
     'sales.own', 'sales.create', 'sales.edit',
+    'pos.own', 'pos.create', 'pos.post',
     'inventory.own',
     'crm.own', 'crm.create', 'crm.edit',
     'reports.view',
@@ -141,7 +143,7 @@ const FALLBACK_PERMISSIONS = {
   ],
   viewer: [
     'core.view', 'accounting.view', 'inventory.view', 'sales.view',
-    'purchases.view', 'manufacturing.view', 'reports.view',
+    'purchases.view', 'manufacturing.view', 'pos.view', 'reports.view',
   ],
 };
 
@@ -335,7 +337,7 @@ function loginAttemptDenied(event, username) {
 const SQL_MODULE_TABLE_RULES = [
   { module: 'settings', tables: ['roles'] },
   { module: 'settings', tables: ['audit_logs'], writeAny: true },
-  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true },
+  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true, writePermissions: ['settings.create', 'settings.edit', 'settings.post', 'pos.create', 'pos.edit', 'pos.post'] },
   // Document numbering is consumed by every create flow (invoices, products,
   // employees, work orders, ...) — writers only need to hold ANY create right.
   {
@@ -345,31 +347,63 @@ const SQL_MODULE_TABLE_RULES = [
     writePermissions: [
       'settings.edit', 'accounting.create', 'sales.create', 'purchases.create',
       'inventory.create', 'hr.create', 'manufacturing.create', 'crm.create',
+      'pos.create',
     ],
   },
-  { module: 'accounting', tables: ['accounts', 'transactions', 'journal_entries', 'cost_centers', 'receipt_vouchers', 'payment_vouchers'] },
+  { module: 'accounting', tables: ['accounts', 'cost_centers', 'receipt_vouchers', 'payment_vouchers'] },
   // GL tables are ALSO written by cross-module posting flows: HR payroll runs
-  // (gross-up entry) and end-of-service accrual/settlement book through the
-  // same journal machinery — same precedent as manufacturing on stock_movements.
+  // (gross-up entry), end-of-service accrual/settlement and POS checkout
+  // (mixed cash/credit sale entry) book through the same journal machinery.
+  // READS of transactions/journal_entries stay accounting.view/own — POS
+  // cashiers never read the GL.
   {
     module: 'accounting',
     tables: ['transactions', 'journal_entries'],
     writePermissions: [
       'accounting.create', 'accounting.edit', 'accounting.post',
       'hr.create', 'hr.edit',
+      'pos.create', 'pos.post',
     ],
   },
-  { module: 'inventory', tables: ['products', 'product_types', 'product_categories', 'product_product_categories', 'product_units', 'stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'] },
+  // products is the POS catalog (grid + barcode search) — cashiers hold no
+  // inventory right, so reads also accept pos.view/pos.own. Writes stay
+  // inventory-only.
+  {
+    module: 'inventory',
+    tables: ['products', 'product_types', 'product_categories', 'product_product_categories', 'product_units'],
+    readPermissions: ['inventory.view', 'inventory.own', 'pos.view', 'pos.own'],
+  },
+  // stock is touched by the POS checkout batch (ensure rows + decrement) —
+  // same cross-module write precedent as stock_movements below.
+  { module: 'inventory', tables: ['stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'], writePermissions: ['inventory.create', 'inventory.edit', 'inventory.post', 'pos.create', 'pos.post'] },
   // Warehouses & stock movements are touched by cross-module posting flows:
   // completing a work order books material consumption (out) and finished
-  // goods (in) against the first warehouse. Warehouses is reference data
-  // (read-only here, but the write gate applies to any statement with a
-  // write verb), so the same manufacturing writers that own work orders are
-  // authorized. Both writes stay scoped to the session's company inside the
-  // composed CTEs.
+  // goods (in) against the first warehouse; POS checkout decrements stock
+  // renderer-composed through the transaction channel — same precedent.
   { module: 'inventory', tables: ['warehouses'], readAny: true, writePermissions: ['inventory.create', 'inventory.edit', 'inventory.post', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post'] },
-  { module: 'inventory', tables: ['stock_movements'], writePermissions: ['inventory.create', 'inventory.edit', 'inventory.post', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post'] },
-  { module: 'sales', tables: ['sales_invoices', 'sales_invoice_lines', 'sales_returns', 'sales_return_lines', 'quotations', 'quotation_lines', 'customers'] },
+  { module: 'inventory', tables: ['stock', 'stock_movements', 'warehouses'], writePermissions: ['inventory.create', 'inventory.edit', 'inventory.post', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post', 'pos.create', 'pos.post'] },
+  // sales_invoices + lines must be listed BEFORE the general sales rule:
+  // assertSqlAuthorized uses .find() (first matching rule wins). POS cashiers
+  // write invoices through composed RPC handlers holding pos.create/pos.post
+  // instead of sales.*; reads stay gated on sales.view/sales.own (cashier
+  // roles carry sales.own — see FALLBACK_PERMISSIONS).
+  {
+    module: 'sales',
+    tables: ['sales_invoices', 'sales_invoice_lines'],
+    readPermissions: ['sales.view', 'sales.own', 'pos.view', 'pos.own', 'reports.view'],
+    writePermissions: ['sales.create', 'sales.edit', 'sales.post', 'pos.create', 'pos.post'],
+  },
+  // customers BEFORE the general rule: POS cashiers pick a customer for
+  // credit sales with only pos.view/pos.own (no sales right).
+  // customers — read by POS cashiers (credit-sale picker) with pos.view/own;
+  // balance writes come from the POS checkout batch (credit part → Debtors
+  // ledger column), same cross-module precedent as the JE/stock rules.
+  { module: 'sales', tables: ['customers'], readPermissions: ['sales.view', 'sales.own', 'pos.view', 'pos.own'], writePermissions: ['sales.create', 'sales.edit', 'sales.post', 'pos.create', 'pos.post'] },
+  { module: 'sales', tables: ['sales_returns', 'sales_return_lines', 'quotations', 'quotation_lines', 'customers'] },
+  // POS shifts + payments are owned by the pos module; the checkout RPC runs
+  // main-process-side with its own guards, this rule covers direct reads.
+  // Reports also need to read shifts/payments for POS analytics.
+  { module: 'pos', tables: ['pos_shifts', 'pos_payments'], readPermissions: ['pos.view', 'pos.own', 'reports.view'] },
   { module: 'purchases', tables: ['purchase_invoices', 'purchase_invoice_lines', 'purchase_orders', 'purchase_order_lines', 'purchase_returns', 'purchase_return_lines', 'suppliers'] },
   { module: 'hr', tables: ['employees', 'payroll_runs', 'payroll_lines', 'payroll_components', 'departments', 'attendance', 'leaves', 'end_of_service'] },
   { module: 'crm', tables: ['leads', 'opportunities', 'tasks', 'activities'] },
@@ -379,7 +413,7 @@ const SQL_MODULE_TABLE_RULES = [
 
 const TABLE_TARGET_PATTERN = /\b(?:from|join|into|update)\s+([a-z_][a-z0-9_]*)/gi;
 const CTE_NAME_PATTERN = /\b(?:with|,)\s+([a-z_][a-z0-9_]*)\s+as\s*\(/gi;
-const SQL_NON_TABLE_TOKENS = new Set(['select', 'values', 'lateral', 'only', 'where', 'returning']);
+const SQL_NON_TABLE_TOKENS = new Set(['select', 'values', 'lateral', 'only', 'where', 'returning', 'set']);
 // Statement-level commands. Anchored at statement start so `UPDATE ... SET`
 // (legitimate everywhere) is not confused with the PG `SET` configuration
 // command — the previous unanchored /\bset\b/ silently blocked every UPDATE.
@@ -422,12 +456,11 @@ function assertSqlAuthorized(session, sql, params) {
       const required = rule.writePermissions || moduleWritePermissions(rule.module);
       if (!required.some((p) => hasPermission(session, p))) throw new Error('Permission denied');
     } else if (!rule.readAny) {
-      if (
-        !hasPermission(session, `${rule.module}.view`) &&
-        !hasPermission(session, `${rule.module}.own`)
-      ) {
-        throw new Error('Permission denied');
-      }
+      // readPermissions mirrors writePermissions: cross-module readers
+      // (e.g. POS cashiers reading the product catalog) without holding
+      // the owning module's view/own right.
+      const readers = rule.readPermissions || [`${rule.module}.view`, `${rule.module}.own`];
+      if (!readers.some((p) => hasPermission(session, p))) throw new Error('Permission denied');
     }
   }
   // Every tenant-scoped request must be tied to the authenticated company.
@@ -897,7 +930,7 @@ export function registerDatabaseHandlers() {
       sql: `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
             SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
               FROM products p
-              JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
+              JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit OR u.name_en = p.unit)
              WHERE p.id = $1::uuid AND p.company_id = $2::uuid
                AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)
             RETURNING id`,
@@ -1100,8 +1133,16 @@ export function registerDatabaseHandlers() {
       if (!p.name) throw new Error('name required');
     },
     compose: (p, session) => ({
-      sql: `UPDATE companies SET name = $1, name_en = $2, currency = $3, tax_number = $4, address = $5, phone = $6, email = $7,
-              logo_url = $8, date_format = $9, decimal_places = $10::numeric, calendar = $11, fiscal_year_start = $12::date,
+      // P1 fix: COALESCE every optional column. The old full-column SET
+      // nulled address/phone/email/tax_number (and forced decimal_places
+      // = 2, calendar = gregorian) whenever the caller sent a SPARSE
+      // payload — e.g. the AI update_company tool sending only {name}.
+      // Sparse updates now preserve; full-record updates behave identically.
+      sql: `UPDATE companies SET name = $1, name_en = COALESCE($2, name_en), currency = COALESCE($3, currency),
+              tax_number = COALESCE($4, tax_number), address = COALESCE($5, address), phone = COALESCE($6, phone),
+              email = COALESCE($7, email), logo_url = COALESCE($8, logo_url), date_format = COALESCE($9, date_format),
+              decimal_places = COALESCE($10::numeric, decimal_places), calendar = COALESCE($11, calendar),
+              fiscal_year_start = COALESCE($12::date, fiscal_year_start),
               updated_by = $13, updated_at = NOW() WHERE id = $14::uuid`,
       params: [
         String(p.name || ''),
@@ -2959,11 +3000,13 @@ export function registerDatabaseHandlers() {
       const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = (page - 1) * pageSize;
       return {
-        sql: `SELECT i.*, c.name as customer_name, (COUNT(*) OVER())::int AS total_count FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id WHERE i.company_id = $1::uuid AND ($2::text IS NULL OR i.status = $2) AND ($3::uuid IS NULL OR i.customer_id = $3) AND ($4::uuid IS NULL OR i.created_by = $4 OR i.created_by IS NULL) ORDER BY i.date DESC LIMIT $5 OFFSET $6`,
-        params: [session.user.companyId, p.status || null, UUID_FILTER(p.customerId), UUID_FILTER(p.createdBy), pageSize, offset],
+        // P2: server-side invoice_number search (ASCII codes — no Arabic
+        // normalization trap). Mirrors the fallback API filter.
+        sql: `SELECT i.*, c.name as customer_name, (COUNT(*) OVER())::int AS total_count FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id WHERE i.company_id = $1::uuid AND ($2::text IS NULL OR i.status = $2) AND ($3::uuid IS NULL OR i.customer_id = $3) AND ($4::uuid IS NULL OR i.created_by = $4 OR i.created_by IS NULL) AND ($5::text IS NULL OR i.invoice_number ILIKE '%' || $5 || '%') ORDER BY i.date DESC LIMIT $6 OFFSET $7`,
+        params: [session.user.companyId, p.status || null, UUID_FILTER(p.customerId), UUID_FILTER(p.createdBy), typeof p.invoiceNumber === 'string' && p.invoiceNumber ? p.invoiceNumber : null, pageSize, offset],
       };
     },
-    paramCount: 6,
+    paramCount: 7,
   });
 
   // sales.getInvoiceById
@@ -3327,10 +3370,20 @@ export function registerDatabaseHandlers() {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const check = await execQuery(client, `SELECT id FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid`, [String(p.id), cid]);
+      const check = await execQuery(client, `SELECT status FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid`, [String(p.id), cid]);
       if (!check.rows || !check.rows.length) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Return not found' };
+      }
+      // P2 fix: posted returns already moved stock + JE + party balance.
+      const retStatus = String(check.rows[0].status || '');
+      if (retStatus !== 'draft' && p.lines !== undefined) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Cannot modify lines of a posted return.' };
+      }
+      if (retStatus !== 'draft' && p.status !== undefined) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Cannot change status of a posted return.' };
       }
       const fields = [];
       const values = [];
@@ -3399,6 +3452,216 @@ export function registerDatabaseHandlers() {
       if (!p.id) throw new Error('id required');
     },
   });
+
+  // ── POS (نقاط البيع) ─────────────────────────────────────────────────
+  // Cashiers interact with shifts/payments/products through these typed
+  // handlers; checkout itself stays renderer-composed (journal machinery)
+  // and ships through the guarded db:internal-transaction channel with the
+  // pos.create/pos.post write rights added to the sales_invoices rule above.
+
+  // pos.getProducts — grid + barcode search, with live stock totals
+  registerRpc('pos.getProducts', {
+    compose: (p, session) => {
+      const search = typeof p.search === 'string' ? p.search.trim() : '';
+      const limit = Math.max(1, Math.min(500, Number(p.limit) || 200));
+      if (search) {
+        return {
+          sql: `SELECT p.id, p.code, p.name_ar, p.name_en, p.barcode, p.sku, p.unit, p.sale_price,
+                       p.product_type_id, pt.name_ar AS product_type_name,
+                       COALESCE(s.total_qty, 0) AS stock_qty,
+                       COALESCE(pcat.category_ids, '[]'::json) AS category_ids
+                  FROM products p
+                  LEFT JOIN product_types pt ON pt.id = p.product_type_id
+                  LEFT JOIN (SELECT product_id, SUM(quantity) AS total_qty FROM stock WHERE company_id = $1 GROUP BY product_id) s ON s.product_id = p.id
+                  LEFT JOIN LATERAL (SELECT json_agg(pc.category_id) AS category_ids FROM product_product_categories pc WHERE pc.product_id = p.id) pcat ON true
+                 WHERE p.company_id = $1 AND p.is_active = true AND p.sale_price IS NOT NULL
+                   AND (p.name_ar ILIKE $2 OR p.name_en ILIKE $2 OR p.barcode ILIKE $2 OR p.sku ILIKE $2 OR p.code ILIKE $2)
+                 ORDER BY p.name_ar LIMIT $3`,
+          params: [session.user.companyId, `%${search}%`, limit],
+        };
+      }
+      return {
+        sql: `SELECT p.id, p.code, p.name_ar, p.name_en, p.barcode, p.sku, p.unit, p.sale_price,
+                     p.product_type_id, pt.name_ar AS product_type_name,
+                     COALESCE(s.total_qty, 0) AS stock_qty,
+                     COALESCE(pcat.category_ids, '[]'::json) AS category_ids
+                FROM products p
+                LEFT JOIN product_types pt ON pt.id = p.product_type_id
+                LEFT JOIN (SELECT product_id, SUM(quantity) AS total_qty FROM stock WHERE company_id = $1 GROUP BY product_id) s ON s.product_id = p.id
+                LEFT JOIN LATERAL (SELECT json_agg(pc.category_id) AS category_ids FROM product_product_categories pc WHERE pc.product_id = p.id) pcat ON true
+               WHERE p.company_id = $1 AND p.is_active = true AND p.sale_price IS NOT NULL
+               ORDER BY p.name_ar LIMIT $2`,
+        params: [session.user.companyId, limit],
+      };
+    },
+    paramCount: null,
+    validate: (p) => {
+      if (p.search !== undefined && typeof p.search !== 'string') throw new Error('search must be a string');
+    },
+  });
+
+  // pos.getActiveShift — the cashier's currently open shift
+  registerRpc('pos.getActiveShift', {
+    compose: (p, session) => ({
+      sql: `SELECT ps.*, cb.name AS cash_box_name, u.full_name AS cashier_name
+              FROM pos_shifts ps
+              LEFT JOIN cash_boxes cb ON cb.id = ps.cash_box_id
+              LEFT JOIN users u ON u.id = ps.user_id
+             WHERE ps.company_id = $1 AND ps.user_id = $2::uuid AND ps.status = 'open'
+             ORDER BY ps.opened_at DESC LIMIT 1`,
+      params: [session.user.companyId, session.user.id],
+    }),
+    paramCount: 2,
+  });
+
+  // pos.openShift — one open shift per cashier (partial unique index backstop)
+  registerRpc('pos.openShift', {
+    compose: (p, session) => ({
+      sql: `INSERT INTO pos_shifts (company_id, cash_box_id, user_id, opening_amount, status, opened_at, created_by)
+            SELECT $1::uuid, $2::uuid, $3::uuid, $4::numeric, 'open', NOW(), $3::uuid
+             WHERE NOT EXISTS (SELECT 1 FROM pos_shifts WHERE company_id = $1::uuid AND user_id = $3::uuid AND status = 'open')
+            RETURNING id`,
+      params: [session.user.companyId, String(p.cashBoxId), session.user.id, Number(p.openingAmount) || 0],
+    }),
+    paramCount: 4,
+    validate: (p) => {
+      if (!p.cashBoxId) throw new Error('cashBoxId required');
+      if (p.openingAmount !== undefined && (!Number.isFinite(Number(p.openingAmount)) || Number(p.openingAmount) < 0)) {
+        throw new Error('openingAmount must be >= 0');
+      }
+    },
+    mapResult: (rows) => {
+      if (!rows || rows.length === 0) {
+        return [{ error: 'You already have an open shift' }];
+      }
+      return rows;
+    },
+  });
+
+  // pos.closeShift — computes expected = opening + cash payments, stores both
+  registerRpc('pos.closeShift', {
+    compose: (p, session) => ({
+      sql: `WITH sums AS (
+              SELECT ps.opening_amount,
+                     COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp WHERE pp.shift_id = $1::uuid AND pp.company_id = $2::uuid AND pp.method = 'cash'), 0) AS cash_total
+                FROM pos_shifts ps WHERE ps.id = $1::uuid AND ps.company_id = $2::uuid AND ps.status = 'open'
+            )
+            UPDATE pos_shifts ps
+               SET closing_amount = $3::numeric,
+                   expected_amount = (SELECT opening_amount + cash_total FROM sums),
+                   difference = $3::numeric - (SELECT opening_amount + cash_total FROM sums),
+                   status = 'closed', closed_at = NOW(),
+                   notes = COALESCE($4, ps.notes),
+                   updated_by = $5::uuid, updated_at = NOW()
+              WHERE ps.id = $1::uuid AND ps.company_id = $2::uuid AND ps.status = 'open'
+                AND (SELECT opening_amount FROM sums) IS NOT NULL
+            RETURNING id, expected_amount, difference`,
+      params: [String(p.id), session.user.companyId, Number(p.countedAmount) || 0, p.notes || null, session.user.id],
+    }),
+    paramCount: 5,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+      if (p.countedAmount === undefined || !Number.isFinite(Number(p.countedAmount)) || Number(p.countedAmount) < 0) {
+        throw new Error('countedAmount required (>= 0)');
+      }
+    },
+  });
+
+  // pos.getShiftsPaginated — shift history with box/cashier names
+  registerRpc('pos.getShiftsPaginated', {
+    compose: (p, session) => {
+      const page = Math.max(1, Number(p.page) || 1);
+      const pageSize = Math.max(1, Math.min(100, Number(p.pageSize) || 25));
+      const offset = (page - 1) * pageSize;
+      return {
+        sql: `SELECT ps.*, cb.name AS cash_box_name, u.full_name AS cashier_name,
+                     (SELECT COUNT(*)::int FROM pos_payments pp WHERE pp.shift_id = ps.id) AS payments_count,
+                     (COUNT(*) OVER())::int AS total_count
+                FROM pos_shifts ps
+                LEFT JOIN cash_boxes cb ON cb.id = ps.cash_box_id
+                LEFT JOIN users u ON u.id = ps.user_id
+               WHERE ps.company_id = $1::uuid
+               ORDER BY ps.opened_at DESC
+               LIMIT $2 OFFSET $3`,
+        params: [session.user.companyId, pageSize, offset],
+      };
+    },
+    paramCount: 3,
+  });
+
+  // pos.getShiftSummary — Z-report aggregates from invoices + payments
+  registerRpc('pos.getShiftSummary', {
+    compose: (p, session) => ({
+      sql: `SELECT ps.opening_amount,
+                   COALESCE(inv.invoices_count, 0) AS invoices_count,
+                   COALESCE(inv.gross_total, 0) AS gross_total,
+                   COALESCE(inv.discount_amount, 0) AS discount_amount,
+                   COALESCE(inv.vat_amount, 0) AS vat_amount,
+                   COALESCE(inv.net_total, 0) AS net_total,
+                   COALESCE(pay.cash_total, 0) AS cash_total,
+                   COALESCE(pay.credit_total, 0) AS credit_total,
+                   (ps.opening_amount + COALESCE(pay.cash_total, 0)) AS expected_amount
+              FROM pos_shifts ps
+              LEFT JOIN (
+                SELECT si.shift_id, COUNT(*) AS invoices_count, SUM(si.subtotal + si.vat_amount) AS gross_total,
+                       SUM(si.discount_amount) AS discount_amount, SUM(si.vat_amount) AS vat_amount, SUM(si.total_amount) AS net_total
+                  FROM sales_invoices si
+                 WHERE si.company_id = $1::uuid AND si.shift_id = $2::uuid AND si.is_pos = true AND si.status <> 'cancelled'
+                 GROUP BY si.shift_id
+              ) inv ON inv.shift_id = ps.id
+              LEFT JOIN (
+                SELECT pp.shift_id,
+                       SUM(CASE WHEN pp.method = 'cash' THEN pp.amount ELSE 0 END) AS cash_total,
+                       SUM(CASE WHEN pp.method = 'credit' THEN pp.amount ELSE 0 END) AS credit_total
+                  FROM pos_payments pp
+                 WHERE pp.company_id = $1::uuid AND pp.shift_id = $2::uuid
+                 GROUP BY pp.shift_id
+              ) pay ON pay.shift_id = ps.id
+             WHERE ps.company_id = $1::uuid AND ps.id = $2::uuid`,
+      params: [session.user.companyId, String(p.id)],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  // pos.getShiftInvoices — receipt list of a shift (Z-report detail/reprint)
+  registerRpc('pos.getShiftInvoices', {
+    compose: (p, session) => ({
+      sql: `SELECT si.id, si.invoice_number, si.total_amount, si.paid_amount, si.created_at, u.full_name AS cashier_name
+              FROM sales_invoices si
+              LEFT JOIN users u ON u.id = si.created_by
+             WHERE si.company_id = $1::uuid AND si.shift_id = $2::uuid AND si.is_pos = true AND si.status <> 'cancelled'
+             ORDER BY si.created_at DESC`,
+      params: [session.user.companyId, String(p.id)],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  // pos.getReceipt — full receipt (lines + payments) for reprint
+  registerRpc('pos.getReceipt', {
+    compose: (p, session) => ({
+      sql: `SELECT si.*, c.name AS customer_name,
+                   (SELECT COALESCE(json_agg(json_build_object('name_ar', pl.name_ar, 'quantity', l.quantity, 'unit_price', l.unit_price, 'line_total', l.line_total, 'unit', pl.unit) ORDER BY l.id), '[]'::json)
+                      FROM sales_invoice_lines l LEFT JOIN products pl ON pl.id = l.product_id
+                     WHERE l.invoice_id = si.id) AS lines,
+                   (SELECT COALESCE(json_agg(json_build_object('method', pp.method, 'amount', pp.amount) ORDER BY pp.id), '[]'::json)
+                      FROM pos_payments pp WHERE pp.invoice_id = si.id) AS payments
+              FROM sales_invoices si
+              LEFT JOIN customers c ON c.id = si.customer_id
+             WHERE si.company_id = $1::uuid AND si.id = $2::uuid AND si.is_pos = true`,
+      params: [session.user.companyId, String(p.id)],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
 console.log('[DB] PostgreSQL IPC handlers registered.');
 }
 
@@ -3650,6 +3913,8 @@ export function registerAuthHandlers() {
     { table: 'work_order_consumptions', scope: { type: 'children', parent: 'work_orders', fk: 'work_order_id' } },
     { table: 'payroll_lines', scope: { type: 'children', parent: 'payroll_runs', fk: 'payroll_run_id' } },
     { table: 'product_units', scope: { type: 'company' } },
+    { table: 'pos_payments', scope: { type: 'company' } },
+    { table: 'pos_shifts', scope: { type: 'company' } },
     { table: 'sales_returns', scope: { type: 'company' } },
     { table: 'sales_invoices', scope: { type: 'company' } },
     { table: 'quotations', scope: { type: 'company' } },
@@ -3713,7 +3978,7 @@ export function registerAuthHandlers() {
     'default_accounts', 'document_sequences', 'settings', 'payroll_components',
     'product_types', 'product_categories', 'warehouses', 'products', 'product_units', 'boms',
     'employees', 'work_orders', 'customers', 'suppliers', 'leads',
-    'opportunities', 'tasks', 'activities', 'quotations', 'sales_invoices',
+    'opportunities', 'tasks', 'activities', 'pos_shifts', 'quotations', 'sales_invoices', 'pos_payments',
     'sales_returns', 'purchase_orders', 'purchase_invoices', 'purchase_returns',
     'receipt_vouchers', 'payment_vouchers', 'transactions', 'journal_entries',
     'stock', 'stock_movements', 'stock_adjustments', 'warehouse_transfers',

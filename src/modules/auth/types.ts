@@ -54,6 +54,8 @@ export type Permission =
   | 'inventory.view' | 'inventory.create' | 'inventory.edit' | 'inventory.delete' | 'inventory.own'
   // Sales
   | 'sales.view' | 'sales.create' | 'sales.edit' | 'sales.delete' | 'sales.post' | 'sales.own'
+  // POS
+  | 'pos.view' | 'pos.create' | 'pos.edit' | 'pos.delete' | 'pos.post' | 'pos.own'
   // Purchases
   | 'purchases.view' | 'purchases.create' | 'purchases.edit' | 'purchases.delete' | 'purchases.own'
   // Manufacturing
@@ -105,6 +107,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   'accounting.view', 'accounting.create', 'accounting.edit', 'accounting.delete', 'accounting.post', 'accounting.own',
   'inventory.view', 'inventory.create', 'inventory.edit', 'inventory.delete', 'inventory.own',
   'sales.view', 'sales.create', 'sales.edit', 'sales.delete', 'sales.post', 'sales.own',
+  'pos.view', 'pos.create', 'pos.edit', 'pos.delete', 'pos.post', 'pos.own',
   'purchases.view', 'purchases.create', 'purchases.edit', 'purchases.delete', 'purchases.own',
   'manufacturing.view', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.delete', 'manufacturing.post', 'manufacturing.own',
   'hr.view', 'hr.create', 'hr.edit', 'hr.delete', 'hr.own',
@@ -160,6 +163,19 @@ export const PERMISSION_GROUPS = [
       { key: 'sales.edit', labelAr: 'تعديل', labelEn: 'Edit' },
       { key: 'sales.delete', labelAr: 'حذف', labelEn: 'Delete' },
       { key: 'sales.post', labelAr: 'ترحيل', labelEn: 'Post' },
+    ],
+  },
+  {
+    module: 'pos',
+    labelAr: 'نقاط البيع',
+    labelEn: 'Point of Sale',
+    permissions: [
+      { key: 'pos.view', labelAr: 'عرض', labelEn: 'View' },
+      { key: 'pos.own', labelAr: 'وردياتي فقط', labelEn: 'Own Shifts Only' },
+      { key: 'pos.create', labelAr: 'بيع', labelEn: 'Sell' },
+      { key: 'pos.edit', labelAr: 'تعديل', labelEn: 'Edit' },
+      { key: 'pos.delete', labelAr: 'حذف', labelEn: 'Delete' },
+      { key: 'pos.post', labelAr: 'الدفع/الترحيل', labelEn: 'Checkout' },
     ],
   },
   {

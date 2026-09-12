@@ -47,6 +47,7 @@ export const directionTools: ToolDefinition[] = [
       properties: {
         docTool: { type: 'string', description: 'أداة المستند كما يبدو (مثل sales.create_invoice)' },
         issuerName: { type: 'string', description: 'اسم المُصدِر المستخرج من المستند (إن وجد)' },
+        issuerNameEn: { type: 'string', description: 'اسم المُصدِر بالإنجليزية (إن وجد — يُطابق مع الاسم الإنجليزي للشركة)' },
         issuerTaxNumber: { type: 'string', description: 'الرقم الضريبي للمُصدِر (إن وجد)' },
         issuerPhone: { type: 'string', description: 'هاتف المُصدِر (إن وجد)' },
       },
@@ -63,7 +64,9 @@ export const directionTools: ToolDefinition[] = [
       const verdict = classifyDirection(
         {
           name: str(args.issuerName) ?? null,
-          nameEn: null,
+          // P3 fix: was hardcoded null — an English issuer name on a document
+          // could never hit the nameEn comparison path in bestNameScore.
+          nameEn: str(args.issuerNameEn) ?? null,
           taxNumber: str(args.issuerTaxNumber) ?? null,
           phone: str(args.issuerPhone) ?? null,
         },

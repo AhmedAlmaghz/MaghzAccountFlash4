@@ -79,9 +79,9 @@ test.describe('Opportunities', () => {
     await page.goto('/crm/opportunities');
     await expect(page.getByRole('heading', { name: /الفرص|Opportunities/i }).first()).toBeVisible({ timeout: 15_000 });
 
-    // Check view mode buttons exist
+    // Check view mode buttons exist (exact match — see note below)
     await expect(page.getByRole('button', { name: /Kanban/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('button', { name: /قائمة|List/i }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /^قائمة$|^List$/i }).first()).toBeVisible();
   });
 
   test('create opportunity form opens with all stages', async ({ page }) => {
@@ -113,7 +113,10 @@ test.describe('Opportunities', () => {
     await page.goto('/crm/opportunities');
     await expect(page.getByRole('heading', { name: /الفرص|Opportunities/i }).first()).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole('button', { name: /قائمة|List/i }).first().click();
+    // NOTE: exact-match /^قائمة$/ — the header avatar menu button is named
+    // "قائمة المستخدم" and precedes the view toggle in DOM order; a loose
+    // /قائمة/ with .first() clicks the avatar menu instead (no view change).
+    await page.getByRole('button', { name: /^قائمة$|^List$/i }).first().click();
     await page.waitForTimeout(500);
 
     // Table should be visible in list view

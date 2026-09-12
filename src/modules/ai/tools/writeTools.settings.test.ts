@@ -7,6 +7,13 @@ vi.mock('@/core/api', () => ({
   createCostCenter: vi.fn(),
 }));
 
+// NOTE: settings.ts imports `coreApi` from '@/modules/core/api' (NOT
+// '@/core/api' above) — a separate mock is required or the REAL
+// updateCompany/updateBranch run (they demand data.id and hit the DB).
+vi.mock('@/modules/core/api', () => ({
+  coreApi: { updateCompany: vi.fn(), updateBranch: vi.fn() },
+}));
+
 vi.mock('@/modules/sales/api', () => ({ salesApi: {} }));
 vi.mock('@/modules/purchases/api', () => ({ purchasesApi: {} }));
 vi.mock('@/modules/accounting/api', () => ({ accountingApi: {} }));
@@ -23,6 +30,7 @@ import {
   createCashBox,
   createCostCenter,
 } from '@/core/api';
+import { coreApi } from '@/modules/core/api';
 import type { ToolContext } from '../types';
 
 const ctx: ToolContext = {
@@ -134,6 +142,40 @@ describe('settings tools — RBAC + companyId regression', () => {
       vi.mocked(createProductType).mockResolvedValue({ success: false, error: 'DB down' } as never);
       const res = (await tool!.execute({ nameAr: 'x' }, ctx)) as Record<string, unknown>;
       expect(res.error).toBe('DB down');
+    });
+  });
+
+  describe('P1: update_company/update_branch field mapping (silent-drop regression)', () => {
+    it('maps taxId AND taxNumber to the real Company.taxNumber field', async () => {
+      vi.mocked(coreApi.updateCompany).mockResolvedValue({ success: true } as never);
+      const tool = findTool('settings.update_company');
+      const r1 = (await tool!.execute({ taxId: '123' }, ctx)) as Record<string, unknown>;
+      expect(r1.updated).toBe(true);
+      expect(coreApi.updateCompany).toHaveBeenCalledWith(expect.objectContaining({ taxNumber: '123' }));
+      expect(coreApi.updateCompany).not.toHaveBeenCalledWith(expect.objectContaining({ taxId: expect.anything() }));
+
+      vi.mocked(coreApi.updateCompany).mockClear();
+      const r2 = (await tool!.execute({ taxNumber: '456' }, ctx)) as Record<string, unknown>;
+      expect(r2.updated).toBe(true);
+      expect(coreApi.updateCompany).toHaveBeenCalledWith(expect.objectContaining({ taxNumber: '456' }));
+    });
+
+    it('update_branch passes (companyId, id) in the API order', async () => {
+      vi.mocked(coreApi.updateBranch).mockResolvedValue({ success: true } as never);
+      const tool = findTool('settings.update_branch');
+      const res = (await tool!.execute(
+        { branchId: '00000000-0000-0000-0000-0000000000b1', name: 'فرع' },
+        ctx,
+      )) as Record<string, unknown>;
+      expect(res.updated).toBe(true);
+      // Signature is updateBranch(companyId, id, data, userId) — the old
+      // swapped call updated 0 rows while reporting success.
+      expect(coreApi.updateBranch).toHaveBeenCalledWith(
+        ctx.companyId,
+        '00000000-0000-0000-0000-0000000000b1',
+        expect.objectContaining({ name: 'فرع' }),
+        ctx.userId,
+      );
     });
   });
 });

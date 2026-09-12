@@ -36,6 +36,7 @@ export default function AiChatPage() {
   const canConfigure = usePermission('ai.settings');
   const messages = useAiStore((s) => s.messages);
   const sessionId = useAiStore((s) => s.sessionId);
+  const isProcessing = useAiStore((s) => s.isProcessing);
   const [configStatus, setConfigStatus] = useState<'loading' | 'configured' | 'not_configured'>('loading');
   const [showSessions, setShowSessions] = useState(false);
   const [sessionsKey, setSessionsKey] = useState(0);
@@ -89,6 +90,10 @@ export default function AiChatPage() {
   }, [exportOpen]);
 
   const handleNewChat = () => {
+    // P2 fix: reset() mid-cycle wipes history under a live runLoop — its next
+    // iteration builds provider messages with no system prompt and lands
+    // replies in the NEW empty conversation. Block while processing.
+    if (isProcessing) return;
     // Persist the current conversation in the background — the save snapshots
     // the store synchronously, so resetting immediately afterwards is safe and
     // the UI never waits on the DB round-trip.
@@ -99,6 +104,11 @@ export default function AiChatPage() {
   };
 
   const handleClear = () => {
+    // P2 fix: same mid-cycle hazard as new-chat, plus this is destructive
+    // with no confirmation and no save — unsaved messages since the last
+    // autosave would vanish silently. Block while processing; confirm first.
+    if (isProcessing) return;
+    if (messages.length > 0 && typeof window !== 'undefined' && !window.confirm(t('ai.clearConfirm'))) return;
     getChatEngine().reset();
   };
 
@@ -249,7 +259,8 @@ export default function AiChatPage() {
 
       <button
         onClick={handleNewChat}
-        className="p-2.5 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+        disabled={isProcessing}
+        className="p-2.5 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors disabled:opacity-40"
         title={t('ai.newChat')}
         aria-label={t('ai.newChat')}
       >
@@ -272,7 +283,8 @@ export default function AiChatPage() {
       {hasMessages && (
         <button
           onClick={handleClear}
-          className="p-2.5 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+          disabled={isProcessing}
+          className="p-2.5 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors disabled:opacity-40"
           title={t('ai.clearChat')}
           aria-label={t('ai.clearChat')}
         >

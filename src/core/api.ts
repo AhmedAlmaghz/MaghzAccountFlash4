@@ -81,6 +81,8 @@ function getTableForDocumentType(documentType: string): string | null {
     sales_invoice: 'sales_invoices',
     sales_return: 'sales_returns',
     quotation: 'quotations',
+    // POS
+    pos_receipt: 'sales_invoices',
     // Purchases
     purchase_order: 'purchase_orders',
     purchase_invoice: 'purchase_invoices',
@@ -111,6 +113,8 @@ function getNumberColumnForDocumentType(documentType: string): string {
     sales_invoice: 'invoice_number',
     sales_return: 'return_number',
     quotation: 'quotation_number',
+    // POS
+    pos_receipt: 'invoice_number',
     // Purchases
     purchase_order: 'order_number',
     purchase_invoice: 'invoice_number',

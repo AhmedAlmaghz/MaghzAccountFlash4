@@ -113,4 +113,15 @@ describe('ensureCompanyScope — tenant switch guard', () => {
     expect(userTurns).toHaveLength(1);
     expect(userTurns[0].content).toBe('مرحبا');
   });
+
+  it('P1: switching companies detaches the persisted sessionId (no cross-tenant save)', () => {
+    // The store sessionId pointed at company A's session ROW. Without a
+    // reset, the next autosave in company B UPDATEs (0 rows, scope mismatch)
+    // then INSERTs a new session under B containing A's whole transcript.
+    const engine = getChatEngine();
+    engine.ensureCompanyScope('11111111-1111-1111-1111-111111111111');
+    useAiStore.getState().setSessionId('session-from-company-A');
+    engine.ensureCompanyScope('22222222-2222-2222-2222-222222222222');
+    expect(useAiStore.getState().sessionId).toBeNull();
+  });
 });

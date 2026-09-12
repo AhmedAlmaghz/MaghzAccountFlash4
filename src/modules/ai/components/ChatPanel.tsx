@@ -131,25 +131,23 @@ export function ChatPanel() {
     return () => clearInterval(interval);
   }, [messages.length, runAutosave]);
 
-  // Find the last user text for regenerate — defensive against holes
-  const lastUserText = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m && m.role === 'user' && m.kind === 'text') {
-        return m.content;
-      }
-    }
-    return null;
-  }, [messages]);
-
-  // Get the last assistant message for regenerate + suggestion chips
+  // Get the last assistant message for regenerate + suggestion chips.
+  // P3 fix: computed over the SAME filtered array the render maps over.
+  // The old code indexed the unfiltered `messages` but the render compared
+  // the FILTERED idx — identical today (the filter never drops anything),
+  // but the first dropped message would have attached suggestions/regenerate
+  // to the wrong bubble. Single source of truth below.
+  const visibleMessages = useMemo(
+    () => messages.filter((m): m is NonNullable<typeof m> => !!m && typeof (m as { role?: unknown }).role === 'string'),
+    [messages],
+  );
   const lastAssistantIndex = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
       if (m && m.role === 'assistant') return i;
     }
     return -1;
-  }, [messages]);
+  }, [visibleMessages]);
 
   const handleSend = useCallback(async (text: string, attachments: PreparedAttachment[] = []) => {
     await engine.send(text, attachments);
@@ -164,10 +162,11 @@ export function ChatPanel() {
   }, [engine]);
 
   const handleRegenerate = useCallback(async () => {
-    if (lastUserText) {
-      await engine.send(lastUserText);
-    }
-  }, [engine, lastUserText]);
+    // Engine-owned: drops the previous user/assistant pair from BOTH the
+    // transcript and the LLM history before re-sending (the old path called
+    // send() directly and duplicated the user turn every click).
+    await engine.regenerate();
+  }, [engine]);
 
   // ── Resumable batches banner (Package D) ─────────────────────────────
   // Batches persist in Postgres; after a restart the worker is gone but the
@@ -194,10 +193,10 @@ export function ChatPanel() {
   // Suggestions for the last assistant message — interactive action chips
   const lastAssistantSuggestions = useMemo<Suggestion[]>(() => {
     if (lastAssistantIndex < 0 || isProcessing) return [];
-    const msg = messages[lastAssistantIndex];
+    const msg = visibleMessages[lastAssistantIndex];
     if (!msg || msg.role !== 'assistant' || msg.kind === 'error') return [];
     return extractSuggestions(msg);
-  }, [messages, lastAssistantIndex, isProcessing]);
+  }, [visibleMessages, lastAssistantIndex, isProcessing]);
 
   const handleSuggestion = useCallback((suggestion: Suggestion) => {
     if (suggestion.type === 'navigate' && suggestion.path) {
@@ -274,7 +273,7 @@ export function ChatPanel() {
       {/* Messages scroll area — centered column, full width on mobile */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl w-full mx-auto px-3 sm:px-4 py-4 space-y-5">
-          {messages.filter((m): m is NonNullable<typeof m> => !!m && typeof (m as { role?: unknown }).role === 'string').map((msg, idx) => (
+          {visibleMessages.map((msg, idx) => (
             <MessageBubble
               key={msg.id}
               message={msg}

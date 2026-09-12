@@ -133,15 +133,18 @@ describe('runBatch', () => {
   it('reports retryable failures with classification and keeps going', async () => {
     mockedApi.batchClaim.mockResolvedValueOnce({
       success: true,
+      // attempts:1 = first failure → immediate retry (delay 0). Higher
+      // attempt counts sleep per the backoff schedule (capped 10s) — a
+      // separate concern covered by nextRetryDelayMs unit tests.
       data: [
-        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 3 },
+        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 1 },
         { id: 'i2', seq: 1, toolName: 't.b', args: {}, afterSeq: null, attempts: 1 },
       ] as never,
     });
     mockedExec
       .mockResolvedValueOnce({ ok: false, error: 'timeout', errorClass: { code: 'TIMEOUT', retryable: true } as never })
       .mockResolvedValueOnce({ ok: true, result: {} });
-    mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: true, attempts: 3 } });
+    mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: true, attempts: 1 } });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
     mockedApi.batchGet
       .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
@@ -154,6 +157,48 @@ describe('runBatch', () => {
     );
     // second item still executed after the first failed retryably
     expect(mockedExec).toHaveBeenCalledTimes(2);
+  });
+
+  it('P1: a TIMEOUT on a WRITE tool is never retried (abandoned promise may still commit)', async () => {
+    // The timeout abandons — never aborts — the underlying promise. For a
+    // write tool the abandoned call may commit at any moment, so re-running
+    // the item would mint a duplicate financial document. It must fail
+    // permanently with an honest code instead.
+    const { registerTool, clearToolRegistry } = await import('../tools/registry');
+    clearToolRegistry();
+    registerTool({
+      name: 't.write',
+      labelAr: 'كتابة',
+      descriptionAr: 'أداة كتابة اختبارية',
+      permission: 'core.view',
+      dangerLevel: 'write',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({}),
+    });
+    try {
+      mockedApi.batchClaim.mockResolvedValueOnce({
+        success: true,
+        data: [
+          { id: 'i1', seq: 0, toolName: 't.write', args: {}, afterSeq: null, attempts: 1 },
+        ] as never,
+      });
+      mockedExec.mockResolvedValueOnce({ ok: false, error: 'timeout', errorClass: { code: 'TIMEOUT', retryable: true } as never });
+      mockedApi.batchItemFail.mockResolvedValue({ success: true, data: { retried: false, finalStatus: 'partial' } });
+      mockedApi.batchGet
+        .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+        .mockResolvedValue({ success: true, data: detail({ status: 'partial', failedCount: 1 }) });
+
+      const final = await runBatch('c1', 'u1', 'b1');
+
+      // Code stays TIMEOUT (classifiable by errorTaxonomy); the duplicate
+      // protection is retryable=false.
+      expect(mockedApi.batchItemFail).toHaveBeenCalledWith(
+        'c1', 'u1', 'b1', 'i1', 'timeout', 'TIMEOUT', false,
+      );
+      expect(final?.status).toBe('partial');
+    } finally {
+      clearToolRegistry();
+    }
   });
 
   it('stops early when the batch finalizes mid-run', async () => {

@@ -916,3 +916,150 @@ describe('Migration 0026: stock unique index', () => {
   });
 });
 
+describe('Migration 0027: POS module', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0027_pos_module.sql'), 'utf-8');
+
+  it('creates pos_shifts with amounts, status CHECK and audit columns', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS pos_shifts/);
+    expect(migrationSql).toMatch(/company_id uuid NOT NULL REFERENCES companies\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/cash_box_id uuid NOT NULL REFERENCES cash_boxes\(id\) ON DELETE RESTRICT/);
+    expect(migrationSql).toMatch(/user_id uuid NOT NULL REFERENCES users\(id\) ON DELETE RESTRICT/);
+    expect(migrationSql).toMatch(/opening_amount numeric\(18, 4\) NOT NULL DEFAULT 0 CHECK \(opening_amount >= 0\)/);
+    expect(migrationSql).toMatch(/status varchar\(20\) NOT NULL DEFAULT 'open'/);
+    expect(migrationSql).toMatch(/pos_shifts_status_check CHECK \(status IN \('open', 'closed'\)\)/);
+    expect(migrationSql).toMatch(/opened_at timestamptz NOT NULL DEFAULT NOW\(\)/);
+    expect(migrationSql).toMatch(/closed_at timestamptz/);
+  });
+
+  it('enforces ONE open shift per cashier per company (partial unique index)', () => {
+    expect(migrationSql).toMatch(/uq_pos_shifts_open_per_user\s+ON pos_shifts \(company_id, user_id\) WHERE status = 'open'/);
+  });
+
+  it('creates pos_payments linked to shifts and invoices', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS pos_payments/);
+    expect(migrationSql).toMatch(/shift_id uuid REFERENCES pos_shifts\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/invoice_id uuid NOT NULL REFERENCES sales_invoices\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/amount numeric\(18, 4\) NOT NULL DEFAULT 0 CHECK \(amount >= 0\)/);
+    expect(migrationSql).toMatch(/pos_payments_method_check CHECK \(method IN \('cash', 'credit'\)\)/);
+  });
+
+  it('adds is_pos + shift_id to sales_invoices with SET NULL (history survives)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS is_pos boolean NOT NULL DEFAULT false/);
+    expect(migrationSql).toMatch(/ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS shift_id uuid REFERENCES pos_shifts\(id\) ON DELETE SET NULL/);
+    expect(migrationSql).toMatch(/idx_sales_invoices_pos ON sales_invoices \(company_id\) WHERE is_pos/);
+  });
+
+  it('is idempotent (IF NOT EXISTS on every CREATE/ALTER)', () => {
+    const creates = migrationSql.match(/CREATE (TABLE|INDEX|UNIQUE INDEX)/g) || [];
+    const guards = migrationSql.match(/CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS/g) || [];
+    expect(creates.length).toBeGreaterThan(0);
+    expect(guards.length).toBe(creates.length);
+    const alters = migrationSql.match(/ALTER TABLE \w+ ADD COLUMN/g) || [];
+    const alterGuards = migrationSql.match(/ALTER TABLE \w+ ADD COLUMN IF NOT EXISTS/g) || [];
+    expect(alters.length).toBe(alters.length > 0 ? alterGuards.length : 0);
+  });
+
+  it('journal registers 0027 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0027_pos_module')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0027 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0027_pos_module\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0027_pos_module', sql: posModule \}/);
+  });
+
+  it('Drizzle schema exposes posShifts/posPayments + sales invoice POS columns', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/pos.ts'), 'utf-8');
+    expect(schema).toMatch(/export const posShifts = pgTable\('pos_shifts'/);
+    expect(schema).toMatch(/export const posPayments = pgTable\('pos_payments'/);
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    expect(sales).toMatch(/isPos: boolean\('is_pos'\)\.notNull\(\)\.default\(false\)/);
+    expect(sales).toMatch(/shiftId: uuid\('shift_id'\)/);
+    const index = readFileSync(join(process.cwd(), 'src/core/database/schema/index.ts'), 'utf-8');
+    expect(index).toMatch(/export \* from '\.\/pos'/);
+  });
+
+  it('backup plan covers both POS tables in FK-safe order (both copies)', () => {
+    const plan = readFileSync(join(process.cwd(), 'src/core/backup/backupTables.ts'), 'utf-8');
+    const deletePosPayments = plan.indexOf("C('pos_payments')");
+    const deletePosShifts = plan.indexOf("C('pos_shifts')");
+    const deleteSales = plan.indexOf("C('sales_invoices')");
+    expect(deletePosPayments).toBeGreaterThan(-1);
+    expect(deletePosShifts).toBeGreaterThan(-1);
+    expect(deletePosPayments).toBeLessThan(deletePosShifts); // payments (FK→shifts) first
+    expect(deletePosShifts).toBeLessThan(deleteSales); // shifts (sales.shift_id SET NULL) before invoices
+    // Insert order — scoped to the INSERT_TABLES list so earlier mentions of
+    // 'sales_invoices' (CHILD_TABLES / DELETE_ORDER) don't skew the comparison.
+    const insertBlock = plan.slice(plan.indexOf('const INSERT_TABLES'), plan.indexOf('export const INSERT_ORDER'));
+    const posOf = (table: string) => insertBlock.indexOf(`'${table}',`);
+    expect(posOf('pos_shifts')).toBeGreaterThan(-1);
+    expect(posOf('pos_shifts')).toBeLessThan(posOf('sales_invoices')); // shifts before the invoices they own
+    expect(posOf('pos_payments')).toBeGreaterThan(posOf('sales_invoices')); // payments reference invoices
+    const handler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(handler).toMatch(/\{ table: 'pos_payments', scope: \{ type: 'company' \} \}/);
+    expect(handler).toMatch(/\{ table: 'pos_shifts', scope: \{ type: 'company' \} \}/);
+    expect(handler).toMatch(/'pos_shifts', 'quotations', 'sales_invoices', 'pos_payments'/);
+  });
+
+  it('SQL module table rules authorize pos tables and pos receipt numbering', () => {
+    const handler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(handler).toMatch(/\{ module: 'pos', tables: \['pos_shifts', 'pos_payments'\] \}/);
+    // sales_invoices rule must allow pos.create/pos.post writes (cashiers)
+    expect(handler).toMatch(/writePermissions: \['sales\.create', 'sales\.edit', 'sales\.post', 'pos\.create', 'pos\.post'\]/);
+    expect(handler).toMatch(/'pos\.create',\s*\n\s*\]/);
+    const api = readFileSync(join(process.cwd(), 'src/core/api.ts'), 'utf-8');
+    expect(api).toMatch(/pos_receipt: 'sales_invoices'/);
+  });
+
+  it('seeds a pos_receipt document sequence (POS- prefix)', () => {
+    const seed = readFileSync(join(process.cwd(), 'electron/seedDemoData.js'), 'utf-8');
+    expect(seed).toMatch(/\{ type: 'pos_receipt',\s+prefix: 'POS-'/);
+  });
+});
+
+describe('Migration 0028: AI job-item claim leases', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0028_ai_job_item_leases.sql'), 'utf-8');
+
+  it('adds claimed_by + claim_expires_at to ai_job_items', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE ai_job_items ADD COLUMN IF NOT EXISTS claimed_by varchar\(64\)/);
+    expect(migrationSql).toMatch(/ALTER TABLE ai_job_items ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz/);
+  });
+
+  it('indexes running leases for the recover gate', () => {
+    expect(migrationSql).toMatch(/CREATE INDEX IF NOT EXISTS idx_ai_job_items_lease/);
+    expect(migrationSql).toMatch(/WHERE status = 'running'/);
+  });
+
+  it('journal registers 0028 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0028_ai_job_item_leases')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0028 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0028_ai_job_item_leases\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0028_ai_job_item_leases', sql: aiJobItemLeases \}/);
+  });
+
+  it('Drizzle schema exposes claimedBy/claimExpiresAt on aiJobItems', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/ai.ts'), 'utf-8');
+    expect(schema).toMatch(/claimedBy: varchar\('claimed_by', \{ length: 64 \}\)/);
+    expect(schema).toMatch(/claimExpiresAt: timestamp\('claim_expires_at', \{ withTimezone: true \}\)/);
+  });
+
+  it('claim stamps the lease and recover only fails EXPIRED leases (both transports)', () => {
+    for (const f of ['electron/aiHandler.js', 'src/modules/ai/api/browserBridge.ts']) {
+      const src = readFileSync(join(process.cwd(), f), 'utf-8');
+      // claim stamps (workerId, +30min)
+      expect(src).toMatch(/claimed_by = \$5::varchar/);
+      expect(src).toMatch(/INTERVAL '30 minutes'/);
+      // recover gate: NULL (pre-migration) or expired only — never live leases
+      expect(src).toMatch(/\(claim_expires_at IS NULL OR claim_expires_at < NOW\(\)\)/);
+    }
+  });
+});
+
