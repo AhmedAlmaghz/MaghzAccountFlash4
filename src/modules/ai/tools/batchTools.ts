@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { aiApi } from '../api/index';
 import { enqueueBatch, getBatch, listBatches } from '../api/batch';
-import { summarizeBatchProgress } from '../engine/batchQueue';
+import { planBatchResume, summarizeBatchProgress } from '../engine/batchQueue';
 import { BATCH_CREATE_CHUNK } from '../api/batchTypes';
 import { isBatchActive } from '../engine/batchRunner';
 
@@ -185,6 +185,14 @@ export const batchTools: ToolDefinition[] = [
       if (detail.status === 'done') return { error: 'الدفعة مكتملة أصلاً — لا شيء لاستئنافه' };
       if (detail.status === 'cancelled') return { error: 'الدفعة ملغاة — أنشئ دفعة جديدة بدلاً من ذلك' };
       if (detail.failedCount > 0) {
+        // Same honesty contract as the banner resume (chatEngine): permanent
+        // failures re-fail verbatim, so report them with fixes instead of a
+        // futile requeue + worker cycle the user reads as "resume is broken".
+        const failed = (detail.items ?? []).filter((i) => i.status === 'failed');
+        const plan = planBatchResume(failed);
+        if (plan.action === 'refuse-permanent') {
+          return { batchId, resumed: false, message: plan.message };
+        }
         const retry = await aiApi.batchRetryFailed(ctx.companyId, ctx.userId, batchId);
         if (!retry.success) return { error: retry.error || 'فشل إعادة العناصر الفاشلة' };
       } else if (detail.status === 'paused') {

@@ -141,15 +141,28 @@ export async function recoverBatch(
   return { success: true, data: res.data };
 }
 
-/** Batches that can be resumed after a restart (running or paused). */
+/**
+ * Batches that can be resumed after a restart (running or paused) — plus
+ * RECENT partial batches with failures (worker gone, items retryable via
+ * the same resume flow). Old partials are history, not work: only those
+ * updated in the last 7 days are offered, so the banner never nags about
+ * batches the user long abandoned.
+ */
 export async function findResumableBatches(): Promise<JobBatchSummary[]> {
   const running = await listBatches('running');
   const paused = await listBatches('paused');
+  const partial = await listBatches('partial');
+  const weekAgo = Date.now() - 7 * 24 * 3600_000;
   const seen = new Map<string, JobBatchSummary>();
   for (const list of [running.data ?? [], paused.data ?? []]) {
     for (const b of list) {
       if (!seen.has(b.id)) seen.set(b.id, b);
     }
+  }
+  for (const b of partial.data ?? []) {
+    if (b.failedCount <= 0 || seen.has(b.id)) continue;
+    const updated = new Date(b.updatedAt).getTime();
+    if (Number.isFinite(updated) && updated >= weekAgo) seen.set(b.id, b);
   }
   return [...seen.values()];
 }

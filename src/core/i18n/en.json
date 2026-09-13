@@ -459,6 +459,7 @@
       "resume": "Resume",
       "cancel": "Cancel batch",
       "retryFailed": "Retry failed",
+      "resumeBlocked": "Resume blocked — see details in chat",
       "status_pending": "Pending",
       "status_running": "Running",
       "status_paused": "Paused",

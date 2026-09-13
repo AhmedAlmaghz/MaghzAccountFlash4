@@ -200,6 +200,40 @@ describe('ai.resume_batch execute', () => {
     expect(mockedApi.batchRetryFailed).toHaveBeenCalledWith('c1', 'u1', 'b1');
     expect(out.startBatchRun).toBe('b1');
   });
+
+  it('refuses resume when every failure is permanent (no futile requeue)', async () => {
+    mockedApi.batchGet.mockResolvedValue({
+      success: true,
+      data: {
+        status: 'partial', doneCount: 3, failedCount: 1, skippedCount: 1, totalCount: 5,
+        items: [
+          { seq: 3, toolName: 'sales.create_invoice', status: 'failed', lastError: 'مرجع غير متوفر (sup)', errorCode: 'UNRESOLVED_REF' },
+        ],
+      } as never,
+    });
+    const out = (await resume.execute({ batchId: 'b1' }, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchRetryFailed).not.toHaveBeenCalled();
+    expect(out.startBatchRun).toBeUndefined();
+    expect(out.resumed).toBe(false);
+    expect(String(out.message)).toContain('تعذّر الاستئناف التلقائي');
+  });
+
+  it('still resumes when at least one failure is transient', async () => {
+    mockedApi.batchGet.mockResolvedValue({
+      success: true,
+      data: {
+        status: 'partial', doneCount: 3, failedCount: 2, skippedCount: 0, totalCount: 5,
+        items: [
+          { seq: 3, toolName: 'sales.create_invoice', status: 'failed', lastError: 'مرجع غير متوفر (sup)', errorCode: 'UNRESOLVED_REF' },
+          { seq: 4, toolName: 'sales.create_invoice', status: 'failed', lastError: 'connection reset', errorCode: 'DB_ERROR' },
+        ],
+      } as never,
+    });
+    mockedApi.batchRetryFailed.mockResolvedValue({ success: true, data: { requeued: 2 } });
+    const out = (await resume.execute({ batchId: 'b1' }, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchRetryFailed).toHaveBeenCalledWith('c1', 'u1', 'b1');
+    expect(out.startBatchRun).toBe('b1');
+  });
 });
 
 describe('ai.batch_status execute', () => {
