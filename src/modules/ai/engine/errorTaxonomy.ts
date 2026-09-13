@@ -192,6 +192,17 @@ const PATTERNS: Pattern[] = [
     retryable: true,
   },
   {
+    // P3 fix: PROVIDER_ERROR was UNREACHABLE — provider failures (429/503/529
+    // overloads, network stalls) fell through to UNKNOWN with no guidance.
+    // Retryable: these are transient by nature (see the engine's one-shot
+    // backoff retry for the same codes).
+    code: 'PROVIDER_ERROR',
+    re: /انتهت حصة|مثقل حالياً|overloaded|LLM provider error|تعذر الاتصال بمزود|انتهت مهلة الاتصال بمزود/,
+    reason: 'مزود الذكاء الاصطناعي مثقل أو غير متاح مؤقتاً — ليس خطأ في الطلب ولا في البيانات.',
+    fixHint: 'انتظر دقيقة وقل "تابع" — الجلسة والدفعات محفوظة. إن تكرر، جرّب طلباً أصغر أو تحقق من إعدادات المزود.',
+    retryable: true,
+  },
+  {
     code: 'DB_ERROR',
     re: /DATABASE|DB (down|error)|connection|syntax for type|does not exist|violation/i,
     reason: 'خطأ تقني في قاعدة البيانات — ليس خطأ المستخدم ولا بياناته.',

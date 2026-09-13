@@ -1354,6 +1354,468 @@ class ChatEngine {
     this.touchProgress();
   }
 
+  /**
+   * Intent-routed tool selection for one loop turn: ALWAYS-ON core + domain
+   * groups matched against the user's recent messages + tools the model
+   * already called (adaptive expansion). Bounded ≤ MAX_ADVERTISED_TOOLS.
+   */
+  private routeCycleTools(): LlmTool[] {
+    // Intent-routed tool selection: ALWAYS-ON core + domain groups matched
+    // against the user's recent messages + tools the model already called
+    // (adaptive expansion). Bounded ≤ MAX_ADVERTISED_TOOLS — the full
+    // registry (~265 tools) would be rejected by the main-process guard
+    // (cap 128) and by the providers themselves.
+    const routed = routeToolsForCycle(this.history, this.extraAdvertisedTools);
+    const llmTools = toLlmTools(routed.tools);
+    // P1: the cap drop used to be silent — a broad intent could lose the
+    // very tools it routed (sliced by registration order). With relevance
+    // ordering the intent domains survive; log the remainder honestly so a
+    // "model never calls X" report starts from the routing line, not a guess.
+    if (routed.dropped > 0) {
+      console.warn(
+        `[ai] tool-router dropped ${routed.dropped} tools this cycle ` +
+        `(routedByIntent=${routed.routedByIntent}); advertised=${routed.tools.length}`,
+      );
+    }
+    return llmTools;
+  }
+
+  /**
+   * Non-streaming provider call shared by the three stream-failure paths
+   * (failed done-result, empty stream, mid-stream throw). Was three
+   * byte-identical inline blocks — the flags reset existed in one twin but
+   * not the others (the swallowed-fallback-answer P1). One definition now.
+   */
+  private async completeFallback(llmTools: LlmTool[]): Promise<ProviderResponse> {
+    const response = await aiApi.complete({
+      companyId: this.ctx.companyId,
+      messages: this.buildMessages(),
+      tools: llmTools.length > 0 ? llmTools : undefined,
+      temperature: 0.2,
+      maxTokens: MAX_COMPLETION_TOKENS,
+    });
+    this.touchProgress();
+    return response;
+  }
+
+  /**
+   * Streaming stage: opens the provider stream behind a placeholder bubble,
+   * drains it (manual next() so the done-value is captured), and falls back
+   * to completeFallback() on every failure shape. Never throws for provider
+   * failures — they become an honest non-streaming response instead.
+   */
+  private async drainStreaming(llmTools: LlmTool[]): Promise<StreamOutcome> {
+    let response: ProviderResponse;
+    let streamingId: string | null = null;
+    // Tracks whether the streaming placeholder received real text content.
+    // If so, the placeholder IS the final assistant bubble — adding a second
+    // message below would render the same text twice.
+    let streamedContent = false;
+
+    try {
+      traceSend('stream-start');
+      const streamGen = aiApi.startStream({
+        companyId: this.ctx.companyId,
+        messages: this.buildMessages(),
+        tools: llmTools.length > 0 ? llmTools : undefined,
+        temperature: 0.2,
+        maxTokens: MAX_COMPLETION_TOKENS,
+      });
+
+      // Add a streaming placeholder so the user sees content appear
+      streamingId = this.store().addMessage({
+        role: 'assistant',
+        kind: 'text',
+        content: '',
+      });
+
+      const chunks: LlmStreamChunk[] = [];
+      // Incremental accumulation + rAF-throttled flushes: re-joining every
+      // chunk was O(n²) and each chunk triggered a full message-list render.
+      const sid = streamingId;
+      let contentAcc = '';
+      let flushScheduled = false;
+      const scheduleFlush = () => {
+        if (flushScheduled) return;
+        flushScheduled = true;
+        const run = () => {
+          flushScheduled = false;
+          this.store().updateMessageContent(sid, stripImitationToolBlocks(contentAcc));
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+        else setTimeout(run, 16);
+      };
+
+      // Stream watchdog: race the drain against a hard ceiling. A stuck
+      // `for await` (lost done-event, dead IPC, hung provider) can NOT be
+      // freed by generator.return() — a pending next() stays pending — so
+      // the timed-out drain is ABANDONED, not awaited. Its late settlement,
+      // if any, only touches the placeholder id + local array: harmless
+      // after we fall through to the complete() fallback below.
+      // Returns 'stopped' when the user pressed stop mid-stream.
+      //
+      // P1 fix: the loop is driven with manual next() (not `for await`)
+      // so the generator's DONE VALUE is captured. The main process ends
+      // an aborted stream with {success:false, error} (90s provider abort,
+      // timeouts) — `for await` silently discarded that value, so a
+      // half-delivered report became a successful final response with
+      // finishReason:null. Now a failed done-result routes to the honest
+      // complete() fallback instead of presenting truncation as success.
+      // Holder object (not a captured `let`): TS keeps a `= null`
+      // initializer narrowing across closures, which would make the check
+      // below "unreachable" (never). Property narrowing is reset by the
+      // `await Promise.race` below, so the declared type applies there.
+      const streamDoneBox: { result: { success: boolean; error?: string } | null } = { result: null };
+      const drainStream = async (): Promise<'drained' | 'stopped'> => {
+        for (;;) {
+          const step = await streamGen.next();
+          if (step.done) {
+            const doneValue = step.value as unknown as { success: boolean; error?: string } | undefined;
+            streamDoneBox.result = doneValue ?? null;
+            return 'drained';
+          }
+          const chunk = step.value;
+          // Stop button: finalize the partial text and end the request.
+          if (this.abortRequested) {
+            this.abortRequested = false;
+            // Drain the generator so its cleanup (listener removal) runs.
+            void streamGen.return?.({ success: false, error: 'stopped' }).catch(() => {});
+            if (streamedContent && streamingId) {
+              this.store().updateMessageContent(streamingId, stripImitationToolBlocks(contentAcc));
+            }
+            return 'stopped';
+          }
+          chunks.push(chunk);
+          this.touchProgress();
+          if (chunk.type === 'content' && chunk.content) {
+            if (!streamedContent) traceSend('first-chunk');
+            streamedContent = true;
+            contentAcc += chunk.content;
+            scheduleFlush();
+          }
+        }
+      };
+      const drainOutcome = await Promise.race([
+        drainStream(),
+        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), STREAM_TOTAL_TIMEOUT_MS)),
+      ]);
+      traceSend(`stream-end:${drainOutcome}`);
+      if (drainOutcome === 'timeout') {
+        void streamGen.return?.({ success: false, error: 'stream timeout' }).catch(() => {});
+        throw new Error('انتهت مهلة البث (120 ثانية) دون اكتمال — تم التحويل للطلب المباشر');
+      }
+      if (drainOutcome === 'stopped') {
+        this.store().addMessage({
+          role: 'assistant',
+          kind: 'text',
+          content: '⏹️ أوقفت التوليد بطلبك — المحتوى أعلاه جزئي.',
+        });
+        return { outcome: 'stopped' };
+      }
+
+      // P1 (paired with the drain fix above): a failed done-result means
+      // the provider aborted mid-report (timeout/overload) — the partial
+      // chunks must NOT be presented as a complete success. Route to the
+      // honest non-streaming fallback; the transient-retry below still
+      // applies to its error text.
+      if (streamDoneBox.result && !streamDoneBox.result.success) {
+        if (streamingId) {
+          this.store().removeMessage(streamingId);
+        }
+        this.touchProgress();
+        // The failed stream's partial text died with its placeholder: reset
+        // the streaming flags so the fallback below renders its FRESH
+        // content as a NEW bubble instead of updating the removed one
+        // (which would silently swallow the answer).
+        streamingId = null;
+        streamedContent = false;
+        contentAcc = '';
+        response = await this.completeFallback(llmTools);
+      } else if (chunks.length > 0) {
+        response = { success: true, data: reconstructResponseFromChunks(chunks) };
+      } else {
+        // Empty stream — fall back to non-streaming, remove placeholder
+        this.store().removeMessage(streamingId);
+        this.touchProgress();
+        response = await this.completeFallback(llmTools);
+      }
+    } catch {
+      // Streaming failed — remove placeholder, fall back to non-streaming.
+      // P1 fix: reset the streaming flags here exactly like the failed-done
+      // path above — otherwise the complete() answer below is written into
+      // the REMOVED placeholder (streamedContent && streamingId stays true)
+      // and the user never sees it.
+      if (streamingId) {
+        this.store().removeMessage(streamingId);
+      }
+      streamingId = null;
+      streamedContent = false;
+      contentAcc = '';
+      this.touchProgress();
+      response = await this.completeFallback(llmTools);
+    }
+
+    return { outcome: 'responded', response, streamingId, streamedContent };
+  }
+
+  /**
+   * Append the assistant turn to history (with tool_calls if present) and
+   * drop a text-less streaming placeholder — the text branch below reuses
+   * it for the final sanitized content, the toolCalls branch never renders
+   * text so the empty bubble must not linger.
+   */
+  private recordAssistantTurn(data: LlmCompletionData, streamingId: string | null, streamedContent: boolean): void {
+    // Append assistant message to history (with tool_calls if present).
+    // Content is sanitized so hallucinated [تم تنفيذ: ...] / [TOOL_RESULT: ...]
+    // imitation blocks never re-enter the LLM context as assistant text.
+    const assistantMsg: LlmMessage = {
+      role: 'assistant',
+      content: data.content ? stripImitationToolBlocks(data.content) : null,
+    };
+    if (data.toolCalls.length > 0) {
+      assistantMsg.tool_calls = data.toolCalls.map((tc) => {
+        // Only preserve EXTRA props from tc.function (e.g. Gemini's thought_signature).
+        // Do NOT spread name/arguments from tc.function because they would override
+        // the top-level values and could desync from parsed arguments.
+        const extras: Record<string, unknown> = {};
+        if ('function' in tc && tc.function && typeof tc.function === 'object') {
+          for (const key of Object.keys(tc.function as Record<string, unknown>)) {
+            if (key !== 'name' && key !== 'arguments') {
+              extras[key] = (tc.function as Record<string, unknown>)[key];
+            }
+          }
+        }
+        return {
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments), ...extras },
+        };
+      });
+    }
+    this.history.push(assistantMsg);
+
+    // A streaming placeholder with no text content would linger as an
+    // empty bubble whenever the reply carries only tool calls (the
+    // toolCalls branch below never renders text). Remove it here; the
+    // text branch reuses it for the final sanitized content.
+    if (streamingId && !streamedContent) {
+      this.store().removeMessage(streamingId);
+    }
+  }
+
+  /**
+   * Final-text branch: anti-fabrication guards, then render into the
+   * placeholder bubble (when streaming already displayed the content) or a
+   * new bubble. Caller returns after this — the loop never continues past
+   * a final answer.
+   */
+  private async finalizeText(data: LlmCompletionData, streamingId: string | null, streamedContent: boolean): Promise<void> {
+    const raw = data.content ?? '';
+    if (!raw) {
+      // Empty streamed placeholder would linger otherwise
+      if (streamedContent && streamingId) this.store().removeMessage(streamingId);
+      return;
+    }
+
+    // ── Anti-fabrication guard ────────────────────────────────────
+    // A final reply must never CLAIM a business action (document
+    // created/posted, voucher paid…) unless a write tool ACTUALLY
+    // executed during this request. Models drifting off the tool loop
+    // imitate earlier success summaries with invented document numbers —
+    // those replies are removed and the model is forced to either call
+    // the real tool or honestly say nothing was done.
+    //
+    // P1 fix: the guard used to be scoped to THIS send only — an honest
+    // follow-up summary ("أنشأت PV-000123 وهو مرحّل") after a REAL write
+    // in an earlier turn was deleted as "fabrication" and the model was
+    // told its true statement was a lie, pressuring it to RE-EXECUTE
+    // (duplicate document). Before correcting, cross-check the claimed
+    // document number against successful write tool results already in
+    // history — a claim matching real evidence passes through.
+    if (this.successfulWritesThisSend.size === 0 && claimsBusinessAction(raw) && !this.claimMatchesExecutedWrite(raw)) {
+      await this.correctFabricatedReply(streamingId, streamedContent);
+      return;
+    }
+    // Silent stripping of imitation blocks also hides failed attempts:
+    // if the model emitted textual fake tool-calls, correct it too.
+    if (stripImitationToolBlocks(raw) !== raw && this.successfulWritesThisSend.size === 0) {
+      await this.correctFabricatedReply(streamingId, streamedContent);
+      return;
+    }
+
+    const cleaned = stripImitationToolBlocks(raw);
+    if (streamedContent && streamingId) {
+      // Streaming already displayed this content in the placeholder
+      // bubble — update it with the final sanitized text instead of
+      // adding a duplicate message (fixes duplicated assistant replies).
+      this.store().updateMessageContent(streamingId, cleaned);
+    } else {
+      this.store().addMessage({
+        role: 'assistant',
+        kind: 'text',
+        content: cleaned,
+      });
+    }
+  }
+
+  /**
+   * Tool-calls branch: classify read vs write (fail-closed), execute reads
+   * in parallel with guided failures, then card writes and STOP.
+   * Returns true when the loop should CONTINUE (only reads ran),
+   * false when it must stop (epoch aborted, writes exhausted/pending).
+   */
+  private async runToolCalls(toolCalls: LlmCompletionData['toolCalls'], myEpoch: number): Promise<boolean> {
+    // Separate read vs write tool calls.
+    // FAIL-CLOSED: only tools that are registered AND explicitly 'read'
+    // take the silent path. Unknown names (model hallucination) default to
+    // WRITE so they always require user confirmation instead of executing
+    // unattended.
+    const readCalls: typeof toolCalls = [];
+    const writeCalls: typeof toolCalls = [];
+
+    for (const tc of toolCalls) {
+      // Adaptive expansion: a registered tool the model called but the
+      // router didn't advertise joins the next iteration's set — routing
+      // mistakes cost one turn, not a failure.
+      if (resolveTool(tc.name)) this.extraAdvertisedTools.add(tc.name);
+      const tool = resolveTool(tc.name);
+      if (tool && tool.dangerLevel === 'read') {
+        readCalls.push(tc);
+      } else {
+        writeCalls.push(tc);
+      }
+    }
+
+    // Execute read tools in parallel (they're independent — no shared state)
+    const readOutcomes = await Promise.all(
+      readCalls.map(async (tc) => {
+        const outcome = await executeToolCall(tc.name, tc.arguments, this.ctx);
+        return { tc, outcome };
+      })
+    );
+    if (myEpoch !== this.recoveryCount) return false;
+    this.touchProgress();
+
+    for (const { tc, outcome } of readOutcomes) {
+      const summary = outcome.ok ? summarizeResult(outcome.result) : (outcome.error ?? 'خطأ');
+
+      this.store().addMessage({
+        role: 'assistant',
+        kind: 'tool',
+        content: '',
+        toolCall: {
+          callId: tc.id,
+          toolName: tc.name,
+          label: resolveTool(tc.name)?.labelAr ?? tc.name,
+          args: tc.arguments,
+          status: outcome.ok ? 'success' : 'error',
+          dangerLevel: 'read',
+          resultSummary: summary,
+        },
+      });
+
+      // Failed reads reach the model WITH structured guidance (code + reason
+      // + fixHint) so it explains the failure and proposes the next step
+      // instead of parroting the raw error string.
+      this.history.push({
+        role: 'tool',
+        content: outcome.ok
+          ? compactToolResultForLlm(outcome.result)
+          : `خطأ: ${outcome.error}${outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : ''}`,
+        tool_call_id: tc.id,
+      });
+    }
+
+    // Every finished tool call is forward progress (matters to the stall
+    // watchdog: a long chain of slow-but-completing tools must not look
+    // wedged).
+    this.touchProgress();
+
+    // Handle write tools → emit confirmation cards and STOP loop.
+    // IDENTICAL-RETRY GUARD: a write that already failed this send with the
+    // SAME arguments gets no more confirmation cards — the model is stuck in
+    // a loop (approve → fail → re-issue verbatim). Surface honest errors and
+    // stop instead of asking the user to approve the doomed call again.
+    if (writeCalls.length > 0) {
+      this.pendingWriteCalls = [];
+      const exhausted: Array<{ callId: string; name: string; error: string }> = [];
+      const confirmable: typeof writeCalls = [];
+
+      for (const tc of writeCalls) {
+        const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
+        const failures = this.failedWriteAttempts.get(key) ?? 0;
+        if (failures >= ChatEngine.WRITE_RETRY_LIMIT) {
+          exhausted.push({
+            callId: tc.id,
+            name: tc.name,
+            error: `توقف تلقائي: استدعاء ${tc.name} بنفس المعطيات فشل ${failures} مرات — لن يُطلب موافقتك مجدداً على نفس العملية. عدّل المعطيات أو نفّذها من الشاشة مباشرة.`,
+          });
+        } else {
+          confirmable.push(tc);
+        }
+      }
+
+      for (const ex of exhausted) {
+        // P1 fix: push the error with the REAL tool_call_id. The old code
+        // minted a synthetic `exhausted-<ts>` id that matches NOTHING in
+        // the partner assistant(tool_calls) message — providers reject the
+        // orphan pair with a 400 on every subsequent request (the guard
+        // designed to SAVE the session killed it instead). Insert right
+        // after the partner like every other tool result.
+        this.pushToolResultAfterPartner(ex.callId, `خطأ: ${ex.error}`);
+        this.store().addMessage({
+          role: 'assistant',
+          kind: 'error',
+          content: ex.error,
+        });
+      }
+
+      if (confirmable.length === 0) {
+        // Every write is a verbatim retry of a failed call — stop here with
+        // an honest summary instead of looping back into the LLM.
+        return false;
+      }
+
+      for (const tc of confirmable) {
+        const tool = resolveTool(tc.name);
+        const pending: PendingToolCall = {
+          callId: tc.id,
+          toolName: tc.name,
+          label: tool?.labelAr ?? tc.name,
+          args: tc.arguments,
+          argsSummary: tool?.summarizeArgs?.(tc.arguments),
+          status: 'pending-confirmation',
+          dangerLevel: 'write',
+        };
+        this.pendingWriteCalls.push(pending);
+
+        const messageId = this.store().addMessage({
+          role: 'assistant',
+          kind: 'tool',
+          content: '',
+          toolCall: pending,
+        });
+
+        // Enrich the confirmation card asynchronously: resolve raw UUID
+        // args (customerId/productId…) into human names/numbers so the user
+        // approves SUBSTANCE, not "المعرف: 3f2a1b9c…". Best-effort — the
+        // card stays fully functional with the plain summary alone.
+        void resolveArgsForCard(tc.arguments, this.ctx).then((labels) => {
+          if (labels.length === 0) return;
+          this.store().updateToolCall(messageId, {
+            argsSummary: [pending.argsSummary, ...labels].filter(Boolean).join(' — '),
+          });
+        }).catch(() => { /* best-effort enrichment */ });
+      }
+
+      // Stop loop — waiting for user confirmation
+      return false;
+    }
+
+    // Reads only — the loop continues.
+    return true;
+  }
+
   async runLoop(): Promise<void> {
     // Orphaned work from before a watchdog recovery must die quietly —
     // its results belong to a session the UI already moved past.
@@ -1372,195 +1834,10 @@ class ChatEngine {
       this.iterationCount++;
       this.touchProgress();
 
-      // Intent-routed tool selection: ALWAYS-ON core + domain groups matched
-      // against the user's recent messages + tools the model already called
-      // (adaptive expansion). Bounded ≤ MAX_ADVERTISED_TOOLS — the full
-      // registry (~265 tools) would be rejected by the main-process guard
-      // (cap 128) and by the providers themselves.
-      const routed = routeToolsForCycle(this.history, this.extraAdvertisedTools);
-      const llmTools = toLlmTools(routed.tools);
-      // P1: the cap drop used to be silent — a broad intent could lose the
-      // very tools it routed (sliced by registration order). With relevance
-      // ordering the intent domains survive; log the remainder honestly so a
-      // "model never calls X" report starts from the routing line, not a guess.
-      if (routed.dropped > 0) {
-        console.warn(
-          `[ai] tool-router dropped ${routed.dropped} tools this cycle ` +
-          `(routedByIntent=${routed.routedByIntent}); advertised=${routed.tools.length}`,
-        );
-      }
-
-      // Try push-based streaming first, then fall back to non-streaming
-      let response: { success: boolean; data?: LlmCompletionData; error?: string };
-      let streamingId: string | null = null;
-      // Tracks whether the streaming placeholder received real text content.
-      // If so, the placeholder IS the final assistant bubble — adding a second
-      // message below would render the same text twice.
-      let streamedContent = false;
-
-      try {
-        traceSend('stream-start');
-        const streamGen = aiApi.startStream({
-          companyId: this.ctx.companyId,
-          messages: this.buildMessages(),
-          tools: llmTools.length > 0 ? llmTools : undefined,
-          temperature: 0.2,
-          maxTokens: MAX_COMPLETION_TOKENS,
-        });
-
-        // Add a streaming placeholder so the user sees content appear
-        streamingId = this.store().addMessage({
-          role: 'assistant',
-          kind: 'text',
-          content: '',
-        });
-
-        const chunks: LlmStreamChunk[] = [];
-        // Incremental accumulation + rAF-throttled flushes: re-joining every
-        // chunk was O(n²) and each chunk triggered a full message-list render.
-        const sid = streamingId;
-        let contentAcc = '';
-        let flushScheduled = false;
-        const scheduleFlush = () => {
-          if (flushScheduled) return;
-          flushScheduled = true;
-          const run = () => {
-            flushScheduled = false;
-            this.store().updateMessageContent(sid, stripImitationToolBlocks(contentAcc));
-          };
-          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-          else setTimeout(run, 16);
-        };
-
-        // Stream watchdog: race the drain against a hard ceiling. A stuck
-        // `for await` (lost done-event, dead IPC, hung provider) can NOT be
-        // freed by generator.return() — a pending next() stays pending — so
-        // the timed-out drain is ABANDONED, not awaited. Its late settlement,
-        // if any, only touches the placeholder id + local array: harmless
-        // after we fall through to the complete() fallback below.
-        // Returns 'stopped' when the user pressed stop mid-stream.
-        //
-        // P1 fix: the loop is driven with manual next() (not `for await`)
-        // so the generator's DONE VALUE is captured. The main process ends
-        // an aborted stream with {success:false, error} (90s provider abort,
-        // timeouts) — `for await` silently discarded that value, so a
-        // half-delivered report became a successful final response with
-        // finishReason:null. Now a failed done-result routes to the honest
-        // complete() fallback instead of presenting truncation as success.
-        // Holder object (not a captured `let`): TS keeps a `= null`
-        // initializer narrowing across closures, which would make the check
-        // below "unreachable" (never). Property narrowing is reset by the
-        // `await Promise.race` below, so the declared type applies there.
-        const streamDoneBox: { result: { success: boolean; error?: string } | null } = { result: null };
-        const drainStream = async (): Promise<'drained' | 'stopped'> => {
-          for (;;) {
-            const step = await streamGen.next();
-            if (step.done) {
-              const doneValue = step.value as unknown as { success: boolean; error?: string } | undefined;
-              streamDoneBox.result = doneValue ?? null;
-              return 'drained';
-            }
-            const chunk = step.value;
-            // Stop button: finalize the partial text and end the request.
-            if (this.abortRequested) {
-              this.abortRequested = false;
-              // Drain the generator so its cleanup (listener removal) runs.
-              void streamGen.return?.({ success: false, error: 'stopped' }).catch(() => {});
-              if (streamedContent && streamingId) {
-                this.store().updateMessageContent(streamingId, stripImitationToolBlocks(contentAcc));
-              }
-              return 'stopped';
-            }
-            chunks.push(chunk);
-            this.touchProgress();
-            if (chunk.type === 'content' && chunk.content) {
-              if (!streamedContent) traceSend('first-chunk');
-              streamedContent = true;
-              contentAcc += chunk.content;
-              scheduleFlush();
-            }
-          }
-        };
-        const drainOutcome = await Promise.race([
-          drainStream(),
-          new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), STREAM_TOTAL_TIMEOUT_MS)),
-        ]);
-        traceSend(`stream-end:${drainOutcome}`);
-        if (drainOutcome === 'timeout') {
-          void streamGen.return?.({ success: false, error: 'stream timeout' }).catch(() => {});
-          throw new Error('انتهت مهلة البث (120 ثانية) دون اكتمال — تم التحويل للطلب المباشر');
-        }
-        if (drainOutcome === 'stopped') {
-          this.store().addMessage({
-            role: 'assistant',
-            kind: 'text',
-            content: '⏹️ أوقفت التوليد بطلبك — المحتوى أعلاه جزئي.',
-          });
-          return;
-        }
-
-        // P1 (paired with the drain fix above): a failed done-result means
-        // the provider aborted mid-report (timeout/overload) — the partial
-        // chunks must NOT be presented as a complete success. Route to the
-        // honest non-streaming fallback; the transient-retry below still
-        // applies to its error text.
-        if (streamDoneBox.result && !streamDoneBox.result.success) {
-          if (streamingId) {
-            this.store().removeMessage(streamingId);
-          }
-          this.touchProgress();
-          // The failed stream's partial text died with its placeholder: reset
-          // the streaming flags so the fallback below renders its FRESH
-          // content as a NEW bubble instead of updating the removed one
-          // (which would silently swallow the answer).
-          streamingId = null;
-          streamedContent = false;
-          contentAcc = '';
-          response = await aiApi.complete({
-            companyId: this.ctx.companyId,
-            messages: this.buildMessages(),
-            tools: llmTools.length > 0 ? llmTools : undefined,
-            temperature: 0.2,
-            maxTokens: MAX_COMPLETION_TOKENS,
-          });
-          this.touchProgress();
-        } else if (chunks.length > 0) {
-          response = { success: true, data: reconstructResponseFromChunks(chunks) };
-        } else {
-          // Empty stream — fall back to non-streaming, remove placeholder
-          this.store().removeMessage(streamingId);
-          this.touchProgress();
-          response = await aiApi.complete({
-            companyId: this.ctx.companyId,
-            messages: this.buildMessages(),
-            tools: llmTools.length > 0 ? llmTools : undefined,
-            temperature: 0.2,
-            maxTokens: MAX_COMPLETION_TOKENS,
-          });
-          this.touchProgress();
-        }
-      } catch {
-        // Streaming failed — remove placeholder, fall back to non-streaming.
-        // P1 fix: reset the streaming flags here exactly like the failed-done
-        // path above — otherwise the complete() answer below is written into
-        // the REMOVED placeholder (streamedContent && streamingId stays true)
-        // and the user never sees it.
-        if (streamingId) {
-          this.store().removeMessage(streamingId);
-        }
-        streamingId = null;
-        streamedContent = false;
-        contentAcc = '';
-        this.touchProgress();
-        response = await aiApi.complete({
-          companyId: this.ctx.companyId,
-          messages: this.buildMessages(),
-          tools: llmTools.length > 0 ? llmTools : undefined,
-          temperature: 0.2,
-          maxTokens: MAX_COMPLETION_TOKENS,
-        });
-        this.touchProgress();
-      }
+      const llmTools = this.routeCycleTools();
+      const stream = await this.drainStreaming(llmTools);
+      if (stream.outcome === 'stopped') return;
+      const { response: firstResponse, streamingId, streamedContent } = stream;
 
       // A watchdog recovery happened while the provider call was in flight —
       // drop its results instead of writing them over the recovered state.
@@ -1571,6 +1848,7 @@ class ChatEngine {
       // TEMPORARY: one backoff retry recovers most of them instead of
       // dumping a dead-end error on the user. Anything else (auth, model,
       // validation) fails fast — retrying it would only burn quota.
+      let response = firstResponse;
       if (!response.success || !response.data) {
         const errText = String(response.error ?? '');
         const transient =
@@ -1601,241 +1879,17 @@ class ChatEngine {
       retriedOnce = false;
 
       const data = response.data;
-
-      // Append assistant message to history (with tool_calls if present).
-      // Content is sanitized so hallucinated [تم تنفيذ: ...] / [TOOL_RESULT: ...]
-      // imitation blocks never re-enter the LLM context as assistant text.
-      const assistantMsg: LlmMessage = {
-        role: 'assistant',
-        content: data.content ? stripImitationToolBlocks(data.content) : null,
-      };
-      if (data.toolCalls.length > 0) {
-        assistantMsg.tool_calls = data.toolCalls.map((tc) => {
-          // Only preserve EXTRA props from tc.function (e.g. Gemini's thought_signature).
-          // Do NOT spread name/arguments from tc.function because they would override
-          // the top-level values and could desync from parsed arguments.
-          const extras: Record<string, unknown> = {};
-          if ('function' in tc && tc.function && typeof tc.function === 'object') {
-            for (const key of Object.keys(tc.function as Record<string, unknown>)) {
-              if (key !== 'name' && key !== 'arguments') {
-                extras[key] = (tc.function as Record<string, unknown>)[key];
-              }
-            }
-          }
-          return {
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.arguments), ...extras },
-          };
-        });
-      }
-      this.history.push(assistantMsg);
-
-      // A streaming placeholder with no text content would linger as an
-      // empty bubble whenever the reply carries only tool calls (the
-      // toolCalls branch below never renders text). Remove it here; the
-      // text branch reuses it for the final sanitized content.
-      if (streamingId && !streamedContent) {
-        this.store().removeMessage(streamingId);
-      }
+      this.recordAssistantTurn(data, streamingId, streamedContent);
 
       // If no tool calls → final text response
       if (data.toolCalls.length === 0) {
-        const raw = data.content ?? '';
-        if (!raw) {
-          // Empty streamed placeholder would linger otherwise
-          if (streamedContent && streamingId) this.store().removeMessage(streamingId);
-          return;
-        }
-
-        // ── Anti-fabrication guard ────────────────────────────────────
-        // A final reply must never CLAIM a business action (document
-        // created/posted, voucher paid…) unless a write tool ACTUALLY
-        // executed during this request. Models drifting off the tool loop
-        // imitate earlier success summaries with invented document numbers —
-        // those replies are removed and the model is forced to either call
-        // the real tool or honestly say nothing was done.
-        //
-        // P1 fix: the guard used to be scoped to THIS send only — an honest
-        // follow-up summary ("أنشأت PV-000123 وهو مرحّل") after a REAL write
-        // in an earlier turn was deleted as "fabrication" and the model was
-        // told its true statement was a lie, pressuring it to RE-EXECUTE
-        // (duplicate document). Before correcting, cross-check the claimed
-        // document number against successful write tool results already in
-        // history — a claim matching real evidence passes through.
-        if (this.successfulWritesThisSend.size === 0 && claimsBusinessAction(raw) && !this.claimMatchesExecutedWrite(raw)) {
-          await this.correctFabricatedReply(streamingId, streamedContent);
-          return;
-        }
-        // Silent stripping of imitation blocks also hides failed attempts:
-        // if the model emitted textual fake tool-calls, correct it too.
-        if (stripImitationToolBlocks(raw) !== raw && this.successfulWritesThisSend.size === 0) {
-          await this.correctFabricatedReply(streamingId, streamedContent);
-          return;
-        }
-
-        const cleaned = stripImitationToolBlocks(raw);
-        if (streamedContent && streamingId) {
-          // Streaming already displayed this content in the placeholder
-          // bubble — update it with the final sanitized text instead of
-          // adding a duplicate message (fixes duplicated assistant replies).
-          this.store().updateMessageContent(streamingId, cleaned);
-        } else {
-          this.store().addMessage({
-            role: 'assistant',
-            kind: 'text',
-            content: cleaned,
-          });
-        }
+        await this.finalizeText(data, streamingId, streamedContent);
         return;
       }
 
-      // Separate read vs write tool calls.
-      // FAIL-CLOSED: only tools that are registered AND explicitly 'read'
-      // take the silent path. Unknown names (model hallucination) default to
-      // WRITE so they always require user confirmation instead of executing
-      // unattended.
-      const readCalls: typeof data.toolCalls = [];
-      const writeCalls: typeof data.toolCalls = [];
-
-      for (const tc of data.toolCalls) {
-        // Adaptive expansion: a registered tool the model called but the
-        // router didn't advertise joins the next iteration's set — routing
-        // mistakes cost one turn, not a failure.
-        if (resolveTool(tc.name)) this.extraAdvertisedTools.add(tc.name);
-        const tool = resolveTool(tc.name);
-        if (tool && tool.dangerLevel === 'read') {
-          readCalls.push(tc);
-        } else {
-          writeCalls.push(tc);
-        }
-      }
-
-      // Execute read tools in parallel (they're independent — no shared state)
-      const readOutcomes = await Promise.all(
-        readCalls.map(async (tc) => {
-          const outcome = await executeToolCall(tc.name, tc.arguments, this.ctx);
-          return { tc, outcome };
-        })
-      );
-      if (myEpoch !== this.recoveryCount) return;
-      this.touchProgress();
-
-      for (const { tc, outcome } of readOutcomes) {
-        const summary = outcome.ok ? summarizeResult(outcome.result) : (outcome.error ?? 'خطأ');
-
-        this.store().addMessage({
-          role: 'assistant',
-          kind: 'tool',
-          content: '',
-          toolCall: {
-            callId: tc.id,
-            toolName: tc.name,
-            label: resolveTool(tc.name)?.labelAr ?? tc.name,
-            args: tc.arguments,
-            status: outcome.ok ? 'success' : 'error',
-            dangerLevel: 'read',
-            resultSummary: summary,
-          },
-        });
-
-        // Failed reads reach the model WITH structured guidance (code + reason
-        // + fixHint) so it explains the failure and proposes the next step
-        // instead of parroting the raw error string.
-        this.history.push({
-          role: 'tool',
-          content: outcome.ok
-            ? compactToolResultForLlm(outcome.result)
-            : `خطأ: ${outcome.error}${outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : ''}`,
-          tool_call_id: tc.id,
-        });
-      }
-
-      // Every finished tool call is forward progress (matters to the stall
-      // watchdog: a long chain of slow-but-completing tools must not look
-      // wedged).
-      this.touchProgress();
-
-      // Handle write tools → emit confirmation cards and STOP loop.
-      // IDENTICAL-RETRY GUARD: a write that already failed this send with the
-      // SAME arguments gets no more confirmation cards — the model is stuck in
-      // a loop (approve → fail → re-issue verbatim). Surface honest errors and
-      // stop instead of asking the user to approve the doomed call again.
-      if (writeCalls.length > 0) {
-        this.pendingWriteCalls = [];
-        const exhausted: Array<{ callId: string; name: string; error: string }> = [];
-        const confirmable: typeof writeCalls = [];
-
-        for (const tc of writeCalls) {
-          const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
-          const failures = this.failedWriteAttempts.get(key) ?? 0;
-          if (failures >= ChatEngine.WRITE_RETRY_LIMIT) {
-            exhausted.push({
-              callId: tc.id,
-              name: tc.name,
-              error: `توقف تلقائي: استدعاء ${tc.name} بنفس المعطيات فشل ${failures} مرات — لن يُطلب موافقتك مجدداً على نفس العملية. عدّل المعطيات أو نفّذها من الشاشة مباشرة.`,
-            });
-          } else {
-            confirmable.push(tc);
-          }
-        }
-
-        for (const ex of exhausted) {
-          // P1 fix: push the error with the REAL tool_call_id. The old code
-          // minted a synthetic `exhausted-<ts>` id that matches NOTHING in
-          // the partner assistant(tool_calls) message — providers reject the
-          // orphan pair with a 400 on every subsequent request (the guard
-          // designed to SAVE the session killed it instead). Insert right
-          // after the partner like every other tool result.
-          this.pushToolResultAfterPartner(ex.callId, `خطأ: ${ex.error}`);
-          this.store().addMessage({
-            role: 'assistant',
-            kind: 'error',
-            content: ex.error,
-          });
-        }
-
-        if (confirmable.length === 0) {
-          // Every write is a verbatim retry of a failed call — stop here with
-          // an honest summary instead of looping back into the LLM.
-          return;
-        }
-
-        for (const tc of confirmable) {
-          const tool = resolveTool(tc.name);
-          const pending: PendingToolCall = {
-            callId: tc.id,
-            toolName: tc.name,
-            label: tool?.labelAr ?? tc.name,
-            args: tc.arguments,
-            argsSummary: tool?.summarizeArgs?.(tc.arguments),
-            status: 'pending-confirmation',
-            dangerLevel: 'write',
-          };
-          this.pendingWriteCalls.push(pending);
-
-          const messageId = this.store().addMessage({
-            role: 'assistant',
-            kind: 'tool',
-            content: '',
-            toolCall: pending,
-          });
-
-          // Enrich the confirmation card asynchronously: resolve raw UUID
-          // args (customerId/productId…) into human names/numbers so the user
-          // approves SUBSTANCE, not "المعرف: 3f2a1b9c…". Best-effort — the
-          // card stays fully functional with the plain summary alone.
-          void resolveArgsForCard(tc.arguments, this.ctx).then((labels) => {
-            if (labels.length === 0) return;
-            this.store().updateToolCall(messageId, {
-              argsSummary: [pending.argsSummary, ...labels].filter(Boolean).join(' — '),
-            });
-          }).catch(() => { /* best-effort enrichment */ });
-        }
-
-        // Stop loop — waiting for user confirmation
-        return;
-      }
+      // Tool calls → execute reads, card writes. False = stop the loop
+      // (epoch aborted, all writes exhausted, or confirmation pending).
+      if (!(await this.runToolCalls(data.toolCalls, myEpoch))) return;
 
       // If only read tools ran, loop continues (LLM may respond with more text).
       // When the provider did not emit a thought_signature, buildMessages()
@@ -1843,6 +1897,7 @@ class ChatEngine {
       // providers that require thought_signature on every tool_call (Gemini)
       // don't reject the follow-up request. MAX_ITERATIONS guards against
       // infinite tool-call loops.
+
     }
 
     // Safety: max iterations reached

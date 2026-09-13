@@ -60,7 +60,12 @@ interface DomainGroup {
  */
 const DOMAIN_GROUPS: readonly DomainGroup[] = [
   {
-    prefixes: ['sales.', 'read.ar_aging', 'read.customer_statement', 'read.sales_analysis'],
+    // P3 fix: the read.* names here were ghosts from a pre-Phase-94 layout
+    // (read.ar_aging, read.customer_statement… do not exist — the only
+    // read.* tools are the six in readTools.ts). Ghost prefixes are harmless
+    // (visibleByName filters) but lie to the reader; domain prefixes alone
+    // already route the whole family (see the reports group below).
+    prefixes: ['sales.'],
     keywords: [
       'بيع', 'مبيعات', 'فاتورة بيع', 'فواتير بيع', 'عميل', 'عملاء', 'عرض سعر', 'عروض أسعار',
       'مردود', 'مرتجع', 'تسعيرة', 'مردودات', 'أجل', 'مدين', 'ذمم', 'أرصدة العملاء',
@@ -68,14 +73,14 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
-    prefixes: ['purchases.', 'read.ap_aging', 'read.supplier_statement'],
+    prefixes: ['purchases.'],
     keywords: [
       'شراء', 'مشتريات', 'فاتورة شراء', 'فواتير شراء', 'مورد', 'موردين', 'أمر شراء',
       'أوامر شراء', 'مردود مشتريات', 'مديونية', 'أرصدة الموردين', 'دائن', 'سداد',
     ],
   },
   {
-    prefixes: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'read.low_stock_alert'],
+    prefixes: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation'],
     keywords: [
       'مخزن', 'مخازن', 'مخزون', 'منتج', 'منتجات', 'صنف', 'أصناف', 'مستودع', 'مستودعات',
       'جرد', 'تحويل مخزني', 'تسويات', 'كرتون', 'درزن', 'كميات', 'تالفة', 'راكد',
@@ -113,7 +118,11 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
-    prefixes: ['accounting.', 'read.profit_loss', 'read.balance_sheet', 'read.'],
+    // P3 fix: the catch-all 'read.' suffix made ANY accounting-ish word pull
+    // every read.* tool (fine for "حساب" reports, but document the intent).
+    // Ghost names (read.profit_loss, read.balance_sheet) removed — only the
+    // six real read.* tools (readTools.ts) may be named explicitly.
+    prefixes: ['accounting.'],
     keywords: [
       'قيود', 'قيد', 'يومية', 'حساب', 'حسابات', 'شجرة الحسابات', 'ميزان', 'ميزانية',
       'أرباح', 'خسائر', 'تدفق نقدي', 'تدفقات', 'سند', 'سندات', 'قبض', 'صرف',

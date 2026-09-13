@@ -83,6 +83,14 @@ describe('classifyToolError', () => {
     expect(c.code).toBe('RATE_LIMIT');
   });
 
+  it('classifies provider overloads (PROVIDER_ERROR) as retryable — P3 reachable-code fix', () => {
+    expect(classifyToolError('انتهت حصة الذكاء الاصطناعي مؤقتاً (429) — انتظر دقيقة ثم قل "تابع"').code).toBe('PROVIDER_ERROR');
+    expect(classifyToolError('مزود الذكاء الاصطناعي مثقل حالياً (503) — انتظر قليلاً').code).toBe('PROVIDER_ERROR');
+    const c = classifyToolError('تعذر الاتصال بمزود الذكاء الاصطناعي: socket hang up');
+    expect(c.code).toBe('PROVIDER_ERROR');
+    expect(c.retryable).toBe(true);
+  });
+
   it('classifies technical DB errors (DB_ERROR)', () => {
     const c = classifyToolError('invalid input syntax for type uuid');
     expect(c.code).toBe('DB_ERROR');
