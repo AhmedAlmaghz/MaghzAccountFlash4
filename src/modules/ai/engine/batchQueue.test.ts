@@ -17,8 +17,8 @@ import {
 describe('resolveBatchItems', () => {
   it('carries display labels through untouched', () => {
     const res = resolveBatchItems([
-      { tool: 'sales.create_invoice', args: {}, label: 'معكوس ← مشتريات' },
-      { tool: 'sales.create_invoice', args: {} },
+      { tool: 'sales.create_invoice', args: { a: 1 }, label: 'معكوس ← مشتريات' },
+      { tool: 'sales.create_invoice', args: { a: 2 } },
     ]);
     expect(res.ok).toBe(true);
     if (!res.ok) return;

@@ -286,7 +286,9 @@ describe('runBatch', () => {
       } as never)
       .mockResolvedValueOnce({ ok: true, result: { invoiceId: 'inv-9' } });
     mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: 'done' } });
-    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'running' }) });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 1 }) });
 
     // Test-only short cooldown (production waits the real 60s window).
     const final = await runBatch('c1', 'u1', 'b1', { rateLimitWindowMs: 1500 });
