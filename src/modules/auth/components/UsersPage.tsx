@@ -112,7 +112,7 @@ export const UsersPage: React.FC = () => {
     setFormErrors({});
     setIsSaving(true);
     try {
-      const data: Record<string, unknown> = {
+      const data = {
         companyId: activeCompany.id,
         username,
         email: formData.email.trim() || undefined,
@@ -121,11 +121,11 @@ export const UsersPage: React.FC = () => {
         role: formData.role,
         branchId: formData.branchId || null,
         isActive: formData.isActive,
-      };
-      if (!editing) (data as Record<string, unknown>).password = formData.password;
+      } as Omit<User, 'id'> & { password?: string; companyId: string };
+      if (!editing) data.password = formData.password;
       let result: { success: boolean; error?: string };
       if (editing) {
-        result = await update(editing.id, data);
+        result = await update(editing.id, data as Partial<User>);
       } else {
         result = await create(data);
       }
