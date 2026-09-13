@@ -140,11 +140,11 @@ export const ReportsHubPage: React.FC = () => {
         <div className="relative px-6 py-10 sm:px-8 sm:py-12 text-white">
           <div className="flex items-center gap-3 mb-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-blue-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
-              <BarChart2 size={12} /> {t('sidebar.reports')}
+              <BarChart2 size={12} /> {t('sidebar.reports.title')}
             </span>
             <span className="inline-flex items-center gap-1 text-xs font-medium tracking-wide text-blue-100/60">{reportModules.length} تقارير متاحة</span>
           </div>
-          <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sidebar.reports')}</h2>
+          <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sidebar.reports.title')}</h2>
           <p className="text-blue-100/80 text-base max-w-lg">{t('reports.hub.subtitle')}</p>
         </div>
       </div>

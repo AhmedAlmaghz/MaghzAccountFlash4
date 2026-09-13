@@ -240,8 +240,11 @@ export const reportTools: ToolDefinition[] = [
         revenueChange: prevRevenue > 0 ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 10000) / 100 : undefined,
         expenseChange: prevExpenses > 0 ? Math.round(((totalExpenses - prevExpenses) / prevExpenses) * 10000) / 100 : undefined,
         revenueCount: revenues.length, expenseCount: expenses.length,
-        revenues: revenues.slice(0, 50).map(a => ({ code: a.code, name: a.nameAr, amount: a.balance })),
-        expenses: expenses.slice(0, 50).map(a => ({ code: a.code, name: a.nameAr, amount: a.balance })),
+        // P3 fix: the service returns RAW snake_case rows (name_ar/balance) —
+        // the old mapping read camelCase nameAr and rendered every account
+        // name as undefined (totals were right, labels were not).
+        revenues: revenues.slice(0, 50).map(a => ({ code: a.code, name: (a.name_ar ?? a.nameAr) as unknown, amount: a.balance })),
+        expenses: expenses.slice(0, 50).map(a => ({ code: a.code, name: (a.name_ar ?? a.nameAr) as unknown, amount: a.balance })),
       };
     },
   },
@@ -1502,7 +1505,10 @@ export const reportTools: ToolDefinition[] = [
       const [leadsRes, oppsRes, invoicesRes] = await Promise.all([
         guardedQuery(`SELECT status, COUNT(*)::int AS count FROM leads WHERE company_id = $1::uuid GROUP BY status`, [ctx.companyId]),
         guardedQuery(`SELECT stage, COUNT(*)::int AS count, COALESCE(SUM(value), 0) AS total_value FROM opportunities WHERE company_id = $1::uuid GROUP BY stage`, [ctx.companyId]),
-        guardedQuery(`SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0) AS total_revenue FROM sales_invoices WHERE company_id = $1::uuid AND status = 'posted'`, [ctx.companyId]),
+        // P3 fix: paid/partially_paid invoices are revenue too — the old
+        // `status = 'posted'` filter dropped every settled invoice from the
+        // funnel (the busier the business, the emptier its funnel looked).
+        guardedQuery(`SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0) AS total_revenue FROM sales_invoices WHERE company_id = $1::uuid AND status IN ('posted', 'partially_paid', 'paid')`, [ctx.companyId]),
       ]);
 
       const totalLeads = (leadsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.count), 0);

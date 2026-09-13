@@ -1108,7 +1108,8 @@
       "accepted": "Accepted",
       "rejected": "Rejected",
       "expired": "Expired",
-      "converted": "Converted"
+      "converted": "Converted",
+      "sent": "Sent"
     },
     "actions": "Actions",
     "notes": "Notes",

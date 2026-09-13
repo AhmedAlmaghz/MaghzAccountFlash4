@@ -46,12 +46,45 @@ describe('preload parity gate (CI)', () => {
       'subscribeStream',
       'stopStream',
       'batchCreate', 'batchClaim', 'batchItemDone', 'batchItemFail',
-      'batchSetStatus', 'batchRetryFailed', 'batchRecover', 'batchGet', 'batchList',
+      'batchSetStatus', 'batchRetryFailed', 'batchRecover', 'batchRelease', 'batchGet', 'batchList',
     ];
     for (const src of [cjs, js]) {
       const methods = exposedMethods(src);
       const missing = required.filter((r) => !methods.includes(r));
       expect(missing, `preload missing AI bridge methods: ${missing.join(', ')}`).toEqual([]);
     }
+  });
+
+  it('the e2e electronAI stub covers the same AI surface (no TypeError drift)', () => {
+    // P2 fix: the e2e shim defined ~12 electronAI methods while the renderer
+    // calls ~25 — any AI-adjacent e2e (purge-on-open, batch cards, resume
+    // banner) hit `b.X is not a function`, swallowed by .catch. The stub is
+    // a single-line template in e2e/vite-e2e-plugin.ts — pin its method set
+    // here so the next channel addition updates both or fails loudly.
+    const plugin = readFileSync(resolve(ROOT, 'e2e/vite-e2e-plugin.ts'), 'utf-8');
+    const stubStart = plugin.indexOf('window.electronAI={');
+    expect(stubStart).toBeGreaterThan(-1);
+    let depth = 0;
+    let end = -1;
+    for (let i = stubStart; i < plugin.length; i++) {
+      const c = plugin[i];
+      if (c === '{') depth++;
+      if (c === '}') {
+        depth--;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    expect(end).toBeGreaterThan(stubStart);
+    const stub = plugin.slice(stubStart, end);
+    const required = [
+      'purgeOldSessions',
+      'renameSession',
+      'subscribeStream',
+      'stopStream',
+      'batchCreate', 'batchClaim', 'batchItemDone', 'batchItemFail',
+      'batchSetStatus', 'batchRetryFailed', 'batchRecover', 'batchRelease', 'batchGet', 'batchList',
+    ];
+    const missing = required.filter((r) => !new RegExp(`\\b${r}\\s*:`).test(stub));
+    expect(missing, `e2e electronAI stub missing methods: ${missing.join(', ')}`).toEqual([]);
   });
 });

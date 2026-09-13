@@ -18,9 +18,27 @@ import type { ToolContext, ToolDefinition } from '../types';
  */
 const toolResultCache = new Map<string, { result: unknown; timestamp: number }>();
 const CACHE_TTL_MS = 60_000; // 1 minute
+/**
+ * P3 fix: the cache was NEVER swept — entries whose keys were never
+ * re-requested lived until session end, each holding a full result payload
+ * (search result arrays). Bound it: TTL expiry on read (existing) + a hard
+ * cap with oldest-first eviction on write.
+ */
+const CACHE_MAX_ENTRIES = 200;
 
 function cacheKey(namespace: string, name: string, args: Record<string, unknown>): string {
-  return `${namespace}:${name}:${JSON.stringify(args)}`;
+  // P3 fix: JSON.stringify is key-order sensitive — {a:1,b:2} and {b:2,a:1}
+  // missed each other. stableStringify (same helper the batch queue uses
+  // for idempotency keys) makes logically-equal args hit one entry.
+  return `${namespace}:${name}:${stableStringify(args)}`;
+}
+
+/** Minimal stable stringify (sorted keys, recursive) — mirrors batchQueue. */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? '';
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`).join(',')}}`;
 }
 
 export function getCachedToolResult(
@@ -45,6 +63,10 @@ export function setCachedToolResult(
   result: unknown
 ): void {
   if (!namespace) return;
+  if (toolResultCache.size >= CACHE_MAX_ENTRIES) {
+    const oldest = toolResultCache.keys().next();
+    if (!oldest.done) toolResultCache.delete(oldest.value);
+  }
   toolResultCache.set(cacheKey(namespace, name, args), { result, timestamp: Date.now() });
 }
 
