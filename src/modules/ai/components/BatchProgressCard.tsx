@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ListChecks, Loader2, Pause, Play, RotateCcw, XCircle } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import { useToastStore } from '@/core/store/toastStore';
 import { cn } from '@/core/utils';
 import {
   cancelBatch,
@@ -47,6 +48,7 @@ function statusStyle(status: JobBatchStatus): string {
 
 export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { batchId: string }) {
   const { t } = useTranslation();
+  const addToast = useToastStore((s) => s.addToast);
   const [detail, setDetail] = useState<JobBatchDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -168,6 +170,31 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
       setBusy(null);
     }
   }, [load]);
+
+  /**
+   * Full resume for a TERMINAL partial batch (failed items, worker gone).
+   * Unlike the bare `retryFailedBatch` requeue, this runs the engine's whole
+   * resume flow (permanent-failure honesty check → requeue → live worker),
+   * so the button actually completes the batch instead of parking it in
+   * 'running' with no driver. Engine import is dynamic: chatEngine is heavy
+   * and the card must stay light for list rendering.
+   */
+  const resumeTerminal = useCallback(async () => {
+    setBusy('resume');
+    try {
+      const { getChatEngine } = await import('../engine/chatEngine');
+      const res = await getChatEngine().resumeBatchById(batchId);
+      if (!res.started) {
+        // The engine posted the full reason to the chat; toast a pointer.
+        addToast('error', t('ai.batch.resumeBlocked', { default: 'تعذّر الاستئناف — راجع التفاصيل في الدردشة' }));
+      }
+      await load();
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(null);
+    }
+  }, [batchId, load, addToast, t]);
 
   if (failed && !detail) {
     return (
@@ -328,6 +355,22 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
           >
             {busy === 'cancel' ? <Loader2 size={12} className="animate-spin" /> : <XCircle size={12} />}
             {busy === 'cancel' ? t('ai.batch.cancelling') : t('ai.batch.cancel')}
+          </button>
+        </div>
+      )}
+
+      {/* Terminal partial with failures: the worker is gone, but the batch
+          is resumable — offer the full resume (requeue + live worker), not
+          just a requeue that parks it in 'running' with no driver. */}
+      {!active && detail.status === 'partial' && detail.failedCount > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          <button
+            className={cn(btn, 'border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/40')}
+            disabled={busy !== null}
+            onClick={() => void resumeTerminal()}
+          >
+            {busy === 'resume' ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+            {t('ai.batch.retryFailed')}
           </button>
         </div>
       )}

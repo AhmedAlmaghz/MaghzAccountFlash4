@@ -12,6 +12,7 @@ import { isBatchActive, runBatch, batchProgressLine } from './batchRunner';
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
 import { extractiveDigest, digestMessage } from './summarizer';
 import { getBatch } from '../api/batch';
+import { planBatchResume } from './batchQueue';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
 import { attachmentContextBlock } from './llmParts';
@@ -817,11 +818,17 @@ class ChatEngine {
    * banner after restarts and by "تابع" follow-ups. The original approval
    * still covers the run: no new confirmation round is requested. Owns a
    * plain text message that doubles as the progress line.
+   *
+   * Returns whether a worker was actually started: `started:false` means the
+   * caller should surface `message` itself (busy, already done, or failures
+   * so permanent that re-running reproduces them verbatim).
    */
-  async resumeBatchById(batchId: string): Promise<void> {
+  async resumeBatchById(batchId: string): Promise<{ started: boolean; message: string }> {
     const store = this.store();
-    if (store.isProcessing) return;
-    if (isBatchActive(batchId)) return; // already driven here — no second loop
+    if (store.isProcessing || isBatchActive(batchId)) {
+      // Already driven here — no second loop (P1 double-worker guard).
+      return { started: false, message: 'المعالج مشغول الآن — انتظر انتهاء العملية الحالية ثم أعد المحاولة' };
+    }
     store.setProcessing(true);
     this.touchProgress();
     try {
@@ -830,28 +837,39 @@ class ChatEngine {
         const msg = got.error || 'الدفعة غير موجودة';
         store.addMessage({ role: 'assistant', kind: 'error', content: msg });
         this.history.push({ role: 'assistant', content: msg });
-        return;
+        return { started: false, message: msg };
       }
       const detail = got.data;
       if (detail.status === 'done') {
         const msg = 'الدفعة مكتملة أصلاً — لا شيء لاستئنافه';
         store.addMessage({ role: 'assistant', kind: 'text', content: msg });
         this.history.push({ role: 'assistant', content: msg });
-        return;
+        return { started: false, message: msg };
       }
       if (detail.status === 'cancelled') {
         const msg = 'الدفعة ملغاة — أنشئ دفعة جديدة بدلاً من ذلك';
         store.addMessage({ role: 'assistant', kind: 'error', content: msg });
         this.history.push({ role: 'assistant', content: msg });
-        return;
+        return { started: false, message: msg };
       }
       if (detail.failedCount > 0) {
+        // Permanent failures (bad ref, posted-document guard, duplicate…)
+        // re-fail IDENTICALLY on every resume — users rightly read that as
+        // "resume never works". Refuse honestly with per-item fixes instead
+        // of burning a worker cycle to land on the same partial state.
+        const failed = (detail.items ?? []).filter((i) => i.status === 'failed');
+        const plan = planBatchResume(failed);
+        if (plan.action === 'refuse-permanent') {
+          store.addMessage({ role: 'assistant', kind: 'error', content: plan.message });
+          this.history.push({ role: 'assistant', content: plan.message });
+          return { started: false, message: plan.message };
+        }
         const retry = await aiApi.batchRetryFailed(this.ctx.companyId, this.ctx.userId, batchId);
         if (!retry.success) {
           const msg = retry.error || 'فشل إعادة العناصر الفاشلة';
           store.addMessage({ role: 'assistant', kind: 'error', content: msg });
           this.history.push({ role: 'assistant', content: msg });
-          return;
+          return { started: false, message: msg };
         }
       } else if (detail.status === 'paused') {
         const unpause = await aiApi.batchSetStatus(this.ctx.companyId, this.ctx.userId, batchId, 'running');
@@ -859,7 +877,7 @@ class ChatEngine {
           const msg = unpause.error || 'فشل إلغاء الإيقاف';
           store.addMessage({ role: 'assistant', kind: 'error', content: msg });
           this.history.push({ role: 'assistant', content: msg });
-          return;
+          return { started: false, message: msg };
         }
       }
       const messageContent = `استئناف الدفعة: ${detail.title || batchId}`;
@@ -871,6 +889,7 @@ class ChatEngine {
       this.history.push({ role: 'assistant', content: messageContent });
       this.abortRequested = false;
       await this.startBatchRun(batchId, messageId);
+      return { started: true, message: messageContent };
     } catch (e) {
       // P2 fix: this path had try/finally but NO catch — getBatch /
       // batchRetryFailed / batchSetStatus rejections vanished silently (and
@@ -879,6 +898,7 @@ class ChatEngine {
       const msg = `فشل استئناف الدفعة: ${errorText}`;
       store.addMessage({ role: 'assistant', kind: 'error', content: msg });
       this.history.push({ role: 'assistant', content: msg });
+      return { started: false, message: msg };
     } finally {
       store.setProcessing(false);
     }

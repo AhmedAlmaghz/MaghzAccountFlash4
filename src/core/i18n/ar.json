@@ -459,6 +459,7 @@
       "resume": "استئناف",
       "cancel": "إلغاء الدفعة",
       "retryFailed": "إعادة الفاشلة",
+      "resumeBlocked": "تعذّر الاستئناف — راجع التفاصيل في الدردشة",
       "status_pending": "بانتظار البدء",
       "status_running": "قيد التنفيذ",
       "status_paused": "متوقفة مؤقتاً",

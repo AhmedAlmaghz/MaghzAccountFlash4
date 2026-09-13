@@ -268,7 +268,7 @@ export default function AiChatPage() {
             <Download size={18} />
           </button>
           {exportOpen && (
-            <div className="absolute top-full end-0 mt-1 z-30 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-float py-1.5 min-w-40 animate-scale-in">
+            <div className="absolute top-full end-0 mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-float py-1.5 min-w-40 animate-scale-in">
               <button
                 onClick={exportJson}
                 className="flex w-full items-center gap-2.5 px-3.5 py-2.5 min-h-11 text-sm font-medium text-start text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
@@ -338,11 +338,18 @@ export default function AiChatPage() {
   // ── Main chat view ─────────────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-zinc-50/50 dark:bg-zinc-900">
-      {/* Header — professional gradient bar */}
-      <div className="relative shrink-0 bg-gradient-to-l from-primary-600 via-primary-700 to-primary-800 text-white overflow-hidden">
-        {/* Decorative glow */}
-        <div className="absolute -top-16 start-1/4 w-48 h-48 rounded-full bg-primary-400/30 blur-3xl pointer-events-none" aria-hidden="true" />
-        <div className="absolute -bottom-20 end-10 w-56 h-40 rounded-full bg-gold-400/20 blur-3xl pointer-events-none" aria-hidden="true" />
+      {/* Header — professional gradient bar.
+          NOTE: no overflow-hidden here — the export dropdown below is
+          absolutely positioned (top-full) and any clipping ancestor would
+          cut it off behind the chat body. The decorative glows are clipped
+          by their own inner wrapper instead. z-20 keeps the whole header
+          (and its dropdown) above the body's stacking contexts. */}
+      <div className="relative z-20 shrink-0 bg-gradient-to-l from-primary-600 via-primary-700 to-primary-800 text-white">
+        {/* Decorative glow — self-clipped so it never leaks outside the bar */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+          <div className="absolute -top-16 start-1/4 w-48 h-48 rounded-full bg-primary-400/30 blur-3xl" />
+          <div className="absolute -bottom-20 end-10 w-56 h-40 rounded-full bg-gold-400/20 blur-3xl" />
+        </div>
 
         <div className="relative flex items-center justify-between gap-2 px-3 sm:px-5 py-3 sm:py-3.5">
           <div className="flex items-center gap-3 min-w-0">

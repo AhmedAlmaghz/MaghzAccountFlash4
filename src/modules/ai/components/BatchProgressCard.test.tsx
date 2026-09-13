@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { BatchProgressCard } from './BatchProgressCard';
 import { getBatch, listBatches, pauseBatch, cancelBatch, retryFailedBatch, unpauseBatch } from '../api/batch';
+import { getChatEngine } from '../engine/chatEngine';
 import { useAppStore } from '@/core/store';
+import { useToastStore } from '@/core/store/toastStore';
 import type { JobBatchDetail } from '../api/batchTypes';
 
 vi.mock('../api/batch', () => ({
@@ -12,6 +14,10 @@ vi.mock('../api/batch', () => ({
   unpauseBatch: vi.fn(),
   cancelBatch: vi.fn(),
   retryFailedBatch: vi.fn(),
+}));
+
+vi.mock('../engine/chatEngine', () => ({
+  getChatEngine: vi.fn(),
 }));
 
 const mockedGet = vi.mocked(getBatch);
@@ -107,6 +113,31 @@ describe('BatchProgressCard', () => {
     expect(await screen.findByText('مكتملة')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /إيقاف مؤقت/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /إلغاء الدفعة/ })).toBeNull();
+  });
+
+  it('offers full engine resume on terminal partial with failures', async () => {
+    const resumeBatchById = vi.fn().mockResolvedValue({ started: true, message: 'ok' });
+    vi.mocked(getChatEngine).mockReturnValue({ resumeBatchById } as never);
+    mockedGet.mockResolvedValue({ success: true, data: detail({ status: 'partial', doneCount: 6, failedCount: 1 }) });
+    render(<BatchProgressCard batchId="b1" />);
+    const btn = await screen.findByRole('button', { name: /إعادة الفاشلة/ });
+    fireEvent.click(btn);
+    await waitFor(() => expect(resumeBatchById).toHaveBeenCalledWith('b1'));
+    // Full resume path — the bare requeue channel is NOT used here.
+    expect(vi.mocked(retryFailedBatch)).not.toHaveBeenCalled();
+  });
+
+  it('toasts when the engine refuses a futile resume', async () => {
+    const resumeBatchById = vi.fn().mockResolvedValue({ started: false, message: 'تعذّر' });
+    vi.mocked(getChatEngine).mockReturnValue({ resumeBatchById } as never);
+    useToastStore.getState().clearToasts();
+    mockedGet.mockResolvedValue({ success: true, data: detail({ status: 'partial', doneCount: 6, failedCount: 1 }) });
+    render(<BatchProgressCard batchId="b1" />);
+    const btn = await screen.findByRole('button', { name: /إعادة الفاشلة/ });
+    fireEvent.click(btn);
+    await waitFor(() => expect(resumeBatchById).toHaveBeenCalledWith('b1'));
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    expect(useToastStore.getState().toasts[0].type).toBe('error');
   });
 
   it('shows a load error when the bridge fails', async () => {

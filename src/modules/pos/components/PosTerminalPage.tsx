@@ -48,29 +48,59 @@ export const PosTerminalPage: React.FC = () => {
   const customerName = usePosStore((s) => s.customerName);
   const heldCarts = usePosStore((s) => s.heldCarts);
 
-  // Default walk-in customer for cash sales (pos.defaultWalkInCustomerId)
+  // POS defaults from settings (pos.defaultWalkInCustomerId + pos.defaultCashBoxId).
+  // Single round-trip for both keys — the terminal reads them on every
+  // company switch, so one query keeps the gate fast.
   const [defaultWalkInCustomerId, setDefaultWalkInCustomerId] = useState<string | null>(null);
+  const [defaultCashBoxId, setDefaultCashBoxId] = useState<string | null>(null);
   useEffect(() => {
-    if (!companyId) { setDefaultWalkInCustomerId(null); return; }
+    if (!companyId) { setDefaultWalkInCustomerId(null); setDefaultCashBoxId(null); return; }
     let cancelled = false;
     (async () => {
       try {
         const { getDbAdapter } = await import('@/core/database/adapters');
         const adapter = await getDbAdapter();
-        const res = await adapter.query("SELECT value FROM settings WHERE company_id = $1 AND key = 'pos.defaultWalkInCustomerId'", [companyId]);
-        if (!cancelled && res.success && res.rows?.[0]) {
-          const v = String((res.rows[0] as Record<string, unknown>).value || '').trim();
-          setDefaultWalkInCustomerId(v || null);
+        const res = await adapter.query(
+          "SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('pos.defaultWalkInCustomerId', 'pos.defaultCashBoxId')",
+          [companyId]
+        );
+        if (!cancelled && res.success) {
+          let customer: string | null = null;
+          let box: string | null = null;
+          for (const row of (res.rows || []) as Array<Record<string, unknown>>) {
+            const v = String(row.value ?? '').trim() || null;
+            if (String(row.key) === 'pos.defaultWalkInCustomerId') customer = v;
+            if (String(row.key) === 'pos.defaultCashBoxId') box = v;
+          }
+          setDefaultWalkInCustomerId(customer);
+          setDefaultCashBoxId(box);
         } else if (!cancelled) {
           setDefaultWalkInCustomerId(null);
+          setDefaultCashBoxId(null);
         }
-      } catch { if (!cancelled) setDefaultWalkInCustomerId(null); }
+      } catch {
+        if (!cancelled) { setDefaultWalkInCustomerId(null); setDefaultCashBoxId(null); }
+      }
     })();
     return () => { cancelled = true; };
   }, [companyId]);
 
   // CustomerSelect exposes id-only onChange; resolve the display name here.
   const { customers } = useCustomers(companyId);
+
+  // Auto-select the configured walk-in customer on every FRESH cart: first
+  // page show, after each completed sale (clearCart nulls the customer),
+  // after parking a cart (holdCart nulls it) and on company switch
+  // (setCompany nulls it). The select stays fully editable — the cashier
+  // can pick any other customer; this only sets the initial value.
+  // The setting is trusted as-is (same trust as the checkout fallback
+  // below); the display name resolves when the customer list has it.
+  useEffect(() => {
+    if (customerId || !defaultWalkInCustomerId) return;
+    const name = customers.find((c) => c.id === defaultWalkInCustomerId)?.name ?? null;
+    usePosStore.getState().setCustomer(defaultWalkInCustomerId, name);
+  }, [customerId, defaultWalkInCustomerId, customers]);
+
   const customerDisplayName = customerId
     ? customers.find((c) => c.id === customerId)?.name ?? customerName ?? ''
     : defaultWalkInCustomerId
@@ -156,15 +186,18 @@ export const PosTerminalPage: React.FC = () => {
   const [shiftCashBox, setShiftCashBox] = useState<string | null>(null);
   const [shiftOpening, setShiftOpening] = useState('0');
   const [isOpeningShift, setIsOpeningShift] = useState(false);
-  // Preselect the first active cash box so a cashier can open a shift with one
-  // click (the select stays editable for multi-box stores).
+  // Preselect the cash box for a new shift: the configured POS default
+  // (pos.defaultCashBoxId) wins when it still exists and is active, otherwise
+  // the first active box. The select stays editable for multi-box stores.
   const { boxes, isLoading: boxesLoading } = useCashBoxes(companyId);
   useEffect(() => {
-    if (shiftDialogOpen && !shiftCashBox) {
-      const firstActive = boxes.find((b) => b.isActive);
-      if (firstActive?.id) setShiftCashBox(firstActive.id);
-    }
-  }, [shiftDialogOpen, shiftCashBox, boxes]);
+    if (!shiftDialogOpen || shiftCashBox) return;
+    const preferred = defaultCashBoxId
+      ? boxes.find((b) => b.id === defaultCashBoxId && b.isActive)
+      : undefined;
+    const pick = preferred ?? boxes.find((b) => b.isActive);
+    if (pick?.id) setShiftCashBox(pick.id);
+  }, [shiftDialogOpen, shiftCashBox, boxes, defaultCashBoxId]);
 
   const handleOpenShift = async () => {
     if (!shiftCashBox || !companyId) return;

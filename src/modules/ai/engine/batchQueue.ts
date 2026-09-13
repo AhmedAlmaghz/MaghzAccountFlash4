@@ -17,6 +17,8 @@
  *   explicit DFS as defense-in-depth.
  */
 
+import { classifyToolError } from './errorTaxonomy';
+
 export type BatchStatus = 'pending' | 'running' | 'paused' | 'done' | 'partial' | 'cancelled';
 
 export type BatchItemStatus = 'queued' | 'running' | 'done' | 'failed' | 'skipped';
@@ -451,4 +453,112 @@ export function substituteRefs(
 export function summarizeBatchProgress(done: number, failed: number, skipped: number, total: number): string {
   const remaining = Math.max(0, total - done - failed - skipped);
   return `أُنجز ${done} — فشل ${failed} — تُخطّي ${skipped} — متبقٍ ${remaining} (من ${total})`;
+}
+
+/**
+ * Failure codes that a re-run reproduces IDENTICALLY — resuming them is a
+ * futile cycle (requeue → instant same failure → partial again), which users
+ * rightly read as "resume never works".
+ *
+ * - Worker-generated (batchRunner fails these with retryable=false):
+ *   UNRESOLVED_REF (a {{ref}} whose producer never yielded an id),
+ *   TIMEOUT_WRITE (the write may already have committed — re-running risks
+ *   a duplicate financial document).
+ * - Taxonomy families flagged retryable:false (see errorTaxonomy PATTERNS):
+ *   state-machine refusals, posted-document guards, duplicates, locked
+ *   periods, permission denials. Repeating the same call changes nothing.
+ */
+export const PERMANENT_ITEM_ERROR_CODES: ReadonlySet<string> = new Set([
+  'UNRESOLVED_REF',
+  'TIMEOUT_WRITE',
+  'INVALID_STATUS_TRANSITION',
+  'DOCUMENT_NOT_DRAFT',
+  'DOCUMENT_HAS_CHILDREN',
+  'DUPLICATE_DOCUMENT',
+  'PERIOD_LOCKED',
+  'PERMISSION_DENIED',
+]);
+
+/** Minimal failed-item shape — structural so callers pass DB rows directly. */
+export interface FailedItemInfo {
+  seq: number;
+  toolName: string;
+  label?: string | null;
+  lastError?: string | null;
+  errorCode?: string | null;
+}
+
+export interface FailedPartition {
+  /** Failed items worth re-running (transient/unknown errors). */
+  retryable: FailedItemInfo[];
+  /** Failed items a re-run reproduces verbatim — need user correction first. */
+  permanent: FailedItemInfo[];
+}
+
+/**
+ * Split failed items by whether a resume can help them. Code-first: worker
+ * rows always carry error_code; legacy rows with a NULL code keep today's
+ * behavior (treated retryable — never refuse a resume we cannot judge).
+ */
+export function partitionFailedItems(failed: FailedItemInfo[]): FailedPartition {
+  const retryable: FailedItemInfo[] = [];
+  const permanent: FailedItemInfo[] = [];
+  for (const it of failed) {
+    const code = (it.errorCode || '').trim();
+    if (code && PERMANENT_ITEM_ERROR_CODES.has(code)) permanent.push(it);
+    else retryable.push(it);
+  }
+  return { retryable, permanent };
+}
+
+export type ResumePlan =
+  | { action: 'retry-and-run' }
+  | { action: 'refuse-permanent'; message: string };
+
+/**
+ * Decide what a resume should do for a batch with failures. When EVERY
+ * failed item is permanent, requeueing only burns a worker cycle to land on
+ * the identical partial state — refuse honestly with per-item reasons and
+ * fixes instead. Partial permanent + partial retryable still resumes (the
+ * retryable ones can progress); the permanent ones will re-fail with their
+ * guidance visible on the card.
+ */
+export function planBatchResume(failed: FailedItemInfo[]): ResumePlan {
+  if (failed.length === 0) return { action: 'retry-and-run' };
+  const { retryable, permanent } = partitionFailedItems(failed);
+  if (retryable.length > 0) return { action: 'retry-and-run' };
+  return { action: 'refuse-permanent', message: describePermanentFailures(permanent) };
+}
+
+/**
+ * Honest Arabic refusal: what failed permanently, WHY re-running cannot fix
+ * it, and WHAT TO DO instead — per item, using the taxonomy guidance where
+ * the code maps to it.
+ */
+export function describePermanentFailures(permanent: FailedItemInfo[]): string {
+  const lines = permanent.slice(0, 8).map((it) => {
+    const head = `#${it.seq + 1} ${it.toolName}${it.label ? ` — ${it.label}` : ''}`;
+    const err = (it.lastError || '').trim();
+    const hint = permanentFixHint(it.errorCode, err);
+    return `${head}\nالسبب: ${err || 'خطأ غير موثّق'}\nالإجراء: ${hint}`;
+  });
+  const rest = permanent.length > 8 ? `\n… و ${permanent.length - 8} عناصر أخرى بنفس الحالة` : '';
+  return [
+    `تعذّر الاستئناف التلقائي — ${permanent.length} عنصراً فشلت بأخطاء دائمة: إعادة التشغيل ستعيد نفس الفشل حرفياً. صحّح ما يلي أولاً ثم أنشئ دفعة جديدة أو نفّذ منفرداً:`,
+    ...lines,
+  ].join('\n') + rest;
+}
+
+function permanentFixHint(code: string | null | undefined, rawError: string): string {
+  const c = (code || '').trim();
+  if (c === 'UNRESOLVED_REF') {
+    return 'هذا العنصر يعتمد على مخرجات عنصر سابق ({{ref}}) لم ينتج معرفاً — غالباً لأن العنصر الأب فشل. أصلح الأب أولاً (نفّذه منفرداً وتحقق من نتيجته) أو أعد بناء الدفعة بترتيب صحيح عبر after.';
+  }
+  if (c === 'TIMEOUT_WRITE') {
+    return 'انتهت المهلة أثناء كتابة — الكتابة ربما نُفذت فعلاً في القاعدة. تحقق من وجود المستند عبر أدوات البحث قبل أي إعادة: إعادة التنفيذ قد تخلق مستنداً مكرراً.';
+  }
+  // Taxonomy-covered codes: reuse the engine's own guidance (single source —
+  // errorTaxonomy is pure and imports nothing from this module, so no cycle).
+  const hint = classifyToolError(rawError).fixHint;
+  return hint || 'راجع سبب الخطأ أعلاه وصحّح المعطيات (معرف/حالة/صلاحية) ثم أعد المحاولة منفرداً.';
 }
