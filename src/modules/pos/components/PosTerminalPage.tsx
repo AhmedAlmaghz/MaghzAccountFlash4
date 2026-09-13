@@ -241,7 +241,7 @@ export const PosTerminalPage: React.FC = () => {
     } else if (cash > totals.totalAmount && currentCredit !== 0) {
       setCreditAmount('0');
     }
-  }, [cashReceived, payMode, payOpen, totals.totalAmount]);
+  }, [cashReceived, payMode, payOpen, totals.totalAmount, creditAmount]);
 
   const checkingOutRef = useRef(false);
   const handleCheckout = useCallback(async () => {

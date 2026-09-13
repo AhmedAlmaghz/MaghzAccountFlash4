@@ -1865,7 +1865,7 @@ class ChatEngine {
       // TEMPORARY: one backoff retry recovers most of them instead of
       // dumping a dead-end error on the user. Anything else (auth, model,
       // validation) fails fast — retrying it would only burn quota.
-      let response = firstResponse;
+      const response = firstResponse;
       if (!response.success || !response.data) {
         const errText = String(response.error ?? '');
         const transient =
