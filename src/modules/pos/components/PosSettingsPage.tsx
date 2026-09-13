@@ -55,7 +55,7 @@ export const PosSettingsPage: React.FC = () => {
     };
     load();
     return () => { cancelled = true; };
-  }, [companyId]);
+  }, [companyId, addToast]);
 
   const handleSave = async () => {
     if (!companyId) return;
