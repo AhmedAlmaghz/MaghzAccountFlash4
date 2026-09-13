@@ -127,14 +127,18 @@ function foldKeepLength(s: string): string {
 
 export function expandDialectText(text: string): { text: string; changed: string[] } {
   if (!text) return { text, changed: [] };
-  const folded = foldKeepLength(text);
   let out = text;
   const changed: string[] = [];
 
+  // P1 fix: `folded` was computed ONCE from the original text while `out`
+  // mutated — after the first length-changing replacement every later match
+  // index was stale ("كاش دستة" → corrupted output). Re-fold `out` before
+  // EACH word scan so indices always describe the current string.
   for (const entry of VOCABULARY) {
     for (const w of entry.words) {
       const re = dialectRegexWithPrefix(foldKeepLength(w));
-      // Collect matches on the FOLDED text (indices == original indices).
+      // Collect matches on the FOLDED CURRENT text (indices == out indices).
+      const folded = foldKeepLength(out);
       const matches = [...folded.matchAll(re)];
       if (matches.length === 0) continue;
       if (!changed.includes(w)) changed.push(w);

@@ -381,7 +381,7 @@ export const crmWriteTools: ToolDefinition[] = [
         estimatedValue: { type: 'number' },
         notes: { type: 'string' },
         rating: { type: 'string', enum: ['hot', 'warm', 'cold'] },
-        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'converted', 'lost'] },
+        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'lost'], description: 'الحالة الجديدة (للتحويل إلى عميل استخدم crm.convert_lead_to_customer — لا يمكن تعيين converted هنا)' },
       },
       required: ['leadId'],
     },
@@ -396,7 +396,16 @@ export const crmWriteTools: ToolDefinition[] = [
       if (args.estimatedValue !== undefined) data.estimatedValue = num(args.estimatedValue);
       if (args.notes !== undefined) data.notes = str(args.notes);
       if (args.rating !== undefined) data.rating = str(args.rating);
-      if (args.status !== undefined) data.status = str(args.status);
+      if (args.status !== undefined) {
+        // P1 fix (mirrors crm.update_lead_status): 'converted' is owned by
+        // the atomic convertLeadToCustomer CTE. Setting it via plain
+        // updateLead marks the lead converted with NO customer created —
+        // corrupting funnel KPIs and blocking the real conversion.
+        if (str(args.status) === 'converted') {
+          return { error: 'التحويل إلى عميل يتم عبر crm.convert_lead_to_customer فقط (ينشئ العميل + يحوّل الحالة ذرّياً) — لا يمكن تعيين converted مباشرة' };
+        }
+        data.status = str(args.status);
+      }
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل' };
       const res = await crmApi.updateLead(leadId, ctx.companyId, data);
       if (!res.success) return { error: res.error || 'فشل تعديل العميل المحتمل' };

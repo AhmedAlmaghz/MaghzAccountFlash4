@@ -47,6 +47,22 @@ describe('expandDialectText', () => {
   it('handles empty/null gracefully', () => {
     expect(expandDialectText('')).toEqual({ text: '', changed: [] });
   });
+
+  it('P1 regression: two+ dialect words in one message do not corrupt each other (stale-index bug)', () => {
+    // The old code matched on a fold computed ONCE from the original text
+    // while mutating `out` — the first length-changing replacement shifted
+    // every later index ("كاش دستة" → garbage). Re-folding per scan fixes it.
+    // "اشتريت دستة أقلام كاش": دسته→' dozen (12 وحدة) ' (longer) + كاش→نقداً.
+    const { text, changed } = expandDialectText('اشتريت دسته اقلام كاش');
+    // Every reported word must expand to its canonical counterpart, and no
+    // stray fragment of either original word may survive.
+    for (const w of changed) {
+      expect(text).not.toMatch(new RegExp(`(?<![\u0600-\u06FF])${w}(?![\u0600-\u06FF])`));
+    }
+    expect(changed.length).toBeGreaterThanOrEqual(2);
+    expect(text).toContain('نقد');
+    expect(text).toContain('12');
+  });
 });
 
 describe('canonicalPaymentMethod', () => {

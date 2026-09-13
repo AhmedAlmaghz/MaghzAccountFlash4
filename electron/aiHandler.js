@@ -1166,7 +1166,10 @@ export function registerAiHandlers() {
       const userId = auth.session.user.id;
       const { batchId, limit } = payload;
       if (!batchId) return { success: false, error: 'batchId is required' };
-      const take = Math.max(1, Math.min(Number(limit) || 10, 100));
+      // P1 parity fix (mirrors browserBridge + BATCH_CLAIM_LIMIT=10): was 100,
+      // silently breaking the "cancel honored within ~9 items" guarantee and
+      // leaving 100-row running windows for recover on this transport only.
+      const take = Math.max(1, Math.min(Number(limit) || 10, 10));
       const pool = getPool();
       if (!pool) return { success: false, error: 'Database not available' };
       const res = await pool.query(
@@ -1529,6 +1532,44 @@ export function registerAiHandlers() {
           finalStatus,
         },
       };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // P1 stop-wedge fix: release claimed-but-unstarted items back to `queued`
+  // WITHOUT burning an attempt (mirrors browserBridge.batchRelease). Scoped
+  // to OUR workerId — a concurrent live worker's leases are never touched.
+  // The renderer worker calls this on cooperative stop so the next resume
+  // claims immediately instead of wedging behind live 30-minute leases.
+  ipcMain.handle('ai:batch-release', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return { success: false, error: auth.error };
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const { batchId, workerId, itemIds } = payload;
+      if (!batchId) return { success: false, error: 'batchId is required' };
+      const ids = Array.isArray(itemIds) ? itemIds.filter((x) => typeof x === 'string' && x) : [];
+      if (ids.length === 0) return { success: true, data: { released: 0 } };
+      if (ids.length > 10) return { success: false, error: 'too many itemIds' };
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const inList = ids.map((_, i) => `$${i + 5}::uuid`).join(', ');
+      const res = await pool.query(
+        `UPDATE ai_job_items SET status = 'queued', claimed_by = NULL,
+           claim_expires_at = NULL, updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+           AND claimed_by = $4::varchar
+           AND id IN (${inList})
+           AND EXISTS (
+             SELECT 1 FROM ai_job_batches b
+             WHERE b.id = $1::uuid AND b.company_id = $2::uuid AND b.user_id = $3::uuid
+           )
+         RETURNING id`,
+        [batchId, companyId, userId, typeof workerId === 'string' ? workerId.slice(0, 64) : null, ...ids]
+      );
+      return { success: true, data: { released: res.rows.length } };
     } catch (err) {
       return { success: false, error: err.message };
     }

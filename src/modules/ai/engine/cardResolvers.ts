@@ -28,40 +28,85 @@ import type { ToolContext } from '../types';
 /** Display label for an id, or null when it cannot be resolved. */
 type IdResolver = (id: string, ctx: ToolContext) => Promise<string | null>;
 
+/**
+ * P2 fix: the header comment claimed "names are cached per companyId (30s
+ * TTL)" but NO cache existed — every approval card fired up to N×200-row
+ * fetches on the time-critical confirmation path. This is a real bounded
+ * cache: key = `${companyId}:${kind}:${id}`, 30s TTL, 500-entry cap with
+ * oldest-first eviction. A stale display name on an APPROVAL card is
+ * harmless (the id is what executes; the label is what the human reads).
+ */
+const LABEL_CACHE = new Map<string, { label: string; at: number }>();
+const LABEL_CACHE_TTL_MS = 30_000;
+const LABEL_CACHE_MAX = 500;
+
+function cacheGet(companyId: string, kind: string, id: string): string | null | undefined {
+  const hit = LABEL_CACHE.get(`${companyId}:${kind}:${id}`);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > LABEL_CACHE_TTL_MS) {
+    LABEL_CACHE.delete(`${companyId}:${kind}:${id}`);
+    return undefined;
+  }
+  return hit.label;
+}
+
+function cacheSet(companyId: string, kind: string, id: string, label: string): void {
+  if (LABEL_CACHE.size >= LABEL_CACHE_MAX) {
+    const oldest = LABEL_CACHE.keys().next();
+    if (!oldest.done) LABEL_CACHE.delete(oldest.value);
+  }
+  LABEL_CACHE.set(`${companyId}:${kind}:${id}`, { label, at: Date.now() });
+}
+
+/** Test helper — clears the label cache between runs. */
+export function clearLabelCache(): void {
+  LABEL_CACHE.clear();
+}
+
+async function cachedResolve(
+  companyId: string, kind: string, id: string, fetch: () => Promise<string | null>,
+): Promise<string | null> {
+  const hit = cacheGet(companyId, kind, id);
+  if (hit !== undefined) return hit;
+  const label = await fetch();
+  if (label) cacheSet(companyId, kind, id, label);
+  return label;
+}
+
 /** Per-entity resolvers — every one returns a HUMAN label, never an id. */
 const RESOLVERS: Record<string, IdResolver> = {
-  customerId: async (id, ctx) => {
+  customerId: async (id, ctx) => cachedResolve(ctx.companyId, 'customer', id, async () => {
     const res = await salesApi.getCustomersPaginated(ctx.companyId, 1, 200);
     if (!res.success || !res.data) return null;
     const c = res.data.items.find((x) => x.id === id);
     return c ? `عميل: ${c.name}` : null;
-  },
-  supplierId: async (id, ctx) => {
+  }),
+  supplierId: async (id, ctx) => cachedResolve(ctx.companyId, 'supplier', id, async () => {
     const res = await purchasesApi.getSuppliersPaginated(ctx.companyId, 1, 200);
     if (!res.success || !res.data) return null;
     const s = res.data.items.find((x) => x.id === id);
     return s ? `مورد: ${s.name}` : null;
-  },
-  employeeId: async (id, ctx) => {
+  }),
+  employeeId: async (id, ctx) => cachedResolve(ctx.companyId, 'employee', id, async () => {
     const res = await hrApi.getEmployeeById(id, ctx.companyId);
     return res.success && res.data ? `موظف: ${res.data.fullName}` : null;
-  },
-  leadId: async (id, ctx) => {
+  }),
+  leadId: async (id, ctx) => cachedResolve(ctx.companyId, 'lead', id, async () => {
     const res = await crmApi.getLeadById(id, ctx.companyId);
     return res.success && res.data ? `عميل محتمل: ${res.data.name}` : null;
-  },
-  opportunityId: async (id, ctx) => {
+  }),
+  opportunityId: async (id, ctx) => cachedResolve(ctx.companyId, 'opportunity', id, async () => {
     const res = await crmApi.getOpportunitiesPaginated(ctx.companyId, 1, 200);
     if (!res.success || !res.data) return null;
     const o = res.data.items.find((x) => x.id === id);
     return o ? `فرصة: ${o.name}` : null;
-  },
-  productId: async (id, ctx) => {
+  }),
+  productId: async (id, ctx) => cachedResolve(ctx.companyId, 'product', id, async () => {
     const res = await inventoryApi.getProductsPaginated(ctx.companyId, 1, 200);
     if (!res.success || !res.data) return null;
     const p = res.data.items.find((x) => x.id === id);
     return p ? `${p.nameAr}${p.code ? ` (${p.code})` : ''}` : null;
-  },
+  }),
 };
 
 /**

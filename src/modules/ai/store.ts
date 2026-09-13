@@ -29,7 +29,14 @@ export const useAiStore = create<AiChatState>()((set) => ({
   sessionId: null,
 
   addMessage: (msg) => {
-    const id = crypto.randomUUID();
+    // P1 fix: crypto.randomUUID is undefined in insecure browsing contexts
+    // (plain http on a LAN IP — the documented web mode) and threw a
+    // TypeError on the FIRST message, killing chat entirely. Same fallback
+    // shape as attachments/extract.ts newId().
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `msg-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
     const message: ChatMessage = { ...msg, id, createdAt: Date.now() };
     set((state) => ({ messages: [...state.messages, message] }));
     return id;

@@ -145,6 +145,18 @@ describe('substituteRefs', () => {
     expect(r.ok).toBe(true);
     expect(r.args).toEqual({ email: 'a@b.com', note: 'قابل @admin غداً' });
   });
+
+  it('P2 regression: values containing $ pass through literally (no $$ doubling)', () => {
+    // The old asLiteral() escaped $ for a *string* replacement — but the
+    // substitution uses a replacer FUNCTION whose return is inserted
+    // literally per ECMAScript. 'شركة $ABC' became 'شركة $$ABC'.
+    const r = substituteRefs(
+      { notes: 'عميل {{sup_abo_elaz.name}} $100 خصم' },
+      new Map([['sup_abo_elaz', { id: 's-uuid-1', name: 'شركة $ABC' }]]),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.args).toEqual({ notes: 'عميل شركة $ABC $100 خصم' });
+  });
 });
 
 describe('resolveOutputId', () => {

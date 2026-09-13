@@ -8,6 +8,7 @@ vi.mock('../api/index', () => ({
     batchGet: vi.fn(),
     batchList: vi.fn(),
     batchRecover: vi.fn(async () => ({ success: true, data: { recoveredFailed: 0, recoveredSkipped: 0, finalStatus: null } })),
+    batchRelease: vi.fn(async () => ({ success: true, data: { released: 0 } })),
   },
 }));
 
@@ -243,6 +244,59 @@ describe('runBatch', () => {
     await runBatch('c1', 'u1', 'b1', { shouldStop: () => ++calls > 1 });
     // first item executed, then stop checked before the second
     expect(mockedExec).toHaveBeenCalledTimes(1);
+  });
+
+  it('P1 stop-wedge: stopping releases the unexecuted chunk remainder (no attempt burned)', async () => {
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 1 },
+        { id: 'i2', seq: 1, toolName: 't.b', args: {}, afterSeq: null, attempts: 1 },
+        { id: 'i3', seq: 2, toolName: 't.c', args: {}, afterSeq: null, attempts: 1 },
+      ] as never,
+    });
+    mockedExec.mockResolvedValue({ ok: true, result: {} });
+    mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail() });
+
+    let calls = 0;
+    await runBatch('c1', 'u1', 'b1', { shouldStop: () => ++calls > 1 });
+
+    expect(mockedExec).toHaveBeenCalledTimes(1);
+    // i2 + i3 (never started) are released to queued via the workerId-scoped
+    // channel — the next resume claims them immediately, no 30-min wedge.
+    expect(mockedApi.batchRelease).toHaveBeenCalledTimes(1);
+    expect(mockedApi.batchRelease).toHaveBeenCalledWith('c1', 'u1', 'b1', expect.any(String), ['i2', 'i3']);
+  });
+
+  it('P1 RATE_LIMIT: waits out the window and retries in place (no fail call)', async () => {
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 1 },
+      ] as never,
+    });
+    mockedExec
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'تجاوز حد الاستدعاءات — test path',
+        errorClass: { code: 'RATE_LIMIT', retryable: true },
+      } as never)
+      .mockResolvedValueOnce({ ok: true, result: { invoiceId: 'inv-9' } });
+    mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: 'done' } });
+    mockedApi.batchGet.mockResolvedValue({ success: true, data: detail({ status: 'running' }) });
+
+    // Test-only short cooldown (production waits the real 60s window).
+    const final = await runBatch('c1', 'u1', 'b1', { rateLimitWindowMs: 1500 });
+
+    // executed twice (original + in-place retry), failed NEVER — the attempt
+    // budget is untouched and no dependent cascade fires.
+    expect(mockedExec).toHaveBeenCalledTimes(2);
+    expect(mockedApi.batchItemFail).not.toHaveBeenCalled();
+    expect(mockedApi.batchItemDone).toHaveBeenCalledTimes(1);
+    expect(final?.status).toBe('done');
   });
 });
 

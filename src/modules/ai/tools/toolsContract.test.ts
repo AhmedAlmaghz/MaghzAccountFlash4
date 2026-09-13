@@ -183,8 +183,7 @@ describe('AI tools contract gate (CI)', () => {
     ).toEqual([]);
   });
 
-  it('read tools whose domain names a module hold that module\'s .view', () => {
-    // domain prefix → the permission every reader of that domain's data
+  it('read tools whose domain names a module hold that module\'s .view', () => {    // domain prefix → the permission every reader of that domain's data
     // must hold. Exceptions: cross-module hybrids documented inline.
     const DOMAIN_VIEW: Record<string, string> = {
       sales: 'sales.view',
@@ -266,6 +265,41 @@ describe('AI tools contract gate (CI)', () => {
             violations.push(`${t.name} -> ${t.permission} (want ${want})`);
           }
         }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  // ─── General-update vs dedicated-status tools (P1 class — 2026-09-12) ───
+  // The recurring hole: a DEDICATED status tool guards an atomic lifecycle
+  // (converted via the customer-creating CTE, work-order status via the
+  // issue/receive/journal line) while the GENERAL update twin for the same
+  // entity forwards the same field RAW, silently bypassing the lifecycle.
+  // Rule: any write tool whose EXECUTE body forwards `data.status` (or an
+  // equivalent protected-state field) to a plain update API MUST either
+  // guard the protected values or not accept the field. This gate pins the
+  // registry side statically: the known protected values may not appear in
+  // the general tool's parameter enum/description as settable states.
+  it('general update tools do not advertise protected lifecycle states', () => {
+    // tool → values owned by its dedicated lifecycle tool (current list is
+    // exhaustive for the registry; extend when a new lifecycle ships).
+    const PROTECTED_STATES: Record<string, { field: string; values: string[] }> = {
+      'crm.update_lead': { field: 'status', values: ['converted'] },
+      'manufacturing.update_work_order': { field: 'status', values: ['planned', 'in_progress', 'completed', 'cancelled'] },
+    };
+    const violations: string[] = [];
+    for (const [name, rule] of Object.entries(PROTECTED_STATES)) {
+      const tool = tools.find((t) => t.name === name);
+      if (!tool) {
+        violations.push(`${name} (tool missing from registry)`);
+        continue;
+      }
+      const props = (tool.parameters?.properties ?? {}) as Record<string, { enum?: unknown }>;
+      const schema = props[rule.field];
+      const enumValues = Array.isArray(schema?.enum) ? schema.enum.map(String) : [];
+      const leaked = rule.values.filter((v) => enumValues.includes(v));
+      if (leaked.length > 0) {
+        violations.push(`${name}.${rule.field} advertises protected states: ${leaked.join(', ')}`);
       }
     }
     expect(violations).toEqual([]);

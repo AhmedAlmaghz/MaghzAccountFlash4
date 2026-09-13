@@ -240,7 +240,12 @@ export const accountingWriteTools: ToolDefinition[] = [
       const hintText = [description, str(args.notes), reference].filter(Boolean).join(' ');
 
       // Expense side: explicit id, else understood from context, else default.
+      // P2 fix: supplier XOR expense — double-booking both legs corrupted the
+      // entry (the API accepts both as optional). Exactly one may be set.
       let expenseAccountId = str(args.expenseAccountId);
+      if (supplierId && expenseAccountId) {
+        return { error: 'مرّر supplierId أو expenseAccountId — وليس الاثنين معاً (كلاهما معاً يُسجَّل على طرفين)' };
+      }
       let expenseNote = '';
       if (!supplierId) {
         if (expenseAccountId) {
@@ -392,7 +397,6 @@ export const accountingWriteTools: ToolDefinition[] = [
               accountId: { type: 'string', description: 'معرف الحساب (من search.accounts)' },
               debit: { type: 'number', description: 'مبلغ مدين (اختياري إذا credit موجود)' },
               credit: { type: 'number', description: 'مبلغ دائن (اختياري إذا debit موجود)' },
-              memo: { type: 'string', description: 'بيان (اختياري)' },
             },
             required: ['accountId'],
           },
@@ -408,7 +412,7 @@ export const accountingWriteTools: ToolDefinition[] = [
       const rawEntries = args.entries;
       if (!Array.isArray(rawEntries) || rawEntries.length === 0) return { error: 'يجب تمرير طرف واحد على الأقل في entries' };
 
-      interface Entry { accountId: string; debit: number; credit: number; memo?: string }
+      interface Entry { accountId: string; debit: number; credit: number }
       const entries: Entry[] = [];
       let totalDebit = 0;
       let totalCredit = 0;
@@ -421,7 +425,12 @@ export const accountingWriteTools: ToolDefinition[] = [
         if (debit <= 0 && credit <= 0) return { error: 'كل entry يحتاج debit أو credit أكبر من صفر' };
         totalDebit += debit;
         totalCredit += credit;
-        entries.push({ accountId, debit, credit, memo: str((item as Record<string, unknown>).memo) });
+        // P2 fix: the old `memo` param was collected then SILENTLY dropped
+        // (the service schema has no memo — neither the API DTO nor
+        // journal_entries carry it). Advertising it invited the model to
+        // write explanations that vanished. Removed from the contract; the
+        // transaction-level `description` remains the narration channel.
+        entries.push({ accountId, debit, credit });
       }
 
       if (Math.abs(totalDebit - totalCredit) > 0.01) return { error: `مجموع المدين (${round2(totalDebit)}) لا يساوي مجموع الدائن (${round2(totalCredit)})` };
@@ -448,7 +457,6 @@ export const accountingWriteTools: ToolDefinition[] = [
           accountId: e.accountId,
           debit: e.debit,
           credit: e.credit,
-          memo: e.memo,
         })),
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء القيد' };

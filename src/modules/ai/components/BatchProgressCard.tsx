@@ -118,6 +118,11 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
         timer = setTimeout(tick, 3000);
         return;
       }
+      // P2 fix: this was try/finally WITHOUT catch — listBatches/load
+      // rejections (getDbAdapter throws when PG is unreachable, per the
+      // project's fail-fast rule) became unhandled promise rejections from
+      // a `void` scheduled callback. Convert transport errors to the card's
+      // honest failed state instead.
       try {
         const res = await listBatches();
         const found = res.success && res.data ? res.data.find((b) => b.id === batchId) : undefined;
@@ -136,6 +141,8 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
             await load(); // new failures — refresh the error texts
           }
         }
+      } catch {
+        if (!cancelled) setFailed(true);
       } finally {
         if (!cancelled) timer = setTimeout(tick, 3000);
       }
@@ -150,8 +157,13 @@ export const BatchProgressCard = memo(function BatchProgressCard({ batchId }: { 
   const act = useCallback(async (name: string, fn: () => Promise<{ success: boolean; error?: string }>) => {
     setBusy(name);
     try {
-      await fn();
+      const res = await fn();
+      // P2 fix: an unsuccessful action used to look identical to success
+      // (busy spinner cleared, nothing said). Surface the honest error.
+      if (!res.success) setFailed(true);
       await load();
+    } catch {
+      setFailed(true);
     } finally {
       setBusy(null);
     }

@@ -309,7 +309,10 @@ export const salesWriteTools: ToolDefinition[] = [
         companyId: ctx.companyId,
         returnNumber: docNumber.number,
         customerId,
-        invoiceId: str(args.invoiceId) || '',
+        // P1 fix (mirrors purchases.create_purchase_return): the schema is
+        // `z.string().uuid().optional()` — a '' fallback fails validation
+        // for EVERY return without a source invoice. Pass undefined instead.
+        invoiceId: str(args.invoiceId) || undefined,
         date: today(),
         subtotal,
         vatAmount,

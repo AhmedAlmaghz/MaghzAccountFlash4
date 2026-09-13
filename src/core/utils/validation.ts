@@ -416,7 +416,8 @@ export const createStockAdjustmentSchema = z.object({
 export const createInventoryTransactionSchema = z.object({
   companyId: companyIdSchema,
   date: dateSchema,
-  type: z.enum(['in', 'out', 'adjustment', 'transfer']),
+  // P1 fix: signed adjustment directions (see InventoryTransaction).
+  type: z.enum(['in', 'out', 'adjustment', 'adjustment_in', 'adjustment_out', 'transfer']),
   productId: uuidSchema,
   warehouseId: uuidSchema,
   quantity: currencyAmountSchema.positive(),

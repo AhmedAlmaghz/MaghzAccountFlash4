@@ -193,7 +193,7 @@ export const detailedReportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
-      const sf = ((args.sortField || 'revenue') === 'revenue') ? 'total_revenue' : (args.sortField === 'quantity') ? 'total_quantity' : 'invoice_count';
+      const sf = ((args.sortField || 'revenue') === 'revenue') ? 'rev' : (args.sortField === 'quantity') ? 'qty' : 'icnt';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const params: unknown[] = [ctx.companyId, from, to];
       let custCond = '';
@@ -241,11 +241,11 @@ export const detailedReportTools: ToolDefinition[] = [
                COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)>=i.total_amount)::int AS cash_cnt,
                COUNT(*) FILTER(WHERE COALESCE(i.paid_amount,0)=0)::int AS credit_cnt
         FROM users u
-        LEFT JOIN sales_invoices i ON i.created_by=u.id AND i.company_id=u.company_id AND i.date BETWEEN $1 AND $2 AND i.status!='cancelled'
+        LEFT JOIN sales_invoices i ON i.created_by=u.id AND i.company_id=u.company_id AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled'
         WHERE u.company_id=$1::uuid
         GROUP BY u.id,u.full_name
         HAVING COUNT(i.id) > 0
-        ORDER BY rev ${sDir} LIMIT $3
+        ORDER BY rev ${sDir} LIMIT $4
       `, [ctx.companyId, from, to, limit]);
 
       if (!res.success) return { error: res.error || 'فشل' };
@@ -420,7 +420,7 @@ export const detailedReportTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const { from, to } = dateRange(args.fromDate as string, args.toDate as string);
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
-      const sf = ((args.sortField || 'value') === 'value') ? 'total_value' : (args.sortField === 'quantity') ? 'total_quantity' : 'invoice_count';
+      const sf = ((args.sortField || 'value') === 'value') ? 'val' : (args.sortField === 'quantity') ? 'qty' : 'icnt';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const params: unknown[] = [ctx.companyId, from, to];
       let suppCond = '';
@@ -467,11 +467,11 @@ export const detailedReportTools: ToolDefinition[] = [
                COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)>=pi.total_amount)::int AS cash_cnt,
                COUNT(*) FILTER(WHERE COALESCE(pi.paid_amount,0)=0)::int AS credit_cnt
         FROM users u
-        LEFT JOIN purchase_invoices pi ON pi.created_by=u.id AND pi.company_id=u.company_id AND pi.date BETWEEN $1 AND $2 AND pi.status!='cancelled'
+        LEFT JOIN purchase_invoices pi ON pi.created_by=u.id AND pi.company_id=u.company_id AND pi.date BETWEEN $2 AND $3 AND pi.status!='cancelled'
         WHERE u.company_id=$1::uuid
         GROUP BY u.id,u.full_name
         HAVING COUNT(pi.id) > 0
-        ORDER BY val ${sDir} LIMIT $3
+        ORDER BY val ${sDir} LIMIT $4
       `, [ctx.companyId, from, to, limit]);
       if (!res.success) return { error: res.error || 'فشل' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
@@ -589,7 +589,7 @@ export const detailedReportTools: ToolDefinition[] = [
       },
     },
     execute: async (args, ctx) => {
-      const sf = ((args.sortField || 'value') === 'quantity') ? 'total_quantity' : (args.sortField === 'count') ? 'product_count' : 'total_value';
+      const sf = ((args.sortField || 'value') === 'quantity') ? 'qty' : (args.sortField === 'count') ? '_n' : 'val';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
       const res = await guardedQuery(
