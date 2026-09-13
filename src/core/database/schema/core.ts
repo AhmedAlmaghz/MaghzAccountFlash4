@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, unique, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // ─── Core / Companies ─────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ export const branches = pgTable('branches', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
-  companyNameUnique: unique('uq_branches_company_name').on(table.companyId, sql`lower(${table.name})`),
+  companyNameUnique: uniqueIndex('uq_branches_company_name').on(table.companyId, sql`lower(${table.name})`),
   companyCodeUnique: unique('uq_branches_company_code').on(table.companyId, table.code),
   companyActiveIdx: index('idx_branches_company_active').on(table.companyId, table.isActive),
 }));
@@ -52,13 +52,13 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   photoUrl: text('photo_url'),
   role: varchar('role', { length: 50 }).notNull().default('accountant'),
-  branchId: uuid('branch_id').references(() => branches.id, { onDelete: 'setNull' }),
+  branchId: uuid('branch_id').references(() => branches.id, { onDelete: 'set null' }),
   isActive: boolean('is_active').notNull().default(true),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
-  companyUsernameUnique: unique('uq_users_company_username').on(table.companyId, sql`lower(${table.username})`),
+  companyUsernameUnique: uniqueIndex('uq_users_company_username').on(table.companyId, sql`lower(${table.username})`),
   companyIdIdx: index('idx_users_company_id').on(table.companyId),
   usernameIdx: index('idx_users_username').on(table.username),
 }));
@@ -73,7 +73,7 @@ export const roles = pgTable('roles', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 }, (table) => ({
-  companyNameUnique: unique('uq_roles_company_name').on(table.companyId, sql`lower(${table.name})`),
+  companyNameUnique: uniqueIndex('uq_roles_company_name').on(table.companyId, sql`lower(${table.name})`),
   companyIdIdx: index('idx_roles_company_id').on(table.companyId),
 }));
 
