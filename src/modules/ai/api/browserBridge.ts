@@ -201,6 +201,19 @@ async function callChatCompletion(opts: CallOptions): Promise<{ success: boolean
           };
         })
       : [];
+    // P2 parity fix (mirrors aiHandler): Gemini sometimes returns
+    // thought_signature at the MESSAGE level (not per tool call). Without
+    // propagation the non-streaming browser path drops it and later
+    // function-calling rounds can be rejected by the provider.
+    {
+      const msgTs = (message as { thought_signature?: unknown }).thought_signature;
+      if (msgTs && toolCalls.length > 0) {
+        for (const tc of toolCalls) {
+          tc.function = tc.function || {};
+          (tc.function as Record<string, unknown>).thought_signature = msgTs;
+        }
+      }
+    }
 
     return {
       success: true,
@@ -958,6 +971,8 @@ export const browserAiBridge = {
       );
       return {
         success: true,
+        // P1 parity fix (mirrors aiHandler): the rows ARE running after the
+        // claim UPDATE — reporting 'queued' was a silent contract lie.
         data: (res.rows || []).map((r) => ({
           id: String(r.id),
           seq: Number(r.seq),
@@ -967,7 +982,7 @@ export const browserAiBridge = {
           label: r.label || null,
           ref: r.ref || null,
           resultData: null,
-          status: 'queued' as const,
+          status: 'running' as const,
           attempts: Number(r.attempts) || 0,
           lastError: null,
           errorCode: null,
@@ -1009,16 +1024,19 @@ export const browserAiBridge = {
         return { success: false, error: 'Item not found or not running' };
       }
       const fin = await adapter.query<{ status: string }>(
+        // P2 parity fix (mirrors aiHandler finalizeBatch): scope the terminal
+        // flip by user_id — a same-company batchId guess could otherwise flip
+        // another user's finished batch.
         `UPDATE ai_job_batches
             SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
                 updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid AND status = 'running'
             AND NOT EXISTS (
               SELECT 1 FROM ai_job_items
               WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
             )
           RETURNING status`,
-        [payload.batchId, payload.companyId]
+        [payload.batchId, payload.companyId, payload.userId]
       );
       return { success: true, data: { finalStatus: fin.rows && fin.rows[0] ? String(fin.rows[0].status) : null } };
     } catch (err) {
@@ -1090,16 +1108,18 @@ export const browserAiBridge = {
         return { success: false, error: 'Item not found or not running' };
       }
       const fin = await adapter.query<{ status: string }>(
+        // P2 parity fix (mirrors aiHandler finalizeBatch): scope the terminal
+        // flip by user_id — same rationale as the itemDone twin above.
         `UPDATE ai_job_batches
             SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
                 updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid AND status = 'running'
             AND NOT EXISTS (
               SELECT 1 FROM ai_job_items
               WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
             )
           RETURNING status`,
-        [payload.batchId, payload.companyId]
+        [payload.batchId, payload.companyId, payload.userId]
       );
       return {
         success: true,
@@ -1202,16 +1222,17 @@ export const browserAiBridge = {
       if (!res.success) return { success: false, error: res.error };
       const row = (res.rows || [])[0];
       const fin = await adapter.query<{ status: string }>(
+        // P2 parity fix (mirrors aiHandler finalizeBatch): scope by user_id.
         `UPDATE ai_job_batches
             SET status = CASE WHEN (failed_count + skipped_count) > 0 THEN 'partial' ELSE 'done' END,
                 updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+          WHERE id = $1::uuid AND company_id = $2::uuid AND user_id = $3::uuid AND status = 'running'
             AND NOT EXISTS (
               SELECT 1 FROM ai_job_items
               WHERE batch_id = $1::uuid AND status IN ('queued', 'running')
             )
           RETURNING status`,
-        [payload.batchId, payload.companyId]
+        [payload.batchId, payload.companyId, payload.userId]
       );
       return {
         success: true,
@@ -1267,6 +1288,43 @@ export const browserAiBridge = {
         [payload.batchId, requeued.rows.length, unskippedCount, payload.companyId, payload.userId]
       );
       return { success: true, data: { requeued: requeued.rows.length, unskipped: unskippedCount } };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
+  /**
+   * P1 stop-wedge fix: release claimed-but-unstarted items back to `queued`
+   * WITHOUT burning an attempt. Scoped to OUR workerId — a concurrent live
+   * worker's leases are never touched. The worker calls this on cooperative
+   * stop so the next resume claims immediately instead of wedging behind
+   * live 30-minute leases.
+   */
+  async batchRelease(payload: {
+    companyId: string; userId: string; batchId: string; workerId: string; itemIds: string[];
+  }): Promise<{ success: boolean; data?: { released: number }; error?: string }> {
+    try {
+      const ids = Array.isArray(payload.itemIds) ? payload.itemIds.filter((x) => typeof x === 'string' && x) : [];
+      if (ids.length === 0) return { success: true, data: { released: 0 } };
+      if (ids.length > BATCH_CLAIM_LIMIT) return { success: false, error: 'too many itemIds' };
+      const adapter = await getDbAdapter();
+      const params: unknown[] = [payload.batchId, payload.companyId, payload.userId, payload.workerId];
+      const placeholders = ids.map((_, i) => `$${params.length + i + 1}::uuid`);
+      const res = await adapter.query(
+        `UPDATE ai_job_items SET status = 'queued', claimed_by = NULL,
+           claim_expires_at = NULL, updated_at = NOW()
+         WHERE batch_id = $1::uuid AND company_id = $2::uuid AND status = 'running'
+           AND claimed_by = $4::varchar
+           AND id IN (${placeholders.join(', ')})
+           AND EXISTS (
+             SELECT 1 FROM ai_job_batches b
+             WHERE b.id = $1::uuid AND b.company_id = $2::uuid AND b.user_id = $3::uuid
+           )
+         RETURNING id`,
+        [...params, ...ids]
+      );
+      if (!res.success) return { success: false, error: res.error };
+      return { success: true, data: { released: (res.rows || []).length } };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

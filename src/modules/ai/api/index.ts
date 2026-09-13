@@ -96,6 +96,13 @@ interface ElectronAI {
   }) => Promise<IpcResult<{ status: string; skipped: number }>>;
   batchRetryFailed: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<{ requeued: number }>>;
   batchRecover: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<{ recoveredFailed: number; recoveredSkipped: number; finalStatus: string | null }>>;
+  /**
+   * Release claimed-but-unstarted items back to queued WITHOUT burning an
+   * attempt — called by the worker on cooperative stop so a resume does not
+   * wedge behind live leases (P1 stop-wedge fix). Scoped to OUR workerId:
+   * another live worker's leases are never touched.
+   */
+  batchRelease: (payload: { companyId: string; userId: string; batchId: string; workerId: string; itemIds: string[] }) => Promise<IpcResult<{ released: number }>>;
   batchGet: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<JobBatchDetail>>;
   batchList: (payload: { companyId: string; userId: string; status?: string }) => Promise<IpcResult<JobBatchSummary[]>>;
 }
@@ -405,6 +412,13 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.batchRecover({ companyId, userId, batchId });
+  },
+
+  async batchRelease(companyId: string, userId: string, batchId: string, workerId: string, itemIds: string[]): Promise<IpcResult<{ released: number }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    if (!b.batchRelease) return { success: true, data: { released: 0 } };
+    return b.batchRelease({ companyId, userId, batchId, workerId, itemIds });
   },
 
   async batchGet(companyId: string, userId: string, batchId: string): Promise<IpcResult<JobBatchDetail>> {

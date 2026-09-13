@@ -163,8 +163,20 @@ export const settingsWriteTools: ToolDefinition[] = [
       if (!sequenceId) return { error: 'sequenceId مطلوب — استخدم settings.get_document_sequences أولاً' };
       const data: Record<string, unknown> = {};
       if (args.prefix !== undefined) data.prefix = str(args.prefix);
-      if (args.currentNumber !== undefined) data.currentNumber = num(args.currentNumber);
-      if (args.incrementStep !== undefined) data.incrementStep = num(args.incrementStep);
+      if (args.currentNumber !== undefined) {
+        // P1 fix: a bad currentNumber/step locks numbering for the WHOLE
+        // document type company-wide — getNextDocumentNumber fails 10
+        // attempts on every document of that type forever. Validate here
+        // (the API layer accepts anything).
+        const n = num(args.currentNumber);
+        if (!Number.isFinite(n) || n < 0) return { error: 'الرقم الحالي يجب أن يكون عدداً موجباً (0 أو أكثر)' };
+        data.currentNumber = Math.floor(n);
+      }
+      if (args.incrementStep !== undefined) {
+        const s = num(args.incrementStep);
+        if (!Number.isFinite(s) || s < 1) return { error: 'خطوة الترقيم يجب أن تكون عدداً صحيحاً موجباً (1 أو أكثر) — القيمة 0 تقفل الترقيم نهائياً' };
+        data.incrementStep = Math.floor(s);
+      }
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
       const res = await updateDocumentSequence(sequenceId, data, ctx.companyId);
@@ -655,14 +667,14 @@ export const settingsWriteTools: ToolDefinition[] = [
   {
     name: 'settings.update_default_account',
     labelAr: 'تعديل حساب افتراضي',
-    descriptionAr: 'يُحدّث الحساب الافتراضي لنوع معين — يربط حساباً أو يفصل الحساب (بإرسال null). استخدم settings.get_default_accounts أولاً.',
+    descriptionAr: 'يُحدّث الحساب الافتراضي لنوع معين — يربط حساباً أو يفصل الحساب (بإرسال "none"). استخدم settings.get_default_accounts أولاً.',
     permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         defaultAccountId: { type: 'string', description: 'معرف الحساب الافتراضي (UUID من settings.get_default_accounts)' },
-        accountId: { type: 'string', description: 'معرف الحساب من شجرة الحسابات (UUID — أرسل null لفصل الحساب)' },
+        accountId: { type: ['string', 'null'], description: 'معرف الحساب من شجرة الحسابات (UUID — أرسل "none" أو null لفصل الحساب)' },
       },
       required: ['defaultAccountId', 'accountId'],
     },
@@ -670,7 +682,21 @@ export const settingsWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const defaultAccountId = str(args.defaultAccountId);
       if (!defaultAccountId) return { error: 'defaultAccountId مطلوب — استخدم settings.get_default_accounts أولاً' };
-      const accountId = args.accountId && typeof args.accountId === 'string' && args.accountId.trim() ? args.accountId.trim() : null;
+      // P2 fix: the old schema declared `type: 'string'` while the docs
+      // promised "send null to unlink" — the model could never actually send
+      // null, and a literal "null" string matched zero rows with success.
+      // Accept explicit "none"/null/empty as unlink; anything else must be a
+      // non-empty UUID string.
+      const raw = args.accountId;
+      const accountId =
+        raw === null || raw === undefined || (typeof raw === 'string' && (raw.trim() === '' || raw.trim().toLowerCase() === 'none'))
+          ? null
+          : typeof raw === 'string' && raw.trim()
+            ? raw.trim()
+            : null;
+      if (raw !== null && raw !== undefined && accountId === null && typeof raw !== 'string') {
+        return { error: 'accountId يجب أن يكون UUID أو "none" للفصل' };
+      }
       const res = await updateDefaultAccount(defaultAccountId, accountId, ctx.companyId);
       if (!res.success) return { error: res.error || 'فشل تعديل الحساب الافتراضي' };
       return { updated: true, defaultAccountId };

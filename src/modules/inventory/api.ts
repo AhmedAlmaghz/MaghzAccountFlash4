@@ -793,7 +793,10 @@ export const inventoryApi = {
       if (!validation.success) return { success: false, error: validation.error };
       const adapter = await getDbAdapter();
       const qty = Number(data.quantity) || 0;
-      const delta = data.type === 'out' ? -qty : qty;
+      // P1 fix: signed adjustment directions (adjustment_in/out) settle the
+      // stock delta by SIGN — the old `data.type === 'out' ? -qty : qty` added
+      // shortage adjustments instead of subtracting them.
+      const delta = data.type === 'out' || data.type === 'adjustment_out' ? -qty : qty;
       // Skip stock update for transfers (handled by dedicated transfer flow)
       if (data.type === 'transfer') {
         const result = await adapter.query(
@@ -950,10 +953,16 @@ export const inventoryApi = {
         sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity) SELECT $1::uuid, $2::uuid, $3::uuid, 0 WHERE NOT EXISTS (SELECT 1 FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid)`,
         params: [companyId, productId, warehouseId],
       });
-      // Movement
+      // Movement — P1 fix: the old row stored type='adjustment' with
+      // quantity=ABS(difference) and NO direction, which made the
+      // product_ledger running balance (and any consumer) add shortage
+      // adjustments INSTEAD of subtracting them. Store the SIGNED direction
+      // explicitly: 'adjustment_in' (surplus found) vs 'adjustment_out'
+      // (shortage). Both keep the 'adjustment' family for the movement
+      // report grouping (LIKE 'adjustment%').
       tx.push({
-        sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, 'adjustment', $4::numeric, $5, $6, NOW())`,
-        params: [companyId, productId, warehouseId, Math.abs(difference), `ADJ-${id}`, reason || 'تسوية جرد'],
+        sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::numeric, $6, $7, NOW())`,
+        params: [companyId, productId, warehouseId, difference >= 0 ? 'adjustment_in' : 'adjustment_out', Math.abs(difference), `ADJ-${id}`, reason || 'تسوية جرد'],
       });
       // Update stock to actual quantity
       tx.push({

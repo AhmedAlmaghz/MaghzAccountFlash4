@@ -145,3 +145,83 @@ describe('stall heartbeat + recovery', () => {
     expect(useAiStore.getState().isProcessing).toBe(false);
   });
 });
+
+describe('P1/P2 engine guards (2026-09-12 hotfix)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    useAiStore.getState().clearMessages();
+    getChatEngine().reset();
+  });
+
+  it('P1: a throw in the send preamble (before try body work) still clears isProcessing', async () => {
+    useAuthStore.getState().logout();
+    useAuthStore.getState().login(user);
+    useAppStore.setState({
+      activeCompany: { id: '00000000-0000-0000-0000-000000000001', name: 'شركة الاختبار', currency: 'YER' },
+    });
+    const { complete } = mocks;
+    complete.mockReturnValue({
+      success: true,
+      data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+    // Poison the optimistic-bubble path: addMessage throws once. Before the
+    // fix, setProcessing(true) ran OUTSIDE try, so this throw skipped the
+    // finally and left isProcessing=true forever (dead chat).
+    const st = useAiStore.getState();
+    const origAdd = st.addMessage;
+    let calls = 0;
+    useAiStore.setState({
+      addMessage: ((msg: never) => {
+        calls += 1;
+        if (calls === 1) throw new Error('poisoned bubble');
+        return (origAdd as (m: never) => string).call(st, msg);
+      }) as typeof st.addMessage,
+    });
+    try {
+      await getChatEngine().send('رسالة مسمومة');
+    } finally {
+      useAiStore.setState({ addMessage: origAdd });
+    }
+    expect(useAiStore.getState().isProcessing).toBe(false);
+  });
+
+  it('P1: a mid-stream throw routes the non-streaming answer to a NEW bubble', async () => {
+    useAuthStore.getState().logout();
+    useAuthStore.getState().login(user);
+    useAppStore.setState({
+      activeCompany: { id: '00000000-0000-0000-0000-000000000001', name: 'شركة الاختبار', currency: 'YER' },
+    });
+    const { complete, startStream } = mocks;
+    // Stream yields one chunk then throws mid-flight (partial content seen).
+    startStream.mockReturnValue(
+      (async function* () {
+        yield { type: 'content', content: 'جزء أول' };
+        throw new Error('provider exploded mid-stream');
+      })(),
+    );
+    complete.mockReturnValue({
+      success: true,
+      data: { content: 'الإجابة الكاملة الاحتياطية', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+
+    await getChatEngine().send('سؤال');
+
+    const msgs = useAiStore.getState().messages;
+    // user bubble + exactly one visible assistant text bubble carrying the
+    // FALLBACK content (the removed placeholder must not swallow it).
+    const assistantTexts = msgs.filter((m) => m.role === 'assistant' && m.kind === 'text');
+    expect(assistantTexts).toHaveLength(1);
+    expect(String(assistantTexts[0].content)).toContain('الإجابة الكاملة الاحتياطية');
+  });
+
+  it('P2: ensureCompanyScope bumps the epoch so old-tenant loops die', () => {
+    const engine = getChatEngine();
+    engine.ensureCompanyScope('company-A');
+    const before = engine.recoveryCount;
+    engine.ensureCompanyScope('company-B');
+    expect(engine.recoveryCount).toBe(before + 1);
+    // Same tenant: no bump.
+    engine.ensureCompanyScope('company-B');
+    expect(engine.recoveryCount).toBe(before + 1);
+  });
+});

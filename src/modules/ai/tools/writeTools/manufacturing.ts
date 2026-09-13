@@ -363,7 +363,7 @@ export const manufacturingWriteTools: ToolDefinition[] = [
   {
     name: 'manufacturing.update_work_order',
     labelAr: 'تعديل أمر تشغيل',
-    descriptionAr: 'يُحدّث بيانات أمر تشغيل — الكمية، الحالة، الملاحظات، تاريخ الاستحقاق. استخدم manufacturing.get_work_orders أولاً.',
+    descriptionAr: 'يُحدّث بيانات أمر تشغيل — الكمية، الملاحظات، تاريخ الاستحقاق (تغيير الحالة عبر manufacturing.update_work_order_status فقط). استخدم manufacturing.get_work_orders أولاً.',
     permission: 'manufacturing.edit',
     dangerLevel: 'write',
     parameters: {
@@ -371,7 +371,6 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       properties: {
         workOrderId: { type: 'string', description: 'معرف أمر التشغيل (من manufacturing.get_work_orders)' },
         quantity: { type: 'number', description: 'الكمية الجديدة (عدد الدفعات — تُعاد تحجيم سطور المواد تناسبياً تلقائياً)' },
-        status: { type: 'string', enum: ['planned', 'in_progress', 'completed', 'cancelled'], description: 'الحالة الجديدة' },
         notes: { type: 'string', description: 'ملاحظات جديدة' },
         dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (يُربط بـ plannedEndDate — لا عمود dueDate)' },
       },
@@ -381,16 +380,20 @@ export const manufacturingWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const workOrderId = str(args.workOrderId);
       if (!workOrderId) return { error: 'workOrderId مطلوب' };
+      // P1 fix (mirrors manufacturing.update_work_order_status): the status
+      // lifecycle is atomic — in_progress issues materials, completed
+      // receives output + settles variances + posts cost. updateWorkOrder
+      // writes status RAW (no issue/receipt/journal), so routing status
+      // through this general tool silently bypasses the entire production
+      // line. Status changes belong to update_work_order_status only.
+      if (args.status !== undefined) {
+        return { error: 'تغيير الحالة يتم عبر manufacturing.update_work_order_status فقط (يصرف الخامات/يسلّم التام/يرحّل التكلفة ذرّياً) — هذه الأداة للكمية والملاحظات والتواريخ' };
+      }
       const data: Record<string, unknown> = {};
       if (args.quantity !== undefined) {
         const q = num(args.quantity);
         if (!(q > 0)) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
         data.quantity = q;
-      }
-      if (args.status !== undefined) {
-        const s = str(args.status);
-        if (s && !['planned', 'in_progress', 'completed', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون planned أو in_progress أو completed أو cancelled' };
-        data.status = s;
       }
       if (args.notes !== undefined) data.notes = str(args.notes);
       // P1 fix: work_orders has NO dueDate column (it is plannedEndDate) —

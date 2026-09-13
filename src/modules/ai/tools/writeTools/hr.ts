@@ -274,23 +274,22 @@ export const hrWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         leaveId: { type: 'string', description: 'معرف طلب الإجازة (من search.leaves)' },
-        status: { type: 'string', enum: ['pending', 'approved', 'rejected', 'cancelled'], description: 'الحالة الجديدة (اختياري)' },
-        reason: { type: 'string', description: 'سبب التحديث (اختياري)' },
+        status: { type: 'string', enum: ['pending', 'approved', 'rejected', 'cancelled'], description: 'الحالة الجديدة' },
       },
-      required: ['leaveId'],
+      required: ['leaveId', 'status'],
     },
     summarizeArgs: (a) => `تحديث طلب إجازة: ${String(a.leaveId).slice(0, 8)}…${a.status ? ` ← ${a.status}` : ''}`,
     execute: async (args, ctx) => {
       const leaveId = str(args.leaveId);
       if (!leaveId) return { error: 'leaveId مطلوب — استخدم search.leaves أولاً' };
       const status = str(args.status) as 'pending' | 'approved' | 'rejected' | 'cancelled' | undefined;
-      if (status && !['pending', 'approved', 'rejected', 'cancelled'].includes(status)) return { error: 'حالة غير صحيحة' };
-      if (!status && args.reason === undefined) return { error: 'يجب تمرير status أو reason على الأقل' };
-      if (status) {
-        const res = await hrApi.updateLeaveStatus(leaveId, ctx.companyId, status, ctx.userId);
-        if (!res.success) return { error: res.error || 'فشل تحديث الإجازة' };
-      }
-      return { updated: true, leaveId, status: status || undefined };
+      // P1 fix: the old `reason`-only path returned { updated: true } with NO
+      // write at all (no API supports editing a leave's reason) — a silent
+      // no-op with a success receipt. `reason` removed; status is required.
+      if (!status || !['pending', 'approved', 'rejected', 'cancelled'].includes(status)) return { error: 'status مطلوب: pending أو approved أو rejected أو cancelled' };
+      const res = await hrApi.updateLeaveStatus(leaveId, ctx.companyId, status, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل تحديث الإجازة' };
+      return { updated: true, leaveId, status };
     },
   },
 

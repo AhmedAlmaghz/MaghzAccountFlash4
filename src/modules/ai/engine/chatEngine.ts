@@ -426,26 +426,29 @@ class ChatEngine {
     // tenant's LLM history before anything reads it.
     this.ensureCompanyScope(this.ctx.companyId);
 
-    store.setProcessing(true);
-    this.touchProgress();
-    traceSend('press-received');
-
-    // Optimistic UI: the user's bubble appears INSTANTLY, before the
-    // (deadline-guarded but still slow on weak transports) settings/entity
-    // preamble. Previously the bubble waited behind up to 60s of DB reads —
-    // pressing send looked completely dead.
-    const trimmedAttachments = trimAttachmentsToBudget(attachments);
-    store.addMessage({
-      role: 'user',
-      kind: 'text',
-      content: text,
-      ...(trimmedAttachments.length > 0
-        ? { attachments: trimmedAttachments.map((a) => a.meta) }
-        : {}),
-    });
-    traceSend('user-stored');
-
     try {
+      // P1 fix: setProcessing(true) lives INSIDE try — previously it ran
+      // before try, so a throw from trimAttachmentsToBudget/addMessage below
+      // skipped the finally and left isProcessing=true FOREVER (dead chat).
+      store.setProcessing(true);
+      this.touchProgress();
+      traceSend('press-received');
+
+      // Optimistic UI: the user's bubble appears INSTANTLY, before the
+      // (deadline-guarded but still slow on weak transports) settings/entity
+      // preamble. Previously the bubble waited behind up to 60s of DB reads —
+      // pressing send looked completely dead.
+      const trimmedAttachments = trimAttachmentsToBudget(attachments);
+      store.addMessage({
+        role: 'user',
+        kind: 'text',
+        content: text,
+        ...(trimmedAttachments.length > 0
+          ? { attachments: trimmedAttachments.map((a) => a.meta) }
+          : {}),
+      });
+      traceSend('user-stored');
+
       // Always (re)build the system prompt so trigger-based skills
       // match the latest user message. The system message lives at
       // index 0 of history and is reused on every API call.
@@ -724,8 +727,14 @@ class ChatEngine {
   private async startBatchRun(batchId: string, messageId: string): Promise<void> {
     const store = this.store();
     // Pin the batch to its card so MessageBubble renders the live progress
-    // card (persisted inside tool_call JSONB — survives reloads).
-    store.updateToolCall(messageId, { batchId });
+    // card (persisted inside tool_call JSONB — survives reloads). Resume
+    // flows own a plain TEXT message (no toolCall) — guard first: an
+    // unconditional updateToolCall on a text message either crashes or
+    // silently drops the batchId pin (P2).
+    const hasCard = store.messages.some((m) => m.id === messageId && m.toolCall);
+    if (hasCard) {
+      store.updateToolCall(messageId, { batchId });
+    }
     try {
       const final = await runBatch(this.ctx.companyId, this.ctx.userId, batchId, {
         shouldStop: () => this.abortRequested,
@@ -845,6 +854,14 @@ class ChatEngine {
       this.history.push({ role: 'assistant', content: messageContent });
       this.abortRequested = false;
       await this.startBatchRun(batchId, messageId);
+    } catch (e) {
+      // P2 fix: this path had try/finally but NO catch — getBatch /
+      // batchRetryFailed / batchSetStatus rejections vanished silently (and
+      // risked unhandled rejections). Surface an honest error instead.
+      const errorText = e instanceof Error ? e.message : String(e);
+      const msg = `فشل استئناف الدفعة: ${errorText}`;
+      store.addMessage({ role: 'assistant', kind: 'error', content: msg });
+      this.history.push({ role: 'assistant', content: msg });
     } finally {
       store.setProcessing(false);
     }
@@ -937,6 +954,11 @@ class ChatEngine {
     this.successfulWritesThisSend.clear();
     this.failedWriteAttempts.clear();
     this.liveContextCache = null;
+    this.extraAdvertisedTools.clear();
+    // P1 fix: bump the epoch so an in-flight runLoop from the OLD tenant dies
+    // at its next epoch check instead of writing old-tenant tool results into
+    // the NEW tenant's (emptied) history without a system prompt.
+    this.recoveryCount++;
     // P1 fix (cross-tenant transcript leak): the store's sessionId still
     // points at the OLD company's session row. The next save would UPDATE
     // that row's company scope check to 0 rows and then INSERT a brand-new
@@ -1518,10 +1540,17 @@ class ChatEngine {
           this.touchProgress();
         }
       } catch {
-        // Streaming failed — remove placeholder, fall back to non-streaming
+        // Streaming failed — remove placeholder, fall back to non-streaming.
+        // P1 fix: reset the streaming flags here exactly like the failed-done
+        // path above — otherwise the complete() answer below is written into
+        // the REMOVED placeholder (streamedContent && streamingId stays true)
+        // and the user never sees it.
         if (streamingId) {
           this.store().removeMessage(streamingId);
         }
+        streamingId = null;
+        streamedContent = false;
+        contentAcc = '';
         this.touchProgress();
         response = await aiApi.complete({
           companyId: this.ctx.companyId,
@@ -1886,7 +1915,9 @@ function renderTable(rows: Record<string, unknown>[], label?: string): string {
     const vals = keys.map((k) => {
       const v = row[k];
       if (v === null || v === undefined) return '';
-      const s = String(v);
+      // P2 fix (mirrors renderObject): nested objects/arrays must NEVER hit
+      // String() — yields the infamous "[object Object]" in card tables.
+      const s = typeof v === 'object' ? safeJson(v) : String(v);
       return s.length > 50 ? s.slice(0, 47) + '...' : s;
     });
     return `| ${vals.join(' | ')} |`;

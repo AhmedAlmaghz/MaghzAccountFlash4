@@ -358,10 +358,6 @@ export function substituteRefs(
   refTools?: Map<string, string>,
 ): SubstituteResult {
   const missing = new Set<string>();
-  /** Escape `$` in replacement values — String.replace interprets `$&`, `$'`,
-   * `` $` ``, `$1`… inside the replacer's RETURN as replacement patterns
-   * (Phase 86 lesson): a resolved value containing `$` corrupted the args. */
-  const asLiteral = (v: string): string => v.replace(/\$/g, '$$$$');
 
   const subString = (s: string): string => {
     if (REF_WHOLE_RE.test(s)) {
@@ -389,7 +385,11 @@ export function substituteRefs(
         missing.add(field ? `${ref}.${field}` : ref);
         return _m;
       }
-      return asLiteral(String(value));
+      // NOTE: no $-escaping here — this callback is a replacer FUNCTION and
+      // per ECMAScript its return is inserted LITERALLY (no $&/$1 patterns).
+      // A previous helper doubled every $ here (a lesson about *string*
+      // replacements misapplied to a function replacer).
+      return String(value);
     });
   };
 

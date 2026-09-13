@@ -105,7 +105,10 @@ export interface InventoryTransaction {
   id: string;
   companyId: string;
   date: string;
-  type: 'in' | 'out' | 'adjustment' | 'transfer';
+  // P1 fix: adjustments carry a SIGNED direction — 'adjustment_in' (surplus
+  // found) vs 'adjustment_out' (shortage). The bare 'adjustment' value is
+  // kept for backward compatibility (legacy rows).
+  type: 'in' | 'out' | 'adjustment' | 'adjustment_in' | 'adjustment_out' | 'transfer';
   productId: string;
   warehouseId: string;
   quantity: number;

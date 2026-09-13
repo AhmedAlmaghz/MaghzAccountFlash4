@@ -32,6 +32,12 @@ export interface BatchRunCallbacks {
   onProgress?: (detail: JobBatchDetail) => void;
   /** Cooperative stop — checked between items (e.g. user pressed stop). */
   shouldStop?: () => boolean;
+  /**
+   * Test-only override for the RATE_LIMIT cooldown window (production uses
+   * the real 60s budget window). Lets unit tests exercise the wait-and-retry
+   * path without sleeping a minute.
+   */
+  rateLimitWindowMs?: number;
 }
 
 /**
@@ -112,6 +118,25 @@ function yieldToUi(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Sliding window of the tool-executor write budget (mirrors toolExecutor). */
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/**
+ * P1 RATE_LIMIT fix: the tool-executor write budget is a 60s sliding window
+ * shared by the whole worker. Sleep one full window in 1s slices so a
+ * cooperative stop stays responsive (a single 60s sleep would ignore the
+ * stop button for a full minute). Returns false when stopped mid-wait.
+ * Exported for tests (they inject a short window instead of 60s).
+ */
+export async function sleepRateLimitWindow(shouldStop?: () => boolean, windowMs = RATE_LIMIT_WINDOW_MS): Promise<boolean> {
+  const deadline = Date.now() + windowMs;
+  while (Date.now() < deadline) {
+    if (shouldStop?.()) return false;
+    await sleep(1000);
+  }
+  return true;
+}
+
 export async function runBatch(
   companyId: string,
   userId: string,
@@ -140,6 +165,31 @@ function newWorkerId(): string {
     if (c?.randomUUID) return `w-${c.randomUUID()}`;
   } catch { /* fall through */ }
   return `w-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffff).toString(36)}`;
+}
+
+/**
+ * P1 stop-wedge fix: release claimed-but-unstarted items of the CURRENT
+ * chunk back to `queued` without burning attempts. `executedCount` is how
+ * many of `chunk` this worker already finished — everything after that
+ * index was never started and is safe to release (still ours: claimed_by =
+ * workerId, lease live). Idempotent and best-effort: a failed release only
+ * means the old 30-minute-lease behaviour for those rows.
+ */
+async function releaseChunkRemainder(
+  companyId: string,
+  userId: string,
+  batchId: string,
+  workerId: string,
+  chunk: Array<{ id: string }>,
+  executedCount: number,
+): Promise<void> {
+  const pending = chunk.slice(executedCount).map((it) => it.id).filter(Boolean);
+  if (pending.length === 0) return;
+  try {
+    await aiApi.batchRelease(companyId, userId, batchId, workerId, pending);
+  } catch {
+    // best-effort: the loop exit proceeds regardless
+  }
 }
 
 async function runBatchInner(
@@ -209,6 +259,8 @@ async function runBatchInner(
 
   while (!isTerminalBatchStatus(detail.status)) {
     if (callbacks.shouldStop?.()) {
+      // Loop-top stop (no live chunk in hand — any previous chunk was fully
+      // executed or released at its own stop check). Just refresh and exit.
       detail = (await refresh(companyId, userId, batchId)) ?? detail;
       return detail;
     }
@@ -253,6 +305,9 @@ async function runBatchInner(
     }
     emptyClaimStreak = 0;
 
+    // Index of the chunk item currently being processed — used ONLY by the
+    // stop path below to release the unstarted remainder (P1 stop-wedge).
+    let executedInChunk = 0;
     for (const item of claim.data) {
       // Cooperative gap: back-to-back heavy writes (invoice + journal +
       // stock on the UI-thread PGlite) must not starve input/paint.
@@ -283,7 +338,27 @@ async function runBatchInner(
           callbacks.onProgress?.(detail);
         }
       } else {
-        const outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
+        // P1 RATE_LIMIT fix: the 60/min write budget is shared by the whole
+        // worker — failing the item burns an attempt while its chunk-siblings
+        // keep the window saturated, so the tail of a big batch dies
+        // permanently within ~a minute (each burns 4 attempts in backoff
+        // sleeps far shorter than the 60s window). Instead: wait out ONE full
+        // window (interruptible by stop) and re-execute IN PLACE — the row
+        // stays claimed (30-min lease), no fail call, no attempt burned
+        // beyond the claim itself, no dependent cascade. Bounded: a second
+        // consecutive RATE_LIMIT falls through to the normal fail path.
+        let outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
+        if (outcome.errorClass?.code === 'RATE_LIMIT') {
+          const waited = await sleepRateLimitWindow(callbacks.shouldStop, callbacks.rateLimitWindowMs);
+          if (!waited) {
+            // Stopped during the cooldown — release the rest of the chunk
+            // (this item included: it never executed) and exit honestly.
+            await releaseChunkRemainder(companyId, userId, batchId, workerId, claim.data, executedInChunk);
+            detail = (await refresh(companyId, userId, batchId)) ?? detail;
+            return detail;
+          }
+          outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
+        }
         if (outcome.ok) {
           const scalars = extractOutputScalars(outcome.result);
           rememberOutput(item, scalars);
@@ -348,8 +423,11 @@ async function runBatchInner(
         }
       }
       // Stop is honored BETWEEN items (after the current one finishes),
-      // never by abandoning an item mid-execution.
+      // never by abandoning an item mid-execution. Unexecuted chunk items
+      // are released back to queued (no attempt burned) so resume is instant.
+      executedInChunk += 1;
       if (callbacks.shouldStop?.()) {
+        await releaseChunkRemainder(companyId, userId, batchId, workerId, claim.data, executedInChunk);
         detail = (await refresh(companyId, userId, batchId)) ?? detail;
         return detail;
       }

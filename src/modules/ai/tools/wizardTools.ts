@@ -103,10 +103,16 @@ export const wizardTools: ToolDefinition[] = [
 
       const resolved = await resolveLineUnits(ctx.companyId, 'sale', parsed);
       if ('error' in resolved) return { error: resolved.error };
+      // P2 fix: the old code priced lines with the RAW parsed discount and
+      // full vatRate even when the company DISABLED invoice discount/VAT
+      // display (invoice.showDiscount/showVat) — the wizard silently recorded
+      // tax the forms would never charge (and hid it via vatSkipped AFTER the
+      // fact). Zero the disabled components BEFORE totals, like writeTools.
       const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
+        const vatPercent = tax.showVat ? tax.vatRate : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
-        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
+        return { ...l, discountPercent, vatPercent, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
       const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
@@ -212,10 +218,13 @@ export const wizardTools: ToolDefinition[] = [
 
       const resolved = await resolveLineUnits(ctx.companyId, 'purchase', parsed);
       if ('error' in resolved) return { error: resolved.error };
+      // P2 fix (mirrors the sales twin above): zero disabled tax components
+      // BEFORE totals when the company disabled invoice discount/VAT display.
       const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
+        const vatPercent = tax.showVat ? tax.vatRate : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
-        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
+        return { ...l, discountPercent, vatPercent, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
       const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
@@ -708,7 +717,15 @@ export const wizardTools: ToolDefinition[] = [
         entries: entries as unknown as import('@/modules/accounting/types').JournalEntry[],
       }, '');
       if (!createRes.success) return { error: createRes.error || 'فشل إنشاء القيد' };
-      const transactionId = createRes.id;
+      // accountingService.postTransaction returns `{ success, transactionId }`
+      // (AccountingService.ts) — `createRes.id` is ALWAYS undefined here, which
+      // made the wizard report failure AFTER the entry was already saved as
+      // POSTED, and the model retried → duplicated posted entries (P0).
+      // Accept both keys defensively; the postTransaction step below is a
+      // no-op for the service (it creates the entry already posted) but is
+      // kept for API paths that genuinely create drafts.
+      const transactionId = (createRes as { transactionId?: string; id?: string }).transactionId
+        ?? createRes.id;
       if (!transactionId) return { error: 'تم إنشاء القيد لكن لم يُرجع معرف' };
 
       // Step 2: Post the transaction

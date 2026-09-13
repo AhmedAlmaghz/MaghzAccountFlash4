@@ -40,7 +40,14 @@ async function guardedQuery(sql: string, params: unknown[]) {
   return adapter.query(check.sql, params);
 }
 
-// ─── Helper: aggregate invoice/line data for revenue/analysis ──────────────
+// ─── Helper: base-currency aggregate expression ──────────────────────────
+// P1 fix: base_currency_amount defaults to 0 for seed/legacy rows (the seed
+// never fills it), so plain SUM(base_currency_amount) reports 0 revenue on
+// seeded data while total_amount-based tools show real numbers. Fall back
+// per-row to the document total — same semantics as the ?? fallback in
+// fetchInvoiceAnalysis above, but server-side.
+const BASE_AMOUNT_SUM = 'COALESCE(SUM(COALESCE(NULLIF(base_currency_amount, 0), total_amount)), 0)';
+const BASE_VOUCHER_SUM = 'COALESCE(SUM(COALESCE(NULLIF(base_currency_amount, 0), amount)), 0)';
 async function fetchInvoiceAnalysis(companyId: string, from: string, to: string) {
   
   const res = await guardedQuery(`
@@ -375,10 +382,10 @@ export const reportTools: ToolDefinition[] = [
       
 
       const [salesRes, purchasesRes, receiptsRes, paymentsRes] = await Promise.all([
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS total FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS total FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS total FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS total FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
+        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS total FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
       ]);
 
       const salesIn = num(salesRes.rows?.[0]?.total || 0);
@@ -884,9 +891,12 @@ export const reportTools: ToolDefinition[] = [
 
       const typeSummary: Record<string, { count: number; totalQty: number }> = {};
       for (const r of rows) {
+        // P1 fix: signed adjustment directions settle by SIGN (shortages
+        // subtract) — the old code lumped every adjustment as +qty.
         const t = String(r.type || 'unknown');
+        const signedQty = t === 'in' || t === 'adjustment_in' || t === 'adjustment' ? num(r.quantity) : -num(r.quantity);
         const entry = typeSummary[t] || { count: 0, totalQty: 0 };
-        entry.count += 1; entry.totalQty += num(r.quantity);
+        entry.count += 1; entry.totalQty += signedQty;
         typeSummary[t] = entry;
       }
 
@@ -995,7 +1005,11 @@ export const reportTools: ToolDefinition[] = [
 
       let runningQty = 0;
       const movements = rows.map((r: Record<string, unknown>) => {
-        const qty = r.type === 'in' || r.type === 'adjustment' ? num(r.quantity) : -num(r.quantity);
+        // P1 fix: signed adjustment directions (adjustment_in/out) settle by
+        // SIGN — the legacy bare 'adjustment' rows (ABS quantity, no side)
+        // stay +qty for backward compatibility.
+        const t = String(r.type || '');
+        const qty = t === 'in' || t === 'adjustment_in' || t === 'adjustment' ? num(r.quantity) : -num(r.quantity);
         runningQty += qty;
         return {
           date: r.created_at, type: r.type,
@@ -1136,11 +1150,15 @@ export const reportTools: ToolDefinition[] = [
       const res = await guardedQuery(`
         SELECT wo.id, wo.order_number, wo.quantity, wo.produced_quantity, wo.total_cost,
                p.name_ar AS product_name,
-               COALESCE(wc.actual_quantity, 0) AS actual_qty,
+               -- P1 fix: actual_* DEFAULT '0' means "fall back to planned"
+               -- (Phase-71 contract — actuals are pinned only at completion).
+               -- Reading raw 0 as consumed-zero fabricated huge negative
+               -- variances for every in_progress order.
+               COALESCE(NULLIF(wc.actual_quantity, 0), wc.planned_quantity, 0) AS actual_qty,
                COALESCE(wc.planned_quantity, 0) AS planned_qty_line,
-               COALESCE(wc.unit_cost, 0) AS unit_cost,
-               (COALESCE(wc.actual_quantity, 0) - COALESCE(wc.planned_quantity, 0)) AS qty_variance,
-               (COALESCE(wc.actual_quantity, 0) * COALESCE(wc.unit_cost, 0))
+               COALESCE(NULLIF(wc.actual_unit_cost, 0), wc.unit_cost, 0) AS unit_cost,
+               (COALESCE(NULLIF(wc.actual_quantity, 0), wc.planned_quantity, 0) - COALESCE(wc.planned_quantity, 0)) AS qty_variance,
+               (COALESCE(NULLIF(wc.actual_quantity, 0), wc.planned_quantity, 0) * COALESCE(NULLIF(wc.actual_unit_cost, 0), wc.unit_cost, 0))
                - (COALESCE(wc.planned_quantity, 0) * COALESCE(wc.unit_cost, 0)) AS cost_variance
         FROM work_orders wo
         LEFT JOIN products p ON wo.product_id = p.id
@@ -1729,10 +1747,10 @@ export const reportTools: ToolDefinition[] = [
         return { lowStockCount: num(lowStockRes.rows?.[0]?.count || 0) };
       })();
       const [salesRes, purchasesRes, receiptsRes, paymentsRes, productRes, customerRes, supplierRes, hrKpiRes, manufacturingRes] = await Promise.all([
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue, COUNT(*)::int AS count FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
-        guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS revenue, COUNT(*)::int AS count FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS amount FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS amount FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM customers WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM suppliers WHERE company_id = $1::uuid`, [ctx.companyId]),
@@ -1752,8 +1770,8 @@ export const reportTools: ToolDefinition[] = [
       let prevExpenses = 0;
       if (comparePrevious) {
         const [prevSalesRes, prevPurchRes] = await Promise.all([
-          guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS revenue FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
-          guardedQuery(`SELECT COALESCE(SUM(base_currency_amount), 0) AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
+          guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS revenue FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
+          guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
         ]);
         prevRevenue = num(prevSalesRes.rows?.[0]?.revenue || 0);
         prevExpenses = num(prevPurchRes.rows?.[0]?.amount || 0);
