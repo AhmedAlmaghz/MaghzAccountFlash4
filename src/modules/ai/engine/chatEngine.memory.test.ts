@@ -199,4 +199,71 @@ describe('ChatEngine memory — restoreHistorySync', () => {
     expect(String(toolMsg.content)).toContain('خطأ:');
     expect(String(toolMsg.content)).toContain('08:00');
   });
+
+  it('keeps the original mission list in the system prompt after the 30-message window drops it (2026-09-14 session regression)', async () => {
+    // الجلسة الحقيقية: قائمة مهام طويلة → عدة دورات بحث ودفعات → سقط الطلب
+    // الأصلي من نافذة السياق → طلب المساعد من المستخدم إعادة إرسالها مرتين
+    // وأعاد إنشاء الموردين والعملاء مكررين. السجل الدائم يمنع ذلك كلياً.
+    const engine = getChatEngine();
+    const mission = [
+      'قم باضافة مورد اسمه الشجاع للتجارة رصيده الافتتاحي 204000',
+      'قم بإضافة العملاء التالية: مؤسسة غدرة التجارية رصيده الافتتاحي 132500',
+      'شوكلاتة سويت مون صغير 65جم الوحدة شدة سعر البيع 10800 سعر التكلفة 10000',
+      'تمر محشي سوداني كبير الوحدة درزن سعر البيع 18000 سعر التكلفة 16000',
+    ].join('\n');
+
+    mocks.complete.mockResolvedValue({
+      success: true,
+      data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+
+    await engine.send(mission);
+    // دورات كثيرة تكفي لإسقاط الطلب الأول من نافذة الـ 30 رسالة
+    for (let i = 0; i < 32; i++) {
+      await engine.send(`تحديث حالة الدفعة رقم ${i}`);
+    }
+
+    const payload = mocks.complete.mock.calls[mocks.complete.mock.calls.length - 1][0];
+    const history = payload.messages as Array<{ role: string; content: string | null }>;
+    // التأكد من المشكلة القديمة: الطلب الأصلي خارج نافذة الرسائل المرسلة
+    const missionInMessageWindow = history
+      .slice(1)
+      .some((m) => typeof m.content === 'string' && m.content.includes('سويت مون صغير'));
+    expect(missionInMessageWindow).toBe(false);
+    // الإصلاح: برومبت النظام يحمل المهمة كاملة عبر سجل المهمة الدائم
+    const system = String(history[0].content);
+    expect(system).toContain('سجل المهمة الدائم لهذه الجلسة');
+    expect(system).toContain('سويت مون صغير');
+    expect(system).toContain('الشجاع للتجارة');
+    expect(system).toContain('سعر التكلفة 16000');
+  });
+
+  it('restores the mission ledger after a saved session reload (no re-asking the user)', async () => {
+    const persisted: ChatMessage[] = [
+      {
+        id: 'u1',
+        role: 'user',
+        kind: 'text',
+        content: 'قائمة المهام: مورد الشجاع للتجارة + منتج شوكلاتة سويت مون صغير سعر البيع 10800',
+        createdAt: 1,
+      },
+      { id: 'a1', role: 'assistant', kind: 'text', content: 'اكتملت الدفعة: أُنجز 2 — فشل 0 (من 2)', createdAt: 2 },
+    ];
+
+    const engine = getChatEngine();
+    engine.restoreHistorySync(persisted);
+
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: { content: 'أتابع القائمة', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+
+    await engine.send('استمر — بقية المهام');
+
+    const payload = mocks.complete.mock.calls[0][0];
+    const system = String((payload.messages as Array<{ role: string; content: string | null }>)[0].content);
+    expect(system).toContain('سجل المهمة الدائم لهذه الجلسة');
+    expect(system).toContain('الشجاع للتجارة');
+    expect(system).toContain('سويت مون صغير');
+  });
 });

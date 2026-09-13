@@ -191,4 +191,31 @@ describe('buildSystemPrompt', () => {
     expect(gregPrompt).toContain('ميلادي');
     expect(gregPrompt).toContain('التواريخ الهجرية');
   });
+
+  // ── سجل المهمة الدائم (Session Task Ledger) ────────────────────────────────
+
+  it('injects the task ledger block verbatim when the engine provides it', () => {
+    const prompt = buildSystemPrompt({
+      tools: [],
+      ledgerBlock: '🗂️ سجل المهمة الدائم لهذه الجلسة — الشجاع للتجارة رصيده 204000',
+    });
+    expect(prompt).toContain('سجل المهمة الدائم لهذه الجلسة');
+    expect(prompt).toContain('الشجاع للتجارة رصيده 204000');
+  });
+
+  it('keeps the prompt free of ledger content when none is provided', () => {
+    const prompt = buildSystemPrompt({ tools: [] });
+    // '▼ طلبات المستخدم' عنوان قسم خاص بكتلة السجل نفسها — لا يظهر في القواعد
+    expect(prompt).not.toContain('▼ طلبات المستخدم');
+    expect(prompt).not.toContain('▼ ما نُفّذ فعلاً');
+  });
+
+  it('carries the memory rules: no re-asking, no duplicate creation, resume-from-stop', () => {
+    // عقود المستخدم: لا يُسأل المستخدم عن بيانات وردت في الجلسة، ولا يُعاد
+    // إنشاء كيان أُنشئ، وعند الفشل يُستأنف من نقطة التوقف.
+    const prompt = buildSystemPrompt({ tools: [] });
+    expect(prompt).toContain('لا تطلب من المستخدم إعادة إرسال');
+    expect(prompt).toContain('ممنوع تكرار الإنشاء');
+    expect(prompt).toContain('استأنف من نقطة التوقف');
+  });
 });

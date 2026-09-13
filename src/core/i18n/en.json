@@ -544,7 +544,21 @@
       "role_viewer": "Viewer",
       "branch_main": "Main Branch - Sana'a",
       "branch_aden": "Aden Branch",
-      "branch_hodeidah": "Hodeidah Branch"
+      "branch_hodeidah": "Hodeidah Branch",
+      "createTitle": "New User",
+      "created": "User created successfully",
+      "deleted": "User deleted",
+      "detailTitle": "User Details",
+      "editTitle": "Edit User",
+      "emailInvalid": "Invalid email address",
+      "empty": "No users found",
+      "filterRole": "Filter by role",
+      "isActive": "Active",
+      "passwordPlaceholder": "Enter a strong password",
+      "passwordPolicy": "At least 8 characters, including a letter and a number",
+      "passwordTooShort": "Password must be at least 8 characters",
+      "updated": "User updated successfully",
+      "usernameInvalid": "Username must contain only letters, numbers, and underscores"
     },
     "roles": {
       "title": "Roles & Permissions",
@@ -2960,6 +2974,13 @@
       "warningDesc": "Resetting will not delete database data. It will only restart the setup wizard so you can change connection settings or re-seed default data.",
       "confirm": "I understand this will restart the setup wizard on next load.",
       "resetNow": "Reset Now"
+    },
+    "calendar": "Calendar",
+    "decimalPlaces": "Decimal Places",
+    "calendarGroup": {},
+    "calendarType": {
+      "gregorian": "Gregorian",
+      "hijri": "Hijri"
     }
   },
   "status": {

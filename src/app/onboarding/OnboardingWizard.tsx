@@ -38,6 +38,7 @@ export const OnboardingWizard: React.FC = () => {
   const steps = getSteps(t);
   const { currentStep, setCurrentStep, dbConfig, companyConfig, setCompleted, setProcessing, isProcessing, processingMessage, error, setError } = useOnboardingStore();
   const setActiveCompany = useAppStore((state) => state.setActiveCompany);
+  const language = useAppStore((state) => state.language);
 
   const nextStep = () => setCurrentStep(Math.min(currentStep + 1, steps.length - 1));
   const prevStep = () => setCurrentStep(Math.max(currentStep - 1, 0));
@@ -96,7 +97,7 @@ export const OnboardingWizard: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4" dir="rtl">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <div className="w-full max-w-3xl">
         {/* Progress */}
         <div className="mb-8">
@@ -517,8 +518,8 @@ function CompanyStep({ onNext, onBack }: { onNext: () => void; onBack: () => voi
               onChange={e => setCompanyConfig({ calendar: e.target.value as 'gregorian' | 'hijri' })}
               className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
-              <option value="gregorian">{t('settings.calendar.gregorian')}</option>
-              <option value="hijri">{t('settings.calendar.hijri')}</option>
+              <option value="gregorian">{t('settings.calendarType.gregorian')}</option>
+              <option value="hijri">{t('settings.calendarType.hijri')}</option>
             </select>
           </div>
           <div>

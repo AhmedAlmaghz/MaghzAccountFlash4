@@ -16,6 +16,7 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import type { User } from '@/modules/auth/types';
 import type { ToolContext } from '../types';
+import { TaskLedger } from '../engine/taskLedger';
 
 const mockedApi = vi.mocked(aiApi, true);
 const ctx: ToolContext = { companyId: 'c1', userId: 'u1' };
@@ -264,5 +265,119 @@ describe('ai.batch_status execute', () => {
     const out = (await status.execute({ batchId: 'b1' }, ctx)) as Record<string, unknown>;
     expect(String(out.progress)).toMatch(/أُنجز 8/);
     expect(JSON.stringify(out.errors)).toMatch(/عميل مفقود/);
+  });
+});
+
+describe('ai.enqueue_batch session duplicate guard', () => {
+  // سجل حقيقي (وليس mock) — نفس التطبيع الذي سيحمي الجلسات الفعلية.
+  const ledger = new TaskLedger();
+  ledger.registerEntities([{ tool: 'purchases.create_supplier', name: 'الشجاع للتجارة' }]);
+  const ledgerCtx: ToolContext = { companyId: 'c1', userId: 'u1', ledger };
+
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+    for (const name of ['purchases.create_supplier', 'sales.create_invoice']) {
+      registerTool({
+        name,
+        labelAr: 'أداة',
+        descriptionAr: 'وصف',
+        permission: 'core.view',
+        dangerLevel: 'write',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({}),
+      });
+    }
+  });
+
+  it('drops re-creation of a session-created supplier and discloses the skip', async () => {
+    // الجلسة الحقيقية 2026-09-14: دفعة كاملة أعادت إنشاء موردين وعملاء
+    // مُنشأين — أرصدة افتتاحية مضاعفة وصفان لكل كيان في البحث.
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'purchases.create_supplier', args: { name: 'الشجاع للتجارة' } },
+        { tool: 'purchases.create_supplier', args: { name: 'مورد جديد' } },
+      ],
+    }, ledgerCtx)) as Record<string, unknown>;
+    expect(out.batchId).toBe('b1');
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items;
+    expect(sent).toHaveLength(1);
+    expect(sent[0].args.name).toBe('مورد جديد');
+    expect(out.skippedDuplicates).toEqual([
+      { name: 'الشجاع للتجارة', existing: 'الشجاع للتجارة', reason: 'أُنشئ سابقاً في هذه الجلسة' },
+    ]);
+    expect(String(out.summary)).toContain('أُسقط 1');
+    expect(String(out.summary)).toContain('الشجاع للتجارة');
+  });
+
+  it('matches normalized names (double space + taa marbuta) — no silent duplicates', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 0, inserted: 0 } });
+    const out = (await enqueue.execute({
+      items: [{ tool: 'purchases.create_supplier', args: { name: 'الشجاع  للتجاره' } }],
+    }, ledgerCtx)) as Record<string, unknown>;
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+    expect(String(out.error)).toContain('أُنشئت سابقاً في هذه الجلسة');
+  });
+
+  it('drops intra-batch identical-name creates (different args escape the idempotency key)', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'purchases.create_supplier', args: { name: 'الحمداني', phone: '1' } },
+        { tool: 'purchases.create_supplier', args: { name: 'الحمداني', phone: '2' } },
+      ],
+    }, ledgerCtx)) as Record<string, unknown>;
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items;
+    expect(sent).toHaveLength(1);
+    expect(out.skippedDuplicates).toEqual([
+      { name: 'الحمداني', existing: 'الحمداني', reason: 'مكرر داخل الدفعة نفسها' },
+    ]);
+  });
+
+  it('cascades the drop to dependents and renumbers numeric after refs', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 2, inserted: 2 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'purchases.create_supplier', args: { name: 'الشجاع للتجارة' }, ref: 'sup1' }, // مكرر ← إسقاط
+        { tool: 'purchases.create_supplier', args: { name: 'الحمادي' } },                     // يبقى — تسلسل 0
+        { tool: 'sales.create_invoice', args: { supplierId: '{{sup1.id}}' } },                // تابع ← إسقاط
+        { tool: 'sales.create_invoice', args: { total: 5 }, after: 1 },                       // بعد ← يُرقَّم 0
+      ],
+    }, ledgerCtx)) as Record<string, unknown>;
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items;
+    expect(sent).toHaveLength(2);
+    expect(sent[0].args.name).toBe('الحمادي');
+    expect(sent[1].after_seq).toBe(0);
+    expect(String(JSON.stringify(out.skippedDuplicates))).toContain('تابع لعنصر مُسقَط');
+  });
+
+  it('leaves batches untouched when the context has no ledger (backward compatible)', async () => {
+    // بلا سجل جلسة: السلوك القائم — args مختلفة تعني مفتاح idempotency مختلف
+    // فيهبطان الاثنان إلى الطابور (حارس الاسم الجلسي هو الجديد فقط).
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 2, inserted: 2 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'purchases.create_supplier', args: { name: 'الشجاع للتجارة', phone: '1' } },
+        { tool: 'purchases.create_supplier', args: { name: 'الشجاع للتجارة', phone: '2' } },
+      ],
+    }, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchCreate.mock.calls[0][0].items).toHaveLength(2);
+    expect(out.skippedDuplicates).toBeUndefined();
+  });
+
+  it('ignores document tools — invoice repeats are legitimate daily work', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 2, inserted: 2 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'sales.create_invoice', args: { customerId: 'c-1', total: 100 } },
+        { tool: 'sales.create_invoice', args: { customerId: 'c-1', total: 200 } },
+      ],
+    }, ledgerCtx)) as Record<string, unknown>;
+    expect(mockedApi.batchCreate.mock.calls[0][0].items).toHaveLength(2);
+    expect(out.skippedDuplicates).toBeUndefined();
   });
 });
