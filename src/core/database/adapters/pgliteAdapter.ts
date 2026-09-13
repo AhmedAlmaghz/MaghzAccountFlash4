@@ -162,6 +162,7 @@ import aiJobRefOutputs from '@root/drizzle/0025_ai_job_ref_outputs.sql?raw';
 import stockUniqueIndex from '@root/drizzle/0026_stock_unique_index.sql?raw';
 import posModule from '@root/drizzle/0027_pos_module.sql?raw';
 import aiJobItemLeases from '@root/drizzle/0028_ai_job_item_leases.sql?raw';
+import usersRolesHardening from '@root/drizzle/0029_users_roles_hardening.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -193,6 +194,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0026_stock_unique_index', sql: stockUniqueIndex },
   { name: '0027_pos_module', sql: posModule },
   { name: '0028_ai_job_item_leases', sql: aiJobItemLeases },
+  { name: '0029_users_roles_hardening', sql: usersRolesHardening },
 ];
 
 /**

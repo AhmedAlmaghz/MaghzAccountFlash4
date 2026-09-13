@@ -36,3 +36,5 @@ release-local/
 *.sw?
 
 .npmrc
+
+.capture

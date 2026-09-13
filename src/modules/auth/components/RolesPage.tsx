@@ -36,6 +36,8 @@ export const RolesPage: React.FC = () => {
     description: '',
     permissions: [] as Permission[],
   });
+  const [formError, setFormError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   React.useEffect(() => {
     if (!canManageRoles) {
@@ -60,26 +62,33 @@ export const RolesPage: React.FC = () => {
 
   const handleSave = async () => {
     if (!activeCompany) return;
-
-    const data = {
-      companyId: activeCompany.id,
-      name: formData.name,
-      description: formData.description,
-      permissions: formData.permissions,
-      isSystem: editingRole?.isSystem ?? false,
-    };
-
-    if (editingRole) {
-      await update(editingRole.id, data);
-      addToast('success', t('auth.roles.updated'));
-    } else {
-      await create(data);
-      addToast('success', t('auth.roles.created'));
+    const name = formData.name.trim();
+    if (!name) { setFormError(t('auth.roles.nameRequired', { default: 'اسم الدور مطلوب' })); return; }
+    if (formData.permissions.length === 0) { setFormError(t('auth.roles.permissionsRequired', { default: 'اختر صلاحية واحدة على الأقل' })); return; }
+    setFormError('');
+    setIsSaving(true);
+    try {
+      const data = {
+        companyId: activeCompany.id,
+        name,
+        description: formData.description.trim(),
+        permissions: formData.permissions,
+        isSystem: editingRole?.isSystem ?? false,
+      };
+      let result: { success: boolean; error?: string };
+      if (editingRole) {
+        result = await update(editingRole.id, data);
+      } else {
+        result = await create(data);
+      }
+      if (!result.success) { addToast('error', result.error || t('common.error')); return; }
+      addToast('success', t(editingRole ? 'auth.roles.updated' : 'auth.roles.created'));
+      setIsModalOpen(false);
+      setEditingRole(null);
+      setFormData({ name: '', description: '', permissions: [] });
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsModalOpen(false);
-    setEditingRole(null);
-    setFormData({ name: '', description: '', permissions: [] });
   };
 
   const handleDelete = (role: Role) => {
@@ -89,7 +98,8 @@ export const RolesPage: React.FC = () => {
       title: t('auth.roles.deleteTitle'),
       message: t('auth.roles.deleteConfirm', { name: role.name }),
       onConfirm: async () => {
-        await remove(role.id);
+        const res = await remove(role.id);
+        if (!res.success) { addToast('error', res.error || t('common.error')); return; }
         addToast('success', t('auth.roles.deleted'));
         setConfirmDialog((prev) => ({ ...prev, open: false }));
       },
@@ -277,12 +287,14 @@ export const RolesPage: React.FC = () => {
         className="max-w-4xl"
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
+            {formError && <span className="text-xs text-rose-600 mr-auto">{formError}</span>}
             <Button variant="secondary" onClick={() => setIsModalOpen(false)}>{t('cancel')}</Button>
             <Button
               variant="primary"
               leftIcon={<Save size={16} />}
               onClick={handleSave}
-              disabled={editingRole?.isSystem}
+              disabled={editingRole?.isSystem || isSaving}
+              isLoading={isSaving}
             >
               {editingRole?.isSystem ? t('auth.roles.readOnly') : t('save')}
             </Button>

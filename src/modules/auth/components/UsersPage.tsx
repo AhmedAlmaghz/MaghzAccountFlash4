@@ -41,6 +41,7 @@ export const UsersPage: React.FC = () => {
 
   const [editing, setEditing] = useState<User | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [detailUser, setDetailUser] = useState<User | null>(null);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -49,8 +50,12 @@ export const UsersPage: React.FC = () => {
     role: 'accountant' as User['role'],
     branchId: '' as string | null,
     isActive: true,
+    password: '',
   });
   const [newPassword, setNewPassword] = useState('');
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
 
   // Redirect if no permission
   React.useEffect(() => {
@@ -59,7 +64,23 @@ export const UsersPage: React.FC = () => {
     }
   }, [hasPermission, navigate]);
 
+  // Load branches for selector
+  React.useEffect(() => {
+    if (!activeCompany?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getDbAdapter } = await import('@/core/database/adapters');
+        const adapter = await getDbAdapter();
+        const res = await adapter.query('SELECT id, name FROM branches WHERE company_id = $1 AND is_active = true ORDER BY name', [activeCompany.id]);
+        if (!cancelled && res.success) setBranches((res.rows || []) as Array<{ id: string; name: string }>);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [activeCompany?.id]);
+
   const openModal = useCallback((user?: User) => {
+    setFormErrors({});
     if (user) {
       setEditing(user);
       setFormData({
@@ -70,39 +91,55 @@ export const UsersPage: React.FC = () => {
         role: user.role,
         branchId: user.branchId || null,
         isActive: user.isActive,
+        password: '',
       });
     } else {
       setEditing(null);
-      setFormData({ username: '', email: '', fullName: '', phone: '', role: 'accountant', branchId: null, isActive: true });
+      setFormData({ username: '', email: '', fullName: '', phone: '', role: 'accountant', branchId: null, isActive: true, password: '' });
     }
     setIsModalOpen(true);
   }, []);
 
   const handleSave = async () => {
     if (!activeCompany) return;
-
-    const data = {
-      companyId: activeCompany.id,
-      username: formData.username,
-      email: formData.email,
-      fullName: formData.fullName,
-      phone: formData.phone,
-      role: formData.role,
-      branchId: formData.branchId,
-      isActive: formData.isActive,
-    };
-
-    if (editing) {
-      await update(editing.id, data);
-      addToast('success', t('auth.users.updated'));
-    } else {
-      await create(data);
-      addToast('success', t('auth.users.created'));
+    const errors: Record<string, string> = {};
+    const username = formData.username.trim();
+    if (!username || !/^[\p{L}\p{N}_.-]{3,100}$/u.test(username)) errors.username = t('auth.users.usernameInvalid', { default: 'اسم المستخدم 3-100 حرف (أحرف وأرقام و _ . -)' });
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) errors.email = t('auth.users.emailInvalid', { default: 'بريد غير صالح' });
+    if (!editing && (!formData.password || formData.password.length < 12)) errors.password = t('auth.users.passwordTooShort', { default: 'كلمة المرور 12 حرفاً على الأقل' });
+    if (formData.password && !/^(?=.*[A-Za-z\u0600-\u06FF])(?=.*\d).{12,}$/.test(formData.password)) errors.password = t('auth.users.passwordPolicy', { default: 'كلمة المرور: 12 حرفاً مع حرف ورقم' });
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
+    setFormErrors({});
+    setIsSaving(true);
+    try {
+      const data: Record<string, unknown> = {
+        companyId: activeCompany.id,
+        username,
+        email: formData.email.trim() || undefined,
+        fullName: formData.fullName.trim() || username,
+        phone: formData.phone.trim() || undefined,
+        role: formData.role,
+        branchId: formData.branchId || null,
+        isActive: formData.isActive,
+      };
+      if (!editing) (data as Record<string, unknown>).password = formData.password;
+      let result: { success: boolean; error?: string };
+      if (editing) {
+        result = await update(editing.id, data);
+      } else {
+        result = await create(data);
+      }
+      if (!result.success) {
+        addToast('error', result.error || t('common.error', { default: 'حدث خطأ' }));
+        return;
+      }
+      addToast('success', t(editing ? 'auth.users.updated' : 'auth.users.created'));
+      setIsModalOpen(false);
+      setEditing(null);
+      setFormData({ username: '', email: '', fullName: '', phone: '', role: 'accountant', branchId: null, isActive: true, password: '' });
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsModalOpen(false);
-    setEditing(null);
-    setFormData({ username: '', email: '', fullName: '', phone: '', role: 'accountant', branchId: null, isActive: true });
   };
 
   const handleDelete = (user: User) => {
@@ -112,7 +149,8 @@ export const UsersPage: React.FC = () => {
       message: t('auth.users.deleteConfirm', { name: user.username }),
       variant: 'danger',
       onConfirm: async () => {
-        await remove(user.id);
+        const res = await remove(user.id);
+        if (!res.success) { addToast('error', res.error || t('common.error')); return; }
         addToast('success', t('auth.users.deleted'));
         setConfirmDialog((prev) => ({ ...prev, open: false }));
       },
@@ -129,8 +167,9 @@ export const UsersPage: React.FC = () => {
         : t('auth.users.activateConfirm', { name: user.username }),
       variant: 'warning',
       onConfirm: async () => {
-        await toggleActive(user.id, !user.isActive);
-        addToast('success', t(user.isActive ? 'auth.users.updated' : 'auth.users.updated'));
+        const res = await toggleActive(user.id, !user.isActive);
+        if (!res.success) { addToast('error', res.error || t('common.error')); return; }
+        addToast('success', t('auth.users.updated'));
         setConfirmDialog((prev) => ({ ...prev, open: false }));
       },
     });
@@ -138,7 +177,12 @@ export const UsersPage: React.FC = () => {
 
   const handleResetPassword = async () => {
     if (!selectedUser || !newPassword) return;
-    await resetPassword(selectedUser.id, newPassword);
+    if (newPassword.length < 12 || !/[A-Za-z\u0600-\u06FF]/.test(newPassword) || !/\d/.test(newPassword)) {
+      addToast('error', t('auth.users.passwordPolicy', { default: 'كلمة المرور: 12 حرفاً مع حرف ورقم' }));
+      return;
+    }
+    const res = await resetPassword(selectedUser.id, newPassword);
+    if (!res.success) { addToast('error', res.error || t('common.error')); return; }
     addToast('success', t('auth.users.updated'));
     setIsResetPasswordOpen(false);
     setNewPassword('');
@@ -202,7 +246,7 @@ export const UsersPage: React.FC = () => {
         return (
           <div className="flex items-center gap-1">
             <ActionButtons
-              onView={() => { setSelectedUser(user); setIsDetailOpen(true); }}
+              onView={() => { setDetailUser(user); setIsDetailOpen(true); }}
               onEdit={() => openModal(user)}
               onDelete={() => handleDelete(user)}
               showDelete={!isCurrentUser}
@@ -262,22 +306,22 @@ export const UsersPage: React.FC = () => {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="بحث في المستخدمين..."
+            placeholder={t('auth.users.searchPlaceholder', { default: 'بحث في المستخدمين...' })}
             className="form-control pr-9 w-full sm:w-72"
           />
         </div>
         <select
-          title="تصفية حسب الدور"
+          title={t('auth.users.filterRole', { default: 'تصفية حسب الدور' })}
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value)}
           className="form-control w-full sm:w-48"
         >
-          <option value="">كل الأدوار</option>
-          <option value="admin">أدمن</option>
-          <option value="manager">مدير</option>
-          <option value="accountant">محاسب</option>
-          <option value="sales_rep">مندوب مبيعات</option>
-          <option value="viewer">مشاهد فقط</option>
+          <option value="">{t('auth.users.allRoles', { default: 'كل الأدوار' })}</option>
+          <option value="admin">{t('auth.users.role_admin')}</option>
+          <option value="manager">{t('auth.users.role_manager')}</option>
+          <option value="accountant">{t('auth.users.role_accountant')}</option>
+          <option value="sales_rep">{t('auth.users.role_sales_rep')}</option>
+          <option value="viewer">{t('auth.users.role_viewer')}</option>
         </select>
       </div>
 
@@ -288,9 +332,9 @@ export const UsersPage: React.FC = () => {
           columns={columns}
           keyExtractor={(row) => row.id}
           isLoading={isLoading}
-          emptyMessage="لا يوجد مستخدمين"
+          emptyMessage={t('auth.users.empty', { default: 'لا يوجد مستخدمين' })}
           searchable={false}
-          title="قائمة المستخدمين"
+          title={t('auth.users.title')}
         />
       </Card>
 
@@ -298,70 +342,83 @@ export const UsersPage: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editing ? 'تعديل مستخدم' : 'مستخدم جديد'}
+        title={editing ? t('auth.users.editTitle', { default: 'تعديل مستخدم' }) : t('auth.users.createTitle', { default: 'مستخدم جديد' })}
         size="md"
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>إلغاء</Button>
-            <Button variant="primary" onClick={handleSave}>حفظ</Button>
+            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>{t('common.cancel', { default: 'إلغاء' })}</Button>
+            <Button variant="primary" onClick={handleSave} isLoading={isSaving} disabled={isSaving}>{t('common.save', { default: 'حفظ' })}</Button>
           </div>
         }
       >
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label="اسم المستخدم"
+              label={t('auth.users.formUsername', { default: 'اسم المستخدم' })}
               value={formData.username}
               onChange={(e) => setFormData((prev) => ({ ...prev, username: e.target.value }))}
+              error={formErrors.username}
               required
             />
             <Input
-              label="البريد الإلكتروني"
+              label={t('auth.users.formEmail', { default: 'البريد الإلكتروني' })}
               type="email"
               value={formData.email}
               onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+              error={formErrors.email}
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label="الاسم الكامل"
+              label={t('auth.users.formFullName', { default: 'الاسم الكامل' })}
               value={formData.fullName}
               onChange={(e) => setFormData((prev) => ({ ...prev, fullName: e.target.value }))}
             />
             <Input
-              label="رقم الهاتف"
+              label={t('auth.users.formPhone', { default: 'رقم الهاتف' })}
               value={formData.phone}
               onChange={(e) => setFormData((prev) => ({ ...prev, phone: e.target.value }))}
             />
           </div>
+          {!editing && (
+            <Input
+              label={t('auth.users.formPassword', { default: 'كلمة المرور' })}
+              type="password"
+              value={formData.password}
+              onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
+              error={formErrors.password}
+              placeholder={t('auth.users.passwordPlaceholder', { default: '12 حرفاً مع حرف ورقم' })}
+              required
+            />
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 block">الدور</label>
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 block">{t('auth.users.role', { default: 'الدور' })}</label>
               <select
-                title="تصفية حسب الدور"
+                title={t('auth.users.filterRole', { default: 'الدور' })}
                 value={formData.role}
                 onChange={(e) => setFormData((prev) => ({ ...prev, role: e.target.value as User['role'] }))}
                 className="form-control w-full"
               >
-                <option value="admin">أدمن</option>
-                <option value="manager">مدير</option>
-                <option value="accountant">محاسب</option>
-                <option value="sales_rep">مندوب مبيعات</option>
-                <option value="viewer">مشاهد فقط</option>
+                <option value="admin">{t('auth.users.role_admin')}</option>
+                <option value="manager">{t('auth.users.role_manager')}</option>
+                <option value="accountant">{t('auth.users.role_accountant')}</option>
+                <option value="sales_rep">{t('auth.users.role_sales_rep')}</option>
+                <option value="viewer">{t('auth.users.role_viewer')}</option>
               </select>
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 block">الفرع</label>
+              <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5 block">{t('auth.users.branch', { default: 'الفرع' })}</label>
               <select
                 value={formData.branchId || ''}
-                title="تصفية حسب الفرع"
+                title={t('auth.users.branch', { default: 'الفرع' })}
                 onChange={(e) => setFormData((prev) => ({ ...prev, branchId: e.target.value || null }))}
                 className="form-control w-full"
               >
-                <option value="">كل الفروع</option>
-                <option value="branch-1">الفرع الرئيسي - صنعاء</option>
-                <option value="branch-2">فرع عدن</option>
-                <option value="branch-3">فرع الحديدة</option>
+                <option value="">{t('auth.users.allBranches', { default: 'كل الفروع' })}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -372,7 +429,7 @@ export const UsersPage: React.FC = () => {
               onChange={(e) => setFormData((prev) => ({ ...prev, isActive: e.target.checked }))}
               className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
             />
-            <span className="text-sm text-slate-700 dark:text-slate-300">حساب نشط</span>
+            <span className="text-sm text-slate-700 dark:text-slate-300">{t('auth.users.isActive', { default: 'حساب نشط' })}</span>
           </label>
         </div>
       </Modal>
@@ -380,48 +437,48 @@ export const UsersPage: React.FC = () => {
       {/* User Details Modal */}
       <Modal
         isOpen={isDetailOpen}
-        onClose={() => { setIsDetailOpen(false); setSelectedUser(null); }}
-        title="تفاصيل المستخدم"
+        onClose={() => { setIsDetailOpen(false); setDetailUser(null); }}
+        title={t('auth.users.detailTitle', { default: 'تفاصيل المستخدم' })}
         size="md"
       >
-        {selectedUser && (
+        {detailUser && (
           <div className="space-y-4">
             <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
               <div className="w-16 h-16 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-600 flex items-center justify-center text-xl font-bold">
-                {selectedUser.username.charAt(0)}
+                {detailUser.username.charAt(0)}
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-slate-50">{selectedUser.username}</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">{ROLE_LABELS[selectedUser.role] || selectedUser.role}</p>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-slate-50">{detailUser.username}</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{ROLE_LABELS[detailUser.role] || detailUser.role}</p>
               </div>
-              <StatusBadge status={selectedUser.isActive ? 'active' : 'inactive'} className="mr-auto" />
+              <StatusBadge status={detailUser.isActive ? 'active' : 'inactive'} className="mr-auto" />
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <Mail size={16} className="text-slate-400" />
-                <span>{selectedUser.email || '-'}</span>
+                <span>{detailUser.email || '-'}</span>
               </div>
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <Phone size={16} className="text-slate-400" />
-                <span>{selectedUser.phone || '-'}</span>
+                <span>{detailUser.phone || '-'}</span>
               </div>
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <Building2 size={16} className="text-slate-400" />
-                <span>الفرع: {selectedUser.branchName || selectedUser.branchId || '-'}</span>
+                <span>{t('auth.users.branch', { default: 'الفرع' })}: {detailUser.branchName || branches.find(b => b.id === detailUser.branchId)?.name || '-'}</span>
               </div>
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <UserIcon size={16} className="text-slate-400" />
-                <span>الاسم الكامل: {selectedUser.fullName || '-'}</span>
+                <span>{t('auth.users.formFullName', { default: 'الاسم الكامل' })}: {detailUser.fullName || '-'}</span>
               </div>
             </div>
 
             <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
               <p className="text-xs text-slate-400">
-                تاريخ الإنشاء: {selectedUser.createdAt ? new Date(selectedUser.createdAt).toLocaleDateString('ar-YE') : '-'}
+                {t('auth.users.createdAt', { default: 'تاريخ الإنشاء' })}: {detailUser.createdAt ? new Date(detailUser.createdAt).toLocaleDateString('ar-YE') : '-'}
               </p>
               <p className="text-xs text-slate-400">
-                آخر دخول: {selectedUser.lastLoginAt ? new Date(selectedUser.lastLoginAt).toLocaleDateString('ar-YE') : '-'}
+                {t('auth.users.lastLogin', { default: 'آخر دخول' })}: {detailUser.lastLoginAt ? new Date(detailUser.lastLoginAt).toLocaleDateString('ar-YE') : '-'}
               </p>
             </div>
           </div>

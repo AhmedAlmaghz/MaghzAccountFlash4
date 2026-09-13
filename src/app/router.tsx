@@ -106,7 +106,6 @@ const HrSettingsPage = React.lazy(() => import('@/modules/settings/components/Hr
 const PayrollComponentsPage = React.lazy(() => import('@/modules/settings/components/PayrollComponentsPage'));
 const BranchesPage = React.lazy(() => import('@/modules/settings/components/BranchesPage'));
 const BackupPage = React.lazy(() => import('@/modules/core/components/BackupPage'));
-const UsersSettingsPage = React.lazy(() => import('@/modules/settings/components/UsersPage'));
 const ResetOnboardingPage = React.lazy(() => import('@/modules/settings/components/ResetOnboardingPage'));
 
 // New admin screens
@@ -274,9 +273,13 @@ export const AppRouter: React.FC = () => {
               <Route path="/reports/opportunity-pipeline" element={withSuspense(OpportunityPipelineReport)} />
             </Route>
 
-            <Route element={<PermissionRoute permission="settings.view" />}>
+            <Route element={<PermissionRoute permission="settings.users" />}>
               <Route path="/users" element={withSuspense(UsersPage)} />
+            </Route>
+            <Route element={<PermissionRoute permission="settings.roles" />}>
               <Route path="/roles" element={withSuspense(RolesPage)} />
+            </Route>
+            <Route element={<PermissionRoute permission="settings.audit_log" />}>
               <Route path="/audit-logs" element={withSuspense(AuditLogPage)} />
             </Route>
 
@@ -300,7 +303,7 @@ export const AppRouter: React.FC = () => {
                 <Route path="cash-boxes" element={withSuspense(CashBoxesPage)} />
                 <Route path="cost-centers" element={withSuspense(CostCentersPage)} />
                 <Route path="database" element={withSuspense(DatabaseSettingsPage)} />
-                <Route path="users" element={withSuspense(UsersSettingsPage)} />
+                <Route path="users" element={<Navigate to="/users" replace />} />
                 <Route path="reset" element={withSuspense(ResetOnboardingPage)} />
               </Route>
               {/* AI settings configure provider API keys — gated at the ROUTE

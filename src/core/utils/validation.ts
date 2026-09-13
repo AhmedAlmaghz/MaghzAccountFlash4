@@ -21,6 +21,49 @@ export const emailSchema = z.string().email().optional().or(z.literal(''));
 
 export const phoneSchema = z.string().max(50).optional().or(z.literal(''));
 
+export const usernameSchema = z.string().min(3).max(100).regex(/^[\p{L}\p{N}_.-]+$/u, 'Username must be 3-100 chars: letters, numbers, _, ., -');
+
+export const passwordSchema = z.string().min(12, 'Password must be at least 12 characters').regex(/[A-Za-z\u0600-\u06FF]/, 'Password must contain a letter').regex(/\d/, 'Password must contain a number');
+
+export const userRoleSchema = z.enum(['super_admin', 'admin', 'manager', 'accountant', 'sales_rep', 'viewer']);
+
+export const createUserSchema = z.object({
+  companyId: companyIdSchema,
+  username: usernameSchema,
+  email: emailSchema,
+  fullName: z.string().max(255).optional().or(z.literal('')),
+  phone: phoneSchema,
+  password: passwordSchema,
+  role: userRoleSchema.default('viewer'),
+  branchId: uuidSchema.optional().nullable().or(z.literal('')),
+  isActive: z.boolean().default(true),
+});
+
+export const updateUserSchema = z.object({
+  username: usernameSchema.optional(),
+  email: emailSchema,
+  fullName: z.string().max(255).optional().or(z.literal('')),
+  phone: phoneSchema,
+  role: userRoleSchema.optional(),
+  branchId: uuidSchema.optional().nullable().or(z.literal('')),
+  isActive: z.boolean().optional(),
+  photoUrl: z.string().max(3000000).optional().nullable(),
+});
+
+export const createRoleSchema = z.object({
+  companyId: companyIdSchema,
+  name: z.string().min(1).max(100).transform(s => s.trim()).refine(s => s.length > 0, 'Role name required'),
+  description: z.string().max(255).optional().or(z.literal('')),
+  permissions: z.array(z.string()).min(1, 'At least one permission required'),
+  isSystem: z.boolean().optional().default(false),
+});
+
+export const updateRoleSchema = z.object({
+  name: z.string().min(1).max(100).transform(s => s.trim()).optional(),
+  description: z.string().max(255).optional().or(z.literal('')),
+  permissions: z.array(z.string()).optional(),
+});
+
 export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; error: string } {
   const result = schema.safeParse(data);
   if (result.success) return { success: true, data: result.data };
@@ -396,7 +439,7 @@ export const createStockTransferSchema = z.object({
     quantity: currencyAmountSchema.positive(),
   })).optional(),
 }).refine(d => d.fromWarehouseId !== d.toWarehouseId, {
-  message: 'ظ…ط³طھظˆط¯ط¹ ط§ظ„ظ…طµط¯ط± ظˆط§ظ„ظˆط¬ظ‡ط© ظٹط¬ط¨ ط£ظ† ظٹظƒظˆظ†ط§ ظ…ط®طھظ„ظپظٹظ†',
+  message: 'مستودع المصدر والوجهة يجب أن يكونا مختلفين',
   path: ['toWarehouseId'],
 });
 
@@ -594,7 +637,7 @@ export const createWorkOrderSchema = z.object({
   })).optional(),
 });
 
-// â”€â”€â”€ POS module (ظ†ظ‚ط§ط· ط§ظ„ط¨ظٹط¹) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ POS module (نقاط البيع) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const openPosShiftSchema = z.object({
   companyId: companyIdSchema,
   cashBoxId: uuidSchema,
