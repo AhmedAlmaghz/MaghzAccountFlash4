@@ -204,6 +204,13 @@
       "when": 1798100000000,
       "tag": "0028_ai_job_item_leases",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": 7,
+      "when": 1798200000000,
+      "tag": "0029_users_roles_hardening",
+      "breakpoints": true
     }
   ]
 }

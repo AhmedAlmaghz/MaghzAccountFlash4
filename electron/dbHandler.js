@@ -148,7 +148,12 @@ const FALLBACK_PERMISSIONS = {
 };
 
 function hasPermission(session, permission) {
-  if (session.user.role === 'super_admin' || session.user.role === 'admin') return true;
+  if (session.user.role === 'super_admin') return true;
+  if (session.user.role === 'admin') {
+    const restricted = ['core.edit'];
+    if (restricted.includes(permission)) return false;
+    return true;
+  }
   if (session.permissions.includes('*')) return true;
   if (session.permissions.includes(permission)) return true;
   const fallback = FALLBACK_PERMISSIONS[session.user.role];
@@ -165,6 +170,23 @@ function sessionPublicData(session) {
 function canManageRole(session, role) {
   if (!role || !isAdminRole(role)) return true;
   return session.user.role === 'super_admin';
+}
+
+async function ensureAtLeastOneAdmin(companyId, excludeUserId = null) {
+  const params = [companyId];
+  let sql = `SELECT COUNT(*)::int AS cnt FROM users WHERE company_id = $1 AND is_active = true AND role IN ('admin','super_admin')`;
+  if (excludeUserId) {
+    sql += ` AND id <> $${params.length + 1}::uuid`;
+    params.push(excludeUserId);
+  }
+  const res = await pool.query(sql, params);
+  return Number(res.rows[0]?.cnt || 0) > 0;
+}
+
+async function assertBranchBelongsToCompany(branchId, companyId) {
+  if (!branchId) return true;
+  const res = await pool.query('SELECT 1 FROM branches WHERE id = $1::uuid AND company_id = $2', [branchId, companyId]);
+  return res.rows.length > 0;
 }
 
 function deleteSession(session) {
@@ -3758,13 +3780,23 @@ export function registerAuthHandlers() {
       if (!canManageRole(session, data?.role)) {
         return { success: false, error: 'Only super_admin can create admin accounts' };
       }
-      if (!data || typeof data.username !== 'string' || !/^[\p{L}\p{N}_.-]{3,100}$/u.test(data.username) || !validateNewPassword(data.password)) {
+      const username = typeof data?.username === 'string' ? data.username.trim() : '';
+      const email = typeof data?.email === 'string' && data.email.trim() ? data.email.trim() : null;
+      const phone = typeof data?.phone === 'string' && data.phone.trim() ? data.phone.trim() : null;
+      if (!username || !/^[\p{L}\p{N}_.-]{3,100}$/u.test(username) || !validateNewPassword(data.password)) {
         return { success: false, error: 'Invalid user data or password' };
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return { success: false, error: 'Invalid email format' };
+      }
+      if (data.branchId) {
+        const ok = await assertBranchBelongsToCompany(data.branchId, session.user.companyId);
+        if (!ok) return { success: false, error: 'Branch does not belong to this company' };
       }
       const result = await pool.query(
         `INSERT INTO users (company_id, username, email, full_name, phone, role, branch_id, is_active, password_hash, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, NOW()) RETURNING id`,
-        [session.user.companyId, data.username.trim(), data.email || null, data.fullName || data.username.trim(), data.phone || null,
+        [session.user.companyId, username, email, data.fullName?.trim() || username, phone,
           data.role || 'viewer', data.branchId || null, data.isActive !== false, hashPasswordNode(data.password)]
       );
       return { success: true, id: result.rows[0].id };
@@ -3778,6 +3810,32 @@ export function registerAuthHandlers() {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
       if (id === session.user.id && data?.isActive === false) return { success: false, error: 'Cannot deactivate current user' };
+      if (data?.username !== undefined) {
+        const u = String(data.username).trim();
+        if (!u || !/^[\p{L}\p{N}_.-]{3,100}$/u.test(u)) return { success: false, error: 'Invalid username' };
+        data.username = u;
+      }
+      if (data?.email !== undefined && data.email) {
+        const e = String(data.email).trim();
+        if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return { success: false, error: 'Invalid email format' };
+        data.email = e || null;
+      }
+      if (data?.branchId) {
+        const ok = await assertBranchBelongsToCompany(data.branchId, session.user.companyId);
+        if (!ok) return { success: false, error: 'Branch does not belong to this company' };
+      }
+      // Last admin protection: don't allow deactivating or demoting the last active admin
+      if (data?.isActive === false || (data?.role && !isAdminRole(data.role))) {
+        const targetRoleRes = await pool.query('SELECT role, is_active FROM users WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+        if (targetRoleRes.rows.length && isAdminRole(targetRoleRes.rows[0].role) && targetRoleRes.rows[0].is_active) {
+          const willDemote = data.role !== undefined && !isAdminRole(data.role);
+          const willDeactivate = data.isActive === false;
+          if (willDemote || willDeactivate) {
+            const hasOtherAdmin = await ensureAtLeastOneAdmin(session.user.companyId, id);
+            if (!hasOtherAdmin) return { success: false, error: 'Cannot deactivate or demote the last admin' };
+          }
+        }
+      }
       // Role changes: never allow granting a privileged role unless the caller
       // is super_admin; never allow demoting/removing the privileged role of an
       // existing admin unless the caller is super_admin.
@@ -3791,11 +3849,23 @@ export function registerAuthHandlers() {
           return { success: false, error: 'Only super_admin can modify admin accounts' };
         }
       }
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (data?.username !== undefined) { fields.push(`username = $${idx++}`); values.push(data.username); }
+      if (data?.email !== undefined) { fields.push(`email = $${idx++}`); values.push(data.email || null); }
+      if (data?.fullName !== undefined) { fields.push(`full_name = $${idx++}`); values.push(data.fullName?.trim() || null); }
+      if (data?.phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(data.phone?.trim() || null); }
+      if (data?.role !== undefined) { fields.push(`role = $${idx++}`); values.push(data.role); }
+      if (data?.branchId !== undefined) { fields.push(`branch_id = $${idx++}::uuid`); values.push(data.branchId || null); }
+      if (data?.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(data.isActive !== false); }
+      if (data?.photoUrl !== undefined) { fields.push(`photo_url = $${idx++}`); values.push(data.photoUrl || null); }
+      if (fields.length === 0) return { success: false, error: 'No fields to update' };
+      fields.push(`updated_at = NOW()`);
+      values.push(id, session.user.companyId);
       const result = await pool.query(
-        `UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, role = $5,
-         branch_id = $6::uuid, is_active = $7, photo_url = $8, updated_at = NOW() WHERE id = $9::uuid AND company_id = $10 RETURNING id`,
-        [data?.username, data?.email || null, data?.fullName || null, data?.phone || null, data?.role,
-          data?.branchId || null, data?.isActive !== false, data?.photoUrl || null, id, session.user.companyId]
+        `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx} RETURNING id`,
+        values
       );
       if (result.rows.length) {
         // Deactivating a user must cut off their live sessions immediately.
@@ -3804,7 +3874,7 @@ export function registerAuthHandlers() {
       }
       return { success: false, error: 'User not found' };
     } catch (err) {
-      return { success: false, error: err.message };
+      return { success: false, error: err.code === '23505' ? 'Username already exists' : err.message };
     }
   });
 
@@ -4103,10 +4173,14 @@ export function registerAuthHandlers() {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
       if (id === session.user.id) return { success: false, error: 'Cannot delete current user' };
-      const target = await pool.query('SELECT role FROM users WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+      const target = await pool.query('SELECT role, is_active FROM users WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
       if (target.rows.length === 0) return { success: false, error: 'User not found' };
       if (!canManageRole(session, target.rows[0].role)) {
         return { success: false, error: 'Only super_admin can delete admin accounts' };
+      }
+      if (isAdminRole(target.rows[0].role) && target.rows[0].is_active) {
+        const hasOtherAdmin = await ensureAtLeastOneAdmin(session.user.companyId, id);
+        if (!hasOtherAdmin) return { success: false, error: 'Cannot delete the last admin' };
       }
       const result = await pool.query('DELETE FROM users WHERE id = $1::uuid AND company_id = $2 RETURNING id', [id, session.user.companyId]);
       if (result.rows.length) {

@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, unique } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, unique, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ─── Core / Companies ─────────────────────────────────────────────────────────
 export const companies = pgTable('companies', {
@@ -21,34 +22,60 @@ export const companies = pgTable('companies', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+export const branches = pgTable('branches', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 100 }).notNull(),
+  code: varchar('code', { length: 20 }),
+  address: text('address'),
+  city: varchar('city', { length: 100 }),
+  phone: varchar('phone', { length: 50 }),
+  isActive: boolean('is_active').notNull().default(true),
+  createdBy: uuid('created_by'),
+  updatedBy: uuid('updated_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  companyNameUnique: unique('uq_branches_company_name').on(table.companyId, sql`lower(${table.name})`),
+  companyCodeUnique: unique('uq_branches_company_code').on(table.companyId, table.code),
+  companyActiveIdx: index('idx_branches_company_active').on(table.companyId, table.isActive),
+}));
+
 // ─── Auth / Users ─────────────────────────────────────────────────────────────
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
-  companyId: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
+  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   username: varchar('username', { length: 100 }).notNull(),
   email: varchar('email', { length: 255 }),
   fullName: varchar('full_name', { length: 255 }),
   phone: varchar('phone', { length: 50 }),
-  passwordHash: text('password_hash'),
+  passwordHash: text('password_hash').notNull(),
   photoUrl: text('photo_url'),
   role: varchar('role', { length: 50 }).notNull().default('accountant'),
-  branchId: uuid('branch_id'),
+  branchId: uuid('branch_id').references(() => branches.id, { onDelete: 'setNull' }),
   isActive: boolean('is_active').notNull().default(true),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  companyUsernameUnique: unique('uq_users_company_username').on(table.companyId, sql`lower(${table.username})`),
+  companyIdIdx: index('idx_users_company_id').on(table.companyId),
+  usernameIdx: index('idx_users_username').on(table.username),
+}));
 
 export const roles = pgTable('roles', {
   id: uuid('id').defaultRandom().primaryKey(),
-  companyId: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
+  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 100 }).notNull(),
   description: varchar('description', { length: 255 }),
   permissions: text('permissions'), // JSON array of permission strings
-  isSystem: boolean('is_system').default(false),
+  isSystem: boolean('is_system').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  companyNameUnique: unique('uq_roles_company_name').on(table.companyId, sql`lower(${table.name})`),
+  companyIdIdx: index('idx_roles_company_id').on(table.companyId),
+}));
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 export const settings = pgTable('settings', {
@@ -61,21 +88,6 @@ export const settings = pgTable('settings', {
 }, (table) => ({
   companyKeyUnique: unique('settings_company_id_key_unique').on(table.companyId, table.key),
 }));
-
-export const branches = pgTable('branches', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  companyId: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
-  name: varchar('name', { length: 100 }).notNull(),
-  code: varchar('code', { length: 20 }),
-  address: text('address'),
-  city: varchar('city', { length: 100 }),
-  phone: varchar('phone', { length: 50 }),
-  isActive: boolean('is_active').notNull().default(true),
-  createdBy: uuid('created_by'),
-  updatedBy: uuid('updated_by'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-});
 
 export const currencies = pgTable('currencies', {
   id: uuid('id').defaultRandom().primaryKey(),

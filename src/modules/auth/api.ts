@@ -75,7 +75,7 @@ async function verifyPassword(password: string, storedHash: string | null | unde
     );
     const hashArray = Array.from(new Uint8Array(derivedBits));
     const actualHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return actualHex === expected;
+    return constantTimeEqual(actualHex.toLowerCase(), expected.toLowerCase());
   } catch {
     return false;
   }
@@ -117,6 +117,42 @@ function mapRowToAuditLog(row: Record<string, unknown>): AuditLog {
   } as AuditLog;
 }
 
+// ─── PGlite rate-limit (browser fallback) ────────────────────────────────────
+const pgliteLoginAttempts = new Map<string, { count: number; resetAt: number }>();
+const PGLITE_LOGIN_LIMIT = 5;
+const PGLITE_LOGIN_WINDOW = 60_000;
+const PGLITE_LOGIN_LOCKOUT = 5 * 60_000;
+
+function pgliteCheckRateLimit(username: string): { allowed: boolean; retryAfterMs?: number } {
+  const key = `u:${username.trim().toLowerCase()}`;
+  const now = Date.now();
+  const bucket = pgliteLoginAttempts.get(key);
+  if (!bucket || now >= bucket.resetAt) return { allowed: true };
+  if (bucket.count >= PGLITE_LOGIN_LIMIT) return { allowed: false, retryAfterMs: bucket.resetAt - now };
+  return { allowed: true };
+}
+function pgliteRecordFailed(username: string): void {
+  const key = `u:${username.trim().toLowerCase()}`;
+  const now = Date.now();
+  const bucket = pgliteLoginAttempts.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    pgliteLoginAttempts.set(key, { count: 1, resetAt: now + PGLITE_LOGIN_WINDOW + (bucket ? PGLITE_LOGIN_LOCKOUT : 0) });
+    return;
+  }
+  bucket.count += 1;
+  if (bucket.count >= PGLITE_LOGIN_LIMIT) bucket.resetAt = now + PGLITE_LOGIN_LOCKOUT;
+}
+function pgliteClearAttempts(username: string): void {
+  pgliteLoginAttempts.delete(`u:${username.trim().toLowerCase()}`);
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return result === 0;
+}
+
 function safeJsonParse(value: string): Record<string, unknown> | undefined {
   try {
     return JSON.parse(value);
@@ -130,6 +166,11 @@ export const authApi = {
     try {
       if (!window.electronAuth) {
         // Browser/PGlite fallback — verify against the users table directly.
+        const rate = pgliteCheckRateLimit(credentials.username);
+        if (!rate.allowed) {
+          const mins = Math.ceil((rate.retryAfterMs || 0) / 60000);
+          return { success: false, error: `محاولات كثيرة — حاول بعد ${mins} دقيقة` };
+        }
         const adapter = await getDbAdapter();
         const result = await adapter.query(
           `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, password_hash
@@ -145,7 +186,8 @@ export const authApi = {
             break;
           }
         }
-        if (!row) return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+        if (!row) { pgliteRecordFailed(credentials.username); return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }; }
+        pgliteClearAttempts(credentials.username);
 
         let permissions: Permission[] = [];
         let roleId: string | undefined;
@@ -245,7 +287,7 @@ export const authApi = {
         let users = mapRows<User>(result.data || []);
         if (filters?.search) {
           const q = filters.search.toLowerCase();
-          users = users.filter((u) => (u.username?.toLowerCase() || '').includes(q) || (u.email && u.email.toLowerCase().includes(q)));
+          users = users.filter((u) => (u.username?.toLowerCase() || '').includes(q) || (u.fullName?.toLowerCase() || '').includes(q) || (u.email && u.email.toLowerCase().includes(q)));
         }
         if (filters?.role) users = users.filter((u) => u.role === filters.role);
         if (filters?.branchId) users = users.filter((u) => u.branchId === filters.branchId);
@@ -253,26 +295,33 @@ export const authApi = {
         return { success: true, data: users };
       }
       const adapter = await getDbAdapter();
+      // Server-side filtering with ILIKE for search (username, full_name, email)
+      const conditions: string[] = ['company_id = $1'];
+      const params: unknown[] = [companyId];
+      if (filters?.search) {
+        const q = `%${filters.search}%`;
+        params.push(q);
+        conditions.push(`(username ILIKE $${params.length} OR full_name ILIKE $${params.length} OR email ILIKE $${params.length})`);
+      }
+      if (filters?.role) {
+        params.push(filters.role);
+        conditions.push(`role = $${params.length}`);
+      }
+      if (filters?.branchId) {
+        params.push(filters.branchId);
+        conditions.push(`branch_id = $${params.length}::uuid`);
+      }
+      if (filters?.isActive !== undefined) {
+        params.push(filters.isActive);
+        conditions.push(`is_active = $${params.length}`);
+      }
+      const where = conditions.join(' AND ');
       const result = await adapter.query(
-        'SELECT * FROM users WHERE company_id = $1 ORDER BY username',
-        [companyId]
+        `SELECT * FROM users WHERE ${where} ORDER BY username LIMIT 500`,
+        params
       );
       if (result.success) {
-        let users = mapRows<User>(result.rows);
-        if (filters?.search) {
-          const q = filters.search.toLowerCase();
-          users = users.filter((u) => (u.username?.toLowerCase() || '').includes(q) || (u.email && u.email.toLowerCase().includes(q)));
-        }
-        if (filters?.role) {
-          users = users.filter((u) => u.role === filters.role);
-        }
-        if (filters?.branchId) {
-          users = users.filter((u) => u.branchId === filters.branchId);
-        }
-        if (filters?.isActive !== undefined) {
-          users = users.filter((u) => u.isActive === filters.isActive);
-        }
-        return { success: true, data: users };
+        return { success: true, data: mapRows<User>(result.rows) };
       }
       return { success: false, error: result.error };
     } catch {
@@ -295,8 +344,6 @@ export const authApi = {
 
   async createUser(data: Omit<User, 'id'>): Promise<{ success: boolean; id?: string; error?: string }> {
     try {
-      const cidValidation = validateInput(companyIdSchema, data.companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const pw = (data as Record<string, unknown>).password as string | undefined;
       if (!pw) {
         return { success: false, error: 'كلمة المرور مطلوبة' };
@@ -314,30 +361,34 @@ export const authApi = {
           password: pw,
         });
       }
+      // PGlite/browser fallback: validate via Zod and use direct SQL (no role_id column)
+      const { validateInput: _validate, createUserSchema: _schema } = await import('@/core/utils/validation');
+      const parsed = _validate(_schema, { ...data, password: pw });
+      if (!parsed.success) return { success: false, error: parsed.error };
       const passwordHash = await hashPassword(pw);
       const adapter = await getDbAdapter();
       const result = await adapter.query(
-        `INSERT INTO users (company_id, username, email, full_name, phone, role, role_id, branch_id, is_active, password_hash, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+        `INSERT INTO users (company_id, username, email, full_name, phone, role, branch_id, is_active, password_hash, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, NOW()) RETURNING id`,
         [
-          data.companyId,
-          data.username,
-          data.email,
-          data.fullName,
-          data.phone,
-          data.role,
-          data.roleId,
-          data.branchId,
-          data.isActive,
+          parsed.data.companyId,
+          parsed.data.username,
+          parsed.data.email || null,
+          parsed.data.fullName || parsed.data.username,
+          parsed.data.phone || null,
+          parsed.data.role,
+          parsed.data.branchId || null,
+          parsed.data.isActive !== false,
           passwordHash,
-          new Date().toISOString(),
         ]
       );
       if (result.success && result.rows?.[0]) {
         return { success: true, id: (result.rows[0] as Record<string, unknown>).id as string };
       }
-      return { success: false, error: result.error };
-    } catch {
+      return { success: false, error: result.error || 'Username already exists' };
+    } catch (e) {
+      const msg = String((e as Error).message || '');
+      if (msg.includes('23505') || msg.toLowerCase().includes('duplicate')) return { success: false, error: 'Username already exists' };
       return { success: false, error: 'حدث خطأ أثناء إنشاء المستخدم' };
     }
   },
@@ -345,12 +396,31 @@ export const authApi = {
   async updateUser(companyId: string, id: string, data: Partial<User>): Promise<{ success: boolean; error?: string }> {
     try {
       if (window.electronAuth) return window.electronAuth.updateUser(id, data as Record<string, unknown>);
+      const { validateInput: _validate, updateUserSchema: _schema } = await import('@/core/utils/validation');
+      const parsed = _validate(_schema, data);
+      if (!parsed.success) return { success: false, error: parsed.error };
       const adapter = await getDbAdapter();
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      if (parsed.data.username !== undefined) { fields.push(`username = $${idx++}`); values.push(parsed.data.username); }
+      if (parsed.data.email !== undefined) { fields.push(`email = $${idx++}`); values.push(parsed.data.email || null); }
+      if (parsed.data.fullName !== undefined) { fields.push(`full_name = $${idx++}`); values.push(parsed.data.fullName || null); }
+      if (parsed.data.phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(parsed.data.phone || null); }
+      if (parsed.data.role !== undefined) { fields.push(`role = $${idx++}`); values.push(parsed.data.role); }
+      if (parsed.data.branchId !== undefined) { fields.push(`branch_id = $${idx++}::uuid`); values.push(parsed.data.branchId || null); }
+      if (parsed.data.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(parsed.data.isActive); }
+      if ((parsed.data as Record<string, unknown>).photoUrl !== undefined) { fields.push(`photo_url = $${idx++}`); values.push((parsed.data as Record<string, unknown>).photoUrl || null); }
+      if (fields.length === 0) return { success: false, error: 'No fields to update' };
+      fields.push(`updated_at = NOW()`);
+      values.push(id, companyId);
       return adapter.query(
-        `UPDATE users SET username = $1, email = $2, full_name = $3, phone = $4, role = $5, role_id = $6, branch_id = $7, is_active = $8, photo_url = $9, updated_at = $10 WHERE id = $11 AND company_id = $12`,
-        [data.username, data.email, data.fullName, data.phone, data.role, data.roleId, data.branchId, data.isActive, data.photoUrl ?? null, new Date().toISOString(), id, companyId]
+        `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`,
+        values
       );
-    } catch {
+    } catch (e) {
+      const msg = String((e as Error).message || '');
+      if (msg.includes('23505')) return { success: false, error: 'Username already exists' };
       return { success: false, error: 'حدث خطأ أثناء تحديث المستخدم' };
     }
   },
@@ -490,13 +560,16 @@ export const authApi = {
         return { success: true, data: roles };
       }
       const adapter = await getDbAdapter();
-      const result = await adapter.query('SELECT * FROM roles WHERE company_id = $1 OR company_id IS NULL ORDER BY name', [companyId]);
+      const conditions: string[] = ['(company_id = $1 OR company_id IS NULL)'];
+      const params: unknown[] = [companyId];
+      if (filters?.search) {
+        params.push(`%${filters.search}%`);
+        conditions.push(`name ILIKE $${params.length}`);
+      }
+      const where = conditions.join(' AND ');
+      const result = await adapter.query(`SELECT * FROM roles WHERE ${where} ORDER BY name`, params);
       if (result.success) {
-        let roles = (result.rows || []).map((row) => mapRowToRole(row as Record<string, unknown>)) as Role[];
-        if (filters?.search) {
-          const q = filters.search.toLowerCase();
-          roles = roles.filter((r) => (r.name?.toLowerCase() || '').includes(q));
-        }
+        const roles = (result.rows || []).map((row) => mapRowToRole(row as Record<string, unknown>)) as Role[];
         return { success: true, data: roles };
       }
       return { success: false, error: result.error };
