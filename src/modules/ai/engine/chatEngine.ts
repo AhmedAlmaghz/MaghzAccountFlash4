@@ -11,6 +11,7 @@ import { executeToolCall, resolveTool } from './toolExecutor';
 import { isBatchActive, runBatch, batchProgressLine } from './batchRunner';
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
 import { extractiveDigest, digestMessage } from './summarizer';
+import { TaskLedger } from './taskLedger';
 import { getBatch } from '../api/batch';
 import { planBatchResume } from './batchQueue';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
@@ -300,6 +301,12 @@ class ChatEngine {
   private store = useAiStore.getState;
   /** The tenant this engine's history currently belongs to (company-switch guard). */
   private scopedCompanyId: string | null = null;
+  /**
+   * سجل المهمة الدائم — الطلبات الكاملة + مخرجات الدفعات + الكيانات المنشأة.
+   * يعيش خارج نافذة السياق (30 رسالة) ويُحقن في برومبت النظام كل دورة،
+   * فلا ينسى المساعد قائمة المهام الأصلية ولا يعيد إنشاء ما أُنشئ.
+   */
+  private ledger = new TaskLedger();
 
   /**
    * Anti-fabrication state (per `send()` invocation):
@@ -351,6 +358,8 @@ class ChatEngine {
     return {
       companyId: company?.id ?? '',
       userId: user?.id ?? '',
+      // قراءة فقط: أدوات الدفعات تستعلمه لإسقاط إعادة إنشاء كيان مُنشأ سابقاً.
+      ledger: this.ledger,
     };
   }
 
@@ -475,7 +484,15 @@ class ChatEngine {
       traceSend('prefix-sync-done');
       // Deadline-guarded: a wedged settings read must degrade, not hang.
       const liveContext = await deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {}, 'live-context');
-      const systemContent = buildSystemPrompt({ tools, activeSkills, liveContext });
+      // سجّل الطلب قبل بناء البرومبت ليظهر نصه الكامل في سجل المهمة من أول
+      // دورة — النص الخام كما كتبه المستخدم هو المرجع (ليس النص المطبَّع).
+      this.ledger.recordRequest(text);
+      const systemContent = buildSystemPrompt({
+        tools,
+        activeSkills,
+        liveContext,
+        ledgerBlock: this.ledger.render(),
+      });
       traceSend('context-ready');
 
       // Ensure history is a clean array — a previous crash may have left
@@ -785,6 +802,11 @@ class ChatEngine {
       // how it finished — otherwise the next "استمر" has no completion to
       // build on. Mirror the UI message into the LLM history.
       this.history.push({ role: 'assistant', content: finalContent });
+      // سجل المهمة: الدفعة المنتهية (وحدها) تدخل الذاكرة مع كياناتها المنفَّذة
+      // (status=done فقط) — فلا ينسى المساعد ما نُفّذ ولا يعيد إنشاء كياناته.
+      try {
+        this.ledger.recordFromBatchDetail(final);
+      } catch { /* الذاكرة خدمة إضافية — لا تُسقط الدورة أبداً */ }
     } catch (e) {
       const errorText = e instanceof Error ? e.message : String(e);
       this.reportBatchProgress(messageId, 'error', errorText);
@@ -913,6 +935,7 @@ class ChatEngine {
     this.failedWriteAttempts.clear();
     this.liveContextCache = null;
     this.scopedCompanyId = null;
+    this.ledger.clear();
     this.store().clearMessages();
   }
 
@@ -992,6 +1015,8 @@ class ChatEngine {
     this.failedWriteAttempts.clear();
     this.liveContextCache = null;
     this.extraAdvertisedTools.clear();
+    // سجل المهمة يخص مستأجراً واحداً — طلبه وكياناته لا يعبَران عبر الشركات.
+    this.ledger.clear();
     // P1 fix: bump the epoch so an in-flight runLoop from the OLD tenant dies
     // at its next epoch check instead of writing old-tenant tool results into
     // the NEW tenant's (emptied) history without a system prompt.
@@ -1058,6 +1083,12 @@ class ChatEngine {
   restoreHistorySync(messages: ChatMessage[]): void {
     const history: LlmMessage[] = [];
 
+    // سجل المهمة: يُعاد بناؤه من رسائل الجلسة المحفوظة قبل بناء البرومبت —
+    // الطلبات الكاملة تُحقن فوراً، وتفاصيل الدفعات تُرطَّب من قاعدة البيانات
+    // خلفياً (فلا ينسى المساعد المهمة بعد إعادة فتح الجلسة).
+    this.ledger.clear();
+    this.ledger.rebuildFromMessages(messages ?? []);
+
     // Inject a fresh system prompt first so the LLM has current context
     // (company, currency, date, user info, available tools, active skills).
     // Use the full recent user history to seed sticky trigger skills, not just
@@ -1078,6 +1109,7 @@ class ChatEngine {
         tools,
         activeSkills,
         liveContext,
+        ledgerBlock: this.ledger.render(),
       }),
     });
 
@@ -1153,6 +1185,29 @@ class ChatEngine {
     // persistence layer already scoped the load by companyId). Pin it so the
     // tenant guard does not wipe it on the next send.
     this.scopedCompanyId = this.ctx.companyId || null;
+
+    // ترطيب خلفي غير متزامن: تفاصيل الدفعات (المنفَّذ فعلاً فقط يدخل حارس
+    // التكرار) تُجلب من قاعدة البيانات وتُضاف إلى الذاكرة — best-effort.
+    const persistedBatchIds = (messages ?? [])
+      .map((m) => (m?.toolCall?.toolName === 'ai.enqueue_batch' ? m.toolCall.batchId : undefined))
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    if (persistedBatchIds.length > 0) {
+      void this.hydrateLedgerBatches(persistedBatchIds);
+    }
+  }
+
+  /**
+   * ترطيب سجل المهمة بعد استعادة جلسة محفوظة: لكل بطاقة enqueue_batch ناجحة
+   * تُجلب تفاصيلها من قاعدة البيانات ويُسجَّل تقدمها في "ما نُفّذ" — الكيانات
+   * المنفَّذة (done فقط) تدخل حارس التكرار، والفاشل يبقى قابلاً لإعادة الإنشاء.
+   */
+  private async hydrateLedgerBatches(batchIds: string[]): Promise<void> {
+    for (const batchId of batchIds.slice(0, 10)) {
+      try {
+        const got = await getBatch(batchId, { companyId: this.ctx.companyId, userId: this.ctx.userId });
+        if (got.success && got.data) this.ledger.recordFromBatchDetail(got.data);
+      } catch { /* الذاكرة خدمة إضافية — لا تعيق الاستعادة أبداً */ }
+    }
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────

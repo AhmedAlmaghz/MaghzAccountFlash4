@@ -1,9 +1,10 @@
-import type { ToolDefinition } from '../types';
+import type { ToolDefinition, ToolLedgerView } from '../types';
 import { aiApi } from '../api/index';
 import { enqueueBatch, getBatch, listBatches } from '../api/batch';
 import { planBatchResume, summarizeBatchProgress } from '../engine/batchQueue';
 import { BATCH_CREATE_CHUNK } from '../api/batchTypes';
 import { isBatchActive } from '../engine/batchRunner';
+import { extractLedgerEntity, normalizeEntityName } from '../engine/taskLedger';
 
 /**
  * Batch tools — ONE approval for MANY operations.
@@ -33,12 +34,118 @@ const BATCH_ITEM_SCHEMA = {
   required: ['tool', 'args'],
 };
 
+/** هل تشير وسائط العنصر إلى مرجع عنصر مُسقَط؟ ({{ref}} / {{ref.field}} / @ref) */
+function argsReferenceRef(value: unknown, ref: string): boolean {
+  if (typeof value === 'string') {
+    return value === `@${ref}` || value.includes(`{{${ref}}}`) || value.includes(`{{${ref}.`);
+  }
+  if (Array.isArray(value)) return value.some((v) => argsReferenceRef(v, ref));
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some((v) => argsReferenceRef(v, ref));
+  }
+  return false;
+}
+
+interface NormalizedBatchItem {
+  tool: string;
+  args: Record<string, unknown>;
+  after?: number | string;
+  ref?: string;
+  label?: string;
+}
+
+/**
+ * حارس التكرار الجلسي: يُسقط عناصر إعادة إنشاء كيان أُنشئ سابقاً في نفس
+ * الجلسة (من سجل المهمة) أو مرتين داخل الدفعة نفسها — والتابعون لها يُسقطون
+ * تتابعياً (مرجعهم لم يعد يُنشأ). يعيد العناصر الفعّالة بعد إعادة ترقيم
+ * after الرقمية، مع قائمة الإفصاح.
+ * الجلسة الحقيقية 2026-09-14: نسيان المهمة أدى إلى دفعة أعادت إنشاء 5 كيانات
+ * (موردين وعملاء) مكررين — الأرصدة الافتتاحية تضاعفت والبحث أعاد صفين لكل كيان.
+ */
+function filterSessionDuplicates(
+  items: NormalizedBatchItem[],
+  ledger: ToolLedgerView | null,
+): { effective: NormalizedBatchItem[]; skippedDuplicates: Array<{ name: string; existing: string; reason: string }> } {
+  const skippedDuplicates: Array<{ name: string; existing: string; reason: string }> = [];
+  if (!ledger || items.length === 0) return { effective: items, skippedDuplicates };
+
+  const droppedIdx = new Set<number>();
+  const droppedRefs = new Set<string>();
+  const seenInBatch = new Map<string, string>(); // normName → أول ظهور
+
+  for (let i = 0; i < items.length; i++) {
+    const entity = extractLedgerEntity(items[i]);
+    if (!entity) continue;
+    const norm = normalizeEntityName(entity.name);
+    if (!norm) continue;
+    const sessionDup = ledger.findDuplicateName(entity.name);
+    if (sessionDup) {
+      droppedIdx.add(i);
+      if (items[i].ref) droppedRefs.add(items[i].ref as string);
+      skippedDuplicates.push({ name: entity.name, existing: sessionDup.display, reason: 'أُنشئ سابقاً في هذه الجلسة' });
+      continue;
+    }
+    if (seenInBatch.has(norm)) {
+      droppedIdx.add(i);
+      if (items[i].ref) droppedRefs.add(items[i].ref as string);
+      skippedDuplicates.push({ name: entity.name, existing: seenInBatch.get(norm) as string, reason: 'مكرر داخل الدفعة نفسها' });
+      continue;
+    }
+    seenInBatch.set(norm, entity.name);
+  }
+
+  // تتابع الإسقاط: تابع عنصر مُسقَط (after رقمي/اسمي أو {{ref}} في الوسائط)
+  // لا يمكنه التنفيذ — مرجعه لم يعد سيُنشأ.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < items.length; i++) {
+      if (droppedIdx.has(i)) continue;
+      const it = items[i];
+      const afterDropped =
+        (typeof it.after === 'number' && droppedIdx.has(it.after)) ||
+        (typeof it.after === 'string' && droppedRefs.has(it.after)) ||
+        Array.from(droppedRefs).some((r) => argsReferenceRef(it.args, r));
+      if (afterDropped) {
+        droppedIdx.add(i);
+        if (it.ref) droppedRefs.add(it.ref);
+        skippedDuplicates.push({ name: it.label || it.tool, existing: it.label || it.tool, reason: 'تابع لعنصر مُسقَط (مكرر)' });
+        changed = true;
+      }
+    }
+  }
+
+  if (droppedIdx.size === 0) return { effective: items, skippedDuplicates };
+
+  // إعادة ترقيم after الرقمية بعد الإسقاط (التسلسل = الفهرس الفعلي الجديد).
+  const remap = new Map<number, number>();
+  const effective: NormalizedBatchItem[] = [];
+  items.forEach((it, i) => {
+    if (!droppedIdx.has(i)) {
+      remap.set(i, effective.length);
+      effective.push(it);
+    }
+  });
+  for (const it of effective) {
+    if (typeof it.after === 'number') {
+      const mapped = remap.get(it.after);
+      if (mapped === undefined) {
+        // تابع لعنصر مُسقَط لم يلتقطه التتابع (سلامة قبل الدقة)
+        it.after = undefined;
+      } else {
+        it.after = mapped;
+      }
+    }
+  }
+  return { effective, skippedDuplicates };
+}
+
 export const batchTools: ToolDefinition[] = [
   {
     name: 'ai.enqueue_batch',
     labelAr: 'إنشاء دفعة عمليات',
     descriptionAr:
-      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من عمليتين كتابيتين (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة) فالموافقة واحدة بزر واحد. رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. شكل كل عنصر حصراً: {"tool": "<domain.verb>", "args": {...}, "after"?: رقم/اسم, "ref"?: "اسم", "label"?: "وصف"} — مثال: {"items": [{"tool": "sales.create_invoice", "args": {"customerId": "..."}}]}. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد.',
+      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من عمليتين كتابيتين (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة) فالموافقة واحدة بزر واحد. رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. شكل كل عنصر حصراً: {"tool": "<domain.verb>", "args": {...}, "after"?: رقم/اسم, "ref"?: "اسم", "label"?: "وصف"} — مثال: {"items": [{"tool": "sales.create_invoice", "args": {"customerId": "..."}}]}. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد. حارس التكرار: أي عنصر يعيد إنشاء كيان (مورد/عميل/منتج/مستودع/موظف…) أُنشئ سابقاً في نفس الجلسة يُسقط تلقائياً مع إفصاح في النتيجة — فلا تعِد إنشاء ما في "ما نُفّذ" بسجل المهمة؛ ابحث عنه بـsearch.* بدلاً من ذلك.',
     permission: 'ai.use',
     dangerLevel: 'write',
     parameters: {
@@ -128,23 +235,36 @@ export const batchTools: ToolDefinition[] = [
           label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
         };
       });
+      // حارس التكرار الجلسي — قبل الإرسال: إعادة إنشاء كيان مُنشأ في نفس
+      // الجلسة (نسيان المهمة) يُسقط بإفصاح صريح بدل تلويث الأرصدة والتقارير.
+      const { effective, skippedDuplicates } = filterSessionDuplicates(items, ctx.ledger ?? null);
+      if (effective.length === 0) {
+        return {
+          error: 'كل عناصر الدفعة كيانات أُنشئت سابقاً في هذه الجلسة — لم يُنشأ شيء. استخدم أدوات البحث (search.*) للوصول إليها بدل إعادة الإنشاء، وإذا أراد المستخدم كياناً جديداً بالاسم نفسه فميّزه أولاً (هاتف أو رمز).',
+          skippedDuplicates,
+        };
+      }
       const res = await enqueueBatch({
         companyId: ctx.companyId,
         userId: ctx.userId,
-        title: str(args.title) || `دفعة ${items.length} عملية`,
+        title: str(args.title) || `دفعة ${effective.length} عملية`,
         kind: str(args.kind) || 'mixed',
-        items,
+        items: effective,
       });
       if (!res.success || !res.data) return { error: res.error || 'فشل إنشاء الدفعة' };
       // P2: disclose dedup — exact-duplicate items are dropped by the
       // idempotency key (ON CONFLICT DO NOTHING); the model must know its
       // batch shrank instead of wondering where items went.
       const deduped = res.data.deduped ?? 0;
+      const dupNote = skippedDuplicates.length > 0
+        ? ` — ⚠️ أُسقط ${skippedDuplicates.length} عنصراً مكرراً (${skippedDuplicates.slice(0, 5).map((d) => d.name).join('، ')}) لأنه أُنشئ سابقاً في هذه الجلسة — لا تعِد إنشاءه`
+        : '';
       return {
         batchId: res.data.batchId,
         total: res.data.total,
         ...(deduped > 0 ? { deduped, dedupNote: `أُسقط ${deduped} عنصراً مكرراً تماماً (نفس الأداة والوسائط) — لن تُنفَّذ مرتين` } : {}),
-        summary: `أُنشئت الدفعة (${res.data.total} عملية${deduped > 0 ? ` بعد إسقاط ${deduped} مكرر` : ''}) — ستبدأ فور موافقتك، وتستطيع متابعة التقدم لحظة بلحظة`,
+        ...(skippedDuplicates.length > 0 ? { skippedDuplicates } : {}),
+        summary: `أُنشئت الدفعة (${res.data.total} عملية${deduped > 0 ? ` بعد إسقاط ${deduped} مكرر` : ''})${dupNote} — ستبدأ فور موافقتك، وتستطيع متابعة التقدم لحظة بلحظة`,
         startBatchRun: res.data.batchId,
       };
     },

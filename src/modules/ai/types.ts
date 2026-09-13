@@ -123,9 +123,21 @@ export interface LlmCompletionStreamData {
 
 // ─── Tool definitions ───────────────────────────────────────────────────────
 
+/**
+ * Read-only view of the session task ledger (engine/taskLedger.ts) — handed
+ * to tools via ctx so the batch enqueuer can refuse re-creating an entity
+ * this session already created. Structural (no import) to avoid a cycle.
+ */
+export interface ToolLedgerView {
+  /** Entity with the same normalized name created earlier in this session. */
+  findDuplicateName(name: string): { display: string; tool: string } | null;
+}
+
 export interface ToolContext {
   companyId: string;
   userId: string;
+  /** Present on calls issued by the chat engine; absent in raw unit tests. */
+  ledger?: ToolLedgerView;
 }
 
 export type ToolDangerLevel = 'read' | 'write';
