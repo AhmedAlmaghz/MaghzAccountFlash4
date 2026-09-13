@@ -8,9 +8,9 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
-const BASE_URL = 'http://localhost:5173';
+const BASE_URL = process.env.DOCS_BASE_URL || 'http://localhost:5173';
 const OUT = path.resolve('Docs2/en/assets');
-const PROFILE = path.join(os.tmpdir(), 'maghz-docs-en-profile');
+const PROFILE = process.env.DOCS_PROFILE || path.join(os.tmpdir(), 'maghz-docs-en-profile');
 
 // [route, output file, ready marker in body text (optional)]
 const SHOTS = {
@@ -211,11 +211,11 @@ async function wizardShots(page) {
   await capture(page, steps[2][1]); // company (English identity)
   await page.getByRole('button', { name: 'Next' }).click();
   await page.waitForTimeout(800);
-  await page.getByRole('button', { name: /Default Data Chart of Accounts/ }).click();
+  await page.getByRole('button', { name: /No Data Start with an empty company/ }).click();
   await page.locator('#seed-admin-password').fill('admin1234');
   await page.waitForTimeout(400);
   await capture(page, steps[3][1]); // seed
-  await page.getByRole('button', { name: 'Seed Data & Continue' }).click();
+  await page.getByRole('button', { name: 'Skip' }).click();
   await page.getByText('Ready to Go', { exact: false }).waitFor({ timeout: 600000 });
   await page.waitForTimeout(1500);
   await capture(page, steps[4][1]); // complete
@@ -225,7 +225,7 @@ async function wizardShots(page) {
 }
 
 async function main() {
-  const groups = process.argv[2] ? [process.argv[2]] : Object.keys(SHOTS);
+  const groups = process.argv[2] ? process.argv[2].split(',') : Object.keys(SHOTS);
   const ctx = await chromium.launchPersistentContext(PROFILE, {
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 1,
@@ -236,7 +236,7 @@ async function main() {
     app.state.language = 'en';
     app.state.theme = 'light';
     localStorage.setItem('maghzaccount-app', JSON.stringify(app));
-    if (!localStorage.getItem('maghzaccount-db-mode')) localStorage.setItem('maghzaccount-db-mode', 'pglite');
+    localStorage.setItem('maghzaccount-db-mode', process.env.DOCS_DB_MODE || 'pglite');
   });
   const page = await ctx.newPage();
 
