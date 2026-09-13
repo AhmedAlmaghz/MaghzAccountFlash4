@@ -1006,7 +1006,7 @@ describe('Migration 0027: POS module', () => {
 
   it('SQL module table rules authorize pos tables and pos receipt numbering', () => {
     const handler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
-    expect(handler).toMatch(/\{ module: 'pos', tables: \['pos_shifts', 'pos_payments'\][^\}]*\}/);
+    expect(handler).toMatch(/\{ module: 'pos', tables: \['pos_shifts', 'pos_payments'\][^}]*\}/);
     // sales_invoices rule must allow pos.create/pos.post writes (cashiers)
     expect(handler).toMatch(/writePermissions: \['sales\.create', 'sales\.edit', 'sales\.post', 'pos\.create', 'pos\.post'\]/);
     expect(handler).toMatch(/'pos\.create',\s*\n\s*\]/);
