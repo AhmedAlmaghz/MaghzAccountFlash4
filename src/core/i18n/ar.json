@@ -1108,7 +1108,8 @@
       "accepted": "مقبولة",
       "rejected": "مرفوضة",
       "expired": "منتهية",
-      "converted": "محوّلة"
+      "converted": "محوّلة",
+      "sent": "مُرسل"
     },
     "actions": "إجراء",
     "notes": "ملاحظات",
