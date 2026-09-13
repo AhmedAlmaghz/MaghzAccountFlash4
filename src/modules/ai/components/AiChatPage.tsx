@@ -38,6 +38,7 @@ export default function AiChatPage() {
   const sessionId = useAiStore((s) => s.sessionId);
   const isProcessing = useAiStore((s) => s.isProcessing);
   const [configStatus, setConfigStatus] = useState<'loading' | 'configured' | 'not_configured'>('loading');
+  const [configData, setConfigData] = useState<import('../types').AiPublicConfig | null>(null);
   const [showSessions, setShowSessions] = useState(false);
   const [sessionsKey, setSessionsKey] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
@@ -47,16 +48,19 @@ export default function AiChatPage() {
   useBodyScrollLock(showSessions && isMobile);
   useEscapeKey(exportOpen, () => setExportOpen(false));
 
-  // Check if AI is configured
+  // Check if AI is configured — keep last config to surface the exact reason
   useEffect(() => {
     let cancelled = false;
     async function check() {
       if (!company?.id) {
         setConfigStatus('not_configured');
+        setConfigData(null);
         return;
       }
       const res = await aiApi.getConfig(company.id);
       if (cancelled) return;
+      if (res.success && res.data) setConfigData(res.data);
+      else setConfigData(null);
       if (res.success && res.data?.enabled && res.data?.hasApiKey) {
         setConfigStatus('configured');
       } else {
@@ -188,8 +192,15 @@ export default function AiChatPage() {
     );
   }
 
-  // Not configured state
+  // Not configured state — surface the exact reason instead of a generic card
   if (configStatus === 'not_configured') {
+    const reason = !company?.id
+      ? 'no_company'
+      : configData && !configData.hasApiKey
+        ? 'no_key'
+        : configData && configData.hasApiKey && !configData.enabled
+          ? 'disabled'
+          : 'unknown';
     return (
       <div className="h-full flex flex-col items-center justify-center p-4 sm:p-6">
         <Card className="max-w-md w-full text-center">
@@ -197,12 +208,32 @@ export default function AiChatPage() {
             <div className="w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-950/50 flex items-center justify-center mx-auto mb-4">
               <Bot size={30} className="text-primary-600 dark:text-primary-400" />
             </div>
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 mb-2">{t('ai.notConfigured')}</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 leading-relaxed">{t('ai.notConfiguredDesc')}</p>
-            {canConfigure && (
+            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 mb-2">
+              {reason === 'no_company' ? t('ai.notConfiguredNoCompany', { default: 'لا توجد شركة نشطة' })
+                : reason === 'no_key' ? t('ai.notConfiguredNoKey', { default: 'لم يتم ضبط مفتاح API' })
+                : reason === 'disabled' ? t('ai.notConfiguredDisabled', { default: 'المساعد معطّل' })
+                : t('ai.notConfigured')}
+            </h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2 leading-relaxed">
+              {reason === 'no_company'
+                ? t('ai.notConfiguredNoCompanyDesc', { default: 'اختر شركة من الإعدادات ثم افتح المساعد مجدداً.' })
+                : reason === 'no_key'
+                  ? t('ai.notConfiguredNoKeyDesc', { default: 'أدخل مفتاح API في إعدادات الذكاء الاصطناعي ثم احفظ — المفاتيح القديمة غير المشفرة تُقبل الآن تلقائياً.' })
+                  : reason === 'disabled'
+                    ? t('ai.notConfiguredDisabledDesc', { default: 'المساعد معطّل لهذه الشركة — فعّله من إعدادات الذكاء الاصطناعي.' })
+                    : t('ai.notConfiguredDesc')}
+            </p>
+            {configData && (
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-6 font-mono">
+                {configData.provider} · {configData.model} · {configData.hasApiKey ? (configData.maskedKey || '****') : t('ai.settings.noKey', { default: 'بلا مفتاح' })} · {configData.enabled ? t('common.enabled', { default: 'مفعّل' }) : t('common.disabled', { default: 'معطّل' })}
+              </p>
+            )}
+            {canConfigure ? (
               <Button onClick={handleGoToSettings} leftIcon={<Settings size={16} />}>
                 {t('ai.goToSettings')}
               </Button>
+            ) : (
+              <p className="text-xs text-amber-600 dark:text-amber-400">{t('ai.noPermission', { default: 'ليس لديك صلاحية إعداد المساعد — اطلب من المسؤول منحك ai.settings' })}</p>
             )}
           </div>
         </Card>

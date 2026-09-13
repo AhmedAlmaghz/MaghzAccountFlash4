@@ -138,7 +138,10 @@ function decryptApiKey(stored) {
       const payload = stored.slice(ENC_PREFIX.length);
       return safeStorage.decryptString(Buffer.from(payload, 'base64'));
     }
-    // Refuse legacy plaintext values. They must be re-entered and encrypted.
+    // Legacy plaintext fallback: old installs stored the key unencrypted.
+    // Accept it as-is so the chat does not break after upgrade; the next
+    // save will re-encrypt it. The value is still tenant-scoped.
+    if (typeof stored === 'string' && stored.trim().length >= 10) return stored.trim();
     return null;
   } catch {
     return null;
@@ -638,10 +641,15 @@ export function registerAiHandlers() {
     }
   });
 
-  // Save AI configuration (admin-only). apiKey optional — omitted means keep.
+  // Save AI configuration (ai.settings). apiKey optional — omitted means keep.
   ipcMain.handle('ai:save-config', async (event, payload = {}) => {
     try {
-      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'settings.edit' });
+      let auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.settings' });
+      if (!auth.ok) {
+        const alt = authenticateIpcSession(event, payload.sessionToken, { permission: 'settings.edit' });
+        if (!alt.ok) return { success: false, error: auth.error };
+        auth = alt;
+      }
       if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
       const { provider, baseUrl, model, apiKey, enabled } = payload;
