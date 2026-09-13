@@ -801,15 +801,18 @@ export const browserAiBridge = {
     }
   },
 
-  async renameSession(payload: { sessionId: string; title: string; companyId?: string; userId?: string }): Promise<{ success: boolean; error?: string }> {
+  async renameSession(payload: { sessionId: string; title: string; companyId: string; userId: string }): Promise<{ success: boolean; error?: string }> {
     try {
+      if (!payload.companyId || !payload.userId) {
+        return { success: false, error: 'companyId and userId are required' };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `UPDATE ai_chat_sessions
             SET title = $2, updated_at = NOW()
           WHERE id = $1::uuid AND company_id = $3::uuid AND user_id = $4::uuid
         RETURNING id`,
-        [payload.sessionId, payload.title.trim().slice(0, 200), payload.companyId ?? null, payload.userId ?? null]
+        [payload.sessionId, payload.title.trim().slice(0, 200), payload.companyId, payload.userId]
       );
       if (!result.success) return { success: false, error: result.error };
       if (!result.rows || result.rows.length === 0) return { success: false, error: 'Session not found' };

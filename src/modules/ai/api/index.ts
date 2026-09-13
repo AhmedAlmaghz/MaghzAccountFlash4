@@ -75,7 +75,7 @@ interface ElectronAI {
   listSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<AiChatSessionSummary[]>>;
   getSessionMessages: (payload: { companyId: string; sessionId: string }) => Promise<IpcResult<ChatMessage[]>>;
   saveSession: (payload: AiSaveSessionPayload) => Promise<IpcResult<{ sessionId: string }>>;
-  renameSession: (payload: { sessionId: string; title: string; companyId?: string; userId?: string }) => Promise<IpcResult<void>>;
+  renameSession: (payload: { sessionId: string; title: string; companyId: string; userId: string }) => Promise<IpcResult<void>>;
   deleteSession: (payload: { companyId: string; userId: string; sessionId: string }) => Promise<IpcResult<void>>;
   purgeOldSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<{ purged: number; retentionDays: number }>>;
   batchCreate: (payload: {
@@ -336,7 +336,7 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     return b.saveSession(payload);
   },
 
-  async renameSession(params: { sessionId: string; title: string; companyId?: string; userId?: string }): Promise<IpcResult<void>> {
+  async renameSession(params: { sessionId: string; title: string; companyId: string; userId: string }): Promise<IpcResult<void>> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.renameSession(params);

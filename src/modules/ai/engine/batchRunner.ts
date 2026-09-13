@@ -308,6 +308,9 @@ async function runBatchInner(
     // Index of the chunk item currently being processed — used ONLY by the
     // stop path below to release the unstarted remainder (P1 stop-wedge).
     let executedInChunk = 0;
+    // P3-5 fix: collect max retry delay for retried items in this chunk;
+    // sleeping inside the loop blocked siblings. Defer to after the loop.
+    let chunkRetryDelay = 0;
     for (const item of claim.data) {
       // Cooperative gap: back-to-back heavy writes (invoice + journal +
       // stock on the UI-thread PGlite) must not starve input/paint.
@@ -407,8 +410,10 @@ async function runBatchInner(
             // P3 fix: item.attempts is post-claim-increment (includes the
             // just-failed attempt) — passing attempts+1 shifted the whole
             // schedule one slot and made the 5-min tier unreachable.
+            // Also: don't sleep inside the loop (blocked siblings); collect
+            // max delay and sleep once after the chunk.
             const delay = nextRetryDelayMs(item.attempts) ?? 0;
-            if (delay > 0) await sleep(Math.min(delay, 10_000));
+            if (delay > 0) chunkRetryDelay = Math.max(chunkRetryDelay, delay);
           }
           if (failed.success && failed.data?.finalStatus) {
             detail = (await refresh(companyId, userId, batchId)) ?? detail;
@@ -428,6 +433,17 @@ async function runBatchInner(
       executedInChunk += 1;
       if (callbacks.shouldStop?.()) {
         await releaseChunkRemainder(companyId, userId, batchId, workerId, claim.data, executedInChunk);
+        detail = (await refresh(companyId, userId, batchId)) ?? detail;
+        return detail;
+      }
+    }
+
+    // P3-5 fix: honor real backoff schedule (0 → 30s → 5min) without capping
+    // to 10s, and without blocking siblings inside the loop. Sleep once
+    // after the chunk if any item was retried.
+    if (chunkRetryDelay > 0) {
+      const waited = await sleepRateLimitWindow(callbacks.shouldStop, chunkRetryDelay);
+      if (!waited) {
         detail = (await refresh(companyId, userId, batchId)) ?? detail;
         return detail;
       }

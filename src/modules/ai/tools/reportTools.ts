@@ -1,7 +1,5 @@
 import type { ToolDefinition } from '../types';
-import { getDbAdapter } from '@/core/database/adapters';
-import { guardSqlQuery } from '../security/sqlGuard';
-import { localToday, localTodayOr, localMonthStart, localDateParts } from '../engine/dateUtils';
+import { localToday, localDateParts } from '../engine/dateUtils';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { accountingApi } from '@/modules/accounting/api';
 import { accountingService } from '@/modules/accounting/services';
@@ -10,44 +8,16 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { hrApi } from '@/modules/hr/api';
 import { manufacturingApi } from '@/modules/manufacturing/api';
+import {
+  guardedQuery,
+  num,
+  pct,
+  dateRange,
+  BASE_AMOUNT_SUM,
+  BASE_VOUCHER_SUM,
+} from './reportCommon';
 
 const EMPTY_PARAMS: Record<string, unknown> = { type: 'object', properties: {} };
-
-function num(v: unknown): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function pct(part: number, total: number): number {
-  return total > 0 ? Math.round((part / total) * 10000) / 100 : 0;
-}
-
-function dateRange(from?: string, to?: string): { from: string; to: string } {
-  // LOCAL calendar bounds — a UTC "to" excludes tonight's rows from reports
-  return {
-    from: typeof from === 'string' && from ? from : localMonthStart(),
-    to: localTodayOr(to),
-  };
-}
-
-// Run every SQL statement through the allow-list guard before hitting the DB.
-// Returns an object with `success/error`, plus `rows` on success, so it can
-// drop in place of the existing `res = guardedQuery(...)` pattern.
-async function guardedQuery(sql: string, params: unknown[]) {
-  const check = guardSqlQuery(sql);
-  if (!check.ok) return { success: false, error: check.error, rows: [] };
-  const adapter = await getDbAdapter();
-  return adapter.query(check.sql, params);
-}
-
-// ─── Helper: base-currency aggregate expression ──────────────────────────
-// P1 fix: base_currency_amount defaults to 0 for seed/legacy rows (the seed
-// never fills it), so plain SUM(base_currency_amount) reports 0 revenue on
-// seeded data while total_amount-based tools show real numbers. Fall back
-// per-row to the document total — same semantics as the ?? fallback in
-// fetchInvoiceAnalysis above, but server-side.
-const BASE_AMOUNT_SUM = 'COALESCE(SUM(COALESCE(NULLIF(base_currency_amount, 0), total_amount)), 0)';
-const BASE_VOUCHER_SUM = 'COALESCE(SUM(COALESCE(NULLIF(base_currency_amount, 0), amount)), 0)';
 async function fetchInvoiceAnalysis(companyId: string, from: string, to: string) {
   
   const res = await guardedQuery(`

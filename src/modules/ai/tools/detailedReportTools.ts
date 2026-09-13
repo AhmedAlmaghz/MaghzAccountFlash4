@@ -1,23 +1,5 @@
 import type { ToolDefinition } from '../types';
-import { getDbAdapter } from '@/core/database/adapters';
-import { guardSqlQuery } from '../security/sqlGuard';
-import { localTodayOr, localMonthStart } from '../engine/dateUtils';
-
-async function guardedQuery(sql: string, params: unknown[]) {
-  const check = guardSqlQuery(sql);
-  if (!check.ok) return { success: false, error: check.error, rows: [] };
-  const adapter = await getDbAdapter();
-  return adapter.query(check.sql, params);
-}
-
-function num(v: unknown): number { const n = Number(v); return Number.isFinite(n) ? n : 0; }
-function dateRange(from?: string, to?: string): { from: string; to: string } {
-  // LOCAL calendar bounds — a UTC "to" excludes tonight's rows from reports
-  return {
-    from: typeof from === 'string' && from ? from : localMonthStart(),
-    to: localTodayOr(to),
-  };
-}
+import { guardedQuery, num, dateRange } from './reportCommon';
 function paymentLabel(): string {
   return `CASE WHEN COALESCE(paid_amount,0) >= total_amount THEN 'نقد' WHEN COALESCE(paid_amount,0) = 0 THEN 'أجل' ELSE 'آجل جزئي' END AS payment_label`;
 }

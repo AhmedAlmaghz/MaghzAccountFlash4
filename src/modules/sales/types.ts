@@ -131,7 +131,7 @@ export interface SalesReturn {
   id: string;
   companyId: string;
   returnNumber: string;
-  invoiceId: string;
+  invoiceId?: string;
   invoice?: SalesInvoice;
   customerId: string;
   customer?: Customer;
