@@ -1,7 +1,5 @@
 import type { ToolDefinition } from '../types';
-import { getDbAdapter } from '@/core/database/adapters';
-import { guardSqlQuery } from '../security/sqlGuard';
-import { localToday, localMonthStart } from '../engine/dateUtils';
+import { guardedQuery, num, dateRange } from './reportCommon';
 
 /**
  * Diagnostic tools (read) — answer the accountant's real follow-up question:
@@ -12,25 +10,6 @@ import { localToday, localMonthStart } from '../engine/dateUtils';
  * with data instead of guessing — the accounting-agent behaviour the product
  * promises (اكتشاف الخطأ وإرشاد المستخدم).
  */
-
-function num(v: unknown): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function dateRange(from?: string, to?: string): { from: string; to: string } {
-  return {
-    from: typeof from === 'string' && from ? from : localMonthStart(),
-    to: typeof to === 'string' && to ? to : localToday(),
-  };
-}
-
-async function guardedQuery(sql: string, params: unknown[]) {
-  const check = guardSqlQuery(sql);
-  if (!check.ok) return { success: false, error: check.error, rows: [] };
-  const adapter = await getDbAdapter();
-  return adapter.query(check.sql, params);
-}
 
 export const diagnosticTools: ToolDefinition[] = [
   {

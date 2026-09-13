@@ -97,8 +97,32 @@ export function buildIdempotencyKey(tool: string, args: Record<string, unknown>)
 export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
   if (inputs.length === 0) return { ok: false, error: 'الدفعة فارغة — لا توجد عناصر للتنفيذ' };
 
+  // P3-2 fix: deduplicate by idempotency key BEFORE assigning seq.
+  // The old code assigned seq = i, then relied on DB ON CONFLICT to drop
+  // duplicates — leaving a seq hole. Any later item with after_seq pointing
+  // to the hole stayed queued forever (unclaimable, invisible to recover).
+  const keys = inputs.map((it) => buildIdempotencyKey(it.tool, it.args));
+  const keyToFirstNewSeq = new Map<string, number>();
+  const oldToNew = new Map<number, number>();
+  const filtered: BatchItemInput[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const k = keys[i];
+    if (keyToFirstNewSeq.has(k)) {
+      oldToNew.set(i, keyToFirstNewSeq.get(k)!);
+    } else {
+      const newSeq = filtered.length;
+      keyToFirstNewSeq.set(k, newSeq);
+      oldToNew.set(i, newSeq);
+      filtered.push(inputs[i]);
+    }
+  }
+  // If dedup happened, afterSeq numeric refs need remapping via oldToNew;
+  // we handle that below by translating through oldToNew. String refs are
+  // rebuilt from the filtered set so they already point to new seqs.
+  const workInputs = filtered;
+
   const refToSeq = new Map<string, number>();
-  inputs.forEach((item, i) => {
+  workInputs.forEach((item, i) => {
     if (item.ref) {
       if (refToSeq.has(item.ref)) {
         return;
@@ -106,18 +130,26 @@ export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
       refToSeq.set(item.ref, i);
     }
   });
-  const dupRef = inputs.map((i) => i.ref).filter(Boolean) as string[];
+  const dupRef = workInputs.map((i) => i.ref).filter(Boolean) as string[];
   if (new Set(dupRef).size !== dupRef.length) {
     return { ok: false, error: 'مرجع مكرر في عناصر الدفعة — كل ref يجب أن يكون فريداً' };
   }
 
-  const afterSeq: Array<number | null> = new Array(inputs.length).fill(null);
-  for (let i = 0; i < inputs.length; i++) {
-    const after = inputs[i].after;
+  const afterSeq: Array<number | null> = new Array(workInputs.length).fill(null);
+  for (let i = 0; i < workInputs.length; i++) {
+    const after = workInputs[i].after;
     if (after === undefined || after === null) continue;
     let target: number;
     if (typeof after === 'number') {
-      target = after;
+      // Numeric after originally pointed to an old index; translate via oldToNew.
+      // We need the old index that corresponds to this filtered position's
+      // original after target. Since we filtered, `after` as a number is an
+      // old seq; map it through oldToNew to get the new seq.
+      const mapped = oldToNew.get(after);
+      if (mapped === undefined) {
+        return { ok: false, error: `العنصر ${i}: الاعتماد على ${String(after)} خارج نطاق الدفعة` };
+      }
+      target = mapped;
     } else if (typeof after === 'string') {
       const found = refToSeq.get(after);
       if (found === undefined) {
@@ -127,7 +159,7 @@ export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
     } else {
       return { ok: false, error: `العنصر ${i}: مرجع الاعتماد after يجب أن يكون رقماً أو اسماً` };
     }
-    if (!Number.isInteger(target) || target < 0 || target >= inputs.length) {
+    if (!Number.isInteger(target) || target < 0 || target >= workInputs.length) {
       return { ok: false, error: `العنصر ${i}: الاعتماد على ${String(after)} خارج نطاق الدفعة` };
     }
     if (target >= i) {
@@ -138,7 +170,7 @@ export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
 
   // Defense-in-depth DFS cycle check (unreachable with backward-only edges,
   // but the graph shape must never be trusted implicitly).
-  const visitState = new Array<number>(inputs.length).fill(0);
+  const visitState = new Array<number>(workInputs.length).fill(0);
   const visit = (n: number): boolean => {
     if (visitState[n] === 1) return false;
     if (visitState[n] === 2) return true;
@@ -148,13 +180,13 @@ export function resolveBatchItems(inputs: BatchItemInput[]): ResolveResult {
     visitState[n] = 2;
     return true;
   };
-  for (let i = 0; i < inputs.length; i++) {
+  for (let i = 0; i < workInputs.length; i++) {
     if (!visit(i)) return { ok: false, error: 'اعتماد دائري بين عناصر الدفعة — مرفوض' };
   }
 
   return {
     ok: true,
-    items: inputs.map((item, i) => ({
+    items: workInputs.map((item, i) => ({
       seq: i,
       tool: item.tool,
       args: item.args,

@@ -600,10 +600,18 @@ function parseMessageAttachments(raw) {
 
 export function registerAiHandlers() {
   // Get current AI configuration for the caller's company (key masked).
+  // P3 fix: was `settings.view` while the route guard requires `ai.settings`
+  // and chat callers only have `ai.use`. Allow either AI permission so both
+  // the settings page and the chat widget can read the (masked) config,
+  // but not an unrelated settings.view holder without AI access.
   ipcMain.handle('ai:get-config', async (event, { sessionToken } = {}) => {
     try {
-      const auth = authenticateIpcSession(event, sessionToken, { permission: 'settings.view' });
-      if (!auth.ok) return { success: false, error: auth.error };
+      let auth = authenticateIpcSession(event, sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) {
+        const alt = authenticateIpcSession(event, sessionToken, { permission: 'ai.settings' });
+        if (!alt.ok) return { success: false, error: auth.error };
+        auth = alt;
+      }
       const companyId = auth.session.user.companyId;
       const settings = await readAiSettings(companyId);
       const envKey = process.env.AI_API_KEY || null;

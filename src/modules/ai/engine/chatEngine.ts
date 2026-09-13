@@ -19,7 +19,7 @@ import { resolveArgsForCard } from './cardResolvers';
 import { expandDialectText } from './dialectMap';
 import { resolveEntitiesInText } from '../entityResolver';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
-import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, PendingToolCall, ToolContext } from '../types';
+import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, LlmTool, PendingToolCall, ToolContext } from '../types';
 import type { Skill } from '../skills/types';
 
 /**
@@ -259,6 +259,23 @@ export function getSendTrace(): Array<{ at: number; phase: string }> {
 if (typeof window !== 'undefined') {
   (window as unknown as { __aiTrace?: unknown }).__aiTrace = getSendTrace;
 }
+
+/**
+ * runLoop stage contracts (Phase-4 decomposition).
+ *
+ * runLoop used to be one ~500-line method where the three stream-failure
+ * paths drifted apart (the flags reset existed in one twin but not the
+ * other — the swallowed-fallback-answer P1). The loop is now an
+ * orchestrator over small stages with explicit in/out contracts:
+ *  - ProviderResponse: one provider round-trip result.
+ *  - StreamOutcome: the streaming stage either stopped (user abort) or
+ *    produced a response plus the placeholder bookkeeping the render
+ *    stages need (streamingId/streamedContent).
+ */
+type ProviderResponse = { success: boolean; data?: LlmCompletionData; error?: string };
+type StreamOutcome =
+  | { outcome: 'stopped' }
+  | { outcome: 'responded'; response: ProviderResponse; streamingId: string | null; streamedContent: boolean };
 
 /**
  * The core agent loop.
@@ -1411,6 +1428,7 @@ class ChatEngine {
     // If so, the placeholder IS the final assistant bubble — adding a second
     // message below would render the same text twice.
     let streamedContent = false;
+    let contentAcc = '';
 
     try {
       traceSend('stream-start');
@@ -1433,7 +1451,6 @@ class ChatEngine {
       // Incremental accumulation + rAF-throttled flushes: re-joining every
       // chunk was O(n²) and each chunk triggered a full message-list render.
       const sid = streamingId;
-      let contentAcc = '';
       let flushScheduled = false;
       const scheduleFlush = () => {
         if (flushScheduled) return;
