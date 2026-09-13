@@ -18,7 +18,7 @@ This file covers three related screens: **Warehouses** (defining locations), **S
 ## Warehouses Screen
 
 
-![Warehouses screen (شاشة المستودعات)](../assets/inventory/warehouses.png)
+![Warehouses screen](../assets/inventory/warehouses.png)
 - **Access:** Sidebar ← Inventory ← Warehouses (`/inventory/warehouses`)
 - **Purpose:** Define storage locations and link them to branches
 
@@ -33,14 +33,14 @@ This file covers three related screens: **Warehouses** (defining locations), **S
 
 ### Buttons & Actions
 
-- **View Stock (عرض المخزون)** per warehouse: a dialog showing all items in that specific warehouse (product, quantity, unit, cost) with the total inventory value.
+- **View Stock** per warehouse: a dialog showing all items in that specific warehouse (product, quantity, unit, cost) with the total inventory value.
 - Edit / Delete — deletion is blocked if the warehouse has balances or movements.
 - **KPIs at the top of the screen:** total warehouses, active ones, the number of linked branches, and the total inventory value.
 
 ## Stock Screen (Balances)
 
 
-![Stock balances by warehouse screen (شاشة أرصدة المخزون)](../assets/inventory/stock.png)
+![Stock balances by warehouse screen](../assets/inventory/stock.png)
 - **Access:** Sidebar ← Inventory ← Stock (`/inventory/stock`)
 - **Purpose:** Read live balances for each (product × warehouse)
 
@@ -67,7 +67,7 @@ Move goods from one warehouse to another without a sale or purchase.
 
 ### Creating a Transfer
 
-- **Access:** Stock screen ← the **Transfers (التحويلات)** tab ← the **New Transfer (تحويل جديد)** button
+- **Access:** Stock screen ← the **Transfers** tab ← the **New Transfer** button
 - **Purpose:** Document a goods movement and execute it physically
 
 | Field | Description | Required |
@@ -90,7 +90,7 @@ Move goods from one warehouse to another without a sale or purchase.
 
 ### The "Complete" Button — Atomic Execution
 
-When you click **Complete (إكمال)**, the system executes a single database transaction that:
+When you click **Complete**, the system executes a single database transaction that:
 
 1. **Checks sufficiency at the database level:** if any line exceeds the source balance, everything fails — no partial movement and no half-executed transfer remains.
 2. Creates an **out movement** from the source warehouse and an **in movement** to the destination warehouse (movement type `transfer`).
@@ -123,7 +123,7 @@ When you click **Complete (إكمال)**, the system executes a single database 
 
 ### Manual Entry of Simple Movements
 
-The **New Movement (حركة جديدة)** button opens a simplified form for small corrections and external inbound goods:
+The **New Movement** button opens a simplified form for small corrections and external inbound goods:
 
 | Field | Description |
 |---|---|
@@ -138,12 +138,12 @@ The **New Movement (حركة جديدة)** button opens a simplified form for sm
 
 Moving 5 cartons (factor 12) from the Main Warehouse to the Branch Warehouse:
 
-1. Stock screen ← the **Transfers** tab ← **New Transfer (تحويل جديد)**.
+1. Stock screen ← the **Transfers** tab ← **New Transfer**.
 2. The transfer number appears automatically: `TRF-00007`.
 3. Product: "Orange Juice". Unit: **Carton**. Quantity: `5`.
 4. From warehouse: **Main Warehouse** (balance 240 pieces). To warehouse: **Branch Warehouse**.
-5. **Save (حفظ)** — the transfer is a draft; nothing has changed in balances yet.
-6. Review the line, then click **Complete (إكمال)**.
+5. **Save** — the transfer is a draft; nothing has changed in balances yet.
+6. Review the line, then click **Complete**.
 7. The result is immediate:
 
 | Warehouse | Before (base pieces) | After (base pieces) |

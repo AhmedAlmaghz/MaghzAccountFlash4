@@ -14,9 +14,9 @@ This file covers the HR data foundation: the Employees screen (a full record tha
 ## Employees
 
 
-![Employees list (قائمة الموظفين)](../assets/hr/employees.png)
+![Employees list](../assets/hr/employees.png)
 
-![HR Hub (مركز الموارد البشرية)](../assets/hr/hub.png)
+![HR Hub](../assets/hr/hub.png)
 ### The Employees Screen
 
 - **Access:** HR ← Employees.
@@ -35,11 +35,11 @@ This file covers the HR data foundation: the Employees screen (a full record tha
 | Hire date | Used to derive years of service (for end of service) | Required |
 | End of service date | Filled in when the employee leaves | Optional |
 | Base salary | The source of truth for payroll accounting — the basis for payroll runs and end of service | Required |
-| Active (مفعّل) | Only an active employee appears in payroll runs | Required |
+| Active | Only an active employee appears in payroll runs | Required |
 | Photo/attachments | The employee's files | Optional |
-| **Opening Balance (الرصيد الافتتاحي)** | **Advances and loans owed by the employee** when you start using the system — posted through the opening balance equity (Opening Balance) | Optional |
+| **Opening Balance** | **Advances and loans owed by the employee** when you start using the system — posted through the opening balance equity (Opening Balance) | Optional |
 
-> **Opening Balance:** entered once when creating the employee (it cannot be edited after posting — a "Posted (تم الترحيل)" alert appears). The value represents the employee's old advances, and it is booked within the opening balance journal entries so the employee statement is consistent from day one.
+> **Opening Balance:** entered once when creating the employee (it cannot be edited after posting — a "Posted" alert appears). The value represents the employee's old advances, and it is booked within the opening balance journal entries so the employee statement is consistent from day one.
 
 ---
 
@@ -54,7 +54,7 @@ This file covers the HR data foundation: the Employees screen (a full record tha
 ## Attendance
 
 
-![Attendance log screen (شاشة سجل الحضور)](../assets/hr/attendance.png)
+![Attendance log screen](../assets/hr/attendance.png)
 ### The Attendance Screen
 
 - **Access:** HR ← Attendance.
@@ -65,8 +65,8 @@ This file covers the HR data foundation: the Employees screen (a full record tha
 | Field | Description |
 |---|---|
 | Employee + date | The record key |
-| Check-in / Check-out (الدخول / الخروج) | Accepts a **time only** (`08:20`) or a **full timestamp** (`2026-08-31 08:20`) — the engine extracts the time from either format |
-| Status | **Present / Absent / Late / On Leave (حاضر / غائب / متأخر / في إجازة)** |
+| Check-in / Check-out | Accepts a **time only** (`08:20`) or a **full timestamp** (`2026-08-31 08:20`) — the engine extracts the time from either format |
+| Status | **Present / Absent / Late / On Leave** |
 
 ### What the Engine Infers Automatically
 
@@ -93,7 +93,7 @@ The engine reads the check-in and check-out punches and the HR policies, and com
 | Field | Description |
 |---|---|
 | Employee | The requester |
-| Type | **Annual / Sick / Emergency / Unpaid (سنوية / مرضية / اضطرارية / بدون راتب)** |
+| Type | **Annual / Sick / Emergency / Unpaid** |
 | From / To | The leave period — the day count is inclusive of both ends |
 | Reason | Free description |
 
@@ -101,10 +101,10 @@ The engine reads the check-in and check-out punches and the HR policies, and com
 
 | Status | Meaning | Transitions |
 |---|---|---|
-| **Pending (معلق)** | Awaiting the manager's decision | → Approved / Rejected / Cancelled |
-| **Approved (معتمد)** | Counted in the balances | Final |
-| **Rejected (مرفوض)** | Rejected and excluded from the balances | Final |
-| **Cancelled (ملغى)** | Cancelled after or before approval | Final |
+| **Pending** | Awaiting the manager's decision | → Approved / Rejected / Cancelled |
+| **Approved** | Counted in the balances | Final |
+| **Rejected** | Rejected and excluded from the balances | Final |
+| **Cancelled** | Cancelled after or before approval | Final |
 
 ### Annual Entitlement Balances
 

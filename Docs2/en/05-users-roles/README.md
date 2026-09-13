@@ -63,9 +63,9 @@ Every permission is written as `module.action` and displayed in a grid grouped b
 ## The Users Screen (`/users`)
 
 
-![Users list (قائمة المستخدمين)](../assets/users-roles/users-list.png)
+![Users list](../assets/users-roles/users-list.png)
 
-![Add/Edit user modal (نافذة إضافة/تعديل مستخدم)](../assets/users-roles/user-modal.png)
+![Add/Edit user modal](../assets/users-roles/user-modal.png)
 - **Access:** Sidebar ← Settings ← Users
 - **Purpose:** Manage login accounts and link them to roles and branches.
 - **Filters:** a search box (username) and a **Filter by role** dropdown (Admin / Manager / Accountant / Sales Rep / Viewer / All roles).
@@ -73,7 +73,7 @@ Every permission is written as `module.action` and displayed in a grid grouped b
 
 ### Add / Edit User
 
-Click **New User (مستخدم جديد)** or the edit icon next to the row:
+Click **New User** or the edit icon next to the row:
 
 | Field | Description | Required |
 |---|---|---|
@@ -99,7 +99,7 @@ Click **New User (مستخدم جديد)** or the edit icon next to the row:
 ## The Roles Screen (`/roles`)
 
 
-![Roles and permissions list (قائمة الأدوار والصلاحيات)](../assets/users-roles/roles-list.png)
+![Roles and permissions list](../assets/users-roles/roles-list.png)
 - **Access:** Sidebar ← Settings ← Roles
 - **Purpose:** Define who can do what, using reusable permission groups.
 - **Display:** role cards in a grid; each card shows the name, the description, permission badges (the first 6 badges then `+N` for the rest), and a **"System" lock badge** for built-in roles.
@@ -144,7 +144,7 @@ Sessions also end automatically after **30 minutes** of inactivity (refreshed wi
 ## The Audit Log Screen (`/audit-logs`)
 
 
-![Audit Log screen (شاشة سجل التدقيق)](../assets/users-roles/audit-log.png)
+![Audit Log screen](../assets/users-roles/audit-log.png)
 - **Access:** Sidebar ← Settings ← Audit Log
 - **Purpose:** a **read-only** log of every sensitive action — nothing in it can be edited or deleted.
 - **What it records:** create, edit, delete, post, cancel, login, logout, password reset, user activation/deactivation.

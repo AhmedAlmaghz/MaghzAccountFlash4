@@ -9,7 +9,7 @@ After completing the First-Run Setup Wizard, or every time you open the system w
 ## The Login Screen
 
 
-![Login screen (شاشة تسجيل الدخول)](../assets/getting-started/login.png)
+![Login screen](../assets/getting-started/login.png)
 - **Access:** appears automatically when the application opens with no active session.
 
 | Element | Description | Required |
@@ -18,13 +18,13 @@ After completing the First-Run Setup Wizard, or every time you open the system w
 | Password | The user's password | Yes |
 | Remember me | Pre-fills the username on the next login — does not save the password | No |
 | Show/hide (eye) button | Displays the password in plain text so you can verify it before clicking "Login" | — |
-| "Login" (تسجيل الدخول) button | Verifies the credentials and opens the system | — |
+| "Login" button | Verifies the credentials and opens the system | — |
 
 ### The Error Message
 
 When you enter wrong credentials, the following message appears:
 
-> **"Incorrect username or password" (اسم المستخدم أو كلمة المرور غير صحيحة)**
+> **"Incorrect username or password"**
 
 The message is deliberately a single one for two reasons: it doesn't reveal to attackers whether the username is correct, and it doesn't indicate which of the two fields is wrong. Check:
 
@@ -47,7 +47,7 @@ When creating a new user or changing a password, the password must meet three co
 | Condition | Detail |
 |---|---|
 | Length | **At least 12 characters** |
-| At least one letter | Arabic (أ-ي) or Latin (A-Z / a-z) |
+| At least one letter | Arabic or Latin (A-Z / a-z) |
 | At least one digit | 0-9 |
 
 Examples: `Maghz@2026` (9 characters — rejected for length), `مغزى الحسابات 2026` (accepted), `Shop#Yemen2026` (accepted).
@@ -56,7 +56,7 @@ Examples: `Maghz@2026` (9 characters — rejected for length), `مغزى الح�
 
 You can change your password at any time without needing an administrator:
 
-- **Path:** the user menu in the header (the user avatar at the top left) ← **Change Password (تغيير كلمة المرور)**
+- **Path:** the user menu in the header (the user avatar at the top left) ← **Change Password**
 
 | Field | Description |
 |---|---|
@@ -68,7 +68,7 @@ The system verifies the current password first (fail-closed): a failed verificat
 
 ## Logout
 
-- **Path:** the user menu ← **Logout (تسجيل الخروج)**
+- **Path:** the user menu ← **Logout**
 - The session ends immediately and you return to the login screen, and the event is recorded in the Audit Log.
 
 ## Automatic Logout (Session Protection)

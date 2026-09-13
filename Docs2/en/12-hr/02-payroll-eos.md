@@ -6,8 +6,8 @@
 
 This file covers two financial HR processes:
 
-1. **Payroll Runs (مسيرات الرواتب)** — running a full month with self-computed derived figures and posting their journal entry.
-2. **End of Service (نهاية الخدمة)** — a loyalty award computed with a progressive formula, with an approval and payment cycle.
+1. **Payroll Runs** — running a full month with self-computed derived figures and posting their journal entry.
+2. **End of Service** — a loyalty award computed with a progressive formula, with an approval and payment cycle.
 
 All calculations live in the **payroll engine** (`payrollEngine.ts`) — pure functions reused by the engine, the operator, and the UI, while the server recomputes everything and ignores any derived figures supplied by the client (protection against tampering and fabrication).
 
@@ -19,21 +19,21 @@ All calculations live in the **payroll engine** (`payrollEngine.ts`) — pure fu
 ## Payroll Runs
 
 
-![Payroll runs screen (شاشة مسيرات الرواتب)](../assets/hr/payroll.png)
+![Payroll runs screen](../assets/hr/payroll.png)
 ### Running a Payroll
 
-1. **Access:** HR ← Payroll ← **New Payroll (مسير جديد)**.
+1. **Access:** HR ← Payroll ← **New Payroll**.
 2. Choose the **month and year** — active employees are gathered with their salaries from their records, and their overtime is gathered from attendance.
 3. **Automatic preview:** the engine computes every line immediately (there is no "save a draft with manual figures").
 4. Adjust what you need (a manual override per employee — see below), then save.
-5. **Post (ترحيل)** — the journal entry is created and the payroll is locked.
+5. **Post** — the journal entry is created and the payroll is locked.
 
 ### The Payroll Lifecycle
 
 | Status | Meaning | What you can do in it |
 |---|---|---|
-| **Draft (مسودة)** | Computed and previewed, not yet accounted for | Edit the overrides, recompute, delete |
-| **Posted (مُرحّل)** | The journal entry is posted | View and print only — no editing and no deletion |
+| **Draft** | Computed and previewed, not yet accounted for | Edit the overrides, recompute, delete |
+| **Posted** | The journal entry is posted | View and print only — no editing and no deletion |
 
 ### The Payroll Line Formula
 
@@ -90,7 +90,7 @@ Payroll components are defined in **Settings** (not in the payroll run): a code,
 ## End of Service
 
 
-![End of service screen (شاشة مستحقات نهاية الخدمة)](../assets/hr/end-of-service.png)
+![End of service screen](../assets/hr/end-of-service.png)
 ### The End of Service Screen
 
 - **Access:** HR ← End of Service.
@@ -101,7 +101,7 @@ Payroll components are defined in **Settings** (not in the payroll run): a code,
 |---|---|
 | Employee | The hire date and base salary are read from it |
 | Termination date | The last working day |
-| **Reason** | **Resignation / Termination / Contract expiry / Retirement (استقالة / إنهاء / انتهاء عقد / تقاعد)** |
+| **Reason** | **Resignation / Termination / Contract expiry / Retirement** |
 | Notes | Free description |
 
 **Years of service and the award are computed by the server** — any figure supplied by the user is ignored. If the award computes to zero, the record is rejected.
@@ -110,16 +110,16 @@ Payroll components are defined in **Settings** (not in the payroll run): a code,
 
 | Status | Meaning | Effect |
 |---|---|---|
-| **Draft (مسودة)** | Computed, awaiting approval | Edit/delete, no journal entries |
-| **Approved (معتمدة)** | An entry posted: debit end-of-service expense (`52501`) / credit end-of-service liability (`21503`) | Awaiting payment |
-| **Paid (مدفوعة)** | Paid in cash | Settled through a cash box only — no manual status payment |
-| **Cancelled (ملغاة)** | Cancelled | Final |
+| **Draft** | Computed, awaiting approval | Edit/delete, no journal entries |
+| **Approved** | An entry posted: debit end-of-service expense (`52501`) / credit end-of-service liability (`21503`) | Awaiting payment |
+| **Paid** | Paid in cash | Settled through a cash box only — no manual status payment |
+| **Cancelled** | Cancelled | Final |
 
 ### The Progressive Award Formula
 
 ```
 Award = (first ≤5 years × first-years multiplier × monthly salary)
-      + (years beyond 5 × beyond-5 multiplier × monthly salary)
+ + (years beyond 5 × beyond-5 multiplier × monthly salary)
 ```
 
 - The default multipliers are **0.5** for the first five years and **1.0** beyond (`hr.eos.firstYearsMultiplier` / `hr.eos.beyondYearsMultiplier` — **configurable from the HR policies** without code changes).
@@ -139,7 +139,7 @@ An employee who served **7 years** with a monthly salary of **100,000 YER**:
 ### Payment via a Cash Box
 
 1. Approve the record (the expense/liability entry is posted).
-2. Click **Pay (دفع)** and choose the **cash box** — mandatory ("A cash box is required to settle the payment (الخزنة مطلوبة لتسوية الدفع)").
+2. Click **Pay** and choose the **cash box** — mandatory ("A cash box is required to settle the payment").
 3. In a single atomic transaction: the payment entry is posted (credit the cash box) and the record is stamped "Paid" with the payment date and cash box.
 
 ## Important Rules

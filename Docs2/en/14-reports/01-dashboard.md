@@ -5,7 +5,7 @@
 ## Overview
 
 
-![Main dashboard with KPIs and charts (لوحة التحكم الرئيسية مع المؤشرات والرسوم)](../assets/reports/dashboard.png)
+![Main dashboard with KPIs and charts](../assets/reports/dashboard.png)
 The dashboard is the home page shown right after login (the `/` route). It displays:
 - Financial and operational KPI cards with the ability to compare against the previous period.
 - Detailed indicators for the Manufacturing, Purchases, Inventory, HR, and CRM modules.
@@ -15,7 +15,7 @@ The dashboard is the home page shown right after login (the `/` route). It displ
 ## Access & Permissions
 
 - Required permission: `reports.view` to view, `reports.export` to export.
-- A user without `reports.view` sees an explicit "You do not have permission to view this page (لا تملك صلاحية لعرض هذه الصفحة)" message with an icon.
+- A user without `reports.view` sees an explicit "You do not have permission to view this page" message with an icon.
 - The export buttons appear disabled for a user without `reports.export`.
 
 | Role | View | Export |
@@ -30,10 +30,10 @@ The dashboard is the home page shown right after login (the `/` route). It displ
 
 | Filter | Options | Notes |
 |---|---|---|
-| **Period** | Today / Week (last 7 days) / Month (current month) / Year (current year) / Custom (مخصص) | Default: current month |
+| **Period** | Today / Week (last 7 days) / Month (current month) / Year (current year) / Custom | Default: current month |
 | **From — To** | Two date fields | They appear only when "Custom" is selected; if left empty, the last 30 days are used |
-| **Compare with previous (مقارنة بالسابق)** | A checkbox | When enabled, a previous period of the same length as the current one is computed automatically, and the change percentage (%) appears with an up/down arrow on the cards |
-| **Reset filters (إعادة التصفية)** | A button | Resets the period to "Month" and turns off the comparison |
+| **Compare with previous** | A checkbox | When enabled, a previous period of the same length as the current one is computed automatically, and the change percentage (%) appears with an up/down arrow on the cards |
+| **Reset filters** | A button | Resets the period to "Month" and turns off the comparison |
 
 ## KPI Cards
 
@@ -82,7 +82,7 @@ They appear in a 4-column grid, and some of them are **clickable**, taking you s
 | Revenue vs. Expenses | Grouped bars | Sales and purchases monthly | If the period spans 60 days or less, it switches automatically to a **daily breakdown**, and months without data appear as zero |
 | Top 5 Products by Sales | Bars | Products by invoice line value in the period | Descending order, cancelled excluded |
 | **Receivables Aging** | Bars | Outstanding receivables split into 0-30 / 31-60 / 61-90 / 90+ days | Based on the due date; paid and cancelled invoices are excluded |
-| Cash Flow | Bars (in/out) | Cash account movements from the journal entries | Cash box and treasury accounts are detected **by name** (containing "صندوق", "نقد", "خزينة", cash, or treasury) — name your cash accounts with these words so the chart renders correctly |
+| Cash Flow | Bars (in/out) | Cash account movements from the journal entries | Cash box and treasury accounts are detected **by name** — name your cash accounts with these words so the chart renders correctly |
 | Sales vs. Purchases Trend | Dual lines | The last 30 days of the selected period | Daily |
 | Profit Trend | Lines | Sales − purchases per day over the last 30 days | Derived from the previous trend chart |
 | Product Category Share | Pie/percentage | The distribution of inventory value (quantity × cost price) across categories | The top 6 categories; uncategorized items appear as "Uncategorized" |

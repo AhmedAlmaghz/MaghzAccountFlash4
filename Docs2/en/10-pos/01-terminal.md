@@ -5,14 +5,14 @@
 ## Overview
 
 
-![The cashier screen: barcode, touch grid, and cart (شاشة الكاشير)](../assets/pos/terminal.png)
+![The cashier screen: barcode, touch grid, and cart](../assets/pos/terminal.png)
 The cashier screen is the module's daily destination for the cashier. It opens from the sidebar ← Point of Sale (or directly at `http://…/pos`) and runs full-screen outside the app shell. Access permission: at least `pos.view`.
 
 ## Locked Until a Shift Is Open
 
 As soon as the screen appears, it checks whether the current user has an open Shift:
 
-- **No open Shift** → the screen shows only the opening prompt: choose the **Cash Box (صندوق النقد)** and enter the **opening float** in the drawer (the cash available when the Shift starts), then click "Open Shift (فتح الوردية)".
+- **No open Shift** → the screen shows only the opening prompt: choose the **Cash Box** and enter the **opening float** in the drawer (the cash available when the Shift starts), then click "Open Shift".
 - **Open Shift** → the **shift badge** appears at the top of the screen: the Cash Box name + the **elapsed time** since opening (updating live).
 
 ## Top Bar
@@ -21,7 +21,7 @@ As soon as the screen appears, it checks whether the current user has an open Sh
 |---|---|
 | Search / barcode | The main search field. Press **F2** to focus it instantly (the current text is selected to be overwritten). |
 | Hardware barcode scanner | Supports "Keyboard Wedge" scanners — the scanner types the code and sends Enter. Scanning searches exactly by barcode, SKU, or code, and the first match is added straight to the cart. |
-| Customer selector | The default list shows the **Walk-in Customer (العميل النقدي الافتراضي)**. Change the customer before a credit sale. |
+| Customer selector | The default list shows the **Walk-in Customer**. Change the customer before a credit sale. |
 | Held carts | A button showing the suspended carts (resume / discard) — see below. |
 | Reprint last receipt | Prints the 80mm receipt of the last sale of the current Shift. |
 | Close Shift | Opens the closing and count dialog (detailed in [02-shifts.md](./02-shifts.md)). |
@@ -30,7 +30,7 @@ As soon as the screen appears, it checks whether the current user has an open Sh
 ## Touch Grid
 
 - **Large tiles** showing: product name, code, price, and a **live stock badge** (the total available quantity across all warehouses).
-- **Out of stock is not tappable**: the tile appears grayed out when stock is zero — it cannot be tapped (unless you enable "Allow negative stock (السماح بالمخزون السالب)" in Settings).
+- **Out of stock is not tappable**: the tile appears grayed out when stock is zero — it cannot be tapped (unless you enable "Allow negative stock" in Settings).
 - In-grid search is **debounced** — it does not fire a query on every keystroke, only after you pause typing for a moment, keeping typing smooth on large databases.
 - The grid shows active products that have a selling price only, capped at 200 results.
 
@@ -92,7 +92,7 @@ Hold a sale and serve the next customer:
 
 ## Payment — What Actually Happens (Atomic Checkout)
 
-When you click "Confirm Payment (تأكيد الدفع)", a **single atomic operation** runs in the database — either everything succeeds or everything fails:
+When you click "Confirm Payment", a **single atomic operation** runs in the database — either everything succeeds or everything fails:
 
 | Step | What happens |
 |---|---|
@@ -112,12 +112,12 @@ Numbering: a new receipt number from the `POS-` sequence, fully independent of t
 - **`POS-` numbering** with six zero-padded digits (example: `POS-000123`) — independent of `INV-` invoice numbering.
 - An **80mm RTL-oriented** template through the browser print window (suitable for thermal printers).
 - Receipt content, in order:
-  1. Company header (name, **Tax Number**, address, phone)
-  2. Receipt number, date, cashier name, and customer name (if any)
-  3. Lines (name, quantity × unit price, total)
-  4. Subtotal, discount, tax, total
-  5. Payment split: **cash / credit**, and the **change due** if any
-  6. A **custom footer** from POS settings (example: "Thank you for your visit — exchange within 14 days")
+ 1. Company header (name, **Tax Number**, address, phone)
+ 2. Receipt number, date, cashier name, and customer name (if any)
+ 3. Lines (name, quantity × unit price, total)
+ 4. Subtotal, discount, tax, total
+ 5. Payment split: **cash / credit**, and the **change due** if any
+ 6. A **custom footer** from POS settings (example: "Thank you for your visit — exchange within 14 days")
 - **Auto-print** after payment (set from POS settings), with the option to **reprint the last receipt** from the top bar at any time.
 - If the browser blocks pop-ups, nothing will print — allow pop-ups for the app's site.
 
@@ -142,7 +142,7 @@ The Journal Entry posted at payment: debit the Cash Box 945 / credit Sales 900 /
 | "المخزون لا يكفي" (Insufficient stock) — disabled tile | The product's stock is zero and negative stock is disallowed | Enable `pos.allowNegativeStock` or check the stock |
 | "فارق في الإجمالي: المتوقع X المستلم Y" (Total mismatch: expected X, received Y) | Manual tampering with the total or a network glitch | Reopen the payment dialog — the server recomputes |
 | "أُغلقت الوردية أثناء عملية الدفع" (The Shift was closed during checkout) | A simultaneous close from another device | Open a new Shift and redo the payment |
-| The print window does not appear | A pop-up blocker | Allow pop-ups then reprint from "Reprint last receipt (إعادة طباعة آخر إيصال)" |
+| The print window does not appear | A pop-up blocker | Allow pop-ups then reprint from "Reprint last receipt" |
 | The scanner adds the wrong product | A code duplicated between two products | Check barcode/SKU uniqueness on the product card |
 
 ## Tips

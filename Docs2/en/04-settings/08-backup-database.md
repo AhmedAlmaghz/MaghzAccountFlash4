@@ -19,7 +19,7 @@ Every sensitive operation is recorded in the Audit Log.
 ## 1. Backup
 
 
-![Backup screen (النسخ الاحتياطي)](../assets/settings/backup.png)
+![Backup screen](../assets/settings/backup.png)
 ### Access & Permissions
 
 | Action | Permission |
@@ -43,8 +43,8 @@ Every sensitive operation is recorded in the Audit Log.
 #### Creating a Backup
 
 1. **Choose the destination:**
-   - **Local:** download the file to your device (or save it inside the app's OPFS storage if downloading is not supported).
-   - **Google Drive:** upload the backup to Drive after connecting (see below).
+ - **Local:** download the file to your device (or save it inside the app's OPFS storage if downloading is not supported).
+ - **Google Drive:** upload the backup to Drive after connecting (see below).
 2. **Encryption (optional):** enable "Encrypt" and enter a password and its confirmation — an encrypted backup can only be restored with the same password. The password is mandatory with encryption and both fields must match.
 3. Click **Create Backup** — the system reads all of the company's tables, builds a file with a unified name carrying the company name and date, and shows a success message with the number of tables (and the number of warnings, if any).
 
@@ -75,7 +75,7 @@ A list of previous backups with the name, date, size, type (manual/automatic), d
 ## 2. Database
 
 
-![Database management screen (إدارة قاعدة البيانات)](../assets/settings/database.png)
+![Database management screen](../assets/settings/database.png)
 ### Screen: Database Settings
 
 - **Access:** Sidebar ← Settings ← Database

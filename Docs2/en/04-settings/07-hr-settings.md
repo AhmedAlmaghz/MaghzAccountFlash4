@@ -16,7 +16,7 @@ Every change on both pages is recorded in the Audit Log, and both fall under the
 ## Section One: HR Policies
 
 
-![HR policies screen (سياسات الموارد البشرية)](../assets/settings/hr-policies.png)
+![HR policies screen](../assets/settings/hr-policies.png)
 ### The Screen
 
 - **Access:** Sidebar ← Settings ← HR Policies
@@ -67,7 +67,7 @@ End-of-service benefit = (0.5 × 5) + (1.0 × (n − 5)) months' salary
 ## Section Two: Payroll Components
 
 
-![Payroll components screen (مكونات الرواتب)](../assets/settings/payroll-components.png)
+![Payroll components screen](../assets/settings/payroll-components.png)
 ### The Screen
 
 - **Access:** Sidebar ← Settings ← Payroll Components

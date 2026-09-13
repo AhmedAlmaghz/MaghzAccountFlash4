@@ -43,11 +43,11 @@ Both views obey the same filters, and both can be exported to **Excel** — the 
 ```
 1 Assets (Group Account)
 └── 11 Cash (Group Account)
-    ├── 11101 Cash Box (Detail — Debit)
-    └── 11102 Ahli Bank (Detail — Debit)
+ ├── 11101 Cash Box (Detail — Debit)
+ └── 11102 Ahli Bank (Detail — Debit)
 4 Revenues (Group Account)
 └── 41 Sales Revenue (Group Account)
-    └── 41101 Retail Sales (Detail — Credit)
+ └── 41101 Retail Sales (Detail — Credit)
 ```
 
 Note: the balance of `11 Cash` = the balance of `11101` + the balance of `11102` — never attempt to record a transaction at the group level.
@@ -55,7 +55,7 @@ Note: the balance of `11 Cash` = the balance of `11101` + the balance of `11102`
 ## Filters and Summary Cards
 
 
-![Chart of Accounts screen (شاشة شجرة الحسابات)](../assets/accounting/chart-of-accounts.png)
+![Chart of Accounts screen](../assets/accounting/chart-of-accounts.png)
 **The filters at the top of the screen:**
 
 | Filter | Options | Behavior |
@@ -77,7 +77,7 @@ Note: the balance of `11 Cash` = the balance of `11101` + the balance of `11102`
 
 ## Adding an Account
 
-Click **Add Account (إضافة حساب)**, then fill in:
+Click **Add Account**, then fill in:
 
 | Field | Description | Required |
 |---|---|---|

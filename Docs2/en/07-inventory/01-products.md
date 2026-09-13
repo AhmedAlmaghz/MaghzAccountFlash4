@@ -17,7 +17,7 @@ The product is the core element around which all inventory, sales, and purchase 
 ## Products List
 
 
-![Products list with filters and export (قائمة المنتجات)](../assets/inventory/products.png)
+![Products list with filters and export](../assets/inventory/products.png)
 A table showing: code, Arabic name, barcode, unit, cost price, sale price, categories, active status, and action buttons.
 
 - **Smart search:** searches the Arabic and English names, code, barcode, and SKU together.
@@ -27,7 +27,7 @@ A table showing: code, Arabic name, barcode, unit, cost price, sale price, categ
 
 ## New Product Screen
 
-- **Access:** Sidebar ← Inventory ← Products ← the **New Product (منتج جديد)** button
+- **Access:** Sidebar ← Inventory ← Products ← the **New Product** button
 - **Purpose:** Create a complete product card
 
 ### Fields
@@ -105,7 +105,7 @@ Click any product to open a tabbed dialog:
 
 Adding an "Orange Juice" product with multi-units:
 
-1. Sidebar ← Inventory ← Products ← **New Product (منتج جديد)**.
+1. Sidebar ← Inventory ← Products ← **New Product**.
 2. Code: generated automatically as `PRD-00012`. Arabic name: «عصير برتقال». English name: `Orange Juice`.
 3. Base Unit: "Piece". Type: "Beverages". Categories: "Beverages" + "Foodstuffs".
 4. Cost price: `500` YER, sale price: `750` YER.
@@ -113,7 +113,7 @@ Adding an "Orange Juice" product with multi-units:
 6. Minimum: `24`, reorder point: `48`, maximum: `500`.
 7. Opening balance: `240` pieces in the Main Warehouse.
 8. In the **Units** section add a "Carton" row: factor `12`, suggested sale price `750 × 12 = 9,000` YER, suggested purchase price `500 × 12 = 6,000` YER. Mark it as the **default sale unit**.
-9. Click **Save (حفظ)** — an opening movement is created: 240 pieces in the Main Warehouse, and a journal entry for `240 × 500 = 120,000` YER:
+9. Click **Save** — an opening movement is created: 240 pieces in the Main Warehouse, and a journal entry for `240 × 500 = 120,000` YER:
 
 | Account | Debit (YER) | Credit (YER) |
 |---|---:|---:|

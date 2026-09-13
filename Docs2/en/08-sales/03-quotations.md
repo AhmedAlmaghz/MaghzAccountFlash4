@@ -18,7 +18,7 @@ A quotation is a non-binding document presented to a customer with proposed pric
 ## The List
 
 
-![Quotations list (قائمة عروض الأسعار)](../assets/sales/quotations.png)
+![Quotations list](../assets/sales/quotations.png)
 A table showing: quotation number, customer, date, **expiry date**, total, **status** (a colored badge), and action buttons.
 
 - **Search** by quotation number and customer name + a **status filter** + a **customer filter** + **server-side pagination**.
@@ -26,7 +26,7 @@ A table showing: quotation number, customer, date, **expiry date**, total, **sta
 
 ## New Quotation Screen
 
-- **Access:** Sidebar ← Sales ← Quotations ← the **New Quotation (عرض جديد)** button
+- **Access:** Sidebar ← Sales ← Quotations ← the **New Quotation** button
 - **Purpose:** Prepare a price quotation for a customer
 
 ### Fields
@@ -74,14 +74,14 @@ Appears on the quotation (especially the draft) and performs the following:
 
 A quotation for Al-Noor Est., then converting it to an invoice:
 
-1. Sidebar ← Sales ← Quotations ← **New Quotation (عرض جديد)**.
+1. Sidebar ← Sales ← Quotations ← **New Quotation**.
 2. The number appears automatically: `QOT-00009`. Customer: "Al-Noor Trading Est.".
 3. Expiry date: `2026-09-30`. Payment type: **Credit**.
 4. **Line:** "Orange Juice" — unit: **Carton**, quantity: `5`, unit price: `9,000`, line discount: `5%` → the line value is `42,750`.
 5. Notes: "The quotation is valid for 30 days — delivery from the Main Warehouse".
-6. **Save (حفظ)** → draft `QOT-00009` (no journal entry and no stock movement — normal).
-7. **Send it (إرسال)** to the customer, then update the status to **Sent** after the agreement.
-8. The customer agrees → mark it **Accepted** (or convert directly), then click **Convert to Invoice (تحويل إلى فاتورة)**.
+6. **Save** → draft `QOT-00009` (no journal entry and no stock movement — normal).
+7. **Send it** to the customer, then update the status to **Sent** after the agreement.
+8. The customer agrees → mark it **Accepted** (or convert directly), then click **Convert to Invoice**.
 9. The result: a draft invoice `INV-…` with the quotation's carton lines (the same line values), its notes carry the `QOT-00009` reference, and the quotation's status is **Converted**.
 10. Complete the invoice: an overall discount if any + VAT 15%, then **post it** — only then does stock move and the customer balance increase.
 

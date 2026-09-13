@@ -18,14 +18,14 @@ A sales invoice documents the sale and generates all of its effects automaticall
 ## The List
 
 
-![Sales invoices list (قائمة فواتير المبيعات)](../assets/sales/invoices.png)
+![Sales invoices list](../assets/sales/invoices.png)
 - **KPI cards:** **Total** (invoice count with posted and draft counts), **Total Value**, **Collected**, and **Drafts awaiting posting**.
 - **Search** by invoice number and customer, a **status filter** (draft/posted/partially paid/paid/cancelled), a **customer filter**, **server-side pagination**, and **Excel/PDF export**.
 - Per-row buttons: view details, edit (draft only), print, delete (draft only), post.
 
 ## Creation Form
 
-Click **New Invoice (فاتورة جديدة)** — the form has three parts:
+Click **New Invoice** — the form has three parts:
 
 ### Header
 
@@ -60,7 +60,7 @@ Live totals at the bottom of the form: Subtotal − Discount + VAT = Total.
 
 ### Saving
 
-- **Save (حفظ)** creates the invoice as a **Draft** with an automatic number carrying the `INV-` prefix from document sequences.
+- **Save** creates the invoice as a **Draft** with an automatic number carrying the `INV-` prefix from document sequences.
 
 ## Duplicate Guard
 
@@ -87,7 +87,7 @@ The guard is a safety cushion: a technical failure of the duplicate check does n
 
 ## Posting Effects (Atomic)
 
-The **Post (ترحيل)** button executes a **single transaction** — all succeed or everything rolls back:
+The **Post** button executes a **single transaction** — all succeed or everything rolls back:
 
 1. **Journal Entry:** debit **Accounts Receivable** with the total — or the **selected Cash Box account** if cash / credit **Sales** with the subtotal + credit **Output VAT** with the VAT.
 2. **Outbound stock movements** for each line (type `out` referencing the invoice number) + the quantity is **deducted from the warehouse with the highest balance** for this product (otherwise the first warehouse) — in the **Base** quantity for multi-units (a carton with factor 12 → 12 go out).
@@ -104,13 +104,13 @@ The **Post (ترحيل)** button executes a **single transaction** — all succe
 
 A credit sale to Al-Noor Est.: 2 cartons of juice (factor 12) + discount:
 
-1. Sidebar ← Sales ← Invoices ← **New Invoice (فاتورة جديدة)**.
+1. Sidebar ← Sales ← Invoices ← **New Invoice**.
 2. Customer: "Al-Noor Trading Est." Date: `2026-09-12`. Due date: `2026-10-12`. Payment type: **Credit**. Currency: YER.
 3. **Line:** product "Orange Juice" (stock 180 and the barcode appear). Unit: **Carton** — fetches its price `9,000` and shows the equivalent: 1 carton = 12 pieces. Quantity: `2`. Unit price: `9,000`. Line discount: `0%`.
 4. Subtotal = `18,000`. Invoice discount: `5%` = `900`. VAT 15% on `17,100` = `2,565`.
-5. **Save (حفظ)** → draft `INV-00052` (the journal entry and stock movements come later).
+5. **Save** → draft `INV-00052` (the journal entry and stock movements come later).
 6. A similarity warning appeared? Review the suspect list — if it is a previous invoice, do not continue.
-7. Click **Post (ترحيل)** — the atomic effect:
+7. Click **Post** — the atomic effect:
 
 | Effect | Details |
 |---|---|

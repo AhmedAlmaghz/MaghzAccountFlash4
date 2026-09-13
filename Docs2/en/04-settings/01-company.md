@@ -21,7 +21,7 @@ If you do not have `settings.edit`, the Save button is hidden and you cannot mak
 ## Screen: Company Information
 
 
-![Company Information screen (بيانات الشركة)](../assets/settings/company.png)
+![Company Information screen](../assets/settings/company.png)
 - **Access:** Sidebar ← Settings ← Company Information
 - **Purpose:** Enter the organization's official identity and configure the general display preferences.
 

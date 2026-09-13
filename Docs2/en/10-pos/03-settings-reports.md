@@ -1,7 +1,7 @@
 # POS Settings & Reports — User Guide
 
 
-![POS settings (إعدادات نقاط البيع)](../assets/pos/settings.png)
+![POS settings](../assets/pos/settings.png)
 > Configuring the cashier screen's behavior (the `pos.*` keys) and analyzing POS sales with filters, grouping, and export.
 
 ## Overview
@@ -22,9 +22,9 @@ Two files in the POS module:
 
 | Key | Setting | Description |
 |---|---|---|
-| `pos.defaultCashBoxId` | **Default Cash Box (صندوق النقد الافتراضي)** | Pre-selected in the "Open Shift" dialog — saves the cashier picking it every morning |
-| `pos.defaultWalkInCustomerId` | **Walk-in Customer (العميل النقدي الافتراضي)** | Used for pure cash sales without selecting a customer — its name shows in the customer bar by default |
-| `pos.receiptFooter` | **Receipt footer text (نص تذييل الإيصال)** | A free line printed at the bottom of every 80mm receipt (example: "Thank you for your visit — no exchange after 14 days") |
+| `pos.defaultCashBoxId` | **Default Cash Box** | Pre-selected in the "Open Shift" dialog — saves the cashier picking it every morning |
+| `pos.defaultWalkInCustomerId` | **Walk-in Customer** | Used for pure cash sales without selecting a customer — its name shows in the customer bar by default |
+| `pos.receiptFooter` | **Receipt footer text** | A free line printed at the bottom of every 80mm receipt (example: "Thank you for your visit — no exchange after 14 days") |
 | `pos.autoPrint` | Auto-print | Prints the receipt the moment payment succeeds, with no extra click |
 | `pos.allowPriceEdit` | Allow price editing | Enables editing the unit price in the cart — **disabled by default** (register safety) |
 | `pos.allowDiscount` | Allow discount | Allows entering a discount percentage on a cart line — enabled by default |
@@ -36,7 +36,7 @@ Two files in the POS module:
 
 | Key | Enabled | Disabled |
 |---|---|---|
-| Auto-print | The print window opens by itself after every successful payment | The cashier prints manually from "Reprint last receipt (إعادة طباعة آخر إيصال)" |
+| Auto-print | The print window opens by itself after every successful payment | The cashier prints manually from "Reprint last receipt" |
 | Price editing | The cashier edits the unit price on a cart line | The price field is locked to the selling price from the product catalog |
 | Allow discount | Entering a discount percentage per line | The discount field is hidden and the price cannot be reduced |
 | Negative stock | Scanning works, zero-stock tiles are tappable, and the sale deducts below zero | The tile is grayed out and scanning rejects the product |
@@ -54,7 +54,7 @@ Two files in the POS module:
 ## POS Reports
 
 
-![POS reports (تقارير نقاط البيع)](../assets/pos/reports.png)
+![POS reports](../assets/pos/reports.png)
 - **Access:** Sidebar ← Point of Sale ← Reports.
 - **Permission:** `reports.view` to view, `reports.export` to export — the export button appears only for holders of the export permission.
 
@@ -73,7 +73,7 @@ Choose from the period bar at the top of the report: **Today / This Week / This 
 
 ### Group By
 
-The **"Group by (تجميع حسب)"** option reshapes the report entirely:
+The **"Group by"** option reshapes the report entirely:
 
 | Grouping | What the user sees |
 |---|---|
@@ -96,7 +96,7 @@ The **"Group by (تجميع حسب)"** option reshapes the report entirely:
 | Receipt number | `POS-000123` |
 | Date/time | The moment of the sale |
 | Cashier | The Shift's owner |
-| Customer | Or "Walk-in Customer (عميل نقدي)" |
+| Customer | Or "Walk-in Customer" |
 | Products | The line names |
 | Cash / Credit | The payment split |
 | Total | The invoice total |

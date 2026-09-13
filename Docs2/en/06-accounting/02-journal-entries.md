@@ -20,7 +20,7 @@ Every entry starts as a **Draft** and is then **Posted** to reflect its effect o
 ## The List
 
 
-![Journal Entries list (قائمة قيود اليومية)](../assets/accounting/journal-entries.png)
+![Journal Entries list](../assets/accounting/journal-entries.png)
 The entries table shows: the date, the reference (the automatic entry number), the description, the amount, the **status** (badge: Draft/Posted), the creating user, and the action buttons.
 
 - **Status filter:** choose Draft, Posted, or All, with search by description and reference.
@@ -36,8 +36,8 @@ The entries table shows: the date, the reference (the automatic entry number), t
 ## The New Entry Screen
 
 
-![New journal entry editor (شاشة إنشاء قيد يومية جديد)](../assets/accounting/journal-entry-editor.png)
-Click **New Entry (قيد جديد)**. You will find:
+![New journal entry editor](../assets/accounting/journal-entry-editor.png)
+Click **New Entry**. You will find:
 
 | Field | Description |
 |---|---|
@@ -92,7 +92,7 @@ Recording rent expense of 150,000 YER paid in cash for June:
 3. **Line one:** Account = "Rent Expense" (`51101`), **Debit = 150,000**, Credit empty, Note: "June rent".
 4. **Line two:** Account = "Cash Box" (`11101`), Debit empty, **Credit = 150,000**.
 5. Watch the live totals: debit 150,000 = credit 150,000 — **balanced** ✓
-6. Click **Save and Post (حفظ ومُرحّلة)** (without the balance, the button would be disabled and you would save a draft).
+6. Click **Save and Post** (without the balance, the button would be disabled and you would save a draft).
 7. An automatic reference number is generated (e.g. `JV-000123`), and the entry's effect appears immediately in the two accounts' ledgers and in the Trial Balance.
 
 | Account | Debit (YER) | Credit (YER) |

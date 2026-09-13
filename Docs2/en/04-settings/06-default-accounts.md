@@ -33,7 +33,7 @@ Every edit or template application is recorded in the Audit Log.
 ## Screen: The Behaviors Table
 
 
-![Default accounts screen (الحسابات الافتراضية)](../assets/settings/default-accounts.png)
+![Default accounts screen](../assets/settings/default-accounts.png)
 - **Access:** Sidebar ← Settings ← Default Accounts
 - **Purpose:** Display all system behaviors in one table with the link status and the current account.
 
