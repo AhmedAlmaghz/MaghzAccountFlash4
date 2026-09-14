@@ -18,7 +18,7 @@ A sales return documents goods coming back after a sale: a manufacturing defect,
 ## The List
 
 
-![Sales returns list (قائمة مرتجعات البيع)](../assets/sales/returns.png)
+![Sales returns list](../assets/sales/returns.png)
 A table showing: return number, customer, **original invoice** (with its number), date, total, **reason**, status, and action buttons.
 
 - **Search** by return number and customer + a **status filter** + a **customer filter** + **server-side pagination**.
@@ -26,7 +26,7 @@ A table showing: return number, customer, **original invoice** (with its number)
 
 ## New Return Screen
 
-- **Access:** Sidebar ← Sales ← Returns ← the **New Return (مرتجع جديد)** button
+- **Access:** Sidebar ← Sales ← Returns ← the **New Return** button
 - **Purpose:** Document goods coming back from a customer
 
 ### Fields
@@ -55,7 +55,7 @@ The return price is based on the original invoice's price (after its line discou
 
 ## Posting Effects (Atomic)
 
-The **Post (ترحيل)** button executes a **single transaction** that succeeds entirely or rolls back entirely:
+The **Post** button executes a **single transaction** that succeeds entirely or rolls back entirely:
 
 | Effect | Details |
 |---|---|
@@ -70,12 +70,12 @@ The running balance in the customer's account statement counts the posted return
 
 A damaged carton of juice came back from invoice `INV-00052`:
 
-1. Sidebar ← Sales ← Returns ← **New Return (مرتجع جديد)**.
+1. Sidebar ← Sales ← Returns ← **New Return**.
 2. The number appears automatically: `SR-00006`.
 3. **Original invoice:** select `INV-00052` (Al-Noor Est.) — **its lines load**: juice cartons at 9,000. The customer is locked: Al-Noor Est.
 4. Returned quantity: `1` carton. Reason: "Packaging damage — photographed in the attachments".
-5. Total = `9,000`. **Save (حفظ)** → draft `SR-00006` (nothing has changed yet).
-6. Inspect the goods physically, then click **Post (ترحيل)** — the atomic effect:
+5. Total = `9,000`. **Save** → draft `SR-00006` (nothing has changed yet).
+6. Inspect the goods physically, then click **Post** — the atomic effect:
 
 | Effect | Details |
 |---|---|

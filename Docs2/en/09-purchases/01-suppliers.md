@@ -5,7 +5,7 @@
 ## Overview
 
 
-![Purchases hub with live counters (مركز المشتريات مع العدادات الحية)](../assets/purchases/hub.png)
+![Purchases hub with live counters](../assets/purchases/hub.png)
 The supplier is the party you buy from, and their balance is **Accounts Payable (AP)**: what you owe them. Access the screen from: **Sidebar ← Purchases ← Suppliers** (`/purchases/suppliers`).
 
 ## Access & Permissions
@@ -19,16 +19,16 @@ The supplier is the party you buy from, and their balance is **Accounts Payable 
 ## Suppliers List
 
 
-![Suppliers list (قائمة الموردين)](../assets/purchases/suppliers.png)
+![Suppliers list](../assets/purchases/suppliers.png)
 A table showing: code, name, phone, **balance** (credit = what you owe), active status, and action buttons.
 
 - **Search** by name, phone, and code + an **active filter** + **server-side pagination**.
 - **Export** the displayed list.
-- **Add New Supplier (إضافة مورد جديد)** is protected by the `purchases.create` permission.
+- **Add New Supplier** is protected by the `purchases.create` permission.
 
 ## New Supplier Screen
 
-- **Access:** Sidebar ← Purchases ← Suppliers ← the **New Supplier (مورد جديد)** button
+- **Access:** Sidebar ← Purchases ← Suppliers ← the **New Supplier** button
 - **Purpose:** Open a supplier file
 
 ### Fields
@@ -84,7 +84,7 @@ Payments are not made from the supplier screen; they go through **Payment Vouche
 
 Opening a new supplier with an opening balance:
 
-1. Sidebar ← Purchases ← Suppliers ← **New Supplier (مورد جديد)**.
+1. Sidebar ← Purchases ← Suppliers ← **New Supplier**.
 2. The code appears automatically. Name: "Al-Khair Distribution Warehouses". Phone: `712345678`.
 3. Opening balance: `500,000` YER (you owe it), opening date: `2026-09-01`.
 4. **Save** — the opening Journal Entry posts once:

@@ -106,7 +106,7 @@ Special additional permissions: `reports.view` / `reports.export` / `reports.cus
 ## Other Important Rules
 
 - **The sidebar adapts automatically**: modules where you hold no view or create permission disappear from the menu — the Viewer does not see the Settings menu, and the rep sees only Sales and CRM.
-- **Buttons hide with the permission**: for example, the **New Invoice (فاتورة جديدة)** button simply does not appear for someone without `sales.create` — it is not merely disabled.
+- **Buttons hide with the permission**: for example, the **New Invoice** button simply does not appear for someone without `sales.create` — it is not merely disabled.
 - **Posting is a separate action**: owning `sales.edit` does not allow posting; the `post` permission is independent because posting a document creates an affecting journal entry.
 - **Deletion is for drafts**: even holders of the `delete` permission cannot delete a posted document — correction is done with a return or a reversing entry.
 - **The AI assistant key**: changing the provider key or disabling the assistant requires `ai.settings` — unavailable to the accountant and the rep.
@@ -116,4 +116,4 @@ Special additional permissions: `reports.view` / `reports.export` / `reports.cus
 - Start by granting the default roles, then customize them — do not give `*` to anyone who does not need it.
 - Review the permissions matrix quarterly and whenever staff change.
 - Use cloning of a system role to create a custom role (for example, a "Purchases Accountant") instead of editing the original role.
-- When in doubt about why an element appears or disappears for a user, first check: Settings ← Roles (الأدوار) ← Permissions.
+- When in doubt about why an element appears or disappears for a user, first check: Settings ← Roles ← Permissions.

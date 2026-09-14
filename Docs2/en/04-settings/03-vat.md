@@ -23,7 +23,7 @@ Every add/edit/delete and every change to the display options is recorded in the
 ## Screen: Tax Types
 
 
-![VAT settings screen (إعدادات ضريبة القيمة المضافة)](../assets/settings/vat.png)
+![VAT settings screen](../assets/settings/vat.png)
 - **Access:** Sidebar ← Settings ← Value Added Tax
 - **Purpose:** Define the VAT types that appear in the selection lists on invoices (sales and purchases).
 

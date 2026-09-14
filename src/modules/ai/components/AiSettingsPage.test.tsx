@@ -26,7 +26,7 @@ describe('AiSettingsPage (Stage-3 component gate)', () => {
     } as never);
     mockedGetConfig.mockResolvedValue({
       success: true,
-      data: { provider: 'gemini', baseUrl: '', model: 'gemini-2.5-flash-lite', enabled: true, hasApiKey: true },
+      data: { provider: 'gemini', baseUrl: '', model: 'gemini-3.5-flash-lite', enabled: true, hasApiKey: true },
     });
   });
 

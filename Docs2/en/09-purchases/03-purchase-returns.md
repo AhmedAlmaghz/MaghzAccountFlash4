@@ -18,7 +18,7 @@ A Purchase Return documents returning purchased goods to the supplier: damaged g
 ## List
 
 
-![Purchase returns list (قائمة مرتجعات المشتريات)](../assets/purchases/returns.png)
+![Purchase returns list](../assets/purchases/returns.png)
 A table showing: return number, supplier, **linked purchase invoice** (if any), date, total, **reason**, status, and action buttons.
 
 - **Search** by return number and supplier name + a **status filter** + a **supplier filter** + **server-side pagination**.
@@ -26,7 +26,7 @@ A table showing: return number, supplier, **linked purchase invoice** (if any), 
 
 ## New Return Screen
 
-- **Access:** Sidebar ← Purchases ← Returns ← the **New Return (مرتجع جديد)** button
+- **Access:** Sidebar ← Purchases ← Returns ← the **New Return** button
 - **Purpose:** Document returning goods to a supplier
 
 ### Fields
@@ -54,7 +54,7 @@ A note on the difference from the sales return: linking to the purchase invoice 
 
 ## Posting Effects (Atomic)
 
-The **Post (ترحيل)** button executes **one transaction** that succeeds entirely or rolls back entirely:
+The **Post** button executes **one transaction** that succeeds entirely or rolls back entirely:
 
 | Effect | Details |
 |---|---|
@@ -69,12 +69,12 @@ After posting: a later Payment Voucher settles the remaining outstanding amount 
 
 You returned 2 damaged juice cartons to Al-Khair from invoice `PINV-00030`:
 
-1. Sidebar ← Purchases ← Returns ← **New Return (مرتجع جديد)**.
+1. Sidebar ← Purchases ← Returns ← **New Return**.
 2. The number appears automatically: `PR-00004`.
 3. Supplier: "Al-Khair Distribution Warehouses". **Purchase invoice:** select `PINV-00030` — its lines load (cartons at a purchase price of 6,000).
 4. Returned quantity: `2` cartons. Reason: "Cooling damage — 2 cartons from the 2026-09-12 batch".
 5. Total = `12,000`. **Save** → Draft `PR-00004` (nothing has changed yet).
-6. Once you agree on the return with the supplier, click **Post (ترحيل)** — the atomic effect:
+6. Once you agree on the return with the supplier, click **Post** — the atomic effect:
 
 | Effect | Details |
 |---|---|

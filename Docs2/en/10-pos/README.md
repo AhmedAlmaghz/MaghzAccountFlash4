@@ -56,7 +56,7 @@ The POS module is a fast-selling interface built for the cashier inside the stor
 ## Screens at a Glance
 
 
-![Full-screen cashier terminal (شاشة الكاشير بملء الشاشة)](../assets/pos/terminal.png)
+![Full-screen cashier terminal](../assets/pos/terminal.png)
 ### Cashier Screen (`/pos`)
 
 - An open-shift prompt (Cash Box + opening float) on the first visit of the day.
@@ -122,7 +122,7 @@ The module integrates automatically with the rest of the modules — no double e
 
 | Message as shown in the system | Cause | Solution |
 |---|---|---|
-| "لا توجد ورديـة مفتوحة" (No open Shift) | The cashier has not opened a Shift yet | Click **Open Shift (فتح ورديـة)** and choose the Cash Box and opening float |
+| "لا توجد ورديـة مفتوحة" (No open Shift) | The cashier has not opened a Shift yet | Click **Open Shift** and choose the Cash Box and opening float |
 | "لديك ورديـة مفتوحة بالفعل" (You already have an open Shift) | Trying to open a second Shift for the same user | Close the current Shift first from the Shifts screen |
 | "يلزم عميل مسجل للبيع الآجل" (A registered customer is required for credit sales) | Mixed or credit payment with no customer | Select a customer from the list before completing payment |
 | "أُغلقت الوردية أثناء عملية الدفع" (The Shift was closed during checkout) | The Shift was closed from another device at the same moment | Open a new Shift and redo the payment |
@@ -130,5 +130,5 @@ The module integrates automatically with the rest of the modules — no double e
 ## Tips
 
 - Hold the cart with **F10** to serve the next customer quickly when the queue builds up.
-- Set the "default Walk-in Customer (العميل النقدي الافتراضي)" and "default Cash Box (صندوق النقد الافتراضي)" once in Settings to speed up the daily Shift opening.
+- Set the "default Walk-in Customer" and "default Cash Box" once in Settings to speed up the daily Shift opening.
 - Review the Shifts screen at the end of each day to make sure there are no large cash differences.

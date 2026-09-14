@@ -26,7 +26,7 @@ Before the first invoice, verify three settings:
 ## 3. Add a Product
 
 1. Sidebar ← **Inventory** ← **Products**
-2. Click the **Add Product (إضافة منتج)** button.
+2. Click the **Add Product** button.
 3. Fill in the essential fields:
 
 | Field | Value in our example | Note |
@@ -41,14 +41,14 @@ Before the first invoice, verify three settings:
 ## 4. Add a Customer
 
 1. Sidebar ← **Sales** ← **Customers**
-2. Click the **Add Customer (إضافة عميل)** button.
+2. Click the **Add Customer** button.
 3. Enter: the name ("Al-Noor Trading Est."), the phone — the rest is optional.
 4. Save. The customer gets a code with the `CUS-` prefix and is automatically linked to the **Accounts Receivable** account in the Chart of Accounts — this is the account that tracks its balance.
 
 ## 5. Create the Sales Invoice
 
 1. Sidebar ← **Sales** ← **Sales Invoices**
-2. Click the **New Invoice (فاتورة جديدة)** button (visible to those with the `sales.create` permission).
+2. Click the **New Invoice** button (visible to those with the `sales.create` permission).
 3. Select the customer "Al-Noor Trading Est." from the customer list.
 4. In the invoice lines, choose the product "24-inch display screen" and quantity **1** — the price is filled automatically from the sale price.
 5. Review the calculation at the bottom of the invoice:
@@ -64,7 +64,7 @@ Before the first invoice, verify three settings:
 
 ## 6. Post the Invoice
 
-Open the (Draft) invoice and click the **Post (ترحيل)** button. At the moment of posting, all of the following happens automatically:
+Open the (Draft) invoice and click the **Post** button. At the moment of posting, all of the following happens automatically:
 
 | What happened? | Detail |
 |---|---|
@@ -80,7 +80,7 @@ Open the (Draft) invoice and click the **Post (ترحيل)** button. At the mome
 The customer has now paid 10,000 out of 17,250:
 
 1. Sidebar ← **Accounting** ← **Receipt Vouchers**
-2. Click **New Receipt Voucher (سند قبض جديد)**.
+2. Click **New Receipt Voucher**.
 3. Select the customer, and enter: the amount **10,000**, the payment method (cash) — the voucher is linked to the cash box/cash account.
 4. Save and then **Post** the voucher.
 5. The effect of posting: Debit: cash box/cash 10,000 — Credit: Accounts Receivable 10,000.
@@ -120,5 +120,5 @@ The customer has now paid 10,000 out of 17,250:
 
 - Don't post the invoice before reviewing the amounts — posting locks editing, and correcting afterwards requires a reversing document (a sales return).
 - Try the full cycle on **Demo Data** first — afterwards you can erase everything and start clean with your business data.
-- Watch the "stock alert" (تنبيه المخزون) message — if you sell more than you own, the system will warn you about the negative balance.
+- Watch the "stock alert" message — if you sell more than you own, the system will warn you about the negative balance.
 - Once you master this cycle, the reverse cycle (buying from a supplier) follows the same logic in the Purchases module.

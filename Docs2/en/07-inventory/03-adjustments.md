@@ -19,7 +19,7 @@ The adjustment is the official document for count differences: breakage, damage,
 ## Adjustments Screen
 
 
-![Stock adjustments screen (شاشة تسويات الجرد)](../assets/inventory/adjustments.png)
+![Stock adjustments screen](../assets/inventory/adjustments.png)
 - **Access:** Sidebar ← Inventory ← Adjustments
 - **Purpose:** Manage the full counting cycle from entry to posting
 
@@ -84,13 +84,13 @@ The entry value = `difference × unit cost` — so fill in the unit cost accurat
 
 Counting "Orange Juice" in the Main Warehouse: book 180 pieces, actual 176:
 
-1. Sidebar ← Inventory ← Adjustments ← **New Adjustment (تسوية جديدة)**.
+1. Sidebar ← Inventory ← Adjustments ← **New Adjustment**.
 2. Product: "Orange Juice". Warehouse: Main Warehouse. Date: `2026-09-12`.
 3. System quantity shows: `180`. Enter the actual: `176` → **the difference is calculated automatically: −4**.
 4. Reason: "Packaging damage". Unit cost: `500` YER.
-5. **Save (حفظ)** → adjustment `ADJ-00003` is a **draft** (the balance has not changed yet).
-6. Review the result with the storekeeper, then click **Approve (اعتماد)**.
-7. Click **Post (ترحيل)** — one atomic effect:
+5. **Save** → adjustment `ADJ-00003` is a **draft** (the balance has not changed yet).
+6. Review the result with the storekeeper, then click **Approve**.
+7. Click **Post** — one atomic effect:
 
 | Effect | Details |
 |---|---|

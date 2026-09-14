@@ -17,16 +17,16 @@ The customer is the party on whom sales invoices and their receivables are built
 ## Customers List
 
 
-![Customers list (قائمة العملاء)](../assets/sales/customers.png)
+![Customers list](../assets/sales/customers.png)
 A table showing: code, name, phone, **balance** (colored: amber for debit / green for credit), active status, and action buttons.
 
 - **Search** by name, phone, and code + an **active filter** + **server-side pagination**.
 - **KPIs:** total customers, active ones, total balances (debit and credit shown separately).
-- **Add New Customer (إضافة عميل جديد)** is protected by the `sales.create` permission.
+- **Add New Customer** is protected by the `sales.create` permission.
 
 ## New Customer Screen
 
-- **Access:** Sidebar ← Sales ← Customers ← the **New Customer (عميل جديد)** button
+- **Access:** Sidebar ← Sales ← Customers ← the **New Customer** button
 - **Purpose:** Open a customer file
 
 ### Fields
@@ -83,9 +83,9 @@ The balance in the list and on the card is computed **directly from the document
 
 ```
 Balance = Opening Balance
-        + Σ posted sales invoices (excluding cancelled)
-        − Σ posted Receipt Vouchers
-        − Σ posted sales returns
+ + Σ posted sales invoices (excluding cancelled)
+ − Σ posted Receipt Vouchers
+ − Σ posted sales returns
 ```
 
 - A positive balance = **Accounts Receivable** (the customer owes you) — colored amber.
@@ -95,11 +95,11 @@ Balance = Opening Balance
 
 Opening a new customer with an opening balance:
 
-1. Sidebar ← Sales ← Customers ← **New Customer (عميل جديد)**.
+1. Sidebar ← Sales ← Customers ← **New Customer**.
 2. The code appears automatically: `CUS-00014`. Name: "Al-Noor Trading Est."
 3. Phone: `777123456`. Tax number: `3001234567`. Credit limit: `2,000,000` YER.
 4. Opening balance: `350,000` YER, opening date: `2026-09-01`.
-5. **Save (حفظ)** — the opening entry posts once:
+5. **Save** — the opening entry posts once:
 
 | Account | Debit (YER) | Credit (YER) |
 |---|---:|---:|

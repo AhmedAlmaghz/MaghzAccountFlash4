@@ -9,18 +9,18 @@ The Setup Wizard appears automatically the first time you run the system, or whe
 ## Step 1: Welcome
 
 
-![Welcome screen of the First-Run Setup Wizard (شاشة الترحيب في معالج الإعداد الأول)](../assets/getting-started/onboarding-01-welcome.png)
-A welcome screen showing the system's main capabilities (PostgreSQL, multi-currency, ready-made Default Data) and a **"Start" (ابدأ)** button to continue.
+![Welcome screen of the First-Run Setup Wizard](../assets/getting-started/onboarding-01-welcome.png)
+A welcome screen showing the system's main capabilities (PostgreSQL, multi-currency, ready-made Default Data) and a **"Start"** button to continue.
 
 ### The "Erase All Data and Start Fresh" Option
 
 At the bottom of the welcome screen there is a full data-erasure option — use it only if you have a previous setup you want to get rid of permanently:
 
-1. Click **"Erase all data and start fresh" (مسح جميع البيانات والبدء من جديد)**.
+1. Click **"Erase all data and start fresh"**.
 2. A yellow warning appears: "All database data will be deleted. This action cannot be undone".
 3. Enter the **admin username** and **admin password** to verify your identity.
 4. Tick the confirmation box: "I understand this action will permanently erase all data".
-5. Click **"Yes, erase all data" (نعم، امسح جميع البيانات)**.
+5. Click **"Yes, erase all data"**.
 
 | Element | Required? | Note |
 |---|---|---|
@@ -33,7 +33,7 @@ At the bottom of the welcome screen there is a full data-erasure option — use 
 ## Step 2: Database
 
 
-![Database selection step (خطوة اختيار قاعدة البيانات)](../assets/getting-started/onboarding-02-database.png)
+![Database selection step](../assets/getting-started/onboarding-02-database.png)
 Here you choose where your data is stored — two cards to choose from:
 
 | Option | When to choose it |
@@ -43,7 +43,7 @@ Here you choose where your data is stored — two cards to choose from:
 
 When choosing the external PostgreSQL, enter: **Host**, **Port**, **Database name**, **Username**, **Password**.
 
-Press the **"Test Connection" (اختبار الاتصال)** button in both cases:
+Press the **"Test Connection"** button in both cases:
 
 - Success: a green message appears with the name of the connected database (and the server version in PostgreSQL mode).
 - Failure: a red message appears with the reason — correct the details and retry before continuing.
@@ -53,7 +53,7 @@ Press the **"Test Connection" (اختبار الاتصال)** button in both cas
 ## Step 3: Company Information
 
 
-![Company information step (خطوة بيانات الشركة)](../assets/getting-started/onboarding-03-company.png)
+![Company information step](../assets/getting-started/onboarding-03-company.png)
 Enter your business identity — this data appears on invoices and reports.
 
 | Field | Description | Required/Optional |
@@ -74,12 +74,12 @@ Enter your business identity — this data appears on invoices and reports.
 ## Step 4: Initial Data
 
 
-![Initial data (default/demo) step (خطوة البيانات الأولية)](../assets/getting-started/onboarding-04-seed.png)
+![Initial data (default/demo) step](../assets/getting-started/onboarding-04-seed.png)
 Here you choose what should be prepared for you when starting, and set the admin password.
 
 ### Admin Password
 
-The **Admin Password (كلمة مرور المدير)** field at the top of the step — it is used to log in as the system administrator after setup. Enter your own password, or leave the field to generate a strong password automatically (depending on your version).
+The **Admin Password** field at the top of the step — it is used to log in as the system administrator after setup. Enter your own password, or leave the field to generate a strong password automatically (depending on your version).
 
 > **Important notice:** if the system generates the password automatically, it is shown **only once** in a distinctive yellow box after seeding completes — copy it and store it immediately. It cannot be recovered later except by re-running the setup.
 
@@ -91,12 +91,12 @@ The **Admin Password (كلمة مرور المدير)** field at the top of the 
 | **Default Data** (recommended) | The ready-made Chart of Accounts, VAT settings, branches, the admin user, the currency | The right starting point for most businesses |
 | **Demo Data** | Everything above + customers, suppliers, products, invoices, employees, tasks, ... | Training and exploration — **do not use it in a production environment** |
 
-Choose an option and then press **"Seed data and continue" (بذر البيانات والتالي)** (or "Skip" if you chose "No data"). A green success message appears when seeding completes.
+Choose an option and then press **"Seed data and continue"** (or "Skip" if you chose "No data"). A green success message appears when seeding completes.
 
 ## Step 5: Finish
 
 
-![Setup completion screen (شاشة إنجاز الإعداد)](../assets/getting-started/onboarding-05-complete.png)
+![Setup completion screen](../assets/getting-started/onboarding-05-complete.png)
 A summary screen showing your settings before entering:
 
 | Item | What does it show? |
@@ -106,7 +106,7 @@ A summary screen showing your settings before entering:
 | Database | The connection type |
 | Data | The chosen option (none / default / demo) |
 
-Review the summary — if you need a change, use the "Back" button to reach the desired step. When ready, press **"Enter the system" (الدخول إلى النظام)**: the system saves all your settings and reloads the application to show the **Login** screen (see `03-login.md`).
+Review the summary — if you need a change, use the "Back" button to reach the desired step. When ready, press **"Enter the system"**: the system saves all your settings and reloads the application to show the **Login** screen (see `03-login.md`).
 
 ## Re-running the Setup Wizard
 
@@ -119,7 +119,7 @@ Steps:
 
 1. A warning card appears clarifying what actually happens: **re-initialization does not delete database data** — it only re-runs the setup wizard to change connection settings or re-seed the Default Data.
 2. Tick the confirmation box: "I understand this will re-run the setup wizard next time".
-3. Click **"Re-initialize now" (إعادة التهيئة الآن)** (the button is visible only to those with the `settings.delete` permission).
+3. Click **"Re-initialize now"** (the button is visible only to those with the `settings.delete` permission).
 4. The system reloads the page and starts the wizard from step one.
 
 > **Note:** the difference between this option and "Erase all data" on the welcome screen: re-initialization only re-runs the wizard without deleting data, whereas "Erase all data" permanently deletes everything.

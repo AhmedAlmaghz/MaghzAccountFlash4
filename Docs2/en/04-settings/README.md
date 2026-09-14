@@ -8,7 +8,7 @@ The Settings module is the starting point for any organization using **MaghzAcco
 
 - **Location:** Sidebar ← Settings
 - **Main page:** `/settings` opens automatically on the Company Information page
-- **Every settings change is recorded in the Audit Log (سجل التدقيق)** with the username, the time, and the old/new values
+- **Every settings change is recorded in the Audit Log** with the username, the time, and the old/new values
 
 > Who uses this module? The business owner (initial setup and the classification structure), the accountant (default accounts, tax, currencies), and the system administrator (users, database, and backup).
 

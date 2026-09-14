@@ -9,7 +9,7 @@ The Reports Hub at the `/reports` route displays **12 reports** in a colorful ca
 ## Access & Permissions
 
 - Required permission: `reports.view` to view the Hub.
-- A user without `reports.view` sees an explicit "You do not have permission to view this page (لا تملك صلاحية لعرض هذه الصفحة)" message instead of the card grid.
+- A user without `reports.view` sees an explicit "You do not have permission to view this page" message instead of the card grid.
 - The **Custom Report Builder** is completely hidden from the grid for anyone without `reports.custom`.
 - Exporting any report requires `reports.export` (the buttons are disabled without it).
 - The "Financial Overview" card does not open a standalone report but takes you to the accounting Balance Sheet (Statement of Financial Position) list (`/accounting/balance`).
@@ -18,7 +18,7 @@ The Reports Hub at the `/reports` route displays **12 reports** in a colorful ca
 ## The 12 Reports
 
 
-![Reports Hub — 12 available reports (مركز التقارير — 12 تقريراً متاحاً)](../assets/reports/reports-hub.png)
+![Reports Hub — 12 available reports](../assets/reports/reports-hub.png)
 | # | Report | Path | What it shows |
 |---|---|---|---|
 | 1 | Sales Analysis | `/reports/sales-analysis` | The period's revenue per invoices, with a breakdown by customer and product |
@@ -55,11 +55,11 @@ The Reports Hub at the `/reports` route displays **12 reports** in a colorful ca
 ## When to Use Each Report
 
 
-![Sales Analysis (تحليل المبيعات)](../assets/reports/sales-analysis.png)
+![Sales Analysis](../assets/reports/sales-analysis.png)
 
-![Profitability analysis (تحليل الربحية)](../assets/reports/profit-analysis.png)
+![Profitability analysis](../assets/reports/profit-analysis.png)
 
-![Customer statement and aging (كشف حساب العميل وأعمار الذمم)](../assets/reports/customer-statement.png)
+![Customer statement and aging](../assets/reports/customer-statement.png)
 | Report | When to use it |
 |---|---|
 | Sales Analysis | Reviewing sales performance: who buys the most, and which products sell |
@@ -95,7 +95,7 @@ Common rules:
 ## Custom Report Builder
 
 
-![Custom Report Builder (منشئ التقارير المخصص)](../assets/reports/custom-builder.png)
+![Custom Report Builder](../assets/reports/custom-builder.png)
 A tool that lets the account owner build a simple report from the core data tables without technical involvement:
 
 1. **Choose the table** from the available lists: sales invoices, purchase invoices, products, customers, suppliers.

@@ -5,7 +5,7 @@
 ## Overview
 
 
-![Manufacturing Hub (مركز التصنيع)](../assets/manufacturing/hub.png)
+![Manufacturing Hub](../assets/manufacturing/hub.png)
 The Manufacturing module converts raw materials into finished products through three screens: the BOM (Bill of Materials), Work Orders, and the Cost and Variance reports. Every operational step has a matching automatic journal entry and stock movement — no manual accounting entry.
 
 - **Access:** Sidebar ← Manufacturing.
@@ -27,7 +27,7 @@ The Manufacturing module converts raw materials into finished products through t
 ### The BOM Screen
 
 
-![BOM list screen (شاشة قوائم المواد)](../assets/manufacturing/bom.png)
+![BOM list screen](../assets/manufacturing/bom.png)
 - **Access:** Manufacturing ← BOM.
 - **Purpose:** Define the "manufacturing recipe" — which materials, and how much of each, are needed to make the product.
 
@@ -37,8 +37,8 @@ The Manufacturing module converts raw materials into finished products through t
 |---|---|---|
 | Product | The finished product the recipe will produce | Required |
 | Version | The recipe's label (e.g. `v1`, `v2`) — **multiple versions per product are allowed, but only one is active** | Required |
-| Active (نشط) | The recipe used by default when creating Work Orders | Required |
-| **Output Quantity (كمية الناتج)** | The number of finished-product units produced by **one batch** of the recipe — default 1 | Required |
+| Active | The recipe used by default when creating Work Orders | Required |
+| **Output Quantity** | The number of finished-product units produced by **one batch** of the recipe — default 1 | Required |
 | Notes | Free description | Optional |
 
 ### BOM Lines
@@ -55,9 +55,9 @@ The BOM as a whole has a **calculated total cost** = the sum of its lines.
 ## Work Order — A Strict State Machine
 
 ```
-Planned (مخطط) ──Start──▶ In Progress (قيد التنفيذ) ──Complete──▶ Completed (مكتمل)
-      │                        │
-      └────────── Cancel ──────┴────────────▶ Cancelled (ملغى)
+Planned ──Start──▶ In Progress ──Complete──▶ Completed
+ │ │
+ └────────── Cancel ──────┴────────────▶ Cancelled
 ```
 
 | Rule | Detail |
@@ -70,7 +70,7 @@ Planned (مخطط) ──Start──▶ In Progress (قيد التنفيذ) ─�
 ### The Work Orders Screen
 
 
-![Work Orders screen (شاشة أوامر التشغيل)](../assets/manufacturing/work-orders.png)
+![Work Orders screen](../assets/manufacturing/work-orders.png)
 - **Access:** Manufacturing ← Work Orders.
 - **Numbering:** Automatic `WO-` prefix (`WO-0001`...).
 
@@ -80,7 +80,7 @@ Planned (مخطط) ──Start──▶ In Progress (قيد التنفيذ) ─�
 |---|---|---|
 | Product | The finished product | Required |
 | BOM | Selected from the product's active recipes | Required |
-| **Quantity = Number of Batches (الدفعات)** | How many times the recipe is executed. **Expected output = Batches × BOM output quantity** | Required |
+| **Quantity = Number of Batches** | How many times the recipe is executed. **Expected output = Batches × BOM output quantity** | Required |
 | Planned start/end date | Timeline planning | Optional |
 | Output warehouse | Where the finished product is received | Optional (default: first warehouse) |
 | Batch number | **Not `WO-` — a lot number in the format `YYYYMMDD-NNN` is generated automatically** if left empty | Optional |
@@ -96,13 +96,13 @@ At creation, the estimated total cost is always computed **server-side** = mater
 
 ## Start — Issuing Materials and the WIP Entry
 
-When you click **Start (بدء)**:
+When you click **Start**:
 
-1. **Material availability gate:** the aggregate requirement **per material** (a material may appear in several lines) must exist in stock. Any shortage fails the operation with the message "Insufficient stock to issue materials (المخزون لا يكفي لصرف الخامات)" with details (Required / Available) for each short material.
+1. **Material availability gate:** the aggregate requirement **per material** (a material may appear in several lines) must exist in stock. Any shortage fails the operation with the message "Insufficient stock to issue materials" with details (Required / Available) for each short material.
 2. **Issuing:** materials are issued from **the warehouse with the highest balance** of each material, and **out** movements are recorded with the order number as reference (`WO-0001`).
 3. **Work In Progress (WIP) journal entry:** posted immediately:
-   - **Debit** the Work In Progress (WIP) inventory account (`11302`) with the total cost of the issued materials
-   - **Credit** each material's inventory account with its cost
+ - **Debit** the Work In Progress (WIP) inventory account (`11302`) with the total cost of the issued materials
+ - **Credit** each material's inventory account with its cost
 4. The **actual start date** is stamped on the order.
 
 ### Pre-flight Availability Check
@@ -111,7 +111,7 @@ Before starting, you can query "how much can I produce?": the screen shows, for 
 
 ## Completion — Delivering the Finished Product and Costing
 
-When you click **Complete (إكمال)**:
+When you click **Complete**:
 
 | Step | Detail |
 |---|---|
@@ -141,9 +141,9 @@ When you click **Complete (إكمال)**:
 ## Reports
 
 
-![Production Cost Report (تقرير كلفة الإنتاج)](../assets/manufacturing/cost-report.png)
+![Production Cost Report](../assets/manufacturing/cost-report.png)
 
-![Variance Analysis Report (تقرير تحليل الفروقات)](../assets/manufacturing/variance-report.png)
+![Variance Analysis Report](../assets/manufacturing/variance-report.png)
 | Report | Content |
 |---|---|
 | **Production Cost Report** | Per work order: material cost (planned/actual) + production costs + total + unit cost |
@@ -159,7 +159,7 @@ When you click **Complete (إكمال)**:
 
 **1) Create the order:** product "Mango Juice 1L", BOM v2, **quantity = 3 batches** → expected output 3 × 10 = **30 cartons**. Production costs: labor 3,000, energy 1,000. Numbering `WO-0001` is automatic, lot `20260912-001`.
 
-**2) Start:** availability check: mango required 15 kg (available 40) ✓, sugar 6 kg (available 10) ✓, cartons 30 (available 25) ✗ → if you click Start now: "Insufficient stock to issue materials (المخزون لا يكفي لصرف الخامات)". After restocking and passing the gate:
+**2) Start:** availability check: mango required 15 kg (available 40) ✓, sugar 6 kg (available 10) ✓, cartons 30 (available 25) ✗ → if you click Start now: "Insufficient stock to issue materials". After restocking and passing the gate:
 - Out movements: mango 15, sugar 6, cartons 30 (from the richest warehouse per material)
 - Journal entry: debit WIP `11302` with 27,300 (15×1200 + 6×800 + 30×150) / credit mango inventory 18,000, sugar 4,800, cartons 4,500
 
@@ -174,10 +174,10 @@ When you click **Complete (إكمال)**:
 
 | Status | Meaning | What you can do in it |
 |---|---|---|
-| **Planned (مخطط)** | A planning draft | Edit everything, delete, start, cancel |
-| **In Progress (قيد التنفيذ)** | Materials issued and the WIP entry posted | Complete, cancel (with material return), no line editing |
-| **Completed (مكتمل)** | Output delivered and cost final | View and reports only — no cancellation and no line editing |
-| **Cancelled (ملغى)** | Ended without production | Reopen to "Planned" (clears the run traces) |
+| **Planned** | A planning draft | Edit everything, delete, start, cancel |
+| **In Progress** | Materials issued and the WIP entry posted | Complete, cancel (with material return), no line editing |
+| **Completed** | Output delivered and cost final | View and reports only — no cancellation and no line editing |
+| **Cancelled** | Ended without production | Reopen to "Planned" (clears the run traces) |
 
 ## Important Rules
 

@@ -25,7 +25,7 @@
 | **HR Officer** | HR Settings ← Employees & Attendance ← Payroll & End of Service |
 | **Sales Manager (CRM)** | Leads ← Opportunities ← Tasks & Activities |
 
-> **Note on screenshots:** the application UI is Arabic-first, so the screenshots in this guide show the Arabic interface. Wherever an on-screen element is referenced, the English label is given with the original Arabic label in parentheses on first mention — e.g. **New Invoice (فاتورة جديدة)** — so you can match the text to what you see on screen.
+> **Note on screenshots:** all screenshots in this guide were captured from the application running in **English (LTR)**. Demo data is bilingual seed data, so some data values (customer and product names, the YER currency symbol) appear in Arabic inside the screenshots — this is how the demo environment actually looks.
 
 ---
 

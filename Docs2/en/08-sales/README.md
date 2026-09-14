@@ -23,7 +23,7 @@ Access the module from: **Sidebar ← Sales** (`/sales`). The hub page shows nav
 ## Sales Hub Page
 
 
-![Sales hub with live counters (مركز المبيعات)](../assets/sales/hub.png)
+![Sales hub with live counters](../assets/sales/hub.png)
 When you open `/sales` you find navigation cards with live counters:
 
 | Card | Path | Live counter | Description |
@@ -37,16 +37,16 @@ When you open `/sales` you find navigation cards with live counters:
 
 ```
 Sales
-├── Customers           ← Customer card + statement + aging (CUS-)
-├── Sales Invoices      ← The central document: draft → post → collect (INV-)
-├── Quotations          ← A quotation that converts to an invoice in one click (QOT-)
-└── Sales Returns       ← Returns against an original invoice (SR-)
+├── Customers ← Customer card + statement + aging (CUS-)
+├── Sales Invoices ← The central document: draft → post → collect (INV-)
+├── Quotations ← A quotation that converts to an invoice in one click (QOT-)
+└── Sales Returns ← Returns against an original invoice (SR-)
 ```
 
 ## Typical Workflow
 
 1. **Register the customer** (or use an existing one) — an automatic `CUS-` code.
-2. *(Optional)* **Issue a quotation** `QOT-` and send it; on acceptance, click **Convert to Invoice (تحويل إلى فاتورة)**.
+2. *(Optional)* **Issue a quotation** `QOT-` and send it; on acceptance, click **Convert to Invoice**.
 3. **Create the invoice** `INV-` as a draft: multi-unit lines, discounts, VAT, currency.
 4. **Review the duplicate guard** if it appears, then **post** the invoice — the journal entry is issued, goods are deducted, and the customer balance increases.
 5. **Collect** via a **Receipt Voucher** from the Accounting module — it reduces the customer balance and flips the invoice status (partially paid / paid).

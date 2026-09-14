@@ -18,7 +18,7 @@ A Purchase Invoice documents what you received from a supplier and what you owe 
 ## Purchase Invoice — List
 
 
-![Purchase invoices list (قائمة فواتير المشتريات)](../assets/purchases/invoices.png)
+![Purchase invoices list](../assets/purchases/invoices.png)
 - **KPI cards:** total invoice count, total value, and **total outstanding AP** (what you currently owe suppliers).
 - **Search** by invoice number and supplier + a **status filter** + a **supplier filter** + **server-side pagination** + **Excel/PDF export**.
 
@@ -61,7 +61,7 @@ Payments are not managed from the invoices screen; they go through **Payment Vou
 ## Purchase Order
 
 
-![Purchase orders list (قائمة أوامر الشراء)](../assets/purchases/orders.png)
+![Purchase orders list](../assets/purchases/orders.png)
 - **Access:** Sidebar ← Purchases ← Purchase Orders
 - **Purpose:** A pre-order to a supplier before receipt
 
@@ -84,7 +84,7 @@ Payments are not managed from the invoices screen; they go through **Payment Vou
 | **Invoiced** | Converted into a purchase invoice |
 | **Cancelled** | Cancelled |
 
-### The "Convert to Purchase Invoice (تحويل إلى فاتورة شراء)" Button
+### The "Convert to Purchase Invoice" Button
 
 Appears on the **Draft** and does the following: creates a purchase invoice **Draft** from the order's lines linked to it (`purchaseOrderId`), and marks the order **Invoiced**. Complete the invoice (VAT, discounts) then post it — only then does stock enter and the supplier balance increase.
 
@@ -96,11 +96,11 @@ Drafts, **Pending** (sent + partially received, awaiting delivery), and Invoiced
 
 Buying 20 cartons of juice (conversion factor 12) from Al-Khair:
 
-1. Sidebar ← Purchases ← Invoices ← **New Invoice (فاتورة جديدة)**.
+1. Sidebar ← Purchases ← Invoices ← **New Invoice**.
 2. Supplier: "Al-Khair Distribution Warehouses". Date: `2026-09-12`. Due: `2026-10-12`. Payment: **Credit**. Currency: YER.
 3. **Line:** "Orange Juice" — unit: **carton** (brings its purchase price `6,000`), quantity: `20`.
 4. Subtotal = `120,000`. Total discount of `2%` = `2,400` → net `117,600`. VAT 15% = `17,640`. **Total = `135,240`**.
-5. **Save** → Draft `PINV-00030`. Review it then click **Post (ترحيل)** — the atomic effect:
+5. **Save** → Draft `PINV-00030`. Review it then click **Post** — the atomic effect:
 
 | Effect | Details |
 |---|---|
@@ -116,10 +116,10 @@ The resulting Journal Entry:
 | Accounts Payable — Al-Khair | | 135,240 |
 | **Total** | **135,240** | **135,240** |
 
-*If it were cash via the "Main Cash Box (الصندوق الرئيسي)": credit the cash box 135,240, and the invoice is automatically marked **Paid** with no effect on the supplier balance.*
+*If it were cash via the "Main Cash Box": credit the cash box 135,240, and the invoice is automatically marked **Paid** with no effect on the supplier balance.*
 
 6. Later you paid 100,000 with a payment voucher linked to the invoice: the status becomes **Partially Paid** and the balance 535,240.
-7. *(Order-based flow)* if the purchase was pre-ordered as `PO-00015`: click "Convert to Purchase Invoice (تحويل إلى فاتورة شراء)" on the order's Draft — `PINV-00030` is created from its lines and the order flips to **Invoiced**.
+7. *(Order-based flow)* if the purchase was pre-ordered as `PO-00015`: click "Convert to Purchase Invoice" on the order's Draft — `PINV-00030` is created from its lines and the order flips to **Invoiced**.
 
 ## Important Rules
 

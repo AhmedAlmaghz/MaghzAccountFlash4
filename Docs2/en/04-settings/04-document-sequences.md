@@ -21,7 +21,7 @@ Every edit is recorded in the Audit Log.
 ## Screen: The Sequences Table
 
 
-![Document sequences screen (ترقيم المستندات)](../assets/settings/document-sequences.png)
+![Document sequences screen](../assets/settings/document-sequences.png)
 - **Access:** Sidebar ← Settings ← Document Sequences
 - **Purpose:** Display all document types in one table, with inline editing of the fields directly in the row.
 

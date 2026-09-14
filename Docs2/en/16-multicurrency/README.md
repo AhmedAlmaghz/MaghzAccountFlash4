@@ -12,7 +12,7 @@
 
 ## 1. Managing Currencies
 
-![Managing currencies and exchange rates (إدارة العملات وأسعار الصرف)](../assets/settings/currencies.png)
+![Managing currencies and exchange rates](../assets/settings/currencies.png)
 
 Everything about adding and editing currencies is documented in `04-settings/02-branches-currencies.md`. Summary:
 
@@ -85,7 +85,7 @@ Additional card elements:
 
 | Element | When It Appears |
 |---|---|
-| **Multi-Currency (متعدد العملات)** badge (amber) | Only if the period contains two or more currencies |
+| **Multi-Currency** badge (amber) | Only if the period contains two or more currencies |
 | A **Total in Base Currency** row | In the card footer when multiple currencies exist — the sum of all base-currency equivalents |
 
 **Example:** a period containing a 100 USD invoice at rate 1500 and a 200,000 YER invoice:
@@ -100,7 +100,7 @@ Additional card elements:
 
 1. **Define your currencies:** Settings ← Currencies ← add USD at 1500 and SAR at 400 (see `04-settings/02-branches-currencies.md`).
 2. **Update the rate daily with the market:** edit the exchange rates on the currencies page whenever the price changes — new documents pull the new rate automatically.
-3. **Issue an invoice in a non-base currency:** Sales ← Invoices ← New Invoice (فاتورة جديدة) ← select the USD currency ← the rate is pulled automatically (edit it if needed) ← watch the Base Currency Amount readout update instantly.
+3. **Issue an invoice in a non-base currency:** Sales ← Invoices ← New Invoice ← select the USD currency ← the rate is pulled automatically (edit it if needed) ← watch the Base Currency Amount readout update instantly.
 4. **Collect in the same currency:** from the Receipt Voucher, select the same currency and the agreed rate — the equivalent is computed server-side and deducted from the customer's balance.
 5. **Read the reports:** Reports Hub ← Sales Analysis ← review the currency breakdown card, the Multi-Currency badge, and the total in base currency.
 

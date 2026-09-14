@@ -23,7 +23,7 @@ The rule: **the type = one primary classification that determines behavior; the 
 ## 1. Product Types
 
 
-![Product types screen (أنواع المنتجات)](../assets/settings/product-types.png)
+![Product types screen](../assets/settings/product-types.png)
 - **Access:** Sidebar ← Settings ← Product Types (`/settings/product-types`)
 - **Purpose:** Simple CRUD for the product types that determine where each product appears.
 
@@ -46,7 +46,7 @@ Adding and editing happen through a popup window, and deletion goes through an e
 ## 2. Product Categories
 
 
-![Product categories screen (تصنيفات المنتجات)](../assets/settings/product-categories.png)
+![Product categories screen](../assets/settings/product-categories.png)
 - **Access:** Sidebar ← Settings ← Product Categories (`/settings/product-categories`)
 - **Purpose:** A hierarchical tree of tags linked to products in a **many-to-many relationship**: one product may carry several categories, and one category groups several products.
 
@@ -68,7 +68,7 @@ The linking is done from the Products page (Inventory): when creating or editing
 ```
 Food
 ├── Beverages
-│   └── Juices
+│ └── Juices
 └── Canned Goods
 Building Materials
 └── Sanitary Ware
@@ -79,7 +79,7 @@ Building Materials
 ## 3. Units of Measure
 
 
-![Units of measure screen (وحدات القياس)](../assets/settings/units.png)
+![Units of measure screen](../assets/settings/units.png)
 - **Access:** Sidebar ← Settings ← Units of Measure (`/settings/units`)
 - **Purpose:** Define the units products are bought and sold in (piece, carton, kilo, ...).
 
@@ -97,7 +97,7 @@ Building Materials
 ## 4. Cash Boxes
 
 
-![Cash boxes screen (صناديق النقد)](../assets/settings/cash-boxes.png)
+![Cash boxes screen](../assets/settings/cash-boxes.png)
 - **Access:** Sidebar ← Settings ← Cash Boxes (`/settings/cash-boxes`)
 - **Purpose:** Define each **Cash Box** linked to a GL account in the Chart of Accounts. Every cash movement goes through a box: POS sales, cash invoices, receipt and payment vouchers, payroll disbursement, and end-of-service settlements.
 
@@ -120,7 +120,7 @@ Building Materials
 ## 5. Cost Centers
 
 
-![Cost centers screen (مراكز التكلفة)](../assets/settings/cost-centers.png)
+![Cost centers screen](../assets/settings/cost-centers.png)
 - **Access:** Sidebar ← Settings ← Cost Centers (`/settings/cost-centers`)
 - **Purpose:** Allocate expenses and revenues across responsibility centers (departments, projects, activities).
 

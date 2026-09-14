@@ -4,7 +4,7 @@
 
 ## Overview
 
-The Shifts screen is the POS cash-watch log. Every sale is linked to a Shift, and every Shift is linked to a cashier and a Cash Box (صندوق النقد) — so you know exactly who sold, when, and how much was in their drawer.
+The Shifts screen is the POS cash-watch log. Every sale is linked to a Shift, and every Shift is linked to a cashier and a Cash Box — so you know exactly who sold, when, and how much was in their drawer.
 
 - **Access:** Sidebar ← Point of Sale ← Shifts (`/pos/shifts`).
 - **Permission:** `pos.view` to view; shift management falls under the `pos.*` permissions.
@@ -12,7 +12,7 @@ The Shifts screen is the POS cash-watch log. Every sale is linked to a Shift, an
 ## Shifts Screen
 
 
-![The Shifts screen with cash box balances (شاشة الورديات)](../assets/pos/shifts.png)
+![The Shifts screen with cash box balances](../assets/pos/shifts.png)
 A page-by-page table showing all Shifts (newest first) across all cashiers and Cash Boxes:
 
 | Column | Description |
@@ -47,13 +47,13 @@ From the Shifts screen you can view the details of any closed Shift: its payment
 ### Opening a Shift
 
 1. Open the cashier screen (`/pos`) — the opening prompt appears if you have no open Shift.
-2. Choose the **Cash Box (صندوق النقد)** (pre-filled from Settings if you set the default).
+2. Choose the **Cash Box** (pre-filled from Settings if you set the default).
 3. Enter the **opening float** — the actual cash in the drawer at the start (example: 50,000 YER as an operating float).
-4. Click "Open Shift (فتح الوردية)" — the opening time is stamped and the shift badge becomes visible in the top bar.
+4. Click "Open Shift" — the opening time is stamped and the shift badge becomes visible in the top bar.
 
 ### Closing a Shift
 
-1. Click "Close Shift (إغلاق الوردية)" from the top bar (or from the Shifts screen).
+1. Click "Close Shift" from the top bar (or from the Shifts screen).
 2. A dialog opens showing the Shift summary computed from real data:
 
 | Item | Source |
@@ -67,7 +67,7 @@ From the Shifts screen you can view the details of any closed Shift: its payment
 
 3. Physically count the cash in the drawer and enter the **counted amount**.
 4. The **difference = counted − expected** is computed and stored with the Shift:
-   - Example: opening 50,000 + cash 320,000 = expected **370,000**. You counted 368,500 → difference **−1,500 (Short)**.
+ - Example: opening 50,000 + cash 320,000 = expected **370,000**. You counted 368,500 → difference **−1,500 (Short)**.
 5. Add **optional notes** (the reason for the difference, for example: "a note torn during collection").
 6. Confirm the close — the "Closed" status and closing time are stamped, and the Shift is locked against any new sale.
 

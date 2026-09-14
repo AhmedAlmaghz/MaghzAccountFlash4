@@ -11,7 +11,7 @@ This page documents two sections of the settings: **Branches** (the organization
 ## Section One: Branches
 
 
-![Branch management screen (إدارة الفروع)](../assets/settings/branches.png)
+![Branch management screen](../assets/settings/branches.png)
 ### Branches Screen
 
 - **Access:** Sidebar ← Settings ← Branches
@@ -49,7 +49,7 @@ This page documents two sections of the settings: **Branches** (the organization
 ## Section Two: Currencies
 
 
-![Currencies and exchange rates screen (إدارة العملات)](../assets/settings/currencies.png)
+![Currencies and exchange rates screen](../assets/settings/currencies.png)
 ### Currencies Screen
 
 - **Access:** Sidebar ← Settings ← Currencies
@@ -61,7 +61,7 @@ This page documents two sections of the settings: **Branches** (the organization
 |---|---|---|
 | Code | The currency's international code — **3 Latin letters, mandatory** (e.g. `YER`, `USD`, `SAR`). The length is validated on save | Required |
 | Name | The currency's name (e.g. Yemeni Rial, US Dollar) | Required |
-| Symbol | The symbol displayed next to amounts (e.g. ر.ي, $) | Optional |
+| Symbol | The symbol displayed next to amounts | Optional |
 | Exchange rate | See the exchange rate rule below | Required (defaults to 1) |
 | Active | Only active currencies appear in the currency selection lists on invoices and vouchers | Optional (defaults to active) |
 

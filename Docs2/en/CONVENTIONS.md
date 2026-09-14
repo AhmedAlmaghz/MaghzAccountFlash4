@@ -54,14 +54,14 @@ Purpose: guarantee full consistency across all parts of the English user guide.
 
 ---
 
-## 2. Arabic UI Labels
+## 2. English UI & Screenshots
 
-The application UI is **Arabic-first**; the embedded screenshots show the Arabic interface. Therefore:
+This guide is illustrated with screenshots captured from the application running in **English (LTR)**. Therefore:
 
-1. **First mention** of an on-screen element whose visible label is Arabic: write the English label followed by the Arabic label in parentheses — e.g. **New Invoice (فاتورة جديدة)**.
-2. **Subsequent mentions**: English label only.
-3. Navigation paths read: **Sidebar ← Accounting ← Journal Entries**.
-4. Keep the Arabic label inside image alt text as well, e.g. `![Sales Invoices list (فواتير المبيعات)](./assets/sales/invoices.png)`.
+1. On-screen elements are referenced by their **English label** only — e.g. **New Invoice**, **Post**, **Save and Post**.
+2. Navigation paths read: **Sidebar ← Accounting ← Journal Entries**.
+3. **Demo data** (customers, suppliers, products) is bilingual seed data; some data values (entity names, the YER currency symbol ر.ي, Arabic-Indic numerals in some widgets) may appear in Arabic inside screenshots. This reflects real application behavior, not a documentation gap.
+4. Image alt text uses the English label, e.g. `![Sales Invoices list](./assets/sales/invoices.png)`.
 
 ---
 

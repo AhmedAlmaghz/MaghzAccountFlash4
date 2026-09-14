@@ -33,7 +33,7 @@ Both screens show a vouchers table with the columns: voucher number, date, party
 ## The Receipt Vouchers Screen
 
 
-![Receipt Vouchers screen (شاشة سندات القبض)](../assets/accounting/receipt-vouchers.png)
+![Receipt Vouchers screen](../assets/accounting/receipt-vouchers.png)
 ### The Fields
 
 | Field | Description | Required |
@@ -77,7 +77,7 @@ Clicking "Post" executes **one atomic operation** — either all of it succeeds 
 ## The Payment Vouchers Screen — The Opposing Mirror
 
 
-![Payment Vouchers screen (شاشة سندات الصرف)](../assets/accounting/payment-vouchers.png)
+![Payment Vouchers screen](../assets/accounting/payment-vouchers.png)
 A payment voucher has the same structure as a receipt voucher and the same lifecycle, with two essential differences:
 
 1. **The party:** it requires **a supplier or an expense account (at least one)** — the system's validation refuses to save with the message "A supplier or expense account is required" if both are left empty. Selecting a supplier opens their list of **unpaid purchase invoices** to link the voucher to.

@@ -16,12 +16,12 @@ After signing in, the main screen appears with a right-to-left (RTL) layout and 
 ## The Sidebar
 
 
-![Sidebar with the module list (الشريط الجانبي)](../assets/interface/sidebar.png)
+![Sidebar with the module list](../assets/interface/sidebar.png)
 The sidebar is the map of the system. Modules are grouped logically:
 
 | Group | Modules |
 |---|---|
-| Home | Dashboard, the "Maghz" AI Assistant (المساعد الذكي «مغزى») |
+| Home | Dashboard, the "Maghz" AI Assistant |
 | Operations | Sales, POS, Purchases, Inventory, Manufacturing |
 | Management | Accounting, HR, CRM |
 | Analysis | Reports (Reports Hub) |
@@ -47,7 +47,7 @@ Modules your role cannot access are **hidden from the sidebar** automatically. F
 ## The Header
 
 
-![Top header bar (شريط الهيدر)](../assets/interface/header.png)
+![Top header bar](../assets/interface/header.png)
 A bar at the top of the screen that stays fixed on every page:
 
 | Element | Location | Function |
@@ -61,7 +61,7 @@ A bar at the top of the screen that stays fixed on every page:
 ## The User Menu
 
 
-![User menu: language, appearance, and profile (قائمة المستخدم)](../assets/interface/user-menu.png)
+![User menu: language, appearance, and profile](../assets/interface/user-menu.png)
 Click the user avatar in the header to open the menu:
 
 | Option | Function |
@@ -78,7 +78,7 @@ Click the user avatar in the header to open the menu:
 ## Themes Page (Appearance & Themes)
 
 
-![Appearance and themes page (المظهر والثيمات)](../assets/settings/themes.png)
+![Appearance and themes page](../assets/settings/themes.png)
 - **Access:** Sidebar ← Settings ← Appearance & Themes (or User Menu ← All Themes)
 
 Here you control the visual identity of the system:
@@ -91,7 +91,7 @@ Here you control the visual identity of the system:
 
 ### Creating a Custom Theme
 
-1. Click **New Theme (ثيم جديد)**.
+1. Click **New Theme**.
 2. Enter the theme name **in both Arabic and English** (both are required).
 3. Choose the **mode**: light or dark.
 4. Set the colors — each field accepts hex format only (`#RRGGBB`):
@@ -126,9 +126,9 @@ Full paths to the most-used pages (follow the same pattern for every module):
 | Page | Full path |
 |---|---|
 | Dashboard | Sidebar ← Dashboard |
-| New sales invoice | Sidebar ← Sales ← Sales Invoices ← **New Invoice (فاتورة جديدة)** button |
+| New sales invoice | Sidebar ← Sales ← Sales Invoices ← **New Invoice** button |
 | Cashier screen | Sidebar ← POS ← Cashier Screen |
-| New journal entry | Sidebar ← Accounting ← Journal Entries ← **New Entry (قيد جديد)** button |
+| New journal entry | Sidebar ← Accounting ← Journal Entries ← **New Entry** button |
 | Customer statement | Sidebar ← Reports ← Customer Statement |
 | Add a user | Sidebar ← Settings ← Users |
 | Backup | Sidebar ← Settings ← Backup |

@@ -5,8 +5,8 @@
 ## Overview
 
 
-![CRM Hub (مركز علاقات العملاء)](../assets/crm/hub.png)
-The CRM module manages the sales cycle before the invoice: **Leads (العملاء المحتملون)** → **Opportunities (الفرص)** → a real customer with an invoice. It also includes **Tasks (المهام)** and **Activities (الأنشطة)** for tracking the daily work, plus funnel and performance reports in the Reports Hub.
+![CRM Hub](../assets/crm/hub.png)
+The CRM module manages the sales cycle before the invoice: **Leads** → **Opportunities** → a real customer with an invoice. It also includes **Tasks** and **Activities** for tracking the daily work, plus funnel and performance reports in the Reports Hub.
 
 - **Access:** Sidebar ← CRM.
 - **Permissions:** `crm.view` to view, `crm.create` to add, `crm.edit` to edit, `crm.delete` to delete.
@@ -23,7 +23,7 @@ The CRM module manages the sales cycle before the invoice: **Leads (العملا
 ## Leads
 
 
-![Leads list (قائمة العملاء المحتملين)](../assets/crm/leads.png)
+![Leads list](../assets/crm/leads.png)
 ### The Leads Screen
 
 - **Access:** CRM ← Leads.
@@ -35,31 +35,31 @@ The CRM module manages the sales cycle before the invoice: **Leads (العملا
 | Name | The name of the person or company | Required |
 | Phone / email / company | Contact details — carried over to the customer on conversion | Optional |
 | Source | Where they came from (an ad, a referral, an exhibition...) | Optional |
-| Status | `New → Contacted → Qualified → Converted/Lost (جديد ← تم التواصل ← مؤهل ← محوَّل/مفقود)` | Required |
-| Rating | **Hot / Warm / Cold (ساخن / فاتر / بارد)** | Required |
+| Status | `New → Contacted → Qualified → Converted/Lost` | Required |
+| Rating | **Hot / Warm / Cold** | Required |
 | Estimated value | The expected deal size, which supports prioritization | Optional |
 | Owner | The employee who owns the relationship | Optional |
 | Notes | Free description | Optional |
-| **Last Contact (آخر تواصل)** | **Stamped automatically (timestamp)** when any activity linked to the lead is recorded — not editable manually | Automatic |
+| **Last Contact** | **Stamped automatically (timestamp)** when any activity linked to the lead is recorded — not editable manually | Automatic |
 
 ### The Lead Lifecycle
 
 | Status | Meaning | Transitions |
 |---|---|---|
-| **New (جديد)** | Not contacted yet | → Contacted / Qualified / Lost |
-| **Contacted (تم التواصل)** | An initial reply or interaction | → Qualified / Lost |
-| **Qualified (مؤهل)** | Serious about buying (need + ability) | → Converted / Lost |
-| **Converted (محوَّل)** | Became a real customer — **a final status**; a converted lead leaves the active work lists | Final |
-| **Lost (مفقود)** | The relationship was lost | Final |
+| **New** | Not contacted yet | → Contacted / Qualified / Lost |
+| **Contacted** | An initial reply or interaction | → Qualified / Lost |
+| **Qualified** | Serious about buying (need + ability) | → Converted / Lost |
+| **Converted** | Became a real customer — **a final status**; a converted lead leaves the active work lists | Final |
+| **Lost** | The relationship was lost | Final |
 
 ### Convert to Customer — An Atomic Operation
 
-The **Convert to Customer (تحويل لعميل)** button executes **one operation (all or nothing)**:
+The **Convert to Customer** button executes **one operation (all or nothing)**:
 
 1. It creates a **real customer** in the customer manager (the same tables used by Sales):
-   - **An automatic code from the sequences** (`CUS-`)
-   - Contact details filled in from the lead (phone/email/company)
-   - **Tax number / credit limit / address** — optional, entered in the conversion dialog
+ - **An automatic code from the sequences** (`CUS-`)
+ - Contact details filled in from the lead (phone/email/company)
+ - **Tax number / credit limit / address** — optional, entered in the conversion dialog
 2. It updates the lead's status to **"Converted"**.
 3. It creates an **optional first opportunity** named "Opportunity [lead name]" linked to the new customer — enable it if the deal is actually under negotiation.
 
@@ -70,7 +70,7 @@ The **Convert to Customer (تحويل لعميل)** button executes **one operat
 ## Opportunities
 
 
-![Opportunities list and stages (قائمة الفرص ومراحلها)](../assets/crm/opportunities.png)
+![Opportunities list and stages](../assets/crm/opportunities.png)
 ### The Opportunities Screen
 
 - **Access:** CRM ← Opportunities.
@@ -88,13 +88,13 @@ The **Convert to Customer (تحويل لعميل)** button executes **one operat
 ### The Strict Stage Machine
 
 ```
-New ──▶ Qualified ──▶ Proposal ──▶ Negotiation ──▶ Won (مكسبَة) / Lost (مفقودة)
+New ──▶ Qualified ──▶ Proposal ──▶ Negotiation ──▶ Won / Lost
 ```
 
 | Rule | Detail |
 |---|---|
 | **Forward only** | Between the open stages (New/Qualified/Proposal/Negotiation), only a transition to a **later** stage is accepted — no going back |
-| **Won/Lost are final and lock the record** | The stage cannot be edited after either one — any attempt is rejected with the message "Cannot change the stage of a locked opportunity (لا يمكن تغيير مرحلة فرصة مقفلة)" |
+| **Won/Lost are final and lock the record** | The stage cannot be edited after either one — any attempt is rejected with the message "Cannot change the stage of a locked opportunity" |
 | Reaching **"Won"** | The **probability is set to 100%** and the **close date** is stamped automatically |
 | Reaching **"Lost"** | The probability is set to 0% and the close date is stamped |
 | Transitioning to the same stage | Accepted (no effect) |
@@ -108,7 +108,7 @@ Value × Probability = the **weighted value** of each opportunity, and their sum
 ## Tasks
 
 
-![Tasks list (قائمة المهام)](../assets/crm/tasks.png)
+![Tasks list](../assets/crm/tasks.png)
 - **Access:** CRM ← Tasks.
 
 | Field | Description |
@@ -116,19 +116,19 @@ Value × Probability = the **weighted value** of each opportunity, and their sum
 | Title / description | What needs to be done |
 | Due date | When it must be done (overdue items appear in a warning color) |
 | Priority | Low / Medium / High |
-| Status | **Pending → Completed / Cancelled (معلق ← مكتمل / ملغى)** |
+| Status | **Pending → Completed / Cancelled** |
 | Link | To a lead, an opportunity, or a customer |
 | Assignee | Who will do it |
 
 ## Activities
 
 
-![Activities and calls log (سجل الأنشطة والمكالمات)](../assets/crm/activities.png)
+![Activities and calls log](../assets/crm/activities.png)
 - **Access:** CRM ← Activities — a log of what actually happened (as opposed to Tasks = what should happen).
 
 | Field | Description |
 |---|---|
-| Type | **Call / Meeting / Email / Visit / Note (مكالمة / اجتماع / بريد / زيارة / ملاحظة)** |
+| Type | **Call / Meeting / Email / Visit / Note** |
 | Subject | A title of what happened |
 | Date + duration | When and how long it took (in minutes) |
 | Link | Lead / opportunity / customer |

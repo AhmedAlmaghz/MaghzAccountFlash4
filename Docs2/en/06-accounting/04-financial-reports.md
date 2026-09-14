@@ -23,7 +23,7 @@ These screens are the Accounting module's output. Everything you posted — entr
 ## Account Ledger
 
 
-![Account ledger — transactions of a specific account (دفتر الأستاذ — حركات حساب محدد)](../assets/accounting/ledger.png)
+![Account ledger — transactions of a specific account](../assets/accounting/ledger.png)
 - **Access:** Accounting ← Account Ledger
 - **Purpose:** a detailed statement of one account's transactions with a **Running Balance** row by row.
 
@@ -41,7 +41,7 @@ These screens are the Accounting module's output. Everything you posted — entr
 ## Trial Balance
 
 
-![Trial Balance report (تقرير ميزان المراجعة)](../assets/accounting/trial-balance.png)
+![Trial Balance report](../assets/accounting/trial-balance.png)
 - **Access:** Accounting ← Trial Balance
 - **Purpose:** show all accounts with their balances up to a specific date, and verify that the books are balanced.
 
@@ -57,7 +57,7 @@ These screens are the Accounting module's output. Everything you posted — entr
 ## Balance Sheet
 
 
-![Balance Sheet (قائمة المركز المالي (الميزانية العمومية))](../assets/accounting/balance-sheet.png)
+![Balance Sheet (قائمة المركز المالي)](../assets/accounting/balance-sheet.png)
 - **Access:** Accounting ← Balance Sheet
 - **Purpose:** a financial snapshot **as of a date**: what you own (assets) versus what you owe (liabilities) and what remains for the owner (equity).
 
@@ -83,7 +83,7 @@ At the top of the report, a live indicator verifies the accounting equation:
 ## Income Statement
 
 
-![Income Statement (قائمة الدخل (الأرباح والخسائر))](../assets/accounting/income-statement.png)
+![Income Statement (قائمة الدخل)](../assets/accounting/income-statement.png)
 - **Access:** Accounting ← Income Statement
 - **Purpose:** measure performance over a **period** (from — to): revenues, expenses, and net profit.
 
@@ -98,7 +98,7 @@ At the top of the report, a live indicator verifies the accounting equation:
 ## Cash Flow Statement
 
 
-![Cash Flow Statement (قائمة التدفقات النقدية)](../assets/accounting/cash-flow.png)
+![Cash Flow Statement](../assets/accounting/cash-flow.png)
 - **Access:** Accounting ← Cash Flow Statement
 - **Purpose:** track the cash movement using the **indirect** method — it explains why cash changed even though the net profit is a different number.
 
