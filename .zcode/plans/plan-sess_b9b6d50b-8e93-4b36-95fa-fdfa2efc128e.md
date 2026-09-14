@@ -23,7 +23,7 @@
 - إضافة إشعار خطأ (toast) عند فشل الحفظ التلقائي في `ChatPanel.tsx` (حالياً fire-and-forget صامت) + تسجيل console.error.
 
 ### 0.3 إصلاح النموذج الافتراضي
-- `aiHandler.js:27` و `browserBridge.ts:52`: `gemini-3.5-flash-lite` (اسم غير موجود) → `gemini-2.5-flash-lite`.
+- `aiHandler.js:27` و `browserBridge.ts:52`: `gemini-3.5-flash-lite` (اسم غير موجود) → `gemini-3.5-flash-lite`.
 - توحيد تسمية المزوّد الافتراضي المتناقضة (`browserBridge.ts:522` يعيد 'gemini' بينما `aiHandler.js:532` يعيد 'openai') → 'gemini' في كليهما.
 - اختبار جديد يقرأ الملفين ويطابق الثوابت (يمنع الانحراف مستقبلاً).
 
