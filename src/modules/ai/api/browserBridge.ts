@@ -51,7 +51,7 @@ const ENABLED_SETTING = 'ai.enabled';
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 // Real Gemini catalog model — see electron/aiHandler.js (kept in sync by
 // providerDefaults.test.ts). 'gemini-3.5-flash-lite' never existed.
-const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const REQUEST_TIMEOUT_MS = 90000;
 const TEST_TIMEOUT_MS = 30000;
 
@@ -188,18 +188,18 @@ async function callChatCompletion(opts: CallOptions): Promise<{ success: boolean
     const message = choice.message || {};
     const toolCalls = Array.isArray(message.tool_calls)
       ? message.tool_calls.map((tc) => {
-          const fn = (tc as { function?: { name?: string; arguments?: string; [k: string]: unknown } }).function || {};
-          const extras: Record<string, unknown> = {};
-          for (const key of Object.keys(fn)) {
-            if (key !== 'name' && key !== 'arguments') extras[key] = fn[key];
-          }
-          return {
-            id: (tc as { id?: string }).id || `call_${(crypto.randomUUID()).slice(9, 23).replace(/-/g, '')}`,
-            name: fn.name || '',
-            arguments: safeParseArgs(fn.arguments),
-            function: extras,
-          };
-        })
+        const fn = (tc as { function?: { name?: string; arguments?: string;[k: string]: unknown } }).function || {};
+        const extras: Record<string, unknown> = {};
+        for (const key of Object.keys(fn)) {
+          if (key !== 'name' && key !== 'arguments') extras[key] = fn[key];
+        }
+        return {
+          id: (tc as { id?: string }).id || `call_${(crypto.randomUUID()).slice(9, 23).replace(/-/g, '')}`,
+          name: fn.name || '',
+          arguments: safeParseArgs(fn.arguments),
+          function: extras,
+        };
+      })
       : [];
     // P2 parity fix (mirrors aiHandler): Gemini sometimes returns
     // thought_signature at the MESSAGE level (not per tool call). Without
@@ -355,10 +355,10 @@ async function runStream(opts: CallOptions & { streamId?: string }): Promise<voi
                       id: tc.id,
                       function: tc.function
                         ? {
-                            name: tc.function.name,
-                            arguments: tc.function.arguments,
-                            thought_signature: tc.function.thought_signature,
-                          } as { name?: string; arguments?: string; thought_signature?: string }
+                          name: tc.function.name,
+                          arguments: tc.function.arguments,
+                          thought_signature: tc.function.thought_signature,
+                        } as { name?: string; arguments?: string; thought_signature?: string }
                         : undefined,
                     },
                   },
