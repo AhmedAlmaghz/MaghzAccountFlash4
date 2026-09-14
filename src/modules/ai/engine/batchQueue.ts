@@ -18,6 +18,7 @@
  */
 
 import { classifyToolError } from './errorTaxonomy';
+import { extractLedgerEntity } from './taskLedger';
 
 export type BatchStatus = 'pending' | 'running' | 'paused' | 'done' | 'partial' | 'cancelled';
 
@@ -453,6 +454,87 @@ export function substituteRefs(
 export function summarizeBatchProgress(done: number, failed: number, skipped: number, total: number): string {
   const remaining = Math.max(0, total - done - failed - skipped);
   return `أُنجز ${done} — فشل ${failed} — تُخطّي ${skipped} — متبقٍ ${remaining} (من ${total})`;
+}
+
+/** شارة بشرية لعنصر دفعة: الـ label إن وجد، وإلا اسم الكيان من الوسائط، وإلا اسم الأداة. */
+export function batchItemLabel(item: {
+  label?: string | null;
+  toolName?: string;
+  args?: Record<string, unknown> | null;
+}): string {
+  if (item.label && item.label.trim()) return item.label.trim().slice(0, 80);
+  const entity = extractLedgerEntity({ tool: item.toolName, args: item.args ?? null });
+  if (entity?.name) return entity.name.slice(0, 80);
+  return (item.toolName ?? 'عنصر').slice(0, 80);
+}
+
+/** شكل النتيجة النهائية للدفعة كما يراها النموذج (نتيجة الأداة بعد الانتظار). */
+export interface BatchOutcomeForModel {
+  status: string;
+  progress: string;
+  doneCount: number;
+  totalCount: number;
+  failed: Array<{ item: number; name: string; error: string; code?: string | null }>;
+  skipped: Array<{ item: number; name: string }>;
+  /** إرشاد إلزامي للنموذج عند وجود فاشل — لا ملخص سلبي دون اقتراح إجراء. */
+  action?: string;
+}
+
+/**
+ * الحالة النهائية للدفعة للنموذج — الفاشلة بأسمائها وأسبابها واقتراح إجراء
+ * فوري. الجلسة الحقيقية 2026-09-14: كنافة فشل إنشاؤها (بيانات عنصر مشوهة)
+ * والمساعد لم يخبر المستخدم أبداً ولا اقترح إنشاءه — بحث عنها 15 مرة وفشل
+ * الـ BOM صامتاً. هذا الملخص يغذي النموذج مباشرة (نتيجة الأداة بعد انتظار
+ * الدفعة) فيقترح الإصلاح فوراً.
+ */
+export function summarizeBatchOutcomeForModel(
+  detail: {
+    status?: string;
+    doneCount?: number;
+    failedCount?: number;
+    skippedCount?: number;
+    totalCount?: number;
+    items?: Array<{
+      seq?: number;
+      toolName?: string;
+      label?: string | null;
+      args?: Record<string, unknown> | null;
+      status?: string;
+      lastError?: string | null;
+      errorCode?: string | null;
+    }>;
+  } | null,
+): BatchOutcomeForModel | null {
+  if (!detail) return null;
+  const items = detail.items ?? [];
+  const doneCount = detail.doneCount ?? items.filter((i) => i.status === 'done').length;
+  const totalCount = detail.totalCount ?? items.length;
+  const failed = items
+    .filter((i) => i.status === 'failed')
+    .slice(0, 8)
+    .map((i) => ({
+      item: (i.seq ?? 0) + 1,
+      name: batchItemLabel(i),
+      error: (i.lastError ?? 'خطأ غير معروف').slice(0, 200),
+      ...(i.errorCode ? { code: i.errorCode } : {}),
+    }));
+  const skipped = items
+    .filter((i) => i.status === 'skipped')
+    .slice(0, 8)
+    .map((i) => ({ item: (i.seq ?? 0) + 1, name: batchItemLabel(i) }));
+  const outcome: BatchOutcomeForModel = {
+    status: detail.status ?? 'unknown',
+    progress: summarizeBatchProgress(doneCount, detail.failedCount ?? failed.length, detail.skippedCount ?? skipped.length, totalCount),
+    doneCount,
+    totalCount,
+    failed,
+    skipped,
+  };
+  if (failed.length > 0) {
+    outcome.action =
+      'اقرأ أخطاء الفاشل أعلاه واعرضها على المستخدم مع الاقتراح: إن كان سبب الفشل كياناً غير موجود أو بيانات ناقصة/مشوهة فاسأل المستخدم "أتريد إنشاءه/تصحيحه؟" ثم أعد العناصر الفاشلة (ai.resume_batch أو دفعة جديدة للعناصر المصلحة فقط) — لا تبدأ من الصفر ولا تعيد ما نجح.';
+  }
+  return outcome;
 }
 
 /**

@@ -4,6 +4,7 @@ import { enqueueBatch, getBatch, listBatches } from '../api/batch';
 import { planBatchResume, summarizeBatchProgress } from '../engine/batchQueue';
 import { BATCH_CREATE_CHUNK } from '../api/batchTypes';
 import { isBatchActive } from '../engine/batchRunner';
+import { getTool } from './registry';
 import { extractLedgerEntity, normalizeEntityName } from '../engine/taskLedger';
 
 /**
@@ -44,6 +45,72 @@ function argsReferenceRef(value: unknown, ref: string): boolean {
     return Object.values(value as Record<string, unknown>).some((v) => argsReferenceRef(v, ref));
   }
   return false;
+}
+
+/**
+ * تعقيم اسم أداة العنصر: الجلسة 2026-09-14 سجلت عنصراً باسم يحوي JSON
+ * مشوهاً ("inventory.create_product},{args:{costPrice:10000,...") فمات
+ * العنصر بأداة غير معروفة. اقتطاع كل ما بعد أول فاصل JSON يعيد اسم الأداة
+ * الحقيقي غالباً — والعنصر يفشل لاحقاً بفحص واضح إن كانت الوسائط مفقودة
+ * فعلاً بدل رسالة "أداة غير معروفة" غامضة.
+ */
+function sanitizeBatchToolName(raw: string): string {
+  if (!raw) return raw;
+  const cut = raw.split(/[{}[\]]/)[0];
+  return cut.trim() || raw.trim();
+}
+
+/** الحقول المرجعية الشائعة التي يجب أن تكون UUID حقيقية (قاعدة 42). */
+const ID_FIELDS = [
+  'customerId', 'supplierId', 'productId', 'warehouseId', 'fromWarehouseId',
+  'toWarehouseId', 'cashBoxId', 'employeeId', 'accountId', 'unitId',
+  'baseUnitId', 'productTypeId', 'categoryId', 'departmentId', 'leadId',
+  'opportunityId', 'workOrderId', 'bomId', 'bomProductId', 'shiftId', 'payrollRunId',
+  'openingStockWarehouseId',
+] as const;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface PreflightProblem {
+  index: number;
+  problem: string;
+}
+
+/**
+ * فحص مسبق لعناصر الدفعة قبل الإرسال — الأخطاء القاتلة (حقل مرجعي ليس
+ * UUID، وسائط فارغة) تكشف هنا بإفصاح لكل عنصر بدل أن تكشف بعد موافقة
+ * المستخدم وقت التنفيذ (MISSING_ID بعد الموافقة = "عمليات ناقصة" وافق
+ * عليها المستخدم دون علمه). المراجع {{ref}} و@ref تُتخطى — تُحل وقت التشغيل.
+ */
+function preflightValidateItems(items: NormalizedBatchItem[]): PreflightProblem[] {
+  const problems: PreflightProblem[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (!it.tool) {
+      problems.push({ index: i, problem: 'اسم الأداة فارغ — كل عنصر يحتاج {tool, args}' });
+      continue;
+    }
+    // أدوات غير معروفة: الفحص المسبق يخص الأدوات المعروفة — الأداة المجهولة
+    // تحافظ على مسارها الحالي (رفض "أداة غير معروفة" من enqueueBatch).
+    if (!getTool(it.tool)) continue;
+    const argKeys = Object.keys(it.args);
+    if (argKeys.length === 0) {
+      problems.push({ index: i, problem: `الوسائط args فارغة لـ ${it.tool} — أعد إرسال العنصر بصيغة صحيحة` });
+      continue;
+    }
+    for (const field of ID_FIELDS) {
+      const v = it.args[field];
+      if (v === undefined || v === null) continue;
+      if (typeof v !== 'string') continue;
+      if (v.includes('{{') || v.startsWith('@')) continue; // مرجع يُحل وقت التشغيل
+      if (!UUID_RE.test(v.trim())) {
+        problems.push({
+          index: i,
+          problem: `الحقل ${field} في ${it.tool} ليس UUID صالحاً ("${v.slice(0, 40)}") — استخدم معرفاً من أدوات البحث (search.*) ولا تمرر أسماء أو أكواداً حرفية`,
+        });
+      }
+    }
+  }
+  return problems;
 }
 
 interface NormalizedBatchItem {
@@ -228,13 +295,24 @@ export const batchTools: ToolDefinition[] = [
           if (!KNOWN_ITEM_KEYS.has(k) && v !== undefined) stray[k] = v;
         }
         return {
-          tool: String(it.tool || it.type || it.action || ''),
+          tool: sanitizeBatchToolName(String(it.tool || it.type || it.action || '')),
           args: { ...stray, ...base },
           after: (it.after as number | string | undefined) ?? undefined,
           ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,
           label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
         };
       });
+      // فحص مسبق (Pre-flight) قبل الإرسال: العناصر المكسورة تموت هنا بإفصاح
+      // لكل عنصر بدل أن تموت بعد الموافقة وقت التنفيذ. الجلسة 2026-09-14:
+      // فاتورتا مبيعات أُرسلتا بلا customerId (MISSING_ID) بعد موافقة
+      // المستخدم — "عمليات ناقصة" وافق عليها المستخدم دون علمه.
+      const invalidItems = preflightValidateItems(items);
+      if (invalidItems.length > 0) {
+        return {
+          error: `فشل الفحص المسبق لـ ${invalidItems.length} عنصراً — لم تُنشأ أي دفعة. أصلح العناصر التالية وأعد الإرسال كدفعة واحدة:\n${invalidItems.slice(0, 8).map((e) => `- العنصر ${e.index + 1}: ${e.problem}`).join('\n')}`,
+          invalidItems,
+        };
+      }
       // حارس التكرار الجلسي — قبل الإرسال: إعادة إنشاء كيان مُنشأ في نفس
       // الجلسة (نسيان المهمة) يُسقط بإفصاح صريح بدل تلويث الأرصدة والتقارير.
       const { effective, skippedDuplicates } = filterSessionDuplicates(items, ctx.ledger ?? null);

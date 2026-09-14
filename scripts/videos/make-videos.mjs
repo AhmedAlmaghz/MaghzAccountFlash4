@@ -27,18 +27,32 @@ const INIT_SCRIPT = () => {
   }));
 };
 
+const HOMEDIR = os.homedir().replace(/\\/g, '/');
+const FF_DIR = path.posix.join(
+  HOMEDIR, 'AppData/Local/Microsoft/WinGet/Packages',
+  'Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe',
+  'ffmpeg-8.1.1-full_build/bin',
+);
+const FFMPEG = process.env.FFMPEG_BIN || (existsSync(path.posix.join(FF_DIR, 'ffmpeg.exe')) ? path.posix.join(FF_DIR, 'ffmpeg.exe') : 'ffmpeg');
+const FFPROBE = process.env.FFPROBE_BIN || (existsSync(path.posix.join(FF_DIR, 'ffprobe.exe')) ? path.posix.join(FF_DIR, 'ffprobe.exe') : 'ffprobe');
+
 const ffmpeg = (args, label) => {
-  execSync(`ffmpeg -y -hide_banner -loglevel error ${args}`, { stdio: 'pipe' });
+  execSync(`"${FFMPEG}" -y -hide_banner -loglevel error ${args}`, { stdio: 'pipe' });
   console.log('   ffmpeg:', label);
 };
 const ffprobeDur = (file) =>
   parseFloat(execSync(
-    `ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${file}"`,
+    `"${FFPROBE}" -v error -show_entries format=duration -of default=nw=1:nk=1 "${file}"`,
   ).toString().trim());
 
+const PYTHON = process.env.PYTHON || 'python';
 async function tts(text, out) {
+  // write the narration to a UTF-8 file and pass it by path — avoids shell
+  // quoting trouble with long Arabic sentences on Windows
+  const txtFile = out.replace(/\.mp3$/, '.txt');
+  await writeFile(txtFile, text, 'utf-8');
   await new Promise((res, rej) => {
-    const p = spawn('python', ['-m', 'edge_tts', '--voice', VOICE, '--text', text, '--write-media', out]);
+    const p = spawn(PYTHON, ['-m', 'edge_tts', '--voice', VOICE, '--file', txtFile, '--write-media', out], { shell: true });
     p.on('exit', (c) => (c === 0 ? res() : rej(new Error(`edge-tts exit ${c}`))));
     p.on('error', rej);
   });

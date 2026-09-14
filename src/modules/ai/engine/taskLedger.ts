@@ -93,6 +93,12 @@ interface LedgerOutcome {
   entities: LedgerEntity[];
 }
 
+interface TaskEntry {
+  title: string;
+  name: string;
+  status: string; // done | failed | skipped | queued | running
+}
+
 interface CreatedEntity {
   display: string;
   tool: string;
@@ -115,6 +121,8 @@ export class TaskLedger {
   private requests: string[] = [];
   private outcomes: LedgerOutcome[] = [];
   private created = new Map<string, CreatedEntity>();
+  /** جدول المهام: حالة كل بند دفعة (منجز/فاشل/مُخطّى) — "ما تم وما بقي". */
+  private taskEntries: TaskEntry[] = [];
 
   /** سجل طلب مستخدم بنصه الكامل. التكرار الحرفي المتتالي يُتجاهل (regenerate). */
   recordRequest(text: string): void {
@@ -161,18 +169,52 @@ export class TaskLedger {
   }
 
   get isEmpty(): boolean {
-    return this.requests.length === 0 && this.outcomes.length === 0;
+    return this.requests.length === 0 && this.outcomes.length === 0 && this.taskEntries.length === 0;
   }
 
   clear(): void {
     this.requests = [];
     this.outcomes = [];
     this.created.clear();
+    this.taskEntries = [];
+  }
+
+  /**
+   * جدول المهام من تفصيل دفعة: كل بند بحالته النهائية (منجز/فاشل/مُخطّى).
+   * البند المكرر بنفس الدفعة والعنوان يُحدَّث لا يُكرر.
+   */
+  recordBatchTaskTable(
+    title: string | null | undefined,
+    items: Array<{ toolName?: string; args?: Record<string, unknown>; status?: string }>,
+  ): void {
+    const safeTitle = String(title ?? '').trim() || 'بدون عنوان';
+    for (const it of items) {
+      const status = String(it.status ?? 'unknown');
+      if (!['done', 'failed', 'skipped'].includes(status)) continue; // جارٍ/مطلوب = بطاقة حية
+      let name = typeof it.toolName === 'string' ? it.toolName : 'عنصر';
+      const entity = extractLedgerEntity({ tool: it.toolName, args: it.args });
+      if (entity?.name) name = entity.name;
+      const key = `${safeTitle}::${name}`;
+      const existing = this.taskEntries.find((t) => `${t.title}::${t.name}` === key);
+      if (existing) {
+        existing.status = status;
+      } else {
+        this.taskEntries.push({ title: safeTitle, name, status });
+      }
+    }
+    if (this.taskEntries.length > 120) {
+      // الأقدم المنجز يُسقط أولاً — الفاشل والمُخطّى يبقيان مرئيين.
+      const keep = this.taskEntries.filter((t) => t.status !== 'done').slice(-100);
+      const doneCount = this.taskEntries.filter((t) => t.status === 'done').length;
+      this.taskEntries = [...keep, { title: 'الإجمالي', name: `${doneCount} بنداً منجزاً سابقاً`, status: 'done' }];
+    }
   }
 
   /**
    * سجّل من تفصيل دفعة (JobBatchDetail): الكيانات المنفَّذة فقط (status=done) —
    * العنصر الفاشل يجب أن يُسمح بإعادة إنشائه لاحقاً، فلا يدخل حارس التكرار.
+   * كما يخزن حالة كل بند في جدول المهام (منجز/فاشل/مُخطّى) الذي يرى النموذج
+   * فيه "ما تم وما لم يتم وما بقي" عبر الدورات.
    */
   recordFromBatchDetail(detail: {
     title?: string | null;
@@ -192,6 +234,7 @@ export class TaskLedger {
       line: `دفعة «${String(detail.title ?? '').trim() || 'بدون عنوان'}»: أُنجز ${done.length} — فشل ${detail.failedCount ?? 0} — تخطي ${detail.skippedCount ?? 0} (من ${total})`,
       entities,
     });
+    this.recordBatchTaskTable(detail.title, items);
   }
 
   /** إعادة بناء الطلبات من رسائل الجلسة المحفوظة (استعادة بعد إعادة الفتح). */
@@ -243,6 +286,25 @@ export class TaskLedger {
     ];
     if (outcomeLines.length > 0) {
       body = body.concat(['▼ ما نُفّذ فعلاً في هذه الجلسة (لا تكرّره):', outcomeLines.join('\n'), '']);
+    }
+    // جدول المهام: "ما تم وما لم يتم وما بقي" — الفاشل والمُخطّى بأسمائهما
+    // فيراه النموذج عبر الدورات ويقترح الإصلاح دون إعادة اكتشاف من السياق.
+    if (this.taskEntries.length > 0) {
+      const doneN = this.taskEntries.filter((t) => t.status === 'done').length;
+      const failedN = this.taskEntries.filter((t) => t.status === 'failed');
+      const skippedN = this.taskEntries.filter((t) => t.status === 'skipped');
+      const taskLines: string[] = [`✓ منجز: ${doneN}`];
+      if (failedN.length > 0) {
+        taskLines.push(
+          `✗ فاشل (${failedN.length}): ${failedN.slice(0, 10).map((t) => t.name).join('، ')}${failedN.length > 10 ? ` و${failedN.length - 10} أخرى` : ''} — اسأل المستخدم إن أراد إنشاءه/تصحيحه ثم أعد الفاشل`,
+        );
+      }
+      if (skippedN.length > 0) {
+        taskLines.push(
+          `⊘ مُخطّى (${skippedN.length}): ${skippedN.slice(0, 10).map((t) => t.name).join('، ')}${skippedN.length > 10 ? ` و${skippedN.length - 10} أخرى` : ''} — تابع لعناصر فاشلة`,
+        );
+      }
+      body = body.concat(['▼ جدول المهام:', taskLines.join('\n'), '']);
     }
     body = body.concat([rules]);
 

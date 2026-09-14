@@ -21,8 +21,13 @@ describe('summarizeResult — empty-search fallback visibility', () => {
     expect(s).toContain('اختر أنسب حساب وسجّل عليه.');
   });
 
-  it('stays quiet when there is nothing to suggest', () => {
-    expect(summarizeResult({ matches: [], totalMatches: 0 })).toBe('❌ لا توجد نتائج.');
+  it('carries the default creation tip when nothing specific is suggested', () => {
+    // صفر نتائج بلا اقتراح مخصص يقترح أداة الإنشاء أو السؤال — لا بحث أبدِ
+    // (الجلسة 2026-09-14: 15 بحثاً عن "كنافة" دون اقتراح إنشاء).
+    const s = summarizeResult({ matches: [], totalMatches: 0 });
+    expect(s).toContain('❌ لا توجد نتائج.');
+    expect(s).toContain('أداة الإنشاء');
+    expect(s).toContain('أتريد إنشاءه؟');
   });
 
   it('still renders normal match tables untouched', () => {

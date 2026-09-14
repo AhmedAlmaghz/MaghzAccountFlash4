@@ -53,6 +53,13 @@ export function isBatchActive(batchId: string): boolean {
   return activeBatches.has(batchId);
 }
 
+/** True while ANY batch has a live worker loop in THIS renderer — the
+ * max-iterations notice uses it to tell "batch still running" from a dead
+ * end. */
+export function isAnyBatchActive(): boolean {
+  return activeBatches.size > 0;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
