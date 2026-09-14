@@ -8,12 +8,14 @@ import { routeToolsForCycle } from './toolRouter';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
-import { isBatchActive, runBatch, batchProgressLine } from './batchRunner';
+import { isBatchActive, isAnyBatchActive, runBatch, batchProgressLine } from './batchRunner';
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
 import { extractiveDigest, digestMessage } from './summarizer';
 import { TaskLedger } from './taskLedger';
+import { summarizeBatchOutcomeForModel, batchItemLabel } from './batchQueue';
 import { getBatch } from '../api/batch';
 import { planBatchResume } from './batchQueue';
+import type { JobBatchDetail } from '../api/batchTypes';
 import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
 import { attachmentContextBlock } from './llmParts';
@@ -336,6 +338,18 @@ class ChatEngine {
    */
   private extraAdvertisedTools = new Set<string>();
 
+  /**
+   * READ-LOOP GUARD state (per `send()`): key (tool+args) → the write
+   * counter at the time of the first identical call. A second identical
+   * read with NO successful write in between is a loop — the model gets a
+   * nudge instead of a wasted execution. writeCounter increments on every
+   * successful write so legitimate re-reads after changed data still run.
+   */
+  private readCallCache = new Map<string, { sinceWrite: number }>();
+  private writeCounter = 0;
+  /** عدد عمليات البحث عديمة النتيجة في هذا الطلب (لتحفيز التوقف والسؤال). */
+  private zeroResultSearches = 0;
+
   /** Stable key for a (toolName, args) pair — key order must not matter. */
   private static writeAttemptKey(toolName: string, args: unknown): string {
     const stable = (v: unknown): unknown => {
@@ -591,6 +605,9 @@ class ChatEngine {
       this.fabricationRetries = 0;
       this.failedWriteAttempts.clear();
       this.extraAdvertisedTools.clear();
+      this.readCallCache.clear();
+      this.writeCounter = 0;
+      this.zeroResultSearches = 0;
       this.abortRequested = false; // fresh request — previous stop is consumed
 
       await this.runLoop();
@@ -699,19 +716,29 @@ class ChatEngine {
           // Mark as REALLY executed — the anti-fabrication guard allows
           // success claims only when at least one write landed here.
           this.successfulWritesThisSend.add(pending.toolName);
+          // READ-LOOP GUARD: a successful write changed the data — repeated
+          // reads after this point are legitimate (fresh balance, fresh
+          // list) and must execute again instead of hitting the cache.
+          this.writeCounter++;
 
           // Batch tools hand back a batchId to run: the single approval the
-          // user just gave covers the whole batch, so the worker starts
-          // immediately (fire-and-forget) and reports progress onto the
-          // same card. No second approval round is ever requested.
+          // user just gave covers the whole batch. Batch-Await: the batch
+          // runs INSIDE the confirmation and the model receives the FINAL
+          // state (progress + named failures) as the tool result — instead
+          // of polling ai.batch_status (12 wasted polls in session
+          // 2026-09-14) until MAX_ITERATIONS killed the loop. No second
+          // approval round is ever requested.
           const batchId = (outcome.result as { startBatchRun?: unknown } | null)?.startBatchRun;
           if (typeof batchId === 'string' && batchId) {
-            void this.startBatchRun(batchId, messageId);
+            const detail = await this.startBatchRun(batchId, messageId);
+            const enriched = {
+              ...(outcome.result as Record<string, unknown>),
+              batchOutcome: summarizeBatchOutcomeForModel(detail),
+            };
+            this.pushToolResultAfterPartner(callId, JSON.stringify(enriched));
+          } else {
+            this.pushToolResultAfterPartner(callId, JSON.stringify(outcome.result));
           }
-
-          // Add tool result to LLM history — immediately after its partner
-          // assistant(tool_calls) message, never at the tail.
-          this.pushToolResultAfterPartner(callId, JSON.stringify(outcome.result));
         } else {
           store.updateToolCall(messageId, {
             status: 'error',
@@ -754,12 +781,15 @@ class ChatEngine {
   }
 
   /**
-   * Run a batch to completion after its single approval. Fire-and-forget:
-   * progress lands on the same tool card after every chunk, and a final
-   * summary message closes the run. Stopping the whole engine also stops
-   * the worker via the shared abort flag — the batch row stays resumable.
+   * Run a batch to completion after its single approval. Progress lands on
+   * the same tool card after every chunk; the final summary message closes
+   * the run WITH the named failures (الإصلاح الاستباقي — لا ملخص سلبي دون
+   * اقتراح). Returns the final detail so the caller (Batch-Await) can feed
+   * the true state to the model as the tool result. Stopping the whole
+   * engine also stops the worker via the shared abort flag — the batch row
+   * stays resumable.
    */
-  private async startBatchRun(batchId: string, messageId: string): Promise<void> {
+  private async startBatchRun(batchId: string, messageId: string): Promise<JobBatchDetail | null> {
     const store = this.store();
     // Pin the batch to its card so MessageBubble renders the live progress
     // card (persisted inside tool_call JSONB — survives reloads). Resume
@@ -779,7 +809,7 @@ class ChatEngine {
       });
       if (!final) {
         store.updateToolCall(messageId, { status: 'error', resultSummary: 'تعذّر قراءة حالة الدفعة' });
-        return;
+        return null;
       }
       const line = batchProgressLine(final);
       this.reportBatchProgress(
@@ -787,11 +817,18 @@ class ChatEngine {
         final.status === 'done' || final.status === 'partial' ? 'success' : 'error',
         line,
       );
+      // الإصلاح الاستباقي: الفاشلة بأسمائها وأسبابها في الرسالة نفسها —
+      // "اكتملت جزئياً... فشل: كنافة (السبب)" لا "اسألني عن تفاصيل الفاشلة".
+      const failedNamed = final.items
+        .filter((i) => i.status === 'failed')
+        .slice(0, 6)
+        .map((i) => `${batchItemLabel(i)} (${(i.lastError ?? '؟').slice(0, 80)})`);
+      const failedNote = failedNamed.length > 0 ? ` — فشل: ${failedNamed.join('؛ ')}` : '';
       const finalContent =
         final.status === 'done'
           ? `اكتملت الدفعة: ${line}`
           : final.status === 'partial'
-            ? `اكتملت الدفعة جزئياً: ${line} — اسألني عن تفاصيل الفاشلة أو قل "أعد الفاشلة" لإعادة المحاولة`
+            ? `اكتملت الدفعة جزئياً: ${line}${failedNote} — إن كان المفقود/الفاشل كياناً جديداً فاسأل المستخدم إن أراد إنشاءه ثم أعد الفاشلة`
             : `توقفت الدفعة (${final.status}): ${line} — قل "تابع" للاستئناف في أي وقت`;
       store.addMessage({
         role: 'assistant',
@@ -807,10 +844,12 @@ class ChatEngine {
       try {
         this.ledger.recordFromBatchDetail(final);
       } catch { /* الذاكرة خدمة إضافية — لا تُسقط الدورة أبداً */ }
+      return final;
     } catch (e) {
       const errorText = e instanceof Error ? e.message : String(e);
       this.reportBatchProgress(messageId, 'error', errorText);
       this.history.push({ role: 'assistant', content: errorText });
+      return null;
     }
   }
 
@@ -870,6 +909,23 @@ class ChatEngine {
       }
       if (detail.status === 'cancelled') {
         const msg = 'الدفعة ملغاة — أنشئ دفعة جديدة بدلاً من ذلك';
+        store.addMessage({ role: 'assistant', kind: 'error', content: msg });
+        this.history.push({ role: 'assistant', content: msg });
+        return { started: false, message: msg };
+      }
+      // P5: nothing left to resume — a partial/running batch with no
+      // queued/running items is TERMINAL work; running it again just
+      // re-emits the same summary (6 duplicate "اكتملت جزئياً" messages in
+      // session 2026-09-14 from repeated استمر on a finished partial batch).
+      const pendingItems = (detail.items ?? []).filter(
+        (i) => i.status === 'queued' || i.status === 'running',
+      ).length;
+      if (pendingItems === 0 && (detail.status === 'partial' || detail.status === 'running')) {
+        const failedNamed = (detail.items ?? [])
+          .filter((i) => i.status === 'failed')
+          .slice(0, 6)
+          .map((i) => batchItemLabel(i));
+        const msg = `لا جديد للاستئناف — الدفعة اكتملت جزئياً سابقاً (${batchProgressLine(detail)})${failedNamed.length > 0 ? ` — الفاشل: ${failedNamed.join('؛ ')}` : ''}. قل "أعد الفاشلة" إن أردت التصحيح.`;
         store.addMessage({ role: 'assistant', kind: 'error', content: msg });
         this.history.push({ role: 'assistant', content: msg });
         return { started: false, message: msg };
@@ -1779,17 +1835,62 @@ class ChatEngine {
     }
 
     // Execute read tools in parallel (they're independent — no shared state)
-    const readOutcomes = await Promise.all(
-      readCalls.map(async (tc) => {
-        const outcome = await executeToolCall(tc.name, tc.arguments, this.ctx);
-        return { tc, outcome };
-      })
+    // READ-LOOP GUARD: the same read/search tool with the SAME args executed
+    // twice in one stretch with NO successful write in between is a loop —
+    // session 2026-09-14 burned 15 identical searches for "كنافة" until
+    // MAX_ITERATIONS killed the request. The second identical call gets a
+    // nudge instead of execution. The write counter resets the guard after
+    // any successful write, so a legitimate re-read after changed data
+    // (search → payment → re-search for the fresh balance) still executes.
+    const dedupedReads: Array<{ tc: LlmCompletionData['toolCalls'][number]; cached?: string }> = [];
+    for (const tc of readCalls) {
+      const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
+      const entry = this.readCallCache.get(key);
+      if (entry && entry.sinceWrite === this.writeCounter) {
+        dedupedReads.push({
+          tc,
+          cached:
+            '🔁 كررت نفس الاستدعاء بنفس المعطيات دون أي عملية كتابة بينهما — النتيجة السابقة في سياق المحادثة صالحة. إن كان الكيان غير موجود فأخبر المستخدم بذلك واسأله "أتريد إنشاءه؟"، ولا تكرر البحث — أكمل الجزء الممكن من الطلب أو اقترح الخطوة التالية.',
+        });
+        continue;
+      }
+      this.readCallCache.set(key, { sinceWrite: this.writeCounter });
+      dedupedReads.push({ tc });
+    }
+
+    // Batch-Await للأدوات القرائية: الاستدعاء المطابق المخبأ لا يُنفَّذ —
+    // النتيجة السابقة صالحة والنموذج يحصل على النديج كنتيجة أداة.
+    const executed = await Promise.all(
+      dedupedReads
+        .filter((r) => !r.cached)
+        .map(async ({ tc }) => ({ tc, outcome: await executeToolCall(tc.name, tc.arguments, this.ctx) })),
+    );
+    const readOutcomes = dedupedReads.map(({ tc, cached }) =>
+      cached
+        ? { tc, outcome: { ok: false as const, error: cached, errorClass: undefined } }
+        : (executed.find((e) => e.tc === tc) as { tc: typeof tc; outcome: Awaited<ReturnType<typeof executeToolCall>> }),
     );
     if (myEpoch !== this.recoveryCount) return false;
     this.touchProgress();
 
+    // Zero-result synthesis: several searches with NO results in one stretch
+    // means the model is hunting an entity that does not exist. From the
+    // third empty search on, every read result carries a FORCED nudge to
+    // stop searching, tell the user what is missing, and ask whether to
+    // create it (the BOM/كنافة failure mode — 15 empty searches, no question).
+    let zeroResultCount = 0;
+    for (const { outcome } of readOutcomes) {
+      const text = outcome.ok ? compactToolResultForLlm(outcome.result) : '';
+      if (/❌ لا توجد نتائج|لا توجد نتائج|empty|0 نتيج/.test(text)) zeroResultCount++;
+    }
+    this.zeroResultSearches += zeroResultCount;
+
     for (const { tc, outcome } of readOutcomes) {
       const summary = outcome.ok ? summarizeResult(outcome.result) : (outcome.error ?? 'خطأ');
+      const forced =
+        this.zeroResultSearches >= 3 && outcome.ok
+          ? '\n\n⚠️ توقفت عدة عمليات بحث بلا نتائج في هذا الطلب — توقف عن البحث الآن: أخبر المستخدم بالأسماء غير الموجودة واسأله "أتريد إنشاءها؟" ثم نفّذ الإنشاء عند موافقته، أو أكمل الجزء الممكن من الطلب. تكرار البحث لن يغير النتيجة.'
+          : '';
 
       this.store().addMessage({
         role: 'assistant',
@@ -1812,7 +1913,7 @@ class ChatEngine {
       this.history.push({
         role: 'tool',
         content: outcome.ok
-          ? compactToolResultForLlm(outcome.result)
+          ? compactToolResultForLlm(outcome.result) + forced
           : `خطأ: ${outcome.error}${outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : ''}`,
         tool_call_id: tc.id,
       });
@@ -1992,13 +2093,8 @@ class ChatEngine {
 
     }
 
-    // Safety: max iterations reached
-    this.store().addMessage({
-      role: 'assistant',
-      kind: 'text',
-      content:
-        'توقّف قبل إكمال الطلب لأنه تجاوز الحد الأقصى لخطوات التنفيذ. ما نُفِّذ فعلاً يظهر فقط في بطاقات الأدوات أعلاه — لا شيء إضافي. جرّب تقسيم الطلب إلى خطوات أصغر.',
-    });
+    // Safety: max iterations reached — batch-aware honest notice.
+    this.emitMaxIterationsNotice();
   }
 
   /** Honest partial-output notice when the user stops between iterations. */
@@ -2008,6 +2104,20 @@ class ChatEngine {
       kind: 'text',
       content: '⏹️ أوقفت التنفيذ بطلبك. ما نُفِّذ فعلاً يظهر في بطاقات الأدوات أعلاه فقط.',
     });
+  }
+
+  /**
+   * Honest max-iterations notice — batch-aware. Session 2026-09-14 showed
+   * the scary generic message ("جرّب تقسيم الطلب") while a batch was STILL
+   * running in the background and would complete: the user was misled into
+   * thinking data was lost. When a batch is active the notice says so;
+   * otherwise it points at what landed and the resume path.
+   */
+  private emitMaxIterationsNotice(): void {
+    const content = isAnyBatchActive()
+      ? '⏳ توقفت خطوات الرد بعد الحد الأقصى، لكن الدفعة ما زالت تعمل خلفياً وستكتمل تلقائياً — تقدمها يظهر على بطاقة الدفعة، ولا شيء مفقود.'
+      : '⏳ توقفت خطوات الرد بعد الحد الأقصى لخطوات التنفيذ. ما نُفِّذ فعلاً يظهر في بطاقات الأدوات أعلاه — قل "تابع" لإكمال بقية الطلب (السجل يحفظ ما تم وما تبقى).';
+    this.store().addMessage({ role: 'assistant', kind: 'text', content });
   }
 }
 
@@ -2227,7 +2337,12 @@ export function summarizeResult(result: unknown): string {
         suggestion?: string;
       };
       if (matches.length === 0) {
-        const tip = suggestion ? `\n\n💡 ${String(suggestion)}` : '';
+        // نصيحة الإنشاء الافتراضية: صفر نتائج بلا اقتراح مخصص يجب أن يقترح
+        // الإنشاء أو السؤال — الجلسة 2026-09-14 بحثت عن "كنافة" 15 مرة
+        // دون أن يقترح المساعد إنشاءها (فقط الحسابات كان يحمل اقتراحاً).
+        const tip = suggestion
+          ? `\n\n💡 ${String(suggestion)}`
+          : '\n\n💡 إن كان الكيان جديداً استخدم أداة الإنشاء المناسبة (مثل sales.create_customer / purchases.create_supplier / inventory.create_product) أو اسأل المستخدم "أتريد إنشاءه؟" قبل المتابعة — ولا تكرر البحث.';
         // Fallback suggestions (e.g. search.accounts expense alternatives)
         // must be VISIBLE on the card — an alternatives list buried only in
         // the model context gets ignored, and the user never sees options.

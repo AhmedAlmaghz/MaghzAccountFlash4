@@ -8,6 +8,8 @@ import {
   nextRetryDelayMs,
   substituteRefs,
   summarizeBatchProgress,
+  summarizeBatchOutcomeForModel,
+  batchItemLabel,
   isTerminalBatchStatus,
   MAX_ITEM_ATTEMPTS,
   truncateScalarsForPersist,
@@ -302,5 +304,59 @@ describe('truncateScalarsForPersist (P3 — no more NULL-on-overflow)', () => {
     expect(JSON.stringify(out).length).toBeLessThanOrEqual(RESULT_DATA_JSON_BUDGET);
     expect(typeof out.invoiceId).toBe('string');
     expect((out.invoiceId as string).length).toBeGreaterThan(12);
+  });
+});
+
+describe('summarizeBatchOutcomeForModel — الإصلاح الاستباقي', () => {
+  it('returns null for a null detail', () => {
+    expect(summarizeBatchOutcomeForModel(null)).toBeNull();
+  });
+
+  it('names the failures with their errors and forces the remediation action', () => {
+    // الجلسة 2026-09-14: "اسألني عن تفاصيل الفاشلة" ملخص سلبي — الآن
+    // الفاشلة بأسمائها وأسبابها + إرشاد إلزامي للنموذج.
+    const out = summarizeBatchOutcomeForModel({
+      status: 'partial',
+      doneCount: 14,
+      failedCount: 1,
+      skippedCount: 0,
+      totalCount: 15,
+      items: [
+        {
+          seq: 4,
+          toolName: 'inventory.create_product',
+          args: { nameAr: 'كنافة' },
+          status: 'failed',
+          lastError: 'بيانات غير صالحة',
+          errorCode: 'INVALID',
+        },
+      ],
+    });
+    expect(out).not.toBeNull();
+    expect(out!.status).toBe('partial');
+    expect(out!.progress).toContain('أُنجز 14');
+    expect(out!.failed).toHaveLength(1);
+    expect(out!.failed[0].name).toBe('كنافة');
+    expect(out!.failed[0].error).toContain('بيانات غير صالحة');
+    expect(out!.action).toContain('أتريد إنشاءه/تصحيحه؟');
+  });
+
+  it('omits the action for a fully done batch (no failures to remediate)', () => {
+    const out = summarizeBatchOutcomeForModel({
+      status: 'done',
+      doneCount: 6,
+      failedCount: 0,
+      skippedCount: 0,
+      totalCount: 6,
+      items: [],
+    });
+    expect(out!.action).toBeUndefined();
+    expect(out!.failed).toHaveLength(0);
+  });
+
+  it('derives entity names from args when no label exists', () => {
+    expect(batchItemLabel({ toolName: 'purchases.create_supplier', args: { name: 'الشجاع للتجارة' } })).toBe('الشجاع للتجارة');
+    expect(batchItemLabel({ label: 'شارة', toolName: 'sales.create_invoice', args: {} })).toBe('شارة');
+    expect(batchItemLabel({ toolName: 'sales.create_invoice', args: {} })).toBe('sales.create_invoice');
   });
 });

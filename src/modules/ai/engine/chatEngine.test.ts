@@ -756,4 +756,150 @@ describe('ChatEngine', () => {
     expect(toolCall.function.arguments).toBe('{"foo":"bar"}');
     expect(toolCall.function.thought_signature).toBe('sig-xyz');
   });
+
+  // ── المرحلة 21: العقل التنفيذي المنظم ────────────────────────────────────
+
+  it('feeds the FINAL batch state (named failures + action) to the model after Batch-Await', async () => {
+    // الجلسة 2026-09-14: كنافة فشل إنشاؤها والمساعد لم يخبر المستخدم أبداً
+    // ولا اقترح إنشاءه — بحث عنه 15 مرة وفشل الـ BOM صامتاً. الآن الدفعة
+    // تعمل داخل التأكيد والنتيجة النهائية (بأسماء الفاشل + الإرشاد) تصل
+    // النموذج كنتيجة أداة فوراً.
+    const { runBatch } = await import('./batchRunner');
+    vi.mocked(runBatch).mockResolvedValueOnce({
+      id: 'b1',
+      kind: 'mixed',
+      title: 'إضافة المنتجات',
+      status: 'partial',
+      totalCount: 15,
+      doneCount: 14,
+      failedCount: 1,
+      skippedCount: 0,
+      createdAt: '',
+      updatedAt: '',
+      items: [
+        {
+          id: 'i5', seq: 4, toolName: 'inventory.create_product',
+          args: { nameAr: 'كنافة' }, afterSeq: null, label: null, ref: null,
+          resultData: null, status: 'failed', attempts: 4,
+          lastError: 'بيانات غير صالحة', errorCode: 'INVALID', resultRef: null,
+        },
+      ],
+    } as never);
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    mocks.executeToolCall.mockResolvedValueOnce({
+      ok: true,
+      result: { batchId: 'b1', total: 15, startBatchRun: 'b1' },
+    });
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'batch-1', name: 'ai.enqueue_batch', arguments: { items: [] } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'فشل كنافة — أتريد إنشاءه؟', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+
+    await getChatEngine().send('أضف 15 منتجاً');
+    await getChatEngine().resolveConfirmation('batch-1', true);
+
+    // نتيجة الأداة للنموذج تحمل الحالة النهائية بأسماء الفاشل + الإرشاد
+    const history = (getChatEngine() as unknown as { history: Array<{ role: string; tool_call_id?: string; content?: string }> }).history;
+    const toolResult = history.find((m) => m.role === 'tool' && m.tool_call_id === 'batch-1');
+    expect(toolResult).toBeDefined();
+    const parsed = JSON.parse(String(toolResult!.content));
+    expect(parsed.batchOutcome.status).toBe('partial');
+    expect(parsed.batchOutcome.failed).toHaveLength(1);
+    expect(parsed.batchOutcome.failed[0].name).toBe('كنافة');
+    expect(parsed.batchOutcome.action).toContain('أتريد إنشاءه/تصحيحه؟');
+  });
+
+  it('blocks the second identical read in one stretch and nudges instead (read-loop guard)', async () => {
+    // الجلسة 2026-09-14: 15 بحثاً متطابقاً عن "كنافة" حتى استنفدت الخطوات.
+    // الآن الاستدعاء الثاني المطابق (بلا كتابة بينهما) يحصل على نديج بدل تنفيذ.
+    mocks.resolveTool.mockReturnValue(tool('read'));
+    mocks.executeToolCall.mockResolvedValue({ ok: true, result: { matches: [], totalMatches: 0 } });
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [
+            { id: 'r1', name: 'test.read', arguments: { q: 'كنافة' } },
+            { id: 'r2', name: 'test.read', arguments: { q: 'كنافة' } },
+          ],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'غير موجود', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+
+    await getChatEngine().send('ابحث');
+
+    // استُدعيت الأداة مرة واحدة فقط — الثانية حصلت على نديج
+    expect(mocks.executeToolCall).toHaveBeenCalledOnce();
+    const history = (getChatEngine() as unknown as { history: Array<{ role: string; tool_call_id?: string; content?: string }> }).history;
+    const nudged = history.find((m) => m.role === 'tool' && m.tool_call_id === 'r2');
+    expect(nudged).toBeDefined();
+    expect(String(nudged!.content)).toContain('كررت نفس الاستدعاء');
+    expect(String(nudged!.content)).toContain('أتريد إنشاءه؟');
+  });
+
+  it('re-executes a repeated read after a successful write changed the data', async () => {
+    // القراءة بعد كتابة ناجحة مشروعة (رصيد جديد) — الحارس لا يحجبها.
+    mocks.resolveTool.mockImplementation(((name: string) =>
+      name === 'test.read' ? tool('read') : tool('write')) as typeof mocks.resolveTool);
+    mocks.executeToolCall.mockResolvedValue({ ok: true, result: { matches: [], totalMatches: 0 } });
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'r1', name: 'test.read', arguments: { q: 'الشجاع' } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'w1', name: 'test.write', arguments: { amount: 500 } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'r2', name: 'test.read', arguments: { q: 'الشجاع' } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'تم', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+
+    await getChatEngine().send('ابحث ثم سدد');
+    await getChatEngine().resolveConfirmation('w1', true);
+
+    // القراءتان نفّذتا — الثانية بعد الكتابة (عداد الكتابة صفّر الحارس)
+    const reads = mocks.executeToolCall.mock.calls.filter((c) => c[0] === 'test.read');
+    expect(reads).toHaveLength(2);
+    const history = (getChatEngine() as unknown as { history: Array<{ role: string; tool_call_id?: string; content?: string }> }).history;
+    const second = history.find((m) => m.role === 'tool' && m.tool_call_id === 'r2');
+    expect(second).toBeDefined();
+    expect(String(second!.content)).not.toContain('كررت نفس الاستدعاء');
+  });
 });

@@ -168,4 +168,51 @@ describe('TaskLedger', () => {
     ledger.clear();
     expect(ledger.render()).toBeNull();
   });
+
+  // ── المرحلة 21: جدول المهام ───────────────────────────────────────────────
+
+  it('renders a task table with named failures and skipped dependents', () => {
+    // الجلسة 2026-09-14: كنافة فشل والمساعد لم يخبر المستخدم أبداً —
+    // الجدول يبقي الفاشل والمُخطّى بأسمائهما في ذاكرة النموذج عبر الدورات.
+    const ledger = new TaskLedger();
+    ledger.recordRequest(MISSION);
+    ledger.recordFromBatchDetail({
+      title: 'إضافة المنتجات',
+      failedCount: 1,
+      skippedCount: 1,
+      totalCount: 4,
+      items: [
+        { toolName: 'inventory.create_product', args: { nameAr: 'شوكلاتة' }, status: 'done' },
+        { toolName: 'inventory.create_product', args: { nameAr: 'تمر' }, status: 'done' },
+        { toolName: 'inventory.create_product', args: { nameAr: 'كنافة' }, status: 'failed' },
+        { toolName: 'sales.create_invoice', args: { customerId: 'x' }, status: 'skipped' },
+      ],
+    });
+    const block = ledger.render() ?? '';
+    expect(block).toContain('جدول المهام');
+    expect(block).toContain('✓ منجز: 2');
+    expect(block).toContain('فاشل (1): كنافة');
+    expect(block).toContain('مُخطّى (1)');
+    expect(block).toContain('أراد إنشاءه/تصحيحه');
+  });
+
+  it('updates (not duplicates) a repeated task entry across batch reruns', () => {
+    const ledger = new TaskLedger();
+    const items = [{ toolName: 'inventory.create_product', args: { nameAr: 'كنافة' }, status: 'failed' }];
+    ledger.recordFromBatchDetail({ title: 'دفعة', items });
+    ledger.recordFromBatchDetail({ title: 'دفعة', items });
+    const block = ledger.render() ?? '';
+    expect(block.split('كنافة').length - 1).toBe(1);
+  });
+
+  it('omits the task table when only queued/running items exist (live card covers them)', () => {
+    const ledger = new TaskLedger();
+    ledger.recordRequest(MISSION);
+    ledger.recordFromBatchDetail({
+      title: 'دفعة',
+      items: [{ toolName: 'inventory.create_product', args: { nameAr: 'شوكلاتة' }, status: 'running' }],
+    });
+    const block = ledger.render() ?? '';
+    expect(block).not.toContain('جدول المهام');
+  });
 });

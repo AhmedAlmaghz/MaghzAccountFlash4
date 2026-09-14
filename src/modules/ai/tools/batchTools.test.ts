@@ -153,7 +153,7 @@ describe('ai.enqueue_batch execute', () => {
       items: [{
         name: 'فاتورة عميل',
         type: 'sales.create_invoice',
-        data: { customerId: 'cust-1', total: 50000 },
+        data: { customerId: '11111111-1111-4111-8111-111111111111', total: 50000 },
       }],
     }, ctx)) as Record<string, unknown>;
     expect(out.error).toBeUndefined();
@@ -162,7 +162,7 @@ describe('ai.enqueue_batch execute', () => {
     expect(sent.tool_name).toBe('sales.create_invoice');
     expect(sent.args).toEqual({
       name: 'فاتورة عميل',
-      customerId: 'cust-1',
+      customerId: '11111111-1111-4111-8111-111111111111',
       total: 50000,
     });
   });
@@ -373,11 +373,83 @@ describe('ai.enqueue_batch session duplicate guard', () => {
     mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 2, inserted: 2 } });
     const out = (await enqueue.execute({
       items: [
-        { tool: 'sales.create_invoice', args: { customerId: 'c-1', total: 100 } },
-        { tool: 'sales.create_invoice', args: { customerId: 'c-1', total: 200 } },
+        { tool: 'sales.create_invoice', args: { customerId: '11111111-1111-4111-8111-111111111111', total: 100 } },
+        { tool: 'sales.create_invoice', args: { customerId: '11111111-1111-4111-8111-111111111111', total: 200 } },
       ],
     }, ledgerCtx)) as Record<string, unknown>;
     expect(mockedApi.batchCreate.mock.calls[0][0].items).toHaveLength(2);
     expect(out.skippedDuplicates).toBeUndefined();
+  });
+});
+
+describe('ai.enqueue_batch pre-flight validation', () => {
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+    for (const name of ['purchases.create_supplier', 'sales.create_invoice']) {
+      registerTool({
+        name,
+        labelAr: 'أداة',
+        descriptionAr: 'وصف',
+        permission: 'core.view',
+        dangerLevel: 'write',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({}),
+      });
+    }
+  });
+
+  it('sanitizes a malformed tool name carrying JSON garbage (2026-09-14 session)', async () => {
+    // "inventory.create_product},{args:{costPrice:10000,..." — العنصر مات
+    // بأداة غير معروفة. الآن الاسم يُعقَّم والأخطاء القاتلة تكشف قبل الموافقة.
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [{
+        tool: 'purchases.create_supplier},{args:{costPrice:10000,nameAr:',
+        args: { name: 'مورد جديد' },
+      }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.error).toBeUndefined();
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items[0];
+    expect(sent.tool_name).toBe('purchases.create_supplier');
+  });
+
+  it('rejects a non-UUID customerId BEFORE approval (no missing-id batch)', async () => {
+    // فاتورتا المبيعات فشلتا MISSING_ID بعد موافقة المستخدم — الآن يموت
+    // الفحص المسبق قبل الموافقة وليس بعد التنفيذ.
+    const out = (await enqueue.execute({
+      items: [{ tool: 'sales.create_invoice', args: { customerId: 'مؤسسة غدرة التجارية', total: 50000 } }],
+    }, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+    expect(String(out.error)).toContain('ليس UUID صالحاً');
+    expect(String(out.error)).toContain('أدوات البحث');
+  });
+
+  it('skips {{ref}} placeholders (resolved at run time, not enqueue time)', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [{ tool: 'sales.create_invoice', args: { customerId: '{{sup1.id}}', total: 100 } }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.error).toBeUndefined();
+    expect(out.batchId).toBe('b1');
+  });
+
+  it('reports every invalid item with its index and problem', async () => {
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'sales.create_invoice', args: {} },
+        { tool: 'sales.create_invoice', args: { customerId: 'not-a-uuid' } },
+      ],
+    }, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+    const invalids = out.invalidItems as Array<{ index: number; problem: string }>;
+    expect(invalids).toHaveLength(2);
+    expect(invalids[0].index).toBe(0);
+    expect(invalids[1].index).toBe(1);
+    expect(String(out.error)).toContain('العنصر 1');
+    expect(String(out.error)).toContain('العنصر 2');
   });
 });
