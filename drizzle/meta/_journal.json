@@ -218,6 +218,13 @@
       "when": 1798300000000,
       "tag": "0030_pos_receipt_and_line_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": 7,
+      "when": 1798400000000,
+      "tag": "0031_discount_accounts",
+      "breakpoints": true
     }
   ]
 }

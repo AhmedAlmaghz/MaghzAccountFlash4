@@ -482,11 +482,22 @@ export const InvoicesPage: React.FC = () => {
     setConfirmOpen(true);
   };
 
-  const handlePost = (invoice: SalesInvoice) => {
+  const handlePost = async (invoice: SalesInvoice) => {
     if (invoice.status !== 'draft') return;
+    // COGS preview before posting (perpetual, IAS 2): frozen sale-time
+    // snapshots already on the lines — zero extra queries when loaded.
+    let previewLines = invoice.lines;
+    if ((!previewLines || previewLines.length === 0) && activeCompany?.id) {
+      const res = await salesApi.getInvoiceById(invoice.id, activeCompany.id);
+      if (res.success && res.data?.lines) previewLines = res.data.lines;
+    }
+    const expectedCogs = Math.round(((previewLines || []).reduce(
+      (s, l) => s + (Number(l.baseQuantity) || Number(l.quantity) || 0) * (Number(l.unitCost) || 0), 0
+    )) * 100) / 100;
+    const previewSuffix = expectedCogs > 0 ? `\n${t('sales.invoice.expectedCogs')}: ${formatCurrency(expectedCogs)}` : '';
     setConfirmConfig({
       title: t('sales.invoice.postTitle'),
-      message: `${t('sales.invoice.postConfirm')}`,
+      message: `${t('sales.invoice.postConfirm')}${previewSuffix}`,
       variant: 'warning',
       confirmText: t('sales.invoice.post'),
       onConfirm: async () => {
@@ -497,7 +508,10 @@ export const InvoicesPage: React.FC = () => {
         const postResult = await post(invoice.id);
         if (postResult.success) {
           await logAudit({ userId: currentUser?.id || 'system', action: 'post', tableName: 'sales_invoices', recordId: invoice.id, companyId: activeCompany.id });
-          addToast('success', t('sales.invoice.posted'));
+          const postedCogs = Math.round(((postResult as { cogsAmount?: number }).cogsAmount || 0) * 100) / 100;
+          addToast('success', postedCogs > 0 ? `${t('sales.invoice.postedWithCogs')}: ${formatCurrency(postedCogs)}` : t('sales.invoice.posted'));
+          const zeroCost = Number((postResult as { zeroCostLines?: number }).zeroCostLines) || 0;
+          if (zeroCost > 0) addToast('warning', `${t('sales.invoice.zeroCostHint')} (${zeroCost})`);
         } else {
           addToast('error', `${t('sales.invoice.postFailed')}: ${postResult.error || t('sales.invoice.unknownError')}`);
         }

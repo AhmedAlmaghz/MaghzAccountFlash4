@@ -7,7 +7,7 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { snapshotLineUnit } from '@/core/utils/unitConversion';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { getNextDocumentNumber } from '@/core/api';
-import { resolvePostingAccounts, buildPurchaseInvoicePostingStatements, buildPurchaseReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, getDefaultAccountId, buildPurchaseInvoicePostingStatements, buildPurchaseReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
 import type {
   Supplier,
   PurchaseInvoice,
@@ -779,7 +779,7 @@ export const purchasesApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const check = await adapter.query(
-        'SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, payment_type, cash_box_id FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+        'SELECT supplier_id, total_amount, paid_amount, subtotal, discount_amount, vat_amount, invoice_number, date, payment_type, cash_box_id FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
@@ -797,9 +797,30 @@ export const purchasesApi = {
 
       // ── Unified atomic contract: JE statements + status flip + supplier
       // balance all commit together in ONE transaction — no orphan JE ever.
+      // Explicit discount (gross method): gross recovered from the lines,
+      // mirroring sales postInvoice.
+      const subtotal = Number(inv.subtotal) || 0;
+      const discountAmount = Math.round((Number(inv.discount_amount) || 0) * 100) / 100;
+      const lineDiscRes = await adapter.query(
+        `SELECT COALESCE(SUM(quantity * unit_price * COALESCE(discount_percent, 0) / 100), 0) AS line_disc
+           FROM purchase_invoice_lines WHERE invoice_id = $1::uuid`,
+        [id]
+      );
+      if (!lineDiscRes.success) return { success: false, error: lineDiscRes.error };
+      const lineDiscRow = (lineDiscRes.rows?.[0] || {}) as Record<string, unknown>;
+      const lineDiscount = Math.round((Number(lineDiscRow.line_disc) || 0) * 100) / 100;
+      const grossSubtotal = Math.round((subtotal + lineDiscount) * 100) / 100;
+
       const accounts = await resolvePostingAccounts(companyId, ['default_inventory', 'default_creditors', 'default_vat_input']);
       if (!accounts.success) {
         return { success: false, error: accounts.error };
+      }
+      let discountId: string | undefined;
+      if (discountAmount > 0) {
+        discountId = await getDefaultAccountId(companyId, 'default_discount_received') || undefined;
+        if (!discountId) {
+          return { success: false, error: 'حساب الخصم المكتسب غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
+        }
       }
       // CASH purchase: the treasury account (selected cash box, or default
       // cash) replaces Creditors on the credit side — we owe the supplier nothing.
@@ -807,12 +828,14 @@ export const purchasesApi = {
       const postingStmts = buildPurchaseInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
         date: String(inv.date || new Date().toISOString().split('T')[0]),
-        subtotal: Number(inv.subtotal) || 0,
+        subtotal,
         vatAmount: Number(inv.vat_amount) || 0,
         totalAmount,
         paymentType,
         cashAccountSubstitute: cashSubstitute,
-      }, { inventory: accounts.ids.default_inventory, creditors: accounts.ids.default_creditors, vat: accounts.ids.default_vat_input });
+        discountAmount,
+        grossSubtotal,
+      }, { inventory: accounts.ids.default_inventory, creditors: accounts.ids.default_creditors, vat: accounts.ids.default_vat_input, discount: discountId });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),

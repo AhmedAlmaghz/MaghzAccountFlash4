@@ -1020,9 +1020,14 @@ export const manufacturingApi = {
       }
 
       // Expected output = number of batches × BOM output quantity per batch.
+      // An absent/zero/non-positive produced quantity falls back to the plan
+      // (UI pre-fills it; the AI agent omits it) — a silent 0 would freeze
+      // produced_quantity at zero with no stock receipt.
       const bomOutputQty = Math.max(Number(wo.bom_output_quantity) || 1, 0);
       const expectedOutput = Math.round((Number(wo.quantity) || 0) * bomOutputQty * 10000) / 10000;
-      const producedQty = Math.max(0, Number(opts.producedQuantity ?? expectedOutput) || 0);
+      const producedQty = Number(opts.producedQuantity) > 0
+        ? Math.round(Number(opts.producedQuantity) * 10000) / 10000
+        : expectedOutput;
       const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
       const fallbackWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
       const outputWh = opts.outputWarehouseId || (wo.output_warehouse_id ? String(wo.output_warehouse_id) : fallbackWh);

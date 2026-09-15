@@ -9,6 +9,7 @@ import {
   postInventoryTransaction,
   postStockAdjustment,
   buildSalesInvoicePostingStatements,
+  buildPurchaseInvoicePostingStatements,
   buildPosSalePostingStatements,
   buildSalesReturnPostingStatements,
   buildPurchaseReturnPostingStatements,
@@ -31,6 +32,8 @@ function createMockAdapter(overrides?: Record<string, unknown>) {
     { id: 'acc-vat', company_id: 'comp-1', code: '21301', name: 'VAT' },
     { id: 'acc-sales', company_id: 'comp-1', code: '41101', name: 'Sales' },
     { id: 'acc-sales-ret', company_id: 'comp-1', code: '41103', name: 'Sales Returns' },
+    { id: 'acc-disc-allowed', company_id: 'comp-1', code: '41201', name: 'Sales Discounts Allowed' },
+    { id: 'acc-disc-earned', company_id: 'comp-1', code: '42101', name: 'Purchase Discounts Earned' },
     { id: 'acc-cogs', company_id: 'comp-1', code: '51101', name: 'COGS' },
     { id: 'acc-salaries', company_id: 'comp-1', code: '52101', name: 'Salaries' },
     { id: 'acc-rent-wh', company_id: 'comp-1', code: '52201', name: 'Rent WH' },
@@ -601,6 +604,147 @@ describe('journalEntryGenerator', () => {
       expect(res.success).toBe(true);
       if (!res.success) return;
       expect(res.statements[0].params!.length).toBe(6 + 2 * 4);
+    });
+  });
+
+  describe('explicit discount legs (gross method)', () => {
+    const salesIds = { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat', cogs: 'acc-cogs', inventory: 'acc-inventory', discount: 'acc-disc-allowed' };
+
+    function legSums(params: unknown[]) {
+      const legs = [];
+      for (let i = 6; i < params.length; i += 4) {
+        legs.push({ account: params[i], debit: Number(params[i + 1]), credit: Number(params[i + 2]) });
+      }
+      const dr = legs.reduce((s, l) => s + l.debit, 0);
+      const cr = legs.reduce((s, l) => s + l.credit, 0);
+      return { legs, dr, cr };
+    }
+
+    it('sales invoice books Dr Debtors + Dr Discount = Cr Gross Sales + Cr VAT', () => {
+      // subtotal 1000 (net of lines) + header discount 100, VAT 15% on 900.
+      const [stmt] = buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-D1', date: '2026-01-01',
+        subtotal: 1000, vatAmount: 135, totalAmount: 1035,
+        discountAmount: 100, grossSubtotal: 1000,
+      }, salesIds);
+      const { legs, dr, cr } = legSums(stmt.params!);
+      expect(legs).toHaveLength(4);
+      expect(dr).toBeCloseTo(cr, 2);
+      expect(legs[0]).toMatchObject({ account: 'acc-debtors', debit: 1035, credit: 0 });
+      expect(legs[1]).toMatchObject({ account: 'acc-disc-allowed', debit: 100, credit: 0 });
+      expect(legs[2]).toMatchObject({ account: 'acc-sales', debit: 0, credit: 1000 });
+      expect(legs[3]).toMatchObject({ account: 'acc-vat', debit: 0, credit: 135 });
+    });
+
+    it('sales invoice keeps the classic 3-leg shape when discount is zero', () => {
+      const [stmt] = buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-D2', date: '2026-01-01',
+        subtotal: 1000, vatAmount: 150, totalAmount: 1150,
+      }, salesIds);
+      expect(stmt.params!.length).toBe(6 + 3 * 4);
+    });
+
+    it('sales invoice throws when discount is positive but the account is missing', () => {
+      expect(() => buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-D3', date: '2026-01-01',
+        subtotal: 1000, vatAmount: 135, totalAmount: 1035,
+        discountAmount: 100, grossSubtotal: 1000,
+      }, { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat' })).toThrow();
+    });
+
+    it('sales invoice throws when discount exceeds gross', () => {
+      expect(() => buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-D4', date: '2026-01-01',
+        subtotal: 100, vatAmount: 0, totalAmount: 0,
+        discountAmount: 150, grossSubtotal: 100,
+      }, salesIds)).toThrow();
+    });
+
+    it('purchase invoice books Dr Gross + Dr VAT = Cr Creditors + Cr Discount Earned', () => {
+      const [stmt] = buildPurchaseInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'PINV-D1', date: '2026-01-01',
+        subtotal: 1000, vatAmount: 135, totalAmount: 1035,
+        discountAmount: 100, grossSubtotal: 1000,
+      }, { inventory: 'acc-inventory', creditors: 'acc-creditors', vat: 'acc-vat', discount: 'acc-disc-earned' });
+      const { legs, dr, cr } = legSums(stmt.params!);
+      expect(legs).toHaveLength(4);
+      expect(dr).toBeCloseTo(cr, 2);
+      expect(legs[0]).toMatchObject({ account: 'acc-inventory', debit: 1000, credit: 0 });
+      expect(legs[2]).toMatchObject({ account: 'acc-creditors', debit: 0, credit: 1035 });
+      expect(legs[3]).toMatchObject({ account: 'acc-disc-earned', debit: 0, credit: 100 });
+    });
+
+    it('purchase invoice keeps the classic 3-leg shape when discount is zero', () => {
+      const [stmt] = buildPurchaseInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'PINV-D2', date: '2026-01-01',
+        subtotal: 1000, vatAmount: 150, totalAmount: 1150,
+      }, { inventory: 'acc-inventory', creditors: 'acc-creditors', vat: 'acc-vat' });
+      expect(stmt.params!.length).toBe(6 + 3 * 4);
+    });
+
+    it('POS builder splits cash/credit debits and adds the discount leg', () => {
+      const [stmt] = buildPosSalePostingStatements('comp-1', {
+        invoiceNumber: 'POS-D1', receiptNumber: 'POS-D1', date: '2026-01-01',
+        subtotal: 900, vatAmount: 135, totalAmount: 1035,
+        cashAmount: 600, creditAmount: 435, cashAccountId: 'acc-cash',
+        discountAmount: 100, grossSubtotal: 1000,
+      }, salesIds);
+      const { legs, dr, cr } = legSums(stmt.params!);
+      expect(dr).toBeCloseTo(cr, 2);
+      expect(legs.map((l) => l.account)).toEqual(
+        expect.arrayContaining(['acc-cash', 'acc-debtors', 'acc-disc-allowed', 'acc-sales', 'acc-vat'])
+      );
+    });
+
+    it('sales return reverses gross: Dr Returns = Cr Debtors + Cr Discount', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildSalesReturnPostingStatements('comp-1', {
+        returnNumber: 'SR-D1', date: '2026-01-01', customer: 'عميل',
+        amount: 900, discountAmount: 100, grossAmount: 1000,
+      });
+      expect(res.success).toBe(true);
+      if (!res.success) return;
+      const { legs, dr, cr } = legSums(res.statements[0].params!);
+      expect(legs).toHaveLength(3);
+      expect(dr).toBeCloseTo(cr, 2);
+      expect(legs[0]).toMatchObject({ account: 'acc-sales-ret', debit: 1000, credit: 0 });
+      expect(legs[1]).toMatchObject({ account: 'acc-disc-allowed', debit: 0, credit: 100 });
+      expect(legs[2]).toMatchObject({ account: 'acc-debtors', debit: 0, credit: 900 });
+    });
+
+    it('purchase return reverses gross: Dr Creditors + Dr Discount = Cr Inventory', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildPurchaseReturnPostingStatements('comp-1', {
+        returnNumber: 'PR-D1', date: '2026-01-01', supplier: 'مورد',
+        amount: 900, discountAmount: 100, grossAmount: 1000,
+      });
+      expect(res.success).toBe(true);
+      if (!res.success) return;
+      const { legs, dr, cr } = legSums(res.statements[0].params!);
+      expect(legs).toHaveLength(3);
+      expect(dr).toBeCloseTo(cr, 2);
+      expect(legs[1]).toMatchObject({ account: 'acc-disc-earned', debit: 100, credit: 0 });
+    });
+
+    it('returns builders fail closed when the discount account is missing', async () => {
+      const adapter = createMockAdapter({
+        query: vi.fn(async (sql: string) => {
+          if (String(sql).toLowerCase().includes('from default_accounts')) return { success: true, rows: [] };
+          if (String(sql).toLowerCase().includes('from accounts')) return { success: true, rows: [] };
+          return { success: true, rows: [] };
+        }),
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildSalesReturnPostingStatements('comp-1', {
+        returnNumber: 'SR-D2', date: '2026-01-01', customer: 'عميل',
+        amount: 900, discountAmount: 100, grossAmount: 1000,
+      });
+      expect(res.success).toBe(false);
     });
   });
 });

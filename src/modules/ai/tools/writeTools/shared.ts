@@ -130,6 +130,31 @@ export async function getInvoiceTaxConfig(companyId: string): Promise<InvoiceTax
   };
 }
 
+/**
+ * Header (below-subtotal) discount — mirrors the invoice forms exactly
+ * (InvoicesPage / PurchaseInvoicesPage arithmetic): percent mode wins when
+ * both are passed, the amount is capped at the subtotal, and a company that
+ * switched discounts off books zero with a skip flag (mirror of vatSkipped).
+ */
+export interface HeaderDiscount {
+  headerDisc: number;
+  discountSkipped: boolean;
+}
+
+export function computeHeaderDiscount(
+  subtotal: number,
+  args: Record<string, unknown>,
+  showDiscount: boolean,
+): HeaderDiscount {
+  const askedPct = num(args.discountPercent);
+  const askedAmt = num(args.discountAmount);
+  if (!showDiscount) return { headerDisc: 0, discountSkipped: askedPct > 0 || askedAmt > 0 };
+  let d = 0;
+  if (askedPct > 0) d = Math.min((subtotal * askedPct) / 100, subtotal);
+  else if (askedAmt > 0) d = Math.min(askedAmt, subtotal);
+  return { headerDisc: round2(d), discountSkipped: false };
+}
+
 export interface RawLine {
   productId: string;
   quantity: number;

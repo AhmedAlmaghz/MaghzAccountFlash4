@@ -337,6 +337,7 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_rent: '52201', default_misc_expense: '52301',
       default_salaries_payable: '21501', default_payroll_deductions: '21502',
       default_eos_payable: '21503', default_eos_expense: '52501',
+      default_discount_allowed: '41201', default_discount_received: '42101',
     },
     manufacturing: {
       default_cash: '11101', default_sales: '41101', default_cogs: '51101',
@@ -351,6 +352,7 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_rent: '52201', default_misc_expense: '52301',
       default_salaries_payable: '21501', default_payroll_deductions: '21502',
       default_eos_payable: '21503', default_eos_expense: '52501',
+      default_discount_allowed: '41201', default_discount_received: '42101',
     },
     services: {
       default_cash: '11101', default_sales: '41102', default_cogs: '51101',
@@ -361,6 +363,7 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_rent: '52201', default_misc_expense: '52301',
       default_salaries_payable: '21501', default_payroll_deductions: '21502',
       default_eos_payable: '21503', default_eos_expense: '52501',
+      default_discount_allowed: '41201', default_discount_received: '42101',
     },
   };
   const adapter = await getDbAdapter();

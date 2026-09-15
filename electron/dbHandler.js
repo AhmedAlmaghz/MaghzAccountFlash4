@@ -3077,7 +3077,9 @@ export function registerDatabaseHandlers() {
           lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::varchar, $${off + 8}::numeric, $${off + 9}::numeric, $${off + 10}::uuid, $${off + 11}::numeric, $${off + 12}::numeric)`);
           params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total, v.unit_id, v.unit_factor, v.base_quantity FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) ON true)`;
+        // Sale-time cost snapshot (perpetual COGS, IAS 2): resolved live from
+        // products inside the same statement — mirrors sales/api.ts fallback.
+        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total, v.unit_id, v.unit_factor, v.base_quantity, COALESCE(p.cost_price, 0) FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $1::uuid)`;
       }
       sql += ' SELECT id FROM inv';
       return { sql, params };
@@ -3157,7 +3159,9 @@ export function registerDatabaseHandlers() {
           lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`);
           lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        await execQuery(client, `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues.join(', ')}`, lineParams);
+        // Sale-time cost snapshot re-frozen on draft edits (mirrors fallback).
+        lineParams.push(cid);
+        await execQuery(client, `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues.join(', ')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid`, lineParams);
       }
       await client.query('COMMIT');
       return { success: true };
@@ -4530,6 +4534,18 @@ export async function seedInitialData(adminPassword, company) {
       VALUES ($1, '51101', 'طھظƒظ„ظپط© ط¨ط¶ط§ط¹ط© ظ…ط¨ط§ط¹ط©', 'Cost of Goods Sold', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
 
+    // Discount accounts (explicit discount legs, gross method — see 0031):
+    // 41201 contra-revenue (debit nature), 42101 other income (credit nature).
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '41201', 'ط®طµظ… ظ…ط³ظ…ظˆط­ ط¨ظ‡', 'Sales Discounts Allowed', $2, 'revenue', 'debit', FALSE, 0);
+    `, [companyId, revenueId]);
+
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '42101', 'ط®طµظ… ظ…ظƒطھط³ط¨', 'Purchase Discounts Earned', $2, 'revenue', 'credit', FALSE, 0);
+    `, [companyId, revenueId]);
+
     // 4. Seed basic settings
     await client.query(`
       INSERT INTO vat_settings (company_id, vat_rate, vat_number, is_inclusive, is_active)
@@ -4613,8 +4629,8 @@ export async function seedInitialData(adminPassword, company) {
 
     // 5a-extra. Additional default accounts
     const additionalDefaultAccounts = [
-      { key: 'default_discount_allowed', code: '41101', required: false },
-      { key: 'default_discount_received', code: '21101', required: false },
+      { key: 'default_discount_allowed', code: '41201', required: false },
+      { key: 'default_discount_received', code: '42101', required: false },
       { key: 'default_purchase_returns', code: '21101', required: true },
     ];
     for (const mapping of additionalDefaultAccounts) {

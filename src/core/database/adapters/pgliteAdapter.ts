@@ -164,6 +164,7 @@ import posModule from '@root/drizzle/0027_pos_module.sql?raw';
 import aiJobItemLeases from '@root/drizzle/0028_ai_job_item_leases.sql?raw';
 import usersRolesHardening from '@root/drizzle/0029_users_roles_hardening.sql?raw';
 import posReceiptAndLineCost from '@root/drizzle/0030_pos_receipt_and_line_cost.sql?raw';
+import discountAccounts from '@root/drizzle/0031_discount_accounts.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -197,6 +198,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0028_ai_job_item_leases', sql: aiJobItemLeases },
   { name: '0029_users_roles_hardening', sql: usersRolesHardening },
   { name: '0030_pos_receipt_and_line_cost', sql: posReceiptAndLineCost },
+  { name: '0031_discount_accounts', sql: discountAccounts },
 ];
 
 /**
@@ -366,6 +368,11 @@ const ACCOUNTS: Array<{
     { code: '41101', name_ar: 'مبيعات المنتجات', name_en: 'Product Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
     { code: '41102', name_ar: 'مبيعات الخدمات', name_en: 'Services Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
     { code: '41103', name_ar: 'مردودات المبيعات', name_en: 'Sales Returns', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
+    { code: '412', name_ar: 'خصومات المبيعات', name_en: 'Sales Discounts', type: 'revenue', nature: 'debit', is_group: true, parent_code: '41' },
+    { code: '41201', name_ar: 'خصم مسموح به', name_en: 'Sales Discounts Allowed', type: 'revenue', nature: 'debit', is_group: false, parent_code: '412' },
+    { code: '42', name_ar: 'إيرادات أخرى', name_en: 'Other Income', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
+    { code: '421', name_ar: 'خصومات مكتسبة', name_en: 'Discounts Earned', type: 'revenue', nature: 'credit', is_group: true, parent_code: '42' },
+    { code: '42101', name_ar: 'خصم مكتسب', name_en: 'Purchase Discounts Earned', type: 'revenue', nature: 'credit', is_group: false, parent_code: '421' },
     // Expenses
     { code: '5', name_ar: 'المصروفات', name_en: 'Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: null },
     { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
@@ -448,8 +455,8 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_eos_payable', account_code: '21503', required: false, description: 'حساب مستحقات نهاية الخدمة' },
   { key: 'default_eos_expense', account_code: '52501', required: false, description: 'حساب مصروف نهاية الخدمة' },
   { key: 'default_sales_returns', account_code: '41103', required: false, description: 'مردودات المبيعات' },
-  { key: 'default_discount_allowed', account_code: '41101', required: false, description: 'الخصم الممنوح' },
-  { key: 'default_discount_received', account_code: '21101', required: false, description: 'الخصم المكتسب' },
+  { key: 'default_discount_allowed', account_code: '41201', required: false, description: 'الخصم الممنوح (contra-revenue)' },
+  { key: 'default_discount_received', account_code: '42101', required: false, description: 'الخصم المكتسب (other income)' },
   { key: 'default_purchase_returns', account_code: '21101', required: true, description: 'مردودات المشتريات' },
 ];
 

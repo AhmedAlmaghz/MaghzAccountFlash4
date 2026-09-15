@@ -6,7 +6,7 @@ import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/cor
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { getNextDocumentNumber } from '@/core/api';
 import { runTransaction, type TxStatement } from '@/core/database/tx';
-import { resolvePostingAccounts, buildPosSalePostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, getDefaultAccountId, buildPosSalePostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
 import { snapshotLineUnit } from '@/core/utils/unitConversion';
 import type { PosShift, PosProduct, PosCheckoutInput, PosCheckoutResult, PosShiftSummary, PosPaymentMethod } from './types';
 
@@ -609,6 +609,22 @@ export const posApi = {
       if (Math.abs(recomputedSubtotal - input.subtotal) > 0.02) {
         return { success: false, error: `Subtotal mismatch: expected ${recomputedSubtotal.toFixed(2)} got ${input.subtotal}` };
       }
+      // Explicit discount (gross method): POS carts carry line discounts
+      // only, so gross = net subtotal + discount. Verified server-side like
+      // the subtotal above — never trusted from the client alone.
+      const recomputedDiscount = input.lines.reduce((a, l) => a + l.unitPrice * l.quantity * ((l.discountPercent ?? 0) / 100), 0);
+      const discountAmount = Math.round((input.discountAmount ?? 0) * 100) / 100;
+      if (Math.abs(recomputedDiscount - discountAmount) > 0.02 * Math.max(1, input.lines.length)) {
+        return { success: false, error: `Discount mismatch: expected ${recomputedDiscount.toFixed(2)} got ${discountAmount.toFixed(2)}` };
+      }
+      const grossSubtotal = Math.round((input.subtotal + discountAmount) * 100) / 100;
+      let discountId: string | undefined;
+      if (discountAmount > 0) {
+        discountId = await getDefaultAccountId(input.companyId, 'default_discount_allowed') || undefined;
+        if (!discountId) {
+          return { success: false, error: 'حساب الخصم المسموح به غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
+        }
+      }
       if (Math.abs((input.cashAmount + input.creditAmount) - input.totalAmount) > 0.02) {
         return { success: false, error: `Payment mismatch: cash ${input.cashAmount} + credit ${input.creditAmount} != total ${input.totalAmount}` };
       }
@@ -667,7 +683,7 @@ export const posApi = {
         params: payParams,
       });
 
-      // Statement C — journal entry (mixed cash/credit + perpetual COGS).
+      // Statement C — journal entry (mixed cash/credit + explicit discount + perpetual COGS).
       txQueries.push(...buildPosSalePostingStatements(
         input.companyId,
         {
@@ -681,8 +697,10 @@ export const posApi = {
           creditAmount: input.creditAmount,
           cashAccountId,
           cogsAmount,
+          discountAmount,
+          grossSubtotal,
         },
-        { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory }
+        { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory, discount: discountId }
       ));
 
       // Statements D/E/F — stock (identical SQL to salesApi.postInvoice).
