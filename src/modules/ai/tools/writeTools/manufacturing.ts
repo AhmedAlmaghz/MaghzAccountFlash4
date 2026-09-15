@@ -287,14 +287,23 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       if (!status || !['planned', 'in_progress', 'completed', 'cancelled'].includes(status)) return { error: 'حالة غير صحيحة' };
 
       const outputWarehouseId = str(args.outputWarehouseId);
+      // Absent producedQuantity must stay undefined so the API falls back to
+      // the planned quantity (quantity × BOM output) — num(undefined) is 0
+      // and 0 would freeze produced_quantity at zero with no stock receipt.
+      const producedQty = status === 'completed' && args.producedQuantity !== undefined && args.producedQuantity !== null && String(args.producedQuantity).trim() !== ''
+        ? num(args.producedQuantity)
+        : undefined;
+      if (producedQty !== undefined && !(producedQty > 0)) {
+        return { error: 'الكمية المنتجة يجب أن تكون أكبر من صفر — اتركها فارغة لاستخدام الكمية المخططة تلقائياً' };
+      }
       const res = await manufacturingApi.updateWorkOrderStatus(
         workOrderId, ctx.companyId, status, ctx.userId,
-        status === 'completed' ? num(args.producedQuantity) : undefined,
+        status === 'completed' ? producedQty : undefined,
         status === 'completed' ? outputWarehouseId : undefined,
         status === 'cancelled' ? { returnMaterials: args.returnMaterials !== false } : undefined
       );
       if (!res.success) return { error: res.error || 'فشل تحديث الحالة' };
-      return { updated: true, workOrderId, status };
+      return { updated: true, workOrderId, status, ...(producedQty !== undefined ? { producedQuantity: producedQty } : { producedFromPlan: true }) };
     },
   },
 

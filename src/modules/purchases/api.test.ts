@@ -267,12 +267,61 @@ describe('purchasesApi supplier computed_balance excludes cash purchases', () =>
   });
 
   it('getApAgingTotal excludes cash invoices', async () => {
-    const adapter = makeMockAdapter(async () => ({ success: true, rows: [{ outstanding: 0 }, { '?column?': 0 }, { '?column?': 0 }, { '?column?': 0 }] }));
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await purchasesApi.getApAgingTotal(COMPANY_ID);
     expect(res.success).toBe(true);
     const [sql] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/COALESCE\(payment_type, 'credit'\) <> 'cash'/);
+  });
+});
+
+describe('purchasesApi.postInvoice explicit discount leg', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('posts Dr Gross + Dr VAT = Cr Creditors + Cr Discount Earned', async () => {
+    const txQueries: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = {
+      query: vi.fn(async (sql: string, p: unknown[]) => {
+        if (sql.includes('FROM purchase_invoices')) {
+          return { success: true, rows: [{ supplier_id: SUPPLIER_ID, total_amount: 1035, paid_amount: 0, subtotal: 1000, discount_amount: 150, vat_amount: 135, payment_type: 'credit', cash_box_id: null }] };
+        }
+        if (sql.includes('FROM purchase_invoice_lines')) {
+          return { success: true, rows: [{ line_disc: 50 }] };
+        }
+        if (sql.includes('default_accounts')) {
+          return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+        }
+        if (sql.includes('FROM accounts')) {
+          return { success: true, rows: [{ id: 'acc-code' }] };
+        }
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+        txQueries.push(...queries);
+        return { success: true, results: [] };
+      }),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postInvoice('00000000-0000-0000-0000-000000000040', COMPANY_ID);
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    const jeInsert = txQueries.find(q => q.sql.includes('INSERT INTO journal_entries'));
+    expect(jeInsert).toBeDefined();
+    const flat = (jeInsert!.params || []).slice(6);
+    const legs: Array<{ account: unknown; debit: number; credit: number }> = [];
+    for (let i = 0; i < flat.length; i += 4) {
+      legs.push({ account: flat[i], debit: Number(flat[i + 1]), credit: Number(flat[i + 2]) });
+    }
+    expect(legs).toHaveLength(4);
+    expect(legs[0]).toMatchObject({ account: 'acc-default_inventory', debit: 1050, credit: 0 });
+    expect(legs[2]).toMatchObject({ account: 'acc-default_creditors', debit: 0, credit: 1035 });
+    expect(legs[3]).toMatchObject({ account: 'acc-default_discount_received', debit: 0, credit: 150 });
+    const dr = legs.reduce((s, l) => s + l.debit, 0);
+    const cr = legs.reduce((s, l) => s + l.credit, 0);
+    expect(dr).toBeCloseTo(cr, 2);
   });
 });

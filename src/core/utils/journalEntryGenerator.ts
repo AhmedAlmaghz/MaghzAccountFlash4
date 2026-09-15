@@ -49,6 +49,8 @@ const ACC = {
   SALES: '41101',          // مبيعات المنتجات
   SALES_SERVICES: '41102', // مبيعات الخدمات
   SALES_RETURNS: '41103',  // مردودات المبيعات
+  DISCOUNT_ALLOWED: '41201', // خصم مسموح به (contra-revenue)
+  DISCOUNT_EARNED: '42101',  // خصم مكتسب (other income)
   COGS: '51101',           // تكلفة بضاعة مباعة
   SALARIES: '52101',       // رواتب وأجور
   RENT_WAREHOUSE: '52201', // إيجار مستودعات
@@ -114,8 +116,8 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_salaries: ACC.SALARIES,
     default_sales_returns: ACC.SALES_RETURNS,
     default_purchase_returns: ACC.TRADE_CREDITORS,
-    default_discount_allowed: ACC.SALES,
-    default_discount_received: ACC.TRADE_CREDITORS,
+    default_discount_allowed: ACC.DISCOUNT_ALLOWED,
+    default_discount_received: ACC.DISCOUNT_EARNED,
     default_wip: '11302',
     default_finished_goods: '11303',
     default_production_labor: '53101',
@@ -183,9 +185,32 @@ export async function getCashBoxAccountId(companyId: string, cashBoxId?: string 
   return res.rows?.[0]?.account_id || null;
 }
 
+/** Round money to 2 decimals — single rounding rule for every posting builder. */
+function toMoney(n: unknown): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/**
+ * Guard an explicit discount leg (gross method): the discount can never
+ * exceed the gross it reduces, and a positive discount needs its dedicated
+ * account — silently dropping the leg would unbalance the entry.
+ */
+function assertDiscountLeg(discount: number, gross: number, accountId: string | undefined, kind: 'allowed' | 'earned'): void {
+  if (discount < 0 || discount > gross + 0.005) {
+    throw new Error('الخصم يتجاوز إجمالي المبلغ — راجع مبالغ الخصم في الفاتورة');
+  }
+  if (discount > 0 && !accountId) {
+    throw new Error(
+      kind === 'allowed'
+        ? 'حساب الخصم المسموح به غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية'
+        : 'حساب الخصم المكتسب غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية'
+    );
+  }
+}
+
 export async function resolvePostingAccounts(
   companyId: string,
-  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash'>
+  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash' | 'default_discount_allowed' | 'default_discount_received'>
 ): Promise<{ success: true; ids: Record<string, string> } | { success: false; error: string }> {
   const ids: Record<string, string> = {};
   for (const key of keys) {
@@ -200,23 +225,34 @@ export async function resolvePostingAccounts(
 
 export function buildSalesInvoicePostingStatements(
   companyId: string,
-  invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null; cogsAmount?: number },
-  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string }
+  invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null; cogsAmount?: number; discountAmount?: number; grossSubtotal?: number },
+  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string; discount?: string }
 ): TxStatement[] {
   // CASH invoice: money entered the treasury at sale time — debit the cash
   // box's own GL account instead of Debtors (the customer owes nothing).
   // CREDIT invoice (default): Dr Debtors / Cr Sales + VAT.
+  // Explicit discount (gross method, IFRS/Odoo): Dr Debtors (net total) +
+  // Dr Sales Discounts Allowed (41201) = Cr Sales (GROSS, before any
+  // discount) + Cr VAT. Zero discount keeps the classic 3-leg shape.
   // Perpetual COGS (IAS 2): Dr COGS / Cr Inventory at the sale-time cost
   // snapshot (computed by the caller from frozen line unit_costs). Skipped
   // when zero (services / zero-cost lines) or when the accounts are absent.
   const isCash = invoice.paymentType === 'cash';
   const debitAccount = (isCash && invoice.cashAccountSubstitute) || ids.debtors;
+  const discount = toMoney(invoice.discountAmount);
+  const gross = toMoney(invoice.grossSubtotal ?? (invoice.subtotal + discount));
+  assertDiscountLeg(discount, gross, ids.discount, 'allowed');
   const entries: JournalEntryLine[] = [
     { accountId: debitAccount, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
-    { accountId: ids.sales, debit: 0, credit: invoice.subtotal, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
-    { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
   ];
-  const cogs = Math.round((invoice.cogsAmount || 0) * 100) / 100;
+  if (discount > 0 && ids.discount) {
+    entries.push({ accountId: ids.discount, debit: discount, credit: 0, memo: `خصم مسموح به ${invoice.invoiceNumber}` });
+  }
+  entries.push(
+    { accountId: ids.sales, debit: 0, credit: gross, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
+    { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
+  );
+  const cogs = toMoney(invoice.cogsAmount);
   if (cogs > 0 && ids.cogs && ids.inventory) {
     entries.push(
       { accountId: ids.cogs, debit: cogs, credit: 0, memo: `تكلفة بضاعة مباعة ${invoice.invoiceNumber}` },
@@ -251,8 +287,8 @@ export function buildSalesInvoicePostingStatements(
  */
 export function buildPosSalePostingStatements(
   companyId: string,
-  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null; cogsAmount?: number },
-  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string }
+  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null; cogsAmount?: number; discountAmount?: number; grossSubtotal?: number },
+  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string; discount?: string }
 ): TxStatement[] {
   const { receiptNumber, cashAmount, creditAmount, cashAccountId, subtotal, vatAmount, totalAmount, date } = sale;
   const debitLines: JournalEntryLine[] = [];
@@ -271,8 +307,16 @@ export function buildPosSalePostingStatements(
   if (debitLines.length === 0) {
     debitLines.push({ accountId: ids.debtors, debit: 0, credit: 0, memo: `نقطة بيع ${receiptNumber}` });
   }
+  // Explicit discount (gross method) — POS carts carry line discounts only,
+  // so gross = net subtotal + discount. Zero discount keeps the classic shape.
+  const discount = toMoney(sale.discountAmount);
+  const gross = toMoney(sale.grossSubtotal ?? (subtotal + discount));
+  assertDiscountLeg(discount, gross, ids.discount, 'allowed');
+  if (discount > 0 && ids.discount) {
+    debitLines.push({ accountId: ids.discount, debit: discount, credit: 0, memo: `خصم مسموح به ${receiptNumber}` });
+  }
   const creditLines: JournalEntryLine[] = [
-    { accountId: ids.sales, debit: 0, credit: subtotal, memo: `إيرادات نقطة بيع ${receiptNumber}` },
+    { accountId: ids.sales, debit: 0, credit: gross, memo: `إيرادات نقطة بيع ${receiptNumber}` },
     { accountId: ids.vat, debit: 0, credit: vatAmount, memo: `ضريبة نقطة بيع ${receiptNumber}` },
   ];
   // Perpetual COGS (IAS 2) — same snapshot semantics as sales invoices.
@@ -296,24 +340,34 @@ export function buildPosSalePostingStatements(
 
 export function buildPurchaseInvoicePostingStatements(
   companyId: string,
-  invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number; paymentType?: string; cashAccountSubstitute?: string | null },
-  ids: { inventory: string; creditors: string; vat: string }
+  invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number; paymentType?: string; cashAccountSubstitute?: string | null; discountAmount?: number; grossSubtotal?: number },
+  ids: { inventory: string; creditors: string; vat: string; discount?: string }
 ): TxStatement[] {
   // CASH purchase: money left the treasury immediately — credit the cash box
   // account instead of Creditors (we owe the supplier nothing).
+  // Explicit discount (gross method, mirror of sales): Dr Inventory (GROSS)
+  // + Dr VAT = Cr Creditors (net total) + Cr Purchase Discounts Earned
+  // (42101, other income). Zero discount keeps the classic 3-leg shape.
   const isCash = invoice.paymentType === 'cash';
   const creditAccount = (isCash && invoice.cashAccountSubstitute) || ids.creditors;
+  const discount = toMoney(invoice.discountAmount);
+  const gross = toMoney(invoice.grossSubtotal ?? (invoice.subtotal + discount));
+  assertDiscountLeg(discount, gross, ids.discount, 'earned');
+  const entries: JournalEntryLine[] = [
+    { accountId: ids.inventory, debit: gross, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}` },
+    { accountId: ids.vat, debit: invoice.vatAmount, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
+    { accountId: creditAccount, debit: 0, credit: invoice.totalAmount, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` },
+  ];
+  if (discount > 0 && ids.discount) {
+    entries.push({ accountId: ids.discount, debit: 0, credit: discount, memo: `خصم مكتسب ${invoice.invoiceNumber}` });
+  }
   return [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
       description: `قيد تلقائي - فاتورة مشتريات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
       totalAmount: invoice.totalAmount,
-      entries: [
-        { accountId: ids.inventory, debit: invoice.subtotal, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}` },
-        { accountId: ids.vat, debit: invoice.vatAmount, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
-        { accountId: creditAccount, debit: 0, credit: invoice.totalAmount, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` },
-      ],
+      entries,
     }),
   ];
 }
@@ -321,20 +375,41 @@ export function buildPurchaseInvoicePostingStatements(
 /** JE + stock-movement statements for a sales return (goods back to stock). */
 export async function buildSalesReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number; discountAmount?: number; grossAmount?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs']);
   if (!resolved.success) return resolved;
   const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId } = resolved.ids;
+
+  // Explicit discount reversal (gross method, mirror of the sales invoice):
+  // Dr Sales Returns (GROSS) = Cr Debtors (net) + Cr Sales Discounts
+  // Allowed (41201). Zero discount keeps the classic 2-leg shape.
+  const discount = toMoney(ret.discountAmount);
+  const gross = toMoney(ret.grossAmount ?? (ret.amount + discount));
+  if (discount < 0 || discount > gross + 0.005) {
+    return { success: false, error: 'الخصم يتجاوز إجمالي المبلغ — راجع مبالغ الخصم في المردود' };
+  }
+  let discountId: string | undefined;
+  if (discount > 0) {
+    discountId = (await getDefaultAccountId(companyId, 'default_discount_allowed')) || undefined;
+    if (!discountId) {
+      return { success: false, error: 'حساب الخصم المسموح به غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
+    }
+  }
 
   // COGS reversal at the ACTUAL sale-time cost snapshot (computed by the
   // caller from the original invoice lines). No ratio guessing: the cost
   // that left inventory when the goods were sold is exactly what returns.
   const reversal = Math.round((ret.cogsReversal || 0) * 100) / 100;
   const entries: JournalEntryLine[] = [
-    { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
-    { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
+    { accountId: salesReturnsId, debit: gross, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
   ];
+  if (discount > 0 && discountId) {
+    entries.push({ accountId: discountId, debit: 0, credit: discount, memo: `عكس خصم مسموح به ${ret.returnNumber}` });
+  }
+  entries.push(
+    { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
+  );
   if (reversal > 0) {
     entries.push(
       { accountId: inventoryId, debit: reversal, credit: 0, memo: `إعادة بضاعة للمخزون` },
@@ -503,22 +578,44 @@ export async function buildPaymentVoucherStatements(
 /** JE + stock-movement statements for a purchase return (goods out of stock). */
 export async function buildPurchaseReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number }
+  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number; discountAmount?: number; grossAmount?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_creditors', 'default_inventory']);
   if (!resolved.success) return resolved;
   const { default_creditors: creditorsId, default_inventory: inventoryId } = resolved.ids;
 
+  // Explicit discount reversal (gross method, mirror of the purchase
+  // invoice): Dr Creditors (net) + Dr Purchase Discounts Earned (42101)
+  // = Cr Inventory (GROSS). Zero discount keeps the classic 2-leg shape.
+  const discount = toMoney(ret.discountAmount);
+  const gross = toMoney(ret.grossAmount ?? (ret.amount + discount));
+  if (discount < 0 || discount > gross + 0.005) {
+    return { success: false, error: 'الخصم يتجاوز إجمالي المبلغ — راجع مبالغ الخصم في المردود' };
+  }
+  let discountId: string | undefined;
+  if (discount > 0) {
+    discountId = (await getDefaultAccountId(companyId, 'default_discount_received')) || undefined;
+    if (!discountId) {
+      return { success: false, error: 'حساب الخصم المكتسب غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
+    }
+  }
+
+  const entries: JournalEntryLine[] = [
+    { accountId: creditorsId, debit: ret.amount, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
+  ];
+  if (discount > 0 && discountId) {
+    entries.push({ accountId: discountId, debit: discount, credit: 0, memo: `عكس خصم مكتسب ${ret.returnNumber}` });
+  }
+  entries.push(
+    { accountId: inventoryId, debit: 0, credit: gross, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` },
+  );
   const statements: TxStatement[] = [
     buildJournalEntryStatement(companyId, {
       reference: ret.returnNumber,
       description: `قيد تلقائي - مردود مشتريات ${ret.returnNumber}`,
       date: ret.date,
       totalAmount: ret.amount,
-      entries: [
-        { accountId: creditorsId, debit: ret.amount, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
-        { accountId: inventoryId, debit: 0, credit: ret.amount, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` },
-      ],
+      entries,
     }),
   ];
 

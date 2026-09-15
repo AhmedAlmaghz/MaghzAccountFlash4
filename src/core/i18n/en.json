@@ -1165,6 +1165,9 @@
       "updated": "Invoice updated successfully",
       "deleted": "Invoice deleted",
       "posted": "Invoice posted successfully",
+      "expectedCogs": "Expected cost",
+      "postedWithCogs": "Posted — cost of goods",
+      "zeroCostHint": "Lines without a stock cost — review the product card if needed",
       "attachments": "Attachments",
       "addAttachment": "Add Attachment",
       "attachmentTooLarge": "Attachment size exceeds 2 MB"

@@ -691,6 +691,73 @@ describe('salesApi.postInvoice customer balance tracking', () => {
     expect(balUpdate).toBeDefined();
     expect(Number(balUpdate!.params![0])).toBe(1150);
   });
+
+  it('posts an explicit discount leg: Dr Debtors + Dr Discount = Cr Gross + Cr VAT', async () => {
+    // subtotal 1000 (net of lines) + line discount 50 + header 100 = 150;
+    // VAT 15% on net 900 = 135; total 1035; gross 1050.
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1035, paid_amount: 0, subtotal: 1000, discount_amount: 150, vat_amount: 135, payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines')) {
+        return { success: true, rows: [{ line_disc: 50, cogs: 0, zero_lines: 0 }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-disc', 'comp-1');
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    expect(res.cogsAmount).toBe(0);
+    expect(res.zeroCostLines).toBe(0);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    const jeInsert = txStmts.find(q => q.sql.includes('INSERT INTO journal_entries'));
+    expect(jeInsert).toBeDefined();
+    const flat = (jeInsert!.params || []).slice(6);
+    const legs: Array<{ account: unknown; debit: number; credit: number }> = [];
+    for (let i = 0; i < flat.length; i += 4) {
+      legs.push({ account: flat[i], debit: Number(flat[i + 1]), credit: Number(flat[i + 2]) });
+    }
+    // 4 legs: debtors + discount + sales + VAT (no COGS — cogs is 0).
+    expect(legs).toHaveLength(4);
+    expect(legs[0]).toMatchObject({ account: 'acc-default_debtors', debit: 1035, credit: 0 });
+    expect(legs[1]).toMatchObject({ account: 'acc-default_discount_allowed', debit: 150, credit: 0 });
+    expect(legs[2]).toMatchObject({ account: 'acc-default_sales', debit: 0, credit: 1050 });
+    expect(legs[3]).toMatchObject({ account: 'acc-default_vat_output', debit: 0, credit: 135 });
+    const dr = legs.reduce((s, l) => s + l.debit, 0);
+    const cr = legs.reduce((s, l) => s + l.credit, 0);
+    expect(dr).toBeCloseTo(cr, 2);
+  });
+
+  it('fails closed when a discount exists but the discount account is missing', async () => {
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1035, paid_amount: 0, subtotal: 1000, discount_amount: 150, vat_amount: 135, payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines')) {
+        return { success: true, rows: [{ line_disc: 50, cogs: 0, zero_lines: 0 }] };
+      }
+      if (sql.includes('default_accounts')) {
+        if (String(p[1]) === 'default_discount_allowed') return { success: true, rows: [] };
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-disc-noacct', 'comp-1');
+    expect(res.success).toBe(false);
+    expect(String(res.error)).toContain('الخصم المسموح به');
+  });
 });
 
 describe('salesApi.postReturn customer balance tracking', () => {

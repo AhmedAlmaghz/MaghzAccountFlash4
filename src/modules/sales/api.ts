@@ -7,7 +7,7 @@ import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/cor
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { snapshotLineUnit } from '@/core/utils/unitConversion';
 import { getNextDocumentNumber } from '@/core/api';
-import { resolvePostingAccounts, buildSalesInvoicePostingStatements, buildSalesReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, getDefaultAccountId, buildSalesInvoicePostingStatements, buildSalesReturnPostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
 import type { Customer, SalesInvoice, SalesInvoiceLine, Quotation, QuotationLine, SalesReturn, SalesReturnLine, CustomerStatementRow, CustomerArAging, InvoiceAttachment } from './types';
 
 // Typed RPC bridge for Sales (Phase 4 slice 10). In Electron the renderer
@@ -749,7 +749,10 @@ export const salesApi = {
           const lineBaseTotal = line.baseCurrencyLineTotal ?? (line.lineTotal * lineExchangeRate);
           params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.vatPercent, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total,v.unit_id,v.unit_factor,v.base_quantity FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) ON true)`;
+        // Sale-time cost snapshot (perpetual COGS, IAS 2): resolved live from
+        // products inside the same statement — server-side truth, zero new
+        // params, no placeholder renumbering. Zeros still backfill at post.
+        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity,unit_cost) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total,v.unit_id,v.unit_factor,v.base_quantity,COALESCE(p.cost_price,0) FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $2::uuid)`;
       }
       sql += ' SELECT id FROM inv';
       const result = await adapter.query(sql, params);
@@ -828,8 +831,12 @@ export const salesApi = {
           const usnap = snapshotLineUnit(line);
           return [id, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.vatPercent, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity];
         });
+        // Sale-time cost snapshot (same semantics as createInvoice): resolved
+        // live from products — draft edits re-freeze the cost.
+        lineParams.push(companyId);
+        const costCidIdx = lineParams.length;
         await adapter.query(
-          `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues}`,
+          `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${costCidIdx}::uuid`,
           lineParams
         );
       }
@@ -878,7 +885,7 @@ export const salesApi = {
     }
   },
 
-  async postInvoice(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  async postInvoice(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string; cogsAmount?: number; zeroCostLines?: number }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -888,7 +895,7 @@ export const salesApi = {
       // fetch draft → build JE statements → ONE transaction that commits the
       // journal entry, the status flip and the customer balance together.
       const check = await adapter.query(
-        'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, payment_type, cash_box_id FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+        'SELECT customer_id, total_amount, paid_amount, subtotal, discount_amount, vat_amount, invoice_number, date, payment_type, cash_box_id FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
@@ -921,17 +928,46 @@ export const salesApi = {
               AND p.id = sil.product_id AND p.company_id = $2::uuid
             RETURNING sil.id
          )
-         SELECT COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * sil.unit_cost), 0) AS cogs
+         SELECT COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * sil.unit_cost), 0) AS cogs,
+                COUNT(*) FILTER (WHERE sil.unit_cost = 0) AS zero_lines
            FROM sales_invoice_lines sil WHERE sil.invoice_id = $1::uuid`,
         [id, companyId]
       );
       if (!cogsRes.success) return { success: false, error: cogsRes.error };
       const cogsRow = (cogsRes.rows?.[0] || {}) as Record<string, unknown>;
       const cogsAmount = Math.round((Number(cogsRow.cogs) || 0) * 100) / 100;
+      // Informational only (never blocking): lines with no cost are usually
+      // services — but a stocked product with cost_price = 0 deserves review.
+      const zeroCostLines = Number(cogsRow.zero_lines) || 0;
+
+      // Explicit discount (gross method): discount_amount stores line +
+      // header discounts while subtotal is net of lines only. The gross
+      // sales figure is recovered from the lines — the invoice-level
+      // discount alone cannot be derived from the header.
+      const subtotal = Number(inv.subtotal) || 0;
+      const discountAmount = Math.round((Number(inv.discount_amount) || 0) * 100) / 100;
+      const lineDiscRes = await adapter.query(
+        `SELECT COALESCE(SUM(quantity * unit_price * COALESCE(discount_percent, 0) / 100), 0) AS line_disc
+           FROM sales_invoice_lines WHERE invoice_id = $1::uuid`,
+        [id]
+      );
+      if (!lineDiscRes.success) return { success: false, error: lineDiscRes.error };
+      const lineDiscRow = (lineDiscRes.rows?.[0] || {}) as Record<string, unknown>;
+      const lineDiscount = Math.round((Number(lineDiscRow.line_disc) || 0) * 100) / 100;
+      const grossSubtotal = Math.round((subtotal + lineDiscount) * 100) / 100;
 
       const accounts = await resolvePostingAccounts(companyId, ['default_debtors', 'default_sales', 'default_vat_output', 'default_cogs', 'default_inventory']);
       if (!accounts.success) {
         return { success: false, error: accounts.error };
+      }
+      // The discount account is required only when a discount exists —
+      // zero-discount invoices keep posting on charts without 0031.
+      let discountId: string | undefined;
+      if (discountAmount > 0) {
+        discountId = await getDefaultAccountId(companyId, 'default_discount_allowed') || undefined;
+        if (!discountId) {
+          return { success: false, error: 'حساب الخصم المسموح به غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
+        }
       }
       // CASH invoice: the treasury account (selected cash box, or default
       // cash) replaces Debtors on the debit side — the customer owes nothing.
@@ -939,13 +975,15 @@ export const salesApi = {
       const postingStmts = buildSalesInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
         date: String(inv.date || new Date().toISOString().split('T')[0]),
-        subtotal: Number(inv.subtotal) || 0,
+        subtotal,
         vatAmount: Number(inv.vat_amount) || 0,
         totalAmount,
         paymentType,
         cashAccountSubstitute: cashSubstitute,
         cogsAmount,
-      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory });
+        discountAmount,
+        grossSubtotal,
+      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory, discount: discountId });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
@@ -1023,7 +1061,7 @@ export const salesApi = {
       if (!txResult.success) {
         return { success: false, error: txResult.error };
       }
-      return { success: true };
+      return { success: true, cogsAmount, zeroCostLines };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -1562,6 +1600,9 @@ export const salesApi = {
       const revRow = (revRes.rows?.[0] || {}) as Record<string, unknown>;
       const cogsReversal = Math.round((Number(revRow.reversal) || 0) * 100) / 100;
 
+      // NOTE: sales_returns stores net totals only (no discount_amount
+      // column) — the return JE posts the balanced net pair. Explicit
+      // discount legs are supported by the builder for future wiring.
       const posting = await buildSalesReturnPostingStatements(companyId, {
         id: id,
         returnNumber: String(ret.return_number || ''),

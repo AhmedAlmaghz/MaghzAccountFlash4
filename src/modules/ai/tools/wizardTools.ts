@@ -7,7 +7,7 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { crmApi } from '@/modules/crm/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
-import { getInvoiceTaxConfig, parseLines, resolveLineUnits, LINES_SCHEMA } from './writeTools/shared';
+import { getInvoiceTaxConfig, computeHeaderDiscount, parseLines, resolveLineUnits, LINES_SCHEMA } from './writeTools/shared';
 
 // ─── Helpers (mirror writeTools.ts) ───────────────────────────────────────
 
@@ -78,12 +78,16 @@ export const wizardTools: ToolDefinition[] = [
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
+        discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
+        discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
       },
       required: ['customerId', 'lines'],
     },
     summarizeArgs: (a) => {
       const base = summarizeDocLines('إنشاء وترحيل فاتورة مبيعات', a.lines);
-      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+      const d = (a as Record<string, unknown>).discountPercent ?? (a as Record<string, unknown>).discountAmount;
+      const discBit = Number(d) > 0 ? ` — خصم فاتورة: ${Number(d)}${(a as Record<string, unknown>).discountPercent ? '%' : ''}` : '';
+      return a.paymentType === 'cash' ? `${base}${discBit} — نقدي` : `${base}${discBit}`;
     },
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
@@ -115,8 +119,17 @@ export const wizardTools: ToolDefinition[] = [
         return { ...l, discountPercent, vatPercent, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
-      const totalAmount = round2(subtotal + vatAmount);
+      const lineDiscountTotal = tax.showDiscount
+        ? round2(resolved.reduce((s, l) => s + l.quantity * l.unitPrice * (l.discountPercent / 100), 0))
+        : 0;
+      if (num(args.discountPercent) < 0 || num(args.discountAmount) < 0) {
+        return { error: 'خصم الفاتورة لا يمكن أن يكون سالباً' };
+      }
+      const { headerDisc, discountSkipped } = computeHeaderDiscount(subtotal, args as Record<string, unknown>, tax.showDiscount);
+      const netSubtotal = round2(subtotal - headerDisc);
+      const discountTotal = round2(lineDiscountTotal + headerDisc);
+      const vatAmount = tax.showVat ? round2((netSubtotal * tax.vatRate) / 100) : 0;
+      const totalAmount = round2(netSubtotal + vatAmount);
 
       // Step 1: Create draft invoice
       const createRes = await salesApi.createInvoice({
@@ -126,7 +139,7 @@ export const wizardTools: ToolDefinition[] = [
         date: today(),
         dueDate: str(args.dueDate),
         subtotal,
-        discountAmount: 0,
+        discountAmount: discountTotal,
         vatAmount,
         totalAmount,
         paidAmount: 0,
@@ -162,11 +175,19 @@ export const wizardTools: ToolDefinition[] = [
         status: 'posted',
         paymentType,
         subtotal,
+        discountAmount: discountTotal,
+        ...(headerDisc > 0 ? { headerDiscount: headerDisc } : {}),
         vatAmount,
         totalAmount,
+        ...((postRes as { cogsAmount?: number }).cogsAmount
+          ? { cogsAmount: (postRes as { cogsAmount?: number }).cogsAmount }
+          : {}),
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
+        ...(discountSkipped
+          ? { discountSkipped: true, discountNote: 'الخصم معطل في إعدادات الشركة (invoice.showDiscount) — سُجلت الفاتورة بدون خصم' }
+          : {}),
         ...(resolved.some((l) => l.priceMismatchNote)
           ? { priceMismatchNotes: resolved.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote) }
           : {}),
@@ -193,12 +214,16 @@ export const wizardTools: ToolDefinition[] = [
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
+        discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
+        discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
       },
       required: ['supplierId', 'lines'],
     },
     summarizeArgs: (a) => {
       const base = summarizeDocLines('إنشاء وترحيل فاتورة مشتريات', a.lines);
-      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+      const d = (a as Record<string, unknown>).discountPercent ?? (a as Record<string, unknown>).discountAmount;
+      const discBit = Number(d) > 0 ? ` — خصم فاتورة: ${Number(d)}${(a as Record<string, unknown>).discountPercent ? '%' : ''}` : '';
+      return a.paymentType === 'cash' ? `${base}${discBit} — نقدي` : `${base}${discBit}`;
     },
     execute: async (args, ctx) => {
       const supplierId = str(args.supplierId);
@@ -227,8 +252,17 @@ export const wizardTools: ToolDefinition[] = [
         return { ...l, discountPercent, vatPercent, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
-      const totalAmount = round2(subtotal + vatAmount);
+      const lineDiscountTotal = tax.showDiscount
+        ? round2(resolved.reduce((s, l) => s + l.quantity * l.unitPrice * (l.discountPercent / 100), 0))
+        : 0;
+      if (num(args.discountPercent) < 0 || num(args.discountAmount) < 0) {
+        return { error: 'خصم الفاتورة لا يمكن أن يكون سالباً' };
+      }
+      const { headerDisc, discountSkipped } = computeHeaderDiscount(subtotal, args as Record<string, unknown>, tax.showDiscount);
+      const netSubtotal = round2(subtotal - headerDisc);
+      const discountTotal = round2(lineDiscountTotal + headerDisc);
+      const vatAmount = tax.showVat ? round2((netSubtotal * tax.vatRate) / 100) : 0;
+      const totalAmount = round2(netSubtotal + vatAmount);
 
       // Step 1: Create draft invoice
       const createRes = await purchasesApi.createInvoice({
@@ -238,7 +272,7 @@ export const wizardTools: ToolDefinition[] = [
         date: today(),
         dueDate: str(args.dueDate),
         subtotal,
-        discountAmount: 0,
+        discountAmount: discountTotal,
         vatAmount,
         totalAmount,
         paidAmount: 0,
@@ -272,11 +306,16 @@ export const wizardTools: ToolDefinition[] = [
         status: 'posted',
         paymentType,
         subtotal,
+        discountAmount: discountTotal,
+        ...(headerDisc > 0 ? { headerDiscount: headerDisc } : {}),
         vatAmount,
         totalAmount,
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
+        ...(discountSkipped
+          ? { discountSkipped: true, discountNote: 'الخصم معطل في إعدادات الشركة (invoice.showDiscount) — سُجلت الفاتورة بدون خصم' }
+          : {}),
         ...(resolved.some((l) => l.priceMismatchNote)
           ? { priceMismatchNotes: resolved.filter((l) => l.priceMismatchNote).map((l) => l.priceMismatchNote) }
           : {}),

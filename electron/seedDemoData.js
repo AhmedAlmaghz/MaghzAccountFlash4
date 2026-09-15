@@ -70,6 +70,11 @@ const ACCOUNTS = [
   { code: '41101', name_ar: 'مبيعات المنتجات', name_en: 'Product Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
   { code: '41102', name_ar: 'مبيعات الخدمات', name_en: 'Services Sales', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
   { code: '41103', name_ar: 'مردودات المبيعات', name_en: 'Sales Returns', type: 'revenue', nature: 'credit', is_group: false, parent_code: '411' },
+  { code: '412', name_ar: 'خصومات المبيعات', name_en: 'Sales Discounts', type: 'revenue', nature: 'debit', is_group: true, parent_code: '41' },
+  { code: '41201', name_ar: 'خصم مسموح به', name_en: 'Sales Discounts Allowed', type: 'revenue', nature: 'debit', is_group: false, parent_code: '412' },
+  { code: '42', name_ar: 'إيرادات أخرى', name_en: 'Other Income', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
+  { code: '421', name_ar: 'خصومات مكتسبة', name_en: 'Discounts Earned', type: 'revenue', nature: 'credit', is_group: true, parent_code: '42' },
+  { code: '42101', name_ar: 'خصم مكتسب', name_en: 'Purchase Discounts Earned', type: 'revenue', nature: 'credit', is_group: false, parent_code: '421' },
   // Expenses
   { code: '5', name_ar: 'المصروفات', name_en: 'Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: null },
   { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
@@ -144,8 +149,8 @@ const DEFAULT_ACCOUNTS = [
   { key: 'default_eos_payable', code: '21503', required: false, desc: 'حساب مستحقات نهاية الخدمة' },
   { key: 'default_eos_expense', code: '52501', required: false, desc: 'حساب مصروف نهاية الخدمة' },
   { key: 'default_sales_returns', code: '41103', required: false, desc: 'حساب مردودات المبيعات' },
-  { key: 'default_discount_allowed', code: '41101', required: false, desc: 'خصم مسموح به' },
-  { key: 'default_discount_received', code: '21101', required: false, desc: 'خصم مكتسب' },
+  { key: 'default_discount_allowed', code: '41201', required: false, desc: 'خصم مسموح به (contra-revenue)' },
+  { key: 'default_discount_received', code: '42101', required: false, desc: 'خصم مكتسب (other income)' },
   { key: 'default_purchase_returns', code: '21101', required: true, desc: 'مردودات المشتريات' },
 ];
 

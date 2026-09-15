@@ -7,6 +7,7 @@ import {
   round2,
   summarizeDocLines,
   getInvoiceTaxConfig,
+  computeHeaderDiscount,
   parseLines,
   resolveLineUnits,
   LINES_SCHEMA,
@@ -90,12 +91,16 @@ export const salesWriteTools: ToolDefinition[] = [
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash لتحديد الخزنة المقبوض فيها' },
         notes: { type: 'string' },
         lines: LINES_SCHEMA,
+        discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
+        discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
       },
       required: ['customerId', 'lines'],
     },
     summarizeArgs: (a) => {
       const base = summarizeDocLines('إنشاء فاتورة مبيعات (مسودة)', a.lines);
-      return a.paymentType === 'cash' ? `${base} — نقدي` : base;
+      const d = (a as Record<string, unknown>).discountPercent ?? (a as Record<string, unknown>).discountAmount;
+      const discBit = Number(d) > 0 ? ` — خصم فاتورة: ${Number(d)}${(a as Record<string, unknown>).discountPercent ? '%' : ''}` : '';
+      return a.paymentType === 'cash' ? `${base}${discBit} — نقدي` : `${base}${discBit}`;
     },
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
@@ -119,11 +124,21 @@ export const salesWriteTools: ToolDefinition[] = [
       const lines = resolved.map((l) => {
         const discountPercent = tax.showDiscount ? l.discountPercent : 0;
         const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
-        return { ...l, discountPercent, vatPercent: tax.vatRate, lineTotal };
+        return { ...l, discountPercent, vatPercent: tax.showVat ? tax.vatRate : 0, lineTotal };
       });
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
-      const totalAmount = round2(subtotal + vatAmount);
+      const lineDiscountTotal = tax.showDiscount
+        ? round2(resolved.reduce((s, l) => s + l.quantity * l.unitPrice * (l.discountPercent / 100), 0))
+        : 0;
+      // Header discount under the subtotal — same arithmetic as the forms.
+      if (num(args.discountPercent) < 0 || num(args.discountAmount) < 0) {
+        return { error: 'خصم الفاتورة لا يمكن أن يكون سالباً' };
+      }
+      const { headerDisc, discountSkipped } = computeHeaderDiscount(subtotal, args as Record<string, unknown>, tax.showDiscount);
+      const netSubtotal = round2(subtotal - headerDisc);
+      const discountTotal = round2(lineDiscountTotal + headerDisc);
+      const vatAmount = tax.showVat ? round2((netSubtotal * tax.vatRate) / 100) : 0;
+      const totalAmount = round2(netSubtotal + vatAmount);
 
       const res = await salesApi.createInvoice({
         companyId: ctx.companyId,
@@ -132,7 +147,7 @@ export const salesWriteTools: ToolDefinition[] = [
         date: str(args.date) || today(),
         dueDate: str(args.dueDate),
         subtotal,
-        discountAmount: 0,
+        discountAmount: discountTotal,
         vatAmount,
         totalAmount,
         paidAmount: 0,
@@ -153,12 +168,17 @@ export const salesWriteTools: ToolDefinition[] = [
         status: 'draft',
         paymentType,
         subtotal,
+        discountAmount: discountTotal,
+        ...(headerDisc > 0 ? { headerDiscount: headerDisc } : {}),
         vatAmount,
         totalAmount,
         ...(tax.showVat
           ? {}
           : { vatSkipped: true, vatNote: 'الضريبة معطلة في إعدادات الشركة (invoice.showVat) — سُجلت الفاتورة بدون ضريبة' }),
         ...(tax.vatUnset && tax.showVat ? { vatUnset: true, vatUnsetNote: 'تعذر قراءة نسبة الضريبة من الإعدادات — سُجلت بدون ضريبة؛ أكّد النسبة مع المستخدم إن لزم' } : {}),
+        ...(discountSkipped
+          ? { discountSkipped: true, discountNote: 'الخصم معطل في إعدادات الشركة (invoice.showDiscount) — سُجلت الفاتورة بدون خصم' }
+          : {}),
         ...(mismatchNotes.length > 0 ? { priceMismatchNotes: mismatchNotes } : {}),
         note: paymentType === 'cash'
           ? 'فاتورة نقدية (مسودة) — استخدم sales.post_invoice لترحيلها؛ سيُقيَّد المبلغ على الخزنة لا على العميل'

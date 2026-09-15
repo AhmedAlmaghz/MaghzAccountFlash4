@@ -1109,5 +1109,56 @@ describe('Migration 0030: POS receipt sequence + sales line cost snapshot', () =
     expect(api).toMatch(/pos_receipt: 'sales_invoices'/);
     expect(api).toMatch(/pos_receipt: 'invoice_number'/);
   });
+
+  it('discount accounts exist in all seed paths (41201/42101 parity)', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/'41201'/);
+    expect(pglite).toMatch(/'42101'/);
+    expect(pglite).toMatch(/default_discount_allowed', account_code: '41201'/);
+    expect(pglite).toMatch(/default_discount_received', account_code: '42101'/);
+    const demoSeed = readFileSync(join(process.cwd(), 'electron/seedDemoData.js'), 'utf-8');
+    expect(demoSeed).toMatch(/code: '41201'/);
+    expect(demoSeed).toMatch(/code: '42101'/);
+    expect(demoSeed).toMatch(/default_discount_allowed', code: '41201'/);
+    expect(demoSeed).toMatch(/default_discount_received', code: '42101'/);
+    const initialSeed = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(initialSeed).toMatch(/'41201'/);
+    expect(initialSeed).toMatch(/'42101'/);
+    expect(initialSeed).toMatch(/default_discount_allowed', code: '41201'/);
+    expect(initialSeed).toMatch(/default_discount_received', code: '42101'/);
+  });
+});
+
+describe('Migration 0031: Dedicated discount accounts', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0031_discount_accounts.sql'), 'utf-8');
+
+  it('creates 412/41201 (contra-revenue) and 42/421/42101 (other income) idempotently', () => {
+    expect(migrationSql).toMatch(/'41201', 'خصم مسموح به'/);
+    expect(migrationSql).toMatch(/'42101', 'خصم مكتسب'/);
+    expect(migrationSql).toMatch(/'412',\s+'خصومات المبيعات'/);
+    expect(migrationSql).toMatch(/'42',\s+'إيرادات أخرى'/);
+    const whereNotExists = migrationSql.match(/WHERE NOT EXISTS \(/g) || [];
+    expect(whereNotExists.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('seeds the two default_accounts rows and rewires legacy aliases', () => {
+    expect(migrationSql).toMatch(/'default_discount_allowed',\s+'41201'/);
+    expect(migrationSql).toMatch(/'default_discount_received', '42101'/);
+    expect(migrationSql).toMatch(/SET account_id = a\.id/);
+    expect(migrationSql).toMatch(/a\.code = '41201'/);
+    expect(migrationSql).toMatch(/a\.code = '42101'/);
+  });
+
+  it('journal registers 0031 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0031_discount_accounts')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0031 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0031_discount_accounts\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0031_discount_accounts', sql: discountAccounts \}/);
+  });
 });
 
