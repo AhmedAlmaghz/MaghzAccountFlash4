@@ -110,6 +110,12 @@ export const diagnosticTools: ToolDefinition[] = [
         [kind === 'sales' ? 'default_debtors' : 'default_creditors', kind === 'sales' ? 'حساب المدينين التجاريين' : 'حساب الدائنين التجاريين'],
         [kind === 'sales' ? 'default_sales' : 'default_inventory', kind === 'sales' ? 'حساب المبيعات' : 'حساب المخزون'],
       ];
+      if (kind === 'sales') {
+        // Perpetual COGS legs (Dr COGS / Cr Inventory) post with the revenue
+        // entry — both accounts must resolve or posting fails closed.
+        need.push(['default_cogs', 'حساب تكلفة البضاعة المباعة']);
+        need.push(['default_inventory', 'حساب المخزون']);
+      }
       if (kind === 'sales' && num(inv.vat_amount) > 0) {
         need.push(['default_vat_output', 'حساب ضريبة المخرجات']);
       }

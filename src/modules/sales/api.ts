@@ -113,8 +113,9 @@ export const salesApi = {
       const result = await adapter.query(
         `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
+                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE c.company_id = $1 ORDER BY c.name`,
@@ -189,8 +190,9 @@ export const salesApi = {
       const dataResult = await adapter.query(
         `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
+                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE ${where} ORDER BY c.name ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -225,8 +227,9 @@ export const salesApi = {
       const result = await adapter.query(
         `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
+                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid LIMIT 1`, [id, companyId]);
@@ -378,7 +381,14 @@ export const salesApi = {
                  total_amount as debit, 0::numeric as credit, notes,
                  1 as sort_type
           FROM sales_invoices
-          WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled'
+          WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' AND COALESCE(payment_type, 'credit') <> 'cash'
+          UNION ALL
+          SELECT i.date, 'نقدية نقطة بيع'::varchar as document_type, i.invoice_number as document_number,
+                 0::numeric as debit, pp.amount as credit, NULL::text as notes,
+                 4 as sort_type
+          FROM pos_payments pp
+          JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash'
+          WHERE pp.company_id = $2::uuid AND pp.method = 'cash' AND i.customer_id = $1::uuid AND i.company_id = $2::uuid
           UNION ALL
           SELECT date, 'مردود'::varchar as document_type, return_number as document_number,
                  0::numeric as debit, total_amount as credit, reason as notes,
@@ -422,7 +432,7 @@ export const salesApi = {
         `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - COALESCE(i.paid_amount,0)) as due_amount, COALESCE(i.due_date, i.date) as aging_date
         FROM customers c
         JOIN sales_invoices i ON i.customer_id = c.id
-        WHERE c.company_id = $1 AND i.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - COALESCE(i.paid_amount,0)) > 0
+        WHERE c.company_id = $1 AND i.company_id = $1 AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - COALESCE(i.paid_amount,0)) > 0 AND COALESCE(i.payment_type, 'credit') <> 'cash'
         UNION ALL
         SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date
         FROM customers c
@@ -900,7 +910,26 @@ export const salesApi = {
       // `sales_invoices_updated_by_fkey`.
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
 
-      const accounts = await resolvePostingAccounts(companyId, ['default_debtors', 'default_sales', 'default_vat_output']);
+      // Perpetual COGS (IAS 2): freeze any missing sale-time cost snapshots
+      // from the live moving-average cost, then value what leaves stock.
+      // One round trip: the UPDATE backfills, the SELECT aggregates.
+      const cogsRes = await adapter.query(
+        `WITH backfill AS (
+           UPDATE sales_invoice_lines sil SET unit_cost = COALESCE(p.cost_price, 0)
+             FROM products p
+            WHERE sil.invoice_id = $1::uuid AND sil.unit_cost = 0
+              AND p.id = sil.product_id AND p.company_id = $2::uuid
+            RETURNING sil.id
+         )
+         SELECT COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * sil.unit_cost), 0) AS cogs
+           FROM sales_invoice_lines sil WHERE sil.invoice_id = $1::uuid`,
+        [id, companyId]
+      );
+      if (!cogsRes.success) return { success: false, error: cogsRes.error };
+      const cogsRow = (cogsRes.rows?.[0] || {}) as Record<string, unknown>;
+      const cogsAmount = Math.round((Number(cogsRow.cogs) || 0) * 100) / 100;
+
+      const accounts = await resolvePostingAccounts(companyId, ['default_debtors', 'default_sales', 'default_vat_output', 'default_cogs', 'default_inventory']);
       if (!accounts.success) {
         return { success: false, error: accounts.error };
       }
@@ -915,7 +944,8 @@ export const salesApi = {
         totalAmount,
         paymentType,
         cashAccountSubstitute: cashSubstitute,
-      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output });
+        cogsAmount,
+      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
@@ -1512,12 +1542,33 @@ export const salesApi = {
       const totalAmount = Number(ret.total_amount) || 0;
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
 
+      // Actual COGS reversal: what the ORIGINAL sale took out of stock for
+      // these products (frozen unit_cost snapshots), falling back to the
+      // live moving-average cost for pre-snapshot lines or standalone
+      // returns. No ratio guessing — the cost that left is what returns.
+      const revRes = await adapter.query(
+        `SELECT COALESCE(SUM(COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity) * COALESCE(
+           (SELECT sil.unit_cost FROM sales_invoice_lines sil
+             WHERE sil.invoice_id = sr.invoice_id AND sil.product_id = srl.product_id
+               AND sil.unit_cost > 0 ORDER BY sil.id LIMIT 1),
+           p.cost_price, 0)), 0) AS reversal
+           FROM sales_returns sr
+           JOIN sales_return_lines srl ON srl.return_id = sr.id
+           LEFT JOIN products p ON p.id = srl.product_id AND p.company_id = $2::uuid
+          WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid`,
+        [id, companyId]
+      );
+      if (!revRes.success) return { success: false, error: revRes.error };
+      const revRow = (revRes.rows?.[0] || {}) as Record<string, unknown>;
+      const cogsReversal = Math.round((Number(revRow.reversal) || 0) * 100) / 100;
+
       const posting = await buildSalesReturnPostingStatements(companyId, {
         id: id,
         returnNumber: String(ret.return_number || ''),
         date: String(ret.date || new Date().toISOString().split('T')[0]),
         customer: String(ret.customer_name || ''),
         amount: totalAmount,
+        cogsReversal,
       });
       if (!posting.success) {
         return { success: false, error: posting.error };
@@ -1604,6 +1655,7 @@ function mapInvoiceLineRow(row: Record<string, unknown>): SalesInvoiceLine {
     discountPercent: Number(row.discount_percent) || 0,
     vatPercent: Number(row.vat_percent) || 0,
     lineTotal: Number(row.line_total) || 0,
+    unitCost: row.unit_cost !== undefined && row.unit_cost !== null ? Number(row.unit_cost) : 0,
     currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,
     exchangeRate: row.exchange_rate !== undefined ? Number(row.exchange_rate) : 1,
     baseCurrencyLineTotal: row.base_currency_line_total !== undefined ? Number(row.base_currency_line_total) : 0,

@@ -47,7 +47,7 @@ export async function getNextDocumentNumber(companyId: string, documentType: str
       [companyId, documentType, safeUserId(_userId)]
     );
     if (!updateResult.success || !updateResult.rows?.[0]) {
-      return { success: false, error: 'Sequence not found' };
+      return { success: false, error: `Sequence not found: ${documentType}` };
     }
     const rawSeq = updateResult.rows[0] as Record<string, unknown>;
     const incrementStep = Number(rawSeq.increment_step) || 1;

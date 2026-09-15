@@ -992,6 +992,32 @@ export const manufacturingApi = {
       const productionCosts = parseProductionCosts(wo.production_costs);
       const productionCostsTotal = Math.round(productionCosts.reduce((s, c) => s + c.amount, 0) * 100) / 100;
 
+  // Strict guard (best practice, IAS 2): production cost accounts 53101-53401
+      // are intermediate capitalization accounts — they may only be CREDITED
+      // up to their accumulated DEBIT balance (expenses already booked via
+      // expense vouchers or payroll). Booking without backing expenses would
+      // invent inventory value / suppress expenses.
+      if (productionCosts.length > 0) {
+        for (const pc of productionCosts) {
+          const code = PRODUCTION_COST_ACCOUNT_CODES[pc.category as keyof typeof PRODUCTION_COST_ACCOUNT_CODES];
+          if (!code) continue;
+          const accId = await resolveProductionCostAccount(companyId, pc.category);
+          if (!accId) continue;
+          const balRes = await adapter.query(
+            `SELECT COALESCE(SUM(debit - credit), 0) AS bal FROM journal_entries WHERE company_id = $1::uuid AND account_id = $2::uuid`,
+            [companyId, accId]
+          );
+          if (!balRes.success) return { success: false, error: balRes.error };
+          const bal = Math.round((Number((balRes.rows?.[0] as Record<string, unknown>)?.bal) || 0) * 100) / 100;
+          if (pc.amount - bal > 0.01) {
+            return {
+              success: false,
+              error: `رصيد تكاليف الإنتاج غير كافٍ — حساب ${code} رصيده المدين ${bal.toFixed(2)} لكن المطلوب ترحيله ${pc.amount.toFixed(2)} (سجّل المصروف أولاً عبر سند مصروف/رواتب على نفس الحساب)`,
+            };
+          }
+        }
+      }
+
       // Expected output = number of batches × BOM output quantity per batch.
       const bomOutputQty = Math.max(Number(wo.bom_output_quantity) || 1, 0);
       const expectedOutput = Math.round((Number(wo.quantity) || 0) * bomOutputQty * 10000) / 10000;
@@ -1407,6 +1433,19 @@ export const manufacturingApi = {
 
   async batchUpdateConsumptions(consumptions: { id: string; actualQuantity: number; actualUnitCost: number; unitCost: number }[], companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
+      // Mandatory actuals: every consumption row must carry a finite
+      // non-negative quantity/cost. Empty is rejected — the modal pre-fills
+      // planned so COMPLETE is a correction-by-exception, not a silent
+      // fallback. Programmatic callers (AI) may still use the planned
+      // default via completeWorkOrder's own fallback.
+      for (const c of consumptions) {
+        if (!Number.isFinite(Number(c.actualQuantity)) || Number(c.actualQuantity) < 0) {
+          return { success: false, error: 'actualQuantity must be a finite number ≥ 0' };
+        }
+        if (!Number.isFinite(Number(c.actualUnitCost)) || Number(c.actualUnitCost) < 0) {
+          return { success: false, error: 'actualUnitCost must be a finite number ≥ 0' };
+        }
+      }
       if (isElectronPg()) {
         const result = await invokeMfgRpc('batchUpdateConsumptions', { consumptions });
         return { success: result.success, error: result.error };

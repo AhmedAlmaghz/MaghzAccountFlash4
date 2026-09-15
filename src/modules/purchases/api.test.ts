@@ -210,4 +210,69 @@ describe('purchasesApi.getSupplierStatement', () => {
     // closing balance = opening + invoices - payments (FULL balance)
     expect(res.data![2].balance).toBe(6000);
   });
+
+  it('excludes cash invoices from the statement (settled at once, not payables)', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.getSupplierStatement(SUPPLIER_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(payment_type, 'credit'\) <> 'cash'/);
+  });
+});
+
+describe('purchasesApi supplier computed_balance excludes cash purchases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('getSuppliers filters cash invoices', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await purchasesApi.getSuppliers(COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(pi\.payment_type, 'credit'\) <> 'cash'/);
+  });
+
+  it('getSuppliersPaginated applies the same cash exclusion', async () => {
+    const adapter = makeMockAdapter(async (sql: string) => {
+      if (/COUNT\(\*\)/.test(sql)) return { success: true, rows: [{ total: 0 }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await purchasesApi.getSuppliersPaginated(COMPANY_ID, 1, 25);
+    const dataSql = adapter.query.mock.calls.map((c) => c[0] as string).find((s) => /computed_balance/.test(s));
+    expect(dataSql).toMatch(/COALESCE\(pi\.payment_type, 'credit'\) <> 'cash'/);
+  });
+
+  it('getSupplierById applies the same cash exclusion', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await purchasesApi.getSupplierById(SUPPLIER_ID, COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(pi\.payment_type, 'credit'\) <> 'cash'/);
+  });
+
+  it('getApAging excludes cash invoices from the invoice leg', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await purchasesApi.getApAging(SUPPLIER_ID, COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(payment_type, 'credit'\) <> 'cash'/);
+  });
+
+  it('getApAgingTotal excludes cash invoices', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [{ outstanding: 0 }, { '?column?': 0 }, { '?column?': 0 }, { '?column?': 0 }] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.getApAgingTotal(COMPANY_ID);
+    expect(res.success).toBe(true);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(payment_type, 'credit'\) <> 'cash'/);
+  });
 });

@@ -2858,8 +2858,9 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => ({
       sql: `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE c.company_id = $1::uuid ORDER BY c.name ASC`,
@@ -2878,8 +2879,9 @@ export function registerDatabaseHandlers() {
       return {
         sql: `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance,
                 (COUNT(*) OVER())::int AS total_count
@@ -2895,8 +2897,9 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => ({
       sql: `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid LIMIT 1`,
@@ -2967,7 +2970,7 @@ export function registerDatabaseHandlers() {
   // sales.getCustomerStatement — opening + invoices - receipts - returns
   registerRpc('sales.getCustomerStatement', {
     compose: (p, session) => ({
-      sql: `WITH entries AS (SELECT COALESCE(c.opening_date, DATE '1900-01-01') AS date, 'رصيد افتتاحي'::varchar AS document_type, 'OPENING'::varchar AS document_number, CASE WHEN c.opening_balance >= 0 THEN c.opening_balance ELSE 0 END AS debit, CASE WHEN c.opening_balance < 0 THEN -c.opening_balance ELSE 0 END AS credit, NULL::text AS notes, 0 AS sort_type FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid AND c.opening_balance <> 0 UNION ALL SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number, total_amount as debit, 0::numeric as credit, notes, 1 as sort_type FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' UNION ALL SELECT date, 'مردود'::varchar as document_type, return_number as document_number, 0::numeric as debit, total_amount as credit, reason as notes, 2 as sort_type FROM sales_returns WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted' UNION ALL SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number, 0::numeric as debit, amount as credit, notes, 3 as sort_type FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted') SELECT date, document_type, document_number, debit, credit, SUM(debit - credit) OVER (ORDER BY date, sort_type, document_number) as balance, notes FROM entries ORDER BY date, sort_type, document_number`,
+      sql: `WITH entries AS (SELECT COALESCE(c.opening_date, DATE '1900-01-01') AS date, 'رصيد افتتاحي'::varchar AS document_type, 'OPENING'::varchar AS document_number, CASE WHEN c.opening_balance >= 0 THEN c.opening_balance ELSE 0 END AS debit, CASE WHEN c.opening_balance < 0 THEN -c.opening_balance ELSE 0 END AS credit, NULL::text AS notes, 0 AS sort_type FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid AND c.opening_balance <> 0 UNION ALL SELECT date, 'فاتورة'::varchar as document_type, invoice_number as document_number, total_amount as debit, 0::numeric as credit, notes, 1 as sort_type FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status <> 'cancelled' AND COALESCE(payment_type, 'credit') <> 'cash' UNION ALL SELECT i.date, 'نقدية نقطة بيع'::varchar as document_type, i.invoice_number as document_number, 0::numeric as debit, pp.amount as credit, NULL::text as notes, 4 as sort_type FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = $2 AND pp.method = 'cash' AND i.customer_id = $1::uuid AND i.company_id = $2::uuid UNION ALL SELECT date, 'مردود'::varchar as document_type, return_number as document_number, 0::numeric as debit, total_amount as credit, reason as notes, 2 as sort_type FROM sales_returns WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted' UNION ALL SELECT date, 'سند قبض'::varchar as document_type, voucher_number as document_number, 0::numeric as debit, amount as credit, notes, 3 as sort_type FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid AND status = 'posted') SELECT date, document_type, document_number, debit, credit, SUM(debit - credit) OVER (ORDER BY date, sort_type, document_number) as balance, notes FROM entries ORDER BY date, sort_type, document_number`,
       params: [String(p.customerId), session.user.companyId],
     }),
     paramCount: 2,
@@ -2979,7 +2982,7 @@ export function registerDatabaseHandlers() {
   // sales.getCustomerArAging — opening + invoices - receipts - returns
   registerRpc('sales.getCustomerArAging', {
     compose: (p, session) => ({
-      sql: `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - COALESCE(i.paid_amount,0)) as due_amount, COALESCE(i.due_date, i.date) as aging_date FROM customers c JOIN sales_invoices i ON i.customer_id = c.id WHERE c.company_id = $1 AND c.id = i.company_id AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - COALESCE(i.paid_amount,0)) > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date FROM customers c WHERE c.company_id = $1 AND c.opening_balance > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, -rv.amount as due_amount, rv.date as aging_date FROM customers c JOIN receipt_vouchers rv ON rv.customer_id = c.id WHERE c.company_id = $1 AND rv.company_id = $1 AND rv.status = 'posted' UNION ALL SELECT c.id as customer_id, c.name as customer_name, -sr.total_amount as due_amount, sr.date as aging_date FROM customers c JOIN sales_returns sr ON sr.customer_id = c.id WHERE c.company_id = $1 AND sr.company_id = $1 AND sr.status = 'posted'`,
+      sql: `SELECT c.id as customer_id, c.name as customer_name, (i.total_amount - COALESCE(i.paid_amount,0)) as due_amount, COALESCE(i.due_date, i.date) as aging_date FROM customers c JOIN sales_invoices i ON i.customer_id = c.id WHERE c.company_id = $1 AND c.id = i.company_id AND i.status IN ('posted', 'partially_paid') AND (i.total_amount - COALESCE(i.paid_amount,0)) > 0 AND COALESCE(i.payment_type, 'credit') <> 'cash' UNION ALL SELECT c.id as customer_id, c.name as customer_name, c.opening_balance as due_amount, COALESCE(c.opening_date, DATE '1900-01-01') as aging_date FROM customers c WHERE c.company_id = $1 AND c.opening_balance > 0 UNION ALL SELECT c.id as customer_id, c.name as customer_name, -rv.amount as due_amount, rv.date as aging_date FROM customers c JOIN receipt_vouchers rv ON rv.customer_id = c.id WHERE c.company_id = $1 AND rv.company_id = $1 AND rv.status = 'posted' UNION ALL SELECT c.id as customer_id, c.name as customer_name, -sr.total_amount as due_amount, sr.date as aging_date FROM customers c JOIN sales_returns sr ON sr.customer_id = c.id WHERE c.company_id = $1 AND sr.company_id = $1 AND sr.status = 'posted'`,
       params: [session.user.companyId],
     }),
     paramCount: 1,
@@ -4562,6 +4565,7 @@ export async function seedInitialData(adminPassword, company) {
 
     // 5-extra. Additional document sequences
     const additionalDocSeqs = [
+      { type: 'pos_receipt', prefix: 'POS-', start: 1, current: 0 },
       { type: 'sales_return', prefix: 'SR-', start: 1, current: 1 },
       { type: 'purchase_return', prefix: 'PR-', start: 1, current: 1 },
       { type: 'work_order', prefix: 'WO-', start: 1, current: 1 },
