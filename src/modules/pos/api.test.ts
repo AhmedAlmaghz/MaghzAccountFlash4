@@ -59,6 +59,9 @@ const DEBTORS_ID = '00000000-0000-0000-0000-000000000060';
 const SALES_ID = '00000000-0000-0000-0000-000000000061';
 const VAT_ID = '00000000-0000-0000-0000-000000000062';
 const CASH_ACCOUNT_ID = '00000000-0000-0000-0000-000000000063';
+const COGS_ID = '00000000-0000-0000-0000-000000000064';
+const INV_ACC_ID = '00000000-0000-0000-0000-000000000065';
+const PRODUCT_COST = 60;
 
 /** Adapter that answers the posting-account + cash-box lookups checkout makes. */
 function makeCheckoutAdapter() {
@@ -72,8 +75,14 @@ function makeCheckoutAdapter() {
         default_debtors: DEBTORS_ID,
         default_sales: SALES_ID,
         default_vat_output: VAT_ID,
+        default_cogs: COGS_ID,
+        default_inventory: INV_ACC_ID,
       };
       return { success: true, rows: [{ account_id: map[key] || SALES_ID }] };
+    }
+    if (/FROM products WHERE company_id/.test(sql)) {
+      // COGS cost lookup — live moving-average cost per product
+      return { success: true, rows: [{ id: PRODUCT_ID, cost_price: PRODUCT_COST }] };
     }
     if (/FROM cash_boxes/.test(sql)) {
       return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
@@ -203,6 +212,30 @@ describe('posApi.checkout', () => {
 
     // payment_type column = 'credit' for a mixed sale (existing lists)
     expect(batch[1].params?.[14]).toBe('credit');
+  });
+
+  it('books perpetual COGS legs and freezes the sale-time cost snapshot', async () => {
+    const { adapter } = makeCheckoutAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
+    expect(res.success).toBe(true);
+
+    // sale-time costs come from the live moving average (server-side truth)
+    const costCall = adapter.query.mock.calls.map((c) => c[0] as string).find((s) => /FROM products WHERE company_id/.test(s));
+    expect(costCall).toBeDefined();
+
+    const batch = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
+    // lines CTE carries the frozen unit_cost (2 base units x 60 = snapshot 60/line)
+    expect(batch[1].sql).toMatch(/unit_cost/);
+    expect(batch[1].params).toContain(PRODUCT_COST);
+    // JE: Dr COGS 120 / Cr Inventory 120 alongside the revenue legs
+    const jeParams = batch[3].params as unknown[];
+    expect(jeParams).toContain(COGS_ID);
+    expect(jeParams).toContain(INV_ACC_ID);
+    const cogsIdx = jeParams.indexOf(COGS_ID);
+    expect(jeParams[cogsIdx + 1]).toBe(120);
+    expect(jeParams[cogsIdx + 2]).toBe(0);
   });
 
   it('refuses checkout when no shift is open', async () => {

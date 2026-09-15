@@ -71,6 +71,10 @@ export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
   vatPercent: numeric('vat_percent', { precision: 5, scale: 2 }).default('15'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  // Cost snapshot (base-unit cost at sale time) for perpetual COGS posting.
+  // Frozen at creation — products.cost_price moves later (purchases,
+  // manufacturing receipts) and must not rewrite history.
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyLineTotal: numeric('base_currency_line_total', { precision: 18, scale: 4 }).notNull().default('0'),

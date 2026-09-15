@@ -163,6 +163,7 @@ import stockUniqueIndex from '@root/drizzle/0026_stock_unique_index.sql?raw';
 import posModule from '@root/drizzle/0027_pos_module.sql?raw';
 import aiJobItemLeases from '@root/drizzle/0028_ai_job_item_leases.sql?raw';
 import usersRolesHardening from '@root/drizzle/0029_users_roles_hardening.sql?raw';
+import posReceiptAndLineCost from '@root/drizzle/0030_pos_receipt_and_line_cost.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -195,6 +196,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0027_pos_module', sql: posModule },
   { name: '0028_ai_job_item_leases', sql: aiJobItemLeases },
   { name: '0029_users_roles_hardening', sql: usersRolesHardening },
+  { name: '0030_pos_receipt_and_line_cost', sql: posReceiptAndLineCost },
 ];
 
 /**
@@ -560,6 +562,7 @@ const LEADS: Array<{
 
 const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: number; pad: number }> = [
   { type: 'sales_invoice', prefix: 'INV-', start: 1, current: 0, pad: 6 },
+  { type: 'pos_receipt', prefix: 'POS-', start: 1, current: 0, pad: 6 },
   { type: 'sales_return', prefix: 'SRT-', start: 1, current: 0, pad: 4 },
   { type: 'quotation', prefix: 'QOT-', start: 1, current: 0, pad: 4 },
   { type: 'purchase_order', prefix: 'PO-', start: 1, current: 0, pad: 6 },

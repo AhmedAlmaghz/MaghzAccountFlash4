@@ -102,9 +102,24 @@ describe('salesApi.getCustomerStatement', () => {
     // the opening-balance branch must exist and fall outside the movement rows
     expect(sql).toMatch(/FROM customers c/);
     expect(sql).toMatch(/رصيد افتتاحي/);
-    // all four UNION branches (opening + invoices + returns + receipts) must filter by the caller's company
-    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(4);
+    // all five UNION branches (opening + invoices + POS-cash + returns + receipts) must filter by the caller's company
+    expect(sql.match(/company_id = \$2::uuid/g)).toHaveLength(6);
     expect(params).toEqual([CUSTOMER_ID, COMPANY_ID]);
+  });
+
+  it('excludes cash invoices from the statement but keeps a POS-cash credit leg', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.getCustomerStatement(CUSTOMER_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    const [sql] = adapter.query.mock.calls[0];
+    // cash sales are settled at once — they are not receivables
+    expect(sql).toMatch(/COALESCE\(payment_type, 'credit'\) <> 'cash'/);
+    // mixed POS sales: the cash part arrives as a statement credit leg
+    expect(sql).toMatch(/FROM pos_payments pp/);
+    expect(sql).toMatch(/pp\.method = 'cash'/);
+    expect(sql).toMatch(/نقدية نقطة بيع/);
   });
 
   it('returns empty array when no transactions exist', async () => {
@@ -238,6 +253,55 @@ describe('salesApi.getCustomerArAging', () => {
     const row = res.data![0];
     expect(row.totalDue).toBe(700);
     expect(row.buckets.find(b => b.period === '>90')?.amount).toBe(700);
+  });
+
+  it('excludes cash invoices from the aging invoice leg', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await salesApi.getCustomerArAging(COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(i\.payment_type, 'credit'\) <> 'cash'/);
+  });
+});
+
+describe('salesApi customer computed_balance excludes cash sales', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('getCustomers filters cash invoices and subtracts POS-cash legs', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await salesApi.getCustomers(COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(i\.payment_type, 'credit'\) <> 'cash'/);
+    expect(sql).toMatch(/FROM pos_payments pp/);
+    expect(sql).toMatch(/pp\.method = 'cash'/);
+  });
+
+  it('getCustomersPaginated applies the same cash exclusion', async () => {
+    const adapter = makeMockAdapter(async (sql: string) => {
+      if (/COUNT\(\*\)/.test(sql)) return { success: true, rows: [{ total: 0 }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await salesApi.getCustomersPaginated(COMPANY_ID, 1, 25);
+    const dataSql = adapter.query.mock.calls.map((c) => c[0] as string).find((s) => /computed_balance/.test(s));
+    expect(dataSql).toMatch(/COALESCE\(i\.payment_type, 'credit'\) <> 'cash'/);
+    expect(dataSql).toMatch(/FROM pos_payments pp/);
+  });
+
+  it('getCustomerById applies the same cash exclusion', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await salesApi.getCustomerById(CUSTOMER_ID, COMPANY_ID);
+    const [sql] = adapter.query.mock.calls[0];
+    expect(sql).toMatch(/COALESCE\(i\.payment_type, 'credit'\) <> 'cash'/);
+    expect(sql).toMatch(/FROM pos_payments pp/);
   });
 });
 
@@ -661,6 +725,104 @@ describe('salesApi.postReturn customer balance tracking', () => {
     expect(custStmt).toBeDefined();
     expect(custStmt!.sql).toMatch(/balance = balance - \$1/);
     expect(Number(custStmt!.params![0])).toBe(200);
+  });
+});
+
+describe('salesApi perpetual COGS (IAS 2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearUserIdCache();
+  });
+
+  it('postInvoice backfills cost snapshots and books Dr COGS / Cr Inventory', async () => {
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('WITH backfill')) {
+        return { success: true, rows: [{ cogs: 640 }] };
+      }
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-901', date: '2026-01-01', payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-901', 'comp-1');
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    // backfill ran before the JE was composed
+    const backfillCall = adapter.query.mock.calls.map((c) => c[0] as string).find((s) => s.includes('WITH backfill'));
+    expect(backfillCall).toContain('UPDATE sales_invoice_lines sil SET unit_cost = COALESCE(p.cost_price, 0)');
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    const je = txStmts.find((q) => q.sql.includes('WITH new_tx'));
+    expect(je).toBeDefined();
+    // revenue legs + COGS legs: 640 Dr COGS / 640 Cr Inventory
+    expect(je!.params).toContain('acc-default_cogs');
+    expect(je!.params).toContain('acc-default_inventory');
+    const cogsIdx = (je!.params as unknown[]).indexOf('acc-default_cogs');
+    expect(je!.params![cogsIdx + 1]).toBe(640);
+    expect(je!.params![cogsIdx + 2]).toBe(0);
+  });
+
+  it('postInvoice skips COGS legs when nothing was taken out of stock', async () => {
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('WITH backfill')) {
+        return { success: true, rows: [{ cogs: 0 }] };
+      }
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 115, paid_amount: 0, subtotal: 100, vat_amount: 15, invoice_number: 'INV-902', date: '2026-01-01', payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-902', 'comp-1');
+    expect(res.success).toBe(true);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    const je = txStmts.find((q) => q.sql.includes('WITH new_tx'));
+    expect(je).toBeDefined();
+    // revenue legs only: 3 entries x 4 params + 6 header params
+    expect(je!.params!.length).toBe(6 + 3 * 4);
+  });
+
+  it('postReturn reverses the actual sale-time cost, not a ratio', async () => {
+    const adapter = makeMockAdapter(async (sql, p) => {
+      if (sql.includes('sales_return_lines')) {
+        return { success: true, rows: [{ reversal: 320 }] };
+      }
+      if (sql.includes('FROM sales_returns')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 500, return_number: 'SR-901', date: '2026-01-02', customer_name: 'عميل' }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postReturn('ret-901', 'comp-1');
+    expect(res.success, 'postReturn failed: ' + (res.error || '')).toBe(true);
+    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
+    const je = txStmts.find((q) => q.sql.includes('WITH new_tx'));
+    expect(je).toBeDefined();
+    expect(je!.params).toContain('acc-default_inventory');
+    expect(je!.params).toContain('acc-default_cogs');
+    const amounts = (je!.params as unknown[]).filter((x) => typeof x === 'number');
+    expect(amounts).toContain(320);
+    expect(amounts).not.toContain(Math.floor(500 * 0.7));
   });
 });
 

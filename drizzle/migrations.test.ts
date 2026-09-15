@@ -1063,3 +1063,51 @@ describe('Migration 0028: AI job-item claim leases', () => {
   });
 });
 
+describe('Migration 0030: POS receipt sequence + sales line cost snapshot', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0030_pos_receipt_and_line_cost.sql'), 'utf-8');
+
+  it('backfills one pos_receipt sequence per company that lacks it (idempotent)', () => {
+    expect(migrationSql).toMatch(/document_type, prefix[\s\S]*'pos_receipt', 'POS-'/);
+    expect(migrationSql).toMatch(/WHERE NOT EXISTS \([\s\S]*document_type = 'pos_receipt'[\s\S]*\)/);
+    expect(migrationSql).toMatch(/FROM companies c/);
+  });
+
+  it('adds sales_invoice_lines.unit_cost with a cost_price backfill', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE sales_invoice_lines ADD COLUMN IF NOT EXISTS unit_cost numeric\(18, 4\)/);
+    expect(migrationSql).toMatch(/SET unit_cost = COALESCE\(p\.cost_price, 0\)/);
+  });
+
+  it('journal registers 0030 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0030_pos_receipt_and_line_cost')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0030 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0030_pos_receipt_and_line_cost\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0030_pos_receipt_and_line_cost', sql: posReceiptAndLineCost \}/);
+  });
+
+  it('Drizzle schema exposes unitCost on salesInvoiceLines', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    expect(schema).toMatch(/unitCost: numeric\('unit_cost', \{ precision: 18, scale: 4 \}\)/);
+  });
+
+  // Regression gate for the POS "Sequence not found" outage: pos_receipt must
+  // exist in EVERY company-creation path (Electron seed, PGlite seed, demo
+  // seed) plus the numbering maps — a type present in only one path breaks
+  // fresh companies while e2e (seeded demo DB) stays green.
+  it('pos_receipt exists in all seed paths and numbering maps (sequence parity)', () => {
+    const initialSeed = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(initialSeed).toMatch(/\{ type: 'pos_receipt', prefix: 'POS-'/);
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/\{ type: 'pos_receipt', prefix: 'POS-'/);
+    const demoSeed = readFileSync(join(process.cwd(), 'electron/seedDemoData.js'), 'utf-8');
+    expect(demoSeed).toMatch(/\{ type: 'pos_receipt',\s+prefix: 'POS-'/);
+    const api = readFileSync(join(process.cwd(), 'src/core/api.ts'), 'utf-8');
+    expect(api).toMatch(/pos_receipt: 'sales_invoices'/);
+    expect(api).toMatch(/pos_receipt: 'invoice_number'/);
+  });
+});
+

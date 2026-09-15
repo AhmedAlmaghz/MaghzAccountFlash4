@@ -518,14 +518,15 @@ export const posApi = {
   // ─── Checkout (the atomic POS sale) ───────────────────────────────────────
   /**
    * One transaction commits EVERYTHING: invoice header + lines + pos payments,
-   * the journal entry (mixed cash/credit aware), stock movements + decrement,
-   * status flip (→ paid when nothing outstanding) and the customer balance.
+   * the journal entry (mixed cash/credit aware + perpetual COGS legs), stock
+   * movements + decrement, status flip (→ paid when nothing outstanding) and
+   * the customer balance.
    *
    * Single code path on both transports — same contract as salesApi.postInvoice
-   * (the posting machinery lives renderer-side; the Electron SQL guard cannot
-   * authorize a composed CTE batch for a cashier, so POS never ships raw SQL
-   * through db:internal-*; production goes through the typed pos RPC handlers
-   * in electron/dbHandler.js which reuse this exact SQL).
+   * (see the module header). The Electron SQL guard authorizes each statement
+   * of the batch; the COGS cost lookup below is a plain products SELECT (a
+   * read the pos role already holds) and the snapshot rides the lines CTE as
+   * a value, so no new guard surface is introduced.
    */
   async checkout(input: PosCheckoutInput, userId?: string): Promise<PosCheckoutResult> {
     try {
@@ -559,9 +560,34 @@ export const posApi = {
       }
       const receiptNumber = numberResult.number;
 
-      // Posting accounts — same trio as a sales invoice.
-      const accounts = await resolvePostingAccounts(input.companyId, ['default_debtors', 'default_sales', 'default_vat_output']);
+      // Posting accounts — debtors/sales/VAT plus the perpetual-inventory
+      // pair (COGS + inventory) for the cost-of-sales legs.
+      const accounts = await resolvePostingAccounts(input.companyId, ['default_debtors', 'default_sales', 'default_vat_output', 'default_cogs', 'default_inventory']);
       if (!accounts.success) return { success: false, error: accounts.error };
+
+      // Perpetual COGS (IAS 2): sale-time costs from the live moving
+      // average — server-side truth, never client-supplied. Snapshot values
+      // ride the lines CTE as plain params (no new SQL tables).
+      const costByProduct = new Map<string, number>();
+      const lineProductIds = [...new Set(input.lines.map((l) => l.productId))];
+      if (lineProductIds.length > 0) {
+        const placeholders = lineProductIds.map((_, i) => `$${i + 2}::uuid`).join(', ');
+        const costRes = await adapter.query(
+          `SELECT id, COALESCE(cost_price, 0) AS cost_price FROM products WHERE company_id = $1::uuid AND id IN (${placeholders})`,
+          [input.companyId, ...lineProductIds]
+        );
+        if (!costRes.success) return { success: false, error: costRes.error };
+        for (const r of costRes.rows || []) {
+          const row = r as Record<string, unknown>;
+          costByProduct.set(String(row.id), Number(row.cost_price) || 0);
+        }
+      }
+      let cogsAmount = 0;
+      for (const l of input.lines) {
+        const baseQty = snapshotLineUnit(l).baseQuantity ?? l.quantity;
+        cogsAmount += baseQty * (costByProduct.get(l.productId) || 0);
+      }
+      cogsAmount = Math.round(cogsAmount * 100) / 100;
       // The cashier's box GL account receives the cash part (falls back to
       // Debtors if the box has no linked account — same fallback as salesApi).
       const cashAccountId = input.cashAmount > 0
@@ -604,13 +630,13 @@ export const posApi = {
       for (const line of input.lines) {
         const off = params.length;
         const usnap = snapshotLineUnit(line);
-        lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric)`);
-        params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent ?? 0, line.vatPercent ?? 0, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity ?? line.quantity);
+        lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric, $${off + 11}::numeric)`);
+        params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent ?? 0, line.vatPercent ?? 0, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity ?? line.quantity, costByProduct.get(line.productId) || 0);
       }
       sql += `, lines_ins AS (INSERT INTO sales_invoice_lines
-        (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity)
-        SELECT v.invoice_id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.unit_id, v.unit_factor, v.base_quantity
-        FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity) ON true)`;
+        (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity, unit_cost)
+        SELECT v.invoice_id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.unit_id, v.unit_factor, v.base_quantity, v.unit_cost
+        FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity, unit_cost) ON true)`;
       sql += ' SELECT id FROM inv';
 
       // Guard TOCTOU: re-validate shift is still open INSIDE the atomic transaction
@@ -641,7 +667,7 @@ export const posApi = {
         params: payParams,
       });
 
-      // Statement C — journal entry (mixed cash/credit).
+      // Statement C — journal entry (mixed cash/credit + perpetual COGS).
       txQueries.push(...buildPosSalePostingStatements(
         input.companyId,
         {
@@ -654,8 +680,9 @@ export const posApi = {
           cashAmount: input.cashAmount,
           creditAmount: input.creditAmount,
           cashAccountId,
+          cogsAmount,
         },
-        { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output }
+        { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory }
       ));
 
       // Statements D/E/F — stock (identical SQL to salesApi.postInvoice).

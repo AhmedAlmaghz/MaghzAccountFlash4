@@ -85,6 +85,8 @@ export interface SalesInvoiceLine {
   discountPercent: number;
   vatPercent: number;
   lineTotal: number;
+  /** Frozen base-unit cost at sale time (server snapshot for perpetual COGS). */
+  unitCost?: number;
   currencyCode?: string;
   exchangeRate?: number;
   baseCurrencyLineTotal?: number;

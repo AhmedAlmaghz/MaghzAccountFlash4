@@ -8,6 +8,8 @@ import {
   postPurchaseReturn,
   postInventoryTransaction,
   postStockAdjustment,
+  buildSalesInvoicePostingStatements,
+  buildPosSalePostingStatements,
   buildSalesReturnPostingStatements,
   buildPurchaseReturnPostingStatements,
 } from './journalEntryGenerator';
@@ -296,12 +298,38 @@ describe('journalEntryGenerator', () => {
       // Atomic contract: JE + stock movements run inside one adapter.transaction batch.
       expect(adapter.transaction).toHaveBeenCalledTimes(1);
       const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
-      // No ret.id -> only the journal entry statement.
+      // No ret.id and no cogsReversal -> only the 2-leg revenue reversal.
       expect(stmts.length).toBe(1);
       expect(stmts[0].sql).toContain('WITH new_tx');
       expect(stmts[0].sql).toContain('journal_entries');
+      // 2 entries x 4 params + 6 header params
+      expect(stmts[0].params!.length).toBe(6 + 2 * 4);
+    });
+
+    it('books the actual-cost COGS reversal instead of any ratio guess', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const result = await postSalesReturn('comp-1', {
+        returnNumber: 'SR-002',
+        date: '2024-06-01',
+        customer: 'شركة اليمن',
+        amount: 500,
+        cogsReversal: 320,
+      });
+
+      expect(result.success).toBe(true);
+      const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      expect(stmts.length).toBe(1);
       // 4 entries x 4 params + 6 header params
       expect(stmts[0].params!.length).toBe(6 + 4 * 4);
+      const params = stmts[0].params!;
+      // entry order: sales-returns Dr, debtors Cr, inventory Dr, COGS Cr
+      expect(params).toContain('acc-inventory');
+      expect(params).toContain('acc-cogs');
+      const amounts = params.filter((p) => typeof p === 'number');
+      expect(amounts).toContain(320);
+      expect(amounts).not.toContain(Math.floor(500 * 0.7)); // no 70% guess
     });
   });
 
@@ -478,6 +506,101 @@ describe('journalEntryGenerator', () => {
       const update = res.statements.find((s) => s.sql.includes('UPDATE stock s SET'));
       expect(update).toBeDefined();
       expect(update!.sql).toContain('SUM(COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity))');
+    });
+  });
+
+  describe('perpetual COGS legs (IAS 2)', () => {
+    const ids = { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat', cogs: 'acc-cogs', inventory: 'acc-inventory' };
+
+    it('sales invoice builder appends Dr COGS / Cr Inventory when cogsAmount > 0', () => {
+      const [stmt] = buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-901',
+        date: '2026-01-01',
+        subtotal: 1000,
+        vatAmount: 150,
+        totalAmount: 1150,
+        cogsAmount: 640,
+      }, ids);
+      const params = stmt.params!;
+      // 5 entries x 4 params + 6 header params
+      expect(params.length).toBe(6 + 5 * 4);
+      expect(params).toContain('acc-cogs');
+      expect(params).toContain('acc-inventory');
+      const cogsIdx = params.indexOf('acc-cogs');
+      expect(params[cogsIdx + 1]).toBe(640); // debit
+      expect(params[cogsIdx + 2]).toBe(0); // credit
+      const invIdx = params.lastIndexOf('acc-inventory');
+      expect(params[invIdx + 1]).toBe(0);
+      expect(params[invIdx + 2]).toBe(640); // credit
+    });
+
+    it('sales invoice builder skips COGS legs when amount is zero or accounts absent', () => {
+      const [zero] = buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-902', date: '2026-01-01', subtotal: 100, vatAmount: 15, totalAmount: 115, cogsAmount: 0,
+      }, ids);
+      expect(zero.params!.length).toBe(6 + 3 * 4);
+      const [noAccts] = buildSalesInvoicePostingStatements('comp-1', {
+        invoiceNumber: 'INV-903', date: '2026-01-01', subtotal: 100, vatAmount: 15, totalAmount: 115, cogsAmount: 70,
+      }, { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat' });
+      expect(noAccts.params!.length).toBe(6 + 3 * 4);
+    });
+
+    it('POS builder appends the same COGS legs for mixed sales', () => {
+      const [stmt] = buildPosSalePostingStatements('comp-1', {
+        invoiceNumber: 'POS-001',
+        receiptNumber: 'POS-001',
+        date: '2026-01-01',
+        subtotal: 200,
+        vatAmount: 0,
+        totalAmount: 200,
+        cashAmount: 120,
+        creditAmount: 80,
+        cashAccountId: 'acc-cash',
+        cogsAmount: 130,
+      }, ids);
+      const params = stmt.params!;
+      expect(params).toContain('acc-cogs');
+      expect(params).toContain('acc-inventory');
+      const cogsIdx = params.indexOf('acc-cogs');
+      expect(params[cogsIdx + 1]).toBe(130);
+      expect(params[cogsIdx + 2]).toBe(0);
+    });
+
+    it('sales return builder reverses the ACTUAL cost, never a ratio', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildSalesReturnPostingStatements('comp-1', {
+        returnNumber: 'SR-901',
+        date: '2026-01-01',
+        customer: 'عميل',
+        amount: 500,
+        cogsReversal: 320,
+      });
+      expect(res.success).toBe(true);
+      if (!res.success) return;
+      const je = res.statements[0];
+      expect(je.params!.length).toBe(6 + 4 * 4);
+      expect(je.params).toContain('acc-inventory');
+      expect(je.params).toContain('acc-cogs');
+      const amounts = je.params!.filter((p) => typeof p === 'number');
+      expect(amounts).toContain(320);
+      expect(amounts).not.toContain(Math.floor(500 * 0.7));
+    });
+
+    it('sales return builder omits reversal legs when cogsReversal is zero', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const res = await buildSalesReturnPostingStatements('comp-1', {
+        returnNumber: 'SR-902',
+        date: '2026-01-01',
+        customer: 'عميل',
+        amount: 500,
+      });
+      expect(res.success).toBe(true);
+      if (!res.success) return;
+      expect(res.statements[0].params!.length).toBe(6 + 2 * 4);
     });
   });
 });

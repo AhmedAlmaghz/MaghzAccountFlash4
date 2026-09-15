@@ -200,25 +200,36 @@ export async function resolvePostingAccounts(
 
 export function buildSalesInvoicePostingStatements(
   companyId: string,
-  invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null },
-  ids: { debtors: string; sales: string; vat: string }
+  invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null; cogsAmount?: number },
+  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string }
 ): TxStatement[] {
   // CASH invoice: money entered the treasury at sale time — debit the cash
   // box's own GL account instead of Debtors (the customer owes nothing).
   // CREDIT invoice (default): Dr Debtors / Cr Sales + VAT.
+  // Perpetual COGS (IAS 2): Dr COGS / Cr Inventory at the sale-time cost
+  // snapshot (computed by the caller from frozen line unit_costs). Skipped
+  // when zero (services / zero-cost lines) or when the accounts are absent.
   const isCash = invoice.paymentType === 'cash';
   const debitAccount = (isCash && invoice.cashAccountSubstitute) || ids.debtors;
+  const entries: JournalEntryLine[] = [
+    { accountId: debitAccount, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
+    { accountId: ids.sales, debit: 0, credit: invoice.subtotal, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
+    { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
+  ];
+  const cogs = Math.round((invoice.cogsAmount || 0) * 100) / 100;
+  if (cogs > 0 && ids.cogs && ids.inventory) {
+    entries.push(
+      { accountId: ids.cogs, debit: cogs, credit: 0, memo: `تكلفة بضاعة مباعة ${invoice.invoiceNumber}` },
+      { accountId: ids.inventory, debit: 0, credit: cogs, memo: `صرف مخزون ${invoice.invoiceNumber}` },
+    );
+  }
   return [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
       description: `قيد تلقائي - فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
       totalAmount: invoice.totalAmount,
-      entries: [
-        { accountId: debitAccount, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
-        { accountId: ids.sales, debit: 0, credit: invoice.subtotal, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
-        { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
-      ],
+      entries,
     }),
   ];
 }
@@ -240,8 +251,8 @@ export function buildSalesInvoicePostingStatements(
  */
 export function buildPosSalePostingStatements(
   companyId: string,
-  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null },
-  ids: { debtors: string; sales: string; vat: string }
+  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null; cogsAmount?: number },
+  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string }
 ): TxStatement[] {
   const { receiptNumber, cashAmount, creditAmount, cashAccountId, subtotal, vatAmount, totalAmount, date } = sale;
   const debitLines: JournalEntryLine[] = [];
@@ -260,17 +271,25 @@ export function buildPosSalePostingStatements(
   if (debitLines.length === 0) {
     debitLines.push({ accountId: ids.debtors, debit: 0, credit: 0, memo: `نقطة بيع ${receiptNumber}` });
   }
+  const creditLines: JournalEntryLine[] = [
+    { accountId: ids.sales, debit: 0, credit: subtotal, memo: `إيرادات نقطة بيع ${receiptNumber}` },
+    { accountId: ids.vat, debit: 0, credit: vatAmount, memo: `ضريبة نقطة بيع ${receiptNumber}` },
+  ];
+  // Perpetual COGS (IAS 2) — same snapshot semantics as sales invoices.
+  const cogs = Math.round(((sale.cogsAmount || 0)) * 100) / 100;
+  if (cogs > 0 && ids.cogs && ids.inventory) {
+    creditLines.push(
+      { accountId: ids.cogs, debit: cogs, credit: 0, memo: `تكلفة بضاعة مباعة ${receiptNumber}` },
+      { accountId: ids.inventory, debit: 0, credit: cogs, memo: `صرف مخزون ${receiptNumber}` },
+    );
+  }
   return [
     buildJournalEntryStatement(companyId, {
       reference: receiptNumber,
       description: `قيد تلقائي - إيصال نقطة بيع ${receiptNumber}`,
       date,
       totalAmount,
-      entries: [
-        ...debitLines,
-        { accountId: ids.sales, debit: 0, credit: subtotal, memo: `إيرادات نقطة بيع ${receiptNumber}` },
-        { accountId: ids.vat, debit: 0, credit: vatAmount, memo: `ضريبة نقطة بيع ${receiptNumber}` },
-      ],
+      entries: [...debitLines, ...creditLines],
     }),
   ];
 }
@@ -302,11 +321,26 @@ export function buildPurchaseInvoicePostingStatements(
 /** JE + stock-movement statements for a sales return (goods back to stock). */
 export async function buildSalesReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs']);
   if (!resolved.success) return resolved;
   const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId } = resolved.ids;
+
+  // COGS reversal at the ACTUAL sale-time cost snapshot (computed by the
+  // caller from the original invoice lines). No ratio guessing: the cost
+  // that left inventory when the goods were sold is exactly what returns.
+  const reversal = Math.round((ret.cogsReversal || 0) * 100) / 100;
+  const entries: JournalEntryLine[] = [
+    { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
+    { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
+  ];
+  if (reversal > 0) {
+    entries.push(
+      { accountId: inventoryId, debit: reversal, credit: 0, memo: `إعادة بضاعة للمخزون` },
+      { accountId: cogsId, debit: 0, credit: reversal, memo: `عكس تكلفة بضاعة مباعة` },
+    );
+  }
 
   const statements: TxStatement[] = [
     buildJournalEntryStatement(companyId, {
@@ -314,13 +348,7 @@ export async function buildSalesReturnPostingStatements(
       description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
       date: ret.date,
       totalAmount: ret.amount,
-      entries: [
-        { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
-        { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
-        // Simplified COGS reversal at an assumed 70% cost ratio.
-        { accountId: inventoryId, debit: Math.floor(ret.amount * 0.7), credit: 0, memo: `إعادة بضاعة للمخزون` },
-        { accountId: cogsId || inventoryId, debit: 0, credit: Math.floor(ret.amount * 0.7), memo: `عكس تكلفة بضاعة مباعة` },
-      ],
+      entries,
     }),
   ];
 
@@ -686,61 +714,27 @@ export async function postPaymentVoucher(
  * Post a Sales Return to accounting (reverse of sales)
  * Dr: Sales Returns
  * Cr: Trade Debtors
+ * (+ actual-cost COGS reversal when cogsReversal is provided)
+ *
+ * Single source of truth: the composable buildSalesReturnPostingStatements
+ * owns the JE shape. This wrapper keeps its standalone-transaction contract
+ * for backward compatibility.
  */
 export async function postSalesReturn(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number }
 ) {
-  const salesReturnsId = await getDefaultAccountId(companyId, 'default_sales_returns');
-  const debtorsId = await getDefaultAccountId(companyId, 'default_debtors');
-  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
-  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
+  const posting = await buildSalesReturnPostingStatements(companyId, {
+    id: ret.id,
+    returnNumber: ret.returnNumber,
+    date: ret.date,
+    customer: ret.customer,
+    amount: ret.amount,
+    cogsReversal: ret.cogsReversal,
+  });
+  if (!posting.success) return { success: false, error: posting.error };
 
-  if (!salesReturnsId || !debtorsId || !inventoryId) {
-    return { success: false, error: 'Required accounts not found. Please configure default accounts in Settings.' };
-  }
-
-  const entries: JournalEntryLine[] = [
-    { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
-    { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
-    // Also return inventory (simplified: assume full return to inventory)
-    { accountId: inventoryId, debit: Math.floor(ret.amount * 0.7), credit: 0, memo: `إعادة بضاعة للمخزون` },
-    { accountId: cogsId || inventoryId, debit: 0, credit: Math.floor(ret.amount * 0.7), memo: `عكس تكلفة بضاعة مباعة` },
-  ];
-
-  // Atomic batch: the journal entry AND its stock movements commit together
-  // (or roll back together), keeping accounting and inventory in lock-step.
-  const statements: TxStatement[] = [
-    buildJournalEntryStatement(companyId, {
-      reference: ret.returnNumber,
-      description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
-      date: ret.date,
-      totalAmount: ret.amount,
-      entries,
-    }),
-  ];
-
-  if (ret.id) {
-    // Insert stock_movements (type='in') for each return line so inventory
-    // reflects goods returning to the warehouse they currently sit in.
-    statements.push({
-      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
-         SELECT sr.company_id, srl.product_id, wh.warehouse_id, 'in', srl.quantity, $1, NOW()
-           FROM sales_returns sr
-           JOIN sales_return_lines srl ON srl.return_id = sr.id
-           JOIN LATERAL (
-             SELECT s.warehouse_id
-               FROM stock s
-              WHERE s.product_id = srl.product_id AND s.company_id = sr.company_id
-              ORDER BY s.quantity DESC
-              LIMIT 1
-           ) wh ON true
-          WHERE sr.id = $2 AND sr.company_id = $3`,
-      params: [ret.returnNumber, ret.id, companyId],
-    });
-  }
-
-  const txResult = await runTransaction(statements);
+  const txResult = await runTransaction(posting.statements);
   if (!txResult.success) return { success: false, error: txResult.error };
   return { success: true };
 }

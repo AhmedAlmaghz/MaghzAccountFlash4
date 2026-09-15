@@ -200,7 +200,7 @@ export const purchasesApi = {
       const result = await adapter.query(
         `SELECT s.*,
                 (COALESCE(s.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                  + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
                  - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
                 ) AS computed_balance
@@ -259,7 +259,7 @@ export const purchasesApi = {
       const dataResult = await adapter.query(
         `SELECT s.*,
                 (COALESCE(s.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                  + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
                  - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
                 ) AS computed_balance
@@ -287,7 +287,7 @@ export const purchasesApi = {
       const result = await adapter.query(
         `SELECT s.*,
                 (COALESCE(s.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                  + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
                  - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
                 ) AS computed_balance
@@ -414,7 +414,7 @@ export const purchasesApi = {
           SELECT id, date, 'invoice' AS type, invoice_number AS doc_number, 'فاتورة مشتريات' AS description,
                  0::numeric AS debit, total_amount AS credit, 1 AS sort_type
           FROM purchase_invoices
-          WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status != 'cancelled'
+          WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status != 'cancelled' AND COALESCE(payment_type, 'credit') <> 'cash'
           UNION ALL
           SELECT id, date, 'return' AS type, return_number AS doc_number, 'مردود مشتريات' AS description,
                  total_amount AS debit, 0::numeric AS credit, 1 AS sort_type
@@ -463,7 +463,7 @@ export const purchasesApi = {
       const result = await adapter.query(
         `SELECT COALESCE(due_date, date) AS aging_date, (total_amount - COALESCE(paid_amount,0)) AS due_amount
         FROM purchase_invoices
-        WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount,0)) > 0
+        WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount,0)) > 0 AND COALESCE(payment_type, 'credit') <> 'cash'
         UNION ALL
         SELECT COALESCE(opening_date, DATE '1900-01-01') AS aging_date, opening_balance AS due_amount
         FROM suppliers WHERE id = $1 AND company_id = $2 AND opening_balance > 0
@@ -514,7 +514,7 @@ export const purchasesApi = {
       const adapter = await getDbAdapter();
       // Full AP = opening + outstanding invoices - posted payments - posted returns.
       const result = await adapter.query(
-        `SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) AS outstanding FROM purchase_invoices WHERE company_id = $1 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount, 0)) > 0
+        `SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) AS outstanding FROM purchase_invoices WHERE company_id = $1 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount, 0)) > 0 AND COALESCE(payment_type, 'credit') <> 'cash'
          UNION ALL SELECT COALESCE(SUM(opening_balance),0) FROM suppliers WHERE company_id = $1 AND opening_balance > 0
          UNION ALL SELECT -COALESCE(SUM(amount),0) FROM payment_vouchers WHERE company_id = $1 AND status = 'posted'
          UNION ALL SELECT -COALESCE(SUM(total_amount),0) FROM purchase_returns WHERE company_id = $1 AND status = 'posted'`,

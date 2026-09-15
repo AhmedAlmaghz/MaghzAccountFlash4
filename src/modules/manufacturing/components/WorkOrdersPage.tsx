@@ -271,27 +271,49 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     if (!confirmStatus) return;
     const addToast = useToastStore.getState().addToast;
     // Persist user-entered ACTUAL consumption before completing. The fields
-    // are PRE-FILLED with planned values; the user edits only what deviated.
+    // are PRE-FILLED with planned values (mandatory) — empty is rejected,
+    // fallback is forbidden: the persisted actual IS the source of truth.
     if (confirmStatus.status === 'completed' && completionLines.length > 0) {
-      const bad = completionLines.find((l) => Number(l.actualQuantity) < 0 || Number(l.actualUnitCost) < 0);
+      const empty = completionLines.find((l) => l.actualQuantity.trim() === '' || String(l.actualUnitCost).trim() === '');
+      if (empty) {
+        addToast('error', t('manufacturing.workOrders.negativeValuesError'));
+        return;
+      }
+      const bad = completionLines.find((l) => {
+        const q = Number(l.actualQuantity);
+        const c = Number(l.actualUnitCost);
+        return !Number.isFinite(q) || q < 0 || !Number.isFinite(c) || c < 0;
+      });
       if (bad) {
         addToast('error', t('manufacturing.workOrders.negativeValuesError'));
         return;
       }
-      const consumptions = completionLines.map((l) => {
-        const entered = l.actualQuantity.trim() === '' ? NaN : Number(l.actualQuantity);
-        const actual = Number.isFinite(entered) && entered >= 0 ? entered : l.plannedQuantity;
-        return { id: l.id, actualQuantity: actual, actualUnitCost: Number(l.actualUnitCost) || l.unitCost, unitCost: l.unitCost };
-      });
+      const consumptions = completionLines.map((l) => ({
+        id: l.id,
+        actualQuantity: Number(l.actualQuantity),
+        actualUnitCost: Number(l.actualUnitCost),
+        unitCost: l.unitCost,
+      }));
       const upd = await manufacturingApi.batchUpdateConsumptions(consumptions, companyId);
       if (!upd.success) {
         addToast('error', upd.error || t('common.error'));
         return;
       }
     }
-    if (confirmStatus.status === 'completed' && producedQty && Number(producedQty) < 0) {
-      addToast('error', t('manufacturing.workOrders.negativeValuesError'));
-      return;
+    if (confirmStatus.status === 'completed') {
+      if (!producedQty || producedQty.trim() === '') {
+        addToast('error', t('manufacturing.workOrders.negativeValuesError'));
+        return;
+      }
+      const pq = Number(producedQty);
+      if (!Number.isFinite(pq) || pq <= 0) {
+        addToast('error', t('manufacturing.workOrders.negativeValuesError'));
+        return;
+      }
+      if (!outputWarehouseId) {
+        addToast('error', t('manufacturing.workOrders.negativeValuesError'));
+        return;
+      }
     }
     const res = await changeStatus(
       confirmStatus.id,
@@ -955,6 +977,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                     onChange={(e) => setProducedQty(e.target.value)}
                     placeholder={t('manufacturing.workOrders.enterActualQuantity')}
                     helperText={t('manufacturing.workOrders.producedDefaultHint')}
+                    required
                   />
                 </div>
                 {completionLines.length > 0 && (
@@ -979,6 +1002,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                                 type="number"
                                 min="0"
                                 step="any"
+                                required
                                 value={l.actualQuantity}
                                 onChange={(e) => setCompletionLines((prev) => prev.map((x, xi) => (xi === i ? { ...x, actualQuantity: e.target.value } : x)))}
                                 aria-label={`${t('manufacturing.status.actual')} — ${l.materialName}`}
@@ -996,6 +1020,7 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
                                 type="number"
                                 min="0"
                                 step="any"
+                                required
                                 value={String(l.actualUnitCost)}
                                 onChange={(e) => setCompletionLines((prev) => prev.map((x, xi) => (xi === i ? { ...x, actualUnitCost: Number(e.target.value) || 0 } : x)))}
                                 aria-label={`${t('manufacturing.workOrders.actualUnitCost')} — ${l.materialName}`}
