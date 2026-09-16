@@ -1,0 +1,1 @@
+fetch('http://127.0.0.1:5173/').then(r=>r.text()).then(t=>{console.log('NODE CONNECTED', t.length); process.exit(0)}).catch(e=>{console.log('NODE FAIL', e.message); process.exit(1)})
