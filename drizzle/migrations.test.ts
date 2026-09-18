@@ -1006,7 +1006,9 @@ describe('Migration 0027: POS module', () => {
 
   it('SQL module table rules authorize pos tables and pos receipt numbering', () => {
     const handler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
-    expect(handler).toMatch(/\{ module: 'pos', tables: \['pos_shifts', 'pos_payments'\] \}/);
+    // Trailing rule fields (e.g. Phase-4 readPermissions for cashier
+    // cross-module reads) are allowed — the tables list is the contract.
+    expect(handler).toMatch(/\{ module: 'pos', tables: \['pos_shifts', 'pos_payments'\][^}]*\}/);
     // sales_invoices rule must allow pos.create/pos.post writes (cashiers)
     expect(handler).toMatch(/writePermissions: \['sales\.create', 'sales\.edit', 'sales\.post', 'pos\.create', 'pos\.post'\]/);
     expect(handler).toMatch(/'pos\.create',\s*\n\s*\]/);
@@ -1060,6 +1062,285 @@ describe('Migration 0028: AI job-item claim leases', () => {
       // recover gate: NULL (pre-migration) or expired only — never live leases
       expect(src).toMatch(/\(claim_expires_at IS NULL OR claim_expires_at < NOW\(\)\)/);
     }
+  });
+});
+
+describe('Migration 0029: perpetual inventory valuation (Phase 1 FIN-1)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0029_inventory_valuation.sql'), 'utf-8');
+
+  it('creates the FIFO layers table with company scoping + ordering index', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS inventory_layers/);
+    expect(migrationSql).toMatch(/company_id uuid NOT NULL REFERENCES companies\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/product_id uuid NOT NULL REFERENCES products\(id\) ON DELETE CASCADE/);
+    expect(migrationSql).toMatch(/warehouse_id uuid REFERENCES warehouses\(id\) ON DELETE SET NULL/);
+    expect(migrationSql).toMatch(/qty_remaining numeric\(18, 4\) NOT NULL DEFAULT 0/);
+    expect(migrationSql).toMatch(/idx_layers_fifo_order/);
+    expect(migrationSql).toMatch(/received_date, created_at/);
+    expect(migrationSql).toMatch(/WHERE qty_remaining > 0/);
+  });
+
+  it('adds standard_cost + sales-line unit_cost as nullable (legacy-safe)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE products ADD COLUMN IF NOT EXISTS standard_cost numeric\(18, 4\)/);
+    expect(migrationSql).toMatch(/ALTER TABLE sales_invoice_lines ADD COLUMN IF NOT EXISTS unit_cost numeric\(18, 4\)/);
+    // nullable by design: pre-Phase-1 rows keep NULL → callers fall back.
+    // (Scoped to the ALTER: inventory_layers.unit_cost is NOT NULL by
+    // design — a fresh layer always carries its cost.)
+    expect(migrationSql).not.toMatch(/ADD COLUMN IF NOT EXISTS unit_cost numeric\(18, 4\) NOT NULL/);
+  });
+
+  it('seeds variance/shortage/surplus accounts + default keys per company (0012 pattern)', () => {
+    for (const code of ['51901', '52901', '41901']) {
+      expect(migrationSql).toContain(`'${code}'`);
+    }
+    for (const key of ['default_price_variance', 'default_inventory_shortage', 'default_inventory_surplus']) {
+      expect(migrationSql).toContain(`'${key}'`);
+    }
+    expect(migrationSql).toMatch(/WHERE NOT EXISTS/);
+  });
+
+  it('is idempotent (IF NOT EXISTS on tables/columns/indexes)', () => {
+    const tables = (migrationSql.match(/CREATE TABLE IF NOT EXISTS/g) || []).length;
+    expect(tables).toBeGreaterThanOrEqual(1);
+    const addCols = (migrationSql.match(/ADD COLUMN IF NOT EXISTS/g) || []).length;
+    expect(addCols).toBe(2);
+    const idx = (migrationSql.match(/CREATE INDEX IF NOT EXISTS/g) || []).length;
+    expect(idx).toBe(2);
+  });
+
+  it('journal registers 0029 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0029_inventory_valuation')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0029 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0029_inventory_valuation\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0029_inventory_valuation', sql: inventoryValuation \}/);
+  });
+
+  it('Drizzle schema exposes inventoryLayers + standardCost + line unitCost', () => {
+    const inv = readFileSync(join(process.cwd(), 'src/core/database/schema/inventory.ts'), 'utf-8');
+    expect(inv).toMatch(/export const inventoryLayers = pgTable\('inventory_layers'/);
+    expect(inv).toMatch(/standardCost: numeric\('standard_cost'/);
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    expect(sales).toMatch(/unitCost: numeric\('unit_cost'/);
+  });
+
+  it('valuation engine + postings consume the new columns (no dead schema)', () => {
+    const valuation = readFileSync(join(process.cwd(), 'src/core/utils/valuation.ts'), 'utf-8');
+    expect(valuation).toMatch(/FROM inventory_layers/);
+    expect(valuation).toMatch(/standard_cost/);
+    const salesApi = readFileSync(join(process.cwd(), 'src/modules/sales/api.ts'), 'utf-8');
+    expect(salesApi).toMatch(/SET unit_cost = /);
+  });
+});
+
+describe('Migration 0030: FX revaluation (Phase 2 FIN-2)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0030_fx_revaluation.sql'), 'utf-8');
+
+  it('seeds the 52902 exchange-difference account + key per company', () => {
+    expect(migrationSql).toContain(`'52902'`);
+    expect(migrationSql).toContain(`'default_exchange_difference'`);
+    expect(migrationSql).toMatch(/WHERE NOT EXISTS/);
+  });
+
+  it('adds last_reval_rate anchors to both invoice tables (nullable)', () => {
+    expect(migrationSql).toMatch(/ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS last_reval_rate numeric\(18, 6\)/);
+    expect(migrationSql).toMatch(/ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS last_reval_rate numeric\(18, 6\)/);
+    expect(migrationSql).not.toMatch(/last_reval_rate numeric\(18, 6\) NOT NULL/);
+  });
+
+  it('is idempotent and additive-only', () => {
+    expect(migrationSql).not.toMatch(/\bDROP\s+(TABLE|INDEX|CONSTRAINT)\b/i);
+    expect((migrationSql.match(/IF NOT EXISTS/g) || []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('journal registers 0030 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0030_fx_revaluation')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0030 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0030_fx_revaluation\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0030_fx_revaluation', sql: fxRevaluation \}/);
+  });
+
+  it('Drizzle schemas expose lastRevalRate on both invoice tables', () => {
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    expect(sales).toMatch(/lastRevalRate: numeric\('last_reval_rate'/);
+    const purch = readFileSync(join(process.cwd(), 'src/core/database/schema/purchases.ts'), 'utf-8');
+    expect(purch).toMatch(/lastRevalRate: numeric\('last_reval_rate'/);
+  });
+
+  it('revaluation API + FX builder exist and the account is wired everywhere', () => {
+    const api = readFileSync(join(process.cwd(), 'src/modules/accounting/api.ts'), 'utf-8');
+    expect(api).toMatch(/revalueForeignBalances/);
+    expect(api).toMatch(/SET last_reval_rate/);
+    const gen = readFileSync(join(process.cwd(), 'src/core/utils/journalEntryGenerator.ts'), 'utf-8');
+    expect(gen).toMatch(/buildFxDifferenceStatements/);
+    expect(gen).toMatch(/default_exchange_difference/);
+    for (const f of ['electron/seedDemoData.js', 'electron/dbHandler.js', 'src/core/api.ts', 'src/core/types.ts']) {
+      const src = readFileSync(join(process.cwd(), f), 'utf-8');
+      expect(src).toContain('default_exchange_difference');
+    }
+  });
+});
+
+describe('Migration 0032: year-end close + fixed assets + accounting periods (Phase 5)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0032_phase5_close_assets_periods.sql'), 'utf-8');
+
+  it('creates accounting_periods with a yearly uniqueness guard + status check', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS accounting_periods/);
+    expect(migrationSql).toMatch(/uq_accounting_periods_year UNIQUE \(company_id, year\)/);
+    expect(migrationSql).toMatch(/status IN \('open',\s*'closed'\)/);
+  });
+
+  it('creates fixed_assets with method/status checks + code uniqueness', () => {
+    expect(migrationSql).toMatch(/CREATE TABLE IF NOT EXISTS fixed_assets/);
+    expect(migrationSql).toMatch(/method IN \('straight_line',\s*'declining_balance'\)/);
+    expect(migrationSql).toMatch(/status IN \('active',\s*'disposed'\)/);
+    expect(migrationSql).toMatch(/uq_fixed_assets_code UNIQUE \(company_id, code\)/);
+  });
+
+  it('seeds groups 12/121/32/321 + leaves 12101/12102/32101/52601 per company', () => {
+    for (const code of ['12', '121', '12101', '12102', '32', '321', '32101', '52601']) {
+      expect(migrationSql).toContain(`'${code}'`);
+    }
+    // Contra asset carries a credit nature under its asset group.
+    expect(migrationSql).toMatch(/'12102'[^)]*'asset',\s*'credit'/);
+    expect(migrationSql).toMatch(/WHERE NOT EXISTS/);
+  });
+
+  it('seeds the four Phase-5 default-account keys per company', () => {
+    for (const key of ['default_fixed_assets', 'default_accumulated_depreciation', 'default_depreciation_expense', 'default_retained_earnings']) {
+      expect(migrationSql).toContain(`'${key}'`);
+    }
+  });
+
+  it('is idempotent and additive-only', () => {
+    expect(migrationSql).not.toMatch(/\bDROP\s+(TABLE|INDEX|CONSTRAINT)\b/i);
+    expect((migrationSql.match(/IF NOT EXISTS/g) || []).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('journal registers 0032 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0032_phase5_close_assets_periods')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0032 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0032_phase5_close_assets_periods\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0032_phase5_close_assets_periods', sql: phase5CloseAssetsPeriods \}/);
+  });
+
+  it('Drizzle schema exposes accountingPeriods + fixedAssets', () => {
+    const schema = readFileSync(join(process.cwd(), 'src/core/database/schema/accounting.ts'), 'utf-8');
+    expect(schema).toMatch(/export const accountingPeriods = pgTable\('accounting_periods'/);
+    expect(schema).toMatch(/export const fixedAssets = pgTable\('fixed_assets'/);
+    expect(schema).toMatch(/accumulatedDepreciation: numeric\('accumulated_depreciation'/);
+  });
+
+  it('the four accounts + keys are wired everywhere (seeds, templates, fallbacks)', () => {
+    const gen = readFileSync(join(process.cwd(), 'src/core/utils/journalEntryGenerator.ts'), 'utf-8');
+    for (const key of ['default_fixed_assets', 'default_accumulated_depreciation', 'default_depreciation_expense', 'default_retained_earnings']) {
+      expect(gen).toContain(key);
+    }
+    for (const f of ['electron/seedDemoData.js', 'electron/dbHandler.js', 'src/core/api.ts', 'src/core/types.ts']) {
+      const src = readFileSync(join(process.cwd(), f), 'utf-8');
+      for (const key of ['default_fixed_assets', 'default_accumulated_depreciation', 'default_depreciation_expense', 'default_retained_earnings']) {
+        expect(src).toContain(key);
+      }
+    }
+    for (const code of ['12101', '12102', '32101', '52601']) {
+      const seed = readFileSync(join(process.cwd(), 'electron/seedDemoData.js'), 'utf-8');
+      expect(seed).toContain(`'${code}'`);
+    }
+  });
+
+  it('backup plan covers both Phase-5 tables in FK-safe order (both copies)', () => {
+    const plan = readFileSync(join(process.cwd(), 'src/core/backup/backupTables.ts'), 'utf-8');
+    expect(plan).toContain("C('accounting_periods')");
+    expect(plan).toContain("C('fixed_assets')");
+    const handler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(handler).toMatch(/\{ table: 'accounting_periods', scope: \{ type: 'company' \} \}/);
+    expect(handler).toMatch(/\{ table: 'fixed_assets', scope: \{ type: 'company' \} \}/);
+    expect(handler).toContain(`'accounting_periods', 'fixed_assets'`);
+  });
+
+  it('SQL module rules + AI whitelist admit the Phase-5 tables', () => {
+    const handler = readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+    expect(handler).toMatch(/'fixed_assets', 'accounting_periods'/);
+    const guard = readFileSync(join(process.cwd(), 'src/modules/ai/security/sqlGuard.ts'), 'utf-8');
+    expect(guard).toContain(`'fixed_assets'`);
+    expect(guard).toContain(`'accounting_periods'`);
+  });
+});
+
+describe('Migration 0033: leave-provision account (Phase 5 IAS 19)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0033_leave_provision_account.sql'), 'utf-8');
+
+  it('seeds 21504 under 215 + its default key per company', () => {
+    expect(migrationSql).toContain(`'21504'`);
+    expect(migrationSql).toContain(`'default_leave_provision'`);
+    expect(migrationSql).toMatch(/WHERE NOT EXISTS/);
+    expect(migrationSql).not.toMatch(/\bDROP\s+(TABLE|INDEX|CONSTRAINT)\b/i);
+  });
+
+  it('journal registers 0033 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0033_leave_provision_account')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0033 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0033_leave_provision_account\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0033_leave_provision_account', sql: leaveProvisionAccount \}/);
+  });
+
+  it('the key is wired everywhere (seeds, templates, types)', () => {
+    for (const f of ['electron/seedDemoData.js', 'src/core/api.ts', 'src/core/types.ts']) {
+      const src = readFileSync(join(process.cwd(), f), 'utf-8');
+      expect(src).toContain('default_leave_provision');
+    }
+    const seed = readFileSync(join(process.cwd(), 'electron/seedDemoData.js'), 'utf-8');
+    expect(seed).toContain(`'21504'`);
+  });
+});
+
+describe('Migration 0034: treasury box accounts (Phase 6)', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0034_treasury_box_accounts.sql'), 'utf-8');
+
+  it('creates 11102/11103 under 111 + links null-account BNK-001/WLT-JEB boxes', () => {
+    expect(migrationSql).toContain(`'11102'`);
+    expect(migrationSql).toContain(`'11103'`);
+    expect(migrationSql).toMatch(/cb\.account_id IS NULL/);
+    expect(migrationSql).toMatch(/cb\.code = 'BNK-001'.*a\.code = '11102'/s);
+    expect(migrationSql).toMatch(/cb\.code = 'WLT-JEB'.*a\.code = '11103'/s);
+    expect(migrationSql).not.toMatch(/\bDROP\s+(TABLE|INDEX|CONSTRAINT)\b/i);
+  });
+
+  it('journal registers 0034 and count mirrors sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0034_treasury_box_accounts')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0034 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0034_treasury_box_accounts\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0034_treasury_box_accounts', sql: treasuryBoxAccounts \}/);
+  });
+
+  it('demo seed carries 11102/11103 + the CASH walk-in customer', () => {
+    const seed = readFileSync(join(process.cwd(), 'electron/seedDemoData.js'), 'utf-8');
+    expect(seed).toContain(`'11102'`);
+    expect(seed).toContain(`'11103'`);
+    expect(seed).toContain(`code: 'CASH'`);
   });
 });
 

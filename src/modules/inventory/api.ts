@@ -1,5 +1,5 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
-import { mapRows } from '@/core/utils/mapPgRow';
+import { mapRows, toDateString } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { z } from 'zod';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createProductSchema, createProductUnitSchema, updateProductUnitSchema, createWarehouseSchema, createStockTransferSchema, createStockAdjustmentSchema, createInventoryTransactionSchema, createProductCategorySchema } from '@/core/utils/validation';
@@ -142,6 +142,14 @@ export const inventoryApi = {
       const created = await adapter.createProduct(payload);
       if (!created.success || !created.id) return { success: false, error: created.error };
       const productId = String(created.id);
+      // Phase 1: the typed-RPC create path has a fixed column list without
+      // standard_cost — persist it with a follow-up UPDATE on all transports.
+      if (data.standardCost !== undefined && data.standardCost !== null) {
+        await adapter.query(
+          `UPDATE products SET standard_cost = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          [data.standardCost, productId, data.companyId]
+        );
+      }
       // Every product owns at least its base unit row (migration 0021
       // backfills history; this covers newly created products).
       await inventoryApi.ensureBaseProductUnit(productId, data.companyId);
@@ -180,8 +188,8 @@ export const inventoryApi = {
         }
       }
       return adapter.query(
-        `UPDATE products SET name_ar = $1, name_en = $2, code = $3, barcode = $4, sku = $5, unit = $6, cost_price = $7, sale_price = $8, is_active = $9, image = $10, min_stock = $11, max_stock = $12, reorder_point = $13, category_id = $14, product_type_id = $15, updated_by = $16, updated_at = NOW() WHERE id = $17 AND company_id = $18`,
-        [data.nameAr, data.nameEn, data.code, data.barcode, data.sku, data.unit, data.costPrice, data.salePrice, data.isActive, data.image, data.minStock, data.maxStock, data.reorderPoint, data.categoryId ?? null, data.productTypeId ?? null, _updatedBy ?? data.updatedBy ?? null, id, companyId]
+        `UPDATE products SET name_ar = $1, name_en = $2, code = $3, barcode = $4, sku = $5, unit = $6, cost_price = $7, sale_price = $8, is_active = $9, image = $10, min_stock = $11, max_stock = $12, reorder_point = $13, category_id = $14, product_type_id = $15, standard_cost = COALESCE($16::numeric, standard_cost), updated_by = $17, updated_at = NOW() WHERE id = $18 AND company_id = $19`,
+        [data.nameAr, data.nameEn, data.code, data.barcode, data.sku, data.unit, data.costPrice, data.salePrice, data.isActive, data.image, data.minStock, data.maxStock, data.reorderPoint, data.categoryId ?? null, data.productTypeId ?? null, data.standardCost ?? null, _updatedBy ?? data.updatedBy ?? null, id, companyId]
       ).then(async (res) => {
         // The base unit row mirrors the product card prices by definition.
         if (res.success && (data.costPrice !== undefined || data.salePrice !== undefined)) {
@@ -639,6 +647,11 @@ export const inventoryApi = {
       if (!hdr.success || !hdr.rows?.[0]) return { success: false, error: 'Transfer not found or not in draft status' };
       const fromId = String((hdr.rows[0] as Record<string, unknown>).from_warehouse_id);
       const toId = String((hdr.rows[0] as Record<string, unknown>).to_warehouse_id);
+      // Phase 4: transfers respect the negative-issue policy — when allowed,
+      // the atomic floor below is skipped (documented override, audited).
+      const { getStockPolicies: getTransferPolicies } = await import('@/core/utils/stockPolicy');
+      const transferPolicies = await getTransferPolicies(companyId, adapter);
+      const enforceFloor = !transferPolicies.allowNegativeIssue;
       const tx: Array<{ sql: string; params?: unknown[] }> = [];
       // Atomic floor FIRST: abort the whole transaction when any line
       // exceeds source stock. A JS pre-check alone races (concurrent
@@ -650,14 +663,16 @@ export const inventoryApi = {
       // NOTE: the denominator MUST be a runtime aggregate, never the
       // constant 1/0 — PostgreSQL constant-folds 1/0 at PLAN time and would
       // abort EVERY transfer (proven live: sufficient case threw too).
-      tx.push({
-        sql: `SELECT CASE WHEN EXISTS (
-                SELECT 1 FROM warehouse_transfer_lines wtl
-                LEFT JOIN stock s ON s.company_id = $2::uuid AND s.product_id = wtl.product_id AND s.warehouse_id = $3::uuid
-               WHERE wtl.transfer_id = $1::uuid AND COALESCE(s.quantity, 0) < wtl.quantity
-              ) THEN 1 / (SELECT COUNT(*) FROM warehouse_transfer_lines WHERE transfer_id = $1::uuid AND 1 = 0) ELSE 1 END AS stock_floor_ok`,
-        params: [id, companyId, fromId],
-      });
+      if (enforceFloor) {
+        tx.push({
+          sql: `SELECT CASE WHEN EXISTS (
+                  SELECT 1 FROM warehouse_transfer_lines wtl
+                  LEFT JOIN stock s ON s.company_id = $2::uuid AND s.product_id = wtl.product_id AND s.warehouse_id = $3::uuid
+                 WHERE wtl.transfer_id = $1::uuid AND COALESCE(s.quantity, 0) < wtl.quantity
+                ) THEN 1 / (SELECT COUNT(*) FROM warehouse_transfer_lines WHERE transfer_id = $1::uuid AND 1 = 0) ELSE 1 END AS stock_floor_ok`,
+          params: [id, companyId, fromId],
+        });
+      }
       // Ensure destination stock rows exist
       tx.push({
         sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
@@ -793,6 +808,21 @@ export const inventoryApi = {
       if (!validation.success) return { success: false, error: validation.error };
       const adapter = await getDbAdapter();
       const qty = Number(data.quantity) || 0;
+      // Phase 4: manual outflows respect the negative-issue policy.
+      if (data.type === 'out' && qty > 0) {
+        const { getStockPolicies, checkStockSufficiency, formatShortages } =
+          await import('@/core/utils/stockPolicy');
+        const policies = await getStockPolicies(data.companyId, adapter);
+        const gate = await checkStockSufficiency(
+          data.companyId,
+          [{ productId: data.productId, baseQty: qty }],
+          adapter,
+          data.warehouseId
+        );
+        if (!gate.ok && !policies.allowNegativeIssue) {
+          return { success: false, error: `المخزون لا يكفي للصرف (${formatShortages(gate.shortages)})` };
+        }
+      }
       const delta = data.type === 'out' ? -qty : qty;
       // Skip stock update for transfers (handled by dedicated transfer flow)
       if (data.type === 'transfer') {
@@ -930,7 +960,7 @@ export const inventoryApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const chk = await adapter.query(
-        `SELECT sa.product_id, sa.warehouse_id, sa.system_qty, sa.actual_qty, sa.difference, sa.reason, sa.date, p.name_ar AS product_name
+        `SELECT sa.product_id, sa.warehouse_id, sa.system_qty, sa.actual_qty, sa.difference, sa.reason, sa.date, sa.unit_cost, p.name_ar AS product_name, p.cost_price
            FROM stock_adjustments sa LEFT JOIN products p ON p.id = sa.product_id
           WHERE sa.id = $1 AND sa.company_id = $2 AND sa.status IN ('draft','approved')`,
         [id, companyId]
@@ -943,7 +973,9 @@ export const inventoryApi = {
       const actualQty = Number(adj.actual_qty) || 0;
       const productName = String(adj.product_name || productId);
       const reason = String(adj.reason || '');
-      const adjDate = String(adj.date || new Date().toISOString().split('T')[0]);
+      // toDateString (never String()): raw pg DATE values are Date objects
+      // whose locale format PG rejects as ::date (Phase 45 trap).
+      const adjDate = toDateString(adj.date) || new Date().toISOString().split('T')[0];
       const tx: Array<{ sql: string; params?: unknown[] }> = [];
       // Ensure stock row exists
       tx.push({
@@ -960,10 +992,38 @@ export const inventoryApi = {
         sql: `UPDATE stock SET quantity = $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
         params: [actualQty, companyId, productId, warehouseId],
       });
-      // Journal entry if difference != 0
+      // Phase 1: FIFO layer bookkeeping for count variances (same batch).
+      // Surplus re-enters as a layer at counted cost; shortage consumes
+      // oldest layers (partial-tolerant — counted losses outrank layer gaps).
+      const {
+        getValuationMethod, allocateFifoOutflow, buildFifoConsumeStatements,
+        buildFifoRestoreStatement,
+      } = await import('@/core/utils/valuation');
+      const storedCost = adj.unit_cost !== null && adj.unit_cost !== undefined && adj.unit_cost !== '' ? Number(adj.unit_cost) : NaN;
+      const unitCost = !isNaN(storedCost) && storedCost > 0 ? storedCost : (Number(adj.cost_price) || 0);
+      if (difference !== 0 && (await getValuationMethod(companyId, adapter)) === 'fifo') {
+        if (difference > 0) {
+          const stmt = buildFifoRestoreStatement(companyId, {
+            productId, warehouseId, qty: difference, unitCost,
+            receivedDate: adjDate, sourceRef: `ADJ-${id}`,
+          });
+          if (stmt) tx.push({ sql: stmt.sql, params: stmt.params as unknown[] });
+        } else {
+          const alloc = await allocateFifoOutflow(
+            companyId, [{ productId, baseQty: Math.abs(difference) }], adapter, { partial: true }
+          );
+          if (alloc.success) {
+            for (const s of buildFifoConsumeStatements(companyId, alloc.consumptions)) {
+              tx.push({ sql: s.sql, params: (s.params ?? []) as unknown[] });
+            }
+          }
+        }
+      }
+      // Journal entry if difference != 0 — Phase 1: valued at unit cost
+      // (stored on the adjustment, else current average), never the raw qty.
       if (difference !== 0) {
         const { buildStockAdjustmentPostingStatements } = await import('@/core/utils/journalEntryGenerator');
-        const je = await buildStockAdjustmentPostingStatements(companyId, { product: productName, difference, reason, date: adjDate, id });
+        const je = await buildStockAdjustmentPostingStatements(companyId, { product: productName, difference, reason, date: adjDate, id, unitCost });
         if (!je.success) return { success: false, error: je.error };
         for (const s of je.statements) tx.push({ sql: s.sql, params: s.params as unknown[] });
       }

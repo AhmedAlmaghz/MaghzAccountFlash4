@@ -106,11 +106,16 @@ export const DEFAULT_ACCOUNT_FUNCTIONS: { key: string; labelAr: string; labelEn:
   { key: 'default_payroll_deductions', labelAr: 'استقطاعات مستحقة', labelEn: 'Payroll Deductions Payable', required: false },
   { key: 'default_eos_payable', labelAr: 'مستحقات نهاية الخدمة', labelEn: 'End-of-Service Payable', required: false },
   { key: 'default_eos_expense', labelAr: 'مصروف نهاية الخدمة', labelEn: 'End-of-Service Expense', required: false },
+  { key: 'default_leave_provision', labelAr: 'مخصص الإجازات', labelEn: 'Leave Provision', required: false },
   { key: 'default_discount_allowed', labelAr: 'خصم مسموح', labelEn: 'Discount Allowed', required: false },
   { key: 'default_discount_received', labelAr: 'خصم مقبوض', labelEn: 'Discount Received', required: false },
   { key: 'default_sales_returns', labelAr: 'مردودات مبيعات', labelEn: 'Sales Returns', required: true },
   { key: 'default_purchase_returns', labelAr: 'مردودات مشتريات', labelEn: 'Purchase Returns', required: true },
   // ── المخازن والتصنيع ──
+  { key: 'default_price_variance', labelAr: 'فروق أسعار الشراء', labelEn: 'Purchase Price Variance', required: false },
+  { key: 'default_exchange_difference', labelAr: 'فروق أسعار الصرف', labelEn: 'Exchange Gain/Loss', required: false },
+  { key: 'default_inventory_shortage', labelAr: 'عجز المخزون', labelEn: 'Inventory Shortage', required: false },
+  { key: 'default_inventory_surplus', labelAr: 'فائض المخزون', labelEn: 'Inventory Surplus', required: false },
   { key: 'default_wip', labelAr: 'بضاعة تحت التشغيل', labelEn: 'Work in Progress', required: false },
   { key: 'default_finished_goods', labelAr: 'مخزون البضاعة التامة', labelEn: 'Finished Goods', required: false },
   { key: 'default_production_labor', labelAr: 'عمالة الإنتاج', labelEn: 'Production Labor', required: false },
@@ -118,6 +123,11 @@ export const DEFAULT_ACCOUNT_FUNCTIONS: { key: string; labelAr: string; labelEn:
   { key: 'default_production_packaging', labelAr: 'تغليف الإنتاج', labelEn: 'Production Packaging', required: false },
   { key: 'default_production_other', labelAr: 'تكاليف إنتاج أخرى', labelEn: 'Production Other', required: false },
   { key: 'default_production_loss', labelAr: 'خسائر الإنتاج', labelEn: 'Production Losses', required: false },
+  // ── الأصول الثابتة والإقفال ──
+  { key: 'default_fixed_assets', labelAr: 'تكلفة الأصول الثابتة', labelEn: 'Fixed Assets at Cost', required: false },
+  { key: 'default_accumulated_depreciation', labelAr: 'مجمع الإهلاك', labelEn: 'Accumulated Depreciation', required: false },
+  { key: 'default_depreciation_expense', labelAr: 'مصروف الإهلاك', labelEn: 'Depreciation Expense', required: false },
+  { key: 'default_retained_earnings', labelAr: 'الأرباح المبقاة', labelEn: 'Retained Earnings', required: false },
   // ── حسابات عامة ──
   { key: 'default_opening_balance', labelAr: 'الأرصدة الافتتاحية', labelEn: 'Opening Balance Equity', required: false },
   { key: 'default_shipping', labelAr: 'النقل والشحن', labelEn: 'Shipping & Freight', required: false },

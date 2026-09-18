@@ -43,19 +43,20 @@ function loadSchema(): Map<string, Set<string>> {
     .sort();
   for (const file of files) {
     const sql = readFileSync(resolve(drizzleDir, file), 'utf-8');
-    // CREATE TABLE "x" ( "col" type, ... );  — naive paren matching is fine
+    // CREATE TABLE ["x"] ( "col" type, ... );  — naive paren matching is fine
     // here because PG DDL in these migrations never nests parens in column defs.
-    const createRe = /CREATE TABLE (?:IF NOT EXISTS )?"([a-z_0-9]+)"\s*\(([\s\S]*?)\n\);/g;
+    // (Post-0030 migrations write unquoted names — accept both styles.)
+    const createRe = /CREATE TABLE (?:IF NOT EXISTS )?"?([a-z_0-9]+)"?\s*\(([\s\S]*?)\n\);/g;
     let m: RegExpExecArray | null;
     while ((m = createRe.exec(sql)) !== null) {
       const table = m[1];
       for (const line of m[2].split('\n')) {
-        const col = line.trim().match(/^"([a-z_0-9]+)"/);
+        const col = line.trim().match(/^"?([a-z_0-9]+)"?(\s|\(|,|$)/);
         if (col) addCol(table, col[1]);
       }
     }
-    // ALTER TABLE "x" ADD COLUMN [IF NOT EXISTS] "col"
-    const alterRe = /ALTER TABLE "([a-z_0-9]+)" ADD COLUMN (?:IF NOT EXISTS )?"([a-z_0-9]+)"/g;
+    // ALTER TABLE ["x"] ADD COLUMN [IF NOT EXISTS] ["col"]
+    const alterRe = /ALTER TABLE "?([a-z_0-9]+)"? ADD COLUMN (?:IF NOT EXISTS )?"?([a-z_0-9]+)"?/g;
     while ((m = alterRe.exec(sql)) !== null) {
       addCol(m[1], m[2]);
     }

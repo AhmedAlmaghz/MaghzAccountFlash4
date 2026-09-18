@@ -45,7 +45,8 @@ const ACC = {
   INVENTORY: '11301',      // بضاعة أول المدة
   PREPAID_RENT: '11401',   // إيجار مدفوع مقدماً
   TRADE_CREDITORS: '21101',// دائنون تجاريون
-  VAT_PAYABLE: '21301',    // ضريبة القيمة المضافة
+  VAT_PAYABLE: '21301',    // ضريبة المخرجات (output)
+  VAT_INPUT: '21302',      // ضريبة المدخلات (input, Phase 3 split)
   SALES: '41101',          // مبيعات المنتجات
   SALES_SERVICES: '41102', // مبيعات الخدمات
   SALES_RETURNS: '41103',  // مردودات المبيعات
@@ -59,6 +60,13 @@ const ACC = {
   SHIPPING: '52601',       // نقل وشحن
   BUILDING_DEP: '52701',   // استهلاك مباني
   EQUIPMENT_DEP: '52702',  // استهلاك معدات
+  PRICE_VARIANCE: '51901', // فروق أسعار الشراء والتقييم (Phase 1)
+  INV_SHORTAGE: '52901',   // عجز المخزون — فاقد (Phase 1)
+  INV_SURPLUS: '41901',    // فائض المخزون — عثور (Phase 1)
+  FIXED_ASSETS: '12101',   // تكلفة الأصول الثابتة (Phase 5)
+  ACC_DEP: '12102',        // مجمع الإهلاك — contra asset (Phase 5)
+  DEP_EXPENSE: '52601',    // مصروف الإهلاك (Phase 5)
+  RETAINED: '32101',       // الأرباح المبقاة (Phase 5)
 };
 
 async function findAccountByCode(companyId: string, code: string): Promise<string | null> {
@@ -76,11 +84,19 @@ async function findAccountByCode(companyId: string, code: string): Promise<strin
     '11301': '%مخزون%|%بضاعة%',
     '21101': '%دائنون%',
     '21301': '%ضريبة%',
+    '21302': '%مدخلات%',
     '41101': '%مبيعات المنتجات%',
     '41102': '%مبيعات الخدمات%',
     '41103': '%مردودات%',
     '51101': '%تكلفة بضاعة%',
     '52101': '%رواتب%',
+    '51901': '%فروق%',
+    '52901': '%عجز%',
+    '41901': '%فائض%',
+    '12101': '%أصول ثابتة%',
+    '12102': '%مجمع%|%إهلاك%',
+    '52601': '%إهلاك%',
+    '32101': '%مبقاة%',
   };
   const pattern = nameMap[code];
   if (pattern) {
@@ -110,7 +126,7 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_debtors: ACC.TRADE_DEBTORS,
     default_creditors: ACC.TRADE_CREDITORS,
     default_vat_output: ACC.VAT_PAYABLE,
-    default_vat_input: ACC.VAT_PAYABLE,
+    default_vat_input: ACC.VAT_INPUT,
     default_salaries: ACC.SALARIES,
     default_sales_returns: ACC.SALES_RETURNS,
     default_purchase_returns: ACC.TRADE_CREDITORS,
@@ -131,6 +147,13 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_payroll_deductions: '21502',
     default_eos_payable: '21503',
     default_eos_expense: '52501',
+    default_price_variance: ACC.PRICE_VARIANCE,
+    default_inventory_shortage: ACC.INV_SHORTAGE,
+    default_inventory_surplus: ACC.INV_SURPLUS,
+    default_fixed_assets: ACC.FIXED_ASSETS,
+    default_accumulated_depreciation: ACC.ACC_DEP,
+    default_depreciation_expense: ACC.DEP_EXPENSE,
+    default_retained_earnings: ACC.RETAINED,
   };
   const code = fallbackMap[functionKey];
   if (code) return findAccountByCode(companyId, code);
@@ -185,7 +208,7 @@ export async function getCashBoxAccountId(companyId: string, cashBoxId?: string 
 
 export async function resolvePostingAccounts(
   companyId: string,
-  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash'>
+  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash' | 'default_price_variance' | 'default_inventory_shortage' | 'default_inventory_surplus' | 'default_exchange_difference' | 'default_fixed_assets' | 'default_accumulated_depreciation' | 'default_depreciation_expense'>
 ): Promise<{ success: true; ids: Record<string, string> } | { success: false; error: string }> {
   const ids: Record<string, string> = {};
   for (const key of keys) {
@@ -198,29 +221,74 @@ export async function resolvePostingAccounts(
   return { success: true, ids };
 }
 
+export interface CogsBooking {
+  /** Total cost of goods sold for this document (base units × unit cost). */
+  total: number;
+  inventoryAccount: string;
+  cogsAccount: string;
+}
+
+/**
+ * Base-currency override for a posting (Phase 2 — IAS 21). The LEDGER is
+ * always kept in base currency; the document keeps its own currency on the
+ * source tables. When omitted the document amounts post as-is (base-only
+ * documents: payroll, manufacturing, POS-cash, adjustments).
+ */
+export interface BaseBooking {
+  subtotal: number;
+  vatAmount: number;
+  totalAmount: number;
+}
+
 export function buildSalesInvoicePostingStatements(
   companyId: string,
   invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null },
-  ids: { debtors: string; sales: string; vat: string }
+  ids: { debtors: string; sales: string; vat: string },
+  cogs?: CogsBooking,
+  base?: BaseBooking
 ): TxStatement[] {
   // CASH invoice: money entered the treasury at sale time — debit the cash
   // box's own GL account instead of Debtors (the customer owes nothing).
   // CREDIT invoice (default): Dr Debtors / Cr Sales + VAT.
   const isCash = invoice.paymentType === 'cash';
   const debitAccount = (isCash && invoice.cashAccountSubstitute) || ids.debtors;
-  return [
+  // Phase 2: book the BASE equivalents; fall back to document amounts when
+  // the caller has no FX data (base-only flows).
+  const bSub = Math.round((Number(base?.subtotal ?? invoice.subtotal) || 0) * 100) / 100;
+  const bVat = Math.round((Number(base?.vatAmount ?? invoice.vatAmount) || 0) * 100) / 100;
+  const bTotal = Math.round((Number(base?.totalAmount ?? invoice.totalAmount) || 0) * 100) / 100;
+  const statements = [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
       description: `قيد تلقائي - فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
-      totalAmount: invoice.totalAmount,
+      totalAmount: bTotal,
       entries: [
-        { accountId: debitAccount, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
-        { accountId: ids.sales, debit: 0, credit: invoice.subtotal, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
-        { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
+        { accountId: debitAccount, debit: bTotal, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
+        { accountId: ids.sales, debit: 0, credit: bSub, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
+        { accountId: ids.vat, debit: 0, credit: bVat, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
       ],
     }),
   ];
+  // Phase 1 (IAS 2): perpetual COGS in the SAME atomic batch — a second,
+  // separately-referenced JE (Dr COGS / Cr Inventory) so revenue and cost
+  // stay independently traceable. Omitted when cost is unknown/zero.
+  const cogsTotal = Math.round((Number(cogs?.total) || 0) * 100) / 100;
+  if (cogs && cogsTotal > 0) {
+    statements.push(
+      buildJournalEntryStatement(companyId, {
+        reference: `${invoice.invoiceNumber}-COGS`,
+        description: `قيد تلقائي - تكلفة فاتورة مبيعات ${invoice.invoiceNumber}`,
+        date: invoice.date,
+        totalAmount: cogsTotal,
+        entries: [
+          { accountId: cogs.cogsAccount, debit: cogsTotal, credit: 0, memo: `تكلفة بضاعة مباعة ${invoice.invoiceNumber}` },
+          { accountId: cogs.inventoryAccount, debit: 0, credit: cogsTotal, memo: `إنقاص مخزون ${invoice.invoiceNumber}` },
+        ],
+      })
+    );
+  }
+  return statements;
 }
 
 /**
@@ -241,9 +309,18 @@ export function buildSalesInvoicePostingStatements(
 export function buildPosSalePostingStatements(
   companyId: string,
   sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null },
-  ids: { debtors: string; sales: string; vat: string }
+  ids: { debtors: string; sales: string; vat: string },
+  cogs?: CogsBooking,
+  base?: BaseBooking & { cashAmount?: number; creditAmount?: number }
 ): TxStatement[] {
-  const { receiptNumber, cashAmount, creditAmount, cashAccountId, subtotal, vatAmount, totalAmount, date } = sale;
+  const { receiptNumber, cashAccountId, date } = sale;
+  // Phase 2: POS receipts are base-currency by construction (the checkout CTE
+  // hardcodes rate 1), but the override keeps the door open honestly.
+  const subtotal = Math.round((Number(base?.subtotal ?? sale.subtotal) || 0) * 100) / 100;
+  const vatAmount = Math.round((Number(base?.vatAmount ?? sale.vatAmount) || 0) * 100) / 100;
+  const totalAmount = Math.round((Number(base?.totalAmount ?? sale.totalAmount) || 0) * 100) / 100;
+  const cashAmount = Math.round((Number(base?.cashAmount ?? sale.cashAmount) || 0) * 100) / 100;
+  const creditAmount = Math.round((Number(base?.creditAmount ?? sale.creditAmount) || 0) * 100) / 100;
   const debitLines: JournalEntryLine[] = [];
   if (cashAmount > 0) {
     debitLines.push({
@@ -260,7 +337,7 @@ export function buildPosSalePostingStatements(
   if (debitLines.length === 0) {
     debitLines.push({ accountId: ids.debtors, debit: 0, credit: 0, memo: `نقطة بيع ${receiptNumber}` });
   }
-  return [
+  const statements = [
     buildJournalEntryStatement(companyId, {
       reference: receiptNumber,
       description: `قيد تلقائي - إيصال نقطة بيع ${receiptNumber}`,
@@ -273,56 +350,192 @@ export function buildPosSalePostingStatements(
       ],
     }),
   ];
+  // Phase 1 (IAS 2): same perpetual-COGS companion JE as sales invoices.
+  const cogsTotal = Math.round((Number(cogs?.total) || 0) * 100) / 100;
+  if (cogs && cogsTotal > 0) {
+    statements.push(
+      buildJournalEntryStatement(companyId, {
+        reference: `${receiptNumber}-COGS`,
+        description: `قيد تلقائي - تكلفة إيصال نقطة بيع ${receiptNumber}`,
+        date,
+        totalAmount: cogsTotal,
+        entries: [
+          { accountId: cogs.cogsAccount, debit: cogsTotal, credit: 0, memo: `تكلفة بضاعة مباعة ${receiptNumber}` },
+          { accountId: cogs.inventoryAccount, debit: 0, credit: cogsTotal, memo: `إنقاص مخزون ${receiptNumber}` },
+        ],
+      })
+    );
+  }
+  return statements;
+}
+
+/**
+ * Cash-count difference JE for a closed POS shift (Phase 5):
+ * shortage (counted < expected) → Dr 52901 / Cr box; surplus →
+ * Dr box / Cr 41901. Pure composer — the caller resolves accounts.
+ */
+export interface CashDifferenceBooking {
+  reference: string;
+  date: string;
+  /** counted − expected (signed; |x| < 0.005 yields no statements). */
+  difference: number;
+  boxAccountId: string;
+  shortageAccountId: string;
+  surplusAccountId: string;
+}
+
+export function buildCashDifferenceStatements(
+  companyId: string,
+  b: CashDifferenceBooking
+): TxStatement[] {
+  const amt = Math.round(Math.abs(Number(b.difference) || 0) * 100) / 100;
+  if (amt < 0.005) return [];
+  const entries =
+    Number(b.difference) < 0
+      ? [
+          { accountId: b.shortageAccountId, debit: amt, credit: 0, memo: `عجز جرد وردية ${b.reference}` },
+          { accountId: b.boxAccountId, debit: 0, credit: amt, memo: `عجز صندوق الوردية` },
+        ]
+      : [
+          { accountId: b.boxAccountId, debit: amt, credit: 0, memo: `فائض صندوق الوردية` },
+          { accountId: b.surplusAccountId, debit: 0, credit: amt, memo: `فائض جرد وردية ${b.reference}` },
+        ];
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: b.reference,
+      description: `قيد فرق جرد وردية ${b.reference}`,
+      date: b.date,
+      totalAmount: amt,
+      entries,
+    }),
+  ];
+}
+
+export interface StandardPurchaseBooking {
+  /** Inventory value at frozen standard cost (Σ baseQty × standard). */
+  inventoryAmount: number;
+  /** actual − standard: >0 over-spend (Dr PPV), <0 saving (Cr PPV). */
+  varianceAmount: number;
+  varianceAccount: string;
 }
 
 export function buildPurchaseInvoicePostingStatements(
   companyId: string,
   invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number; paymentType?: string; cashAccountSubstitute?: string | null },
-  ids: { inventory: string; creditors: string; vat: string }
+  ids: { inventory: string; creditors: string; vat: string },
+  standard?: StandardPurchaseBooking,
+  base?: BaseBooking
 ): TxStatement[] {
   // CASH purchase: money left the treasury immediately — credit the cash box
   // account instead of Creditors (we owe the supplier nothing).
   const isCash = invoice.paymentType === 'cash';
   const creditAccount = (isCash && invoice.cashAccountSubstitute) || ids.creditors;
+  // Phase 1: standard-cost companies book inventory at the FROZEN standard;
+  // the actual-vs-standard gap is a price variance, never hidden inventory.
+  // Phase 2: non-standard companies book the BASE subtotal (IAS 21).
+  const docSubtotal = base
+    ? Math.round((Number(base.subtotal) || 0) * 100) / 100
+    : undefined;
+  const docVat = base
+    ? Math.round((Number(base.vatAmount) || 0) * 100) / 100
+    : undefined;
+  const docTotal = base
+    ? Math.round((Number(base.totalAmount) || 0) * 100) / 100
+    : undefined;
+  const inventoryAmount = standard
+    ? Math.round((Number(standard.inventoryAmount) || 0) * 100) / 100
+    : (docSubtotal ?? Math.round((Number(invoice.subtotal) || 0) * 100) / 100);
+  const variance = standard ? Math.round((Number(standard.varianceAmount) || 0) * 100) / 100 : 0;
+  // Phase 2: VAT + creditor legs in base (callers pass base explicitly).
+  const bVat = docVat ?? Math.round((Number(invoice.vatAmount) || 0) * 100) / 100;
+  const bTotal = docTotal ?? Math.round((Number(invoice.totalAmount) || 0) * 100) / 100;
+  const entries: JournalEntryLine[] = [
+    { accountId: ids.inventory, debit: inventoryAmount, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}${standard ? ' (بالتكلفة المعيارية)' : ''}` },
+  ];
+  if (standard && variance > 0) {
+    entries.push({ accountId: standard.varianceAccount, debit: variance, credit: 0, memo: `فروق أسعار شراء ${invoice.invoiceNumber}` });
+  }
+  entries.push(
+    { accountId: ids.vat, debit: bVat, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
+    { accountId: creditAccount, debit: 0, credit: bTotal, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` }
+  );
+  if (standard && variance < 0) {
+    entries.push({ accountId: standard.varianceAccount, debit: 0, credit: -variance, memo: `وفورات أسعار شراء ${invoice.invoiceNumber}` });
+  }
   return [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
       description: `قيد تلقائي - فاتورة مشتريات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
-      totalAmount: invoice.totalAmount,
-      entries: [
-        { accountId: ids.inventory, debit: invoice.subtotal, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}` },
-        { accountId: ids.vat, debit: invoice.vatAmount, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
-        { accountId: creditAccount, debit: 0, credit: invoice.totalAmount, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` },
-      ],
+      totalAmount: bTotal,
+      entries,
     }),
   ];
 }
 
-/** JE + stock-movement statements for a sales return (goods back to stock). */
+export interface SalesReturnCosting {
+  /** Net (ex-VAT) return value. */
+  subtotal: number;
+  /** VAT to reverse (output VAT leg — Phase-3-safe via default_vat_output). */
+  vatAmount: number;
+  /** ORIGINAL cost basis being restored (base units × posting-time unit cost). */
+  costTotal: number;
+}
+
+/**
+ * JE + stock-movement statements for a sales return (goods back to stock).
+ * preferredWarehouseId (Phase 4): validated default source tried first when
+ * it holds the line qty, else richest, else first warehouse. Appended as the
+ * LAST bind param of every statement ($3/$4) so numbering never shifts.
+ */
 export async function buildSalesReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number },
+  costing?: SalesReturnCosting,
+  base?: BaseBooking,
+  preferredWarehouseId?: string | null
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
-  const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs']);
+  const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs', 'default_vat_output']);
   if (!resolved.success) return resolved;
-  const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId } = resolved.ids;
+  const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId, default_vat_output: vatOutputId } = resolved.ids;
 
+  // Phase 1 (IAS 2 + VAT): the return reverses revenue at NET value, output
+  // VAT on its own leg, and the ORIGINAL posting-time cost — never the
+  // retired 70%-of-amount estimate (which also truncated halalas via floor).
+  // Phase 2: revenue/VAT/debtor legs in base (cost legs are domestic).
+  const subtotal = Math.round((Number(base?.subtotal ?? costing?.subtotal ?? ret.amount) || 0) * 100) / 100;
+  const vatAmount = Math.round((Number(base?.vatAmount ?? costing?.vatAmount ?? 0) || 0) * 100) / 100;
+  const costTotal = Math.round((Number(costing?.costTotal ?? 0) || 0) * 100) / 100;
+  const total = Math.round((subtotal + vatAmount) * 100) / 100;
+  const entries: JournalEntryLine[] = [
+    { accountId: salesReturnsId, debit: subtotal, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
+  ];
+  if (vatAmount > 0) {
+    entries.push({ accountId: vatOutputId, debit: vatAmount, credit: 0, memo: `عكس ضريبة مخرجات ${ret.returnNumber}` });
+  }
+  entries.push({ accountId: debtorsId, debit: 0, credit: total, memo: `تخفيض ذمة ${ret.customer}` });
+  if (costTotal > 0) {
+    entries.push({ accountId: inventoryId, debit: costTotal, credit: 0, memo: `إعادة بضاعة للمخزون` });
+    entries.push({ accountId: cogsId, debit: 0, credit: costTotal, memo: `عكس تكلفة بضاعة مباعة` });
+  }
   const statements: TxStatement[] = [
     buildJournalEntryStatement(companyId, {
       reference: ret.returnNumber,
       description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
       date: ret.date,
-      totalAmount: ret.amount,
-      entries: [
-        { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
-        { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
-        // Simplified COGS reversal at an assumed 70% cost ratio.
-        { accountId: inventoryId, debit: Math.floor(ret.amount * 0.7), credit: 0, memo: `إعادة بضاعة للمخزون` },
-        { accountId: cogsId || inventoryId, debit: 0, credit: Math.floor(ret.amount * 0.7), memo: `عكس تكلفة بضاعة مباعة` },
-      ],
+      totalAmount: total,
+      entries,
     }),
   ];
+
+  // Phase 4 preferred-source fragment (default warehouse when it holds the
+  // line qty). NULL-safe: a NULL preference degrades to richest-first.
+  const preferSrc = `(SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = srl.product_id AND s2.company_id = sr.company_id AND s2.warehouse_id = $PREF::uuid AND s2.quantity >= COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity) LIMIT 1),`;
+  const lateralSrc = (pref: string) => `SELECT COALESCE(
+                      ${preferSrc.replaceAll('$PREF', pref)}
+                      (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
+                      (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
+                    ) AS warehouse_id`;
 
   if (ret.id) {
     // Ensure stock rows exist for returned products (in case product never stocked before)
@@ -332,15 +545,12 @@ export async function buildSalesReturnPostingStatements(
               FROM sales_returns sr
               JOIN sales_return_lines srl ON srl.return_id = sr.id
               JOIN LATERAL (
-                SELECT COALESCE(
-                  (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
-                  (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
-                ) AS warehouse_id
+                ${lateralSrc('$3')}
               ) wh ON true
               LEFT JOIN stock s ON s.company_id = sr.company_id AND s.product_id = srl.product_id AND s.warehouse_id = wh.warehouse_id
              WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL AND s.id IS NULL
              GROUP BY srl.product_id, wh.warehouse_id`,
-      params: [ret.id, companyId],
+      params: [ret.id, companyId, preferredWarehouseId || null],
     });
     statements.push({
       sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
@@ -348,13 +558,10 @@ export async function buildSalesReturnPostingStatements(
            FROM sales_returns sr
            JOIN sales_return_lines srl ON srl.return_id = sr.id
            JOIN LATERAL (
-             SELECT COALESCE(
-               (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
-               (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
-             ) AS warehouse_id
+             ${lateralSrc('$4')}
            ) wh ON true
           WHERE sr.id = $2::uuid AND sr.company_id = $3::uuid AND wh.warehouse_id IS NOT NULL`,
-      params: [ret.returnNumber, ret.id, companyId],
+      params: [ret.returnNumber, ret.id, companyId, preferredWarehouseId || null],
     });
     // Increase stock quantities (base units — the document quantity may be
     // expressed in a larger unit such as carton).
@@ -365,39 +572,44 @@ export async function buildSalesReturnPostingStatements(
                   FROM sales_returns sr
                   JOIN sales_return_lines srl ON srl.return_id = sr.id
                   JOIN LATERAL (
-                    SELECT COALESCE(
-                      (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
-                      (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
-                    ) AS warehouse_id
+                    ${lateralSrc('$3')}
                   ) wh ON true
                  WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL
                  GROUP BY srl.product_id, wh.warehouse_id
               ) sub
              WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
-      params: [ret.id, companyId],
+      params: [ret.id, companyId, preferredWarehouseId || null],
     });
   }
   return { success: true, statements };
 }
 
-/** JE statements for a stock adjustment: found → Dr Inventory / Cr Cogs, lost → Dr Cogs / Cr Inventory. */
+/**
+ * JE statements for a stock adjustment.
+ * Phase 1 (IAS 2): the amount is MONEY (|difference| × unitCost) — never the
+ * raw quantity — and the counter-leg is a dedicated gain/loss account, never
+ * COGS (a stock-count variance is not cost of goods sold and must not move
+ * gross margin).
+ *   found (actual > system) → Dr Inventory / Cr Surplus gain (41901)
+ *   lost  (actual < system) → Dr Shortage loss (52901) / Cr Inventory
+ */
 export async function buildStockAdjustmentPostingStatements(
   companyId: string,
-  adj: { product: string; difference: number; reason: string; date: string; id: string }
+  adj: { product: string; difference: number; reason: string; date: string; id: string; unitCost?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   if (!adj.difference || adj.difference === 0) return { success: true, statements: [] };
-  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
-  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
-  if (!inventoryId) return { success: false, error: 'Inventory account not found. Please configure default accounts in Settings.' };
-  const amount = Math.abs(adj.difference);
+  const resolved = await resolvePostingAccounts(companyId, ['default_inventory', 'default_inventory_shortage', 'default_inventory_surplus']);
+  if (!resolved.success) return resolved;
+  const { default_inventory: inventoryId, default_inventory_shortage: shortageId, default_inventory_surplus: surplusId } = resolved.ids;
+  const amount = Math.round(Math.abs(adj.difference) * (Number(adj.unitCost) || 0) * 100) / 100;
+  if (amount <= 0) return { success: true, statements: [] };
   const entries: JournalEntryLine[] = [];
   if (adj.difference > 0) {
     entries.push({ accountId: inventoryId, debit: amount, credit: 0, memo: `عثور ${adj.product}` });
-    entries.push({ accountId: cogsId || inventoryId, debit: 0, credit: amount, memo: `إيراد عثور` });
+    entries.push({ accountId: surplusId, debit: 0, credit: amount, memo: `فائض مخزون` });
   } else {
-    const loss = amount;
-    entries.push({ accountId: cogsId || inventoryId, debit: loss, credit: 0, memo: `فاقد ${adj.product}` });
-    entries.push({ accountId: inventoryId, debit: 0, credit: loss, memo: `خسارة مخزون` });
+    entries.push({ accountId: shortageId, debit: amount, credit: 0, memo: `فاقد ${adj.product}` });
+    entries.push({ accountId: inventoryId, debit: 0, credit: amount, memo: `عجز مخزون` });
   }
   return {
     success: true,
@@ -413,16 +625,52 @@ export async function buildStockAdjustmentPostingStatements(
   };
 }
 
-/** JE statements for a receipt voucher: Dr treasury / Cr debtors. */
+/**
+ * Realized exchange-difference JE (Phase 2 — IAS 21): the gap between what a
+ * linked payment was worth at the INVOICE rate and what actually moved at the
+ * PAYMENT rate. Positive amount with an explicit side — the caller decides
+ * direction; this builder only shapes the balanced pair.
+ *   receipt, shortfall (received less base value than booked) → Dr FX / Cr debtors
+ *   receipt, windfall  → Dr debtors / Cr FX
+ *   payment, shortfall (paid less base value than relieved) → Dr creditors / Cr FX
+ *   payment, windfall  → Dr FX / Cr creditors
+ */
+export function buildFxDifferenceStatements(
+  companyId: string,
+  fx: { reference: string; date: string; memo: string; amount: number; debitAccount: string; creditAccount: string }
+): TxStatement[] {
+  const amount = Math.round((Number(fx.amount) || 0) * 100) / 100;
+  if (amount <= 0) return [];
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: `${fx.reference}-FX`,
+      description: `قيد تلقائي - فروق صرف ${fx.reference}`,
+      date: fx.date,
+      totalAmount: amount,
+      entries: [
+        { accountId: fx.debitAccount, debit: amount, credit: 0, memo: fx.memo },
+        { accountId: fx.creditAccount, debit: 0, credit: amount, memo: fx.memo },
+      ],
+    }),
+  ];
+}
+
+/**
+ * JE statements for a receipt voucher: Dr treasury / Cr debtors.
+ * Phase 2: posted in BASE amount (treasuries are base-currency by design —
+ * cash_boxes carry no currency). Pass baseAmount explicitly; legacy callers
+ * without FX data keep posting the document amount.
+ */
 export async function buildReceiptVoucherStatements(
   companyId: string,
-  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
+  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null; baseAmount?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_debtors']);
   if (!resolved.success) return resolved;
   const { default_cash: cashId, default_debtors: debtorsId } = resolved.ids;
   // Post to the SELECTED خزنة's own GL account, falling back to default cash.
   const debitAccount = (await getCashBoxAccountId(companyId, v.cashBoxId)) || cashId;
+  const amount = Math.round((Number(v.baseAmount ?? v.amount) || 0) * 100) / 100;
 
   return {
     success: true,
@@ -433,26 +681,30 @@ export async function buildReceiptVoucherStatements(
         // Guard: callers may forward raw pg DATE values (JS Date at UTC
         // midnight) — normalize before the timestamptz INSERT.
         date: normalizeDate(v.date),
-        totalAmount: v.amount,
+        totalAmount: amount,
         entries: [
-          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'العميل'}` },
-          { accountId: debtorsId, debit: 0, credit: v.amount, memo: `تسديد دين` },
+          { accountId: debitAccount, debit: amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'العميل'}` },
+          { accountId: debtorsId, debit: 0, credit: amount, memo: `تسديد دين` },
         ],
       }),
     ],
   };
 }
 
-/** JE statements for a payment voucher: Dr creditors/expense / Cr treasury. */
+/**
+ * JE statements for a payment voucher: Dr creditors/expense / Cr treasury.
+ * Phase 2: posted in BASE amount (same base-currency treasury rule).
+ */
 export async function buildPaymentVoucherStatements(
   companyId: string,
-  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
+  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null; baseAmount?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_creditors']);
   if (!resolved.success) return resolved;
   const { default_cash: cashId, default_creditors: creditorsId } = resolved.ids;
   const creditAccount = (await getCashBoxAccountId(companyId, v.cashBoxId)) || cashId;
   const debitAccount = v.expenseAccountId || creditorsId;
+  const amount = Math.round((Number(v.baseAmount ?? v.amount) || 0) * 100) / 100;
 
   return {
     success: true,
@@ -462,35 +714,68 @@ export async function buildPaymentVoucherStatements(
         description: `سند صرف - رقم ${v.voucherNumber}${v.supplierName ? ` - ${v.supplierName}` : ''}`,
         // Guard: same normalization as receipt vouchers (raw pg DATE values).
         date: normalizeDate(v.date),
-        totalAmount: v.amount,
+        totalAmount: amount,
         entries: [
-          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `صرف إلى ${v.supplierName || v.supplierId || 'المورد'}` },
-          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `سحب من الخزنة` },
+          { accountId: debitAccount, debit: amount, credit: 0, memo: `صرف إلى ${v.supplierName || v.supplierId || 'المورد'}` },
+          { accountId: creditAccount, debit: 0, credit: amount, memo: `سحب من الخزنة` },
         ],
       }),
     ],
   };
 }
 
+export interface PurchaseReturnCosting {
+  /** Net (ex-VAT) return value. */
+  subtotal: number;
+  /** Input VAT to reverse (via default_vat_input — Phase-3-safe). */
+  vatAmount: number;
+  /** Inventory value leaving stock (method cost basis, NOT the return price). */
+  costBasis: number;
+}
+
 /** JE + stock-movement statements for a purchase return (goods out of stock). */
 export async function buildPurchaseReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number }
+  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number },
+  costing?: PurchaseReturnCosting,
+  base?: BaseBooking,
+  preferredWarehouseId?: string | null
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
-  const resolved = await resolvePostingAccounts(companyId, ['default_creditors', 'default_inventory']);
+  const resolved = await resolvePostingAccounts(companyId, ['default_creditors', 'default_inventory', 'default_vat_input', 'default_price_variance']);
   if (!resolved.success) return resolved;
-  const { default_creditors: creditorsId, default_inventory: inventoryId } = resolved.ids;
+  const { default_creditors: creditorsId, default_inventory: inventoryId, default_vat_input: vatInputId, default_price_variance: ppvId } = resolved.ids;
 
+  // Phase 1 (IAS 2 + VAT): inventory leaves at COST basis; input VAT reverses
+  // on its own leg; any gap between the agreed return price and the cost
+  // basis is a price variance — never hidden inside inventory.
+  // Phase 2: creditor/VAT legs in base (cost legs are domestic). The gap may
+  // therefore absorb FX drift between purchase and return — still P&L-correct
+  // (PPV is a profit-and-loss account), just less granular than 42101.
+  const subtotal = Math.round((Number(base?.subtotal ?? costing?.subtotal ?? ret.amount) || 0) * 100) / 100;
+  const vatAmount = Math.round((Number(base?.vatAmount ?? costing?.vatAmount ?? 0) || 0) * 100) / 100;
+  const costBasis = Math.round((Number(costing?.costBasis ?? subtotal) || 0) * 100) / 100;
+  const total = Math.round((subtotal + vatAmount) * 100) / 100;
+  const gap = Math.round((costBasis - subtotal) * 100) / 100;
+  const entries: JournalEntryLine[] = [
+    { accountId: creditorsId, debit: total, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
+  ];
+  if (gap > 0) {
+    entries.push({ accountId: ppvId, debit: gap, credit: 0, memo: `فروق تقييم مردود ${ret.returnNumber}` });
+  }
+  entries.push({ accountId: inventoryId, debit: 0, credit: costBasis, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` });
+  if (vatAmount > 0) {
+    entries.push({ accountId: vatInputId, debit: 0, credit: vatAmount, memo: `عكس ضريبة مدخلات ${ret.returnNumber}` });
+  }
+  if (gap < 0) {
+    entries.push({ accountId: ppvId, debit: 0, credit: -gap, memo: `وفورات تقييم مردود ${ret.returnNumber}` });
+  }
   const statements: TxStatement[] = [
     buildJournalEntryStatement(companyId, {
       reference: ret.returnNumber,
       description: `قيد تلقائي - مردود مشتريات ${ret.returnNumber}`,
       date: ret.date,
-      totalAmount: ret.amount,
-      entries: [
-        { accountId: creditorsId, debit: ret.amount, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
-        { accountId: inventoryId, debit: 0, credit: ret.amount, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` },
-      ],
+      totalAmount: total,
+      entries,
     }),
   ];
 
@@ -501,12 +786,15 @@ export async function buildPurchaseReturnPostingStatements(
            FROM purchase_returns pr
            JOIN purchase_return_lines prl ON prl.return_id = pr.id
            JOIN LATERAL (
-             SELECT s.warehouse_id FROM stock s
-              WHERE s.product_id = prl.product_id AND s.company_id = pr.company_id
-              ORDER BY s.quantity DESC LIMIT 1
+             SELECT COALESCE(
+               (SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = prl.product_id AND s2.company_id = pr.company_id AND s2.warehouse_id = $4::uuid AND s2.quantity >= COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity) LIMIT 1),
+               (SELECT s.warehouse_id FROM stock s
+                WHERE s.product_id = prl.product_id AND s.company_id = pr.company_id
+                ORDER BY s.quantity DESC LIMIT 1)
+             ) AS warehouse_id
            ) wh ON true
           WHERE pr.id = $2::uuid AND pr.company_id = $3::uuid`,
-      params: [ret.returnNumber, ret.id, companyId],
+      params: [ret.returnNumber, ret.id, companyId, preferredWarehouseId || null],
     });
     // Decrement stock quantities (base units — the document quantity may be
     // expressed in a larger unit such as carton).
@@ -683,64 +971,23 @@ export async function postPaymentVoucher(
 }
 
 /**
- * Post a Sales Return to accounting (reverse of sales)
- * Dr: Sales Returns
- * Cr: Trade Debtors
+ * Post a Sales Return to accounting (reverse of sales).
+ * Phase 1: thin delegate over buildSalesReturnPostingStatements — the old
+ * inline 70%-of-amount COGS estimate (plus halala-truncating floor) is gone;
+ * without explicit costing the JE carries revenue + debtor legs only.
  */
 export async function postSalesReturn(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number },
+  costing?: SalesReturnCosting
 ) {
-  const salesReturnsId = await getDefaultAccountId(companyId, 'default_sales_returns');
-  const debtorsId = await getDefaultAccountId(companyId, 'default_debtors');
-  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
-  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
-
-  if (!salesReturnsId || !debtorsId || !inventoryId) {
-    return { success: false, error: 'Required accounts not found. Please configure default accounts in Settings.' };
-  }
-
-  const entries: JournalEntryLine[] = [
-    { accountId: salesReturnsId, debit: ret.amount, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
-    { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
-    // Also return inventory (simplified: assume full return to inventory)
-    { accountId: inventoryId, debit: Math.floor(ret.amount * 0.7), credit: 0, memo: `إعادة بضاعة للمخزون` },
-    { accountId: cogsId || inventoryId, debit: 0, credit: Math.floor(ret.amount * 0.7), memo: `عكس تكلفة بضاعة مباعة` },
-  ];
-
-  // Atomic batch: the journal entry AND its stock movements commit together
-  // (or roll back together), keeping accounting and inventory in lock-step.
-  const statements: TxStatement[] = [
-    buildJournalEntryStatement(companyId, {
-      reference: ret.returnNumber,
-      description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
-      date: ret.date,
-      totalAmount: ret.amount,
-      entries,
-    }),
-  ];
-
-  if (ret.id) {
-    // Insert stock_movements (type='in') for each return line so inventory
-    // reflects goods returning to the warehouse they currently sit in.
-    statements.push({
-      sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, quantity, type, reference, created_at)
-         SELECT sr.company_id, srl.product_id, wh.warehouse_id, 'in', srl.quantity, $1, NOW()
-           FROM sales_returns sr
-           JOIN sales_return_lines srl ON srl.return_id = sr.id
-           JOIN LATERAL (
-             SELECT s.warehouse_id
-               FROM stock s
-              WHERE s.product_id = srl.product_id AND s.company_id = sr.company_id
-              ORDER BY s.quantity DESC
-              LIMIT 1
-           ) wh ON true
-          WHERE sr.id = $2 AND sr.company_id = $3`,
-      params: [ret.returnNumber, ret.id, companyId],
-    });
-  }
-
-  const txResult = await runTransaction(statements);
+  const built = await buildSalesReturnPostingStatements(
+    companyId,
+    { id: ret.id, returnNumber: ret.returnNumber, date: ret.date, customer: ret.customer, amount: ret.amount },
+    costing
+  );
+  if (!built.success) return built;
+  const txResult = await runTransaction(built.statements);
   if (!txResult.success) return { success: false, error: txResult.error };
   return { success: true };
 }
@@ -852,42 +1099,27 @@ export async function postInventoryTransaction(
 }
 
 /**
- * Post a Stock Adjustment to accounting
- * Positive difference (found): Dr Inventory, Cr Income
- * Negative difference (lost): Dr Loss, Cr Inventory
+ * Post a Stock Adjustment to accounting.
+ * Phase 1: thin delegate over buildStockAdjustmentPostingStatements — the
+ * amount is money (|difference| × unitCost) on dedicated gain/loss accounts.
+ * Callers that only know a monetary difference pass it as difference with
+ * unitCost 1 (legacy tests do exactly this).
  */
 export async function postStockAdjustment(
   companyId: string,
-  adj: { id: string; date: string; product: string; difference: number; reason: string }
+  adj: { id: string; date: string; product: string; difference: number; reason: string; unitCost?: number }
 ) {
-  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
-  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
-
-  if (!inventoryId) {
-    return { success: false, error: 'Inventory account not found. Please configure default accounts in Settings.' };
-  }
-
-  const entries: JournalEntryLine[] = [];
-  if (adj.difference > 0) {
-    entries.push(
-      { accountId: inventoryId, debit: adj.difference, credit: 0, memo: `عثور ${adj.product}` },
-      { accountId: cogsId || inventoryId, debit: 0, credit: adj.difference, memo: `إيراد عثور` }
-    );
-  } else if (adj.difference < 0) {
-    const loss = Math.abs(adj.difference);
-    entries.push(
-      { accountId: cogsId || inventoryId, debit: loss, credit: 0, memo: `فاقد ${adj.product}` },
-      { accountId: inventoryId, debit: 0, credit: loss, memo: `خسارة مخزون` }
-    );
-  }
-
-  if (entries.length === 0) return { success: true, id: 'skip' };
-
-  return createTransaction(companyId, {
-    reference: `ADJ-${adj.id}`,
-    description: `قيد تلقائي - تسوية مخزون ${adj.id} - ${adj.reason}`,
+  const built = await buildStockAdjustmentPostingStatements(companyId, {
+    product: adj.product,
+    difference: adj.difference,
+    reason: adj.reason,
     date: adj.date,
-    totalAmount: Math.abs(adj.difference),
-    entries,
+    id: adj.id,
+    unitCost: adj.unitCost,
   });
+  if (!built.success) return built;
+  if (built.statements.length === 0) return { success: true, id: 'skip' };
+  const txResult = await runTransaction(built.statements);
+  if (!txResult.success) return { success: false, error: txResult.error };
+  return { success: true };
 }

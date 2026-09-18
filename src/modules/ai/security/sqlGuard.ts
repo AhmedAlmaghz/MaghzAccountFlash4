@@ -22,6 +22,9 @@ const AI_ALLOWED_TABLES = [
   'users',
   // accounting
   'accounts', 'transactions', 'journal_entries', 'receipt_vouchers', 'payment_vouchers',
+  'fixed_assets', 'accounting_periods',
+  // tax periods (0031) + FIFO layers (0029) — read by close/vat/valuation tools
+  'tax_periods', 'inventory_layers',
   // sales
   'sales_invoices', 'sales_invoice_lines', 'sales_returns', 'sales_return_lines',
   'quotations', 'quotation_lines', 'customers',

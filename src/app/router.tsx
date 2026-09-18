@@ -47,6 +47,8 @@ const CashFlowPage = React.lazy(() => import('@/modules/accounting/components/Ca
 const ReceiptVouchersPage = React.lazy(() => import('@/modules/accounting/components/ReceiptVouchersPage'));
 const PaymentVouchersPage = React.lazy(() => import('@/modules/accounting/components/PaymentVouchersPage'));
 const AccountLedgerPage = React.lazy(() => import('@/modules/accounting/components/AccountLedgerPage'));
+const YearEndClosePage = React.lazy(() => import('@/modules/accounting/components/YearEndClosePage'));
+const FixedAssetsPage = React.lazy(() => import('@/modules/accounting/components/FixedAssetsPage'));
 
 // Inventory sub-pages
 const ProductsPage = React.lazy(() => import('@/modules/inventory/components/ProductsPage'));
@@ -192,6 +194,8 @@ export const AppRouter: React.FC = () => {
                 <Route path="receipt-vouchers" element={withSuspense(ReceiptVouchersPage)} />
                 <Route path="payment-vouchers" element={withSuspense(PaymentVouchersPage)} />
                 <Route path="ledger" element={withSuspense(AccountLedgerPage)} />
+                <Route path="year-end" element={withSuspense(YearEndClosePage)} />
+                <Route path="fixed-assets" element={withSuspense(FixedAssetsPage)} />
               </Route>
             </Route>
 

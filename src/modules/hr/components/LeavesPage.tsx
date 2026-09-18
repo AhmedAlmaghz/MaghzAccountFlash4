@@ -8,6 +8,7 @@ import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { useAppStore } from '@/core/store';
 import { useLeavesPaginated, useEmployees, useLeaveBalances } from '../hooks/useHr';
 import { useAuthStore } from '@/modules/auth/store';
+import { hrApi } from '../api';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { DEFAULT_LOCALE } from '@/core/utils/locale';
@@ -191,11 +192,30 @@ export const LeavesPage: React.FC = () => {
         icon={<CalendarDays size={22} />}
         title={t('hr.leaves.title')}
         subtitle={t('hr.leaves.subtitle')}
-        actions={
-          <Can action="create" module="hr">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)} className="shadow-sm">{t('hr.leaves.request')}</Button>
-          </Can>
-        }
+          actions={
+            <div className="flex items-center gap-2">
+              <Can action="post" module="hr">
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    if (!activeCompany?.id) return;
+                    const lastYear = new Date().getFullYear() - 1;
+                    const res = await hrApi.postLeaveProvision(activeCompany.id, lastYear, user?.id || '');
+                    if (res.success) {
+                      addToast('success', `${t('hr.leaves.provisionPosted')} (${res.data?.reference}): ${res.data?.amount}`);
+                    } else {
+                      addToast('error', res.error || t('common.error'));
+                    }
+                  }}
+                >
+                  {t('hr.leaves.provision')}
+                </Button>
+              </Can>
+              <Can action="create" module="hr">
+                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => setIsModalOpen(true)} className="shadow-sm">{t('hr.leaves.request')}</Button>
+              </Can>
+            </div>
+          }
       />
 
       {/* KPI Cards */}

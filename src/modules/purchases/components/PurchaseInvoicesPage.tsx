@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart, TrendingUp, Store, Receipt } from 'lucide-react';
+import { FileText, Plus, CheckSquare, BookOpen, Trash2, Printer, Wallet, Layers, ShoppingCart, TrendingUp, Store,
+Receipt, Undo2 } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { todayIso } from '@/core/utils/aging';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
@@ -28,6 +29,8 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
 import { purchasesApi } from '../api';
+import { reversePurchaseInvoice } from '@/modules/accounting/reversal';
+import { ReverseDialog } from '@/modules/accounting/components/ReverseDialog';
 import { useToastStore } from '@/core/store/toastStore';
 import type { PurchaseInvoice } from '../types';
 import type { Product } from '@/modules/inventory/types';
@@ -104,7 +107,21 @@ export const PurchaseInvoicesPage: React.FC = () => {
     update,
     remove,
     post,
+    reload,
   } = usePurchaseInvoicesPaginated(activeCompany?.id || '', invoiceFilters);
+  const [reverseRow, setReverseRow] = useState<PurchaseInvoice | null>(null);
+
+  const handleReverseConfirm = async (date: string, reason: string) => {
+    if (!activeCompany?.id || !reverseRow) return;
+    const res = await reversePurchaseInvoice(activeCompany.id, reverseRow.id, { date, reason }, user?.id || '');
+    if (res.success) {
+      addToast('success', `${t('accounting.reverse.success')} (${res.data.reference})`);
+      setReverseRow(null);
+      await reload();
+    } else {
+      addToast('error', res.error || t('common.error'));
+    }
+  };
   const { orders } = usePurchaseOrders(activeCompany?.id || '');
   const { settings } = useSettings(activeCompany?.id || '');
   const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
@@ -679,12 +696,25 @@ export const PurchaseInvoicesPage: React.FC = () => {
                 {isPosting ? t('loading') : t('accounting.post')}
               </Button>
             )}
-            {inv.status !== 'draft' && (
-              <span className="text-xs text-zinc-400 flex items-center gap-1 mr-2">
-                <BookOpen size={12} /> {t('accounting.posted')}
-              </span>
-            )}
-          </div>
+              {inv.status !== 'draft' && (
+                <span className="text-xs text-zinc-400 flex items-center gap-1 mr-2">
+                  <BookOpen size={12} /> {t('accounting.posted')}
+                </span>
+              )}
+              {['posted', 'partially_paid', 'paid'].includes(inv.status) && (
+                <Can action="post" module="purchases">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title={t('accounting.reverse.title')}
+                    aria-label={t('accounting.reverse.title')}
+                    onClick={() => setReverseRow(inv)}
+                  >
+                    <Undo2 size={14} />
+                  </Button>
+                </Can>
+              )}
+            </div>
         );
       },
     },
@@ -1148,6 +1178,13 @@ export const PurchaseInvoicesPage: React.FC = () => {
         title={t('purchases.invoice.postTitle')}
         message={t('purchases.invoice.postConfirm')}
         variant="warning"
+      />
+
+      <ReverseDialog
+        open={!!reverseRow}
+        onClose={() => setReverseRow(null)}
+        docLabel={reverseRow?.invoiceNumber || ''}
+        onConfirm={handleReverseConfirm}
       />
 
       <DuplicateWarningDialog

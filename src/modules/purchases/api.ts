@@ -200,8 +200,8 @@ export const purchasesApi = {
       const result = await adapter.query(
         `SELECT s.*,
                 (COALESCE(s.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
                 ) AS computed_balance
          FROM suppliers s WHERE s.company_id = $1 AND s.is_active = true ORDER BY s.name`,
@@ -259,8 +259,8 @@ export const purchasesApi = {
       const dataResult = await adapter.query(
         `SELECT s.*,
                 (COALESCE(s.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
                 ) AS computed_balance
          FROM suppliers s WHERE ${where} ORDER BY s.name LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -287,8 +287,8 @@ export const purchasesApi = {
       const result = await adapter.query(
         `SELECT s.*,
                 (COALESCE(s.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
                 ) AS computed_balance
          FROM suppliers s WHERE s.id = $1 AND s.company_id = $2 LIMIT 1`,
@@ -665,11 +665,19 @@ export const purchasesApi = {
     try {
       const validation = validateInput(createPurchaseInvoiceSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      // Phase 0 fix: parity with sales.createInvoice — overpayment and
+      // non-positive rates are rejected up front instead of entering the books.
+      if ((data.paidAmount ?? 0) > data.totalAmount) {
+        return { success: false, error: 'Paid amount cannot exceed total amount.' };
+      }
+      if (data.exchangeRate !== undefined && data.exchangeRate <= 0) {
+        return { success: false, error: 'Exchange rate must be positive.' };
+      }
       const adapter = await getDbAdapter();
       const currencyCode = data.currencyCode || YER_CODE;
       const exchangeRate = data.exchangeRate ?? 1;
       const baseCurrencyAmount = data.baseCurrencyAmount ?? (data.totalAmount * exchangeRate);
-      const baseCurrencyPaid = data.baseCurrencyPaid ?? 0;
+      const baseCurrencyPaid = data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * exchangeRate);
       const invoiceId = crypto.randomUUID();
       const params: unknown[] = [invoiceId, data.companyId, data.invoiceNumber, data.supplierId, data.purchaseOrderId || null, data.date, data.dueDate, data.subtotal, data.discountAmount, data.vatAmount, data.totalAmount, data.paidAmount, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyPaid, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
       let sql = `WITH inv AS (INSERT INTO purchase_invoices (id,company_id,invoice_number,supplier_id,purchase_order_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7::date,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::uuid,$20,$21::uuid,$22::uuid) RETURNING id)`;
@@ -721,6 +729,25 @@ export const purchasesApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Phase 0 fix: parity with sales.updateInvoice — a posted invoice
+      // already moved JE + stock + supplier balance. Its lines are frozen
+      // and paid_amount may only grow (new payments), never shrink.
+      const check = await adapter.query(
+        'SELECT status, paid_amount FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Invoice not found' };
+      }
+      const inv = check.rows[0] as Record<string, unknown>;
+      const status = String(inv.status);
+      const paidAmount = Number(inv.paid_amount) || 0;
+      if (status !== 'draft' && (data as { lines?: unknown }).lines !== undefined) {
+        return { success: false, error: 'Cannot modify lines of posted invoice. Cancel it first.' };
+      }
+      if (status !== 'draft' && data.paidAmount !== undefined && data.paidAmount < paidAmount) {
+        return { success: false, error: 'Cannot reduce paid amount below current payments.' };
+      }
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;
@@ -763,6 +790,22 @@ export const purchasesApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Phase 0 fix: parity with sales.deleteInvoice — deleting a posted or
+      // paid invoice would orphan its JE + stock moves + supplier balance.
+      const check = await adapter.query(
+        'SELECT status, paid_amount FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Invoice not found' };
+      }
+      const inv = check.rows[0] as Record<string, unknown>;
+      if (String(inv.status) !== 'draft') {
+        return { success: false, error: 'Cannot delete posted invoice. Cancel it first.' };
+      }
+      if (Number(inv.paid_amount) > 0) {
+        return { success: false, error: 'Cannot delete invoice with payments. Refund the payment first.' };
+      }
       const result = await adapter.transaction([
         { sql: 'DELETE FROM purchase_invoice_lines WHERE invoice_id = $1 AND $2 = (SELECT company_id FROM purchase_invoices WHERE id = $1)', params: [id, companyId] },
         { sql: 'DELETE FROM purchase_invoices WHERE id = $1 AND company_id = $2', params: [id, companyId] },
@@ -779,13 +822,25 @@ export const purchasesApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const check = await adapter.query(
-        'SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, payment_type, cash_box_id FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+        'SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, payment_type, cash_box_id, base_currency_amount, exchange_rate FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
         return { success: false, error: 'Invoice not found or not in draft status' };
       }
       const inv = check.rows[0] as Record<string, unknown>;
+      // Phase 3: closed/filing tax periods are immutable (see sales/api.ts).
+      const { assertPeriodOpen } = await import('@/modules/tax/engine');
+      const periodGate = await assertPeriodOpen(companyId, toDateString(inv.date) || '', adapter);
+      if (!periodGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${periodGate.period.startDate} – ${periodGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalOpen } = await import('@/modules/accounting/yearEnd');
+      const fiscalGate = await assertFiscalOpen(companyId, toDateString(inv.date) || '', adapter);
+      if (!fiscalGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const supplierId = String(inv.supplier_id);
       const totalAmount = Number(inv.total_amount) || 0;
       const paymentType = String(inv.payment_type || 'credit');
@@ -795,38 +850,145 @@ export const purchasesApi = {
       const paidAmount = paymentType === 'cash' ? totalAmount : (Number(inv.paid_amount) || 0);
       const outstanding = paymentType === 'cash' ? 0 : (totalAmount - paidAmount);
 
+      // ── Phase 1 (IAS 2): perpetual valuation on receipt.
+      // moving_average → re-blend products.cost_price (weighted, base units)
+      // fifo           → open a cost layer per line (first warehouse rule)
+      // standard       → book inventory at frozen standard; the actual-vs-
+      //                  standard gap hits PPV, never inventory value.
+      const {
+        getValuationMethod, computePurchaseAverages, buildAverageUpdateStatements,
+        buildPurchaseLayerStatements, resolveFirstWarehouse, getProductCostMap, roundMoney, splitBaseTotal,
+      } = await import('@/core/utils/valuation');
+      // Phase 4: inbound receipts land in the default warehouse when set
+      // (else the historical first warehouse). Validated + active-checked.
+      const { resolveDefaultWarehouse: resolveRecvWh } = await import('@/core/utils/stockPolicy');
+      const recvWh = (await resolveRecvWh(companyId, 'issue', adapter))
+        || await resolveFirstWarehouse(companyId, adapter);
+      // Phase 2 (IAS 21): ledger legs in base (stored base wins, else rate;
+      // unknown rate means base already — a zero JE is never right).
+      const pinvRate = Number(inv.exchange_rate) || 1;
+      const pinvStoredBase = Number(inv.base_currency_amount) || 0;
+      const pinvBase = splitBaseTotal(
+        pinvStoredBase > 0 ? pinvStoredBase : totalAmount * pinvRate,
+        Number(inv.vat_amount) || 0,
+        totalAmount
+      );
+      const method = await getValuationMethod(companyId, adapter);
+      const purchLinesRes = await adapter.query(
+        `SELECT product_id, COALESCE(NULLIF(base_quantity, 0), quantity) AS bq, line_total
+           FROM purchase_invoice_lines WHERE invoice_id = $1`,
+        [id]
+      );
+      if (!purchLinesRes.success) return { success: false, error: purchLinesRes.error };
+      const purchItems = ((purchLinesRes.rows || []) as Record<string, unknown>[]).map((r) => ({
+        productId: String(r.product_id),
+        baseQty: Number(r.bq) || 0,
+        lineTotal: Number(r.line_total) || 0,
+      })).filter((l) => l.baseQty > 0);
+      const avgUpdates: Array<{ productId: string; newCost: number }> = [];
+      const fifoLayerStmts: Array<{ sql: string; params: unknown[] }> = [];
+      let standardBooking: { inventoryAmount: number; varianceAmount: number; varianceAccount: string } | undefined;
+      // toDateString (never String()): node-postgres returns DATE columns as
+      // JS Date objects whose locale format PG rejects (Phase 45 trap).
+      const invDate = toDateString(inv.date) || new Date().toISOString().split('T')[0];
+      if (method === 'moving_average' && purchItems.length > 0) {
+        const avg = await computePurchaseAverages(companyId, purchItems, adapter);
+        if (!avg.success) return { success: false, error: avg.error };
+        avgUpdates.push(...avg.updates);
+      } else if (method === 'fifo' && purchItems.length > 0) {
+        // No warehouse at all → no layers (the stock-ensure below degrades
+        // the same way); FIFO costing then falls back per line at sale time.
+        const firstWh = recvWh;
+        if (firstWh) {
+          fifoLayerStmts.push(
+            ...buildPurchaseLayerStatements(companyId, purchItems.map((l) => ({
+              productId: l.productId,
+              warehouseId: firstWh,
+              baseQty: l.baseQty,
+              lineTotal: l.lineTotal,
+              receivedDate: invDate,
+              sourceRef: String(inv.invoice_number || ''),
+            }))).map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] }))
+          );
+        }
+      } else if (method === 'standard' && purchItems.length > 0) {
+        const costs = await getProductCostMap(companyId, purchItems.map((l) => l.productId), adapter);
+        let stdTotal = 0;
+        for (const l of purchItems) {
+          const std = costs.get(l.productId)?.standardCost ?? costs.get(l.productId)?.costPrice ?? 0;
+          stdTotal = roundMoney(stdTotal + l.baseQty * std);
+        }
+        // Phase 2: the variance is measured in BASE (standards are base).
+        standardBooking = {
+          inventoryAmount: stdTotal,
+          varianceAmount: roundMoney(pinvBase.sub - stdTotal),
+          varianceAccount: '',
+        };
+      }
+
+      // ── Phase 4: cash purchases drain the treasury — same floor as payments.
+      if (paymentType === 'cash') {
+        const {
+          getStockPolicies: getCashPurPolicies, getCashBoxGlBalance: getCashPurBox, auditOverride: auditCashPur,
+        } = await import('@/core/utils/stockPolicy');
+        const cashPurPolicies = await getCashPurPolicies(companyId, adapter);
+        const cashPurBalance = await getCashPurBox(companyId, cashBoxId, adapter);
+        if (cashPurBalance !== null && cashPurBalance - pinvBase.total < 0) {
+          const msg = `رصيد الخزينة لا يكفي للشراء النقدي (المتاح ${cashPurBalance} — المطلوب ${pinvBase.total})`;
+          if (!cashPurPolicies.allowNegativeCashbox) {
+            return { success: false, error: msg };
+          }
+          await auditCashPur({
+            companyId, userId: safeUserId(_userId) ?? undefined, kind: 'negative-cashbox',
+            recordId: id, label: `فاتورة مشتريات نقدية ${String(inv.invoice_number || '')}`,
+            detail: { balance: cashPurBalance, amount: pinvBase.total },
+          });
+        }
+      }
+
       // ── Unified atomic contract: JE statements + status flip + supplier
       // balance all commit together in ONE transaction — no orphan JE ever.
-      const accounts = await resolvePostingAccounts(companyId, ['default_inventory', 'default_creditors', 'default_vat_input']);
+      const accountKeys = ['default_inventory', 'default_creditors', 'default_vat_input'] as const;
+      const accounts = await resolvePostingAccounts(
+        companyId,
+        standardBooking ? [...accountKeys, 'default_price_variance'] : [...accountKeys]
+      );
       if (!accounts.success) {
         return { success: false, error: accounts.error };
       }
+      if (standardBooking) standardBooking.varianceAccount = accounts.ids.default_price_variance;
       // CASH purchase: the treasury account (selected cash box, or default
       // cash) replaces Creditors on the credit side — we owe the supplier nothing.
       const cashSubstitute = paymentType === 'cash' ? (await getCashBoxGLAccountId(companyId, cashBoxId)) : undefined;
       const postingStmts = buildPurchaseInvoicePostingStatements(companyId, {
         invoiceNumber: String(inv.invoice_number || ''),
-        date: String(inv.date || new Date().toISOString().split('T')[0]),
+        date: invDate,
         subtotal: Number(inv.subtotal) || 0,
         vatAmount: Number(inv.vat_amount) || 0,
         totalAmount,
         paymentType,
         cashAccountSubstitute: cashSubstitute,
-      }, { inventory: accounts.ids.default_inventory, creditors: accounts.ids.default_creditors, vat: accounts.ids.default_vat_input });
+      }, { inventory: accounts.ids.default_inventory, creditors: accounts.ids.default_creditors, vat: accounts.ids.default_vat_input },
+      standardBooking,
+      { subtotal: pinvBase.sub, vatAmount: pinvBase.vat, totalAmount: pinvBase.total });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
+        // Phase 1: re-blended moving averages + FIFO receipt layers ride the
+        // same atomic batch as the JE + stock.
+        ...buildAverageUpdateStatements(companyId, avgUpdates).map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
+        ...fifoLayerStmts,
         // Ensure stock rows exist for all products in the invoice
         {
           sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
                 SELECT $2::uuid, pil.product_id, w.warehouse_id, 0
                   FROM purchase_invoices pi
                   JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
-                  CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
+                  CROSS JOIN (SELECT $3::uuid AS warehouse_id) w
                   LEFT JOIN stock s ON s.company_id = $2::uuid AND s.product_id = pil.product_id AND s.warehouse_id = w.warehouse_id
-                 WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid AND s.id IS NULL
+                 WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid AND w.warehouse_id IS NOT NULL AND s.id IS NULL
                  GROUP BY pil.product_id, w.warehouse_id`,
-          params: [id, companyId],
+          params: [id, companyId, recvWh],
         },
         // Stock movements (in) for each line
         {
@@ -834,9 +996,9 @@ export const purchasesApi = {
                 SELECT pi.company_id, pil.product_id, w.warehouse_id, 'in', COALESCE(NULLIF(pil.base_quantity, 0), pil.quantity), pi.invoice_number, 'فاتورة مشتريات', NOW()
                   FROM purchase_invoices pi
                   JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
-                  CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
-                 WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid`,
-          params: [id, companyId],
+                  CROSS JOIN (SELECT $3::uuid AS warehouse_id) w
+                 WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid AND w.warehouse_id IS NOT NULL`,
+          params: [id, companyId, recvWh],
         },
         // Increment stock quantities
         {
@@ -845,12 +1007,12 @@ export const purchasesApi = {
                     SELECT pil.product_id, w.warehouse_id, SUM(COALESCE(NULLIF(pil.base_quantity, 0), pil.quantity)) AS qty
                       FROM purchase_invoices pi
                       JOIN purchase_invoice_lines pil ON pil.invoice_id = pi.id
-                      CROSS JOIN (SELECT id AS warehouse_id FROM warehouses WHERE company_id = $2::uuid ORDER BY created_at LIMIT 1) w
-                     WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid
+                      CROSS JOIN (SELECT $3::uuid AS warehouse_id) w
+                     WHERE pi.id = $1::uuid AND pi.company_id = $2::uuid AND w.warehouse_id IS NOT NULL
                      GROUP BY pil.product_id, w.warehouse_id
                   ) sub
                  WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
-          params: [id, companyId],
+          params: [id, companyId, recvWh],
         },
         {
           sql: `UPDATE purchase_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
@@ -1249,7 +1411,10 @@ export const purchasesApi = {
       // P2 fix: posted returns already moved stock + JE + party balance —
       // flipping status (e.g. posted → cancelled) while those effects stand
       // corrupts the books. Draft edits only (posting goes via postReturn).
-      if (data.status !== undefined) {
+      // Phase 0: extended from status-only to lines + amounts (parity with
+      // sales.updateReturn) — editing money on a posted return corrupts the
+      // standing JE/stock/balance just as badly as flipping its status.
+      if (data.status !== undefined || (data as { lines?: unknown }).lines !== undefined || data.totalAmount !== undefined || data.subtotal !== undefined || data.vatAmount !== undefined) {
         const cur = await adapter.query<{ status: string }>(
           `SELECT status FROM purchase_returns WHERE id = $1::uuid AND company_id = $2::uuid`,
           [id, companyId]
@@ -1258,7 +1423,7 @@ export const purchasesApi = {
         const curStatus = String(cur.rows?.[0]?.status ?? '');
         if (!curStatus) return { success: false, error: 'Return not found' };
         if (curStatus !== 'draft') {
-          return { success: false, error: 'Cannot change status of a posted return.' };
+          return { success: false, error: 'Cannot modify a posted return.' };
         }
       }
       const fields: string[] = [];
@@ -1297,6 +1462,19 @@ export const purchasesApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Phase 0 fix: parity with sales.deleteReturn — a posted return
+      // already moved stock + JE + supplier balance; it is reversed,
+      // never deleted.
+      const check = await adapter.query(
+        'SELECT status FROM purchase_returns WHERE id = $1::uuid AND company_id = $2::uuid',
+        [id, companyId]
+      );
+      if (!check.success || !check.rows?.[0]) {
+        return { success: false, error: 'Return not found' };
+      }
+      if (String((check.rows[0] as Record<string, unknown>).status) !== 'draft') {
+        return { success: false, error: 'Cannot delete posted return. Cancel it first.' };
+      }
       const result = await adapter.transaction([
         { sql: 'DELETE FROM purchase_return_lines WHERE return_id = $1 AND $2 = (SELECT company_id FROM purchase_returns WHERE id = $1)', params: [id, companyId] },
         { sql: 'DELETE FROM purchase_returns WHERE id = $1 AND company_id = $2', params: [id, companyId] },
@@ -1313,15 +1491,106 @@ export const purchasesApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
       const check = await adapter.query(
-        'SELECT pr.supplier_id, pr.total_amount, pr.return_number, pr.date, s.name as supplier_name FROM purchase_returns pr LEFT JOIN suppliers s ON pr.supplier_id = s.id WHERE pr.id = $1::uuid AND pr.company_id = $2::uuid AND pr.status = $3',
+        'SELECT pr.supplier_id, pr.total_amount, pr.subtotal, pr.vat_amount, pr.invoice_id, pr.return_number, pr.date, s.name as supplier_name FROM purchase_returns pr LEFT JOIN suppliers s ON pr.supplier_id = s.id WHERE pr.id = $1::uuid AND pr.company_id = $2::uuid AND pr.status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
         return { success: false, error: 'Return not found or not in draft status' };
       }
       const ret = check.rows[0] as Record<string, unknown>;
+      const { assertPeriodOpen: assertPReturnPeriod } = await import('@/modules/tax/engine');
+      const pretGate = await assertPReturnPeriod(companyId, toDateString(ret.date) || '', adapter);
+      if (!pretGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${pretGate.period.startDate} – ${pretGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalPReturnOpen } = await import('@/modules/accounting/yearEnd');
+      const fiscalPretGate = await assertFiscalPReturnOpen(companyId, toDateString(ret.date) || '', adapter);
+      if (!fiscalPretGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalPretGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const supplierId = String(ret.supplier_id);
       const totalAmount = Number(ret.total_amount) || 0;
+      const pretSubtotal = Number(ret.subtotal ?? totalAmount) || 0;
+      const pretVat = Number(ret.vat_amount ?? Math.max(0, totalAmount - pretSubtotal)) || 0;
+
+      // ── Phase 1 (IAS 2): inventory leaves at COST basis, input VAT on its
+      // own leg, price gap to PPV. FIFO consumes oldest layers as an outflow.
+      const {
+        getValuationMethod: getMethod2, resolveSaleUnitCosts: resolveCosts2,
+        allocateFifoOutflow: allocFifo2, buildFifoConsumeStatements: consumeStmts2, roundMoney: round2, splitBaseTotal: splitBase2,
+      } = await import('@/core/utils/valuation');
+      // Phase 4: preferred source warehouse for the removed stock.
+      const { resolveDefaultWarehouse: resolvePRetWh } = await import('@/core/utils/stockPolicy');
+      const pretPreferredWh = await resolvePRetWh(companyId, 'issue', adapter);
+      // Phase 2 (IAS 21): creditor/VAT legs in base at the source invoice
+      // rate; without a linked invoice the return is assumed base already.
+      let pretBase = { sub: pretSubtotal, vat: pretVat, total: pretSubtotal + pretVat };
+      const pretSrcId = ret.invoice_id ? String(ret.invoice_id) : null;
+      if (pretSrcId) {
+        const srcHead = await adapter.query(
+          `SELECT total_amount, exchange_rate, base_currency_amount FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [pretSrcId, companyId]
+        );
+        if (srcHead.success && srcHead.rows?.[0]) {
+          const sh = srcHead.rows[0] as Record<string, unknown>;
+          const srcTotal = Number(sh.total_amount) || 0;
+          const srcBase = Number(sh.base_currency_amount) || 0;
+          const rate = srcTotal > 0 && srcBase > 0 ? srcBase / srcTotal : (Number(sh.exchange_rate) || 1);
+          pretBase = splitBase2(
+            round2((pretSubtotal + pretVat) * rate),
+            pretVat,
+            pretSubtotal + pretVat
+          );
+        }
+      }
+      const pretLinesRes = await adapter.query(
+        `SELECT product_id, COALESCE(NULLIF(base_quantity, 0), quantity) AS bq
+           FROM purchase_return_lines WHERE return_id = $1`,
+        [id]
+      );
+      if (!pretLinesRes.success) return { success: false, error: pretLinesRes.error };
+      const pretItems = ((pretLinesRes.rows || []) as Record<string, unknown>[]).map((r) => ({
+        productId: String(r.product_id),
+        baseQty: Number(r.bq) || 0,
+      })).filter((l) => l.baseQty > 0);
+      const pretMethod = await getMethod2(companyId, adapter);
+      // ── Phase 4: a purchase return is an OUTFLOW — same floor as sales.
+      const { getStockPolicies: getPRetPolicies, checkStockSufficiency: checkPRetStock, formatShortages: fmtPRetShort, auditOverride: auditPRet } =
+        await import('@/core/utils/stockPolicy');
+      const pretPolicies = await getPRetPolicies(companyId, adapter);
+      const pretStockGate = await checkPRetStock(companyId, pretItems, adapter);
+      if (!pretStockGate.ok && !pretPolicies.allowNegativePurchaseReturn) {
+        return { success: false, error: `المخزون لا يكفي للمردود (${fmtPRetShort(pretStockGate.shortages)})` };
+      }
+      if (!pretStockGate.ok && pretPolicies.allowNegativePurchaseReturn) {
+        await auditPRet({
+          companyId, userId: safeUserId(_userId) ?? undefined, kind: 'negative-stock',
+          recordId: id, label: `مردود مشتريات ${String(ret.return_number || '')}`,
+          detail: { shortages: pretStockGate.shortages },
+        });
+      }
+      // No lines resolvable (shouldn't happen — returns require lines):
+      // fall back to the return price itself so the JE stays sane.
+      let pretCostBasis = pretSubtotal;
+      const pretConsume: Array<{ sql: string; params: unknown[] }> = [];
+      if (pretItems.length === 0) {
+        pretCostBasis = pretSubtotal;
+      } else if (pretMethod === 'fifo') {
+        const alloc = await allocFifo2(companyId, pretItems, adapter);
+        if (!alloc.success) return { success: false, error: alloc.error };
+        pretCostBasis = alloc.total;
+        pretConsume.push(
+          ...consumeStmts2(companyId, alloc.consumptions).map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] }))
+        );
+      } else {
+        const resolved = await resolveCosts2(companyId, pretItems, adapter);
+        if (!resolved.success) return { success: false, error: resolved.error };
+        pretCostBasis = 0;
+        for (const it of pretItems) {
+          pretCostBasis = round2(pretCostBasis + it.baseQty * (resolved.costs.get(it.productId) || 0));
+        }
+      }
 
       // ── Unified atomic contract: JE + stock movements + status flip +
       // supplier balance all commit together in ONE transaction.
@@ -1331,7 +1600,15 @@ export const purchasesApi = {
         date: String(ret.date || new Date().toISOString().split('T')[0]),
         supplier: String(ret.supplier_name || ''),
         amount: totalAmount,
-      });
+      }, {
+        subtotal: pretSubtotal,
+        vatAmount: pretVat,
+        costBasis: pretCostBasis,
+      }, {
+        subtotal: pretBase.sub,
+        vatAmount: pretBase.vat,
+        totalAmount: pretBase.total,
+      }, pretPreferredWh);
       if (!posting.success) {
         return { success: false, error: posting.error };
       }
@@ -1339,6 +1616,8 @@ export const purchasesApi = {
       const resolvedUserId = await resolveExistingUserId(adapter, _userId, companyId);
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...posting.statements.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
+        // FIFO layer consumption rides the same atomic batch.
+        ...pretConsume,
         {
           sql: `UPDATE purchase_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, resolvedUserId],

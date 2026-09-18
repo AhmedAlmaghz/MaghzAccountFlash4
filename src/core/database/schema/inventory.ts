@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { companies } from './core';
 import { productTypes, units } from './settings';
 
@@ -24,6 +25,9 @@ export const products = pgTable('products', {
   categoryId: uuid('category_id'),
   productTypeId: uuid('product_type_id').references(() => productTypes.id, { onDelete: 'set null' }),
   costPrice: numeric('cost_price', { precision: 18, scale: 4 }).notNull().default('0'),
+  // Phase 1: frozen standard cost (standard-cost method only). NULL = unset →
+  // callers fall back to cost_price so nothing crashes on legacy rows.
+  standardCost: numeric('standard_cost', { precision: 18, scale: 4 }),
   salePrice: numeric('sale_price', { precision: 18, scale: 4 }).notNull().default('0'),
   isActive: boolean('is_active').notNull().default(true),
   image: text('image'),
@@ -137,6 +141,25 @@ export const warehouseTransferLines = pgTable('warehouse_transfer_lines', {
   productId: uuid('product_id').notNull(),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
 });
+
+// ─── FIFO Cost Layers (Phase 1 — perpetual valuation) ─────────────────────────
+// One row per receipt (purchase / manufacturing / return inflow). Outflows
+// consume oldest-first by (received_date, created_at). Moving-average and
+// standard-cost companies never read this table.
+export const inventoryLayers = pgTable('inventory_layers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+  warehouseId: uuid('warehouse_id').references(() => warehouses.id, { onDelete: 'set null' }),
+  qtyRemaining: numeric('qty_remaining', { precision: 18, scale: 4 }).notNull().default('0'),
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
+  receivedDate: date('received_date').notNull().defaultNow(),
+  sourceRef: varchar('source_ref', { length: 100 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (t) => [
+  index('idx_layers_company_product').on(t.companyId, t.productId),
+  index('idx_layers_fifo_order').on(t.companyId, t.productId, t.receivedDate, t.createdAt).where(sql`${t.qtyRemaining} > 0`),
+]);
 
 // ─── Stock Adjustments ────────────────────────────────────────────────────────
 export const stockAdjustments = pgTable('stock_adjustments', {

@@ -41,6 +41,8 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyAmount: numeric('base_currency_amount', { precision: 18, scale: 4 }).notNull().default('0'),
   baseCurrencyPaid: numeric('base_currency_paid', { precision: 18, scale: 4 }).notNull().default('0'),
+  // Phase 2 (IAS 21): incremental-revaluation anchor (see sales schema).
+  lastRevalRate: numeric('last_reval_rate', { precision: 18, scale: 6 }),
   status: varchar('status', { length: 20 }).default('draft'),
   paymentType: varchar('payment_type', { length: 10 }).notNull().default('credit'),
   cashBoxId: uuid('cash_box_id'),

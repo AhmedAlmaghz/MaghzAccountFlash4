@@ -16,6 +16,7 @@ dist-ssr
 test-results/
 playwright-report/
 build-output.txt
+.capture/
 lint-output.txt
 test-output.txt
 *-out.txt

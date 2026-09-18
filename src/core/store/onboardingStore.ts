@@ -22,6 +22,11 @@ export interface CompanyConfig {
   decimalPlaces?: number;
   dateFormat?: string;
   fiscalYearStart?: string;
+  // Phase 1: inventory valuation method chosen at company setup.
+  valuationMethod?: 'moving_average' | 'fifo' | 'standard';
+  // Phase 3: tax jurisdiction chosen at company setup.
+  taxCountry?: string;
+  taxTimezone?: string;
 }
 
 export type SeedOption = 'none' | 'default' | 'demo';
@@ -71,6 +76,9 @@ const defaultCompanyConfig: CompanyConfig = {
   decimalPlaces: 2,
   dateFormat: 'yyyy-MM-dd',
   fiscalYearStart: new Date().getFullYear() + '-01-01',
+  valuationMethod: 'moving_average',
+  taxCountry: 'YE',
+  taxTimezone: 'Asia/Aden',
 };
 
 export const useOnboardingStore = create<OnboardingState>()(

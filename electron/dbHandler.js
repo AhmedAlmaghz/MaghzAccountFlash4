@@ -350,7 +350,7 @@ const SQL_MODULE_TABLE_RULES = [
       'pos.create',
     ],
   },
-  { module: 'accounting', tables: ['accounts', 'cost_centers', 'receipt_vouchers', 'payment_vouchers'] },
+  { module: 'accounting', tables: ['accounts', 'cost_centers', 'receipt_vouchers', 'payment_vouchers', 'fixed_assets', 'accounting_periods'] },
   // GL tables are ALSO written by cross-module posting flows: HR payroll runs
   // (gross-up entry), end-of-service accrual/settlement and POS checkout
   // (mixed cash/credit sale entry) book through the same journal machinery.
@@ -2836,8 +2836,8 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => ({
       sql: `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE c.company_id = $1::uuid ORDER BY c.name ASC`,
@@ -2856,8 +2856,8 @@ export function registerDatabaseHandlers() {
       return {
         sql: `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance,
                 (COUNT(*) OVER())::int AS total_count
@@ -2873,8 +2873,8 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => ({
       sql: `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                 + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
+                 - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
          FROM customers c WHERE c.id = $1::uuid AND c.company_id = $2::uuid LIMIT 1`,
@@ -3925,7 +3925,10 @@ export function registerAuthHandlers() {
     { table: 'payment_vouchers', scope: { type: 'company' } },
     { table: 'journal_entries', scope: { type: 'company' } },
     { table: 'transactions', scope: { type: 'company' } },
+    { table: 'accounting_periods', scope: { type: 'company' } },
+    { table: 'fixed_assets', scope: { type: 'company' } },
     { table: 'stock_movements', scope: { type: 'company' } },
+    { table: 'inventory_layers', scope: { type: 'company' } },
     { table: 'stock_adjustments', scope: { type: 'company' } },
     { table: 'warehouse_transfers', scope: { type: 'company' } },
     { table: 'attendance', scope: { type: 'company' } },
@@ -3966,6 +3969,7 @@ export function registerAuthHandlers() {
     { table: 'users', scope: { type: 'company' } },
     { table: 'roles', scope: { type: 'company' } },
     { table: 'settings', scope: { type: 'company' } },
+    { table: 'tax_periods', scope: { type: 'company' } },
     { table: 'companies', scope: { type: 'single', idColumn: 'id' } },
   ];
 
@@ -3975,13 +3979,14 @@ export function registerAuthHandlers() {
   const BACKUP_INSERT_ORDER = [
     'companies', 'currencies', 'units', 'branches', 'roles', 'users',
     'departments', 'accounts', 'cash_boxes', 'cost_centers', 'vat_settings',
-    'default_accounts', 'document_sequences', 'settings', 'payroll_components',
+    'default_accounts', 'document_sequences', 'settings', 'tax_periods', 'payroll_components',
     'product_types', 'product_categories', 'warehouses', 'products', 'product_units', 'boms',
     'employees', 'work_orders', 'customers', 'suppliers', 'leads',
     'opportunities', 'tasks', 'activities', 'pos_shifts', 'quotations', 'sales_invoices', 'pos_payments',
     'sales_returns', 'purchase_orders', 'purchase_invoices', 'purchase_returns',
     'receipt_vouchers', 'payment_vouchers', 'transactions', 'journal_entries',
-    'stock', 'stock_movements', 'stock_adjustments', 'warehouse_transfers',
+    'accounting_periods', 'fixed_assets',
+    'stock', 'stock_movements', 'inventory_layers', 'stock_adjustments', 'warehouse_transfers',
     'attendance', 'leaves', 'payroll_runs', 'end_of_service', 'ai_chat_sessions',
     'ai_chat_messages', 'ai_job_batches', 'ai_job_items', 'audit_logs', 'product_product_categories',
     'warehouse_transfer_lines', 'quotation_lines', 'sales_invoice_lines',
@@ -4433,7 +4438,13 @@ export async function seedInitialData(adminPassword, company) {
     // VAT Payable
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '21301', 'ط¶ط±ظٹط¨ط© ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ظ…ط¶ط§ظپط©', 'VAT Payable', $2, 'liability', 'credit', FALSE, 0);
+      VALUES ($1, '21301', 'ضريبة القيمة المضافة', 'VAT Payable', $2, 'liability', 'credit', FALSE, 0);
+    `, [companyId, liabId]);
+
+    // Phase 3: input VAT as a contra-liability (debit nature) — split from 21301.
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '21302', 'ضريبة القيمة المضافة على المدخلات', 'VAT Input Recoverable', $2, 'liability', 'debit', FALSE, 0);
     `, [companyId, liabId]);
 
     // Additional revenue accounts
@@ -4451,6 +4462,66 @@ export async function seedInitialData(adminPassword, company) {
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
       VALUES ($1, '51101', 'طھظƒظ„ظپط© ط¨ط¶ط§ط¹ط© ظ…ط¨ط§ط¹ط©', 'Cost of Goods Sold', $2, 'expense', 'debit', FALSE, 0);
+    `, [companyId, expenseId]);
+
+    // Phase 2 (FIN-2): exchange gain/loss account for IAS 21 differences.
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '52902', 'فروق أسعار الصرف', 'Exchange Gain/Loss', $2, 'expense', 'debit', FALSE, 0);
+    `, [companyId, expenseId]);
+
+    // Phase 1 (FIN-1): variance / shortage / surplus accounts for the
+    // perpetual-valuation postings (PPV, stock-count gain/loss).
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '51901', 'ظپط±ظˆظ‚ ط§ط³ط¹ط§ط± ط§ظ„ط´ط±ط§ط،', 'Purchase Price Variance', $2, 'expense', 'debit', FALSE, 0);
+    `, [companyId, expenseId]);
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '52901', 'ط¹ط¬ط² ط§ظ„ظ…ط®ط²ظˆظ†', 'Inventory Shortage Loss', $2, 'expense', 'debit', FALSE, 0);
+    `, [companyId, expenseId]);
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '41901', 'ظپط§ط¦ط¶ ط§ظ„ظ…ط®ط²ظˆظ†', 'Inventory Surplus Gain', $2, 'revenue', 'credit', FALSE, 0);
+    `, [companyId, revenueId]);
+
+    // Phase 5: fixed-asset groups + leaves (12/121/12101 cost, 12102 contra).
+    const faGroupRes = await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
+      VALUES ($1, '12', 'الأصول الثابتة', 'Fixed Assets', $2, 'asset', 'debit', TRUE) RETURNING id;
+    `, [companyId, assetsId]);
+    const faCostGroupRes = await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
+      VALUES ($1, '121', 'الأصول الثابتة - التكلفة', 'Fixed Assets at Cost', $2, 'asset', 'debit', TRUE) RETURNING id;
+    `, [companyId, faGroupRes.rows[0].id]);
+    const faCostGroupId = faCostGroupRes.rows[0].id;
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '12101', 'تكلفة الأصول الثابتة', 'Fixed Assets at Cost', $2, 'asset', 'debit', FALSE, 0);
+    `, [companyId, faCostGroupId]);
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '12102', 'مجمع إهلاك الأصول الثابتة', 'Accumulated Depreciation', $2, 'asset', 'credit', FALSE, 0);
+    `, [companyId, faCostGroupId]);
+
+    // Phase 5: retained-earnings groups + leaf (32/321/32101).
+    const reGroupRes = await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
+      VALUES ($1, '32', 'الأرباح المبقاة والاحتياطيات', 'Retained Earnings & Reserves', $2, 'equity', 'credit', TRUE) RETURNING id;
+    `, [companyId, equityId]);
+    const reSubGroupRes = await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
+      VALUES ($1, '321', 'الأرباح المبقاة', 'Retained Earnings', $2, 'equity', 'credit', TRUE) RETURNING id;
+    `, [companyId, reGroupRes.rows[0].id]);
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '32101', 'الأرباح المبقاة', 'Retained Earnings', $2, 'equity', 'credit', FALSE, 0);
+    `, [companyId, reSubGroupRes.rows[0].id]);
+
+    // Phase 5: depreciation expense leaf.
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '52601', 'مصروف إهلاك الأصول الثابتة', 'Depreciation Expense', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
 
     // 4. Seed basic settings
@@ -4478,6 +4549,7 @@ export async function seedInitialData(adminPassword, company) {
       { type: 'journal_voucher', prefix: 'JV-', start: 1, current: 1 },
       { type: 'receipt_voucher', prefix: 'RV-', start: 1, current: 1 },
       { type: 'payment_voucher', prefix: 'PV-', start: 1, current: 1 },
+      { type: 'fixed_asset', prefix: 'FA-', start: 1, current: 1 },
     ];
     for (const s of docSeqs) {
       await client.query(`
@@ -4516,7 +4588,7 @@ export async function seedInitialData(adminPassword, company) {
       { key: 'default_debtors', code: '11201' },
       { key: 'default_creditors', code: '21101' },
       { key: 'default_vat_output', code: '21301' },
-      { key: 'default_vat_input', code: '21301' },
+      { key: 'default_vat_input', code: '21302' },
       { key: 'default_salaries', code: '52101' },
       { key: 'default_sales_returns', code: '41103' },
     ];
@@ -4538,6 +4610,17 @@ export async function seedInitialData(adminPassword, company) {
       { key: 'default_discount_allowed', code: '41101', required: false },
       { key: 'default_discount_received', code: '21101', required: false },
       { key: 'default_purchase_returns', code: '21101', required: true },
+      // Phase 1 (FIN-1): valuation variance / shortage / surplus postings.
+      { key: 'default_price_variance', code: '51901', required: false },
+      { key: 'default_inventory_shortage', code: '52901', required: false },
+      { key: 'default_inventory_surplus', code: '41901', required: false },
+      // Phase 2 (FIN-2): realized + unrealized exchange differences.
+      { key: 'default_exchange_difference', code: '52902', required: false },
+      // Phase 5: fixed assets + depreciation + retained earnings.
+      { key: 'default_fixed_assets', code: '12101', required: false },
+      { key: 'default_accumulated_depreciation', code: '12102', required: false },
+      { key: 'default_depreciation_expense', code: '52601', required: false },
+      { key: 'default_retained_earnings', code: '32101', required: false },
     ];
     for (const mapping of additionalDefaultAccounts) {
       const accRes = await client.query(

@@ -4,6 +4,8 @@ import { validateInput, idCompanySchema, companyIdSchema, createEmployeeSchema }
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { getNextDocumentNumber } from '@/core/api';
 import { runTransaction, buildJournalEntryStatement, type TxStatement } from '@/core/database/tx';
+import { getDefaultAccountId } from '@/core/utils/journalEntryGenerator';
+import { logAudit } from '@/core/utils/auditLogger';
 import { toDateString } from '@/core/utils/mapPgRow';
 import {
   buildPolicy, computeLeaveDays, leavesOverlap, computeLeaveBalance, computePayroll,
@@ -900,6 +902,18 @@ export const hrApi = {
 
       const runNumber = String(run.run_number || '');
       const monthLabel = new Date().toISOString().slice(0, 10);
+      // Phase 3: the payroll JE is dated today — closed periods reject it.
+      const { assertPeriodOpen } = await import('@/modules/tax/engine');
+      const payGate = await assertPeriodOpen(companyId, monthLabel, adapter);
+      if (!payGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${payGate.period.startDate} – ${payGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalPay } = await import('@/modules/accounting/yearEnd');
+      const fiscalPayGate = await assertFiscalPay(companyId, monthLabel, adapter);
+      if (!fiscalPayGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalPayGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const entries = [
         { accountId: salariesAcc, debit: gross, credit: 0, memo: `مصروف رواتب — مسير ${runNumber}` },
         { accountId: payableAcc, debit: 0, credit: net, memo: `رواتب مستحقة الدفع — مسير ${runNumber}` },
@@ -1452,6 +1466,13 @@ export const hrApi = {
       const cashAcc = cashBoxRes.rows?.[0]?.account_id || null;
       if (!eosPayableAcc) return { success: false, error: 'حساب مستحقات نهاية الخدمة غير مهيأ (21503).' };
       if (!cashAcc) return { success: false, error: 'الخزنة المختارة غير مرتبطة بحساب محاسبي — راجع شاشة النقدية والخزائن.' };
+      // Phase 5: the settlement JE is dated today — a closed fiscal year
+      // locks it like every other posting path.
+      const { assertAccountingPeriodOpen: assertFiscalEos } = await import('@/modules/accounting/yearEnd');
+      const fiscalEosGate = await assertFiscalEos(companyId, new Date().toISOString().slice(0, 10), adapter);
+      if (!fiscalEosGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalEosGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
 
       const statements: TxStatement[] = [
         buildJournalEntryStatement(companyId, {
@@ -1473,6 +1494,116 @@ export const hrApi = {
       const tx = await runTransaction(statements);
       if (!tx.success) return { success: false, error: tx.error || 'فشل تسجيل الدفع' };
       return { success: true };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * IAS 19 accumulating-absence provision (Phase 5): unused annual leave
+   * liability at year-end — Σ remaining days × (base/30) per active
+   * employee, trued-up against the 21504 subledger (never payroll clearing
+   * 21501). Top-up: Dr 52101 / Cr 21504; excess: Dr 21504 / Cr 52101.
+   * Reference LEAVE-YYYY is once-per-year (rerun refuses — reverse to fix).
+   */
+  async postLeaveProvision(companyId: string, year: number, userId?: string): Promise<{ success: boolean; data?: { reference: string; employees: number; amount: number }; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+        return { success: false, error: 'Invalid year' };
+      }
+      const yearEnd = `${year}-12-31`;
+      const today = toDateString(new Date()) || '';
+      if (yearEnd > today) return { success: false, error: 'Cannot provide for a year that has not ended' };
+      const adapter = await getDbAdapter();
+      const { assertAccountingPeriodOpen } = await import('@/modules/accounting/yearEnd');
+      const gate = await assertAccountingPeriodOpen(companyId, yearEnd, adapter);
+      if (!gate.open) {
+        return { success: false, error: `السنة المالية ${gate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      const reference = `LEAVE-${year}`;
+      const dup = await adapter.query(
+        `SELECT id FROM transactions WHERE company_id = $1::uuid AND reference = $2 LIMIT 1`,
+        [companyId, reference]
+      );
+      if (!dup.success) return { success: false, error: dup.error };
+      if (dup.rows?.length) return { success: false, error: 'Provision for this year is already posted — reverse it to correct' };
+      const policy = await loadHrPolicy(companyId);
+      const empRes = await adapter.query(
+        `SELECT id, base_salary FROM employees WHERE company_id = $1::uuid AND is_active = true`,
+        [companyId]
+      );
+      if (!empRes.success) return { success: false, error: empRes.error };
+      let target = 0;
+      let employees = 0;
+      for (const r of (empRes.rows || []) as Record<string, unknown>[]) {
+        const used = await getUsedLeaveDays(companyId, String(r.id), 'annual', year);
+        const balance = computeLeaveBalance({ leaveType: 'annual', usedDays: used, policy });
+        if (balance.uncapped || balance.remaining <= 0) continue;
+        const daily = (Number(r.base_salary) || 0) / 30;
+        if (daily <= 0) continue;
+        target += balance.remaining * daily;
+        employees++;
+      }
+      target = Math.round(target * 100) / 100;
+      const cur = await adapter.query(
+        `SELECT COALESCE(SUM(je.debit - je.credit), 0) AS bal
+           FROM journal_entries je JOIN transactions t ON t.id = je.transaction_id
+           JOIN accounts a ON a.id = je.account_id
+          WHERE je.company_id = $1::uuid AND t.status = 'posted' AND a.code = '21504'`,
+        [companyId]
+      );
+      if (!cur.success) return { success: false, error: cur.error };
+      // 21504 is credit-natured: balance>0 means over-provided... note the
+      // JE sign convention here is (debit − credit), so a credit balance
+      // reads NEGATIVE. Flip to liability-positive for the true-up math.
+      const current = -1 * (Number((cur.rows?.[0] as Record<string, unknown> | undefined)?.bal) || 0);
+      const delta = Math.round((target - current) * 100) / 100;
+      if (Math.abs(delta) < 0.005) {
+        return { success: true, data: { reference, employees, amount: 0 } };
+      }
+      const salariesAcc = await getDefaultAccountId(companyId, 'default_salaries');
+      let provisionAcc = await getDefaultAccountId(companyId, 'default_leave_provision');
+      if (!provisionAcc) {
+        const byCode = await adapter.query(
+          `SELECT id FROM accounts WHERE company_id = $1::uuid AND code = '21504' LIMIT 1`,
+          [companyId]
+        );
+        provisionAcc = byCode.success ? String((byCode.rows?.[0] as Record<string, unknown> | undefined)?.id || '') : '';
+      }
+      if (!salariesAcc) return { success: false, error: 'Salaries account not configured (52101)' };
+      if (!provisionAcc) return { success: false, error: 'Leave-provision account not configured (21504)' };
+      const abs = Math.abs(delta);
+      const statements: TxStatement[] = [
+        buildJournalEntryStatement(companyId, {
+          reference,
+          description: `مخصص الإجازات غير المستخدمة ${year} — ${employees} موظف`,
+          date: yearEnd,
+          totalAmount: abs,
+          entries:
+            delta > 0
+              ? [
+                  { accountId: salariesAcc, debit: abs, credit: 0, memo: `مخصص إجازات ${year}` },
+                  { accountId: provisionAcc, debit: 0, credit: abs, memo: `التزام إجازات ${year}` },
+                ]
+              : [
+                  { accountId: provisionAcc, debit: abs, credit: 0, memo: `عكس فائض مخصص ${year}` },
+                  { accountId: salariesAcc, debit: 0, credit: abs, memo: `عكس فائض مخصص ${year}` },
+                ],
+        }),
+      ];
+      const result = await runTransaction(statements);
+      if (!result.success) return { success: false, error: result.error };
+      await logAudit({
+        companyId,
+        userId: safeUserId(userId) || 'system',
+        action: 'post',
+        tableName: 'employees',
+        recordId: reference,
+        newValues: { year, employees, target, previous: Math.round(current * 100) / 100, posted: delta },
+      }).catch(() => undefined);
+      return { success: true, data: { reference, employees, amount: delta } };
     } catch (e) {
       return { success: false, error: String(e) };
     }

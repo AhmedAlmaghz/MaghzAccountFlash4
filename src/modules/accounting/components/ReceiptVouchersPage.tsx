@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Plus, CheckSquare, Users, Hash, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle } from 'lucide-react';
+import { Plus, CheckSquare, Users, Hash, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle, Undo2 } from
+'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { Card, Button, Modal, Input, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
@@ -12,6 +13,8 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useReceiptVouchersPaginated } from '../hooks/useAccounting';
 import { useOutstandingInvoicesForCustomer } from '@/modules/sales/hooks/useSales';
 import { accountingApi } from '../api';
+import { reverseVoucher } from '../reversal';
+import { ReverseDialog } from './ReverseDialog';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
@@ -47,8 +50,21 @@ export const ReceiptVouchersPage: React.FC = () => {
     }),
     [statusFilter, search, methodFilter],
   );
-  const { vouchers, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } =
+  const { vouchers, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, reload } =
     useReceiptVouchersPaginated(activeCompany?.id || '', voucherFilters);
+  const [reverseRow, setReverseRow] = useState<ReceiptVoucher | null>(null);
+
+  const handleReverseConfirm = async (date: string, reason: string) => {
+    if (!activeCompany?.id || !reverseRow) return;
+    const res = await reverseVoucher(activeCompany.id, reverseRow.id, 'receipt', { date, reason }, user?.id || '');
+    if (res.success) {
+      addToast('success', `${t('accounting.reverse.success')} (${res.data.reference})`);
+      setReverseRow(null);
+      await reload();
+    } else {
+      addToast('error', res.error || t('common.error'));
+    }
+  };
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
@@ -421,10 +437,24 @@ export const ReceiptVouchersPage: React.FC = () => {
               showPreview
               showPrint
               showExport={false}
-              disabledEdit={row.status === 'posted'}
-              disabledDelete={row.status === 'posted'}
-            />
-            {row.status === 'draft' && (
+                disabledEdit={row.status === 'posted' || row.status === 'reversed'}
+                disabledDelete={row.status === 'posted' || row.status === 'reversed'}
+              />
+              {row.status === 'posted' && (
+                <Can action="post" module="accounting">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title={t('accounting.reverse.title')}
+                    aria-label={t('accounting.reverse.title')}
+                    onClick={() => setReverseRow(row)}
+                    className="h-7 text-xs px-2"
+                  >
+                    <Undo2 size={13} />
+                  </Button>
+                </Can>
+              )}
+              {row.status === 'draft' && (
               <Button size="sm" variant="secondary" leftIcon={<CheckSquare size={13} />} onClick={() => handlePost(row)} disabled={postingId === row.id} className="h-7 text-xs px-2">
                 {postingId === row.id ? t('accounting.posting') : 'ترحيل'}
               </Button>
@@ -799,6 +829,13 @@ export const ReceiptVouchersPage: React.FC = () => {
         title={t('delete')}
         message={`${t('accounting.deleteReceiptVoucherConfirm')} "${confirmDelete?.voucherNumber}"؟`}
         variant="danger"
+      />
+
+      <ReverseDialog
+        open={!!reverseRow}
+        onClose={() => setReverseRow(null)}
+        docLabel={reverseRow?.voucherNumber || ''}
+        onConfirm={handleReverseConfirm}
       />
 
       <DuplicateWarningDialog

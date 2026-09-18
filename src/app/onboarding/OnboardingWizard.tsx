@@ -58,6 +58,29 @@ export const OnboardingWizard: React.FC = () => {
       // Update app company state from the database row when available
       // (real id + canonical values), otherwise from the wizard config.
       const c = persisted.success && persisted.data ? persisted.data : null;
+
+      // Phase 1: persist the chosen valuation method as a settings key
+      // (best-effort — posting flows default to moving_average when unset).
+      try {
+        const finishCompanyId = (c as { id?: string } | null)?.id;
+        const method = companyConfig.valuationMethod || 'moving_average';
+        if (finishCompanyId && ['moving_average', 'fifo', 'standard'].includes(method)) {
+          const { setValuationMethod } = await import('@/core/utils/valuation');
+          await setValuationMethod(finishCompanyId, method as 'moving_average' | 'fifo' | 'standard');
+        }
+      } catch {
+        /* non-fatal: settings default applies */
+      }
+      // Phase 3: persist the chosen tax jurisdiction the same way.
+      try {
+        const finishCompanyId = (c as { id?: string } | null)?.id;
+        if (finishCompanyId && companyConfig.taxCountry) {
+          const { setCompanyTaxContext } = await import('@/modules/tax/engine');
+          await setCompanyTaxContext(finishCompanyId, companyConfig.taxCountry, companyConfig.taxTimezone || '');
+        }
+      } catch {
+        /* non-fatal: YE zero-rate default applies */
+      }
       setActiveCompany(c?.name || companyConfig.name, c?.id || 'comp-1', c?.currency || companyConfig.currency, {
         nameEn: c?.nameEn,
         taxNumber: c?.taxNumber,
@@ -544,6 +567,56 @@ function CompanyStep({ onNext, onBack }: { onNext: () => void; onBack: () => voi
               onChange={e => setCompanyConfig({ fiscalYearStart: e.target.value })}
               className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('settings.inventory.valuationMethod')}</label>
+          <select
+            value={companyConfig.valuationMethod || 'moving_average'}
+            title={t('settings.inventory.valuationMethod')}
+            onChange={e => setCompanyConfig({ valuationMethod: e.target.value as 'moving_average' | 'fifo' | 'standard' })}
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="moving_average">{t('settings.inventory.moving_average')}</option>
+            <option value="fifo">{t('settings.inventory.fifo')}</option>
+            <option value="standard">{t('settings.inventory.standard')}</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('settings.inventory.subtitle')}</p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('settings.tax.country')}</label>
+            <select
+              value={companyConfig.taxCountry || 'YE'}
+              title={t('settings.tax.country')}
+              onChange={e => {
+                const code = e.target.value;
+                setCompanyConfig({ taxCountry: code });
+              }}
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="YE">اليمن — Yemen</option>
+              <option value="SA">السعودية — Saudi Arabia</option>
+              <option value="AE">الإمارات — UAE</option>
+              <option value="EG">مصر — Egypt</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('settings.tax.timezone')}</label>
+            <select
+              value={companyConfig.taxTimezone || 'Asia/Aden'}
+              title={t('settings.tax.timezone')}
+              onChange={e => setCompanyConfig({ taxTimezone: e.target.value })}
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="Asia/Aden">Asia/Aden</option>
+              <option value="Asia/Riyadh">Asia/Riyadh</option>
+              <option value="Asia/Dubai">Asia/Dubai</option>
+              <option value="Africa/Cairo">Africa/Cairo</option>
+              <option value="UTC">UTC</option>
+            </select>
           </div>
         </div>
       </div>

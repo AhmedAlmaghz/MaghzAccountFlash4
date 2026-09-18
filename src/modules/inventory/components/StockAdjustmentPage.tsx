@@ -10,7 +10,6 @@ import { useStockAdjustments } from '../hooks/useInventory';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
-import { postStockAdjustment } from '@/core/utils/journalEntryGenerator';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useToastStore } from '@/core/store/toastStore';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
@@ -166,19 +165,16 @@ export const StockAdjustmentPage: React.FC = () => {
     }
     setPostingId(adj.id);
     try {
-      const result = await postStockAdjustment(activeCompany.id, {
-        id: adj.id,
-        date: adj.date,
-        product: adj.productId,
-        difference: adj.difference * (adj.unitCost || 0),
-        reason: adj.reason,
-      });
-      if (result.success) {
-        await post(adj.id);
+      // Phase 1 fix: post EXACTLY once through the atomic API (JE + stock
+      // moves + flip in one transaction). The old direct-wrapper call posted
+      // a SECOND journal entry for the same adjustment — every posted
+      // adjustment was double-counted in the books.
+      const result = await post(adj.id);
+      if (result?.success) {
         await logAudit({ userId: user?.id || '', action: 'post', tableName: 'stock_adjustments', recordId: adj.id, companyId: activeCompany.id });
         addToast('success', t('inventory.adjustment.posted'));
       } else {
-        addToast('error', result.error || t('common.error'));
+        addToast('error', result?.error || t('common.error'));
       }
     } finally {
       setPostingId(null);

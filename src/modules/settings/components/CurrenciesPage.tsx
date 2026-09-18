@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Coins, Plus, Pencil, Trash2, Save, Star } from 'lucide-react';
+import { Coins, Plus, Pencil, Trash2, Save, Star, RefreshCw } from 'lucide-react';
 import { Card, Button, Input, Table, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { useFormatters } from '@/core/utils/useFormatters';
@@ -31,6 +31,41 @@ export const CurrenciesPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Currency>>({ code: '', name: '', symbol: '', exchangeRate: 1, isActive: true });
+  // Phase 2 (IAS 21): period-end revaluation of open foreign balances.
+  const [revalDate, setRevalDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [isRevaluing, setIsRevaluing] = useState(false);
+
+  const handleRevalue = async () => {
+    if (!activeCompany?.id || !user?.id) return;
+    setIsRevaluing(true);
+    try {
+      const { accountingApi } = await import('@/modules/accounting/api');
+      const res = await accountingApi.revalueForeignBalances(activeCompany.id, user.id, revalDate || undefined);
+      if (!res.success) {
+        addToast('error', res.error || t('settings.currencies.saveError'));
+        return;
+      }
+      const d = res.data;
+      if (!d || d.lines === 0) {
+        addToast('success', t('settings.currencies.revalueEmpty'));
+      } else {
+        addToast('success', t('settings.currencies.revalueDone', { lines: d.lines, ref: d.reference }));
+      }
+      await logAudit({
+        userId: user.id,
+        username: user.username,
+        action: 'post',
+        tableName: 'fx_revaluation',
+        recordId: d?.reference || revalDate,
+        recordLabel: `gain=${d?.gain} loss=${d?.loss}`,
+        companyId: activeCompany.id,
+      });
+    } catch {
+      addToast('error', t('settings.currencies.saveError'));
+    } finally {
+      setIsRevaluing(false);
+    }
+  };
 
   const loadData = async () => {
     if (!activeCompany?.id) return;
@@ -214,6 +249,27 @@ export const CurrenciesPage: React.FC = () => {
           isLoading={isLoading}
           emptyMessage={t('settings.currencies.empty')}
         />
+      </Card>
+
+      <Card>
+        <h3 className="font-semibold text-slate-900 dark:text-slate-50">{t('settings.currencies.revalueTitle')}</h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('settings.currencies.revalueDesc')}</p>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">{t('settings.currencies.revalueDate')}</label>
+            <input
+              type="date"
+              value={revalDate}
+              onChange={(e) => setRevalDate(e.target.value)}
+              className="form-control"
+            />
+          </div>
+          <Can action="post" module="accounting">
+            <Button variant="secondary" leftIcon={<RefreshCw size={16} />} onClick={handleRevalue} isLoading={isRevaluing}>
+              {t('settings.currencies.revalueRun')}
+            </Button>
+          </Can>
+        </div>
       </Card>
 
       <ConfirmDialog isOpen={!!showDeleteConfirm} onClose={() => setShowDeleteConfirm(null)} onConfirm={() => showDeleteConfirm && handleDelete(showDeleteConfirm)} title={t('settings.currencies.deleteTitle')} message={t('settings.currencies.deleteMessage')} confirmText={t('settings.common.delete')} variant="danger" />

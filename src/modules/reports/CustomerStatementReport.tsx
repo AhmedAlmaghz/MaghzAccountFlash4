@@ -36,12 +36,15 @@ export const CustomerStatementReport: React.FC = () => {
       const contacts = (contactsResult.data || []) as Array<{ id: string; name: string; phone?: string; balance?: number }>;
 
       const params: unknown[] = [companyId];
+      // Phase 2 (IAS 21): invoice + receipt legs in BASE currency. Return
+      // legs stay document-currency (returns carry no currency metadata —
+      // Phase 3 gap, documented).
       let invQuery = `SELECT customer_id, invoice_number, date, due_date,
-                              (total_amount - COALESCE(paid_amount, 0)) AS outstanding
+                              (COALESCE(base_currency_amount, total_amount) - COALESCE(base_currency_paid, paid_amount, 0)) AS outstanding
                          FROM sales_invoices
                         WHERE company_id = $1
                           AND status IN ('posted', 'partially_paid', 'paid')
-                          AND (total_amount - COALESCE(paid_amount, 0)) > 0
+                          AND (COALESCE(base_currency_amount, total_amount) - COALESCE(base_currency_paid, paid_amount, 0)) > 0
                         UNION ALL
                         SELECT id AS customer_id, 'OPENING' AS invoice_number,
                                COALESCE(opening_date, DATE '1900-01-01') AS date, NULL AS due_date,
@@ -49,7 +52,7 @@ export const CustomerStatementReport: React.FC = () => {
                           FROM customers
                          WHERE company_id = $1 AND opening_balance > 0
                         UNION ALL
-                        SELECT customer_id, 'RECEIPT' AS invoice_number, date, NULL AS due_date, -amount AS outstanding
+                        SELECT customer_id, 'RECEIPT' AS invoice_number, date, NULL AS due_date, -COALESCE(base_currency_amount, amount) AS outstanding
                           FROM receipt_vouchers WHERE company_id = $1 AND status = 'posted'
                         UNION ALL
                         SELECT customer_id, 'RETURN' AS invoice_number, date, NULL AS due_date, -total_amount AS outstanding

@@ -131,7 +131,10 @@ export interface SalesReturn {
   id: string;
   companyId: string;
   returnNumber: string;
-  invoiceId: string;
+  // Phase 0 fix: the DB column is nullable (standalone returns without a
+  // source invoice are legal) — the type must admit undefined instead of
+  // forcing mappers into String(null) === "null".
+  invoiceId?: string;
   invoice?: SalesInvoice;
   customerId: string;
   customer?: Customer;

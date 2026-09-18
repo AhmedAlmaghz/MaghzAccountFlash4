@@ -92,6 +92,8 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.accounting.ledger', path: '/accounting/ledger' },
       { labelKey: 'sidebar.accounting.receiptVouchers', path: '/accounting/receipt-vouchers' },
       { labelKey: 'sidebar.accounting.paymentVouchers', path: '/accounting/payment-vouchers' },
+      { labelKey: 'sidebar.accounting.fixedAssets', path: '/accounting/fixed-assets' },
+      { labelKey: 'sidebar.accounting.yearEnd', path: '/accounting/year-end' },
     ],
   },
   {

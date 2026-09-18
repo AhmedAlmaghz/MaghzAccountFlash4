@@ -28,7 +28,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { succe
   return { success: false, error: errors };
 }
 
-// â”€â”€â”€ Multi-unit line snapshot (shared by all 6 document line schemas) â”€â”€â”€â”€
+// ─── Multi-unit line snapshot (shared by all 6 document line schemas) ────
 // unitId = chosen product_units row; unitFactor = frozen factor;
 // baseQuantity = qty in base unit (server recomputes if missing).
 export const lineUnitFields = {
@@ -45,7 +45,7 @@ export const idCompanySchema = z.object({
   companyId: companyIdSchema,
 });
 
-// â”€â”€â”€ Company profile (shared by onboarding, settings page, and seed) â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Company profile (shared by onboarding, settings page, and seed) ────────
 // Single source of truth for which company fields the app accepts and their
 // limits. Column sizes mirror drizzle/0000_init.sql (companies table).
 export const companyProfileSchema = z.object({
@@ -335,6 +335,9 @@ export const createProductSchema = z.object({
   categoryIds: z.array(uuidSchema).optional(),
   productTypeId: uuidSchema.optional(),
   costPrice: currencyAmountSchema,
+  // Phase 1: zod strips unknown keys silently — the standard cost MUST be
+  // declared or product saves would drop it without any error.
+  standardCost: currencyAmountSchema.optional(),
   salePrice: currencyAmountSchema,
   isActive: z.boolean().default(true),
   image: z.string().optional(),
@@ -593,7 +596,7 @@ export const createWorkOrderSchema = z.object({
   })).optional(),
 });
 
-// â”€â”€â”€ POS module (ظ†ظ‚ط§ط· ط§ظ„ط¨ظٹط¹) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── POS module (نقاط البيع) ──────────────────────────────────────────────
 export const openPosShiftSchema = z.object({
   companyId: companyIdSchema,
   cashBoxId: uuidSchema,
@@ -651,4 +654,51 @@ export const posSettingsSchema = z.object({
   allowPriceEdit: z.boolean().optional(),
   allowDiscount: z.boolean().optional(),
   allowNegativeStock: z.boolean().optional(),
+});
+
+// ─── Fixed assets (Phase 5: straight-line + declining-balance) ──────────
+export const fixedAssetMethodSchema = z.enum(['straight_line', 'declining_balance']);
+
+export const assetFundingSchema = z.object({
+  kind: z.enum(['cash', 'payable', 'opening']),
+  cashBoxId: uuidSchema.optional(),
+});
+
+export const createFixedAssetSchema = z.object({
+  companyId: companyIdSchema,
+  code: z.string().min(1).max(50).optional(),
+  nameAr: z.string().min(1).max(200),
+  nameEn: z.string().max(200).optional().or(z.literal('')),
+  category: z.string().max(100).optional().or(z.literal('')),
+  purchaseDate: dateSchema,
+  cost: z.number().positive().multipleOf(0.0001),
+  salvageValue: currencyAmountSchema.optional().default(0),
+  usefulLifeMonths: z.number().int().min(1).max(1200),
+  method: fixedAssetMethodSchema,
+  funding: assetFundingSchema,
+});
+
+export const updateFixedAssetSchema = z.object({
+  nameAr: z.string().min(1).max(200).optional(),
+  nameEn: z.string().max(200).optional().or(z.literal('')),
+  category: z.string().max(100).optional().or(z.literal('')),
+  purchaseDate: dateSchema.optional(),
+  salvageValue: currencyAmountSchema.optional(),
+  usefulLifeMonths: z.number().int().min(1).max(1200).optional(),
+  method: fixedAssetMethodSchema.optional(),
+});
+
+export const depreciationRunSchema = z.object({
+  companyId: companyIdSchema,
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+});
+
+export const disposeFixedAssetSchema = z.object({
+  companyId: companyIdSchema,
+  id: uuidSchema,
+  date: dateSchema.optional(),
+  proceeds: currencyAmountSchema.optional().default(0),
+  cashBoxId: uuidSchema.optional(),
+  reason: z.string().min(3).max(500),
 });

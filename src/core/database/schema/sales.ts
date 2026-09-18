@@ -41,6 +41,10 @@ export const salesInvoices = pgTable('sales_invoices', {
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyAmount: numeric('base_currency_amount', { precision: 18, scale: 4 }).notNull().default('0'),
   baseCurrencyPaid: numeric('base_currency_paid', { precision: 18, scale: 4 }).notNull().default('0'),
+  // Phase 2 (IAS 21): rate at which the outstanding was LAST revalued.
+  // Revaluation books only the incremental move vs this rate (then stamps
+  // it), so repeated runs never double-book. NULL = never revalued.
+  lastRevalRate: numeric('last_reval_rate', { precision: 18, scale: 6 }),
   status: varchar('status', { length: 20 }).default('draft'),
   paymentType: varchar('payment_type', { length: 10 }).notNull().default('credit'),
   cashBoxId: uuid('cash_box_id'),
@@ -71,6 +75,9 @@ export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
   vatPercent: numeric('vat_percent', { precision: 5, scale: 2 }).default('15'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  // Phase 1: cost basis per BASE unit frozen at posting time — sales returns
+  // reverse the ORIGINAL cost. NULL = pre-Phase-1 row → method fallback.
+  unitCost: numeric('unit_cost', { precision: 18, scale: 4 }),
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyLineTotal: numeric('base_currency_line_total', { precision: 18, scale: 4 }).notNull().default('0'),

@@ -1,12 +1,14 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
+import type { DbAdapter } from '@/core/database/adapters/types';
 import { mapRows } from '@/core/utils/mapPgRow';
-import { resolveExistingUserId } from '@/core/utils/userIdValidator';
+import { resolveExistingUserId, safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, companyIdSchema, posCheckoutSchema, openPosShiftSchema, closePosShiftSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { getNextDocumentNumber } from '@/core/api';
 import { runTransaction, type TxStatement } from '@/core/database/tx';
-import { resolvePostingAccounts, buildPosSalePostingStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
+import { resolvePostingAccounts, buildPosSalePostingStatements, buildCashDifferenceStatements, getCashBoxAccountId as getCashBoxGLAccountId } from '@/core/utils/journalEntryGenerator';
+import { logAudit } from '@/core/utils/auditLogger';
 import { snapshotLineUnit } from '@/core/utils/unitConversion';
 import type { PosShift, PosProduct, PosCheckoutInput, PosCheckoutResult, PosShiftSummary, PosPaymentMethod } from './types';
 
@@ -24,43 +26,151 @@ import type { PosShift, PosProduct, PosCheckoutInput, PosCheckoutResult, PosShif
 // ─── Shared stock helpers (extracted from salesApi.postInvoice — same SQL) ──
 // Each returns the statements that (1) ensure stock rows exist, (2) record
 // 'out' movements and (3) decrement quantities for every invoice line.
-function buildEnsureStockStatements(invoiceId: string, companyId: string): TxStatement[] {
+// preferredWarehouseId (Phase 4): validated default source tried first when
+// it holds the line qty — appended LAST ($3/$4) so numbering never shifts.
+const PREFERRED_LATERAL = (pref: string) => `SELECT COALESCE(
+                (SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = sil.product_id AND s2.company_id = si.company_id AND s2.warehouse_id = ${pref}::uuid AND s2.quantity >= COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) LIMIT 1),
+                (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
+                (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
+              ) AS warehouse_id`;
+
+/**
+ * Post the cash-count difference JE for a closed shift (Phase 5).
+ * Idempotent per shift (POS-DIFF-<id8> reference guard) and a no-op for
+ * balanced closes. Returns the JE reference (or null when nothing posted).
+ */
+async function postShiftDifferenceJe(
+  adapter: DbAdapter,
+  companyId: string,
+  shiftId: string,
+  cashBoxId: string | null,
+  difference: number,
+  date: string,
+  userId?: string
+): Promise<{ success: boolean; jeReference: string | null; error?: string }> {
+  try {
+    const diff = Math.round((Number(difference) || 0) * 100) / 100;
+    if (Math.abs(diff) < 0.005) return { success: true, jeReference: null };
+    const jeReference = `POS-DIFF-${String(shiftId).slice(0, 8).toUpperCase()}`;
+    const dup = await adapter.query(
+      `SELECT id FROM transactions WHERE company_id = $1::uuid AND reference = $2 LIMIT 1`,
+      [companyId, jeReference]
+    );
+    if (!dup.success) return { success: false, jeReference: null, error: dup.error };
+    if (dup.rows?.length) return { success: true, jeReference };
+    let boxAccount: string | null = null;
+    if (cashBoxId) {
+      boxAccount = await getCashBoxGLAccountId(companyId, cashBoxId);
+    }
+    if (!boxAccount) {
+      return { success: false, jeReference: null, error: 'الخزينة غير مرتبطة بحساب محاسبي — اربطها أولاً ثم أعد إغلاق الوردية' };
+    }
+    const accs = await resolvePostingAccounts(companyId, ['default_inventory_shortage', 'default_inventory_surplus']);
+    if (!accs.success) return { success: false, jeReference: null, error: accs.error };
+    const statements = buildCashDifferenceStatements(companyId, {
+      reference: jeReference,
+      date,
+      difference: diff,
+      boxAccountId: boxAccount,
+      shortageAccountId: accs.ids.default_inventory_shortage,
+      surplusAccountId: accs.ids.default_inventory_surplus,
+    });
+    if (!statements.length) return { success: true, jeReference: null };
+    const result = await runTransaction(statements);
+    if (!result.success) return { success: false, jeReference: null, error: result.error };
+    await logAudit({
+      companyId,
+      userId: safeUserId(userId) || 'system',
+      action: 'post',
+      tableName: 'pos_shifts',
+      recordId: shiftId,
+      newValues: { difference: diff, jeReference },
+    }).catch(() => undefined);
+    return { success: true, jeReference };
+  } catch (e) {
+    return { success: false, jeReference: null, error: String(e) };
+  }
+}
+
+/**
+ * Resolve the walk-in customer for cash sales (Phase 6): the configured
+ * `pos.defaultWalkInCustomerId` setting wins when it names a live customer;
+ * otherwise the conventional CASH customer (find-or-create, race-safe via
+ * ON CONFLICT + reselect). Only ever returns null with an honest error —
+ * callers must refuse the sale, never INSERT a null customer_id.
+ */
+async function resolveWalkInCustomer(
+  companyId: string,
+  adapter: DbAdapter
+): Promise<{ success: boolean; customerId?: string; error?: string }> {
+  try {
+    const setting = await adapter.query(
+      `SELECT value FROM settings WHERE company_id = $1::uuid AND key = 'pos.defaultWalkInCustomerId'`,
+      [companyId]
+    );
+    const configured = setting.success ? String((setting.rows?.[0] as Record<string, unknown> | undefined)?.value || '').trim() : '';
+    if (configured) {
+      const live = await adapter.query(
+        `SELECT id FROM customers WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true`,
+        [configured, companyId]
+      );
+      if (live.success && live.rows?.[0]) {
+        return { success: true, customerId: String((live.rows[0] as Record<string, unknown>).id) };
+      }
+    }
+    // Single-statement find-or-create (no check-then-insert race window;
+    // customers has no UNIQUE(company_id, code), so ON CONFLICT targets
+    // nothing — the WHERE NOT EXISTS inside one statement is the guard).
+    const ensured = await adapter.query(
+      `WITH sel AS (SELECT id FROM customers WHERE company_id = $1::uuid AND code = 'CASH' LIMIT 1),
+            ins AS (INSERT INTO customers (company_id, code, name, is_active)
+                    SELECT $1::uuid, 'CASH', 'عملاء النقدية', true
+                     WHERE NOT EXISTS (SELECT 1 FROM sel)
+                    RETURNING id)
+       SELECT id FROM ins UNION ALL SELECT id FROM sel LIMIT 1`,
+      [companyId]
+    );
+    if (!ensured.success) return { success: false, error: ensured.error };
+    if (ensured.rows?.[0]) {
+      return { success: true, customerId: String((ensured.rows[0] as Record<string, unknown>).id) };
+    }
+    return { success: false, error: 'عيّن عميل النقدية الافتراضي من إعدادات نقاط البيع' };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
+function buildEnsureStockStatements(invoiceId: string, companyId: string, preferredWarehouseId?: string | null): TxStatement[] {
   return [{
     sql: `INSERT INTO stock (company_id, product_id, warehouse_id, quantity)
           SELECT $2::uuid, sil.product_id, wh.warehouse_id, 0
             FROM sales_invoices si
             JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
             JOIN LATERAL (
-              SELECT COALESCE(
-                (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
-                (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
-              ) AS warehouse_id
+              ${PREFERRED_LATERAL('$3')}
             ) wh ON true
             LEFT JOIN stock s ON s.company_id = si.company_id AND s.product_id = sil.product_id AND s.warehouse_id = wh.warehouse_id
            WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL AND s.id IS NULL
            GROUP BY si.company_id, sil.product_id, wh.warehouse_id`,
-    params: [invoiceId, companyId],
+    params: [invoiceId, companyId, preferredWarehouseId || null],
   }];
 }
 
-function buildStockOutStatements(invoiceId: string, companyId: string, notes: string): TxStatement[] {
+function buildStockOutStatements(invoiceId: string, companyId: string, notes: string, preferredWarehouseId?: string | null): TxStatement[] {
   return [{
     sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
           SELECT si.company_id, sil.product_id, wh.warehouse_id, 'out', COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity), si.invoice_number, $3, NOW()
             FROM sales_invoices si
             JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
             JOIN LATERAL (
-              SELECT COALESCE(
-                (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
-                (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
-              ) AS warehouse_id
+              ${PREFERRED_LATERAL('$4')}
             ) wh ON true
            WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL`,
-    params: [invoiceId, companyId, notes],
+    params: [invoiceId, companyId, notes, preferredWarehouseId || null],
   }];
 }
 
-function buildDecrementStockStatements(invoiceId: string, companyId: string): TxStatement[] {
+function buildDecrementStockStatements(invoiceId: string, companyId: string, preferredWarehouseId?: string | null): TxStatement[] {
   return [{
     sql: `UPDATE stock s SET quantity = s.quantity - sub.qty, updated_at = NOW()
             FROM (
@@ -68,16 +178,13 @@ function buildDecrementStockStatements(invoiceId: string, companyId: string): Tx
                 FROM sales_invoices si
                 JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
                 JOIN LATERAL (
-                  SELECT COALESCE(
-                    (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
-                    (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
-                  ) AS warehouse_id
+                  ${PREFERRED_LATERAL('$3')}
                 ) wh ON true
                WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL
                GROUP BY sil.product_id, wh.warehouse_id
             ) sub
            WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
-    params: [invoiceId, companyId],
+    params: [invoiceId, companyId, preferredWarehouseId || null],
   }];
 }
 
@@ -355,10 +462,44 @@ export const posApi = {
     }
   },
 
-  async closeShift(companyId: string, shiftId: string, countedAmount: number, notes?: string, userId?: string): Promise<{ success: boolean; data?: { expectedAmount: number; difference: number }; error?: string }> {
+  async closeShift(companyId: string, shiftId: string, countedAmount: number, notes?: string, userId?: string): Promise<{ success: boolean; data?: { expectedAmount: number; difference: number; jeReference?: string | null }; error?: string }> {
     try {
       const validation = validateInput(closePosShiftSchema, { id: shiftId, companyId, countedAmount });
       if (!validation.success) return { success: false, error: validation.error };
+      const adapter = await getDbAdapter();
+      const today = new Date().toISOString().slice(0, 10);
+      // Phase 5: closing posts into today — a closed fiscal year locks the
+      // whole close (a stranded open shift is an operational error the
+      // message names, not a silent report-only close).
+      const { assertAccountingPeriodOpen: assertFiscalClose } = await import('@/modules/accounting/yearEnd');
+      const fiscalCloseGate = await assertFiscalClose(companyId, today, adapter);
+      if (!fiscalCloseGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalCloseGate.period.year} مقفلة — لا يمكن إغلاق الوردية بتاريخ داخلها` };
+      }
+      // Heal: an already-closed shift whose difference never got its JE
+      // (earlier JE failure) posts it now instead of erroring.
+      const cur = await adapter.query(
+        `SELECT id, status, cash_box_id, expected_amount, difference FROM pos_shifts WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [shiftId, companyId]
+      );
+      if (!cur.success) return { success: false, error: cur.error };
+      const curRow = cur.rows?.[0] as Record<string, unknown> | undefined;
+      if (curRow && String(curRow.status) === 'closed') {
+        const healed = await postShiftDifferenceJe(
+          adapter, companyId, shiftId,
+          curRow.cash_box_id ? String(curRow.cash_box_id) : null,
+          Number(curRow.difference) || 0, today, userId
+        );
+        if (!healed.success) return { success: false, error: healed.error };
+        return {
+          success: true,
+          data: {
+            expectedAmount: Number(curRow.expected_amount) || 0,
+            difference: Number(curRow.difference) || 0,
+            jeReference: healed.jeReference,
+          },
+        };
+      }
       if (isElectronPg()) {
         const pos = window.electronDB?.pos;
         if (!pos) return { success: false, error: 'RPC unavailable' };
@@ -366,19 +507,17 @@ export const posApi = {
         if (!result.success) return { success: false, error: result.error };
         const row = result.rows?.[0];
         if (!row) return { success: false, error: 'Shift not found or already closed' };
-        return {
-          success: true,
-          data: {
-            expectedAmount: Number(row.expected_amount) || 0,
-            difference: Number(row.difference) || 0,
-          },
-        };
+        const expected = Number(row.expected_amount) || 0;
+        const difference = Number(row.difference) || 0;
+        const boxId = curRow?.cash_box_id ? String(curRow.cash_box_id) : null;
+        const je = await postShiftDifferenceJe(adapter, companyId, shiftId, boxId, difference, today, userId);
+        if (!je.success) return { success: false, error: je.error };
+        return { success: true, data: { expectedAmount: expected, difference, jeReference: je.jeReference } };
       }
       const summary = await this.getShiftSummary(companyId, shiftId);
       if (!summary.success || !summary.data) return { success: false, error: summary.error || 'Shift not found' };
       const expected = summary.data.expectedAmount;
       const difference = countedAmount - expected;
-      const adapter = await getDbAdapter();
       const safeUser = await resolveExistingUserId(adapter, userId, companyId);
       const result = await adapter.query(
         `UPDATE pos_shifts
@@ -390,7 +529,10 @@ export const posApi = {
       );
       if (!result.success) return { success: false, error: result.error };
       if (!result.rows?.length) return { success: false, error: 'Shift not found or already closed' };
-      return { success: true, data: { expectedAmount: expected, difference } };
+      const boxId = curRow?.cash_box_id ? String(curRow.cash_box_id) : null;
+      const je = await postShiftDifferenceJe(adapter, companyId, shiftId, boxId, difference, today, userId);
+      if (!je.success) return { success: false, error: je.error };
+      return { success: true, data: { expectedAmount: expected, difference, jeReference: je.jeReference } };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -552,6 +694,19 @@ export const posApi = {
         return { success: false, error: 'A registered customer is required for credit sales.' };
       }
 
+      // Phase 6 fix: a cash walk-in sale MUST still reference a customer row
+      // (customer_id is NOT NULL) — resolve the configured default, else the
+      // conventional CASH customer (find-or-create, race-safe), else fail
+      // honestly BEFORE any write. Never a raw NOT NULL crash.
+      let walkInCustomerId: string | null = normalizedCustomerId;
+      if (!walkInCustomerId) {
+        const resolved = await resolveWalkInCustomer(input.companyId, adapter);
+        if (!resolved.success || !resolved.customerId) {
+          return { success: false, error: resolved.error || 'Walk-in customer unavailable' };
+        }
+        walkInCustomerId = resolved.customerId;
+      }
+
       // The next POS receipt number (consumes the pos_receipt sequence).
       const numberResult = await getNextDocumentNumber(input.companyId, 'pos_receipt', userId);
       if (!numberResult.success || !numberResult.number) {
@@ -559,8 +714,56 @@ export const posApi = {
       }
       const receiptNumber = numberResult.number;
 
-      // Posting accounts — same trio as a sales invoice.
-      const accounts = await resolvePostingAccounts(input.companyId, ['default_debtors', 'default_sales', 'default_vat_output']);
+      // ── Phase 1 (IAS 2): perpetual COGS, resolved BEFORE the lines CTE
+      // so posting-time unit costs are frozen on the lines in one shot.
+      const {
+        getValuationMethod, resolveSaleUnitCosts, allocateFifoOutflow,
+        buildFifoConsumeStatements, roundMoney: roundMoneyV,
+      } = await import('@/core/utils/valuation');
+      const posMethod = await getValuationMethod(input.companyId, adapter);
+      const posItems = input.lines.map((l) => {
+        const usnap = snapshotLineUnit(l);
+        return { productId: String(l.productId), baseQty: Number(usnap.baseQuantity ?? l.quantity) || 0 };
+      }).filter((l) => l.baseQty > 0);
+      let posUnitCosts = new Map<string, number>();
+      let posFifo: Array<{ layerId: string; productId: string; qty: number; unitCost: number }> = [];
+      if (posMethod === 'fifo' && posItems.length > 0) {
+        const alloc = await allocateFifoOutflow(input.companyId, posItems, adapter);
+        if (!alloc.success) return { success: false, error: alloc.error };
+        posFifo = alloc.consumptions;
+        const perProduct = new Map<string, { qty: number; cost: number }>();
+        for (const c of alloc.consumptions) {
+          const cur = perProduct.get(c.productId) || { qty: 0, cost: 0 };
+          cur.qty += c.qty;
+          cur.cost += c.qty * c.unitCost;
+          perProduct.set(c.productId, cur);
+        }
+        for (const [pid, v] of perProduct) posUnitCosts.set(pid, v.qty > 0 ? v.cost / v.qty : 0);
+      } else if (posItems.length > 0) {
+        const resolved = await resolveSaleUnitCosts(input.companyId, posItems, adapter);
+        if (!resolved.success) return { success: false, error: resolved.error };
+        posUnitCosts = resolved.costs;
+      }
+      let posCogsTotal = 0;
+      for (const it of posItems) {
+        posCogsTotal = roundMoneyV(posCogsTotal + it.baseQty * (posUnitCosts.get(it.productId) || 0));
+      }
+
+      // Phase 3: POS posts dated today — closed tax periods reject it.
+      const { assertPeriodOpen: assertPosPeriod } = await import('@/modules/tax/engine');
+      const posGate = await assertPosPeriod(input.companyId, new Date().toISOString().split('T')[0], adapter);
+      if (!posGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${posGate.period.startDate} – ${posGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalPos } = await import('@/modules/accounting/yearEnd');
+      const fiscalPosGate = await assertFiscalPos(input.companyId, new Date().toISOString().split('T')[0], adapter);
+      if (!fiscalPosGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalPosGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+
+      // Posting accounts — same trio as a sales invoice, plus COGS pair.
+      const accounts = await resolvePostingAccounts(input.companyId, ['default_debtors', 'default_sales', 'default_vat_output', 'default_cogs', 'default_inventory']);
       if (!accounts.success) return { success: false, error: accounts.error };
       // The cashier's box GL account receives the cash part (falls back to
       // Debtors if the box has no linked account — same fallback as salesApi).
@@ -587,10 +790,67 @@ export const posApi = {
         return { success: false, error: `Payment mismatch: cash ${input.cashAmount} + credit ${input.creditAmount} != total ${input.totalAmount}` };
       }
 
+      // ── Phase 4 guardrails ──────────────────────────────────────────
+      const {
+        getStockPolicies: getPosPolicies, checkStockSufficiency: checkPosStock,
+        formatShortages: fmtPosShort, auditOverride: auditPos,
+      } = await import('@/core/utils/stockPolicy');
+      const posPolicies = await getPosPolicies(input.companyId, adapter);
+      // Legacy fallback: the older pos.allowNegativeStock key still counts
+      // when the unified policy was never set (backward compatible).
+      let allowNeg = posPolicies.allowNegativeSale;
+      if (!allowNeg) {
+        const legacy = await adapter.query(
+          `SELECT value FROM settings WHERE company_id = $1 AND key = 'pos.allowNegativeStock' LIMIT 1`,
+          [input.companyId]
+        );
+        const lv = legacy.success ? String(legacy.rows?.[0]?.value ?? '') : '';
+        allowNeg = lv === 'true' || lv === '1';
+      }
+      const posIssueItems = input.lines.map((l) => {
+        const usnap = snapshotLineUnit(l);
+        return { productId: String(l.productId), baseQty: Number(usnap.baseQuantity ?? l.quantity) || 0 };
+      }).filter((l) => l.baseQty > 0);
+      const posStockGate = await checkPosStock(input.companyId, posIssueItems, adapter);
+      if (!posStockGate.ok && !allowNeg) {
+        return { success: false, error: `المخزون لا يكفي للبيع (${fmtPosShort(posStockGate.shortages)})` };
+      }
+      if (!posStockGate.ok && allowNeg) {
+        await auditPos({
+          companyId: input.companyId, userId: safeUser, kind: 'negative-stock',
+          recordId: `pos-${input.shiftId}`, label: `نقطة بيع (وردية ${input.shiftId.slice(0, 8)})`,
+          detail: { shortages: posStockGate.shortages },
+        });
+      }
+      // Credit-limit check on the credit part (cash needs none).
+      if (input.creditAmount > 0 && normalizedCustomerId) {
+        const custRes = await adapter.query(
+          `SELECT COALESCE(balance, 0) AS balance, COALESCE(credit_limit, 0) AS credit_limit
+             FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [normalizedCustomerId, input.companyId]
+        );
+        if (custRes.success && custRes.rows?.[0]) {
+          const crow = custRes.rows[0] as Record<string, unknown>;
+          const limit = Number(crow.credit_limit) || 0;
+          const wouldBe = (Number(crow.balance) || 0) + input.creditAmount;
+          if (limit > 0 && wouldBe > limit) {
+            const msg = `تجاوز الحد الائتماني للعميل (الحد ${limit} — سيصبح ${wouldBe})`;
+            if (posPolicies.creditOverlimit === 'block') {
+              return { success: false, error: msg };
+            }
+            await auditPos({
+              companyId: input.companyId, userId: safeUser, kind: 'credit-overlimit',
+              recordId: `pos-${input.shiftId}`, label: `نقطة بيع آجل (وردية ${input.shiftId.slice(0, 8)})`,
+              detail: { limit, current: Number(crow.balance) || 0, outstanding: input.creditAmount, mode: posPolicies.creditOverlimit },
+            });
+          }
+        }
+      }
+
       // Statement A — invoice header + all lines (single CTE, atomic by
       // itself; same statement shape as salesApi.createInvoice's fallback).
       const params: unknown[] = [
-        invoiceId, input.companyId, receiptNumber, normalizedCustomerId, date,
+        invoiceId, input.companyId, receiptNumber, walkInCustomerId, date,
         input.subtotal, input.discountAmount ?? 0, input.vatAmount ?? 0,
         input.totalAmount, paidAmount, currencyCode, 1,
         input.totalAmount, paidAmount, paymentType, input.cashBoxId,
@@ -604,13 +864,16 @@ export const posApi = {
       for (const line of input.lines) {
         const off = params.length;
         const usnap = snapshotLineUnit(line);
-        lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric)`);
-        params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent ?? 0, line.vatPercent ?? 0, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity ?? line.quantity);
+        // Phase 1: unit_cost appended LAST (append-at-end rule) — posting-time
+        // cost basis frozen per base unit for exact return reversals later.
+        const lineUnitCost = posUnitCosts.get(String(line.productId)) || 0;
+        lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric, $${off + 11}::numeric)`);
+        params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent ?? 0, line.vatPercent ?? 0, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity ?? line.quantity, lineUnitCost);
       }
       sql += `, lines_ins AS (INSERT INTO sales_invoice_lines
-        (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity)
-        SELECT v.invoice_id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.unit_id, v.unit_factor, v.base_quantity
-        FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity) ON true)`;
+        (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity, unit_cost)
+        SELECT v.invoice_id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.unit_id, v.unit_factor, v.base_quantity, v.unit_cost
+        FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, unit_id, unit_factor, base_quantity, unit_cost) ON true)`;
       sql += ' SELECT id FROM inv';
 
       // Guard TOCTOU: re-validate shift is still open INSIDE the atomic transaction
@@ -641,7 +904,7 @@ export const posApi = {
         params: payParams,
       });
 
-      // Statement C — journal entry (mixed cash/credit).
+      // Statement C — journal entry (mixed cash/credit) + COGS companion.
       txQueries.push(...buildPosSalePostingStatements(
         input.companyId,
         {
@@ -655,13 +918,24 @@ export const posApi = {
           creditAmount: input.creditAmount,
           cashAccountId,
         },
-        { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output }
+        { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output },
+        posCogsTotal > 0
+          ? { total: posCogsTotal, inventoryAccount: accounts.ids.default_inventory, cogsAccount: accounts.ids.default_cogs }
+          : undefined
       ));
 
+      // FIFO layer consumption rides the same atomic batch.
+      if (posFifo.length > 0) {
+        txQueries.push(...buildFifoConsumeStatements(input.companyId, posFifo).map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })));
+      }
+
       // Statements D/E/F — stock (identical SQL to salesApi.postInvoice).
-      txQueries.push(...buildEnsureStockStatements(invoiceId, input.companyId));
-      txQueries.push(...buildStockOutStatements(invoiceId, input.companyId, `إيصال نقطة بيع ${receiptNumber}`));
-      txQueries.push(...buildDecrementStockStatements(invoiceId, input.companyId));
+      // Phase 4: default source warehouse preferred (validated, may be null).
+      const { resolveDefaultWarehouse: resolvePosWh } = await import('@/core/utils/stockPolicy');
+      const posPreferredWh = await resolvePosWh(input.companyId, 'issue', adapter);
+      txQueries.push(...buildEnsureStockStatements(invoiceId, input.companyId, posPreferredWh));
+      txQueries.push(...buildStockOutStatements(invoiceId, input.companyId, `إيصال نقطة بيع ${receiptNumber}`, posPreferredWh));
+      txQueries.push(...buildDecrementStockStatements(invoiceId, input.companyId, posPreferredWh));
 
       // Statement G — status flip (paid when nothing outstanding).
       const outstanding = input.totalAmount - input.cashAmount;
