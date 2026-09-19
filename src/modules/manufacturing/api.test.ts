@@ -386,7 +386,10 @@ describe('manufacturingApi', () => {
       const fgReceipt = txQs.find((q) => q.sql.includes("'in'") && String(q.params?.[5]).includes('تام'));
       expect(fgReceipt?.params?.[3]).toBe(10);
       expect(txQs.some((q) => q.sql.includes("status = 'completed'"))).toBe(true);
-      // GL journal entry: DR inventory 660 / CR inventory 660 (materials only, no production costs)
+      // GL journal entry: DR FG 660 / CR raw-material inventory 660
+      // (materials only, no production costs; per-material relief, never
+      // the FG account being debited — in this mock both resolve to the
+      // same id, see the distinct-accounts tests below for the separation)
       const je = txQs.find((q) => q.sql.includes('INSERT INTO transactions'));
       expect(je).toBeTruthy();
       // product cost_price updated with unit cost (660 / 10 = 66)
@@ -797,6 +800,138 @@ describe('manufacturingApi', () => {
         lines: [{ materialId: PRODUCT_ID, plannedQuantity: 5, unitCost: 100 }],
       });
       expect(res.success).toBe(true);
+    });
+  });
+
+  describe('COMPLETE cost-variance fixes (price دلتا, legacy relief, WIP clear, zero-output guard)', () => {
+    const FG_ACC = 'fg-acc-1';
+    const WIP2_ACC = 'wip-acc-2';
+    const MAT_ACC = 'mat-acc-1';
+
+    // Distinct GL identities: FG (11303) ≠ WIP (11302) ≠ raw (11301).
+    // default_accounts empty so every resolver falls to its chart code.
+    const distinctAccounts = async (sql: string, params?: unknown[]) => {
+      if (sql.includes('default_accounts')) return { success: true, rows: [] as unknown[] };
+      if (sql.includes('product_types pt')) return { success: true, rows: [] as unknown[] };
+      if (sql.includes('FROM accounts') && sql.includes('code')) {
+        const code = String((params as unknown[] | undefined)?.[1] || '');
+        if (code === '11303') return { success: true, rows: [{ id: FG_ACC }] };
+        if (code === '11302') return { success: true, rows: [{ id: WIP2_ACC }] };
+        return { success: true, rows: [{ id: MAT_ACC }] };
+      }
+      return null;
+    };
+
+    it('posts price-only variance (same qty, higher unit cost) instead of failing unbalanced', async () => {
+      const adapter = makeMockAdapter(async (sql, params) => {
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return {
+            success: true,
+            rows: [{
+              status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null,
+              product_id: PRODUCT_ID, order_number: 'WO-PV', production_costs: [],
+              wip_materials_cost: '500',
+            }],
+          };
+        }
+        if (sql.includes('FROM work_order_consumptions c')) {
+          // Planned 5×100=500 issued at START; actual 5×110=550 → price variance 50, qty variance 0.
+          return {
+            success: true,
+            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '5', unit_cost: '100', actual_unit_cost: '110' }],
+          };
+        }
+        if (sql.includes('FROM warehouses')) return { success: true, rows: [{ id: 'wh-out' }] };
+        const routed = await distinctAccounts(sql, params);
+        if (routed) return routed;
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 10, userId: USER_ID });
+      expect(res.success, res.error || '').toBe(true);
+      expect(res.data?.totalCost).toBe(550);
+
+      const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;
+      const je = txQs.find((q) => q.sql.includes('INSERT INTO transactions'));
+      expect(je).toBeTruthy();
+      expect(je?.params?.[4]).toBe(550);
+      const ids = (je?.params || []) as unknown[];
+      // Dr FG 550 / Cr WIP 500 / Cr raw-material 50 (price variance) — balanced.
+      expect(ids.filter((p) => p === FG_ACC).length).toBe(1);
+      expect(ids.filter((p) => p === WIP2_ACC).length).toBe(1);
+      expect(ids.filter((p) => p === MAT_ACC).length).toBe(1);
+      expect(ids).toContain(50);
+      // WIP memo cleared on completion (keeps the WIP partial index truthful).
+      const statusUpd = txQs.find((q) => q.sql.includes("status = 'completed'"));
+      expect(statusUpd?.sql).toContain('wip_materials_cost = 0');
+    });
+
+    it('legacy flow (no WIP) relieves raw-material accounts, never the FG account', async () => {
+      const adapter = makeMockAdapter(async (sql, params) => {
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return {
+            success: true,
+            rows: [{
+              status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null,
+              product_id: PRODUCT_ID, order_number: 'WO-LEG', production_costs: [],
+              wip_materials_cost: '0',
+            }],
+          };
+        }
+        if (sql.includes('FROM work_order_consumptions c')) {
+          return {
+            success: true,
+            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '6', unit_cost: '100', actual_unit_cost: '110' }],
+          };
+        }
+        if (sql.includes('FROM warehouses')) return { success: true, rows: [{ id: 'wh-out' }] };
+        const routed = await distinctAccounts(sql, params);
+        if (routed) return routed;
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 10, userId: USER_ID });
+      expect(res.success, res.error || '').toBe(true);
+      expect(res.data?.totalCost).toBe(660);
+
+      const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;
+      const je = txQs.find((q) => q.sql.includes('INSERT INTO transactions'));
+      expect(je).toBeTruthy();
+      expect(je?.params?.[4]).toBe(660);
+      const ids = (je?.params || []) as unknown[];
+      // Dr FG once, Cr raw-material once — the FG account must not fund itself.
+      expect(ids.filter((p) => p === FG_ACC).length).toBe(1);
+      expect(ids.filter((p) => p === MAT_ACC).length).toBe(1);
+    });
+
+    it('refuses completion with zero output when costs exist (no phantom FG value)', async () => {
+      const adapter = makeMockAdapter(async (sql) => {
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return {
+            success: true,
+            rows: [{
+              status: 'in_progress', quantity: '0', produced_quantity: '0', output_warehouse_id: null,
+              product_id: PRODUCT_ID, order_number: 'WO-ZERO', production_costs: [],
+              wip_materials_cost: '0',
+            }],
+          };
+        }
+        if (sql.includes('FROM work_order_consumptions c')) {
+          return {
+            success: true,
+            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '5', unit_cost: '100', actual_unit_cost: '100' }],
+          };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, {});
+      expect(res.success).toBe(false);
+      expect(String(res.error)).toContain('صفر');
+      expect(adapter.transaction).not.toHaveBeenCalled();
     });
   });
 

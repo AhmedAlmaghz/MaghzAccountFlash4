@@ -222,12 +222,22 @@ async function resolveProductionLossAccount(companyId: string): Promise<string |
 
 /**
  * Resolve the finished-goods GL account for a completed work order's output:
- * product-type default → default_accounts(default_finished_goods)
- * → default_accounts(default_inventory) → code 11303 → code 11301.
- * (IAS 2: finished goods are tracked separately from raw materials.)
+ * default_accounts(default_finished_goods) → code 11303
+ * → product-type default → default_accounts(default_inventory) → code 11301.
+ * (IAS 2: finished goods are tracked separately from raw materials, so the
+ * FG-specific configuration wins over the raw-material per-type override.
+ * The per-type override is kept as a fallback for companies that deliberately
+ * use per-type stock accounts.)
  */
 async function resolveFinishedGoodsAccountId(companyId: string, productId: string): Promise<string | null> {
   const adapter = await getDbAdapter();
+  const daRes = await adapter.query<{ account_id: string }>(
+    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_finished_goods'`,
+    [companyId]
+  );
+  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
+  const fgByCode = await findAccountByCodeLocal(companyId, '11303');
+  if (fgByCode) return fgByCode;
   const ptRes = await adapter.query<{ default_inventory_account_id: string | null }>(
     `SELECT pt.default_inventory_account_id
        FROM products p
@@ -236,13 +246,6 @@ async function resolveFinishedGoodsAccountId(companyId: string, productId: strin
     [productId, companyId]
   );
   if (ptRes.rows?.[0]?.default_inventory_account_id) return String(ptRes.rows[0].default_inventory_account_id);
-  const daRes = await adapter.query<{ account_id: string }>(
-    `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_finished_goods'`,
-    [companyId]
-  );
-  if (daRes.rows?.[0]?.account_id) return String(daRes.rows[0].account_id);
-  const fgByCode = await findAccountByCodeLocal(companyId, '11303');
-  if (fgByCode) return fgByCode;
   const invRes = await adapter.query<{ account_id: string }>(
     `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = 'default_inventory'`,
     [companyId]
@@ -1084,6 +1087,11 @@ export const manufacturingApi = {
       );
       if (!consRes.success) return { success: false, error: consRes.error };
       const consRows = (consRes.rows || []) as Record<string, unknown>[];
+      // A completion with costs but zero output would post a phantom FG
+      // value with no stock receipt — fail honestly instead.
+      if (producedQty <= 0 && (productionCostsTotal > 0 || consRows.length > 0)) {
+        return { success: false, error: 'كمية الإنتاج صفر — لا يمكن الإكمال بتكاليف دون إنتاج. أدخل الكمية المنتجة أولاً' };
+      }
       // Human-readable reference for every stock movement below.
       const orderNumber = wo.order_number ? String(wo.order_number) : id;
 
@@ -1256,10 +1264,12 @@ export const manufacturingApi = {
       // WIP flow (orders started after migration 0007 — wipPosted > 0):
       //   DR finished-goods inventory — total production cost
       //   CR WIP (11302)              — material cost issued at START
-      //   CR inventory                — extra consumption beyond issued (Δ>0)
-      //   DR inventory                — surplus returned to stock    (Δ<0)
+      //   CR/DR raw inventory         — NET material variance per material
+      //     (actual×actualUC − planned×plannedUC: quantity دلتا AND price
+      //     دلتا; positive → extra cost relieved, negative → saving returned)
       //   CR 53xxx                    — labor/energy/packaging/other
-      // Legacy flow (wipPosted = 0): materials credited straight to inventory.
+      // Legacy flow (wipPosted = 0): each material's own inventory account
+      // credited at actual cost — never the FG account being debited.
       // ── GL posting — إصلاح شامل للمبالغ والحسابات (IAS 2) ──
       const shouldPost = totalCost > 0 || wipPosted > 0 || productionCostsTotal > 0;
       if (shouldPost) {
@@ -1277,25 +1287,38 @@ export const manufacturingApi = {
             return { success: false, error: `حساب بضاعة تحت التشغيل (${WIP_ACCOUNT_CODE}) غير موجود في شجرة الحسابات` };
           }
           entries.push({ accountId: wipAccountId, debit: 0, credit: wipPosted, memo: 'مواد خام مصروفة عند البدء — تسوية WIP' });
-          // فائض/عجز لكل مادة بحسابها الخاص (أفضل من تجميع واحد)
+          // Net material variance per material account: actual×actualUC −
+          // planned×plannedUC. Covers BOTH quantity دلتا and price دلتا
+          // (same qty at a different unit cost). Positive → extra cost
+          // relieved from raw inventory; negative → surplus/saving returned.
           for (const r of consRows) {
             const planned = Number(r.planned_quantity) || 0;
+            const plannedUc = Number(r.unit_cost) || 0;
             const actual = r.actual_quantity != null && r.actual_quantity !== '' && Number(r.actual_quantity) > 0 ? Number(r.actual_quantity) : planned;
-            const deltaQty = Math.round((actual - planned) * 10000) / 10000;
-            if (deltaQty === 0) continue;
-            const uc = r.actual_unit_cost != null && r.actual_unit_cost !== '' && Number(r.actual_unit_cost) > 0 ? Number(r.actual_unit_cost) : (Number(r.unit_cost) || 0);
-            const deltaCost = Math.round(deltaQty * uc * 100) / 100;
-            if (deltaCost === 0) continue;
+            const actualUc = r.actual_unit_cost != null && r.actual_unit_cost !== '' && Number(r.actual_unit_cost) > 0 ? Number(r.actual_unit_cost) : plannedUc;
+            const netVar = Math.round((actual * actualUc - planned * plannedUc) * 100) / 100;
+            if (netVar === 0) continue;
             const matAccId = await resolveInventoryAccountId(companyId, String(r.material_id));
             if (!matAccId) continue;
-            if (deltaCost > 0) {
-              entries.push({ accountId: matAccId, debit: 0, credit: deltaCost, memo: `استهلاك إضافي - مادة ${String(r.material_id).slice(0, 8)}` });
+            if (netVar > 0) {
+              entries.push({ accountId: matAccId, debit: 0, credit: netVar, memo: `فرق استهلاك - مادة ${String(r.material_id).slice(0, 8)}` });
             } else {
-              entries.push({ accountId: matAccId, debit: -deltaCost, credit: 0, memo: `إرجاع فائض - مادة ${String(r.material_id).slice(0, 8)}` });
+              entries.push({ accountId: matAccId, debit: -netVar, credit: 0, memo: `فرق توفير - مادة ${String(r.material_id).slice(0, 8)}` });
             }
           }
         } else if (materialsCostRounded > 0) {
-          entries.push({ accountId: inventoryAccountId, debit: 0, credit: materialsCostRounded, memo: 'مواد خام مستهلكة (مسار قديم — بلا WIP)' });
+          // Legacy flow (no WIP): relieve each material's own inventory
+          // account at actual cost — never the FG account being debited.
+          for (const r of consRows) {
+            const planned = Number(r.planned_quantity) || 0;
+            const plannedUc = Number(r.unit_cost) || 0;
+            const actual = r.actual_quantity != null && r.actual_quantity !== '' && Number(r.actual_quantity) > 0 ? Number(r.actual_quantity) : planned;
+            const actualUc = r.actual_unit_cost != null && r.actual_unit_cost !== '' && Number(r.actual_unit_cost) > 0 ? Number(r.actual_unit_cost) : plannedUc;
+            const lineCost = Math.round(actual * actualUc * 100) / 100;
+            if (lineCost === 0) continue;
+            const matAccId = (await resolveInventoryAccountId(companyId, String(r.material_id))) || inventoryAccountId;
+            entries.push({ accountId: matAccId, debit: 0, credit: lineCost, memo: `مواد خام مستهلكة - مادة ${String(r.material_id).slice(0, 8)} (مسار قديم — بلا WIP)` });
+          }
         }
         for (const pc of productionCosts) {
           const accId = await resolveProductionCostAccount(companyId, pc.category);
@@ -1322,7 +1345,7 @@ export const manufacturingApi = {
       }
 
       statements.push({
-        sql: `UPDATE work_orders SET status = 'completed', actual_end_date = CURRENT_DATE, produced_quantity = $3::numeric, total_cost = $4::numeric, output_warehouse_id = COALESCE($5::uuid, output_warehouse_id), updated_at = NOW()${opts.userId ? ', updated_by = $6::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        sql: `UPDATE work_orders SET status = 'completed', actual_end_date = CURRENT_DATE, produced_quantity = $3::numeric, total_cost = $4::numeric, wip_materials_cost = 0, output_warehouse_id = COALESCE($5::uuid, output_warehouse_id), updated_at = NOW()${opts.userId ? ', updated_by = $6::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: opts.userId
           ? [id, companyId, producedQty, totalCost, outputWh, opts.userId]
           : [id, companyId, producedQty, totalCost, outputWh],
