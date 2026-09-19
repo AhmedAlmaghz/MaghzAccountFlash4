@@ -225,6 +225,48 @@
       "when": 1798400000000,
       "tag": "0031_discount_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": 7,
+      "when": 1798200000000,
+      "tag": "0032_inventory_valuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": 7,
+      "when": 1798300000000,
+      "tag": "0033_fx_revaluation",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": 7,
+      "when": 1798400000000,
+      "tag": "0034_vat_split_periods",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": 7,
+      "when": 1798500000000,
+      "tag": "0035_phase5_close_assets_periods",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": 7,
+      "when": 1798600000000,
+      "tag": "0036_leave_provision_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": 7,
+      "when": 1798700000000,
+      "tag": "0037_treasury_box_accounts",
+      "breakpoints": true
     }
   ]
 }

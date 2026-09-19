@@ -183,13 +183,19 @@ export class AccountingService extends BaseService {
 
   /**
    * Post a journal entry transaction
-   * 
+   *
    * This is a critical operation that:
    * 1. Validates the transaction (debits = credits)
-   * 2. Updates account balances
-   * 3. Creates the transaction and journal entries
-   * 4. Is performed atomically (transaction-safe)
-   * 5. Includes retry logic for deadlocks
+   * 2. Creates the transaction and journal entries
+   * 3. Is performed atomically (transaction-safe)
+   * 4. Includes retry logic for deadlocks
+   *
+   * Phase 0: the legacy `accounts.balance` mirror bump was REMOVED here.
+   * SUM(journal_entries WHERE status='posted') is the single source of truth
+   * (getAccounts exposes it as `running_balance`); the mirror drifted
+   * because auto-posted flows (invoices, vouchers, payroll, POS) never
+   * bumped it while this manual path did. The `balance` column stays as a
+   * legacy display fallback only.
    */
   async postTransaction(data: CreateTransactionDto) {
     this.requirePermission('accounting.post');
@@ -227,21 +233,12 @@ export class AccountingService extends BaseService {
           },
         ];
 
-        // Add journal entries
+        // Add journal entries (no `accounts.balance` mirror bump — see above)
         for (const entry of validated.entries) {
           queries.push({
             sql: `INSERT INTO journal_entries (id, transaction_id, account_id, debit, credit, company_id)
                   VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid)`,
             params: [crypto.randomUUID(), transactionId, entry.accountId, entry.debit, entry.credit, companyId],
-          });
-
-          // Update account balance
-          const balanceChange = entry.debit - entry.credit;
-          queries.push({
-            sql: `UPDATE accounts 
-                  SET balance = balance + $1 
-                  WHERE id = $2::uuid AND company_id = $3::uuid`,
-            params: [balanceChange, entry.accountId, companyId],
           });
         }
 

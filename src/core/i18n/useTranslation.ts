@@ -13,16 +13,19 @@ export function useTranslation() {
   );
 
   const t = useCallback((key: string, params?: Record<string, string | number>): string => {
+    // Phase 6: an explicit inline `default` renders when the key is missing
+    // instead of leaking the raw key into the UI (e.g. toast messages).
+    const missingDefault = params && typeof params.default !== 'undefined' ? String(params.default) : null;
     const keys = key.split('.');
     let value: unknown = currentTranslations;
     for (const k of keys) {
       if (value && typeof value === 'object' && k in value) {
         value = (value as Record<string, unknown>)[k];
       } else {
-        return key;
+        return missingDefault ?? key;
       }
     }
-    if (typeof value !== 'string') return key;
+    if (typeof value !== 'string') return missingDefault ?? key;
     if (!params) return value;
     return value.replace(/\{\{(\w+)\}\}/g, (_, paramKey) =>
       paramKey in params ? String(params[paramKey]) : `{{${paramKey}}}`

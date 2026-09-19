@@ -26,7 +26,7 @@ vi.mock('@/core/api', () => ({
   getNextDocumentNumber: vi.fn(async () => ({ success: true, number: 'POS-000042' })),
 }));
 
-// NOTE: journalEntryGenerator + tx helpers are NOT mocked — the posting
+// NOTE: journalEntryGenerator + tx helpers are NOT mocked ظ¤ the posting
 // builders are pure SQL composers exercised through the mocked adapter, so
 // these tests verify the full atomic checkout batch end-to-end.
 
@@ -59,9 +59,6 @@ const DEBTORS_ID = '00000000-0000-0000-0000-000000000060';
 const SALES_ID = '00000000-0000-0000-0000-000000000061';
 const VAT_ID = '00000000-0000-0000-0000-000000000062';
 const CASH_ACCOUNT_ID = '00000000-0000-0000-0000-000000000063';
-const COGS_ID = '00000000-0000-0000-0000-000000000064';
-const INV_ACC_ID = '00000000-0000-0000-0000-000000000065';
-const PRODUCT_COST = 60;
 
 /** Adapter that answers the posting-account + cash-box lookups checkout makes. */
 function makeCheckoutAdapter() {
@@ -69,23 +66,25 @@ function makeCheckoutAdapter() {
   const adapter = makeMockAdapter(async (sql, params) => {
     executed.push({ sql, params });
     if (/FROM default_accounts/.test(sql)) {
-      // resolvePostingAccounts — one id per function key in request order
+      // resolvePostingAccounts ظ¤ one id per function key in request order
       const key = String(params[1] || '');
       const map: Record<string, string> = {
         default_debtors: DEBTORS_ID,
         default_sales: SALES_ID,
         default_vat_output: VAT_ID,
-        default_cogs: COGS_ID,
-        default_inventory: INV_ACC_ID,
       };
       return { success: true, rows: [{ account_id: map[key] || SALES_ID }] };
     }
-    if (/FROM products WHERE company_id/.test(sql)) {
-      // COGS cost lookup — live moving-average cost per product
-      return { success: true, rows: [{ id: PRODUCT_ID, cost_price: PRODUCT_COST }] };
-    }
     if (/FROM cash_boxes/.test(sql)) {
       return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+    }
+    // Phase 4 gate: ample richest-warehouse stock (shortage is covered by
+    // dedicated policy tests below, not by every checkout test).
+    if (/FROM stock/.test(sql)) {
+      return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
+    }
+    if (/FROM products WHERE/.test(sql)) {
+      return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
     }
     if (/FROM pos_shifts WHERE id = /.test(sql)) {
       return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
@@ -143,10 +142,10 @@ describe('posApi.checkout', () => {
     const batch = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
     const sqls = batch.map((q) => q.sql);
 
-    // Statement 0 — TOCTOU guard (locks the shift row)
+    // Statement 0 ظ¤ TOCTOU guard (locks the shift row)
     expect(sqls[0]).toMatch(/WITH guard AS.*pos_shifts.*FOR UPDATE/);
     expect(sqls[0]).toMatch(/1 \/ \(SELECT COUNT\(\*\) FROM guard\)/);
-    // Statement A — invoice header with POS marker + shift link
+    // Statement A ظ¤ invoice header with POS marker + shift link
     expect(sqls[1]).toMatch(/INSERT INTO sales_invoices/);
     expect(sqls[1]).toMatch(/is_pos, shift_id/);
     expect(sqls[1]).toMatch(/true, \$20::uuid/); // is_pos = true + shift_id param
@@ -156,14 +155,14 @@ describe('posApi.checkout', () => {
     // Company scoping on the header insert
     expect(batch[1].params?.[1]).toBe(COMPANY_ID);
 
-    // Statement B — POS payments (cash row for a full-cash sale)
+    // Statement B ظ¤ POS payments (cash row for a full-cash sale)
     expect(sqls[2]).toMatch(/INSERT INTO pos_payments/);
     expect(sqls[2]).toMatch(/'cash'/);
     expect(sqls[2]).not.toMatch(/'credit'/);
     expect(batch[2].params?.[0]).toBe(COMPANY_ID);
     expect(typeof batch[2].params?.[2]).toBe('string'); // invoiceId
 
-    // Statement C — journal entry: Dr cash-box account / Cr sales / Cr VAT
+    // Statement C ظ¤ journal entry: Dr cash-box account / Cr sales / Cr VAT
     expect(sqls[3]).toMatch(/INSERT INTO transactions/);
     expect(sqls[3]).toMatch(/INSERT INTO journal_entries/);
     expect(batch[3].params).toContain(CASH_ACCOUNT_ID);
@@ -171,16 +170,16 @@ describe('posApi.checkout', () => {
     expect(batch[3].params).toContain(VAT_ID);
     expect(batch[3].params).not.toContain(DEBTORS_ID);
     // Arabic memo carries the POS receipt number + cash wording
-    expect(batch[3].params).toContain('نقدية نقطة بيع POS-000042');
-    expect(batch[3].params).toContain('قيد تلقائي - إيصال نقطة بيع POS-000042');
+    expect(batch[3].params).toContain('┘┘é╪»┘è╪ر ┘┘é╪╖╪ر ╪ذ┘è╪╣ POS-000042');
+    expect(batch[3].params).toContain('┘é┘è╪» ╪ز┘┘é╪د╪خ┘è - ╪ح┘è╪╡╪د┘ ┘┘é╪╖╪ر ╪ذ┘è╪╣ POS-000042');
 
-    // Statements D/E/F — stock ensure + movements + decrement (same SQL as salesApi)
+    // Statements D/E/F ظ¤ stock ensure + movements + decrement (same SQL as salesApi)
     expect(sqls[4]).toMatch(/INSERT INTO stock \(/);
     expect(sqls[5]).toMatch(/INSERT INTO stock_movements/);
     expect(sqls[5]).toMatch(/'out'/);
     expect(sqls[6]).toMatch(/UPDATE stock s SET quantity = s.quantity - sub\.qty/);
 
-    // Statement G — full cash → status 'paid'
+    // Statement G ظ¤ full cash ظْ status 'paid'
     expect(sqls[7]).toMatch(/SET status = 'paid'/);
   });
 
@@ -236,6 +235,203 @@ describe('posApi.checkout', () => {
     const cogsIdx = jeParams.indexOf(COGS_ID);
     expect(jeParams[cogsIdx + 1]).toBe(120);
     expect(jeParams[cogsIdx + 2]).toBe(0);
+  });
+
+  it('posts a COGS companion JE at moving average + freezes line unit_cost (Phase 1)', async () => {
+    const executed: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      executed.push({ sql, params });
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
+      }
+      if (/FROM users WHERE id = /.test(sql) || /SELECT 1 FROM users/.test(sql)) {
+        return { success: true, rows: [{ id: USER_ID }] };
+      }
+      if (/FROM settings/.test(sql)) return { success: true, rows: [{ value: 'moving_average' }] };
+      if (/FROM products WHERE/.test(sql)) {
+        return { success: true, rows: [{ id: PRODUCT_ID, cost_price: 60, standard_cost: null, name_ar: '╪╡┘┘' }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        const key = String(params[1] || '');
+        const map: Record<string, string> = {
+          default_debtors: DEBTORS_ID,
+          default_sales: SALES_ID,
+          default_vat_output: VAT_ID,
+          default_cogs: '00000000-0000-0000-0000-000000000070',
+          default_inventory: '00000000-0000-0000-0000-000000000071',
+        };
+        return { success: true, rows: [{ account_id: map[key] || SALES_ID }] };
+      }
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      // Phase 4 gate: ample stock so the COGS assertions run.
+      if (/FROM stock/.test(sql)) {
+        return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
+    expect(res.success, 'checkout failed: ' + (res.error || '')).toBe(true);
+    const batch = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
+    // lines CTE carries the frozen posting-time cost (2 units ├ù 60)
+    const linesCte = batch.find((q) => q.sql.includes('lines_ins AS (INSERT INTO sales_invoice_lines'))!;
+    expect(linesCte.sql).toContain('unit_cost');
+    expect(linesCte.params).toContain(60);
+    // COGS companion JE right after the revenue JE: Dr 120 / Cr 120
+    const cogsJe = batch.find((q) => q.sql.includes('WITH new_tx') && (q.params || []).includes('POS-000042-COGS'));
+    expect(cogsJe).toBeDefined();
+    expect(cogsJe!.params).toContain(120);
+  });
+
+  it('blocks checkout below zero when the policy denies it (Phase 4)', async () => {
+    const { adapter } = makeCheckoutAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    // Starve the gate: every stock read reports zero on hand.
+    adapter.query.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (/FROM stock/.test(sql)) return { success: true, rows: [] };
+      if (/FROM products WHERE/.test(sql)) {
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+      }
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
+      }
+      if (/FROM users WHERE id = /.test(sql) || /SELECT 1 FROM users/.test(sql)) {
+        return { success: true, rows: [{ id: USER_ID }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        return { success: true, rows: [{ account_id: 'acc-' + String((params as unknown[])[1]) }] };
+      }
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      return { success: true, rows: [] };
+    });
+
+    const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/╪د┘┘à╪«╪▓┘ê┘ ┘╪د ┘è┘â┘┘è/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses checkout inside a closed fiscal year (Phase 5)', async () => {
+    const { adapter } = makeCheckoutAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const today = new Date().toISOString().slice(0, 10);
+    const year = Number(today.slice(0, 4));
+    adapter.query.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (/FROM accounting_periods/.test(sql)) {
+        return {
+          success: true,
+          rows: [{
+            id: 'p1', company_id: 'comp-1', year,
+            start_date: `${year}-01-01`, end_date: `${year}-12-31`,
+            status: 'closed', closed_at: 'x',
+          }],
+        };
+      }
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
+      }
+      if (/FROM users WHERE id = /.test(sql) || /SELECT 1 FROM users/.test(sql)) {
+        return { success: true, rows: [{ id: USER_ID }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        return { success: true, rows: [{ account_id: 'acc-' + String((params as unknown[])[1]) }] };
+      }
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      if (/FROM stock/.test(sql)) {
+        return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
+      }
+      if (/FROM products WHERE/.test(sql)) {
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+      }
+      return { success: true, rows: [] };
+    });
+
+    const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/┘à┘é┘┘╪ر/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+
+  it('resolves a null walk-in customer to the CASH customer (Phase 6)', async () => {
+    const { adapter } = makeCheckoutAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    // No setting row, no explicit customer ظ¤ the conventional CASH row wins.
+    adapter.query.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
+      }
+      if (/FROM users WHERE id = /.test(sql) || /SELECT 1 FROM users/.test(sql)) {
+        return { success: true, rows: [{ id: USER_ID }] };
+      }
+      if (/FROM settings/.test(sql)) return { success: true, rows: [] };
+      if (/FROM customers/.test(sql)) {
+        return { success: true, rows: [{ id: 'cust-cash-1' }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        return { success: true, rows: [{ account_id: 'acc-' + String((params as unknown[])[1]) }] };
+      }
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      if (/FROM stock/.test(sql)) {
+        return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
+      }
+      if (/FROM products WHERE/.test(sql)) {
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+      }
+      return { success: true, rows: [] };
+    });
+
+    const res = await posApi.checkout({ ...makeCheckoutInput(), customerId: undefined }, USER_ID);
+    expect(res.success, res.error || '').toBe(true);
+    const batch = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
+    const header = batch.find((q) => q.sql.includes('INSERT INTO sales_invoices'))!;
+    // $4 = customer_id ظْ the resolved CASH customer, never null.
+    expect(header.params?.[3]).toBe('cust-cash-1');
+  });
+
+  it('creates the CASH customer when none exists (Phase 6)', async () => {
+    const { adapter } = makeCheckoutAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    adapter.query.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
+      }
+      if (/FROM users WHERE id = /.test(sql) || /SELECT 1 FROM users/.test(sql)) {
+        return { success: true, rows: [{ id: USER_ID }] };
+      }
+      if (/FROM settings/.test(sql)) return { success: true, rows: [] };
+      if (/code = 'CASH'/.test(sql)) {
+        if (sql.includes('INSERT INTO customers')) return { success: true, rows: [{ id: 'cust-cash-new' }] };
+        return { success: true, rows: [] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        return { success: true, rows: [{ account_id: 'acc-' + String((params as unknown[])[1]) }] };
+      }
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      if (/FROM stock/.test(sql)) {
+        return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
+      }
+      if (/FROM products WHERE/.test(sql)) {
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+      }
+      return { success: true, rows: [] };
+    });
+
+    const res = await posApi.checkout({ ...makeCheckoutInput(), customerId: undefined }, USER_ID);
+    expect(res.success, res.error || '').toBe(true);
+    const batch = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
+    const header = batch.find((q) => q.sql.includes('INSERT INTO sales_invoices'))!;
+    expect(header.params?.[3]).toBe('cust-cash-new');
   });
 
   it('refuses checkout when no shift is open', async () => {
@@ -312,9 +508,13 @@ describe('posApi.openShift / closeShift', () => {
   });
 
   it('closeShift stores expected (opening + cash) and difference, then flips to closed', async () => {
-    const adapter = makeMockAdapter(async (sql) => {
+    const adapter = makeMockAdapter(async (sql, params) => {
       if (/SELECT 1 FROM users|FROM users WHERE id = /.test(sql)) {
         return { success: true, rows: [{ id: USER_ID }] };
+      }
+      // Phase 5 heal lookup: shift still open.
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, status: 'open', cash_box_id: CASH_BOX_ID, expected_amount: null, difference: null }] };
       }
       if (/COALESCE\(inv\.invoices_count/.test(sql)) {
         // getShiftSummary aggregate row
@@ -330,18 +530,111 @@ describe('posApi.openShift / closeShift', () => {
       if (/UPDATE pos_shifts/.test(sql)) {
         return { success: true, rows: [{ id: SHIFT_ID }] };
       }
+      // Phase 5 cash-difference JE: box GL + shortage account.
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+      }
       return { success: true, rows: [] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await posApi.closeShift(COMPANY_ID, SHIFT_ID, 17000, 'counted', USER_ID);
-    expect(res.success).toBe(true);
-    // expected = 5000 opening + 12300 cash payments = 17300; counted 17000 → -300
+    expect(res.success, res.error || '').toBe(true);
+    // expected = 5000 opening + 12300 cash payments = 17300; counted 17000 ظْ -300
     expect(res.data?.expectedAmount).toBe(17300);
     expect(res.data?.difference).toBe(-300);
     const updateCall = adapter.query.mock.calls.find(([sql]) => /UPDATE pos_shifts/.test(sql as string));
     expect(updateCall![0]).toMatch(/status = 'closed'/);
     expect(updateCall![1]).toEqual([SHIFT_ID, COMPANY_ID, 17000, 17300, -300, 'counted', USER_ID]);
+    // Shortage JE posted: Dr 52901 300 / Cr box 300.
+    expect(res.data?.jeReference).toMatch(/^POS-DIFF-/);
+    const je = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
+    const diffJe = je.find((q) => q.sql.includes('WITH new_tx'))!;
+    expect(diffJe).toBeDefined();
+    const flat = diffJe.params || [];
+    const legs = [0, 1].map((i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    expect(legs.find((l) => l.acc === 'acc-default_inventory_shortage')).toMatchObject({ debit: 300, credit: 0 });
+    expect(legs.find((l) => l.acc === CASH_ACCOUNT_ID)).toMatchObject({ debit: 0, credit: 300 });
+  });
+
+  it('closeShift posts no JE for a balanced close (difference 0)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, status: 'open', cash_box_id: CASH_BOX_ID, expected_amount: null, difference: null }] };
+      }
+      if (/COALESCE\(inv\.invoices_count/.test(sql)) {
+        return {
+          success: true,
+          rows: [{
+            opening_amount: 5000, invoices_count: 1, gross_total: 200, discount_amount: 0,
+            vat_amount: 0, net_total: 200, cash_total: 200, credit_total: 0,
+          }],
+        };
+      }
+      if (/UPDATE pos_shifts/.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    // expected = 5000 + 200 = 5200; counted 5200 ظْ balanced.
+    const res = await posApi.closeShift(COMPANY_ID, SHIFT_ID, 5200, undefined, USER_ID);
+    expect(res.success, res.error || '').toBe(true);
+    expect(res.data?.difference).toBe(0);
+    expect(res.data?.jeReference).toBeNull();
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+
+  it('closeShift heals an already-closed shift whose difference JE never posted', async () => {
+    const adapter = makeMockAdapter(async (sql, params) => {
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, status: 'closed', cash_box_id: CASH_BOX_ID, expected_amount: 17300, difference: -300 }] };
+      }
+      if (/FROM transactions/.test(sql)) return { success: true, rows: [] };
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await posApi.closeShift(COMPANY_ID, SHIFT_ID, 17000, undefined, USER_ID);
+    expect(res.success, res.error || '').toBe(true);
+    expect(res.data?.difference).toBe(-300);
+    expect(res.data?.jeReference).toMatch(/^POS-DIFF-/);
+  });
+
+  it('closeShift refuses inside a closed fiscal year (Phase 5)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/FROM accounting_periods/.test(sql)) {
+        const year = Number(new Date().toISOString().slice(0, 4));
+        return {
+          success: true,
+          rows: [{
+            id: 'p1', company_id: COMPANY_ID, year,
+            start_date: `${year}-01-01`, end_date: `${year}-12-31`,
+            status: 'closed', closed_at: 'x',
+          }],
+        };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await posApi.closeShift(COMPANY_ID, SHIFT_ID, 17000, undefined, USER_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/┘à┘é┘┘╪ر/);
   });
 
   it('closeShift rejects an unknown/already-closed shift', async () => {
@@ -368,29 +661,29 @@ describe('posApi.getProducts', () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
       rows: [{
-        id: PRODUCT_ID, code: 'P-1', name_ar: 'شاي', name_en: 'Tea', barcode: '123',
-        sku: 'SKU1', unit: 'علبة', sale_price: '150.0000', product_type_id: null,
+        id: PRODUCT_ID, code: 'P-1', name_ar: '╪┤╪د┘è', name_en: 'Tea', barcode: '123',
+        sku: 'SKU1', unit: '╪╣┘╪ذ╪ر', sale_price: '150.0000', product_type_id: null,
         product_type_name: null, stock_qty: '42', category_ids: null,
       }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-    const res = await posApi.getProducts(COMPANY_ID, 'شاي');
+    const res = await posApi.getProducts(COMPANY_ID, '╪┤╪د┘è');
     expect(res.success).toBe(true);
     expect(res.data?.[0].salePrice).toBe(150);
     expect(res.data?.[0].stockQty).toBe(42);
     const [sql, params] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/COALESCE\(s\.total_qty, 0\) AS stock_qty/);
     expect(sql).toMatch(/p\.barcode ILIKE \$2/);
-    expect(params).toEqual([COMPANY_ID, '%شاي%']);
+    expect(params).toEqual([COMPANY_ID, '%╪┤╪د┘è%']);
   });
 
   it('findProductByCode prefers an exact barcode match', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
       rows: [
-        { id: PRODUCT_ID, code: 'P-1', name_ar: 'شاي', barcode: '62901234', sku: 'SKU1', unit: 'علبة', sale_price: '150', stock_qty: '10', category_ids: null },
-        { id: '00000000-0000-0000-0000-000000000051', code: '62901234', name_ar: 'قهوة', barcode: '9999', sku: 'X', unit: 'كيس', sale_price: '250', stock_qty: '5', category_ids: null },
+        { id: PRODUCT_ID, code: 'P-1', name_ar: '╪┤╪د┘è', barcode: '62901234', sku: 'SKU1', unit: '╪╣┘╪ذ╪ر', sale_price: '150', stock_qty: '10', category_ids: null },
+        { id: '00000000-0000-0000-0000-000000000051', code: '62901234', name_ar: '┘é┘ç┘ê╪ر', barcode: '9999', sku: 'X', unit: '┘â┘è╪│', sale_price: '250', stock_qty: '5', category_ids: null },
       ],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);

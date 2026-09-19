@@ -495,9 +495,9 @@ export const SalesReturnsPage: React.FC = () => {
         </span>
       ),
     },
-    { key: 'invoiceNumber', header: t('sales.return.originalInvoice'), width: '140px', render: (row: SalesReturn) => (
-      <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-mono text-xs"><FileText size={13} /> {row.invoice?.invoiceNumber || (row.invoiceId ? row.invoiceId.slice(0, 8) : '—')}</span>
-    )},
+      { key: 'invoiceNumber', header: t('sales.return.originalInvoice'), width: '140px', render: (row: SalesReturn) => (
+       <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-mono text-xs"><FileText size={13} /> {row.invoice?.invoiceNumber || row.invoiceId?.slice(0, 8) || '—'}</span>
+      )},
     {
       key: 'customerName',
       header: t('sales.customer.title'),

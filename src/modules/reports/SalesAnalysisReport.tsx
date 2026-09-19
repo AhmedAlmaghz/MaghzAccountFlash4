@@ -19,7 +19,10 @@ interface SalesLine {
   date: string;
   customerName: string;
   productName: string;
+  /** Document-currency amount (display + per-currency breakdown). */
   revenue: number;
+  /** Base-currency amount (EVERY aggregation: KPIs/pivot/chart). */
+  baseRevenue: number;
   invoiceCount: number;
   avgValue: number;
   currencyCode: string;
@@ -79,6 +82,9 @@ export const SalesAnalysisReport: React.FC = () => {
       try {
         const adapter = await getDbAdapter();
         const result = await adapter.query(
+          // Phase 2 (IAS 21): BOTH amounts travel together — document amount
+          // for display + per-currency breakdown, base amount for every
+          // aggregation (KPIs/pivot/chart). Mixing them double-converts.
           `SELECT i.id AS invoice_id,
                   i.date,
                   i.status,
@@ -91,6 +97,7 @@ export const SalesAnalysisReport: React.FC = () => {
                   l.quantity,
                   l.unit_price,
                   l.line_total,
+                  COALESCE(l.base_currency_line_total, l.line_total) AS base_line_total,
                   l.discount_percent,
                   l.vat_percent,
                   p.name_ar AS product_name,
@@ -115,7 +122,7 @@ export const SalesAnalysisReport: React.FC = () => {
         date: string;
         customerName: string;
         currencyCode: string;
-        lines: { productName: string; lineTotal: number; quantity: number; unitPrice: number }[];
+        lines: { productName: string; lineTotal: number; baseTotal: number; quantity: number; unitPrice: number }[];
       }>();
       for (const r of dbRows) {
         const invId = String(r.invoice_id || '');
@@ -136,6 +143,7 @@ export const SalesAnalysisReport: React.FC = () => {
           entry.lines.push({
             productName: String(r.product_name || r.product_name_en || '-'),
             lineTotal,
+            baseTotal: Number(r.base_line_total ?? lineTotal),
             quantity: Number(r.quantity ?? 0),
             unitPrice: Number(r.unit_price ?? 0),
           });
@@ -153,6 +161,7 @@ export const SalesAnalysisReport: React.FC = () => {
             customerName: entry.customerName,
             productName: '-',
             revenue: 0,
+            baseRevenue: 0,
             invoiceCount: 1,
             avgValue: 0,
             currencyCode: entry.currencyCode,
@@ -165,6 +174,7 @@ export const SalesAnalysisReport: React.FC = () => {
               customerName: entry.customerName,
               productName: l.productName,
               revenue: l.lineTotal,
+              baseRevenue: l.baseTotal,
               invoiceCount: 1,
               avgValue: l.lineTotal,
               currencyCode: entry.currencyCode,
@@ -190,13 +200,15 @@ export const SalesAnalysisReport: React.FC = () => {
     });
   }, [rawData, customerFilter, productFilter]);
 
+  // Phase 2: every aggregation below runs on BASE amounts; the per-line
+  // document amounts feed only the detail table + currency breakdown.
   const pivotData = useMemo((): PivotRow[] => {
     if (pivotBy === 'none') return [];
     const map: Record<string, { revenue: number; invoiceCount: number; count: number }> = {};
     for (const row of filteredData) {
       const key = row[pivotBy === 'customer' ? 'customerName' : pivotBy === 'product' ? 'productName' : 'month'];
       if (!map[key]) map[key] = { revenue: 0, invoiceCount: 0, count: 0 };
-      map[key].revenue += row.revenue;
+      map[key].revenue += row.baseRevenue;
       map[key].invoiceCount += row.invoiceCount;
       map[key].count += 1;
     }
@@ -208,7 +220,7 @@ export const SalesAnalysisReport: React.FC = () => {
     })).sort((a, b) => b.revenue - a.revenue);
   }, [filteredData, pivotBy]);
 
-  const totalRevenue = filteredData.reduce((s, d) => s + d.revenue, 0);
+  const totalRevenue = filteredData.reduce((s, d) => s + d.baseRevenue, 0);
   const totalInvoices = filteredData.reduce((s, d) => s + d.invoiceCount, 0);
   const avgInvoice = totalInvoices > 0 ? Math.floor(totalRevenue / totalInvoices) : 0;
 
@@ -224,7 +236,7 @@ export const SalesAnalysisReport: React.FC = () => {
     if (pivotBy !== 'none') return pivotData.map((p) => ({ name: p.dimension, revenue: p.revenue }));
     const monthMap: Record<string, number> = {};
     for (const row of filteredData) {
-      monthMap[row.month] = (monthMap[row.month] || 0) + row.revenue;
+      monthMap[row.month] = (monthMap[row.month] || 0) + row.baseRevenue;
     }
     return Object.entries(monthMap).map(([name, revenue]) => ({ name, revenue }));
   }, [filteredData, pivotData, pivotBy]);

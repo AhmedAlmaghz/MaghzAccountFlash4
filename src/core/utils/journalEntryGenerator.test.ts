@@ -10,7 +10,6 @@ import {
   postStockAdjustment,
   buildSalesInvoicePostingStatements,
   buildPurchaseInvoicePostingStatements,
-  buildPosSalePostingStatements,
   buildSalesReturnPostingStatements,
   buildPurchaseReturnPostingStatements,
 } from './journalEntryGenerator';
@@ -32,8 +31,6 @@ function createMockAdapter(overrides?: Record<string, unknown>) {
     { id: 'acc-vat', company_id: 'comp-1', code: '21301', name: 'VAT' },
     { id: 'acc-sales', company_id: 'comp-1', code: '41101', name: 'Sales' },
     { id: 'acc-sales-ret', company_id: 'comp-1', code: '41103', name: 'Sales Returns' },
-    { id: 'acc-disc-allowed', company_id: 'comp-1', code: '41201', name: 'Sales Discounts Allowed' },
-    { id: 'acc-disc-earned', company_id: 'comp-1', code: '42101', name: 'Purchase Discounts Earned' },
     { id: 'acc-cogs', company_id: 'comp-1', code: '51101', name: 'COGS' },
     { id: 'acc-salaries', company_id: 'comp-1', code: '52101', name: 'Salaries' },
     { id: 'acc-rent-wh', company_id: 'comp-1', code: '52201', name: 'Rent WH' },
@@ -42,6 +39,14 @@ function createMockAdapter(overrides?: Record<string, unknown>) {
     { id: 'acc-adv', company_id: 'comp-1', code: '52401', name: 'Advertising' },
     { id: 'acc-maint', company_id: 'comp-1', code: '52501', name: 'Maintenance' },
     { id: 'acc-ship', company_id: 'comp-1', code: '52601', name: 'Shipping' },
+    // Phase 1 valuation accounts (migration 0029 seed)
+    { id: 'acc-ppv', company_id: 'comp-1', code: '51901', name: 'Purchase Price Variance' },
+    { id: 'acc-short', company_id: 'comp-1', code: '52901', name: 'Inventory Shortage' },
+    { id: 'acc-surplus', company_id: 'comp-1', code: '41901', name: 'Inventory Surplus' },
+    // Phase 2 FX differences (migration 0030 seed) + Phase 3 VAT split
+    // (migration 0031 seed) — builders resolve these by code fallback.
+    { id: 'acc-fx', company_id: 'comp-1', code: '52902', name: 'Exchange Differences' },
+    { id: 'acc-vat-in', company_id: 'comp-1', code: '21302', name: 'VAT Input' },
   ];
 
   const defaultAccounts: Record<string, string> = {};
@@ -301,38 +306,47 @@ describe('journalEntryGenerator', () => {
       // Atomic contract: JE + stock movements run inside one adapter.transaction batch.
       expect(adapter.transaction).toHaveBeenCalledTimes(1);
       const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
-      // No ret.id and no cogsReversal -> only the 2-leg revenue reversal.
+      // No ret.id -> only the journal entry statement.
       expect(stmts.length).toBe(1);
       expect(stmts[0].sql).toContain('WITH new_tx');
       expect(stmts[0].sql).toContain('journal_entries');
-      // 2 entries x 4 params + 6 header params
+      // Phase 1: without explicit costing the JE carries revenue + debtor
+      // legs only (2 entries x 4 params + 6 header params) — the retired
+      // 70%-of-amount estimate is gone.
       expect(stmts[0].params!.length).toBe(6 + 2 * 4);
     });
 
-    it('books the actual-cost COGS reversal instead of any ratio guess', async () => {
+    it('reverses output VAT + original cost when costing is provided (Phase 1)', async () => {
       const adapter = createMockAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
-      const result = await postSalesReturn('comp-1', {
-        returnNumber: 'SR-002',
-        date: '2024-06-01',
-        customer: 'شركة اليمن',
-        amount: 500,
-        cogsReversal: 320,
-      });
+      const result = await postSalesReturn(
+        'comp-1',
+        { returnNumber: 'SR-002', date: '2024-06-01', customer: 'شركة اليمن', amount: 1150 },
+        { subtotal: 1000, vatAmount: 150, costTotal: 700 }
+      );
 
       expect(result.success).toBe(true);
       const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
       expect(stmts.length).toBe(1);
-      // 4 entries x 4 params + 6 header params
-      expect(stmts[0].params!.length).toBe(6 + 4 * 4);
-      const params = stmts[0].params!;
-      // entry order: sales-returns Dr, debtors Cr, inventory Dr, COGS Cr
-      expect(params).toContain('acc-inventory');
-      expect(params).toContain('acc-cogs');
-      const amounts = params.filter((p) => typeof p === 'number');
-      expect(amounts).toContain(320);
-      expect(amounts).not.toContain(Math.floor(500 * 0.7)); // no 70% guess
+      // 5 legs: Dr returns 1000 + Dr VAT 150 + Cr debtors 1150 + Dr inventory 700 + Cr COGS 700
+      expect(stmts[0].params!.length).toBe(6 + 5 * 4);
+      const flat = stmts[0].params!;
+      // entries layout: [acc, debit, credit, memo] × 5 starting at index 6
+      const legs = [0, 1, 2, 3, 4].map((i) => ({
+        acc: String(flat[6 + i * 4]),
+        debit: Number(flat[6 + i * 4 + 1]),
+        credit: Number(flat[6 + i * 4 + 2]),
+      }));
+      expect(legs[0]).toMatchObject({ debit: 1000, credit: 0 });
+      expect(legs[1]).toMatchObject({ debit: 150, credit: 0 });
+      expect(legs[2]).toMatchObject({ debit: 0, credit: 1150 });
+      expect(legs[3]).toMatchObject({ debit: 700, credit: 0 });
+      expect(legs[4]).toMatchObject({ debit: 0, credit: 700 });
+      // balanced by construction
+      const dr = legs.reduce((s, l) => s + l.debit, 0);
+      const cr = legs.reduce((s, l) => s + l.credit, 0);
+      expect(dr).toBe(cr);
     });
   });
 
@@ -411,25 +425,35 @@ describe('journalEntryGenerator', () => {
   });
 
   describe('postStockAdjustment', () => {
-    it('posts positive adjustment (found)', async () => {
+    it('posts positive adjustment (found) to the surplus account, never COGS', async () => {
       const adapter = createMockAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
+      // Legacy monetary-difference callers pass unitCost 1 (difference IS money).
       const result = await postStockAdjustment('comp-1', {
         id: 'ADJ-001',
         date: '2024-06-01',
         product: 'منتج أ',
         difference: 50,
         reason: 'عثور',
+        unitCost: 1,
       });
 
       expect(result.success).toBe(true);
-      const txCall = adapter.createTransaction.mock.calls[0][0];
-      expect(txCall.entries[0].debit).toBe(50); // Inventory
-      expect(txCall.entries[1].credit).toBe(50); // COGS / Income
+      expect(adapter.transaction).toHaveBeenCalledTimes(1);
+      const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      expect(stmts.length).toBe(1);
+      const flat = stmts[0].params!;
+      const legs = [0, 1].map((i) => ({
+        acc: String(flat[6 + i * 4]),
+        debit: Number(flat[6 + i * 4 + 1]),
+        credit: Number(flat[6 + i * 4 + 2]),
+      }));
+      expect(legs[0]).toMatchObject({ acc: 'acc-inventory', debit: 50, credit: 0 });
+      expect(legs[1]).toMatchObject({ acc: 'acc-surplus', debit: 0, credit: 50 });
     });
 
-    it('posts negative adjustment (lost)', async () => {
+    it('posts negative adjustment (lost) to the shortage account', async () => {
       const adapter = createMockAdapter();
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
@@ -439,12 +463,40 @@ describe('journalEntryGenerator', () => {
         product: 'منتج أ',
         difference: -30,
         reason: 'فاقد',
+        unitCost: 1,
       });
 
       expect(result.success).toBe(true);
-      const txCall = adapter.createTransaction.mock.calls[0][0];
-      expect(txCall.entries[0].debit).toBe(30); // COGS / Loss
-      expect(txCall.entries[1].credit).toBe(30); // Inventory
+      const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      const flat = stmts[0].params!;
+      const legs = [0, 1].map((i) => ({
+        acc: String(flat[6 + i * 4]),
+        debit: Number(flat[6 + i * 4 + 1]),
+        credit: Number(flat[6 + i * 4 + 2]),
+      }));
+      expect(legs[0]).toMatchObject({ acc: 'acc-short', debit: 30, credit: 0 });
+      expect(legs[1]).toMatchObject({ acc: 'acc-inventory', debit: 0, credit: 30 });
+    });
+
+    it('values quantity differences by unit cost (never raw qty as money)', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+
+      const result = await postStockAdjustment('comp-1', {
+        id: 'ADJ-004',
+        date: '2024-06-01',
+        product: 'منتج أ',
+        difference: 10,
+        reason: 'عثور',
+        unitCost: 5000,
+      });
+
+      expect(result.success).toBe(true);
+      const stmts = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      const flat = stmts[0].params!;
+      // 10 units at 5000 each — the old code would have posted 10 riyals
+      expect(Number(flat[6 + 1])).toBe(50000);
+      expect(Number(flat[6 + 4 + 2])).toBe(50000);
     });
 
     it('skips zero difference', async () => {
@@ -512,239 +564,92 @@ describe('journalEntryGenerator', () => {
     });
   });
 
-  describe('perpetual COGS legs (IAS 2)', () => {
-    const ids = { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat', cogs: 'acc-cogs', inventory: 'acc-inventory' };
-
-    it('sales invoice builder appends Dr COGS / Cr Inventory when cogsAmount > 0', () => {
-      const [stmt] = buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-901',
-        date: '2026-01-01',
-        subtotal: 1000,
-        vatAmount: 150,
-        totalAmount: 1150,
-        cogsAmount: 640,
-      }, ids);
-      const params = stmt.params!;
-      // 5 entries x 4 params + 6 header params
-      expect(params.length).toBe(6 + 5 * 4);
-      expect(params).toContain('acc-cogs');
-      expect(params).toContain('acc-inventory');
-      const cogsIdx = params.indexOf('acc-cogs');
-      expect(params[cogsIdx + 1]).toBe(640); // debit
-      expect(params[cogsIdx + 2]).toBe(0); // credit
-      const invIdx = params.lastIndexOf('acc-inventory');
-      expect(params[invIdx + 1]).toBe(0);
-      expect(params[invIdx + 2]).toBe(640); // credit
+  describe('Phase 1 valuation postings', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
     });
 
-    it('sales invoice builder skips COGS legs when amount is zero or accounts absent', () => {
-      const [zero] = buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-902', date: '2026-01-01', subtotal: 100, vatAmount: 15, totalAmount: 115, cogsAmount: 0,
-      }, ids);
-      expect(zero.params!.length).toBe(6 + 3 * 4);
-      const [noAccts] = buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-903', date: '2026-01-01', subtotal: 100, vatAmount: 15, totalAmount: 115, cogsAmount: 70,
-      }, { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat' });
-      expect(noAccts.params!.length).toBe(6 + 3 * 4);
+    it('sales invoice appends a balanced COGS companion JE (separate reference)', async () => {
+      const stmts = buildSalesInvoicePostingStatements(
+        'comp-1',
+        { invoiceNumber: 'INV-9', date: '2026-09-01', subtotal: 1000, vatAmount: 150, totalAmount: 1150 },
+        { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat' },
+        { total: 700, inventoryAccount: 'acc-inventory', cogsAccount: 'acc-cogs' }
+      );
+      expect(stmts).toHaveLength(2);
+      // The reference travels as a bound param (never inlined in SQL).
+      expect(stmts[1].params).toContain('INV-9-COGS');
+      const flat = stmts[1].params!;
+      const legs = [0, 1].map((i) => ({
+        acc: String(flat[6 + i * 4]),
+        debit: Number(flat[6 + i * 4 + 1]),
+        credit: Number(flat[6 + i * 4 + 2]),
+      }));
+      expect(legs[0]).toMatchObject({ acc: 'acc-cogs', debit: 700, credit: 0 });
+      expect(legs[1]).toMatchObject({ acc: 'acc-inventory', debit: 0, credit: 700 });
     });
 
-    it('POS builder appends the same COGS legs for mixed sales', () => {
-      const [stmt] = buildPosSalePostingStatements('comp-1', {
-        invoiceNumber: 'POS-001',
-        receiptNumber: 'POS-001',
-        date: '2026-01-01',
-        subtotal: 200,
-        vatAmount: 0,
-        totalAmount: 200,
-        cashAmount: 120,
-        creditAmount: 80,
-        cashAccountId: 'acc-cash',
-        cogsAmount: 130,
-      }, ids);
-      const params = stmt.params!;
-      expect(params).toContain('acc-cogs');
-      expect(params).toContain('acc-inventory');
-      const cogsIdx = params.indexOf('acc-cogs');
-      expect(params[cogsIdx + 1]).toBe(130);
-      expect(params[cogsIdx + 2]).toBe(0);
+    it('sales invoice without cogs stays a 3-leg JE (backward compatible)', async () => {
+      const stmts = buildSalesInvoicePostingStatements(
+        'comp-1',
+        { invoiceNumber: 'INV-9', date: '2026-09-01', subtotal: 1000, vatAmount: 150, totalAmount: 1150 },
+        { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat' }
+      );
+      expect(stmts).toHaveLength(1);
     });
 
-    it('sales return builder reverses the ACTUAL cost, never a ratio', async () => {
-      const adapter = createMockAdapter();
-      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
-
-      const res = await buildSalesReturnPostingStatements('comp-1', {
-        returnNumber: 'SR-901',
-        date: '2026-01-01',
-        customer: 'عميل',
-        amount: 500,
-        cogsReversal: 320,
-      });
-      expect(res.success).toBe(true);
-      if (!res.success) return;
-      const je = res.statements[0];
-      expect(je.params!.length).toBe(6 + 4 * 4);
-      expect(je.params).toContain('acc-inventory');
-      expect(je.params).toContain('acc-cogs');
-      const amounts = je.params!.filter((p) => typeof p === 'number');
-      expect(amounts).toContain(320);
-      expect(amounts).not.toContain(Math.floor(500 * 0.7));
-    });
-
-    it('sales return builder omits reversal legs when cogsReversal is zero', async () => {
-      const adapter = createMockAdapter();
-      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
-
-      const res = await buildSalesReturnPostingStatements('comp-1', {
-        returnNumber: 'SR-902',
-        date: '2026-01-01',
-        customer: 'عميل',
-        amount: 500,
-      });
-      expect(res.success).toBe(true);
-      if (!res.success) return;
-      expect(res.statements[0].params!.length).toBe(6 + 2 * 4);
-    });
-  });
-
-  describe('explicit discount legs (gross method)', () => {
-    const salesIds = { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat', cogs: 'acc-cogs', inventory: 'acc-inventory', discount: 'acc-disc-allowed' };
-
-    function legSums(params: unknown[]) {
-      const legs = [];
-      for (let i = 6; i < params.length; i += 4) {
-        legs.push({ account: params[i], debit: Number(params[i + 1]), credit: Number(params[i + 2]) });
-      }
+    it('standard purchase books inventory at standard + PPV legs balance', async () => {
+      const stmts = buildPurchaseInvoicePostingStatements(
+        'comp-1',
+        { invoiceNumber: 'PINV-9', date: '2026-09-01', subtotal: 1100, vatAmount: 0, totalAmount: 1100 },
+        { inventory: 'acc-inventory', creditors: 'acc-creditors', vat: 'acc-vat' },
+        { inventoryAmount: 1000, varianceAmount: 100, varianceAccount: 'acc-ppv' }
+      );
+      expect(stmts).toHaveLength(1);
+      const flat = stmts[0].params!;
+      const n = (flat.length - 6) / 4;
+      const legs = Array.from({ length: n }, (_, i) => ({
+        acc: String(flat[6 + i * 4]),
+        debit: Number(flat[6 + i * 4 + 1]),
+        credit: Number(flat[6 + i * 4 + 2]),
+      }));
+      expect(legs.find((l) => l.acc === 'acc-inventory')).toMatchObject({ debit: 1000 });
+      expect(legs.find((l) => l.acc === 'acc-ppv')).toMatchObject({ debit: 100 });
+      expect(legs.find((l) => l.acc === 'acc-creditors')).toMatchObject({ credit: 1100 });
       const dr = legs.reduce((s, l) => s + l.debit, 0);
       const cr = legs.reduce((s, l) => s + l.credit, 0);
-      return { legs, dr, cr };
-    }
-
-    it('sales invoice books Dr Debtors + Dr Discount = Cr Gross Sales + Cr VAT', () => {
-      // subtotal 1000 (net of lines) + header discount 100, VAT 15% on 900.
-      const [stmt] = buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-D1', date: '2026-01-01',
-        subtotal: 1000, vatAmount: 135, totalAmount: 1035,
-        discountAmount: 100, grossSubtotal: 1000,
-      }, salesIds);
-      const { legs, dr, cr } = legSums(stmt.params!);
-      expect(legs).toHaveLength(4);
-      expect(dr).toBeCloseTo(cr, 2);
-      expect(legs[0]).toMatchObject({ account: 'acc-debtors', debit: 1035, credit: 0 });
-      expect(legs[1]).toMatchObject({ account: 'acc-disc-allowed', debit: 100, credit: 0 });
-      expect(legs[2]).toMatchObject({ account: 'acc-sales', debit: 0, credit: 1000 });
-      expect(legs[3]).toMatchObject({ account: 'acc-vat', debit: 0, credit: 135 });
+      expect(dr).toBe(cr);
     });
 
-    it('sales invoice keeps the classic 3-leg shape when discount is zero', () => {
-      const [stmt] = buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-D2', date: '2026-01-01',
-        subtotal: 1000, vatAmount: 150, totalAmount: 1150,
-      }, salesIds);
-      expect(stmt.params!.length).toBe(6 + 3 * 4);
-    });
+    it('purchase return reverses input VAT and plugs the price gap to PPV', async () => {
+      const adapter = createMockAdapter();
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 
-    it('sales invoice throws when discount is positive but the account is missing', () => {
-      expect(() => buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-D3', date: '2026-01-01',
-        subtotal: 1000, vatAmount: 135, totalAmount: 1035,
-        discountAmount: 100, grossSubtotal: 1000,
-      }, { debtors: 'acc-debtors', sales: 'acc-sales', vat: 'acc-vat' })).toThrow();
-    });
-
-    it('sales invoice throws when discount exceeds gross', () => {
-      expect(() => buildSalesInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'INV-D4', date: '2026-01-01',
-        subtotal: 100, vatAmount: 0, totalAmount: 0,
-        discountAmount: 150, grossSubtotal: 100,
-      }, salesIds)).toThrow();
-    });
-
-    it('purchase invoice books Dr Gross + Dr VAT = Cr Creditors + Cr Discount Earned', () => {
-      const [stmt] = buildPurchaseInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'PINV-D1', date: '2026-01-01',
-        subtotal: 1000, vatAmount: 135, totalAmount: 1035,
-        discountAmount: 100, grossSubtotal: 1000,
-      }, { inventory: 'acc-inventory', creditors: 'acc-creditors', vat: 'acc-vat', discount: 'acc-disc-earned' });
-      const { legs, dr, cr } = legSums(stmt.params!);
-      expect(legs).toHaveLength(4);
-      expect(dr).toBeCloseTo(cr, 2);
-      expect(legs[0]).toMatchObject({ account: 'acc-inventory', debit: 1000, credit: 0 });
-      expect(legs[2]).toMatchObject({ account: 'acc-creditors', debit: 0, credit: 1035 });
-      expect(legs[3]).toMatchObject({ account: 'acc-disc-earned', debit: 0, credit: 100 });
-    });
-
-    it('purchase invoice keeps the classic 3-leg shape when discount is zero', () => {
-      const [stmt] = buildPurchaseInvoicePostingStatements('comp-1', {
-        invoiceNumber: 'PINV-D2', date: '2026-01-01',
-        subtotal: 1000, vatAmount: 150, totalAmount: 1150,
-      }, { inventory: 'acc-inventory', creditors: 'acc-creditors', vat: 'acc-vat' });
-      expect(stmt.params!.length).toBe(6 + 3 * 4);
-    });
-
-    it('POS builder splits cash/credit debits and adds the discount leg', () => {
-      const [stmt] = buildPosSalePostingStatements('comp-1', {
-        invoiceNumber: 'POS-D1', receiptNumber: 'POS-D1', date: '2026-01-01',
-        subtotal: 900, vatAmount: 135, totalAmount: 1035,
-        cashAmount: 600, creditAmount: 435, cashAccountId: 'acc-cash',
-        discountAmount: 100, grossSubtotal: 1000,
-      }, salesIds);
-      const { legs, dr, cr } = legSums(stmt.params!);
-      expect(dr).toBeCloseTo(cr, 2);
-      expect(legs.map((l) => l.account)).toEqual(
-        expect.arrayContaining(['acc-cash', 'acc-debtors', 'acc-disc-allowed', 'acc-sales', 'acc-vat'])
+      const res = await buildPurchaseReturnPostingStatements(
+        'comp-1',
+        { returnNumber: 'PR-9', date: '2026-09-01', supplier: 'مورد', amount: 1150 },
+        { subtotal: 1000, vatAmount: 150, costBasis: 900 }
       );
-    });
-
-    it('sales return reverses gross: Dr Returns = Cr Debtors + Cr Discount', async () => {
-      const adapter = createMockAdapter();
-      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
-
-      const res = await buildSalesReturnPostingStatements('comp-1', {
-        returnNumber: 'SR-D1', date: '2026-01-01', customer: 'عميل',
-        amount: 900, discountAmount: 100, grossAmount: 1000,
-      });
       expect(res.success).toBe(true);
       if (!res.success) return;
-      const { legs, dr, cr } = legSums(res.statements[0].params!);
-      expect(legs).toHaveLength(3);
-      expect(dr).toBeCloseTo(cr, 2);
-      expect(legs[0]).toMatchObject({ account: 'acc-sales-ret', debit: 1000, credit: 0 });
-      expect(legs[1]).toMatchObject({ account: 'acc-disc-allowed', debit: 0, credit: 100 });
-      expect(legs[2]).toMatchObject({ account: 'acc-debtors', debit: 0, credit: 900 });
-    });
-
-    it('purchase return reverses gross: Dr Creditors + Dr Discount = Cr Inventory', async () => {
-      const adapter = createMockAdapter();
-      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
-
-      const res = await buildPurchaseReturnPostingStatements('comp-1', {
-        returnNumber: 'PR-D1', date: '2026-01-01', supplier: 'مورد',
-        amount: 900, discountAmount: 100, grossAmount: 1000,
-      });
-      expect(res.success).toBe(true);
-      if (!res.success) return;
-      const { legs, dr, cr } = legSums(res.statements[0].params!);
-      expect(legs).toHaveLength(3);
-      expect(dr).toBeCloseTo(cr, 2);
-      expect(legs[1]).toMatchObject({ account: 'acc-disc-earned', debit: 100, credit: 0 });
-    });
-
-    it('returns builders fail closed when the discount account is missing', async () => {
-      const adapter = createMockAdapter({
-        query: vi.fn(async (sql: string) => {
-          if (String(sql).toLowerCase().includes('from default_accounts')) return { success: true, rows: [] };
-          if (String(sql).toLowerCase().includes('from accounts')) return { success: true, rows: [] };
-          return { success: true, rows: [] };
-        }),
-      });
-      vi.mocked(getDbAdapter).mockResolvedValue(adapter as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
-
-      const res = await buildSalesReturnPostingStatements('comp-1', {
-        returnNumber: 'SR-D2', date: '2026-01-01', customer: 'عميل',
-        amount: 900, discountAmount: 100, grossAmount: 1000,
-      });
-      expect(res.success).toBe(false);
+      const je = res.statements.find((s) => s.sql.includes('WITH new_tx'))!;
+      const flat = je.params!;
+      const n = (flat.length - 6) / 4;
+      const legs = Array.from({ length: n }, (_, i) => ({
+        acc: String(flat[6 + i * 4]),
+        debit: Number(flat[6 + i * 4 + 1]),
+        credit: Number(flat[6 + i * 4 + 2]),
+      }));
+      // gap = costBasis - subtotal = 900 - 1000 < 0, so Cr PPV 100 (saving).
+      // Input VAT reverses to the Phase-3 split account 21302 (acc-vat-in),
+      // not the output account 21301.
+      expect(legs.find((l) => l.acc === 'acc-creditors')).toMatchObject({ debit: 1150 });
+      expect(legs.find((l) => l.acc === 'acc-inventory')).toMatchObject({ credit: 900 });
+      expect(legs.find((l) => l.acc === 'acc-vat-in')).toMatchObject({ credit: 150 });
+      expect(legs.find((l) => l.acc === 'acc-ppv')).toMatchObject({ credit: 100 });
+      const dr = legs.reduce((s, l) => s + l.debit, 0);
+      const cr = legs.reduce((s, l) => s + l.credit, 0);
+      expect(dr).toBe(cr);
     });
   });
 });

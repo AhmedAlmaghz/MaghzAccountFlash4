@@ -33,6 +33,7 @@ interface FormData {
   sku: string;
   unit: string;
   costPrice: string;
+  standardCost: string;
   salePrice: string;
   minStock: string;
   maxStock: string;
@@ -54,6 +55,7 @@ const initialForm: FormData = {
   sku: '',
   unit: '',
   costPrice: '0',
+  standardCost: '',
   salePrice: '0',
   minStock: '0',
   maxStock: '0',
@@ -149,6 +151,7 @@ export const ProductsPage: React.FC = () => {
       sku: product.sku || '',
       unit: product.unit || '',
       costPrice: String(product.costPrice),
+      standardCost: product.standardCost !== null && product.standardCost !== undefined ? String(product.standardCost) : '',
       salePrice: String(product.salePrice),
       minStock: String(product.minStock ?? 0),
       maxStock: String(product.maxStock ?? 0),
@@ -261,6 +264,7 @@ export const ProductsPage: React.FC = () => {
         sku: formData.sku.trim() || undefined,
         unit: formData.unit,
         costPrice: Number(formData.costPrice) || 0,
+        standardCost: formData.standardCost.trim() === '' ? undefined : Number(formData.standardCost) || 0,
         salePrice: Number(formData.salePrice) || 0,
         isActive: formData.isActive,
         image: formData.image || undefined,
@@ -747,6 +751,10 @@ export const ProductsPage: React.FC = () => {
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.costPrice')}</label>
                 <input type="number" step="0.01" min="0" value={formData.costPrice} onChange={(e) => setFormData((prev) => ({ ...prev, costPrice: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.standardCost')}</label>
+                <input type="number" step="0.01" min="0" placeholder={formData.costPrice} value={formData.standardCost} onChange={(e) => setFormData((prev) => ({ ...prev, standardCost: e.target.value }))} title={t('inventory.standardCostHint')} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.salePrice')}</label>

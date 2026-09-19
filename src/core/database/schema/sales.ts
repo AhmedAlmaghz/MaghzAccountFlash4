@@ -41,6 +41,10 @@ export const salesInvoices = pgTable('sales_invoices', {
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyAmount: numeric('base_currency_amount', { precision: 18, scale: 4 }).notNull().default('0'),
   baseCurrencyPaid: numeric('base_currency_paid', { precision: 18, scale: 4 }).notNull().default('0'),
+  // Phase 2 (IAS 21): rate at which the outstanding was LAST revalued.
+  // Revaluation books only the incremental move vs this rate (then stamps
+  // it), so repeated runs never double-book. NULL = never revalued.
+  lastRevalRate: numeric('last_reval_rate', { precision: 18, scale: 6 }),
   status: varchar('status', { length: 20 }).default('draft'),
   paymentType: varchar('payment_type', { length: 10 }).notNull().default('credit'),
   cashBoxId: uuid('cash_box_id'),
@@ -73,7 +77,8 @@ export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
   // Cost snapshot (base-unit cost at sale time) for perpetual COGS posting.
   // Frozen at creation — products.cost_price moves later (purchases,
-  // manufacturing receipts) and must not rewrite history.
+  // manufacturing receipts) and must not rewrite history. NOT NULL DEFAULT 0
+  // with 0 meaning "unset" (method fallback) — matches migration 0030.
   unitCost: numeric('unit_cost', { precision: 18, scale: 4 }).notNull().default('0'),
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),

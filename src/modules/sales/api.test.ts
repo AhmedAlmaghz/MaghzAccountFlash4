@@ -562,7 +562,7 @@ describe('salesApi.postInvoice customer balance tracking', () => {
     expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
     // Atomic contract: JE + flip + balance run in ONE transaction batch.
     expect(adapter.transaction).toHaveBeenCalledTimes(1);
-    const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>);
+    const txStmts = (adapter.transaction.mock.calls[0]?.[0] as Array<{ sql: string; params?: unknown[] }>);
     const custStmt = txStmts.find(q => q.sql.includes('UPDATE customers'));
     expect(custStmt).toBeDefined();
     expect(custStmt!.sql).toMatch(/balance = balance \+ \$1/);
@@ -1244,5 +1244,331 @@ describe('salesApi line unit snapshots (multi-unit)', () => {
     const res = await salesApi.postInvoice(INVOICE_ID, COMPANY_ID);
     expect(captured.some((c) => c.sql.includes('COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity)'))).toBe(true);
     expect(res.success).toBe(true);
+  });
+});
+
+describe('salesApi.postInvoice perpetual COGS (Phase 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearUserIdCache();
+  });
+
+  function cogsAdapter(method: string, products: Array<{ id: string; cost: number }>, layers: Array<{ id: string; pid: string; qty: number; cost: number }>) {
+    return makeMockAdapter(async (sql, p) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-COGS', date: '2026-09-01', payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines')) {
+        return {
+          success: true,
+          rows: [
+            { product_id: 'p1', bq: 2 },
+            { product_id: 'p2', bq: 3 },
+          ],
+        };
+      }
+      if (sql.includes('FROM settings')) {
+        return { success: true, rows: [{ value: method }] };
+      }
+      // Phase 4 gate: ample richest-warehouse stock (policy tests cover shortage).
+      if (sql.includes('FROM stock')) {
+        return {
+          success: true,
+          rows: products.map((x) => ({ product_id: x.id, have: 1000000 })),
+        };
+      }
+      if (sql.includes('FROM products WHERE')) {
+        return {
+          success: true,
+          rows: products.map((x) => ({ id: x.id, cost_price: x.cost, standard_cost: null, name_ar: x.id })),
+        };
+      }
+      if (sql.includes('FROM inventory_layers')) {
+        return {
+          success: true,
+          rows: layers.map((l) => ({ id: l.id, product_id: l.pid, qty_remaining: l.qty, unit_cost: l.cost })),
+        };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
+      }
+      if (sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      return { success: true, rows: [] };
+    });
+  }
+
+  it('books Dr COGS / Cr Inventory at moving average + freezes line unit_cost', async () => {
+    const adapter = cogsAdapter('moving_average', [{ id: 'p1', cost: 100 }, { id: 'p2', cost: 50 }], []);
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-1', 'comp-1');
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    const txStmts = (adapter.transaction.mock.calls[0]?.[0] as Array<{ sql: string; params?: unknown[] }>);
+    // COGS companion JE: 2×100 + 3×50 = 350
+    const cogsJe = txStmts.filter((q) => q.sql.includes('WITH new_tx'));
+    expect(cogsJe).toHaveLength(2);
+    expect(cogsJe[1].params?.[2]).toBe('INV-COGS-COGS');
+    expect(Number(cogsJe[1].params?.[4])).toBe(350);
+    // posting-time costs frozen on the lines
+    const freeze = txStmts.find((q) => q.sql.includes('SET unit_cost ='));
+    expect(freeze).toBeDefined();
+    expect(freeze!.params).toContain('p1');
+    expect(freeze!.params).toContain(100);
+    expect(freeze!.params).toContain('p2');
+    expect(freeze!.params).toContain(50);
+  });
+
+  it('fifo consumes oldest layers and fails honestly on shortage', async () => {
+    const adapter = cogsAdapter(
+      'fifo',
+      [{ id: 'p1', cost: 100 }, { id: 'p2', cost: 50 }],
+      [{ id: 'l1', pid: 'p1', qty: 1, cost: 80 }]
+    );
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    // p1 needs 2 but only 1 layer unit exists → honest failure, nothing posts
+    const res = await salesApi.postInvoice('inv-1', 'comp-1');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Insufficient FIFO stock/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('salesApi.postReturn reverses VAT + original cost (Phase 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reverses output VAT on its own leg and COGS at posting-time cost (never 70%)', async () => {
+    const tx: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = {
+      query: vi.fn(async (sql: string, params: unknown[]) => {
+        if (sql.includes('FROM sales_returns')) {
+          return {
+            success: true,
+            rows: [{
+              customer_id: 'c1', total_amount: 1150, subtotal: 1000, vat_amount: 150,
+              invoice_id: 'inv-1', return_number: 'SRT-V', date: '2026-09-01', customer_name: 'عميل',
+            }],
+          };
+        }
+        if (sql.includes('FROM sales_return_lines')) {
+          return { success: true, rows: [{ product_id: 'p1', bq: 2 }] };
+        }
+        if (sql.includes('FROM sales_invoice_lines')) {
+          return { success: true, rows: [{ product_id: 'p1', unit_cost: 400 }] };
+        }
+        if (sql.includes('FROM settings')) return { success: true, rows: [{ value: 'moving_average' }] };
+        if (sql.includes('default_accounts')) {
+          return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+        }
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+        for (const q of queries) tx.push(q);
+        return { success: true, results: [] };
+      }),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postReturn('ret-1', 'comp-1');
+    expect(res.success, 'postReturn failed: ' + (res.error || '')).toBe(true);
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
+    const flat = je.params || [];
+    const n = (flat.length - 6) / 4;
+    const legs = Array.from({ length: n }, (_, i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    // revenue reverses at NET, VAT on its own leg, COGS at original 2×400
+    expect(legs.find((l) => l.acc === 'acc-default_sales_returns')).toMatchObject({ debit: 1000 });
+    expect(legs.find((l) => l.acc === 'acc-default_vat_output')).toMatchObject({ debit: 150 });
+    expect(legs.find((l) => l.acc === 'acc-default_debtors')).toMatchObject({ credit: 1150 });
+    expect(legs.find((l) => l.acc === 'acc-default_inventory')).toMatchObject({ debit: 800 });
+    expect(legs.find((l) => l.acc === 'acc-default_cogs')).toMatchObject({ credit: 800 });
+    const dr = legs.reduce((s, l) => s + l.debit, 0);
+    const cr = legs.reduce((s, l) => s + l.credit, 0);
+    expect(dr).toBe(cr);
+    expect(dr).toBe(1950);
+  });
+});
+
+describe('salesApi period guard (Phase 3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects posting into a closed tax period', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0, date: '2026-08-15' }] };
+      }
+      if (sql.includes('FROM tax_periods')) {
+        return {
+          success: true,
+          rows: [{ id: 'p1', company_id: COMPANY_ID, country_code: 'SA', period_type: 'monthly', start_date: '2026-08-01', end_date: '2026-08-31', status: 'closed', filed_at: null }],
+        };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-1', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مغلقة/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('salesApi Phase 4 guardrails (negative stock + credit limit)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function policyAdapter(opts: {
+    lines?: Array<{ pid: string; bq: number }>;
+    stock?: Array<{ pid: string; have: number }>;
+    policies?: Record<string, string>;
+    customer?: { balance: number; limit: number };
+  }) {
+    return makeMockAdapter(async (sql, p) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0, subtotal: 1000, vat_amount: 0, invoice_number: 'INV-P', date: '2026-09-01', payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines')) {
+        return { success: true, rows: (opts.lines || []).map((l) => ({ product_id: l.pid, bq: l.bq })) };
+      }
+      // No settings rows → fail-closed defaults (block negatives, block overlimit).
+      if (sql.includes('FROM settings')) {
+        return { success: true, rows: [] };
+      }
+      if (sql.includes('FROM stock')) {
+        return { success: true, rows: (opts.stock || []).map((s) => ({ product_id: s.pid, have: s.have })) };
+      }
+      if (sql.includes('FROM products WHERE')) {
+        const ids = ((p as unknown[]).slice(1) as string[]).map(String);
+        return { success: true, rows: ids.map((id) => ({ id, name_ar: id })) };
+      }
+      if (sql.includes('FROM customers WHERE')) {
+        const c = opts.customer || { balance: 0, limit: 0 };
+        return { success: true, rows: [{ balance: c.balance, credit_limit: c.limit }] };
+      }
+      if (sql.includes('default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String((p as unknown[])[1]) }] };
+      }
+      return { success: true, rows: [] };
+    });
+  }
+
+  it('blocks posting below zero when the policy denies it', async () => {
+    const adapter = policyAdapter({ lines: [{ pid: 'p1', bq: 5 }], stock: [{ pid: 'p1', have: 2 }] });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-1', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/المخزون لا يكفي/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+
+  it('blocks a credit invoice that breaches the customer limit', async () => {
+    const adapter = policyAdapter({
+      lines: [{ pid: 'p1', bq: 1 }],
+      stock: [{ pid: 'p1', have: 100 }],
+      customer: { balance: 9000, limit: 9500 },
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    // outstanding 1000 → would-be 10000 > 9500
+    const res = await salesApi.postInvoice('inv-1', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/الحد الائتماني/);
+  });
+
+  it('treats limit 0 as unlimited', async () => {
+    const adapter = policyAdapter({
+      lines: [{ pid: 'p1', bq: 1 }],
+      stock: [{ pid: 'p1', have: 100 }],
+      customer: { balance: 999999, limit: 0 },
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-1', COMPANY_ID);
+    expect(res.success).toBe(true);
+  });
+});
+
+describe('salesApi Phase 5 fiscal lock (closed year refuses posting)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const CLOSED_YEAR = {
+    success: true,
+    rows: [{
+      id: 'p1', company_id: 'c1', year: 2024,
+      start_date: '2024-01-01', end_date: '2024-12-31',
+      status: 'closed', closed_at: '2025-01-05',
+    }],
+  };
+
+  it('postInvoice refuses a date inside a closed fiscal year', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0, subtotal: 1000, vat_amount: 0, invoice_number: 'INV-1', date: '2024-06-01', payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('FROM accounting_periods')) return CLOSED_YEAR;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postInvoice('inv-1', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مقفلة/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+
+  it('postReturn refuses a date inside a closed fiscal year', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM sales_returns')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 100, subtotal: 100, vat_amount: 0, return_number: 'SRT-1', date: '2024-06-01' }] };
+      }
+      if (sql.includes('FROM accounting_periods')) return CLOSED_YEAR;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.postReturn('ret-1', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مقفلة/);
+  });
+});
+
+describe('salesApi.mapReturnRow — NULL invoice link (Phase 0)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('maps a return without a source invoice to undefined (never the string "null")', async () => {
+    const adapter = makeMockAdapter(async () => ({
+      success: true,
+      rows: [{
+        id: 'ret-1', company_id: COMPANY_ID, return_number: 'SRT-1',
+        invoice_id: null, invoice_number_ref: null,
+        customer_id: CUSTOMER_ID, customer_name: 'عميل',
+        date: '2026-09-01', subtotal: 1000, vat_amount: 150, total_amount: 1150,
+        reason: 'test', payment_type: 'credit', cash_box_id: null,
+        status: 'draft', notes: null,
+      }],
+    }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await salesApi.getReturns(COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(res.data).toHaveLength(1);
+    expect(res.data![0].invoiceId).toBeUndefined();
+    expect(res.data![0].invoice).toBeUndefined();
   });
 });

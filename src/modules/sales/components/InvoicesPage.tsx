@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Wallet, TrendingUp, Layers, ShoppingCart, CheckCircle2, Clock } from 'lucide-react';
+import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Wallet, TrendingUp, Layers,
+ShoppingCart, CheckCircle2, Clock, Undo2 } from 'lucide-react';
 import { Card, Button, Table, Input, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
@@ -25,6 +26,8 @@ import { printDocument } from '@/core/utils/printDocument';
 import { todayIso } from '@/core/utils/aging';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { salesApi } from '../api';
+import { reverseSalesInvoice } from '@/modules/accounting/reversal';
+import { ReverseDialog } from '@/modules/accounting/components/ReverseDialog';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
@@ -75,6 +78,7 @@ export const InvoicesPage: React.FC = () => {
     update,
     remove,
     post,
+    reload,
   } = useInvoicesPaginated(activeCompany?.id || '', useMemo(() => ({
     createdBy: isOwnOnly ? currentUser?.id : undefined,
     status: statusFilter || undefined,
@@ -96,6 +100,19 @@ export const InvoicesPage: React.FC = () => {
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'warning' | 'info'; confirmText?: string } | null>(null);
 
   const [postingId, setPostingId] = useState<string | null>(null);
+  const [reverseRow, setReverseRow] = useState<SalesInvoice | null>(null);
+
+  const handleReverseConfirm = async (date: string, reason: string) => {
+    if (!activeCompany?.id || !reverseRow) return;
+    const res = await reverseSalesInvoice(activeCompany.id, reverseRow.id, { date, reason }, currentUser?.id || '');
+    if (res.success) {
+      addToast('success', `${t('accounting.reverse.success')} (${res.data.reference})`);
+      setReverseRow(null);
+      await reload();
+    } else {
+      addToast('error', res.error || t('common.error'));
+    }
+  };
   const [saving, setSaving] = useState(false);
   const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
   const [docDuplicateInput, setDocDuplicateInput] = useState('');
@@ -696,19 +713,32 @@ export const InvoicesPage: React.FC = () => {
           showDelete={row.status === 'draft'}
           showPrint
         />
-        {row.status === 'draft' && (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => handlePost(row)}
-            disabled={postingId === row.id}
-            leftIcon={<CheckSquare size={14} />}
-          >
-            {postingId === row.id ? (t('loading')) : (t('sales.invoice.post'))}
-          </Button>
-        )}
-      </div>
-    )},
+          {row.status === 'draft' && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => handlePost(row)}
+              disabled={postingId === row.id}
+              leftIcon={<CheckSquare size={14} />}
+            >
+              {postingId === row.id ? (t('loading')) : (t('sales.invoice.post'))}
+            </Button>
+          )}
+          {['posted', 'partially_paid', 'paid'].includes(row.status) && (
+            <Can action="post" module="sales">
+              <Button
+                size="sm"
+                variant="ghost"
+                title={t('accounting.reverse.title')}
+                aria-label={t('accounting.reverse.title')}
+                onClick={() => setReverseRow(row)}
+              >
+                <Undo2 size={14} />
+              </Button>
+            </Can>
+          )}
+        </div>
+      )},
   ];
 
   const stats = useMemo(() => {
@@ -1205,9 +1235,16 @@ export const InvoicesPage: React.FC = () => {
         title={confirmConfig?.title || ''}
         message={confirmConfig?.message || ''}
         variant={confirmConfig?.variant || 'warning'}
-        confirmText={confirmConfig?.confirmText || (t('confirm'))}
-        cancelText={t('cancel')}
-      />
+          confirmText={confirmConfig?.confirmText || (t('confirm'))}
+          cancelText={t('cancel')}
+        />
+
+        <ReverseDialog
+          open={!!reverseRow}
+          onClose={() => setReverseRow(null)}
+          docLabel={reverseRow?.invoiceNumber || ''}
+          onConfirm={handleReverseConfirm}
+        />
 
       <DuplicateWarningDialog
         isOpen={docDuplicateOpen}

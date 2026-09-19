@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { BookOpen, Plus, Save, Send, X } from 'lucide-react';
+import { BookOpen, Plus, Save, Send, Undo2, X } from 'lucide-react';
 import { Card, Button, Input, Modal, Table, PageHeader } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
@@ -8,7 +8,10 @@ import { AccountSelect } from '@/core/ui/components/smart';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { useTransactionsPaginated } from '../hooks/useAccounting';
 import { accountingApi } from '../api';
+import { reverseTransaction } from '../reversal';
+import { ReverseDialog } from './ReverseDialog';
 import { useAppStore } from '@/core/store';
+import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { printDocument } from '@/core/utils/printDocument';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
@@ -39,7 +42,8 @@ export const JournalEntriesPage: React.FC = () => {
   const activeCompany = useAppStore(state => state.activeCompany);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const txFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
-  const { transactions, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, post, remove } = useTransactionsPaginated(activeCompany?.id || '', txFilters);
+  const { transactions, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, post, remove, reload } = useTransactionsPaginated(activeCompany?.id || '', txFilters);
+  const currentUser = useAuthStore((s) => s.user);
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
   const { getUserName } = useUserMap();
@@ -58,6 +62,7 @@ export const JournalEntriesPage: React.FC = () => {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
+  const [reverseTx, setReverseTx] = useState<Transaction | null>(null);
   const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
   const [docDuplicateInput, setDocDuplicateInput] = useState('');
   const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
@@ -208,6 +213,18 @@ export const JournalEntriesPage: React.FC = () => {
     }
   };
 
+  const handleReverseConfirm = async (date: string, reason: string) => {
+    if (!activeCompany || !reverseTx) return;
+    const res = await reverseTransaction(activeCompany.id, reverseTx.id, { date, reason }, currentUser?.id || '');
+    if (res.success) {
+      addToast('success', `${t('accounting.reverse.success')} (${res.data.reference})`);
+      setReverseTx(null);
+      await reload();
+    } else {
+      addToast('error', res.error || t('common.error'));
+    }
+  };
+
   const handlePrint = async (tx: Transaction) => {
     let entries = tx.entries || [];
     if (entries.length === 0 && activeCompany) {
@@ -256,6 +273,7 @@ export const JournalEntriesPage: React.FC = () => {
       <span className="text-xs text-slate-600 dark:text-slate-400">{getUserName(row.createdBy)}</span>
     ) },
     { key: 'actions', header: t('edit'), mobile: 'actions' as const, render: (row: Transaction) => (
+      <div className="flex items-center gap-1">
       <ActionButtons
         size="sm"
         onView={async () => {
@@ -281,6 +299,20 @@ export const JournalEntriesPage: React.FC = () => {
         disabledEdit={row.status === 'posted'}
         disabledDelete={row.status === 'posted'}
       />
+      {row.status === 'posted' && (
+        <Can action="post" module="accounting">
+          <Button
+            variant="ghost"
+            size="sm"
+            title={t('accounting.reverse.title')}
+            aria-label={t('accounting.reverse.title')}
+            onClick={() => setReverseTx(row)}
+          >
+            <Undo2 size={14} />
+          </Button>
+        </Can>
+      )}
+      </div>
     )},
   ];
 
@@ -515,6 +547,13 @@ export const JournalEntriesPage: React.FC = () => {
         title={t('delete')}
         message={`${t('accounting.deleteConfirm')} "${confirmDelete?.reference || confirmDelete?.id}"?`}
         variant="danger"
+      />
+
+      <ReverseDialog
+        open={!!reverseTx}
+        onClose={() => setReverseTx(null)}
+        docLabel={reverseTx?.reference || reverseTx?.id || ''}
+        onConfirm={handleReverseConfirm}
       />
 
       <DuplicateWarningDialog

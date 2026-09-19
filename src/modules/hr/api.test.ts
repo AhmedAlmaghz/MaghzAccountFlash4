@@ -1152,6 +1152,45 @@ describe('hrApi.saveAttendance — server-side punch normalization', () => {
   });
 });
 
+describe('hrApi Phase 5 fiscal lock (closed year refuses postings)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('postPayrollRun refuses inside a closed fiscal year', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const year = Number(today.slice(0, 4));
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM payroll_runs pr')) {
+        return {
+          success: true,
+          rows: [{ run_number: 'PR-1', status: 'draft', gross: 1000, deductions: 100, net: 900 }],
+        };
+      }
+      if (sql.includes('FROM accounting_periods')) {
+        return {
+          success: true,
+          rows: [{
+            id: 'p1', company_id: COMPANY_ID, year,
+            start_date: `${year}-01-01`, end_date: `${year}-12-31`,
+            status: 'closed', closed_at: 'x',
+          }],
+        };
+      }
+      // Payroll accounts resolve before the gates run.
+      if (sql.includes('FROM default_accounts') || sql.includes('FROM accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-1', id: 'acc-1' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await hrApi.postPayrollRun('run1', COMPANY_ID, 'user1');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مقفلة/);
+  });
+});
+
 describe('hrApi.mapAttendanceRow — date/time mapping (Phase 45 guard)', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
@@ -1181,5 +1220,100 @@ describe('hrApi.mapAttendanceRow — date/time mapping (Phase 45 guard)', () => 
     expect(rec?.date).toBe('2026-08-31');
     expect(rec?.checkIn).toMatch(/^\d{2}:\d{2}$/);
     expect(rec?.overtimeHours).toBe(2.5);
+  });
+});
+
+describe('hrApi.postLeaveProvision — IAS 19 unused-leave liability (Phase 5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // One active employee: salary 30000 (daily 1000), 6 annual days used of
+  // 21 entitled → remaining 15 → target 15000.
+  function provisionDb(provisionBalance: number, dup = false) {
+    const tx: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      if (sql.includes('FROM employees')) {
+        return { success: true, rows: [{ id: 'emp-1', base_salary: 30000 }] };
+      }
+      if (sql.includes('FROM leaves')) return { success: true, rows: [{ total: 6 }] };
+      if (sql.includes('FROM settings')) return { success: true, rows: [] };
+      if (sql.includes('FROM default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+      }
+      if (sql.includes(`a.code = '21504'`)) {
+        // Signed (debit − credit): a credit balance reads negative.
+        return { success: true, rows: [{ bal: -provisionBalance }] };
+      }
+      if (sql.includes('FROM transactions')) {
+        return { success: true, rows: dup ? [{ id: 't-old' }] : [] };
+      }
+      return { success: true, rows: [] };
+    });
+    // Capture the atomic batch while still answering reads.
+    const innerTx = adapter.transaction;
+    adapter.transaction = vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      const r = await (innerTx as (...a: unknown[]) => Promise<{ success: boolean }>)(
+        queries as unknown as { sql: string; params?: unknown[] }[]
+      );
+      for (const q of queries) tx.push(q);
+      return r;
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return { adapter, tx };
+  }
+
+  it('tops up the provision: Dr salaries / Cr 21504 for target − current', async () => {
+    const { tx } = provisionDb(5000);
+    const res = await hrApi.postLeaveProvision(COMPANY_ID, 2024, 'user1');
+    expect(res.success, res.error || '').toBe(true);
+    if (!res.success || !res.data) return;
+    expect(res.data.reference).toBe('LEAVE-2024');
+    expect(res.data.employees).toBe(1);
+    expect(res.data.amount).toBe(10000);
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
+    const flat = je.params || [];
+    const legs = [0, 1].map((i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    expect(legs.find((l) => l.acc === 'acc-default_salaries')).toMatchObject({ debit: 10000, credit: 0 });
+    expect(legs.find((l) => l.acc === 'acc-default_leave_provision')).toMatchObject({ debit: 0, credit: 10000 });
+  });
+
+  it('reverses excess provision when the target fell below current', async () => {
+    const { tx } = provisionDb(20000);
+    const res = await hrApi.postLeaveProvision(COMPANY_ID, 2024, 'user1');
+    expect(res.success).toBe(true);
+    if (!res.success || !res.data) return;
+    expect(res.data.amount).toBe(-5000);
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
+    const flat = je.params || [];
+    const legs = [0, 1].map((i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    expect(legs.find((l) => l.acc === 'acc-default_leave_provision')).toMatchObject({ debit: 5000, credit: 0 });
+  });
+
+  it('posts nothing when already exactly provided', async () => {
+    const { tx } = provisionDb(15000);
+    const res = await hrApi.postLeaveProvision(COMPANY_ID, 2024, 'user1');
+    expect(res.success).toBe(true);
+    if (!res.success || !res.data) return;
+    expect(res.data.amount).toBe(0);
+    expect(tx.some((q) => q.sql.includes('WITH new_tx'))).toBe(false);
+  });
+
+  it('refuses reruns and future years', async () => {
+    provisionDb(0, true);
+    const dup = await hrApi.postLeaveProvision(COMPANY_ID, 2024, 'user1');
+    expect(dup.success).toBe(false);
+    expect(dup.error).toMatch(/already posted/);
+
+    const future = await hrApi.postLeaveProvision(COMPANY_ID, 2100, 'user1');
+    expect(future.success).toBe(false);
   });
 });

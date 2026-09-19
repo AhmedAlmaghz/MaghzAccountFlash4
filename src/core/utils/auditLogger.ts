@@ -9,7 +9,9 @@ export type AuditAction =
   | 'login'
   | 'logout'
   | 'reset_password'
-  | 'toggle_active';
+  | 'toggle_active'
+  // Phase 4: policy-override trail (negative stock/cashbox, credit overlimit).
+  | 'override';
 
 interface AuditLogEntry {
   userId: string;

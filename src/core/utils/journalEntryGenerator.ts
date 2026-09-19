@@ -45,7 +45,8 @@ const ACC = {
   INVENTORY: '11301',      // بضاعة أول المدة
   PREPAID_RENT: '11401',   // إيجار مدفوع مقدماً
   TRADE_CREDITORS: '21101',// دائنون تجاريون
-  VAT_PAYABLE: '21301',    // ضريبة القيمة المضافة
+  VAT_PAYABLE: '21301',    // ضريبة المخرجات (output)
+  VAT_INPUT: '21302',      // ضريبة المدخلات (input, Phase 3 split)
   SALES: '41101',          // مبيعات المنتجات
   SALES_SERVICES: '41102', // مبيعات الخدمات
   SALES_RETURNS: '41103',  // مردودات المبيعات
@@ -61,6 +62,13 @@ const ACC = {
   SHIPPING: '52601',       // نقل وشحن
   BUILDING_DEP: '52701',   // استهلاك مباني
   EQUIPMENT_DEP: '52702',  // استهلاك معدات
+  PRICE_VARIANCE: '51901', // فروق أسعار الشراء والتقييم (Phase 1)
+  INV_SHORTAGE: '52901',   // عجز المخزون — فاقد (Phase 1)
+  INV_SURPLUS: '41901',    // فائض المخزون — عثور (Phase 1)
+  FIXED_ASSETS: '12101',   // تكلفة الأصول الثابتة (Phase 5)
+  ACC_DEP: '12102',        // مجمع الإهلاك — contra asset (Phase 5)
+  DEP_EXPENSE: '52601',    // مصروف الإهلاك (Phase 5)
+  RETAINED: '32101',       // الأرباح المبقاة (Phase 5)
 };
 
 async function findAccountByCode(companyId: string, code: string): Promise<string | null> {
@@ -78,11 +86,21 @@ async function findAccountByCode(companyId: string, code: string): Promise<strin
     '11301': '%مخزون%|%بضاعة%',
     '21101': '%دائنون%',
     '21301': '%ضريبة%',
+    '21302': '%مدخلات%',
     '41101': '%مبيعات المنتجات%',
     '41102': '%مبيعات الخدمات%',
     '41103': '%مردودات%',
     '51101': '%تكلفة بضاعة%',
+    '41201': '%خصم مسموح%',
+    '42101': '%خصم مكتسب%',
     '52101': '%رواتب%',
+    '51901': '%فروق%',
+    '52901': '%عجز%',
+    '41901': '%فائض%',
+    '12101': '%أصول ثابتة%',
+    '12102': '%مجمع%|%إهلاك%',
+    '52601': '%إهلاك%',
+    '32101': '%مبقاة%',
   };
   const pattern = nameMap[code];
   if (pattern) {
@@ -112,12 +130,12 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_debtors: ACC.TRADE_DEBTORS,
     default_creditors: ACC.TRADE_CREDITORS,
     default_vat_output: ACC.VAT_PAYABLE,
-    default_vat_input: ACC.VAT_PAYABLE,
+    default_vat_input: ACC.VAT_INPUT,
     default_salaries: ACC.SALARIES,
     default_sales_returns: ACC.SALES_RETURNS,
     default_purchase_returns: ACC.TRADE_CREDITORS,
-    default_discount_allowed: ACC.DISCOUNT_ALLOWED,
-    default_discount_received: ACC.DISCOUNT_EARNED,
+    default_discount_allowed: ACC.SALES,
+    default_discount_received: ACC.TRADE_CREDITORS,
     default_wip: '11302',
     default_finished_goods: '11303',
     default_production_labor: '53101',
@@ -133,6 +151,13 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_payroll_deductions: '21502',
     default_eos_payable: '21503',
     default_eos_expense: '52501',
+    default_price_variance: ACC.PRICE_VARIANCE,
+    default_inventory_shortage: ACC.INV_SHORTAGE,
+    default_inventory_surplus: ACC.INV_SURPLUS,
+    default_fixed_assets: ACC.FIXED_ASSETS,
+    default_accumulated_depreciation: ACC.ACC_DEP,
+    default_depreciation_expense: ACC.DEP_EXPENSE,
+    default_retained_earnings: ACC.RETAINED,
   };
   const code = fallbackMap[functionKey];
   if (code) return findAccountByCode(companyId, code);
@@ -185,7 +210,7 @@ export async function getCashBoxAccountId(companyId: string, cashBoxId?: string 
   return res.rows?.[0]?.account_id || null;
 }
 
-/** Round money to 2 decimals — single rounding rule for every posting builder. */
+/* Round money to 2 decimals — single rounding rule for every posting builder. */
 function toMoney(n: unknown): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
@@ -210,7 +235,7 @@ function assertDiscountLeg(discount: number, gross: number, accountId: string | 
 
 export async function resolvePostingAccounts(
   companyId: string,
-  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash' | 'default_discount_allowed' | 'default_discount_received'>
+  keys: Array<'default_debtors' | 'default_creditors' | 'default_sales' | 'default_sales_returns' | 'default_cogs' | 'default_inventory' | 'default_vat_output' | 'default_vat_input' | 'default_cash' | 'default_discount_allowed' | 'default_discount_received' | 'default_price_variance' | 'default_inventory_shortage' | 'default_inventory_surplus' | 'default_exchange_difference' | 'default_fixed_assets' | 'default_accumulated_depreciation' | 'default_depreciation_expense'>
 ): Promise<{ success: true; ids: Record<string, string> } | { success: false; error: string }> {
   const ids: Record<string, string> = {};
   for (const key of keys) {
@@ -223,141 +248,241 @@ export async function resolvePostingAccounts(
   return { success: true, ids };
 }
 
+export interface CogsBooking {
+  /** Total cost of goods sold for this document (base units × unit cost). */
+  total: number;
+  inventoryAccount: string;
+  cogsAccount: string;
+}
+
+/**
+ * Base-currency override for a posting (Phase 2 — IAS 21). The LEDGER is
+ * always kept in base currency; the document keeps its own currency on the
+ * source tables. When omitted the document amounts post as-is (base-only
+ * documents: payroll, manufacturing, POS-cash, adjustments).
+ */
+export interface BaseBooking {
+  subtotal: number;
+  vatAmount: number;
+  totalAmount: number;
+}
+
 export function buildSalesInvoicePostingStatements(
   companyId: string,
   invoice: SalesInvoicePostingInput & { paymentType?: string; cashAccountSubstitute?: string | null; cogsAmount?: number; discountAmount?: number; grossSubtotal?: number },
-  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string; discount?: string }
+  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string; discount?: string },
+  cogs?: CogsBooking,
+  base?: BaseBooking
 ): TxStatement[] {
-  // CASH invoice: money entered the treasury at sale time — debit the cash
-  // box's own GL account instead of Debtors (the customer owes nothing).
-  // CREDIT invoice (default): Dr Debtors / Cr Sales + VAT.
-  // Explicit discount (gross method, IFRS/Odoo): Dr Debtors (net total) +
-  // Dr Sales Discounts Allowed (41201) = Cr Sales (GROSS, before any
-  // discount) + Cr VAT. Zero discount keeps the classic 3-leg shape.
-  // Perpetual COGS (IAS 2): Dr COGS / Cr Inventory at the sale-time cost
-  // snapshot (computed by the caller from frozen line unit_costs). Skipped
-  // when zero (services / zero-cost lines) or when the accounts are absent.
   const isCash = invoice.paymentType === 'cash';
   const debitAccount = (isCash && invoice.cashAccountSubstitute) || ids.debtors;
+  const bSub = Math.round((Number(base?.subtotal ?? invoice.subtotal) || 0) * 100) / 100;
+  const bVat = Math.round((Number(base?.vatAmount ?? invoice.vatAmount) || 0) * 100) / 100;
+  const bTotal = Math.round((Number(base?.totalAmount ?? invoice.totalAmount) || 0) * 100) / 100;
   const discount = toMoney(invoice.discountAmount);
-  const gross = toMoney(invoice.grossSubtotal ?? (invoice.subtotal + discount));
+  const gross = toMoney(invoice.grossSubtotal ?? (bSub + discount));
   assertDiscountLeg(discount, gross, ids.discount, 'allowed');
   const entries: JournalEntryLine[] = [
-    { accountId: debitAccount, debit: invoice.totalAmount, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
+    { accountId: debitAccount, debit: bTotal, credit: 0, memo: `فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' نقدية' : ''}` },
   ];
   if (discount > 0 && ids.discount) {
     entries.push({ accountId: ids.discount, debit: discount, credit: 0, memo: `خصم مسموح به ${invoice.invoiceNumber}` });
   }
   entries.push(
-    { accountId: ids.sales, debit: 0, credit: gross, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
-    { accountId: ids.vat, debit: 0, credit: invoice.vatAmount, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
+    { accountId: ids.sales, debit: 0, credit: discount > 0 ? gross : bSub, memo: `إيرادات مبيعات ${invoice.invoiceNumber}` },
+    { accountId: ids.vat, debit: 0, credit: bVat, memo: `ضريبة مبيعات ${invoice.invoiceNumber}` },
   );
-  const cogs = toMoney(invoice.cogsAmount);
-  if (cogs > 0 && ids.cogs && ids.inventory) {
+  const cogsAmt = toMoney(invoice.cogsAmount);
+  if (!cogs && cogsAmt > 0 && ids.cogs && ids.inventory) {
     entries.push(
-      { accountId: ids.cogs, debit: cogs, credit: 0, memo: `تكلفة بضاعة مباعة ${invoice.invoiceNumber}` },
-      { accountId: ids.inventory, debit: 0, credit: cogs, memo: `صرف مخزون ${invoice.invoiceNumber}` },
+      { accountId: ids.cogs, debit: cogsAmt, credit: 0, memo: `تكلفة بضاعة مباعة ${invoice.invoiceNumber}` },
+      { accountId: ids.inventory, debit: 0, credit: cogsAmt, memo: `صرف مخزون ${invoice.invoiceNumber}` },
     );
   }
-  return [
+  const statements: TxStatement[] = [
     buildJournalEntryStatement(companyId, {
       reference: invoice.invoiceNumber,
       description: `قيد تلقائي - فاتورة مبيعات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
-      totalAmount: invoice.totalAmount,
+      totalAmount: bTotal,
+      entries,
+    }),
+  ];
+  const cogsTotal = Math.round((Number(cogs?.total) || 0) * 100) / 100;
+  if (cogs && cogsTotal > 0) {
+    statements.push(
+      buildJournalEntryStatement(companyId, {
+        reference: `${invoice.invoiceNumber}-COGS`,
+        description: `قيد تلقائي - تكلفة فاتورة مبيعات ${invoice.invoiceNumber}`,
+        date: invoice.date,
+        totalAmount: cogsTotal,
+        entries: [
+          { accountId: cogs.cogsAccount, debit: cogsTotal, credit: 0, memo: `تكلفة بضاعة مباعة ${invoice.invoiceNumber}` },
+          { accountId: cogs.inventoryAccount, debit: 0, credit: cogsTotal, memo: `انقاص مخزون ${invoice.invoiceNumber}` },
+        ],
+      })
+    );
+  }
+  return statements;
+}
+
+export function buildPosSalePostingStatements(
+  companyId: string,
+  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null; cogsAmount?: number; discountAmount?: number; grossSubtotal?: number },
+  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string; discount?: string },
+  cogs?: CogsBooking,
+  base?: BaseBooking & { cashAmount?: number; creditAmount?: number }
+): TxStatement[] {
+  const bSub = Math.round((Number(base?.subtotal ?? sale.subtotal) || 0) * 100) / 100;
+  const bVat = Math.round((Number(base?.vatAmount ?? sale.vatAmount) || 0) * 100) / 100;
+  const bTotal = Math.round((Number(base?.totalAmount ?? sale.totalAmount) || 0) * 100) / 100;
+  const bCash = Math.round((Number(base?.cashAmount ?? sale.cashAmount) || 0) * 100) / 100;
+  const bCredit = Math.round((Number(base?.creditAmount ?? sale.creditAmount) || 0) * 100) / 100;
+  const { receiptNumber, cashAccountId, date } = sale;
+  const debitLines: JournalEntryLine[] = [];
+  if (bCash > 0) {
+    debitLines.push({ accountId: cashAccountId || ids.debtors, debit: bCash, credit: 0, memo: `نقدية نقطة بيع ${receiptNumber}` });
+  }
+  if (bCredit > 0) {
+    debitLines.push({ accountId: ids.debtors, debit: bCredit, credit: 0, memo: `آجل نقطة بيع ${receiptNumber}` });
+  }
+  if (debitLines.length === 0) {
+    debitLines.push({ accountId: ids.debtors, debit: 0, credit: 0, memo: `نقطة بيع ${receiptNumber}` });
+  }
+  const discount = toMoney(sale.discountAmount);
+  const gross = toMoney(sale.grossSubtotal ?? (bSub + discount));
+  assertDiscountLeg(discount, gross, ids.discount, 'allowed');
+  if (discount > 0 && ids.discount) {
+    debitLines.push({ accountId: ids.discount, debit: discount, credit: 0, memo: `خصم مسموح به ${receiptNumber}` });
+  }
+  const statements: TxStatement[] = [
+    buildJournalEntryStatement(companyId, {
+      reference: receiptNumber,
+      description: `قيد تلقائي - إيصال نقطة بيع ${receiptNumber}`,
+      date,
+      totalAmount: bTotal,
+      entries: [
+        ...debitLines,
+        { accountId: ids.sales, debit: 0, credit: discount > 0 ? gross : bSub, memo: `إيرادات نقطة بيع ${receiptNumber}` },
+        { accountId: ids.vat, debit: 0, credit: bVat, memo: `ضريبة نقطة بيع ${receiptNumber}` },
+      ],
+    }),
+  ];
+  const cogsAmt = Math.round(((sale.cogsAmount || 0)) * 100) / 100;
+  if (!cogs && cogsAmt > 0 && ids.cogs && ids.inventory) {
+    const cogsEntries: JournalEntryLine[] = [
+      { accountId: ids.cogs, debit: cogsAmt, credit: 0, memo: `تكلفة بضاعة مباعة ${receiptNumber}` },
+      { accountId: ids.inventory, debit: 0, credit: cogsAmt, memo: `صرف مخزون ${receiptNumber}` },
+    ];
+    const baseEntries = [
+      ...debitLines,
+      { accountId: ids.sales, debit: 0, credit: discount > 0 ? gross : bSub, memo: `إيرادات نقطة بيع ${receiptNumber}` },
+      { accountId: ids.vat, debit: 0, credit: bVat, memo: `ضريبة نقطة بيع ${receiptNumber}` },
+      ...cogsEntries,
+    ];
+    statements[0] = buildJournalEntryStatement(companyId, {
+      reference: receiptNumber,
+      description: `قيد تلقائي - إيصال نقطة بيع ${receiptNumber}`,
+      date,
+      totalAmount: bTotal,
+      entries: baseEntries,
+    });
+  }
+  const cogsTotal = Math.round((Number(cogs?.total) || 0) * 100) / 100;
+  if (cogs && cogsTotal > 0) {
+    statements.push(
+      buildJournalEntryStatement(companyId, {
+        reference: `${receiptNumber}-COGS`,
+        description: `قيد تلقائي - تكلفة إيصال نقطة بيع ${receiptNumber}`,
+        date,
+        totalAmount: cogsTotal,
+        entries: [
+          { accountId: cogs.cogsAccount, debit: cogsTotal, credit: 0, memo: `تكلفة بضاعة مباعة ${receiptNumber}` },
+          { accountId: cogs.inventoryAccount, debit: 0, credit: cogsTotal, memo: `انقاص مخزون ${receiptNumber}` },
+        ],
+      })
+    );
+  }
+  return statements;
+}
+
+export interface CashDifferenceBooking {
+  reference: string;
+  date: string;
+  /** counted − expected (signed; |x| < 0.005 yields no statements). */
+  difference: number;
+  boxAccountId: string;
+  shortageAccountId: string;
+  surplusAccountId: string;
+}
+
+export function buildCashDifferenceStatements(
+  companyId: string,
+  b: CashDifferenceBooking
+): TxStatement[] {
+  const amt = Math.round(Math.abs(Number(b.difference) || 0) * 100) / 100;
+  if (amt < 0.005) return [];
+  const entries =
+    Number(b.difference) < 0
+      ? [
+          { accountId: b.shortageAccountId, debit: amt, credit: 0, memo: `عجز جرد وردية ${b.reference}` },
+          { accountId: b.boxAccountId, debit: 0, credit: amt, memo: `عجز صندوق الوردية` },
+        ]
+      : [
+          { accountId: b.boxAccountId, debit: amt, credit: 0, memo: `فائض صندوق الوردية` },
+          { accountId: b.surplusAccountId, debit: 0, credit: amt, memo: `فائض جرد وردية ${b.reference}` },
+        ];
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: b.reference,
+      description: `قيد فرق جرد وردية ${b.reference}`,
+      date: b.date,
+      totalAmount: amt,
       entries,
     }),
   ];
 }
 
-/**
- * POS sale posting — the MIXED-aware extension of the sales invoice entry.
- *
- * A POS checkout may split the total between cash collected now (into the
- * cashier's cash box) and credit handed to the customer (Debtors):
- *   Dr cash-box GL account  = cashAmount
- *   Dr Debtors              = creditAmount
- *   Cr Sales                = subtotal
- *   Cr VAT payable          = vatAmount
- *
- * cashAmount = total reproduces buildSalesInvoicePostingStatements' cash
- * behaviour exactly (Dr box / Cr sales+VAT); creditAmount = total reproduces
- * the credit behaviour (Dr debtors). Zero-amount legs are skipped so the
- * journal stays clean on pure cash/credit sales.
- */
-export function buildPosSalePostingStatements(
-  companyId: string,
-  sale: SalesInvoicePostingInput & { receiptNumber: string; cashAmount: number; creditAmount: number; cashAccountId: string | null; cogsAmount?: number; discountAmount?: number; grossSubtotal?: number },
-  ids: { debtors: string; sales: string; vat: string; cogs?: string; inventory?: string; discount?: string }
-): TxStatement[] {
-  const { receiptNumber, cashAmount, creditAmount, cashAccountId, subtotal, vatAmount, totalAmount, date } = sale;
-  const debitLines: JournalEntryLine[] = [];
-  if (cashAmount > 0) {
-    debitLines.push({
-      accountId: cashAccountId || ids.debtors, // no box account? fall back like salesApi
-      debit: cashAmount,
-      credit: 0,
-      memo: `نقدية نقطة بيع ${receiptNumber}`,
-    });
-  }
-  if (creditAmount > 0) {
-    debitLines.push({ accountId: ids.debtors, debit: creditAmount, credit: 0, memo: `آجل نقطة بيع ${receiptNumber}` });
-  }
-  // Degenerate guard: zero-total sale still needs a balanced pair to post.
-  if (debitLines.length === 0) {
-    debitLines.push({ accountId: ids.debtors, debit: 0, credit: 0, memo: `نقطة بيع ${receiptNumber}` });
-  }
-  // Explicit discount (gross method) — POS carts carry line discounts only,
-  // so gross = net subtotal + discount. Zero discount keeps the classic shape.
-  const discount = toMoney(sale.discountAmount);
-  const gross = toMoney(sale.grossSubtotal ?? (subtotal + discount));
-  assertDiscountLeg(discount, gross, ids.discount, 'allowed');
-  if (discount > 0 && ids.discount) {
-    debitLines.push({ accountId: ids.discount, debit: discount, credit: 0, memo: `خصم مسموح به ${receiptNumber}` });
-  }
-  const creditLines: JournalEntryLine[] = [
-    { accountId: ids.sales, debit: 0, credit: gross, memo: `إيرادات نقطة بيع ${receiptNumber}` },
-    { accountId: ids.vat, debit: 0, credit: vatAmount, memo: `ضريبة نقطة بيع ${receiptNumber}` },
-  ];
-  // Perpetual COGS (IAS 2) — same snapshot semantics as sales invoices.
-  const cogs = Math.round(((sale.cogsAmount || 0)) * 100) / 100;
-  if (cogs > 0 && ids.cogs && ids.inventory) {
-    creditLines.push(
-      { accountId: ids.cogs, debit: cogs, credit: 0, memo: `تكلفة بضاعة مباعة ${receiptNumber}` },
-      { accountId: ids.inventory, debit: 0, credit: cogs, memo: `صرف مخزون ${receiptNumber}` },
-    );
-  }
-  return [
-    buildJournalEntryStatement(companyId, {
-      reference: receiptNumber,
-      description: `قيد تلقائي - إيصال نقطة بيع ${receiptNumber}`,
-      date,
-      totalAmount,
-      entries: [...debitLines, ...creditLines],
-    }),
-  ];
+export interface StandardPurchaseBooking {
+  /** Inventory value at frozen standard cost (Σ baseQty × standard). */
+  inventoryAmount: number;
+  /** actual − standard: >0 over-spend (Dr PPV), <0 saving (Cr PPV). */
+  varianceAmount: number;
+  varianceAccount: string;
 }
 
 export function buildPurchaseInvoicePostingStatements(
   companyId: string,
   invoice: { invoiceNumber: string; date: string; subtotal: number; vatAmount: number; totalAmount: number; paymentType?: string; cashAccountSubstitute?: string | null; discountAmount?: number; grossSubtotal?: number },
-  ids: { inventory: string; creditors: string; vat: string; discount?: string }
+  ids: { inventory: string; creditors: string; vat: string; discount?: string },
+  standard?: StandardPurchaseBooking,
+  base?: BaseBooking
 ): TxStatement[] {
-  // CASH purchase: money left the treasury immediately — credit the cash box
-  // account instead of Creditors (we owe the supplier nothing).
-  // Explicit discount (gross method, mirror of sales): Dr Inventory (GROSS)
-  // + Dr VAT = Cr Creditors (net total) + Cr Purchase Discounts Earned
-  // (42101, other income). Zero discount keeps the classic 3-leg shape.
   const isCash = invoice.paymentType === 'cash';
   const creditAccount = (isCash && invoice.cashAccountSubstitute) || ids.creditors;
+  const bSub = base ? Math.round((Number(base.subtotal) || 0) * 100) / 100 : undefined;
+  const bVat = base ? Math.round((Number(base.vatAmount) || 0) * 100) / 100 : undefined;
+  const bTotal = base ? Math.round((Number(base.totalAmount) || 0) * 100) / 100 : undefined;
   const discount = toMoney(invoice.discountAmount);
-  const gross = toMoney(invoice.grossSubtotal ?? (invoice.subtotal + discount));
+  const gross = toMoney(invoice.grossSubtotal ?? ((bSub ?? invoice.subtotal) + discount));
   assertDiscountLeg(discount, gross, ids.discount, 'earned');
+  const inventoryAmount = standard ? Math.round((Number(standard.inventoryAmount) || 0) * 100) / 100 : (bSub !== undefined ? bSub : gross);
+  const variance = standard ? Math.round((Number(standard.varianceAmount) || 0) * 100) / 100 : 0;
+  const bVatFinal = bVat !== undefined ? bVat : Math.round((Number(invoice.vatAmount) || 0) * 100) / 100;
+  const bTotalFinal = bTotal !== undefined ? bTotal : Math.round((Number(invoice.totalAmount) || 0) * 100) / 100;
   const entries: JournalEntryLine[] = [
-    { accountId: ids.inventory, debit: gross, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}` },
-    { accountId: ids.vat, debit: invoice.vatAmount, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
-    { accountId: creditAccount, debit: 0, credit: invoice.totalAmount, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` },
+    { accountId: ids.inventory, debit: inventoryAmount, credit: 0, memo: `مشتريات ${invoice.invoiceNumber}${standard ? ' (بالكلفة المعيارية)' : ''}` },
   ];
+  if (standard && variance > 0) {
+    entries.push({ accountId: standard.varianceAccount, debit: variance, credit: 0, memo: `فروق أسعار شراء ${invoice.invoiceNumber}` });
+  }
+  entries.push(
+    { accountId: ids.vat, debit: bVatFinal, credit: 0, memo: `ضريبة مشتريات ${invoice.invoiceNumber}` },
+    { accountId: creditAccount, debit: 0, credit: bTotalFinal, memo: isCash ? `سداد نقدي ${invoice.invoiceNumber}` : `التزام مورد ${invoice.invoiceNumber}` }
+  );
+  if (standard && variance < 0) {
+    entries.push({ accountId: standard.varianceAccount, debit: 0, credit: -variance, memo: `وفرات أسعار شراء ${invoice.invoiceNumber}` });
+  }
   if (discount > 0 && ids.discount) {
     entries.push({ accountId: ids.discount, debit: 0, credit: discount, memo: `خصم مكتسب ${invoice.invoiceNumber}` });
   }
@@ -366,24 +491,28 @@ export function buildPurchaseInvoicePostingStatements(
       reference: invoice.invoiceNumber,
       description: `قيد تلقائي - فاتورة مشتريات ${invoice.invoiceNumber}${isCash ? ' (نقدية)' : ''}`,
       date: invoice.date,
-      totalAmount: invoice.totalAmount,
+      totalAmount: bTotalFinal,
       entries,
     }),
   ];
 }
 
-/** JE + stock-movement statements for a sales return (goods back to stock). */
+export interface SalesReturnCosting {
+  subtotal: number;
+  vatAmount: number;
+  costTotal: number;
+}
+
 export async function buildSalesReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number; discountAmount?: number; grossAmount?: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number; discountAmount?: number; grossAmount?: number },
+  costing?: SalesReturnCosting,
+  base?: BaseBooking,
+  preferredWarehouseId?: string | null
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
-  const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs']);
+  const resolved = await resolvePostingAccounts(companyId, ['default_sales_returns', 'default_debtors', 'default_inventory', 'default_cogs', 'default_vat_output']);
   if (!resolved.success) return resolved;
-  const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId } = resolved.ids;
-
-  // Explicit discount reversal (gross method, mirror of the sales invoice):
-  // Dr Sales Returns (GROSS) = Cr Debtors (net) + Cr Sales Discounts
-  // Allowed (41201). Zero discount keeps the classic 2-leg shape.
+  const { default_sales_returns: salesReturnsId, default_debtors: debtorsId, default_inventory: inventoryId, default_cogs: cogsId, default_vat_output: vatOutputId } = resolved.ids;
   const discount = toMoney(ret.discountAmount);
   const gross = toMoney(ret.grossAmount ?? (ret.amount + discount));
   if (discount < 0 || discount > gross + 0.005) {
@@ -396,25 +525,24 @@ export async function buildSalesReturnPostingStatements(
       return { success: false, error: 'حساب الخصم المسموح به غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
     }
   }
-
-  // COGS reversal at the ACTUAL sale-time cost snapshot (computed by the
-  // caller from the original invoice lines). No ratio guessing: the cost
-  // that left inventory when the goods were sold is exactly what returns.
-  const reversal = Math.round((ret.cogsReversal || 0) * 100) / 100;
+  const subtotal = Math.round((Number(base?.subtotal ?? costing?.subtotal ?? ret.amount) || 0) * 100) / 100;
+  const vatAmount = Math.round((Number(base?.vatAmount ?? costing?.vatAmount ?? 0) || 0) * 100) / 100;
+  const costTotal = Math.round((Number(costing?.costTotal ?? ret.cogsReversal ?? 0) || 0) * 100) / 100;
+  const total = Math.round((subtotal + vatAmount) * 100) / 100;
+  const salesDebit = discount > 0 ? gross : subtotal;
   const entries: JournalEntryLine[] = [
-    { accountId: salesReturnsId, debit: gross, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
+    { accountId: salesReturnsId, debit: salesDebit, credit: 0, memo: `مردود مبيعات ${ret.returnNumber}` },
   ];
   if (discount > 0 && discountId) {
     entries.push({ accountId: discountId, debit: 0, credit: discount, memo: `عكس خصم مسموح به ${ret.returnNumber}` });
   }
-  entries.push(
-    { accountId: debtorsId, debit: 0, credit: ret.amount, memo: `تخفيض ذمة ${ret.customer}` },
-  );
-  if (reversal > 0) {
-    entries.push(
-      { accountId: inventoryId, debit: reversal, credit: 0, memo: `إعادة بضاعة للمخزون` },
-      { accountId: cogsId, debit: 0, credit: reversal, memo: `عكس تكلفة بضاعة مباعة` },
-    );
+  if (vatAmount > 0) {
+    entries.push({ accountId: vatOutputId, debit: vatAmount, credit: 0, memo: `عكس ضريبة مخرجات ${ret.returnNumber}` });
+  }
+  entries.push({ accountId: debtorsId, debit: 0, credit: total, memo: `تخفيض ذمة ${ret.customer}` });
+  if (costTotal > 0) {
+    entries.push({ accountId: inventoryId, debit: costTotal, credit: 0, memo: `إعادة بضاعة للمخزون` });
+    entries.push({ accountId: cogsId, debit: 0, credit: costTotal, memo: `عكس تكلفة بضاعة مباعة` });
   }
 
   const statements: TxStatement[] = [
@@ -422,10 +550,19 @@ export async function buildSalesReturnPostingStatements(
       reference: ret.returnNumber,
       description: `قيد تلقائي - مردود مبيعات ${ret.returnNumber}`,
       date: ret.date,
-      totalAmount: ret.amount,
+      totalAmount: total,
       entries,
     }),
   ];
+
+  // Phase 4 preferred-source fragment (default warehouse when it holds the
+  // line qty). NULL-safe: a NULL preference degrades to richest-first.
+  const preferSrc = `(SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = srl.product_id AND s2.company_id = sr.company_id AND s2.warehouse_id = $PREF::uuid AND s2.quantity >= COALESCE(NULLIF(srl.base_quantity, 0), srl.quantity) LIMIT 1),`;
+  const lateralSrc = (pref: string) => `SELECT COALESCE(
+                      ${preferSrc.replaceAll('$PREF', pref)}
+                      (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
+                      (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
+                    ) AS warehouse_id`;
 
   if (ret.id) {
     // Ensure stock rows exist for returned products (in case product never stocked before)
@@ -435,15 +572,12 @@ export async function buildSalesReturnPostingStatements(
               FROM sales_returns sr
               JOIN sales_return_lines srl ON srl.return_id = sr.id
               JOIN LATERAL (
-                SELECT COALESCE(
-                  (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
-                  (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
-                ) AS warehouse_id
+                ${lateralSrc('$3')}
               ) wh ON true
               LEFT JOIN stock s ON s.company_id = sr.company_id AND s.product_id = srl.product_id AND s.warehouse_id = wh.warehouse_id
              WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL AND s.id IS NULL
              GROUP BY srl.product_id, wh.warehouse_id`,
-      params: [ret.id, companyId],
+      params: [ret.id, companyId, preferredWarehouseId || null],
     });
     statements.push({
       sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_at)
@@ -451,13 +585,10 @@ export async function buildSalesReturnPostingStatements(
            FROM sales_returns sr
            JOIN sales_return_lines srl ON srl.return_id = sr.id
            JOIN LATERAL (
-             SELECT COALESCE(
-               (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
-               (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
-             ) AS warehouse_id
+             ${lateralSrc('$4')}
            ) wh ON true
           WHERE sr.id = $2::uuid AND sr.company_id = $3::uuid AND wh.warehouse_id IS NOT NULL`,
-      params: [ret.returnNumber, ret.id, companyId],
+      params: [ret.returnNumber, ret.id, companyId, preferredWarehouseId || null],
     });
     // Increase stock quantities (base units — the document quantity may be
     // expressed in a larger unit such as carton).
@@ -468,39 +599,44 @@ export async function buildSalesReturnPostingStatements(
                   FROM sales_returns sr
                   JOIN sales_return_lines srl ON srl.return_id = sr.id
                   JOIN LATERAL (
-                    SELECT COALESCE(
-                      (SELECT warehouse_id FROM stock WHERE product_id = srl.product_id AND company_id = sr.company_id ORDER BY quantity DESC LIMIT 1),
-                      (SELECT id FROM warehouses WHERE company_id = sr.company_id ORDER BY created_at LIMIT 1)
-                    ) AS warehouse_id
+                    ${lateralSrc('$3')}
                   ) wh ON true
                  WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL
                  GROUP BY srl.product_id, wh.warehouse_id
               ) sub
              WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
-      params: [ret.id, companyId],
+      params: [ret.id, companyId, preferredWarehouseId || null],
     });
   }
   return { success: true, statements };
 }
 
-/** JE statements for a stock adjustment: found → Dr Inventory / Cr Cogs, lost → Dr Cogs / Cr Inventory. */
+/**
+ * JE statements for a stock adjustment.
+ * Phase 1 (IAS 2): the amount is MONEY (|difference| × unitCost) — never the
+ * raw quantity — and the counter-leg is a dedicated gain/loss account, never
+ * COGS (a stock-count variance is not cost of goods sold and must not move
+ * gross margin).
+ *   found (actual > system) → Dr Inventory / Cr Surplus gain (41901)
+ *   lost  (actual < system) → Dr Shortage loss (52901) / Cr Inventory
+ */
 export async function buildStockAdjustmentPostingStatements(
   companyId: string,
-  adj: { product: string; difference: number; reason: string; date: string; id: string }
+  adj: { product: string; difference: number; reason: string; date: string; id: string; unitCost?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   if (!adj.difference || adj.difference === 0) return { success: true, statements: [] };
-  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
-  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
-  if (!inventoryId) return { success: false, error: 'Inventory account not found. Please configure default accounts in Settings.' };
-  const amount = Math.abs(adj.difference);
+  const resolved = await resolvePostingAccounts(companyId, ['default_inventory', 'default_inventory_shortage', 'default_inventory_surplus']);
+  if (!resolved.success) return resolved;
+  const { default_inventory: inventoryId, default_inventory_shortage: shortageId, default_inventory_surplus: surplusId } = resolved.ids;
+  const amount = Math.round(Math.abs(adj.difference) * (Number(adj.unitCost) || 0) * 100) / 100;
+  if (amount <= 0) return { success: true, statements: [] };
   const entries: JournalEntryLine[] = [];
   if (adj.difference > 0) {
     entries.push({ accountId: inventoryId, debit: amount, credit: 0, memo: `عثور ${adj.product}` });
-    entries.push({ accountId: cogsId || inventoryId, debit: 0, credit: amount, memo: `إيراد عثور` });
+    entries.push({ accountId: surplusId, debit: 0, credit: amount, memo: `فائض مخزون` });
   } else {
-    const loss = amount;
-    entries.push({ accountId: cogsId || inventoryId, debit: loss, credit: 0, memo: `فاقد ${adj.product}` });
-    entries.push({ accountId: inventoryId, debit: 0, credit: loss, memo: `خسارة مخزون` });
+    entries.push({ accountId: shortageId, debit: amount, credit: 0, memo: `فاقد ${adj.product}` });
+    entries.push({ accountId: inventoryId, debit: 0, credit: amount, memo: `عجز مخزون` });
   }
   return {
     success: true,
@@ -516,16 +652,52 @@ export async function buildStockAdjustmentPostingStatements(
   };
 }
 
-/** JE statements for a receipt voucher: Dr treasury / Cr debtors. */
+/**
+ * Realized exchange-difference JE (Phase 2 — IAS 21): the gap between what a
+ * linked payment was worth at the INVOICE rate and what actually moved at the
+ * PAYMENT rate. Positive amount with an explicit side — the caller decides
+ * direction; this builder only shapes the balanced pair.
+ *   receipt, shortfall (received less base value than booked) → Dr FX / Cr debtors
+ *   receipt, windfall  → Dr debtors / Cr FX
+ *   payment, shortfall (paid less base value than relieved) → Dr creditors / Cr FX
+ *   payment, windfall  → Dr FX / Cr creditors
+ */
+export function buildFxDifferenceStatements(
+  companyId: string,
+  fx: { reference: string; date: string; memo: string; amount: number; debitAccount: string; creditAccount: string }
+): TxStatement[] {
+  const amount = Math.round((Number(fx.amount) || 0) * 100) / 100;
+  if (amount <= 0) return [];
+  return [
+    buildJournalEntryStatement(companyId, {
+      reference: `${fx.reference}-FX`,
+      description: `قيد تلقائي - فروق صرف ${fx.reference}`,
+      date: fx.date,
+      totalAmount: amount,
+      entries: [
+        { accountId: fx.debitAccount, debit: amount, credit: 0, memo: fx.memo },
+        { accountId: fx.creditAccount, debit: 0, credit: amount, memo: fx.memo },
+      ],
+    }),
+  ];
+}
+
+/**
+ * JE statements for a receipt voucher: Dr treasury / Cr debtors.
+ * Phase 2: posted in BASE amount (treasuries are base-currency by design —
+ * cash_boxes carry no currency). Pass baseAmount explicitly; legacy callers
+ * without FX data keep posting the document amount.
+ */
 export async function buildReceiptVoucherStatements(
   companyId: string,
-  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
+  v: { voucherNumber: string; date: string; customerName: string; customerId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null; baseAmount?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_debtors']);
   if (!resolved.success) return resolved;
   const { default_cash: cashId, default_debtors: debtorsId } = resolved.ids;
   // Post to the SELECTED خزنة's own GL account, falling back to default cash.
   const debitAccount = (await getCashBoxAccountId(companyId, v.cashBoxId)) || cashId;
+  const amount = Math.round((Number(v.baseAmount ?? v.amount) || 0) * 100) / 100;
 
   return {
     success: true,
@@ -536,26 +708,30 @@ export async function buildReceiptVoucherStatements(
         // Guard: callers may forward raw pg DATE values (JS Date at UTC
         // midnight) — normalize before the timestamptz INSERT.
         date: normalizeDate(v.date),
-        totalAmount: v.amount,
+        totalAmount: amount,
         entries: [
-          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'العميل'}` },
-          { accountId: debtorsId, debit: 0, credit: v.amount, memo: `تسديد دين` },
+          { accountId: debitAccount, debit: amount, credit: 0, memo: `قبض من ${v.customerName || v.customerId || 'العميل'}` },
+          { accountId: debtorsId, debit: 0, credit: amount, memo: `تسديد دين` },
         ],
       }),
     ],
   };
 }
 
-/** JE statements for a payment voucher: Dr creditors/expense / Cr treasury. */
+/**
+ * JE statements for a payment voucher: Dr creditors/expense / Cr treasury.
+ * Phase 2: posted in BASE amount (same base-currency treasury rule).
+ */
 export async function buildPaymentVoucherStatements(
   companyId: string,
-  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null }
+  v: { voucherNumber: string; date: string; supplierName: string; supplierId?: string; expenseAccountId?: string; amount: number; paymentMethod: string; cashBoxId?: string | null; baseAmount?: number }
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
   const resolved = await resolvePostingAccounts(companyId, ['default_cash', 'default_creditors']);
   if (!resolved.success) return resolved;
   const { default_cash: cashId, default_creditors: creditorsId } = resolved.ids;
   const creditAccount = (await getCashBoxAccountId(companyId, v.cashBoxId)) || cashId;
   const debitAccount = v.expenseAccountId || creditorsId;
+  const amount = Math.round((Number(v.baseAmount ?? v.amount) || 0) * 100) / 100;
 
   return {
     success: true,
@@ -565,56 +741,67 @@ export async function buildPaymentVoucherStatements(
         description: `سند صرف - رقم ${v.voucherNumber}${v.supplierName ? ` - ${v.supplierName}` : ''}`,
         // Guard: same normalization as receipt vouchers (raw pg DATE values).
         date: normalizeDate(v.date),
-        totalAmount: v.amount,
+        totalAmount: amount,
         entries: [
-          { accountId: debitAccount, debit: v.amount, credit: 0, memo: `صرف إلى ${v.supplierName || v.supplierId || 'المورد'}` },
-          { accountId: creditAccount, debit: 0, credit: v.amount, memo: `سحب من الخزنة` },
+          { accountId: debitAccount, debit: amount, credit: 0, memo: `صرف إلى ${v.supplierName || v.supplierId || 'المورد'}` },
+          { accountId: creditAccount, debit: 0, credit: amount, memo: `سحب من الخزنة` },
         ],
       }),
     ],
   };
 }
 
+export interface PurchaseReturnCosting {
+  /** Net (ex-VAT) return value. */
+  subtotal: number;
+  /** Input VAT to reverse (via default_vat_input — Phase-3-safe). */
+  vatAmount: number;
+  /** Inventory value leaving stock (method cost basis, NOT the return price). */
+  costBasis: number;
+}
+
 /** JE + stock-movement statements for a purchase return (goods out of stock). */
 export async function buildPurchaseReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number; discountAmount?: number; grossAmount?: number }
+  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number },
+  costing?: PurchaseReturnCosting,
+  base?: BaseBooking,
+  preferredWarehouseId?: string | null
 ): Promise<{ success: true; statements: TxStatement[] } | { success: false; error: string }> {
-  const resolved = await resolvePostingAccounts(companyId, ['default_creditors', 'default_inventory']);
+  const resolved = await resolvePostingAccounts(companyId, ['default_creditors', 'default_inventory', 'default_vat_input', 'default_price_variance']);
   if (!resolved.success) return resolved;
-  const { default_creditors: creditorsId, default_inventory: inventoryId } = resolved.ids;
+  const { default_creditors: creditorsId, default_inventory: inventoryId, default_vat_input: vatInputId, default_price_variance: ppvId } = resolved.ids;
 
-  // Explicit discount reversal (gross method, mirror of the purchase
-  // invoice): Dr Creditors (net) + Dr Purchase Discounts Earned (42101)
-  // = Cr Inventory (GROSS). Zero discount keeps the classic 2-leg shape.
-  const discount = toMoney(ret.discountAmount);
-  const gross = toMoney(ret.grossAmount ?? (ret.amount + discount));
-  if (discount < 0 || discount > gross + 0.005) {
-    return { success: false, error: 'الخصم يتجاوز إجمالي المبلغ — راجع مبالغ الخصم في المردود' };
-  }
-  let discountId: string | undefined;
-  if (discount > 0) {
-    discountId = (await getDefaultAccountId(companyId, 'default_discount_received')) || undefined;
-    if (!discountId) {
-      return { success: false, error: 'حساب الخصم المكتسب غير مضبوط — اربطه في الإعدادات ← الحسابات الافتراضية' };
-    }
-  }
-
+  // Phase 1 (IAS 2 + VAT): inventory leaves at COST basis; input VAT reverses
+  // on its own leg; any gap between the agreed return price and the cost
+  // basis is a price variance — never hidden inside inventory.
+  // Phase 2: creditor/VAT legs in base (cost legs are domestic). The gap may
+  // therefore absorb FX drift between purchase and return — still P&L-correct
+  // (PPV is a profit-and-loss account), just less granular than 42101.
+  const subtotal = Math.round((Number(base?.subtotal ?? costing?.subtotal ?? ret.amount) || 0) * 100) / 100;
+  const vatAmount = Math.round((Number(base?.vatAmount ?? costing?.vatAmount ?? 0) || 0) * 100) / 100;
+  const costBasis = Math.round((Number(costing?.costBasis ?? subtotal) || 0) * 100) / 100;
+  const total = Math.round((subtotal + vatAmount) * 100) / 100;
+  const gap = Math.round((costBasis - subtotal) * 100) / 100;
   const entries: JournalEntryLine[] = [
-    { accountId: creditorsId, debit: ret.amount, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
+    { accountId: creditorsId, debit: total, credit: 0, memo: `تخفيض التزام ${ret.supplier}` },
   ];
-  if (discount > 0 && discountId) {
-    entries.push({ accountId: discountId, debit: discount, credit: 0, memo: `عكس خصم مكتسب ${ret.returnNumber}` });
+  if (gap > 0) {
+    entries.push({ accountId: ppvId, debit: gap, credit: 0, memo: `فروق تقييم مردود ${ret.returnNumber}` });
   }
-  entries.push(
-    { accountId: inventoryId, debit: 0, credit: gross, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` },
-  );
+  entries.push({ accountId: inventoryId, debit: 0, credit: costBasis, memo: `إخراج بضاعة مردودة ${ret.returnNumber}` });
+  if (vatAmount > 0) {
+    entries.push({ accountId: vatInputId, debit: 0, credit: vatAmount, memo: `عكس ضريبة مدخلات ${ret.returnNumber}` });
+  }
+  if (gap < 0) {
+    entries.push({ accountId: ppvId, debit: 0, credit: -gap, memo: `وفورات تقييم مردود ${ret.returnNumber}` });
+  }
   const statements: TxStatement[] = [
     buildJournalEntryStatement(companyId, {
       reference: ret.returnNumber,
       description: `قيد تلقائي - مردود مشتريات ${ret.returnNumber}`,
       date: ret.date,
-      totalAmount: ret.amount,
+      totalAmount: total,
       entries,
     }),
   ];
@@ -626,12 +813,15 @@ export async function buildPurchaseReturnPostingStatements(
            FROM purchase_returns pr
            JOIN purchase_return_lines prl ON prl.return_id = pr.id
            JOIN LATERAL (
-             SELECT s.warehouse_id FROM stock s
-              WHERE s.product_id = prl.product_id AND s.company_id = pr.company_id
-              ORDER BY s.quantity DESC LIMIT 1
+             SELECT COALESCE(
+               (SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = prl.product_id AND s2.company_id = pr.company_id AND s2.warehouse_id = $4::uuid AND s2.quantity >= COALESCE(NULLIF(prl.base_quantity, 0), prl.quantity) LIMIT 1),
+               (SELECT s.warehouse_id FROM stock s
+                WHERE s.product_id = prl.product_id AND s.company_id = pr.company_id
+                ORDER BY s.quantity DESC LIMIT 1)
+             ) AS warehouse_id
            ) wh ON true
           WHERE pr.id = $2::uuid AND pr.company_id = $3::uuid`,
-      params: [ret.returnNumber, ret.id, companyId],
+      params: [ret.returnNumber, ret.id, companyId, preferredWarehouseId || null],
     });
     // Decrement stock quantities (base units — the document quantity may be
     // expressed in a larger unit such as carton).
@@ -808,30 +998,23 @@ export async function postPaymentVoucher(
 }
 
 /**
- * Post a Sales Return to accounting (reverse of sales)
- * Dr: Sales Returns
- * Cr: Trade Debtors
- * (+ actual-cost COGS reversal when cogsReversal is provided)
- *
- * Single source of truth: the composable buildSalesReturnPostingStatements
- * owns the JE shape. This wrapper keeps its standalone-transaction contract
- * for backward compatibility.
+ * Post a Sales Return to accounting (reverse of sales).
+ * Phase 1: thin delegate over buildSalesReturnPostingStatements — the old
+ * inline 70%-of-amount COGS estimate (plus halala-truncating floor) is gone;
+ * without explicit costing the JE carries revenue + debtor legs only.
  */
 export async function postSalesReturn(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number; cogsReversal?: number }
+  ret: { id?: string; returnNumber: string; date: string; customer: string; amount: number },
+  costing?: SalesReturnCosting
 ) {
-  const posting = await buildSalesReturnPostingStatements(companyId, {
-    id: ret.id,
-    returnNumber: ret.returnNumber,
-    date: ret.date,
-    customer: ret.customer,
-    amount: ret.amount,
-    cogsReversal: ret.cogsReversal,
-  });
-  if (!posting.success) return { success: false, error: posting.error };
-
-  const txResult = await runTransaction(posting.statements);
+  const built = await buildSalesReturnPostingStatements(
+    companyId,
+    { id: ret.id, returnNumber: ret.returnNumber, date: ret.date, customer: ret.customer, amount: ret.amount },
+    costing
+  );
+  if (!built.success) return built;
+  const txResult = await runTransaction(built.statements);
   if (!txResult.success) return { success: false, error: txResult.error };
   return { success: true };
 }
@@ -943,42 +1126,27 @@ export async function postInventoryTransaction(
 }
 
 /**
- * Post a Stock Adjustment to accounting
- * Positive difference (found): Dr Inventory, Cr Income
- * Negative difference (lost): Dr Loss, Cr Inventory
+ * Post a Stock Adjustment to accounting.
+ * Phase 1: thin delegate over buildStockAdjustmentPostingStatements — the
+ * amount is money (|difference| × unitCost) on dedicated gain/loss accounts.
+ * Callers that only know a monetary difference pass it as difference with
+ * unitCost 1 (legacy tests do exactly this).
  */
 export async function postStockAdjustment(
   companyId: string,
-  adj: { id: string; date: string; product: string; difference: number; reason: string }
+  adj: { id: string; date: string; product: string; difference: number; reason: string; unitCost?: number }
 ) {
-  const inventoryId = await getDefaultAccountId(companyId, 'default_inventory');
-  const cogsId = await getDefaultAccountId(companyId, 'default_cogs');
-
-  if (!inventoryId) {
-    return { success: false, error: 'Inventory account not found. Please configure default accounts in Settings.' };
-  }
-
-  const entries: JournalEntryLine[] = [];
-  if (adj.difference > 0) {
-    entries.push(
-      { accountId: inventoryId, debit: adj.difference, credit: 0, memo: `عثور ${adj.product}` },
-      { accountId: cogsId || inventoryId, debit: 0, credit: adj.difference, memo: `إيراد عثور` }
-    );
-  } else if (adj.difference < 0) {
-    const loss = Math.abs(adj.difference);
-    entries.push(
-      { accountId: cogsId || inventoryId, debit: loss, credit: 0, memo: `فاقد ${adj.product}` },
-      { accountId: inventoryId, debit: 0, credit: loss, memo: `خسارة مخزون` }
-    );
-  }
-
-  if (entries.length === 0) return { success: true, id: 'skip' };
-
-  return createTransaction(companyId, {
-    reference: `ADJ-${adj.id}`,
-    description: `قيد تلقائي - تسوية مخزون ${adj.id} - ${adj.reason}`,
+  const built = await buildStockAdjustmentPostingStatements(companyId, {
+    product: adj.product,
+    difference: adj.difference,
+    reason: adj.reason,
     date: adj.date,
-    totalAmount: Math.abs(adj.difference),
-    entries,
+    id: adj.id,
+    unitCost: adj.unitCost,
   });
+  if (!built.success) return built;
+  if (built.statements.length === 0) return { success: true, id: 'skip' };
+  const txResult = await runTransaction(built.statements);
+  if (!txResult.success) return { success: false, error: txResult.error };
+  return { success: true };
 }

@@ -1,15 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Banknote, FileDown, Calendar, TrendingUp, Building2, Wallet, ArrowUpCircle, ArrowDownCircle, Activity } from 'lucide-react';
 import { Card, Button, Input, Badge } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { accountingApi } from '../api';
-import { salesApi } from '@/modules/sales/api';
-import { purchasesApi } from '@/modules/purchases/api';
 import { exportToExcel } from '@/core/utils/exportEngine';
 import { exportToPdf } from '@/core/utils/export';
-import type { Account } from '../types';
+import type { CashFlowStatement } from '../types';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useAsyncData } from '@/core/hooks/useAsyncData';
 import { useSettings } from '@/core/utils/useSettings';
@@ -22,14 +20,20 @@ interface CFRow {
   isTotal?: boolean;
 }
 
-interface CashFlowData {
-  operating: CFRow[];
-  investing: CFRow[];
-  financing: CFRow[];
-  netChange: number;
-}
+type CashFlowData = CashFlowStatement;
 
-const emptyData: CashFlowData = { operating: [], investing: [], financing: [], netChange: 0 };
+const LINE_LABELS: Record<string, string> = {
+  netProfit: 'accounting.cashFlow.netProfit',
+  depreciation: 'accounting.cashFlow.depreciation',
+  receivablesChange: 'accounting.cashFlow.receivablesChange',
+  payablesChange: 'accounting.cashFlow.payablesChange',
+  inventoryChange: 'accounting.cashFlow.inventoryChange',
+  vatChange: 'accounting.cashFlow.vatChange',
+  payrollChange: 'accounting.cashFlow.payrollChange',
+  capex: 'accounting.cashFlow.capex',
+  proceeds: 'accounting.cashFlow.proceeds',
+  equityChange: 'accounting.cashFlow.equityChange',
+};
 
 function defaultFromDate(fiscalYearStart?: string): string {
   if (fiscalYearStart) {
@@ -72,79 +76,37 @@ export const CashFlowReport: React.FC = () => {
 
   const formatNumber = (n: number) => formatCurrency(Math.abs(n));
 
+  // Phase 5: single JE-derived source (IAS 7 indirect) — no snapshots,
+  // no name/code heuristics.
   const { data: cfData, isLoading } = useAsyncData<CashFlowData>(
     async () => {
       const companyId = activeCompany!.id;
-      const plResult = await accountingApi.getProfitLoss(companyId, startDate || undefined, endDate || undefined);
-      const bsResult = await accountingApi.getBalanceSheet(companyId, endDate || undefined);
-      const arResult = await salesApi.getCustomerArAging(companyId);
-      const apTotalResult = await purchasesApi.getApAgingTotal(companyId);
-      const apTotal = apTotalResult.success ? (apTotalResult.total || 0) : 0;
-
-      let netProfit = 0;
-      if (plResult.success && plResult.data) {
-        const accounts = plResult.data as Account[];
-        const revenue = accounts.filter((a) => a.type === 'revenue').reduce((s, a) => s + Math.abs(a.balance), 0);
-        const expense = accounts.filter((a) => a.type === 'expense').reduce((s, a) => s + Math.abs(a.balance), 0);
-        netProfit = revenue - expense;
-      }
-      const arChange = arResult.data?.reduce((s, c) => s + (c.totalDue || 0), 0) || 0;
-      const apChange = apTotal;
-
-      const ops: CFRow[] = [];
-      if (netProfit !== 0) ops.push({ activity: t('accounting.cashFlow.netProfit'), amount: netProfit });
-      if (plResult.success && plResult.data) {
-        const accounts = plResult.data as Account[];
-        const depreciationAcc = accounts.find((a) => a.nameAr?.includes('إهلاك') || a.nameAr?.includes('اهلاك') || a.code.startsWith('12'));
-        if (depreciationAcc) ops.push({ activity: t('accounting.cashFlow.depreciation'), amount: Math.abs(depreciationAcc.balance) });
-      }
-      if (arChange !== 0) ops.push({ activity: t('accounting.cashFlow.receivablesChange'), amount: -arChange });
-      if (apChange !== 0) ops.push({ activity: t('accounting.cashFlow.payablesChange'), amount: apChange });
-      let inventoryChange = 0;
-      if (bsResult.success && bsResult.data) {
-        const accounts = bsResult.data as Account[];
-        const inventoryAcc = accounts.find((a) => a.nameAr?.includes('مخزون') || a.code.startsWith('13'));
-        if (inventoryAcc) inventoryChange = inventoryAcc.balance;
-      }
-      if (inventoryChange !== 0) ops.push({ activity: t('accounting.cashFlow.inventoryChange'), amount: -inventoryChange });
-      const opsTotal = ops.reduce((s, r) => s + r.amount, 0);
-      if (ops.length > 0) ops.push({ activity: t('accounting.cashFlow.netOperating'), amount: opsTotal, isTotal: true });
-
-      const inv: CFRow[] = [];
-      if (bsResult.success && bsResult.data) {
-        const accounts = bsResult.data as Account[];
-        const fixedAssets = accounts.filter((a) => a.type === 'asset' && (a.nameAr?.includes('أصول ثابتة') || a.code.startsWith('12')));
-        const faTotal = fixedAssets.reduce((s, a) => s + Math.abs(a.balance), 0);
-        if (faTotal > 0) inv.push({ activity: t('accounting.cashFlow.fixedAssetsPurchase'), amount: -faTotal });
-      }
-      const invTotal = inv.reduce((s, r) => s + r.amount, 0);
-      if (inv.length > 0) inv.push({ activity: t('accounting.cashFlow.netInvesting'), amount: invTotal, isTotal: true });
-
-      const fin: CFRow[] = [];
-      if (bsResult.success && bsResult.data) {
-        const accounts = bsResult.data as Account[];
-        const loans = accounts.filter((a) => a.type === 'liability');
-        const equity = accounts.filter((a) => a.type === 'equity');
-        const loanTotal = loans.reduce((s, a) => s + a.balance, 0);
-        const equityTotal = equity.reduce((s, a) => s + a.balance, 0);
-        if (loanTotal !== 0) fin.push({ activity: t('accounting.cashFlow.loanRepayment'), amount: loanTotal });
-        if (equityTotal !== 0) fin.push({ activity: t('accounting.cashFlow.equityContributions'), amount: equityTotal });
-      }
-      const finTotal = fin.reduce((s, r) => s + r.amount, 0);
-      if (fin.length > 0) fin.push({ activity: t('accounting.cashFlow.netFinancing'), amount: finTotal, isTotal: true });
-
-      return {
-        operating: ops,
-        investing: inv,
-        financing: fin,
-        netChange: opsTotal + invTotal + finTotal,
-      };
+      const res = await accountingApi.getCashFlow(companyId, startDate, endDate);
+      if (!res.success || !res.data) throw new Error(res.error);
+      return res.data;
     },
     [activeCompany?.id, startDate, endDate],
-    !!activeCompany?.id,
+    !!activeCompany?.id && !!startDate && !!endDate,
   );
 
-  const { operating, investing, financing, netChange } = cfData ?? emptyData;
+  const toRows = useCallback((lines: { key: string; amount: number }[], totalKey: string): CFRow[] => [
+    ...lines.map((l) => ({ activity: t(LINE_LABELS[l.key] || 'accounting.cashFlow.activity'), amount: l.amount })),
+    ...(lines.length > 0 ? [{ activity: t(totalKey), amount: lines.reduce((s, l) => s + l.amount, 0), isTotal: true }] : []),
+  ], [t]);
+  const operating = useMemo(
+    () => (cfData ? toRows(cfData.operating, 'accounting.cashFlow.netOperating') : []),
+    [cfData, toRows]
+  );
+  const investing = useMemo(
+    () => (cfData ? toRows(cfData.investing, 'accounting.cashFlow.netInvesting') : []),
+    [cfData, toRows]
+  );
+  const financing = useMemo(
+    () => (cfData ? toRows(cfData.financing, 'accounting.cashFlow.netFinancing') : []),
+    [cfData, toRows]
+  );
+  const netChange = cfData?.netChange || 0;
+
   const allRows = [...operating, ...investing, ...financing];
 
   const totals = useMemo(() => {
@@ -352,6 +314,32 @@ export const CashFlowReport: React.FC = () => {
         <span className="font-bold flex items-center gap-2"><Activity size={16} /> {t('accounting.cashFlow.netChange')}</span>
         <span className={cn('font-bold tabular-nums text-lg', netChange >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300')}>{netChange >= 0 ? '+' : ''}{formatCurrency(netChange)}</span>
       </Card>
+
+      {cfData && (
+        <Card className="p-4">
+          <div className="font-bold mb-2">{t('accounting.cashFlow.reconcileTitle')}</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div>
+              <div className="text-slate-500">{t('accounting.cashFlow.cashBegin')}</div>
+              <div className="font-bold tabular-nums">{formatCurrency(cfData.cashBegin)}</div>
+            </div>
+            <div>
+              <div className="text-slate-500">{t('accounting.cashFlow.cashEnd')}</div>
+              <div className="font-bold tabular-nums">{formatCurrency(cfData.cashEnd)}</div>
+            </div>
+            <div>
+              <div className="text-slate-500">{t('accounting.cashFlow.cashChange')}</div>
+              <div className="font-bold tabular-nums">{formatCurrency(cfData.cashChange)}</div>
+            </div>
+            <div>
+              <div className="text-slate-500">{t('accounting.cashFlow.unexplained')}</div>
+              <div className={cn('font-bold tabular-nums', cfData.unexplained === 0 ? 'text-emerald-600' : 'text-amber-600')}>
+                {formatCurrency(cfData.unexplained)}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div id="cf-print" className="hidden">
         <table>

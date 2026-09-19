@@ -179,6 +179,18 @@ export async function postProductStockOpening(
   const valueAmount = Math.round(Number(opts.costPrice || 0) * qty * 100) / 100;
   if (valueAmount <= 0) return { success: false, error: 'قيمة مخزون أول المدة يجب أن تكون أكبر من صفر (تأكد من سعر التكلفة)' };
 
+  // Phase 1: every receipt opens a FIFO layer (all methods — layers are only
+  // CONSUMED in fifo mode, so this keeps future method switches exact).
+  const { buildFifoRestoreStatement } = await import('@/core/utils/valuation');
+  const openingLayer = buildFifoRestoreStatement(companyId, {
+    productId: opts.productId,
+    warehouseId: opts.warehouseId,
+    qty,
+    unitCost: Number(opts.costPrice) || 0,
+    receivedDate: new Date().toISOString().split('T')[0],
+    sourceRef: 'OPENING',
+  });
+
   const inv = await findAccountIdByCode(companyId, INVENTORY_CODE);
   const obe = await ensureOpeningBalanceEquityAccount(companyId);
   if (!inv || !obe) return { success: false, error: 'تعذر تجهيز حسابات الرصيد الافتتاحي (المخزون/الأرصدة الافتتاحية)' };
@@ -223,6 +235,8 @@ export async function postProductStockOpening(
             WHERE id = $3::uuid AND company_id = $4::uuid`,
       params: [qty, opts.warehouseId, opts.productId, companyId],
     },
+    // 5) FIFO layer for the opening receipt (all methods — see above)
+    ...(openingLayer ? [{ sql: openingLayer.sql, params: (openingLayer.params ?? []) as unknown[] }] : []),
   ];
 
   const result = await runTransaction(statements);

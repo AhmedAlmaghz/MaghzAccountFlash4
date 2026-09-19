@@ -142,13 +142,16 @@ export function useDashboard(companyId: string, filters: DashboardFilters) {
   return { data, isLoading };
 }
 
+// Phase 2 (IAS 21): aging aggregates in BASE currency — document-currency
+// sums across USD/YER/SAR invoices are meaningless. COALESCE keeps legacy
+// rows (base columns backfilled as 0/NULL) contributing their doc amounts.
 const AR_BUCKET_SQL = `SELECT customer_id, date::text AS date, due_date::text AS due_date,
-                              (total_amount - paid_amount) AS outstanding,
+                              (COALESCE(base_currency_amount, total_amount) - COALESCE(base_currency_paid, paid_amount)) AS outstanding,
                               invoice_number
                          FROM sales_invoices
                         WHERE company_id = $1
                           AND status NOT IN ('paid', 'cancelled')
-                          AND (total_amount - paid_amount) > 0`;
+                          AND (COALESCE(base_currency_amount, total_amount) - COALESCE(base_currency_paid, paid_amount)) > 0`;
 
 const AR_AGGREGATE_SQL = `SELECT id, name, phone, balance
                             FROM customers
@@ -163,14 +166,14 @@ async function fetchDashboardData(adapter: DbAdapter, companyId: string, range: 
   // 1. Period totals (revenue, expenses, profit)
   const [revResult, expResult, invResult] = await Promise.all([
     adapter.query<{ revenue: string | number }>(
-      `SELECT COALESCE(SUM(total_amount), 0) AS revenue
+      `SELECT COALESCE(SUM(COALESCE(base_currency_amount, total_amount)), 0) AS revenue
          FROM sales_invoices
         WHERE company_id = $1 AND date >= $2 AND date <= $3
           AND status != 'cancelled'`,
       [companyId, fromStr, toStr],
     ),
     adapter.query<{ expenses: string | number }>(
-      `SELECT COALESCE(SUM(total_amount), 0) AS expenses
+      `SELECT COALESCE(SUM(COALESCE(base_currency_amount, total_amount)), 0) AS expenses
          FROM purchase_invoices
         WHERE company_id = $1 AND date >= $2 AND date <= $3
           AND status != 'cancelled'`,
@@ -252,8 +255,8 @@ async function fetchDashboardData(adapter: DbAdapter, companyId: string, range: 
          ) AS m
        )
        SELECT TO_CHAR(months.m, 'YYYY-MM') AS month,
-              COALESCE(SUM(CASE WHEN si.total_amount IS NOT NULL THEN si.total_amount ELSE 0 END), 0) AS revenue,
-              COALESCE(SUM(CASE WHEN pi.total_amount IS NOT NULL THEN pi.total_amount ELSE 0 END), 0) AS expenses
+              COALESCE(SUM(COALESCE(si.base_currency_amount, si.total_amount)), 0) AS revenue,
+              COALESCE(SUM(COALESCE(pi.base_currency_amount, pi.total_amount)), 0) AS expenses
          FROM months
          LEFT JOIN sales_invoices si ON si.company_id = $1
                AND si.date >= months.m AND si.date < months.m + INTERVAL '1 month'
@@ -278,8 +281,8 @@ async function fetchDashboardData(adapter: DbAdapter, companyId: string, range: 
          SELECT generate_series($2::date, $3::date, '1 day'::interval)::date AS d
        )
        SELECT TO_CHAR(days.d, 'YYYY-MM-DD') AS day,
-              COALESCE(SUM(CASE WHEN si.total_amount IS NOT NULL THEN si.total_amount ELSE 0 END), 0) AS revenue,
-              COALESCE(SUM(CASE WHEN pi.total_amount IS NOT NULL THEN pi.total_amount ELSE 0 END), 0) AS expenses
+              COALESCE(SUM(COALESCE(si.base_currency_amount, si.total_amount)), 0) AS revenue,
+              COALESCE(SUM(COALESCE(pi.base_currency_amount, pi.total_amount)), 0) AS expenses
          FROM days
          LEFT JOIN sales_invoices si ON si.company_id = $1 AND si.date = days.d AND si.status != 'cancelled'
          LEFT JOIN purchase_invoices pi ON pi.company_id = $1 AND pi.date = days.d AND pi.status != 'cancelled'
@@ -298,7 +301,7 @@ async function fetchDashboardData(adapter: DbAdapter, companyId: string, range: 
 
   // 4. Top products (top 5 by sales)
   const topProdResult = await adapter.query<{ name: string; value: string | number }>(
-    `SELECT p.name_ar AS name, COALESCE(SUM(sil.line_total), 0) AS value
+    `SELECT p.name_ar AS name, COALESCE(SUM(COALESCE(sil.base_currency_line_total, sil.line_total)), 0) AS value
        FROM products p
        JOIN sales_invoice_lines sil ON sil.product_id = p.id
        JOIN sales_invoices si ON sil.invoice_id = si.id
@@ -402,9 +405,9 @@ async function fetchDashboardData(adapter: DbAdapter, companyId: string, range: 
     `WITH days AS (
        SELECT generate_series($2::date, $3::date, '1 day'::interval)::date AS d
      )
-     SELECT TO_CHAR(days.d, 'YYYY-MM-DD') AS day,
-            COALESCE(SUM(CASE WHEN si.total_amount IS NOT NULL THEN si.total_amount ELSE 0 END), 0) AS sales,
-            COALESCE(SUM(CASE WHEN pi.total_amount IS NOT NULL THEN pi.total_amount ELSE 0 END), 0) AS purchases
+       SELECT TO_CHAR(days.d, 'YYYY-MM-DD') AS day,
+            COALESCE(SUM(COALESCE(si.base_currency_amount, si.total_amount)), 0) AS sales,
+            COALESCE(SUM(COALESCE(pi.base_currency_amount, pi.total_amount)), 0) AS purchases
        FROM days
        LEFT JOIN sales_invoices si ON si.company_id = $1 AND si.date = days.d AND si.status != 'cancelled'
        LEFT JOIN purchase_invoices pi ON pi.company_id = $1 AND pi.date = days.d AND pi.status != 'cancelled'

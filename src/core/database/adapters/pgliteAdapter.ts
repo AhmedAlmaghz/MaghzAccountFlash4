@@ -165,6 +165,12 @@ import aiJobItemLeases from '@root/drizzle/0028_ai_job_item_leases.sql?raw';
 import usersRolesHardening from '@root/drizzle/0029_users_roles_hardening.sql?raw';
 import posReceiptAndLineCost from '@root/drizzle/0030_pos_receipt_and_line_cost.sql?raw';
 import discountAccounts from '@root/drizzle/0031_discount_accounts.sql?raw';
+import inventoryValuation from '@root/drizzle/0032_inventory_valuation.sql?raw';
+import fxRevaluation from '@root/drizzle/0033_fx_revaluation.sql?raw';
+import vatSplitPeriods from '@root/drizzle/0034_vat_split_periods.sql?raw';
+import phase5CloseAssetsPeriods from '@root/drizzle/0035_phase5_close_assets_periods.sql?raw';
+import leaveProvisionAccount from '@root/drizzle/0036_leave_provision_account.sql?raw';
+import treasuryBoxAccounts from '@root/drizzle/0037_treasury_box_accounts.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -199,6 +205,12 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0029_users_roles_hardening', sql: usersRolesHardening },
   { name: '0030_pos_receipt_and_line_cost', sql: posReceiptAndLineCost },
   { name: '0031_discount_accounts', sql: discountAccounts },
+  { name: '0032_inventory_valuation', sql: inventoryValuation },
+  { name: '0033_fx_revaluation', sql: fxRevaluation },
+  { name: '0034_vat_split_periods', sql: vatSplitPeriods },
+  { name: '0035_phase5_close_assets_periods', sql: phase5CloseAssetsPeriods },
+  { name: '0036_leave_provision_account', sql: leaveProvisionAccount },
+  { name: '0037_treasury_box_accounts', sql: treasuryBoxAccounts },
 ];
 
 /**
@@ -336,7 +348,7 @@ const ACCOUNTS: Array<{
     { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Banks', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
     { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
     { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
-    { code: '11103', name_ar: 'محفظة جيب', name_en: 'Jibe Wallet', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
+    { code: '11103', name_ar: 'محفظة جيب', name_en: 'Jeeb Wallet', type: 'asset', nature: 'debit', is_group: false, parent_code: '111', balance: 0 },
     { code: '112', name_ar: 'المدينون', name_en: 'Receivables', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
     { code: '11201', name_ar: 'المدينون التجاريون', name_en: 'Trade Customers', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
     { code: '11202', name_ar: 'سلف الموظفين', name_en: 'Employee Advances', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
@@ -344,6 +356,10 @@ const ACCOUNTS: Array<{
     { code: '11301', name_ar: 'بضاعة أول المدة', name_en: 'Opening Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
     { code: '11302', name_ar: 'بضاعة تحت التشغيل', name_en: 'Work in Progress', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
     { code: '11303', name_ar: 'بضاعة تامة الصنع', name_en: 'Finished Goods Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
+    { code: '12', name_ar: 'الأصول الثابتة', name_en: 'Fixed Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
+    { code: '121', name_ar: 'الأصول الثابتة - التكلفة', name_en: 'Fixed Assets at Cost', type: 'asset', nature: 'debit', is_group: true, parent_code: '12' },
+    { code: '12101', name_ar: 'تكلفة الأصول الثابتة', name_en: 'Fixed Assets at Cost', type: 'asset', nature: 'debit', is_group: false, parent_code: '121' },
+    { code: '12102', name_ar: 'مجمع إهلاك الأصول الثابتة', name_en: 'Accumulated Depreciation', type: 'asset', nature: 'credit', is_group: false, parent_code: '121' },
     // Liabilities
     { code: '2', name_ar: 'الالتزامات', name_en: 'Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: null },
     { code: '21', name_ar: 'الالتزامات المتداولة', name_en: 'Current Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: '2' },
@@ -351,16 +367,21 @@ const ACCOUNTS: Array<{
     { code: '21101', name_ar: 'الدائنون التجاريون', name_en: 'Trade Suppliers', type: 'liability', nature: 'credit', is_group: false, parent_code: '211' },
     { code: '213', name_ar: 'الضرائب', name_en: 'Taxes', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
     { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
+    { code: '21302', name_ar: 'ضريبة القيمة المضافة على المدخلات', name_en: 'VAT Input Recoverable', type: 'liability', nature: 'debit', is_group: false, parent_code: '213' },
     { code: '215', name_ar: 'مستحقات الموظفين', name_en: 'Employee Benefits', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
     { code: '21501', name_ar: 'رواتب مستحقة الدفع', name_en: 'Salaries Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
     { code: '21502', name_ar: 'استقطاعات مستحقة', name_en: 'Payroll Deductions Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
     { code: '21503', name_ar: 'مستحقات نهاية الخدمة', name_en: 'End-of-Service Gratuity Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
+    { code: '21504', name_ar: 'مخصص الإجازات', name_en: 'Leave Provision', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
     // Equity
     { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
     { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
     { code: '31101', name_ar: 'رأس المال المدفوع', name_en: 'Paid-in Capital', type: 'equity', nature: 'credit', is_group: false, balance: 0, parent_code: '311' },
     { code: '312', name_ar: 'أرصدة افتتاحية وفروق تسوية', name_en: 'Opening Balance & Adjustments', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
     { code: '31201', name_ar: 'حساب الأرصدة الافتتاحية', name_en: 'Opening Balance Equity', type: 'equity', nature: 'credit', is_group: false, parent_code: '312' },
+    { code: '32', name_ar: 'الأرباح المبقاة والاحتياطيات', name_en: 'Retained Earnings & Reserves', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
+    { code: '321', name_ar: 'الأرباح المبقاة', name_en: 'Retained Earnings', type: 'equity', nature: 'credit', is_group: true, parent_code: '32' },
+    { code: '32101', name_ar: 'الأرباح المبقاة', name_en: 'Retained Earnings', type: 'equity', nature: 'credit', is_group: false, parent_code: '321' },
     // Revenues
     { code: '4', name_ar: 'الإيرادات', name_en: 'Revenues', type: 'revenue', nature: 'credit', is_group: true, parent_code: null },
     { code: '41', name_ar: 'إيرادات المبيعات', name_en: 'Sales Revenue', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
@@ -373,17 +394,22 @@ const ACCOUNTS: Array<{
     { code: '42', name_ar: 'إيرادات أخرى', name_en: 'Other Income', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
     { code: '421', name_ar: 'خصومات مكتسبة', name_en: 'Discounts Earned', type: 'revenue', nature: 'credit', is_group: true, parent_code: '42' },
     { code: '42101', name_ar: 'خصم مكتسب', name_en: 'Purchase Discounts Earned', type: 'revenue', nature: 'credit', is_group: false, parent_code: '421' },
+    { code: '41901', name_ar: 'فائض المخزون', name_en: 'Inventory Surplus Gain', type: 'revenue', nature: 'credit', is_group: false, parent_code: '41' },
     // Expenses
     { code: '5', name_ar: 'المصروفات', name_en: 'Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: null },
     { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
     { code: '511', name_ar: 'تكلفة البضاعة', name_en: 'COGS', type: 'expense', nature: 'debit', is_group: true, parent_code: '51' },
     { code: '51101', name_ar: 'تكلفة بضاعة مباعة', name_en: 'Cost of Goods Sold', type: 'expense', nature: 'debit', is_group: false, parent_code: '511' },
+    { code: '51901', name_ar: 'فروق أسعار الشراء', name_en: 'Purchase Price Variance', type: 'expense', nature: 'debit', is_group: false, parent_code: '51' },
+    { code: '52901', name_ar: 'عجز المخزون', name_en: 'Inventory Shortage Loss', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+    { code: '52902', name_ar: 'فروق أسعار الصرف', name_en: 'Exchange Gain/Loss', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52', name_ar: 'مصاريف تشغيلية', name_en: 'Operating Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
     { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52301', name_ar: 'مصروفات متنوعة ونثريات', name_en: 'Miscellaneous Expenses', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52401', name_ar: 'مصروفات نقل وشحن', name_en: 'Shipping & Freight', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     { code: '52501', name_ar: 'مصروف نهاية الخدمة', name_en: 'End-of-Service Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+    { code: '52601', name_ar: 'مصروف إهلاك الأصول الثابتة', name_en: 'Depreciation Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
     // Production costs (capitalized into finished-goods cost on work-order completion)
     { code: '53', name_ar: 'تكاليف الإنتاج', name_en: 'Production Costs', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
     { code: '53101', name_ar: 'تكاليف إنتاج - أجور', name_en: 'Production Costs - Labor', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
@@ -433,6 +459,10 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_cash', account_code: '11101', required: true, description: 'الصندوق الرئيسي' },
   { key: 'default_sales', account_code: '41101', required: true, description: 'إيرادات المبيعات' },
   { key: 'default_cogs', account_code: '51101', required: true, description: 'تكلفة البضاعة المباعة' },
+  { key: 'default_price_variance', account_code: '51901', required: false, description: 'فروق أسعار الشراء والتقييم' },
+  { key: 'default_exchange_difference', account_code: '52902', required: false, description: 'فروق أسعار الصرف (محققة وغير محققة)' },
+  { key: 'default_inventory_shortage', account_code: '52901', required: false, description: 'عجز المخزون (فاقد)' },
+  { key: 'default_inventory_surplus', account_code: '41901', required: false, description: 'فائض المخزون (عثور)' },
   { key: 'default_inventory', account_code: '11301', required: true, description: 'حساب المخزون' },
   { key: 'default_wip', account_code: '11302', required: false, description: 'حساب بضاعة تحت التشغيل' },
   { key: 'default_finished_goods', account_code: '11303', required: false, description: 'حساب مخزون البضاعة التامة' },
@@ -448,16 +478,21 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_debtors', account_code: '11201', required: true, description: 'المدينون التجاريون' },
   { key: 'default_creditors', account_code: '21101', required: true, description: 'الدائنون التجاريون' },
   { key: 'default_vat_output', account_code: '21301', required: true, description: 'ضريبة المخرجات' },
-  { key: 'default_vat_input', account_code: '21301', required: true, description: 'ضريبة المدخلات' },
+  { key: 'default_vat_input', account_code: '21302', required: true, description: 'ضريبة المدخلات' },
   { key: 'default_salaries', account_code: '52101', required: false, description: 'مصاريف الرواتب' },
   { key: 'default_salaries_payable', account_code: '21501', required: false, description: 'حساب الرواتب المستحقة الدفع' },
   { key: 'default_payroll_deductions', account_code: '21502', required: false, description: 'حساب الاستقطاعات المستحقة' },
   { key: 'default_eos_payable', account_code: '21503', required: false, description: 'حساب مستحقات نهاية الخدمة' },
   { key: 'default_eos_expense', account_code: '52501', required: false, description: 'حساب مصروف نهاية الخدمة' },
+  { key: 'default_leave_provision', account_code: '21504', required: false, description: 'حساب مخصص الإجازات غير المستخدمة' },
   { key: 'default_sales_returns', account_code: '41103', required: false, description: 'مردودات المبيعات' },
   { key: 'default_discount_allowed', account_code: '41201', required: false, description: 'الخصم الممنوح (contra-revenue)' },
   { key: 'default_discount_received', account_code: '42101', required: false, description: 'الخصم المكتسب (other income)' },
   { key: 'default_purchase_returns', account_code: '21101', required: true, description: 'مردودات المشتريات' },
+  { key: 'default_fixed_assets', account_code: '12101', required: false, description: 'حساب تكلفة الأصول الثابتة' },
+  { key: 'default_accumulated_depreciation', account_code: '12102', required: false, description: 'حساب مجمع الإهلاك' },
+  { key: 'default_depreciation_expense', account_code: '52601', required: false, description: 'حساب مصروف الإهلاك' },
+  { key: 'default_retained_earnings', account_code: '32101', required: false, description: 'حساب الأرباح المبقاة' },
 ];
 
 const BRANCHES: Array<{ code: string; name: string; address: string }> = [

@@ -1,12 +1,13 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { runTransaction } from '@/core/database/tx';
-import { buildReceiptVoucherStatements, buildPaymentVoucherStatements } from '@/core/utils/journalEntryGenerator';
+import { buildReceiptVoucherStatements, buildPaymentVoucherStatements, buildFxDifferenceStatements, resolvePostingAccounts } from '@/core/utils/journalEntryGenerator';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { accountingService } from './services';
-import type { Account, Transaction, JournalEntry, TrialBalanceRow, LedgerRow, ReceiptVoucher, PaymentVoucher } from './types';
+import type { Account, Transaction, JournalEntry, TrialBalanceRow, LedgerRow, ReceiptVoucher, PaymentVoucher, CashFlowStatement } from
+'./types';
 
 /** LOCAL calendar day — a UTC date is yesterday for GMT+3 between 00:00–03:00. */
 const localToday = (): string => toDateString(new Date()) ?? '';
@@ -330,22 +331,62 @@ export const accountingApi = {
     try {
       const validation = validateInput(createTransactionSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
-      
+
       // Convert to service DTO format
       const entries = (data.entries as JournalEntry[]).map(entry => ({
         accountId: entry.accountId,
         debit: entry.debit,
         credit: entry.credit,
+        // memo must survive on the draft path: adapter.createTransaction
+        // binds it as a param, and `undefined` params break pg binding —
+        // normalize to null (the service path ignores memo by contract).
+        memo: (entry as { memo?: unknown }).memo ?? null,
       }));
-      
+      const date = toDateString(data.date) || new Date().toISOString().split('T')[0];
+
+      // Phase 0 fix: honor the requested status. Drafts are inert (no GL
+      // effect until posted) and go through the adapter path which supports
+      // a status column on every backend (Electron RPC / PGlite / e2e shim).
+      // Previously EVERYTHING posted immediately, so the whole draft → post
+      // flow (UI + AI wizard) was dead and postTransaction() could never
+      // find a draft.
+      if (data.status === 'draft') {
+        // Drafts are inert — the period guard applies at posting time.
+        const adapter = await getDbAdapter();
+        const draft = await adapter.createTransaction({
+          companyId: data.companyId,
+          date,
+          reference: data.reference,
+          description: data.description || '',
+          totalAmount: data.totalAmount,
+          status: 'draft',
+          entries,
+        });
+        if (!draft.success) return { success: false, error: draft.error };
+        return { success: true, id: draft.id };
+      }
+
+      // Phase 3: immediate postings respect closed tax periods too.
+      const { assertPeriodOpen } = await import('@/modules/tax/engine');
+      const createGate = await assertPeriodOpen(data.companyId, date);
+      if (!createGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${createGate.period.startDate} – ${createGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalCreate } = await import('@/modules/accounting/yearEnd');
+      const fiscalCreateGate = await assertFiscalCreate(data.companyId, date);
+      if (!fiscalCreateGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalCreateGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const result = await accountingService.postTransaction({
-        date: toDateString(data.date) || new Date().toISOString().split('T')[0],
+        date,
         description: data.description || '',
         entries,
         reference: data.reference,
       });
-      
-      return result;
+
+      if (!result.success) return { success: false, error: (result as { error?: string }).error };
+      return { success: true, id: (result as { transactionId?: string }).transactionId };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -356,9 +397,90 @@ export const accountingApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Phase 0 fix: a POSTED transaction is immutable — editing it rewrites
+      // SUM(journal_entries) retroactively while the books already report it.
+      // Correct posted entries with a REVERSAL entry, never an UPDATE.
+      // (Mirrors the draft-only guard on deleteTransaction below.)
+      const cur = await adapter.query<{ status: string; date: string }>(
+        `SELECT status, date FROM transactions WHERE id = $1 AND company_id = $2`,
+        [id, companyId]
+      );
+      if (!cur.success) return { success: false, error: cur.error };
+      const curRow = (cur.rows?.[0] || {}) as { status: string; date: string };
+      const curStatus = String(curRow.status ?? '');
+      const curDate = toDateString(curRow.date) || '';
+      if (!curStatus) return { success: false, error: 'Transaction not found' };
+      if (curStatus !== 'draft') {
+        return { success: false, error: 'لا يمكن تعديل قيد مرحّل — أنشئ قيداً عكسياً بدلاً من التعديل' };
+      }
+      // Status may only move draft → posted (validated, via postTransaction
+      // semantics) or draft → cancelled. Anything else is rejected.
+      const nextStatus = data.status;
+      if (nextStatus !== undefined && nextStatus !== 'draft' && nextStatus !== 'posted' && nextStatus !== 'cancelled') {
+        return { success: false, error: 'Invalid transaction status' };
+      }
+      // Phase 0 fix: replacement lines are validated server-side BEFORE the
+      // old lines are deleted — the previous code trusted client totals, so
+      // any AI/direct caller could post an unbalanced entry.
+      if (data.entries && data.entries.length > 0) {
+        const dr = data.entries.reduce((s, e) => s + (Number(e.debit) || 0), 0);
+        const cr = data.entries.reduce((s, e) => s + (Number(e.credit) || 0), 0);
+        if (Math.abs(dr - cr) > 0.01) {
+          return { success: false, error: `Transaction not balanced: debit=${dr}, credit=${cr}` };
+        }
+        if (dr === 0) {
+          return { success: false, error: 'Transaction amount cannot be zero' };
+        }
+      }
+      if (nextStatus === 'posted') {
+        // Phase 3: posting through an edit respects closed tax periods too
+        // (new date wins, else the stored draft date).
+        const { assertPeriodOpen: assertEditPeriod } = await import('@/modules/tax/engine');
+        const editGate = await assertEditPeriod(companyId, toDateString(data.date) || curDate, adapter);
+        if (!editGate.open) {
+          return { success: false, error: `الفترة الضريبية مغلقة (${editGate.period.startDate} – ${editGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+        }
+        // Phase 5: a closed fiscal year locks its dates for every posting path.
+        const { assertAccountingPeriodOpen: assertFiscalEdit } = await import('@/modules/accounting/yearEnd');
+        const fiscalEditGate = await assertFiscalEdit(companyId, toDateString(data.date) || curDate, adapter);
+        if (!fiscalEditGate.open) {
+          return { success: false, error: `السنة المالية ${fiscalEditGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+        }
+        // Posting through an edit: the resulting entry must balance. When
+        // the caller ships replacement lines they were just validated above;
+        // otherwise the stored draft lines must balance on their own.
+        if (!data.entries || data.entries.length === 0) {
+          const sums = await adapter.query<{ dr: number; cr: number; n: number }>(
+            `SELECT COALESCE(SUM(debit),0) AS dr, COALESCE(SUM(credit),0) AS cr, COUNT(*)::int AS n FROM journal_entries WHERE transaction_id = $1 AND company_id = $2`,
+            [id, companyId]
+          );
+          if (!sums.success) return { success: false, error: sums.error };
+          const s = sums.rows?.[0] as { dr: number; cr: number; n: number } | undefined;
+          const dr = Number(s?.dr) || 0;
+          const cr = Number(s?.cr) || 0;
+          if (!s || Number(s.n) === 0 || Math.abs(dr - cr) > 0.01 || dr === 0) {
+            return { success: false, error: `Cannot post unbalanced draft: debit=${dr}, credit=${cr}` };
+          }
+        }
+      }
+      // Dynamic SET: only provided fields are touched. The previous code
+      // unconditionally overwrote date/reference/description/total with
+      // possibly-undefined values (NULLing the header on partial updates).
+      const headerFields: string[] = [];
+      const headerValues: unknown[] = [];
+      let hIdx = 1;
+      if (data.date !== undefined) { headerFields.push(`date = $${hIdx++}::timestamptz`); headerValues.push(toDateString(data.date)); }
+      if (data.reference !== undefined) { headerFields.push(`reference = $${hIdx++}`); headerValues.push(data.reference); }
+      if (data.description !== undefined) { headerFields.push(`description = $${hIdx++}`); headerValues.push(data.description); }
+      if (data.totalAmount !== undefined) { headerFields.push(`total_amount = $${hIdx++}`); headerValues.push(data.totalAmount); }
+      if (nextStatus !== undefined && nextStatus !== curStatus) { headerFields.push(`status = $${hIdx++}`); headerValues.push(nextStatus); }
+      headerFields.push(`updated_at = NOW()`);
+      headerFields.push(`updated_by = $${hIdx++}`); headerValues.push(safeUserId(userId));
+      headerValues.push(id);
+      headerValues.push(companyId);
       const txResult = await adapter.query(
-        `UPDATE transactions SET date = $1::timestamptz, reference = $2, description = $3, total_amount = $4, status = $5, updated_at = NOW(), updated_by = $6 WHERE id = $7 AND company_id = $8`,
-        [toDateString(data.date), data.reference, data.description, data.totalAmount, data.status, safeUserId(userId), id, companyId]
+        `UPDATE transactions SET ${headerFields.join(', ')} WHERE id = $${hIdx} AND company_id = $${hIdx + 1} AND status = 'draft'`,
+        headerValues
       );
       if (!txResult.success) return txResult;
 
@@ -384,17 +506,59 @@ export const accountingApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
-      const safeUpdatedBy = safeUserId(userId);
-      if (safeUpdatedBy) {
-        return await adapter.query(
-          `UPDATE transactions SET status = 'posted', updated_at = NOW(), updated_by = $1 WHERE id = $2 AND company_id = $3`,
-          [safeUpdatedBy, id, companyId]
-        );
-      }
-      return await adapter.query(
-        `UPDATE transactions SET status = 'posted', updated_at = NOW() WHERE id = $1 AND company_id = $2`,
+      // Phase 0 fix: posting is draft → posted ONLY, and only when the
+      // stored lines balance. Previously ANY transaction (including an
+      // already-posted one) was "posted" again with success, and unbalanced
+      // drafts — creatable through the adapter path which never validates —
+      // entered the books silently.
+      const cur = await adapter.query<{ status: string; dr: number; cr: number; n: number; date: string }>(
+        `SELECT t.status, t.date,
+                COALESCE((SELECT SUM(je.debit) FROM journal_entries je WHERE je.transaction_id = t.id AND je.company_id = t.company_id), 0) AS dr,
+                COALESCE((SELECT SUM(je.credit) FROM journal_entries je WHERE je.transaction_id = t.id AND je.company_id = t.company_id), 0) AS cr,
+                (SELECT COUNT(*)::int FROM journal_entries je WHERE je.transaction_id = t.id AND je.company_id = t.company_id) AS n
+           FROM transactions t WHERE t.id = $1 AND t.company_id = $2`,
         [id, companyId]
       );
+      if (!cur.success) return { success: false, error: cur.error };
+      const row = cur.rows?.[0] as { status: string; dr: number; cr: number; n: number; date: string } | undefined;
+      if (!row) return { success: false, error: 'Transaction not found' };
+      if (String(row.status) !== 'draft') {
+        return { success: false, error: 'Transaction is not in draft status (already posted or cancelled)' };
+      }
+      // Phase 3: posting into a closed/filing tax period is rejected.
+      const { assertPeriodOpen: assertPostPeriod } = await import('@/modules/tax/engine');
+      const postGate = await assertPostPeriod(companyId, String(row.date || ''), adapter);
+      if (!postGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${postGate.period.startDate} – ${postGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalPost } = await import('@/modules/accounting/yearEnd');
+      const fiscalPostGate = await assertFiscalPost(companyId, String(row.date || ''), adapter);
+      if (!fiscalPostGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalPostGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      const dr = Number(row.dr) || 0;
+      const cr = Number(row.cr) || 0;
+      if (Number(row.n) === 0 || Math.abs(dr - cr) > 0.01 || dr === 0) {
+        return { success: false, error: `Cannot post unbalanced transaction: debit=${dr}, credit=${cr}` };
+      }
+      const safeUpdatedBy = safeUserId(userId);
+      // RETURNING id makes the flip verifiable: zero rows = lost race /
+      // already posted — reported honestly instead of silent success.
+      const flip = safeUpdatedBy
+        ? await adapter.query<{ id: string }>(
+          `UPDATE transactions SET status = 'posted', updated_at = NOW(), updated_by = $1 WHERE id = $2 AND company_id = $3 AND status = 'draft' RETURNING id`,
+          [safeUpdatedBy, id, companyId]
+        )
+        : await adapter.query<{ id: string }>(
+          `UPDATE transactions SET status = 'posted', updated_at = NOW() WHERE id = $1 AND company_id = $2 AND status = 'draft' RETURNING id`,
+          [id, companyId]
+        );
+      if (!flip.success) return { success: false, error: flip.error };
+      if (!flip.rows || flip.rows.length === 0) {
+        return { success: false, error: 'Transaction is not in draft status (already posted or cancelled)' };
+      }
+      return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -542,9 +706,16 @@ export const accountingApi = {
           params: [id, data.companyId, data.voucherNumber, data.date, data.customerId, data.invoiceId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
         },
       ];
-      // Posted vouchers: JE + invoice allocation + customer balance — all atomic.
-      // Draft vouchers are inert (no GL, no balance, no invoice update).
+      // Posted vouchers: JE (base) + invoice allocation + customer balance +
+      // realized FX difference — all atomic. Draft vouchers are inert.
       if (data.status === 'posted') {
+        // Phase 5: direct-posted creates skip postVoucher, so the fiscal
+        // lock is enforced here too (same dates, same message).
+        const { assertAccountingPeriodOpen: assertFiscalDirect } = await import('@/modules/accounting/yearEnd');
+        const fiscalDirectGate = await assertFiscalDirect(data.companyId, String(data.date || ''));
+        if (!fiscalDirectGate.open) {
+          return { success: false, error: `السنة المالية ${fiscalDirectGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+        }
         const je = await buildReceiptVoucherStatements(data.companyId, {
           voucherNumber: data.voucherNumber,
           date: data.date,
@@ -553,6 +724,8 @@ export const accountingApi = {
           paymentMethod: data.paymentMethod || 'cash',
           customerId: data.customerId,
           cashBoxId: data.cashBoxId,
+          // Phase 2: the treasury moves base value, not document numbers.
+          baseAmount: baseCurrencyAmount,
         });
         if (!je.success) return { success: false, error: je.error };
         statements.push(...je.statements);
@@ -564,6 +737,37 @@ export const accountingApi = {
         });
         // Allocated portion also bumps the invoice's paid amount.
         if (data.invoiceId && amountApplied > 0) {
+          // Phase 2: read the invoice for the outstanding cap AND its rate.
+          // The invoice accrues base at ITS rate; the voucher moved base at
+          // the PAYMENT rate — the gap is a realized FX difference (IAS 21).
+          const adapter = await getDbAdapter();
+          const invRes = await adapter.query(
+            `SELECT total_amount, COALESCE(paid_amount, 0) AS paid_amount, status,
+                    COALESCE(currency_code, '') AS currency_code,
+                    COALESCE(exchange_rate, 0) AS exchange_rate,
+                    COALESCE(base_currency_amount, 0) AS base_currency_amount
+               FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid`,
+            [data.invoiceId, data.companyId]
+          );
+          if (!invRes.success) return { success: false, error: invRes.error };
+          const invRow = invRes.rows?.[0] as Record<string, unknown> | undefined;
+          if (!invRow) return { success: false, error: 'Linked invoice not found' };
+          if (String(invRow.status) === 'cancelled') {
+            return { success: false, error: 'Cannot link a voucher to a cancelled invoice' };
+          }
+          // Phase 2: application is only meaningful in the invoice currency —
+          // cross-currency settlement needs an explicit FX voucher (Phase 3).
+          if (String(invRow.currency_code || '') !== String(data.currencyCode || YER_CODE)) {
+            return { success: false, error: `Voucher currency (${data.currencyCode || YER_CODE}) must match the invoice currency (${invRow.currency_code})` };
+          }
+          const invTotal = Number(invRow.total_amount) || 0;
+          const invPaid = Number(invRow.paid_amount) || 0;
+          if (amountApplied > invTotal - invPaid) {
+            return { success: false, error: `Applied amount (${amountApplied}) exceeds the invoice outstanding (${invTotal - invPaid})` };
+          }
+          const invStoredBase = Number(invRow.base_currency_amount) || 0;
+          const invRate = invTotal > 0 && invStoredBase > 0 ? invStoredBase / invTotal : (Number(invRow.exchange_rate) || 0);
+          const invoiceBaseApplied = Math.round(amountApplied * (invRate > 0 ? invRate : exchangeRate) * 100) / 100;
           statements.push({
             sql: `UPDATE sales_invoices AS i
                   SET paid_amount = COALESCE(i.paid_amount, 0) + $1,
@@ -574,8 +778,24 @@ export const accountingApi = {
                         ELSE i.status END,
                       updated_at = NOW()
                   WHERE i.id = $3::uuid AND i.company_id = $4::uuid`,
-            params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId],
+            params: [amountApplied, invoiceBaseApplied, data.invoiceId, data.companyId],
           });
+          // Realized FX difference: booked (invoice rate) vs moved (voucher rate).
+          const fxDiff = Math.round((invoiceBaseApplied - baseCurrencyApplied) * 100) / 100;
+          if (Math.abs(fxDiff) >= 0.01) {
+            const fxAccs = await resolvePostingAccounts(data.companyId, ['default_debtors', 'default_exchange_difference']);
+            if (!fxAccs.success) return { success: false, error: fxAccs.error };
+            statements.push(...buildFxDifferenceStatements(data.companyId, {
+              reference: data.voucherNumber,
+              date: data.date,
+              memo: `فرق صرف محقق - سند ${data.voucherNumber}`,
+              amount: Math.abs(fxDiff),
+              // Received LESS base value than booked → loss (Dr FX / Cr debtors);
+              // received MORE → gain (Dr debtors / Cr FX).
+              debitAccount: fxDiff > 0 ? fxAccs.ids.default_exchange_difference : fxAccs.ids.default_debtors,
+              creditAccount: fxDiff > 0 ? fxAccs.ids.default_debtors : fxAccs.ids.default_exchange_difference,
+            }));
+          }
         }
       } else if (data.invoiceId && amountApplied > 0) {
         // Draft but invoice-linked: validate linkage without touching balances.
@@ -609,6 +829,18 @@ export const accountingApi = {
       if (!row.success || !row.rows?.[0]) return { success: false, error: 'Voucher not found' };
       const v = row.rows[0] as Record<string, unknown>;
       if (String(v.status) !== 'draft') return { success: false, error: 'Voucher is not in draft status' };
+      // Phase 3: posting into a closed/filing tax period is rejected.
+      const { assertPeriodOpen: assertVoucherPeriod } = await import('@/modules/tax/engine');
+      const voucherGate = await assertVoucherPeriod(companyId, String(toDateString(v.date) || ''), adapter);
+      if (!voucherGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${voucherGate.period.startDate} – ${voucherGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalVoucher } = await import('@/modules/accounting/yearEnd');
+      const fiscalVoucherGate = await assertFiscalVoucher(companyId, String(toDateString(v.date) || ''), adapter);
+      if (!fiscalVoucherGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalVoucherGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
 
       const amount = Number(v.amount) || 0;
       // v comes from a RAW pg row: the driver parses DATE columns as
@@ -619,17 +851,93 @@ export const accountingApi = {
         voucherNumber: String(v.voucher_number || ''),
         date: toDateString(v.date) || new Date().toISOString().split('T')[0],
         amount,
+        // Phase 2: the treasury moves base value (stored base wins, else
+        // document amount — base-only vouchers post unchanged).
+        baseAmount: Number(v.base_currency_amount) || amount,
         paymentMethod: String(v.payment_method || 'cash'),
         cashBoxId: v.cash_box_id ? String(v.cash_box_id) : null,
       };
 
       const statements: Array<{ sql: string; params?: unknown[] }> = [];
+      // Phase 0 fix: a draft voucher may carry an invoice link
+      // (invoice_id + amount_applied). Posting MUST move the invoice's
+      // paid_amount/status exactly like the direct-posted create path does —
+      // otherwise the invoice stays "due" while the statement nets the
+      // receipt, and AR/AP aging contradicts the ledger.
+      const linkedInvoiceId = v.invoice_id ? String(v.invoice_id) : '';
+      const linkedApplied = Number(v.amount_applied) || 0;
+      const linkedBaseApplied = Number(v.base_currency_applied) || 0;
+      const pushInvoiceApplication = async (invoiceTable: 'sales_invoices' | 'purchase_invoices'): Promise<{ success: boolean; error?: string }> => {
+        if (!linkedInvoiceId || linkedApplied <= 0) return { success: true };
+        const inv = await adapter.query(
+          `SELECT total_amount, COALESCE(paid_amount, 0) AS paid_amount, status,
+                  COALESCE(exchange_rate, 0) AS exchange_rate,
+                  COALESCE(base_currency_amount, 0) AS base_currency_amount
+             FROM ${invoiceTable} WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [linkedInvoiceId, companyId]
+        );
+        if (!inv.success) return { success: false, error: inv.error };
+        const irow = inv.rows?.[0] as Record<string, unknown> | undefined;
+        if (!irow) return { success: false, error: 'Linked invoice not found' };
+        if (String(irow.status) === 'cancelled') {
+          return { success: false, error: 'Cannot post a voucher linked to a cancelled invoice' };
+        }
+        const outstanding = (Number(irow.total_amount) || 0) - (Number(irow.paid_amount) || 0);
+        if (linkedApplied > outstanding) {
+          return { success: false, error: `Applied amount (${linkedApplied}) exceeds the invoice outstanding (${outstanding})` };
+        }
+        // Phase 2: the invoice accrues base at ITS rate; the voucher moved
+        // base at the payment rate — the gap is realized FX (IAS 21).
+        const invTotal = Number(irow.total_amount) || 0;
+        const invStoredBase = Number(irow.base_currency_amount) || 0;
+        const invRate = invTotal > 0 && invStoredBase > 0 ? invStoredBase / invTotal : (Number(irow.exchange_rate) || 0);
+        const invoiceBaseApplied = Math.round(linkedApplied * (invRate > 0 ? invRate : 1) * 100) / 100;
+        statements.push({
+          sql: `UPDATE ${invoiceTable} AS i
+                SET paid_amount = COALESCE(i.paid_amount, 0) + $1,
+                    base_currency_paid = COALESCE(i.base_currency_paid, 0) + $2,
+                    status = CASE
+                      WHEN COALESCE(i.paid_amount, 0) + $1 >= i.total_amount AND i.status NOT IN ('cancelled', 'paid') THEN 'paid'
+                      WHEN COALESCE(i.paid_amount, 0) + $1 > 0 AND i.status NOT IN ('cancelled', 'paid') THEN 'partially_paid'
+                      ELSE i.status END,
+                    updated_at = NOW()
+                WHERE i.id = $3::uuid AND i.company_id = $4::uuid`,
+          params: [linkedApplied, invoiceBaseApplied, linkedInvoiceId, companyId],
+        });
+        const fxDiff = Math.round((invoiceBaseApplied - linkedBaseApplied) * 100) / 100;
+        if (Math.abs(fxDiff) >= 0.01) {
+          const partyKey = type === 'receipt' ? 'default_debtors' : 'default_creditors';
+          const fxAccs = await resolvePostingAccounts(companyId, [partyKey, 'default_exchange_difference']);
+          if (!fxAccs.success) return { success: false, error: fxAccs.error };
+          const partyAcc = fxAccs.ids[partyKey];
+          const fxAcc = fxAccs.ids.default_exchange_difference;
+          // Receipt: received less than booked → Dr FX / Cr debtors (and mirror).
+          // Payment: relieved more than paid → Dr creditors / Cr FX (and mirror).
+          const receipt = type === 'receipt';
+          const debitAccount = receipt
+            ? (fxDiff > 0 ? fxAcc : partyAcc)
+            : (fxDiff > 0 ? partyAcc : fxAcc);
+          const creditAccount = receipt
+            ? (fxDiff > 0 ? partyAcc : fxAcc)
+            : (fxDiff > 0 ? fxAcc : partyAcc);
+          statements.push(...buildFxDifferenceStatements(companyId, {
+            reference: String(v.voucher_number || ''),
+            date: typeof common.date === 'string' ? common.date : new Date().toISOString().split('T')[0],
+            memo: `فرق صرف محقق - سند ${String(v.voucher_number || '')}`,
+            amount: Math.abs(fxDiff),
+            debitAccount,
+            creditAccount,
+          }));
+        }
+        return { success: true };
+      };
       if (type === 'receipt') {
         const customerId = v.customer_id ? String(v.customer_id) : '';
         const je = await buildReceiptVoucherStatements(companyId, {
           ...common,
           customerName: '',
           customerId,
+          baseAmount: common.baseAmount,
         });
         if (!je.success) return { success: false, error: je.error };
         statements.push(...je.statements);
@@ -639,7 +947,26 @@ export const accountingApi = {
             params: [amount, customerId, companyId],
           });
         }
+        const applied = await pushInvoiceApplication('sales_invoices');
+        if (!applied.success) return applied;
       } else {
+        // Phase 4: same treasury floor as direct-posted payments.
+        const {
+          getStockPolicies: getPostPayPolicies, getCashBoxGlBalance: getPostPayBox, auditOverride: auditPostPay,
+        } = await import('@/core/utils/stockPolicy');
+        const postPayPolicies = await getPostPayPolicies(companyId, adapter);
+        const postPayBalance = await getPostPayBox(companyId, common.cashBoxId, adapter);
+        if (postPayBalance !== null && postPayBalance - common.baseAmount < 0) {
+          const msg = `رصيد الخزينة لا يكفي للصرف (المتاح ${postPayBalance} — المطلوب ${common.baseAmount})`;
+          if (!postPayPolicies.allowNegativeCashbox) {
+            return { success: false, error: msg };
+          }
+          await auditPostPay({
+            companyId, userId: safeUserId(userId), kind: 'negative-cashbox',
+            recordId: id, label: `سند صرف ${common.voucherNumber}`,
+            detail: { balance: postPayBalance, amount: common.baseAmount },
+          });
+        }
         const supplierId = v.supplier_id ? String(v.supplier_id) : '';
         const expenseAccountId = v.expense_account_id ? String(v.expense_account_id) : undefined;
         const je = await buildPaymentVoucherStatements(companyId, {
@@ -647,6 +974,7 @@ export const accountingApi = {
           supplierName: '',
           supplierId,
           expenseAccountId,
+          baseAmount: common.baseAmount,
         });
         if (!je.success) return { success: false, error: je.error };
         statements.push(...je.statements);
@@ -656,6 +984,8 @@ export const accountingApi = {
             params: [amount, supplierId, companyId],
           });
         }
+        const applied = await pushInvoiceApplication('purchase_invoices');
+        if (!applied.success) return applied;
       }
       statements.push({
         sql: `UPDATE ${table} SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
@@ -684,8 +1014,28 @@ export const accountingApi = {
       }
       const cv = current.rows[0] as Record<string, unknown>;
       const currentStatus = String(cv.status);
-      if (currentStatus === 'posted' && (data.invoiceId !== undefined || data.amountApplied !== undefined)) {
-        return { success: false, error: 'Cannot modify invoice link or amount applied on a posted voucher.' };
+      // Phase 5: reversed vouchers are terminal — the mirror JE already
+      // netted every effect. Only reverseVoucher may set this status.
+      if (currentStatus === 'reversed') {
+        return { success: false, error: 'Cannot modify a reversed voucher — it is terminal.' };
+      }
+      if (data.status === 'reversed') {
+        return { success: false, error: 'Reversed status is set only by the reversal workflow.' };
+      }
+      // Phase 0 fix: a posted voucher already moved GL + party balance +
+      // invoice paid_amount. Editing ANY financial term (amount, currency,
+      // rate, party, treasury, method, date, link) without reversing those
+      // effects corrupts all three. Posted vouchers are immutable except
+      // for notes/check references/status — correct them with a reversal.
+      if (currentStatus === 'posted' && (
+        data.invoiceId !== undefined || data.amountApplied !== undefined ||
+        data.amount !== undefined || data.currencyCode !== undefined ||
+        data.exchangeRate !== undefined || data.baseCurrencyAmount !== undefined ||
+        data.baseCurrencyApplied !== undefined || data.customerId !== undefined ||
+        data.cashBoxId !== undefined || data.paymentMethod !== undefined ||
+        data.date !== undefined
+      )) {
+        return { success: false, error: 'Cannot modify a posted voucher — reverse it with a reversal voucher instead.' };
       }
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -731,6 +1081,17 @@ export const accountingApi = {
         return { success: false, error: 'Voucher not found' };
       }
       const v = check.rows[0] as Record<string, unknown>;
+      // Phase 0 fix: a posted voucher already moved GL + party balance
+      // (+ invoice paid_amount when linked). Deleting it leaves an orphan JE
+      // and a drifted balance — posted vouchers are reversed, never deleted.
+      if (String(v.status) === 'posted') {
+        return { success: false, error: 'Cannot delete a posted voucher — reverse it with a reversal voucher instead.' };
+      }
+      // Phase 5: reversed vouchers carry a mirror JE — deleting them
+      // orphans it. Terminal means terminal.
+      if (String(v.status) === 'reversed') {
+        return { success: false, error: 'Cannot delete a reversed voucher — it is terminal.' };
+      }
       const amountApplied = Number(v.amount_applied) || 0;
       if (amountApplied > 0) {
         return { success: false, error: 'Cannot delete voucher with applied payments. Reverse the payment first by creating a reversal voucher.' };
@@ -872,9 +1233,35 @@ export const accountingApi = {
           params: [id, data.companyId, data.voucherNumber, data.date, data.supplierId || null, data.invoiceId || null, data.expenseAccountId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
         },
       ];
-      // Posted vouchers: JE + invoice allocation + supplier balance — all atomic.
-      // Draft vouchers are inert.
+      // Posted vouchers: JE (base) + invoice allocation + supplier balance +
+      // realized FX difference — all atomic. Draft vouchers are inert.
       if (data.status === 'posted') {
+        // Phase 5: direct-posted creates skip postVoucher, so the fiscal
+        // lock is enforced here too (same dates, same message).
+        const { assertAccountingPeriodOpen: assertFiscalPayDirect } = await import('@/modules/accounting/yearEnd');
+        const fiscalPayDirectGate = await assertFiscalPayDirect(data.companyId, String(data.date || ''));
+        if (!fiscalPayDirectGate.open) {
+          return { success: false, error: `السنة المالية ${fiscalPayDirectGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+        }
+        // Phase 4: a payment voucher drains the treasury — refuse (or audit)
+        // driving the cash-box GL balance below zero.
+        const adapter = await getDbAdapter();
+        const {
+          getStockPolicies: getPayPolicies, getCashBoxGlBalance: getPayBoxBalance, auditOverride: auditPay,
+        } = await import('@/core/utils/stockPolicy');
+        const payPolicies = await getPayPolicies(data.companyId, adapter);
+        const payBoxBalance = await getPayBoxBalance(data.companyId, data.cashBoxId, adapter);
+        if (payBoxBalance !== null && payBoxBalance - baseCurrencyAmount < 0) {
+          const msg = `رصيد الخزينة لا يكفي للصرف (المتاح ${payBoxBalance} — المطلوب ${baseCurrencyAmount})`;
+          if (!payPolicies.allowNegativeCashbox) {
+            return { success: false, error: msg };
+          }
+          await auditPay({
+            companyId: data.companyId, userId: safeUserId(userId), kind: 'negative-cashbox',
+            recordId: id, label: `سند صرف ${data.voucherNumber}`,
+            detail: { balance: payBoxBalance, amount: baseCurrencyAmount },
+          });
+        }
         const je = await buildPaymentVoucherStatements(data.companyId, {
           voucherNumber: data.voucherNumber,
           date: data.date,
@@ -884,6 +1271,8 @@ export const accountingApi = {
           amount: data.amount,
           paymentMethod: data.paymentMethod || 'cash',
           cashBoxId: data.cashBoxId,
+          // Phase 2: the treasury moves base value, not document numbers.
+          baseAmount: baseCurrencyAmount,
         });
         if (!je.success) return { success: false, error: je.error };
         statements.push(...je.statements);
@@ -895,6 +1284,34 @@ export const accountingApi = {
           });
         }
         if (data.invoiceId && amountApplied > 0) {
+          // Phase 2: same invoice-rate accrual + outstanding cap + realized
+          // FX difference as the receipt path (mirrored for payables).
+          const adapter = await getDbAdapter();
+          const invRes = await adapter.query(
+            `SELECT total_amount, COALESCE(paid_amount, 0) AS paid_amount, status,
+                    COALESCE(currency_code, '') AS currency_code,
+                    COALESCE(exchange_rate, 0) AS exchange_rate,
+                    COALESCE(base_currency_amount, 0) AS base_currency_amount
+               FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid`,
+            [data.invoiceId, data.companyId]
+          );
+          if (!invRes.success) return { success: false, error: invRes.error };
+          const invRow = invRes.rows?.[0] as Record<string, unknown> | undefined;
+          if (!invRow) return { success: false, error: 'Linked invoice not found' };
+          if (String(invRow.status) === 'cancelled') {
+            return { success: false, error: 'Cannot link a voucher to a cancelled invoice' };
+          }
+          if (String(invRow.currency_code || '') !== String(data.currencyCode || YER_CODE)) {
+            return { success: false, error: `Voucher currency (${data.currencyCode || YER_CODE}) must match the invoice currency (${invRow.currency_code})` };
+          }
+          const invTotal = Number(invRow.total_amount) || 0;
+          const invPaid = Number(invRow.paid_amount) || 0;
+          if (amountApplied > invTotal - invPaid) {
+            return { success: false, error: `Applied amount (${amountApplied}) exceeds the invoice outstanding (${invTotal - invPaid})` };
+          }
+          const invStoredBase = Number(invRow.base_currency_amount) || 0;
+          const invRate = invTotal > 0 && invStoredBase > 0 ? invStoredBase / invTotal : (Number(invRow.exchange_rate) || 0);
+          const invoiceBaseApplied = Math.round(amountApplied * (invRate > 0 ? invRate : exchangeRate) * 100) / 100;
           statements.push({
             sql: `UPDATE purchase_invoices AS i
                   SET paid_amount = COALESCE(i.paid_amount, 0) + $1,
@@ -905,8 +1322,23 @@ export const accountingApi = {
                         ELSE i.status END,
                       updated_at = NOW()
                   WHERE i.id = $3::uuid AND i.company_id = $4::uuid`,
-            params: [amountApplied, baseCurrencyApplied, data.invoiceId, data.companyId],
+            params: [amountApplied, invoiceBaseApplied, data.invoiceId, data.companyId],
           });
+          // Relieved MORE base value than paid → gain (Dr creditors / Cr FX);
+          // paid MORE → loss (Dr FX / Cr creditors).
+          const fxDiff = Math.round((invoiceBaseApplied - baseCurrencyApplied) * 100) / 100;
+          if (Math.abs(fxDiff) >= 0.01) {
+            const fxAccs = await resolvePostingAccounts(data.companyId, ['default_creditors', 'default_exchange_difference']);
+            if (!fxAccs.success) return { success: false, error: fxAccs.error };
+            statements.push(...buildFxDifferenceStatements(data.companyId, {
+              reference: data.voucherNumber,
+              date: data.date,
+              memo: `فرق صرف محقق - سند ${data.voucherNumber}`,
+              amount: Math.abs(fxDiff),
+              debitAccount: fxDiff > 0 ? fxAccs.ids.default_creditors : fxAccs.ids.default_exchange_difference,
+              creditAccount: fxDiff > 0 ? fxAccs.ids.default_exchange_difference : fxAccs.ids.default_creditors,
+            }));
+          }
         }
       } else if (data.invoiceId && amountApplied > 0) {
         // Draft but invoice-linked: no-op — invoice/balance moves happen only when posted.
@@ -935,13 +1367,32 @@ export const accountingApi = {
       }
       const cv = current.rows[0] as Record<string, unknown>;
       const currentStatus = String(cv.status);
-      if (currentStatus === 'posted' && (data.invoiceId !== undefined || data.amountApplied !== undefined)) {
-        return { success: false, error: 'Cannot modify invoice link or amount applied on a posted voucher.' };
+      // Phase 5: reversed vouchers are terminal (see updateReceiptVoucher).
+      if (currentStatus === 'reversed') {
+        return { success: false, error: 'Cannot modify a reversed voucher — it is terminal.' };
+      }
+      if (data.status === 'reversed') {
+        return { success: false, error: 'Reversed status is set only by the reversal workflow.' };
+      }
+      // Phase 0 fix: same posted-voucher immutability as receipts (see
+      // updateReceiptVoucher) — financial terms need a reversal, not an edit.
+      if (currentStatus === 'posted' && (
+        data.invoiceId !== undefined || data.amountApplied !== undefined ||
+        data.amount !== undefined || data.currencyCode !== undefined ||
+        data.exchangeRate !== undefined || data.baseCurrencyAmount !== undefined ||
+        data.baseCurrencyApplied !== undefined || data.supplierId !== undefined ||
+        data.expenseAccountId !== undefined || data.cashBoxId !== undefined ||
+        data.paymentMethod !== undefined || data.date !== undefined
+      )) {
+        return { success: false, error: 'Cannot modify a posted voucher — reverse it with a reversal voucher instead.' };
       }
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;
-      if (data.date !== undefined) { fields.push(`date = ${idx++}::date`); values.push(toDateString(data.date)); }
+      // Phase 0 fix: missing `$` before the placeholder injected the row
+      // number as a date literal (e.g. `date = 1::date`) — every payment
+      // voucher date edit failed (or worse). Now parameterized like receipts.
+      if (data.date !== undefined) { fields.push(`date = $${idx++}::date`); values.push(toDateString(data.date)); }
       if (data.supplierId !== undefined) { fields.push(`supplier_id = $${idx++}`); values.push(data.supplierId || null); }
       if (data.invoiceId !== undefined) { fields.push(`invoice_id = $${idx++}`); values.push(data.invoiceId || null); }
       if (data.expenseAccountId !== undefined) { fields.push(`expense_account_id = $${idx++}`); values.push(data.expenseAccountId || null); }
@@ -983,6 +1434,15 @@ export const accountingApi = {
         return { success: false, error: 'Voucher not found' };
       }
       const v = check.rows[0] as Record<string, unknown>;
+      // Phase 0 fix: same posted-voucher protection as receipts — a posted
+      // payment already moved GL + supplier balance (+ invoice paid_amount).
+      if (String(v.status) === 'posted') {
+        return { success: false, error: 'Cannot delete a posted voucher — reverse it with a reversal voucher instead.' };
+      }
+      // Phase 5: reversed vouchers carry a mirror JE — terminal, like receipts.
+      if (String(v.status) === 'reversed') {
+        return { success: false, error: 'Cannot delete a reversed voucher — it is terminal.' };
+      }
       const amountApplied = Number(v.amount_applied) || 0;
       if (amountApplied > 0) {
         return { success: false, error: 'Cannot delete voucher with applied payments. Reverse the payment first by creating a reversal voucher.' };
@@ -1003,6 +1463,177 @@ export const accountingApi = {
         return { success: false, error: 'Cannot delete voucher with linked records. Cancel it instead.' };
       }
       return { success: false, error: msg };
+    }
+  },
+
+  // ─── Foreign-exchange revaluation (Phase 2 — IAS 21) ──────────────────────
+  /**
+   * Revalue open foreign-currency invoices at CURRENT currency-table rates.
+   * Books ONE aggregate JE (Dr/Cr debtors/creditors vs 52902) for the
+   * INCREMENTAL move since each invoice's last revaluation (or its own rate
+   * when never revalued), then stamps last_reval_rate — repeated runs never
+   * double-book. Base-currency invoices are untouched by construction.
+   */
+  async revalueForeignBalances(
+    companyId: string,
+    _userId: string,
+    date?: string
+  ): Promise<{
+    success: boolean;
+    data?: { reference: string; lines: number; gain: number; loss: number; currencies: string[] };
+    error?: string;
+  }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const revalDate = toDateString(date) || new Date().toISOString().split('T')[0];
+
+      // Current rates + base currency resolution.
+      const curRes = await adapter.query<{ code: string; exchange_rate: number; is_default: boolean }>(
+        `SELECT code, COALESCE(exchange_rate, 0) AS exchange_rate, COALESCE(is_default, false) AS is_default
+           FROM currencies WHERE company_id = $1 AND COALESCE(is_active, true) = true`,
+        [companyId]
+      );
+      if (!curRes.success) return { success: false, error: curRes.error };
+      const currencies = (curRes.rows || []) as { code: string; exchange_rate: number; is_default: boolean }[];
+      const baseRow = currencies.find((c) => c.is_default) || currencies.find((c) => String(c.code).toUpperCase() === YER_CODE);
+      const baseCode = baseRow ? String(baseRow.code) : YER_CODE;
+      const rates = new Map<string, number>();
+      for (const c of currencies) {
+        const code = String(c.code);
+        const rate = Number(c.exchange_rate) || 0;
+        if (code && code !== baseCode && rate > 0) rates.set(code, rate);
+      }
+      if (rates.size === 0) {
+        return { success: true, data: { reference: '', lines: 0, gain: 0, loss: 0, currencies: [] } };
+      }
+
+      // Open foreign invoices on both sides.
+      interface OpenInv {
+        id: string;
+        invoice_number: string;
+        currency_code: string;
+        out: number;
+        total: number;
+        rate: number;
+        base: number;
+        last: number | null;
+      }
+      const sides: Array<{ table: string; numberColumn: string; party: 'customer' | 'supplier' }> = [
+        { table: 'sales_invoices', numberColumn: 'invoice_number', party: 'customer' },
+        { table: 'purchase_invoices', numberColumn: 'invoice_number', party: 'supplier' },
+      ];
+      const open: Array<OpenInv & { side: 'sales' | 'purchase' }> = [];
+      for (const s of sides) {
+        const r = await adapter.query(
+          `SELECT id, ${s.numberColumn} AS invoice_number, currency_code,
+                  total_amount,
+                  (total_amount - COALESCE(paid_amount, 0)) AS out,
+                  COALESCE(exchange_rate, 0) AS exchange_rate,
+                  COALESCE(base_currency_amount, 0) AS base_currency_amount,
+                  last_reval_rate
+             FROM ${s.table}
+            WHERE company_id = $1::uuid AND status IN ('posted', 'partially_paid')
+              AND currency_code <> $2
+              AND (total_amount - COALESCE(paid_amount, 0)) > 0`,
+          [companyId, baseCode]
+        );
+        if (!r.success) return { success: false, error: r.error };
+        for (const row of (r.rows || []) as Record<string, unknown>[]) {
+          open.push({
+            id: String(row.id),
+            invoice_number: String(row.invoice_number || ''),
+            currency_code: String(row.currency_code || ''),
+            out: Number(row.out) || 0,
+            total: Number(row.total_amount) || 0,
+            rate: Number(row.exchange_rate) || 0,
+            base: Number(row.base_currency_amount) || 0,
+            last: row.last_reval_rate === null || row.last_reval_rate === undefined ? null : Number(row.last_reval_rate),
+            side: s.table === 'sales_invoices' ? 'sales' : 'purchase',
+          });
+        }
+      }
+
+      // Incremental differences vs anchor (last reval, else invoice rate).
+      const moves: Array<{ inv: (typeof open)[0]; diff: number; current: number }> = [];
+      const touchedCurrencies = new Set<string>();
+      for (const inv of open) {
+        const current = rates.get(inv.currency_code);
+        if (!current) continue; // no current rate published — skip honestly
+        // Anchor: last revaluation rate when present, else the invoice's own
+        // rate — stored FULL base ÷ FULL total (never base ÷ outstanding,
+        // which drifts after partial payments), else the header rate column.
+        const anchorRate = inv.last !== null && inv.last > 0
+          ? inv.last
+          : (inv.base > 0 && inv.total > 0 ? inv.base / inv.total : inv.rate);
+        if (!(anchorRate > 0)) continue;
+        const diff = Math.round(inv.out * (current - anchorRate) * 100) / 100;
+        if (Math.abs(diff) < 0.01) continue;
+        moves.push({ inv, diff, current });
+        touchedCurrencies.add(inv.currency_code);
+      }
+      if (moves.length === 0) {
+        return { success: true, data: { reference: '', lines: 0, gain: 0, loss: 0, currencies: [] } };
+      }
+
+      const fxAccs = await resolvePostingAccounts(companyId, ['default_debtors', 'default_creditors', 'default_exchange_difference']);
+      if (!fxAccs.success) return { success: false, error: fxAccs.error };
+      const { buildJournalEntryStatement } = await import('@/core/database/tx');
+      const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [];
+      let gain = 0;
+      let loss = 0;
+      const statements: Array<{ sql: string; params?: unknown[] }> = [];
+      for (const m of moves) {
+        const abs = Math.abs(m.diff);
+        if (m.inv.side === 'sales') {
+          // Receivable worth more → gain (Dr debtors / Cr FX); worth less → loss.
+          if (m.diff > 0) {
+            entries.push({ accountId: fxAccs.ids.default_debtors, debit: abs, credit: 0, memo: `إعادة تقييم ${m.inv.invoice_number}` });
+            entries.push({ accountId: fxAccs.ids.default_exchange_difference, debit: 0, credit: abs, memo: `مكاسب صرف ${m.inv.invoice_number}` });
+            gain = Math.round((gain + abs) * 100) / 100;
+          } else {
+            entries.push({ accountId: fxAccs.ids.default_exchange_difference, debit: abs, credit: 0, memo: `خسائر صرف ${m.inv.invoice_number}` });
+            entries.push({ accountId: fxAccs.ids.default_debtors, debit: 0, credit: abs, memo: `إعادة تقييم ${m.inv.invoice_number}` });
+            loss = Math.round((loss + abs) * 100) / 100;
+          }
+        } else {
+          // Owe more → loss (Dr FX / Cr creditors); owe less → gain.
+          if (m.diff > 0) {
+            entries.push({ accountId: fxAccs.ids.default_exchange_difference, debit: abs, credit: 0, memo: `خسائر صرف ${m.inv.invoice_number}` });
+            entries.push({ accountId: fxAccs.ids.default_creditors, debit: 0, credit: abs, memo: `إعادة تقييم ${m.inv.invoice_number}` });
+            loss = Math.round((loss + abs) * 100) / 100;
+          } else {
+            entries.push({ accountId: fxAccs.ids.default_creditors, debit: abs, credit: 0, memo: `إعادة تقييم ${m.inv.invoice_number}` });
+            entries.push({ accountId: fxAccs.ids.default_exchange_difference, debit: 0, credit: abs, memo: `مكاسب صرف ${m.inv.invoice_number}` });
+            gain = Math.round((gain + abs) * 100) / 100;
+          }
+        }
+        // Stamp the new anchor so the next run measures only the next move.
+        statements.push({
+          sql: `UPDATE ${m.inv.side === 'sales' ? 'sales_invoices' : 'purchase_invoices'} SET last_reval_rate = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+          params: [m.current, m.inv.id, companyId],
+        });
+      }
+      const total = Math.round(entries.reduce((s, e) => s + e.debit, 0) * 100) / 100;
+      const reference = `FX-${revalDate}`;
+      statements.unshift(
+        buildJournalEntryStatement(companyId, {
+          reference,
+          description: `قيد تلقائي - إعادة تقييم أرصدة العملات ${revalDate}`,
+          date: revalDate,
+          totalAmount: total,
+          entries,
+        }) as { sql: string; params?: unknown[] }
+      );
+      const result = await runTransaction(statements);
+      if (!result.success) return { success: false, error: result.error };
+      return {
+        success: true,
+        data: { reference, lines: moves.length, gain, loss, currencies: [...touchedCurrencies] },
+      };
+    } catch (e) {
+      return { success: false, error: String(e) };
     }
   },
 
@@ -1103,6 +1734,186 @@ export const accountingApi = {
       return { success: true, data: accounts };
     } catch (e) {
       return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * IAS 7 indirect cash flow, derived entirely from posted journal entries
+   * (Phase 5 rewrite — the old page mixed P&L movements with balance-sheet
+   * snapshots and name/code heuristics):
+   * - Operating: net profit (P&L movement) + depreciation add-back (JE
+   *   movement on depreciation expense accounts) ± working-capital changes
+   *   (begin-vs-end signed balances on 112/211/113/213/215).
+   * - Investing: capex (Dr movement on 12101) vs disposal proceeds (treasury
+   *   Dr legs inside DSP-* transactions).
+    * - Financing: delta equity (3%) excluding non-cash CLS/OPENING refs.
+    * - Reconciliation: computed net change vs actual delta treasury (111%).
+    */
+  async getCashFlow(companyId: string, fromDate: string, toDate: string): Promise<{ success: boolean; data?: CashFlowStatement; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const dayRe = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dayRe.test(fromDate) || !dayRe.test(toDate) || fromDate > toDate) {
+        return { success: false, error: 'Invalid date range' };
+      }
+      const adapter = await getDbAdapter();
+      const num = (v: unknown) => Number(v) || 0;
+      // Signed BS balance of code-prefix groups as of a date (inclusive).
+      const bsAsOf = async (prefixes: string[], asOf: string, excludeRefs: string[] = []): Promise<number> => {
+        const like = prefixes.map((_p, i) => `a.code LIKE $${i + 4}`).join(' OR ');
+        const excl = excludeRefs.map((_r, i) => `AND t.reference NOT LIKE $${prefixes.length + 4 + i}`).join(' ');
+        const res = await adapter.query(
+          `SELECT COALESCE(SUM(je.debit - je.credit), 0) AS bal
+             FROM journal_entries je
+             JOIN transactions t ON t.id = je.transaction_id
+             JOIN accounts a ON a.id = je.account_id
+            WHERE je.company_id = $1::uuid AND t.status = 'posted'
+              AND t.date < ($2::date + INTERVAL '1 day')
+              AND (${like}) ${excl}`,
+          [companyId, asOf, ...prefixes.map((p) => `${p}%`), ...excludeRefs.map((r) => `${r}%`)]
+        );
+        if (!res.success) throw new Error(res.error);
+        return num((res.rows?.[0] as Record<string, unknown> | undefined)?.bal);
+      };
+      // Dr/Cr movement inside [from, to] for code-prefix groups.
+      const movement = async (prefixes: string[], extraWhere = '', extraParams: unknown[] = []): Promise<{ dr: number; cr: number }> => {
+        const like = prefixes.map((_p, i) => `a.code LIKE $${i + 4}`).join(' OR ');
+        const res = await adapter.query(
+          `SELECT COALESCE(SUM(je.debit), 0) AS dr, COALESCE(SUM(je.credit), 0) AS cr
+             FROM journal_entries je
+             JOIN transactions t ON t.id = je.transaction_id
+             JOIN accounts a ON a.id = je.account_id
+            WHERE je.company_id = $1::uuid AND t.status = 'posted'
+              AND t.date >= $2::date AND t.date < ($3::date + INTERVAL '1 day')
+              AND (${like}) ${extraWhere}`,
+          [companyId, fromDate, toDate, ...prefixes.map((p) => `${p}%`), ...extraParams]
+        );
+        if (!res.success) throw new Error(res.error);
+        const row = (res.rows?.[0] as Record<string, unknown> | undefined) || {};
+        return { dr: num(row.dr), cr: num(row.cr) };
+      };
+      const line = (key: string, amount: number) => ({ key, amount: Math.round(amount * 100) / 100 });
+      // Day before a date (local-time math — opening balances are cumulative
+      // "everything before from", so begin = bsAsOf(day before from)).
+      const prevDay = (day: string): string => {
+        const d = new Date(`${day}T00:00:00`);
+        d.setDate(d.getDate() - 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      };
+
+      // ── Operating ──
+      const rev = await movement(['4']);
+      const exp = await movement(['5']);
+      const netProfit = (rev.cr - rev.dr) - (exp.dr - exp.cr);
+      // Depreciation add-back: configured account + legacy 526/527 codes.
+      const depIds: string[] = [];
+      const depKey = await adapter.query(
+        `SELECT account_id FROM default_accounts WHERE company_id = $1::uuid AND function_key = 'default_depreciation_expense'`,
+        [companyId]
+      );
+      if (!depKey.success) throw new Error(depKey.error);
+      const depId = (depKey.rows?.[0] as Record<string, unknown> | undefined)?.account_id;
+      if (depId) depIds.push(String(depId));
+      const depMove = await movement(['526', '527']);
+      let depAddBack = depMove.dr - depMove.cr;
+      if (depId) {
+        const one = await adapter.query(
+          `SELECT COALESCE(SUM(je.debit - je.credit), 0) AS bal
+             FROM journal_entries je JOIN transactions t ON t.id = je.transaction_id
+            WHERE je.company_id = $1::uuid AND t.status = 'posted'
+              AND t.date >= $2::date AND t.date < ($3::date + INTERVAL '1 day')
+              AND je.account_id = $4::uuid`,
+          [companyId, fromDate, toDate, depId]
+        );
+        if (!one.success) throw new Error(one.error);
+        const only = num((one.rows?.[0] as Record<string, unknown> | undefined)?.bal);
+        // The configured account may live outside 526/527 — take the union
+        // without double-counting it.
+        const overlap = await adapter.query(
+          `SELECT COALESCE(SUM(je.debit - je.credit), 0) AS bal
+             FROM journal_entries je JOIN transactions t ON t.id = je.transaction_id
+             JOIN accounts a ON a.id = je.account_id
+            WHERE je.company_id = $1::uuid AND t.status = 'posted'
+              AND t.date >= $2::date AND t.date < ($3::date + INTERVAL '1 day')
+              AND je.account_id = $4::uuid AND (a.code LIKE '526%' OR a.code LIKE '527%')`,
+          [companyId, fromDate, toDate, depId]
+        );
+        if (!overlap.success) throw new Error(overlap.error);
+        depAddBack = depAddBack + only - num((overlap.rows?.[0] as Record<string, unknown> | undefined)?.bal);
+      }
+      const arEnd = await bsAsOf(['112'], toDate);
+      const arBegin = await bsAsOf(['112'], prevDay(fromDate));
+      const apEnd = await bsAsOf(['211'], toDate);
+      const apBegin = await bsAsOf(['211'], prevDay(fromDate));
+      const invEnd = await bsAsOf(['113'], toDate);
+      const invBegin = await bsAsOf(['113'], prevDay(fromDate));
+      const vatEnd = await bsAsOf(['213'], toDate);
+      const vatBegin = await bsAsOf(['213'], prevDay(fromDate));
+      const payEnd = await bsAsOf(['215'], toDate);
+      const payBegin = await bsAsOf(['215'], prevDay(fromDate));
+      const operating = [
+        line('netProfit', netProfit),
+        line('depreciation', depAddBack),
+        line('receivablesChange', -(arEnd - arBegin)),
+        line('payablesChange', apEnd - apBegin),
+        line('inventoryChange', -(invEnd - invBegin)),
+        line('vatChange', vatEnd - vatBegin),
+        line('payrollChange', payEnd - payBegin),
+      ].filter((l) => Math.abs(l.amount) >= 0.005);
+      const operatingTotal = Math.round(operating.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+
+      // ── Investing ──
+      const capexMove = await movement(['12101']);
+      const capex = capexMove.dr - capexMove.cr;
+      const procRes = await adapter.query(
+        `SELECT COALESCE(SUM(je.debit), 0) AS inflow
+           FROM journal_entries je
+           JOIN transactions t ON t.id = je.transaction_id
+           JOIN accounts a ON a.id = je.account_id
+          WHERE je.company_id = $1::uuid AND t.status = 'posted'
+            AND t.date >= $2::date AND t.date < ($3::date + INTERVAL '1 day')
+            AND t.reference LIKE 'DSP-%' AND a.code LIKE '111%'`,
+        [companyId, fromDate, toDate]
+      );
+      if (!procRes.success) throw new Error(procRes.error);
+      const proceeds = num((procRes.rows?.[0] as Record<string, unknown> | undefined)?.inflow);
+      const investing = [
+        line('capex', -capex),
+        line('proceeds', proceeds),
+      ].filter((l) => Math.abs(l.amount) >= 0.005);
+      const investingTotal = Math.round(investing.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+
+      // ── Financing: Δ equity excluding non-cash allocations ──
+      const eqEnd = await bsAsOf(['3'], toDate, ['CLS-', 'OPENING-']);
+      const eqBegin = await bsAsOf(['3'], prevDay(fromDate), ['CLS-', 'OPENING-']);
+      const financing = [line('equityChange', eqEnd - eqBegin)].filter((l) => Math.abs(l.amount) >= 0.005);
+      const financingTotal = Math.round(financing.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+
+      const netChange = Math.round((operatingTotal + investingTotal + financingTotal) * 100) / 100;
+      const cashEnd = await bsAsOf(['111'], toDate);
+      const cashBegin = await bsAsOf(['111'], prevDay(fromDate));
+      const cashChange = Math.round((cashEnd - cashBegin) * 100) / 100;
+      return {
+        success: true,
+        data: {
+          from: fromDate,
+          to: toDate,
+          operating,
+          operatingTotal,
+          investing,
+          investingTotal,
+          financing,
+          financingTotal,
+          netChange,
+          cashBegin: Math.round(cashBegin * 100) / 100,
+          cashEnd: Math.round(cashEnd * 100) / 100,
+          cashChange,
+          unexplained: Math.round((netChange - cashChange) * 100) / 100,
+        },
+      };
+    } catch (e) {
+      return { success: false, error: String(e instanceof Error ? e.message : e) };
     }
   },
 
@@ -1251,7 +2062,40 @@ export const accountingApi = {
       const table = voucherType === 'receipt' ? 'sales_invoices' : 'purchase_invoices';
       const partyTable = voucherType === 'receipt' ? 'customers' : 'suppliers';
       const partyIdColumn = voucherType === 'receipt' ? 'customer_id' : 'supplier_id';
-      const balanceDelta = voucherType === 'receipt' ? -amountApplied : amountApplied;
+      // Phase 0 fix: a payment REDUCES what we owe the supplier, exactly as
+      // it reduces what the customer owes us. The old `+amountApplied` for
+      // payments inverted AP (every live path decrements supplier balance).
+      const balanceDelta = -amountApplied;
+      // Phase 0 fix: cap the application at the invoice outstanding. Without
+      // this a voucher could push paid_amount above total_amount and flip a
+      // partially-paid invoice to "paid" while money is still due.
+      const adapter = await getDbAdapter();
+      const invCheck = await adapter.query(
+        `SELECT total_amount, COALESCE(paid_amount, 0) AS paid_amount, status,
+                COALESCE(exchange_rate, 0) AS exchange_rate,
+                COALESCE(base_currency_amount, 0) AS base_currency_amount
+           FROM ${table} WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [invoiceId, companyId]
+      );
+      if (!invCheck.success) return { success: false, error: invCheck.error };
+      const invRow = invCheck.rows?.[0] as Record<string, unknown> | undefined;
+      if (!invRow) return { success: false, error: 'Invoice not found' };
+      if (String(invRow.status) === 'cancelled') {
+        return { success: false, error: 'Cannot apply a payment to a cancelled invoice' };
+      }
+      const outstanding = (Number(invRow.total_amount) || 0) - (Number(invRow.paid_amount) || 0);
+      if (amountApplied > outstanding) {
+        return { success: false, error: `Applied amount (${amountApplied}) exceeds the invoice outstanding (${outstanding})` };
+      }
+      // Phase 2: accrue base at the INVOICE rate (the payment-rate base is
+      // the caller's responsibility via a realized-FX voucher, as in the
+      // create/post paths above).
+      const invTotal = Number(invRow.total_amount) || 0;
+      const invStoredBase = Number(invRow.base_currency_amount) || 0;
+      const invRate = invTotal > 0 && invStoredBase > 0 ? invStoredBase / invTotal : (Number(invRow.exchange_rate) || 0);
+      if (invRate > 0) {
+        baseCurrencyApplied = Math.round(amountApplied * invRate * 100) / 100;
+      }
 
       // Atomic batch: the invoice payment/status update and the party balance
       // adjustment commit together or roll back together.

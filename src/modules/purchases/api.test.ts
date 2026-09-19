@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
 }));
@@ -222,6 +222,135 @@ describe('purchasesApi.getSupplierStatement', () => {
   });
 });
 
+describe('purchasesApi invoice/return guards — sales parity (Phase 0)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const INVOICE_ID = '00000000-0000-0000-0000-000000000040';
+  const RETURN_ID = '00000000-0000-0000-0000-000000000050';
+
+  // delete/update paths run multi-statement batches — route them through the
+  // same query impl like the sales tests do.
+  function makeTxAdapter(queryImpl: (sql: string, params: unknown[]) => Promise<{ success: boolean; rows?: unknown[]; error?: string }>) {
+    return {
+      query: vi.fn(queryImpl),
+      transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+        for (const q of queries) {
+          const r = await queryImpl(q.sql, (q.params || []) as unknown[]);
+          if (!r.success) return { success: false, error: r.error };
+        }
+        return { success: true, results: [] };
+      }),
+    };
+  }
+
+  it('createInvoice rejects overpayment (paid > total)', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [{ id: INVOICE_ID }] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.createInvoice({
+      companyId: COMPANY_ID, invoiceNumber: 'PINV-1', supplierId: SUPPLIER_ID,
+      date: '2026-09-01', subtotal: 1000, discountAmount: 0, vatAmount: 150,
+      totalAmount: 1150, paidAmount: 2000, status: 'draft',
+    } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/exceed total/i);
+    expect(adapter.query).not.toHaveBeenCalled();
+  });
+
+  it('createInvoice rejects non-positive exchange rates', async () => {
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [{ id: INVOICE_ID }] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.createInvoice({
+      companyId: COMPANY_ID, invoiceNumber: 'PINV-1', supplierId: SUPPLIER_ID,
+      date: '2026-09-01', subtotal: 1000, discountAmount: 0, vatAmount: 0,
+      totalAmount: 1000, paidAmount: 0, status: 'draft', exchangeRate: 0,
+    } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/positive/i);
+  });
+
+  it('createInvoice defaults baseCurrencyPaid to paid*rate (no silent zero)', async () => {
+    const captured: Array<{ sql: string; params: unknown[] }> = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      captured.push({ sql, params });
+      return { success: true, rows: [{ id: INVOICE_ID }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.createInvoice({
+      companyId: COMPANY_ID, invoiceNumber: 'PINV-1', supplierId: SUPPLIER_ID,
+      date: '2026-09-01', subtotal: 1000, discountAmount: 0, vatAmount: 0,
+      totalAmount: 1000, paidAmount: 400, status: 'draft',
+      currencyCode: 'USD', exchangeRate: 500,
+    } as never);
+    expect(res.success).toBe(true);
+    const insert = captured.find(c => c.sql.includes('INSERT INTO purchase_invoices'))!;
+    // params: [..., currency(13), rate(14), baseAmount(15), basePaid(16), ...] (1-based $13..$16)
+    expect(insert.params[15]).toBe(400 * 500);
+  });
+
+  it('updateInvoice rejects changes to a posted invoice paid floor', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) {
+        return { success: true, rows: [{ status: 'posted', paid_amount: 300 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.updateInvoice(INVOICE_ID, COMPANY_ID, { paidAmount: 100 } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/paid amount/i);
+  });
+
+  it('deleteInvoice rejects posted invoices and paid drafts', async () => {
+    const posted = makeTxAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) return { success: true, rows: [{ status: 'posted', paid_amount: 0 }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(posted as never);
+    const r1 = await purchasesApi.deleteInvoice(INVOICE_ID, COMPANY_ID);
+    expect(r1.success).toBe(false);
+    expect(r1.error).toMatch(/posted invoice/i);
+
+    const paidDraft = makeTxAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) return { success: true, rows: [{ status: 'draft', paid_amount: 100 }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(paidDraft as never);
+    const r2 = await purchasesApi.deleteInvoice(INVOICE_ID, COMPANY_ID);
+    expect(r2.success).toBe(false);
+    expect(r2.error).toMatch(/payments/i);
+  });
+
+  it('deleteReturn rejects posted returns', async () => {
+    const adapter = makeTxAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) return { success: true, rows: [{ status: 'posted' }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.deleteReturn(RETURN_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/posted return/i);
+  });
+
+  it('updateReturn rejects amount changes on a posted return', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) return { success: true, rows: [{ status: 'posted' }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.updateReturn(RETURN_ID, COMPANY_ID, { totalAmount: 1 } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/posted return/i);
+  });
+});
+
 describe('purchasesApi supplier computed_balance excludes cash purchases', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -323,5 +452,272 @@ describe('purchasesApi.postInvoice explicit discount leg', () => {
     const dr = legs.reduce((s, l) => s + l.debit, 0);
     const cr = legs.reduce((s, l) => s + l.credit, 0);
     expect(dr).toBeCloseTo(cr, 2);
+  });
+});
+
+describe('purchasesApi.postInvoice perpetual valuation (Phase 1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const INVOICE_ID = '00000000-0000-0000-0000-000000000040';
+
+  function valuationAdapter(method: string, opts: {
+    lines?: Array<{ pid: string; bq: number; total: number }>;
+    stock?: Array<{ pid: string; q: number }>;
+    products?: Array<{ id: string; cost: number; std: number | null }>;
+    warehouse?: string | null;
+  }) {
+    const tx: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = {
+      query: vi.fn(async (sql: string, params: unknown[]) => {
+        if (sql.includes('FROM purchase_invoices')) {
+          return {
+            success: true,
+            rows: [{
+              supplier_id: SUPPLIER_ID, total_amount: 1150, paid_amount: 0,
+              subtotal: 1000, vat_amount: 150, invoice_number: 'PINV-V',
+              date: '2026-09-01', payment_type: 'credit', cash_box_id: null,
+            }],
+          };
+        }
+        if (sql.includes('FROM purchase_invoice_lines')) {
+          return {
+            success: true,
+            rows: (opts.lines || []).map((l) => ({ product_id: l.pid, bq: l.bq, line_total: l.total })),
+          };
+        }
+        if (sql.includes('FROM settings')) return { success: true, rows: [{ value: method }] };
+        if (sql.includes('FROM stock')) {
+          // Both shapes: averaging reads product_id/q, the Phase-4 gate
+          // reads product_id/have. Ample when the test omits stock.
+          const base = (opts.stock || []).map((s) => ({ product_id: s.pid, q: s.q, have: s.q }));
+          if (base.length > 0) return { success: true, rows: base };
+          const ids = ((params || []) as unknown[]).slice(1).map((x) => String(x));
+          return { success: true, rows: ids.map((id) => ({ product_id: id, q: 1000000, have: 1000000 })) };
+        }
+        if (sql.includes('FROM products WHERE')) {
+          return {
+            success: true,
+            rows: (opts.products || []).map((x) => ({ id: x.id, cost_price: x.cost, standard_cost: x.std, name_ar: x.id })),
+          };
+        }
+        if (sql.includes('FROM warehouses')) {
+          return { success: true, rows: opts.warehouse ? [{ id: opts.warehouse }] : [] };
+        }
+        if (sql.includes('default_accounts')) {
+          return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+        }
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+        for (const q of queries) tx.push(q);
+        return { success: true, results: [] };
+      }),
+    };
+    return { adapter, tx };
+  }
+
+  it('moving_average re-blends cost_price: (10×100 + 10×120)/20 = 110', async () => {
+    const { adapter, tx } = valuationAdapter('moving_average', {
+      lines: [{ pid: 'p1', bq: 10, total: 1200 }],
+      stock: [{ pid: 'p1', q: 10 }],
+      products: [{ id: 'p1', cost: 100, std: null }],
+      warehouse: 'w1',
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postInvoice(INVOICE_ID, COMPANY_ID);
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    const avg = tx.find((q) => q.sql.includes('UPDATE products SET cost_price'));
+    expect(avg).toBeDefined();
+    expect(Number(avg!.params?.[0])).toBe(110);
+    // inventory booked at actual subtotal (no PPV in average mode)
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'));
+    expect(je).toBeDefined();
+    expect(je!.params).toContain(1000);
+    expect(tx.some((q) => q.sql.includes('51901') || String(q.params || []).includes('acc-default_price_variance'))).toBe(false);
+  });
+
+  it('fifo opens one layer per line at base-unit cost', async () => {
+    const { adapter, tx } = valuationAdapter('fifo', {
+      lines: [{ pid: 'p1', bq: 12, total: 1200 }],
+      products: [{ id: 'p1', cost: 0, std: null }],
+      warehouse: 'w1',
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postInvoice(INVOICE_ID, COMPANY_ID);
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    const layer = tx.find((q) => q.sql.includes('INSERT INTO inventory_layers'));
+    expect(layer).toBeDefined();
+    // [company, product, warehouse, qty 12, unit 100, date, ref]
+    expect(layer!.params?.[3]).toBe(12);
+    expect(layer!.params?.[4]).toBe(100);
+    // average untouched in fifo mode
+    expect(tx.some((q) => q.sql.includes('UPDATE products SET cost_price'))).toBe(false);
+  });
+
+  it('rejects posting into a closed tax period (Phase 3)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM purchase_invoices')) {
+        return { success: true, rows: [{ supplier_id: SUPPLIER_ID, total_amount: 1000, paid_amount: 0, date: '2026-08-15' }] };
+      }
+      if (sql.includes('FROM tax_periods')) {
+        return {
+          success: true,
+          rows: [{ id: 'p1', company_id: COMPANY_ID, country_code: 'SA', period_type: 'monthly', start_date: '2026-08-01', end_date: '2026-08-31', status: 'filed', filed_at: '2026-09-01' }],
+        };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postInvoice('00000000-0000-0000-0000-000000000040', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مغلقة/);
+  });
+
+  it('refuses posting inside a closed fiscal year (Phase 5)', async () => {
+    const closed = {
+      success: true,
+      rows: [{
+        id: 'p1', company_id: COMPANY_ID, year: 2024,
+        start_date: '2024-01-01', end_date: '2024-12-31',
+        status: 'closed', closed_at: '2025-01-05',
+      }],
+    };
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM purchase_invoices')) {
+        return {
+          success: true,
+          rows: [{
+            supplier_id: SUPPLIER_ID, total_amount: 500, subtotal: 500, vat_amount: 0,
+            invoice_number: 'PINV-N', date: '2024-09-01', payment_type: 'credit', cash_box_id: null,
+          }],
+        };
+      }
+      if (sql.includes('FROM accounting_periods')) return closed;
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postInvoice('00000000-0000-0000-0000-000000000040', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/مقفلة/);
+    // Refusal happens before any batch is built — adapter.transaction is
+    // never even reached (this file's mock has no transaction spy).
+    expect(res.error).not.toMatch(/transaction/i);
+  });
+
+  it('blocks a purchase return that would drive stock negative (Phase 4)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM purchase_returns')) {
+        return {
+          success: true,
+          rows: [{
+            supplier_id: SUPPLIER_ID, total_amount: 500, subtotal: 500, vat_amount: 0,
+            return_number: 'PRT-N', date: '2026-09-01', supplier_name: 'مورد',
+          }],
+        };
+      }
+      if (sql.includes('FROM purchase_return_lines')) {
+        return { success: true, rows: [{ product_id: 'p1', bq: 10 }] };
+      }
+      if (sql.includes('FROM settings')) return { success: true, rows: [] };
+      if (sql.includes('FROM stock')) {
+        return { success: true, rows: [{ product_id: 'p1', have: 3 }] };
+      }
+      if (sql.includes('FROM products WHERE')) {
+        return { success: true, rows: [{ id: 'p1', name_ar: 'صنف' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postReturn('00000000-0000-0000-0000-000000000050', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/المخزون لا يكفي/);
+  });
+
+  it('postReturn splits VAT + books inventory at cost with PPV plug (Phase 1)', async () => {
+    const tx: Array<{ sql: string; params?: unknown[] }> = [];
+    const adapter = {
+      query: vi.fn(async (sql: string, params: unknown[]) => {
+        if (sql.includes('FROM purchase_returns')) {
+          return {
+            success: true,
+            rows: [{
+              supplier_id: SUPPLIER_ID, total_amount: 1150, subtotal: 1000, vat_amount: 150,
+              return_number: 'PRT-V', date: '2026-09-01', supplier_name: 'مورد',
+            }],
+          };
+        }
+        if (sql.includes('FROM purchase_return_lines')) {
+          return { success: true, rows: [{ product_id: 'p1', bq: 10 }] };
+        }
+        if (sql.includes('FROM settings')) return { success: true, rows: [{ value: 'moving_average' }] };
+        if (sql.includes('FROM stock')) {
+          return { success: true, rows: [{ product_id: 'p1', have: 1000000 }] };
+        }
+        if (sql.includes('FROM products WHERE')) {
+          return { success: true, rows: [{ id: 'p1', cost_price: 90, standard_cost: null, name_ar: 'p1' }] };
+        }
+        if (sql.includes('default_accounts')) {
+          return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+        }
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+        for (const q of queries) tx.push(q);
+        return { success: true, results: [] };
+      }),
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postReturn('00000000-0000-0000-0000-000000000050', COMPANY_ID);
+    expect(res.success, 'postReturn failed: ' + (res.error || '')).toBe(true);
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
+    const flat = je.params || [];
+    const n = (flat.length - 6) / 4;
+    const legs = Array.from({ length: n }, (_, i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    // cost basis 10×90 = 900 vs price 1000 → Cr PPV 100; VAT reverses on its own leg
+    expect(legs.find((l) => l.acc === 'acc-default_creditors')).toMatchObject({ debit: 1150 });
+    expect(legs.find((l) => l.acc === 'acc-default_inventory')).toMatchObject({ credit: 900 });
+    expect(legs.find((l) => l.acc === 'acc-default_vat_input')).toMatchObject({ credit: 150 });
+    expect(legs.find((l) => l.acc === 'acc-default_price_variance')).toMatchObject({ credit: 100 });
+    const dr = legs.reduce((s, l) => s + l.debit, 0);
+    const cr = legs.reduce((s, l) => s + l.credit, 0);
+    expect(dr).toBe(cr);
+  });
+
+  it('standard books inventory at frozen cost + PPV for the gap', async () => {
+    const { adapter, tx } = valuationAdapter('standard', {
+      lines: [{ pid: 'p1', bq: 10, total: 1100 }],
+      products: [{ id: 'p1', cost: 95, std: 90 }],
+      warehouse: 'w1',
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await purchasesApi.postInvoice(INVOICE_ID, COMPANY_ID);
+    expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
+    const flat = je.params || [];
+    const n = (flat.length - 6) / 4;
+    const legs = Array.from({ length: n }, (_, i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    // inventory at 10×90 = 900; header subtotal 1000 → PPV Dr 100; creditors Cr total 1150
+    expect(legs.find((l) => l.acc === 'acc-default_inventory')).toMatchObject({ debit: 900 });
+    expect(legs.find((l) => l.acc === 'acc-default_price_variance')).toMatchObject({ debit: 100 });
+    const dr = legs.reduce((s, l) => s + l.debit, 0);
+    const cr = legs.reduce((s, l) => s + l.credit, 0);
+    expect(dr).toBe(cr);
   });
 });

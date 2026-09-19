@@ -64,6 +64,14 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     setConfirmStatus({ id, status });
     setCompletionLines([]);
     if (status !== 'completed') return;
+    // Phase 4: pre-select the default FG warehouse (user may still change it).
+    if (companyId) {
+      import('@/core/utils/stockPolicy').then(({ resolveDefaultWarehouse }) =>
+        resolveDefaultWarehouse(companyId, 'fg').then((wh) => {
+          if (wh) setOutputWarehouseId(wh);
+        }).catch(() => {})
+      );
+    }
     // Ask the user for actual consumption: load the order's material lines.
     // ACTUAL = PLANNED by default (best practice): fields are PRE-FILLED with
     // the planned quantities/costs so completing a standard order is one

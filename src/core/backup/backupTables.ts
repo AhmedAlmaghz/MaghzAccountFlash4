@@ -65,7 +65,14 @@ export const DELETE_ORDER: PlannedTable[] = [
   C('payment_vouchers'),
   C('journal_entries'),
   C('transactions'),
+  // Phase 5: fiscal periods + fixed-asset register (company-scoped, FK only
+  // to companies — delete with the operations, before the company row).
+  C('accounting_periods'),
+  C('fixed_assets'),
   C('stock_movements'),
+  // FIFO layers reference products (CASCADE) + warehouses (SET NULL) —
+  // delete with the other stock operations, before both masters.
+  C('inventory_layers'),
   C('stock_adjustments'),
   C('warehouse_transfers'),
   C('attendance'),
@@ -107,6 +114,8 @@ export const DELETE_ORDER: PlannedTable[] = [
   C('users'),
   C('roles'),
   C('settings'),
+  // Tax periods reference only the company — delete with the masters.
+  C('tax_periods'),
   // the company row itself — deleted last, inserted first
   { table: 'companies', scope: { type: 'single', idColumn: 'id' } },
 ];
@@ -132,6 +141,7 @@ const INSERT_TABLES = [
   'default_accounts',
   'document_sequences',
   'settings',
+  'tax_periods',
   'payroll_components',
   'product_types',
   'product_categories',
@@ -159,8 +169,11 @@ const INSERT_TABLES = [
   'payment_vouchers',
   'transactions',
   'journal_entries',
+  'accounting_periods',
+  'fixed_assets',
   'stock',
   'stock_movements',
+  'inventory_layers',
   'stock_adjustments',
   'warehouse_transfers',
   'attendance',

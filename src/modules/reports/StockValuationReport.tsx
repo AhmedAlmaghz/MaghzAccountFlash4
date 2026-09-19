@@ -54,6 +54,8 @@ export const StockValuationReport = () => {
   const [categories, setCategories] = useState<CategoryValuation[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseValuation[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('products');
+  // Phase 1: the valuation method behind every number below (disclosure).
+  const [valuationMethod, setValuationMethod] = useState<string>('moving_average');
 
   useEffect(() => {
     if (!activeCompany?.id) return;
@@ -63,15 +65,55 @@ export const StockValuationReport = () => {
       setIsLoading(true);
       try {
         const adapter = await getDbAdapter();
+        // Method first: it selects the unit-cost expression for ALL sums.
+        let method = 'moving_average';
+        try {
+          const mRes = await adapter.query(
+            "SELECT value FROM settings WHERE company_id = $1 AND key = 'inventory.valuation_method' LIMIT 1",
+            [companyId]
+          );
+          const mv = String((mRes.rows?.[0] as Record<string, unknown> | undefined)?.value || '');
+          if (['moving_average', 'fifo', 'standard'].includes(mv)) method = mv;
+        } catch {
+          /* default stands */
+        }
+        setValuationMethod(method);
+        // FIFO values come from open layers (exact); standard from the frozen
+        // cost (falling back to average when unset); average from cost_price.
+        const unitExpr =
+          method === 'standard'
+            ? 'COALESCE(p.standard_cost, p.cost_price)'
+            : method === 'fifo'
+              // Layer-less products (pre-Phase-1 stock) fall back to average
+              // instead of vanishing from the valuation via NULL math.
+              ? 'COALESCE(fl.unit, p.cost_price)'
+              : 'p.cost_price';
+        const fifoJoin =
+          method === 'fifo'
+            ? `LEFT JOIN (
+                 SELECT product_id,
+                        SUM(qty_remaining * unit_cost) AS total,
+                        SUM(qty_remaining) AS qty,
+                        CASE WHEN SUM(qty_remaining) > 0
+                             THEN SUM(qty_remaining * unit_cost) / SUM(qty_remaining)
+                             ELSE NULL END AS unit
+                   FROM inventory_layers WHERE company_id = $1 GROUP BY product_id
+               ) fl ON fl.product_id = p.id`
+            : '';
+        const prodValueExpr =
+          method === 'fifo'
+            ? 'COALESCE(fl.total, SUM(s.quantity) * p.cost_price)'
+            : `COALESCE(SUM(s.quantity * (${unitExpr})), 0)`;
 
       const prodResult = await adapter.query(
         `SELECT p.id, p.name_ar, p.sku, p.code, p.cost_price, p.sale_price,
                 COALESCE(SUM(s.quantity), 0) as total_qty,
-                COALESCE(SUM(s.quantity * p.cost_price), 0) as total_cost_value,
+                ${prodValueExpr} as total_cost_value,
                 COALESCE(SUM(s.quantity * p.sale_price), 0) as total_sale_value,
                 COALESCE(MAX(pc.name), '') as category_name
            FROM products p
            LEFT JOIN stock s ON s.product_id = p.id
+           ${fifoJoin}
            LEFT JOIN product_product_categories ppc ON ppc.product_id = p.id
            LEFT JOIN product_categories pc ON ppc.category_id = pc.id
           WHERE p.company_id = $1 AND p.is_active = true
@@ -101,9 +143,10 @@ export const StockValuationReport = () => {
         `SELECT COALESCE(pc.name, '') as category_name,
                 COUNT(DISTINCT p.id) as product_count,
                 COALESCE(SUM(s.quantity), 0) as total_qty,
-                COALESCE(SUM(s.quantity * p.cost_price), 0) as total_value
+                COALESCE(SUM(s.quantity * (${unitExpr})), 0) as total_value
            FROM products p
            LEFT JOIN stock s ON s.product_id = p.id
+           ${fifoJoin}
            LEFT JOIN product_product_categories ppc ON ppc.product_id = p.id
            LEFT JOIN product_categories pc ON ppc.category_id = pc.id
           WHERE p.company_id = $1 AND p.is_active = true
@@ -122,14 +165,37 @@ export const StockValuationReport = () => {
         })),
       );
 
+      // FIFO warehouse values apportion each product's layer total by the
+      // warehouse's share of its on-hand quantity (exact when layers track
+      // the same warehouses, which every Phase-1 receipt guarantees).
+      const whValueExpr =
+        method === 'fifo'
+          ? `COALESCE(SUM(
+               CASE WHEN COALESCE(ptq.tq, 0) > 0
+                    THEN s.quantity * COALESCE(flw.total, 0) / ptq.tq
+                    ELSE s.quantity * p.cost_price END
+             ), 0)`
+          : `COALESCE(SUM(s.quantity * (${unitExpr})), 0)`;
+      const whFifoJoins =
+        method === 'fifo'
+          ? `LEFT JOIN (
+               SELECT product_id, SUM(qty_remaining * unit_cost) AS total
+                 FROM inventory_layers WHERE company_id = $1 GROUP BY product_id
+             ) flw ON flw.product_id = p.id
+             LEFT JOIN (
+               SELECT product_id, SUM(quantity) AS tq FROM stock
+                WHERE company_id = $1 GROUP BY product_id
+             ) ptq ON ptq.product_id = p.id`
+          : '';
       const whResult = await adapter.query(
         `SELECT w.name as warehouse_name,
                 COUNT(DISTINCT s.product_id) as product_count,
                 COALESCE(SUM(s.quantity), 0) as total_qty,
-                COALESCE(SUM(s.quantity * p.cost_price), 0) as total_value
+                ${whValueExpr} as total_value
            FROM warehouses w
            LEFT JOIN stock s ON s.warehouse_id = w.id
            LEFT JOIN products p ON s.product_id = p.id AND p.company_id = $1
+           ${whFifoJoins}
           WHERE w.company_id = $1 AND w.is_active = true
           GROUP BY w.name
           ORDER BY total_value DESC`,
@@ -317,6 +383,12 @@ export const StockValuationReport = () => {
             {tab.label}
           </button>
         ))}
+      </div>
+
+      {/* Phase 1 disclosure: every value below is priced by this method. */}
+      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <Layers size={14} />
+        <span>{t('settings.inventory.valuationMethod')}: {t(`settings.inventory.${valuationMethod === 'fifo' ? 'fifo' : valuationMethod === 'standard' ? 'standard' : 'moving_average'}`)}</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

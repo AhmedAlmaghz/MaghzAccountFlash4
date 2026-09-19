@@ -843,6 +843,13 @@ export const manufacturingApi = {
       if (String(woRes.rows[0].status) !== 'planned') {
         return { success: false, error: 'لا يمكن بدء أمر غير مخطط — حالته الحالية ليست "مخطط"' };
       }
+      // Phase 5: starting issues materials + posts the WIP JE dated today —
+      // a closed fiscal year locks it like every other posting path.
+      const { assertAccountingPeriodOpen: assertFiscalStart } = await import('@/modules/accounting/yearEnd');
+      const fiscalStartGate = await assertFiscalStart(companyId, new Date().toISOString().slice(0, 10), adapter);
+      if (!fiscalStartGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalStartGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const orderNumber = woRes.rows[0].order_number ? String(woRes.rows[0].order_number) : '';
 
       const consRes = await adapter.query(
@@ -874,6 +881,24 @@ export const manufacturingApi = {
         return { success: false, error: `المخزون لا يكفي لصرف الخامات (${detail})` };
       }
 
+      // Phase 1: FIFO material issues consume oldest layers so the layer
+      // ledger mirrors the stock that just left (same atomic batch below).
+      const { getValuationMethod: getMethodStart, allocateFifoOutflow: allocStart, buildFifoConsumeStatements: consumeStart } =
+        await import('@/core/utils/valuation');
+      const startMethod = await getMethodStart(companyId, adapter);
+      let startFifoStmts: Array<{ sql: string; params?: unknown[] }> = [];
+      if (startMethod === 'fifo') {
+        const issueItems = [...reqByMaterial.entries()]
+          .map(([productId, baseQty]) => ({ productId, baseQty }))
+          .filter((l) => l.baseQty > 0);
+        if (issueItems.length > 0) {
+          const alloc = await allocStart(companyId, issueItems, adapter);
+          if (!alloc.success) return { success: false, error: alloc.error };
+          startFifoStmts = consumeStart(companyId, alloc.consumptions)
+            .map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] }));
+        }
+      }
+
       // Issued-material cost per GL inventory account (for the WIP journal
       // entry): planned qty × unit cost, credited to each material's own
       // inventory account, debited in total to WIP (11302).
@@ -901,13 +926,20 @@ export const manufacturingApi = {
       const defaultWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
       const issuedLines = consRows.length;
 
+      // Phase 4: default source warehouse first (when it holds the planned
+      // qty), else richest — resolved once, reused for every material.
+      const { resolveDefaultWarehouse: resolveStartWh } = await import('@/core/utils/stockPolicy');
+      const startPreferredWh = await resolveStartWh(companyId, 'issue', adapter);
       for (const r of consRows) {
         const materialId = String(r.material_id);
         const qty = Number(r.planned_quantity) || 0;
         if (qty <= 0) continue;
         const whRes2 = await adapter.query(
-          `SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1`,
-          [companyId, materialId]
+          `SELECT COALESCE(
+             (SELECT warehouse_id FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid AND quantity >= $4::numeric LIMIT 1),
+             (SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1)
+           ) AS warehouse_id`,
+          [companyId, materialId, startPreferredWh, qty]
         );
         const whId = whRes2.success && whRes2.rows?.[0]?.warehouse_id ? String(whRes2.rows[0].warehouse_id) : defaultWh;
         if (!whId) continue;
@@ -956,6 +988,8 @@ export const manufacturingApi = {
         sql: `UPDATE work_orders SET status = 'in_progress', actual_start_date = CURRENT_DATE, wip_materials_cost = $3::numeric${userId ? ', updated_by = $4::uuid' : ''} WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: userId ? [id, companyId, issuedCostTotal, userId] : [id, companyId, issuedCostTotal],
       });
+      // Phase 1: FIFO layer consumption for the issued materials.
+      statements.push(...startFifoStmts);
 
       const result = await runTransaction(statements);
       if (!result.success) return { success: false, error: result.error };
@@ -988,6 +1022,13 @@ export const manufacturingApi = {
       const wo = woRes.rows[0];
       if (String(wo.status) !== 'in_progress') {
         return { success: false, error: 'الإكمال متاح فقط لأوامر قيد التشغيل — ابدأ الأمر أولاُ ليُصرف خاماته' };
+      }
+      // Phase 5: completion posts FG + variance JEs dated today — a closed
+      // fiscal year locks it like every other posting path.
+      const { assertAccountingPeriodOpen: assertFiscalComplete } = await import('@/modules/accounting/yearEnd');
+      const fiscalCompleteGate = await assertFiscalComplete(companyId, new Date().toISOString().slice(0, 10), adapter);
+      if (!fiscalCompleteGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalCompleteGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
       }
       const productionCosts = parseProductionCosts(wo.production_costs);
       const productionCostsTotal = Math.round(productionCosts.reduce((s, c) => s + c.amount, 0) * 100) / 100;
@@ -1030,7 +1071,11 @@ export const manufacturingApi = {
         : expectedOutput;
       const whRes = await adapter.query('SELECT id FROM warehouses WHERE company_id = $1 ORDER BY created_at ASC LIMIT 1', [companyId]);
       const fallbackWh = whRes.success && whRes.rows?.[0]?.id ? String(whRes.rows[0].id) : null;
-      const outputWh = opts.outputWarehouseId || (wo.output_warehouse_id ? String(wo.output_warehouse_id) : fallbackWh);
+      // Phase 4: explicit choice → saved order value → DEFAULT FG warehouse →
+      // first warehouse. The default applies automatically to every completion.
+      const { resolveDefaultWarehouse: resolveFgWh } = await import('@/core/utils/stockPolicy');
+      const defaultFgWh = await resolveFgWh(companyId, 'fg', adapter);
+      const outputWh = opts.outputWarehouseId || (wo.output_warehouse_id ? String(wo.output_warehouse_id) : null) || defaultFgWh || fallbackWh;
 
       const consRes = await adapter.query(
         `SELECT c.id, c.material_id, c.planned_quantity, c.actual_quantity, c.unit_cost, c.actual_unit_cost
@@ -1052,6 +1097,16 @@ export const manufacturingApi = {
       const statements: Array<{ sql: string; params?: unknown[] }> = [];
       let materialsCost = 0;
 
+      // Phase 4: default source warehouse for variance moves (validated).
+      const { resolveDefaultWarehouse: resolveDeltaWh } = await import('@/core/utils/stockPolicy');
+      const deltaPreferredWh = await resolveDeltaWh(companyId, 'issue', adapter);
+
+      // Phase 1: FIFO variance moves touch layers (consume on extra issue,
+      // restore on surplus return). Other methods skip layer bookkeeping.
+      const { getValuationMethod: getMethodDelta, allocateFifoOutflow, buildFifoConsumeStatements, buildFifoRestoreStatement } =
+        await import('@/core/utils/valuation');
+      const isFifoCompletion = (await getMethodDelta(companyId, adapter)) === 'fifo';
+
       for (const r of consRows) {
         const materialId = String(r.material_id);
         const planned = Number(r.planned_quantity) || 0;
@@ -1070,8 +1125,11 @@ export const manufacturingApi = {
         if (delta === 0) continue;
 
         const whRes2 = await adapter.query(
-          `SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1`,
-          [companyId, materialId]
+          `SELECT COALESCE(
+             (SELECT warehouse_id FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid AND warehouse_id = $3::uuid AND quantity >= $4::numeric LIMIT 1),
+             (SELECT st.warehouse_id FROM stock st WHERE st.company_id = $1::uuid AND st.product_id = $2::uuid ORDER BY st.quantity DESC LIMIT 1)
+           ) AS warehouse_id`,
+          [companyId, materialId, deltaPreferredWh, Math.abs(delta)]
         );
         const whId = whRes2.success && whRes2.rows?.[0]?.warehouse_id ? String(whRes2.rows[0].warehouse_id) : fallbackWh;
         if (!whId) continue;
@@ -1089,6 +1147,15 @@ export const manufacturingApi = {
             sql: `UPDATE stock SET quantity = quantity - $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
             params: [delta, companyId, materialId, whId],
           });
+          // Phase 1: FIFO extra issues consume oldest layers (same batch).
+          if (isFifoCompletion) {
+            const alloc = await allocateFifoOutflow(companyId, [{ productId: materialId, baseQty: delta }], adapter);
+            if (alloc.success) {
+              for (const s of buildFifoConsumeStatements(companyId, alloc.consumptions)) {
+                statements.push({ sql: s.sql, params: (s.params ?? []) as unknown[] });
+              }
+            }
+          }
         } else {
           statements.push({
             sql: `INSERT INTO stock_movements (company_id, product_id, warehouse_id, type, quantity, reference, notes, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, 'in', $4::numeric, $5, $6, $7)`,
@@ -1098,6 +1165,18 @@ export const manufacturingApi = {
             sql: `UPDATE stock SET quantity = quantity + $1::numeric, updated_at = NOW() WHERE company_id = $2::uuid AND product_id = $3::uuid AND warehouse_id = $4::uuid`,
             params: [-delta, companyId, materialId, whId],
           });
+          // Phase 1: FIFO surplus returns re-enter as a layer at actual cost.
+          if (isFifoCompletion) {
+            const stmt = buildFifoRestoreStatement(companyId, {
+              productId: materialId,
+              warehouseId: whId,
+              qty: -delta,
+              unitCost,
+              receivedDate: new Date().toISOString().split('T')[0],
+              sourceRef: orderNumber,
+            });
+            if (stmt) statements.push({ sql: stmt.sql, params: (stmt.params ?? []) as unknown[] });
+          }
         }
       }
 
@@ -1131,7 +1210,14 @@ export const manufacturingApi = {
       // production value instead of overwriting it. Stock is read BEFORE the
       // receipt statements execute (same transaction), so existingQty
       // excludes the quantity being received now.
-      if (producedQty > 0 && totalCost > 0) {
+      // Phase 1: standard-cost companies keep the FROZEN standard (a
+      // production run never rewrites it); FIFO companies ALSO open a
+      // finished-goods layer below so later sales consume real costs.
+      // NOTE: buildFifoRestoreStatement is already bound above (delta block,
+      // same function scope) — re-destructuring it would redeclare the const.
+      const { getValuationMethod } = await import('@/core/utils/valuation');
+      const mfgMethod = await getValuationMethod(companyId, adapter);
+      if (producedQty > 0 && totalCost > 0 && mfgMethod !== 'standard') {
         const prodId = String(wo.product_id ?? '');
         const stockRes = await adapter.query(
           `SELECT COALESCE(SUM(quantity), 0) AS q FROM stock WHERE company_id = $1::uuid AND product_id = $2::uuid`,
@@ -1151,6 +1237,19 @@ export const manufacturingApi = {
           sql: `UPDATE products SET cost_price = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
           params: [newCostPrice, prodId, companyId],
         });
+      }
+      // Phase 1: FIFO finished-goods layer at the actual run cost so the
+      // next sale consumes THIS run first-in-line, not an old average.
+      if (producedQty > 0 && unitCostNew > 0 && mfgMethod === 'fifo' && outputWh) {
+        const fgLayer = buildFifoRestoreStatement(companyId, {
+          productId: String(wo.product_id ?? ''),
+          warehouseId: outputWh,
+          qty: producedQty,
+          unitCost: unitCostNew,
+          receivedDate: new Date().toISOString().split('T')[0],
+          sourceRef: orderNumber,
+        });
+        if (fgLayer) statements.push({ sql: fgLayer.sql, params: (fgLayer.params ?? []) as unknown[] });
       }
 
       // GL posting (same atomic transaction as stock movements).
@@ -1270,6 +1369,13 @@ export const manufacturingApi = {
       }
       if (status === 'cancelled') {
         return { success: false, error: 'الأمر ملغي بالفعل' };
+      }
+      // Phase 5: cancellation posts a WIP-reversal JE dated today — a closed
+      // fiscal year locks it like every other posting path.
+      const { assertAccountingPeriodOpen: assertFiscalCancel } = await import('@/modules/accounting/yearEnd');
+      const fiscalCancelGate = await assertFiscalCancel(companyId, new Date().toISOString().slice(0, 10), adapter);
+      if (!fiscalCancelGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalCancelGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
       }
 
       const returnMaterials = opts.returnMaterials !== false && status === 'in_progress';

@@ -44,16 +44,19 @@ async function seedContext(): Promise<Ctx> {
   const userId = String(userRes.rows![0].id);
   void roleRes;
 
-  // Chart-of-accounts defaults the posting needs
-  for (const [code, name] of [['11201', 'العملاء - المدينون'], ['41101', 'إيرادات المبيعات'], ['21301', 'ضريبة القيمة المضافة المستحقة'], ['11101', 'الصندوق']]) {
-    await query(`INSERT INTO accounts (company_id, code, name_ar, type, nature, is_active) VALUES ($1, $2, $3, 'asset', 'debit', true)`, [companyId, code, name]);
+  // Chart-of-accounts defaults the posting needs (Phase 1: + COGS pair;
+  // Phase 5: + shortage/surplus pair for the auto cash-difference JE).
+  for (const [code, name, type, nature] of [['11201', 'العملاء - المدينون', 'asset', 'debit'], ['41101', 'إيرادات المبيعات', 'revenue', 'credit'], ['21301', 'ضريبة القيمة المضافة المستحقة', 'liability', 'credit'], ['11101', 'الصندوق', 'asset', 'debit'], ['51101', 'تكلفة بضاعة مباعة', 'expense', 'debit'], ['11301', 'مخزون البضاعة', 'asset', 'debit'], ['52901', 'عجز المخزون', 'expense', 'debit'], ['41901', 'فائض المخزون', 'revenue', 'credit']]) {
+    await query(`INSERT INTO accounts (company_id, code, name_ar, type, nature, is_active) VALUES ($1, $2, $3, $4, $5, true)`, [companyId, code, name, type, nature]);
   }
   const accRes = await query(`SELECT code, id FROM accounts WHERE company_id = $1`, [companyId]);
   const accByCode = new Map((accRes.rows || []).map((r) => [String(r.code), String(r.id)]));
   await query(
     `INSERT INTO default_accounts (company_id, function_key, account_id) VALUES
-     ($1, 'default_debtors', $2), ($1, 'default_sales', $3), ($1, 'default_vat_output', $4)`,
-    [companyId, accByCode.get('11201'), accByCode.get('41101'), accByCode.get('21301')]
+     ($1, 'default_debtors', $2), ($1, 'default_sales', $3), ($1, 'default_vat_output', $4),
+     ($1, 'default_cogs', $5), ($1, 'default_inventory', $6),
+     ($1, 'default_inventory_shortage', $7), ($1, 'default_inventory_surplus', $8)`,
+    [companyId, accByCode.get('11201'), accByCode.get('41101'), accByCode.get('21301'), accByCode.get('51101'), accByCode.get('11301'), accByCode.get('52901'), accByCode.get('41901')]
   );
 
   // Warehouse + product + stock
@@ -168,6 +171,18 @@ describe('posApi.checkout on PGlite (real database)', () => {
     expect(debit).toBeCloseTo(200, 2);
     expect(credit).toBeCloseTo(200, 2);
 
+    // Phase 1: COGS companion JE at moving average (2 units × cost 50 = 100)
+    const cogs = await query(
+      `SELECT je.debit, je.credit, a.code FROM journal_entries je JOIN transactions t ON je.transaction_id = t.id JOIN accounts a ON a.id = je.account_id WHERE t.reference = $1`,
+      [res.receiptNumber + '-COGS']
+    );
+    expect((cogs.rows || []).length).toBe(2);
+    const cogsDr = (cogs.rows || []).find((r) => String((r as Record<string, unknown>).code) === '51101');
+    expect(Number((cogsDr as Record<string, unknown>).debit)).toBeCloseTo(100, 2);
+    // posting-time cost frozen on the line for exact return reversals
+    const line = await query(`SELECT unit_cost FROM sales_invoice_lines WHERE invoice_id = $1`, [res.invoiceId]);
+    expect(Number((line.rows![0] as Record<string, unknown>).unit_cost)).toBeCloseTo(50, 2);
+
     // Stock decremented by 2 (base quantity)
     const stock = await query(`SELECT quantity FROM stock WHERE product_id = $1`, [ctx.productId]);
     expect(Number(stock.rows![0].quantity)).toBe(8);
@@ -221,6 +236,31 @@ describe('posApi.checkout on PGlite (real database)', () => {
     expect(pay.rows).toHaveLength(2);
   });
 
+  it('Phase 4: overselling the on-hand stock is refused fail-closed (nothing written)', async () => {
+    // Runs while the shift is still open (before closeShift below).
+    const stockBefore = await query(`SELECT quantity FROM stock WHERE product_id = $1`, [ctx.productId]);
+    const invBefore = await query(`SELECT COUNT(*) AS n FROM sales_invoices WHERE company_id = $1`, [ctx.companyId]);
+    const res = await posApi.checkout({
+      companyId: ctx.companyId,
+      shiftId: ctx.shiftId,
+      customerId: ctx.customerId,
+      cashBoxId: ctx.cashBoxId,
+      lines: [{ productId: ctx.productId, quantity: 999999, unitPrice: 100, discountPercent: 0, vatPercent: 0, lineTotal: 99999900 }],
+      subtotal: 99999900,
+      discountAmount: 0,
+      vatAmount: 0,
+      totalAmount: 99999900,
+      cashAmount: 99999900,
+      creditAmount: 0,
+    }, ctx.userId);
+    expect(res.success).toBe(false);
+    expect(res.error || '').toMatch(/المخزون/);
+    const stockAfter = await query(`SELECT quantity FROM stock WHERE product_id = $1`, [ctx.productId]);
+    const invAfter = await query(`SELECT COUNT(*) AS n FROM sales_invoices WHERE company_id = $1`, [ctx.companyId]);
+    expect(Number(stockAfter.rows![0].quantity)).toBe(Number(stockBefore.rows![0].quantity));
+    expect(Number(invAfter.rows![0].n)).toBe(Number(invBefore.rows![0].n));
+  });
+
   it('getShiftSummary derives expected cash and closeShift stores the difference', async () => {
     const summary = await posApi.getShiftSummary(ctx.companyId, ctx.shiftId);
     expect(summary.success).toBe(true);
@@ -230,8 +270,18 @@ describe('posApi.checkout on PGlite (real database)', () => {
     expect(summary.data!.invoicesCount).toBe(2);
 
     const close = await posApi.closeShift(ctx.companyId, ctx.shiftId, 5200, undefined, ctx.userId);
-    expect(close.success).toBe(true);
+    expect(close.success, close.error || 'no error').toBe(true);
     expect(close.data!.difference).toBeCloseTo(-100, 2);
+
+    // Phase 5: the -100 shortage posted Dr 52901 / Cr box automatically.
+    expect(close.data!.jeReference).toMatch(/^POS-DIFF-/);
+    const dje = await query(
+      `SELECT je.debit, je.credit, a.code FROM journal_entries je JOIN transactions t ON je.transaction_id = t.id JOIN accounts a ON a.id = je.account_id WHERE t.reference = $1`,
+      [close.data!.jeReference]
+    );
+    expect((dje.rows || []).length).toBe(2);
+    const shortLeg = (dje.rows || []).find((r) => String((r as Record<string, unknown>).code) === '52901');
+    expect(Number((shortLeg as Record<string, unknown>).debit)).toBeCloseTo(100, 2);
 
     const shiftRow = await query(`SELECT status, closing_amount, expected_amount, difference FROM pos_shifts WHERE id = $1`, [ctx.shiftId]);
     const row = shiftRow.rows![0] as Record<string, unknown>;

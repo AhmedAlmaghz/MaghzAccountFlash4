@@ -8,6 +8,7 @@ import { getDbAdapter } from '@/core/database/adapters';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
+import { VatReturnPanel } from '@/modules/tax/components/VatReturnPanel';
 
 interface VatType {
   id: string;
@@ -299,6 +300,9 @@ export const VatSettingsPage: React.FC = () => {
           </div>
         </div>
       </Card>
+
+      {/* Phase 3: VAT return workspace (periods + JE-sourced return). */}
+      <VatReturnPanel />
 
       <ConfirmDialog
         isOpen={!!showDeleteConfirm}

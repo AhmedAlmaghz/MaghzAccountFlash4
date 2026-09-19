@@ -113,8 +113,8 @@ export const salesApi = {
       const result = await adapter.query(
         `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                  + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
-                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
+                  - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
                   - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
@@ -190,8 +190,8 @@ export const salesApi = {
       const dataResult = await adapter.query(
         `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                  + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
-                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
+                  - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
                   - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
@@ -227,8 +227,8 @@ export const salesApi = {
       const result = await adapter.query(
         `SELECT c.*,
                 (COALESCE(c.opening_balance,0)
-                  + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
-                  - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
+                  + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
+                  - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
                   - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
                  - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
                 ) AS computed_balance
@@ -894,14 +894,27 @@ export const salesApi = {
       // ── Unified atomic contract (single code path, no Electron/fallback split):
       // fetch draft → build JE statements → ONE transaction that commits the
       // journal entry, the status flip and the customer balance together.
-      const check = await adapter.query(
-        'SELECT customer_id, total_amount, paid_amount, subtotal, discount_amount, vat_amount, invoice_number, date, payment_type, cash_box_id FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
-        [id, companyId, 'draft']
-      );
+        const check = await adapter.query(
+         'SELECT customer_id, total_amount, paid_amount, subtotal, discount_amount, vat_amount, invoice_number, date, payment_type, cash_box_id, base_currency_amount, exchange_rate FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = $3',
+          [id, companyId, 'draft']
+        );
       if (!check.success || !check.rows?.[0]) {
         return { success: false, error: 'Invoice not found or not in draft status' };
       }
       const inv = check.rows[0] as Record<string, unknown>;
+      // Phase 3: closed/filing tax periods are immutable — backdated posting
+      // into them would silently rewrite a filed VAT return.
+      const { assertPeriodOpen } = await import('@/modules/tax/engine');
+      const periodGate = await assertPeriodOpen(companyId, toDateString(inv.date) || '', adapter);
+      if (!periodGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${periodGate.period.startDate} – ${periodGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalOpen } = await import('@/modules/accounting/yearEnd');
+      const fiscalGate = await assertFiscalOpen(companyId, toDateString(inv.date) || '', adapter);
+      if (!fiscalGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const customerId = String(inv.customer_id);
       const totalAmount = Number(inv.total_amount) || 0;
       const paymentType = String(inv.payment_type || 'credit');
@@ -955,6 +968,102 @@ export const salesApi = {
       const lineDiscRow = (lineDiscRes.rows?.[0] || {}) as Record<string, unknown>;
       const lineDiscount = Math.round((Number(lineDiscRow.line_disc) || 0) * 100) / 100;
       const grossSubtotal = Math.round((subtotal + lineDiscount) * 100) / 100;
+      // ── Phase 1 (IAS 2): perpetual COGS. Resolve the posting-time unit
+      // cost per base unit (method-aware), freeze it on the lines (returns
+      // reverse the ORIGINAL cost), and book Dr COGS / Cr Inventory in the
+      // same atomic batch as the revenue JE.
+      const saleLinesRes = await adapter.query(
+        `SELECT product_id, COALESCE(NULLIF(base_quantity, 0), quantity) AS bq
+           FROM sales_invoice_lines WHERE invoice_id = $1`,
+        [id]
+      );
+      if (!saleLinesRes.success) return { success: false, error: saleLinesRes.error };
+      const saleItems = ((saleLinesRes.rows || []) as Record<string, unknown>[]).map((r) => ({
+        productId: String(r.product_id),
+        baseQty: Number(r.bq) || 0,
+      })).filter((l) => l.baseQty > 0);
+      // ── Phase 4: stock + credit guardrails (fail-closed company policy).
+      const {
+        getStockPolicies, checkStockSufficiency, formatShortages, auditOverride,
+        resolveDefaultWarehouse,
+      } = await import('@/core/utils/stockPolicy');
+      const policies = await getStockPolicies(companyId, adapter);
+      // Preferred source warehouse for auto-resolved outflows (validated).
+      const preferredWh = await resolveDefaultWarehouse(companyId, 'issue', adapter);
+      const stockGate = await checkStockSufficiency(companyId, saleItems, adapter);
+      if (!stockGate.ok && !policies.allowNegativeSale) {
+        return { success: false, error: `المخزون لا يكفي للبيع (${formatShortages(stockGate.shortages)})` };
+      }
+      if (!stockGate.ok && policies.allowNegativeSale) {
+        await auditOverride({
+          companyId, userId: safeUserIdValue, kind: 'negative-stock',
+          recordId: id, label: `فاتورة مبيعات ${String(inv.invoice_number || '')}`,
+          detail: { shortages: stockGate.shortages },
+        });
+      }
+      // Phase 4: customer credit limit (credit sales only; 0/NULL = unlimited).
+      if (paymentType !== 'cash' && outstanding > 0) {
+        const custRes = await adapter.query(
+          `SELECT COALESCE(balance, 0) AS balance, COALESCE(credit_limit, 0) AS credit_limit
+             FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [customerId, companyId]
+        );
+        if (custRes.success && custRes.rows?.[0]) {
+          const crow = custRes.rows[0] as Record<string, unknown>;
+          const limit = Number(crow.credit_limit) || 0;
+          const wouldBe = (Number(crow.balance) || 0) + outstanding;
+          if (limit > 0 && wouldBe > limit) {
+            const msg = `تجاوز الحد الائتماني للعميل (الحد ${limit} — سيصبح ${wouldBe})`;
+            if (policies.creditOverlimit === 'block') {
+              return { success: false, error: msg };
+            }
+            await auditOverride({
+              companyId, userId: safeUserIdValue, kind: 'credit-overlimit',
+              recordId: id, label: `فاتورة مبيعات ${String(inv.invoice_number || '')}`,
+              detail: { limit, current: Number(crow.balance) || 0, outstanding, mode: policies.creditOverlimit },
+            });
+          }
+        }
+      }
+      const { resolveSaleUnitCosts, allocateFifoOutflow, buildFifoConsumeStatements, getValuationMethod, roundMoney, splitBaseTotal } =
+        await import('@/core/utils/valuation');
+      // Phase 2 (IAS 21): the LEDGER posts base amounts. Stored base total
+      // wins; otherwise scale document amounts by the invoice rate; unknown
+      // rate means base already (legacy rows default rate 1) — a zero JE is
+      // never the right answer.
+      const invRate = Number(inv.exchange_rate) || 1;
+      const storedBase = Number(inv.base_currency_amount) || 0;
+      const baseTriple = splitBaseTotal(
+        storedBase > 0 ? storedBase : totalAmount * invRate,
+        Number(inv.vat_amount) || 0,
+        totalAmount
+      );
+      const method = await getValuationMethod(companyId, adapter);
+      let lineUnitCosts = new Map<string, number>();
+      let fifoConsumptions: Array<{ layerId: string; productId: string; qty: number; unitCost: number }> = [];
+      if (method === 'fifo' && saleItems.length > 0) {
+        const alloc = await allocateFifoOutflow(companyId, saleItems, adapter);
+        if (!alloc.success) return { success: false, error: alloc.error };
+        fifoConsumptions = alloc.consumptions;
+        const perProduct = new Map<string, { qty: number; cost: number }>();
+        for (const c of alloc.consumptions) {
+          const cur = perProduct.get(c.productId) || { qty: 0, cost: 0 };
+          cur.qty += c.qty;
+          cur.cost += c.qty * c.unitCost;
+          perProduct.set(c.productId, cur);
+        }
+        for (const [pid, v] of perProduct) {
+          lineUnitCosts.set(pid, v.qty > 0 ? v.cost / v.qty : 0);
+        }
+      } else if (saleItems.length > 0) {
+        const resolved = await resolveSaleUnitCosts(companyId, saleItems, adapter);
+        if (!resolved.success) return { success: false, error: resolved.error };
+        lineUnitCosts = resolved.costs;
+      }
+      let cogsTotal = 0;
+      for (const it of saleItems) {
+        cogsTotal = roundMoney(cogsTotal + it.baseQty * (lineUnitCosts.get(it.productId) || 0));
+      }
 
       const accounts = await resolvePostingAccounts(companyId, ['default_debtors', 'default_sales', 'default_vat_output', 'default_cogs', 'default_inventory']);
       if (!accounts.success) {
@@ -983,7 +1092,13 @@ export const salesApi = {
         cogsAmount,
         discountAmount,
         grossSubtotal,
-      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory, discount: discountId });
+      }, { debtors: accounts.ids.default_debtors, sales: accounts.ids.default_sales, vat: accounts.ids.default_vat_output, cogs: accounts.ids.default_cogs, inventory: accounts.ids.default_inventory, discount: discountId },
+      cogsTotal > 0
+        ? { total: cogsTotal, inventoryAccount: accounts.ids.default_inventory, cogsAccount: accounts.ids.default_cogs }
+        : cogsAmount > 0
+          ? { total: cogsAmount, inventoryAccount: accounts.ids.default_inventory, cogsAccount: accounts.ids.default_cogs }
+          : undefined,
+      { subtotal: baseTriple.sub, vatAmount: baseTriple.vat, totalAmount: baseTriple.total });
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...postingStmts.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
@@ -995,6 +1110,9 @@ export const salesApi = {
                   JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
                   JOIN LATERAL (
                     SELECT COALESCE(
+                      -- Phase 4: default source warehouse first (when it holds
+                      -- the line qty), else richest, else first warehouse.
+                      (SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = sil.product_id AND s2.company_id = si.company_id AND s2.warehouse_id = $3::uuid AND s2.quantity >= COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) LIMIT 1),
                       (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
                       (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
                     ) AS warehouse_id
@@ -1002,7 +1120,7 @@ export const salesApi = {
                   LEFT JOIN stock s ON s.company_id = si.company_id AND s.product_id = sil.product_id AND s.warehouse_id = wh.warehouse_id
                  WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL AND s.id IS NULL
                  GROUP BY si.company_id, sil.product_id, wh.warehouse_id`,
-          params: [id, companyId],
+          params: [id, companyId, preferredWh],
         },
         // Stock movements (out) for each line
         {
@@ -1012,12 +1130,15 @@ export const salesApi = {
                   JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
                   JOIN LATERAL (
                     SELECT COALESCE(
+                      -- Phase 4: default source warehouse first (when it holds
+                      -- the line qty), else richest, else first warehouse.
+                      (SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = sil.product_id AND s2.company_id = si.company_id AND s2.warehouse_id = $3::uuid AND s2.quantity >= COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) LIMIT 1),
                       (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
                       (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
                     ) AS warehouse_id
                   ) wh ON true
                  WHERE si.id = $1::uuid AND si.company_id = $2::uuid AND wh.warehouse_id IS NOT NULL`,
-          params: [id, companyId],
+          params: [id, companyId, preferredWh],
         },
         // Decrement stock quantities
         {
@@ -1036,13 +1157,33 @@ export const salesApi = {
                      GROUP BY sil.product_id, wh.warehouse_id
                   ) sub
                  WHERE s.company_id = $2::uuid AND s.product_id = sub.product_id AND s.warehouse_id = sub.warehouse_id`,
-          params: [id, companyId],
+          params: [id, companyId, preferredWh],
         },
         {
           sql: `UPDATE sales_invoices SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserIdValue],
         },
       ];
+      // Phase 1: freeze posting-time unit costs on the lines FIRST so the
+      // return path reverses these exact costs; FIFO layer consumption rides
+      // the same atomic batch as JE + stock.
+      if (lineUnitCosts.size > 0) {
+        const costRows: string[] = [];
+        const costParams: unknown[] = [];
+        let ci = 1;
+        for (const [pid, cost] of lineUnitCosts) {
+          costRows.push(`($${ci++}::uuid, $${ci++}::numeric)`);
+          costParams.push(pid, cost);
+        }
+        costParams.push(id);
+        txQueries.push({
+          sql: `UPDATE sales_invoice_lines AS l SET unit_cost = v.cost FROM (VALUES ${costRows.join(', ')}) AS v(pid, cost) WHERE l.invoice_id = $${ci}::uuid AND l.product_id = v.pid::uuid`,
+          params: costParams,
+        });
+      }
+      if (fifoConsumptions.length > 0) {
+        txQueries.push(...buildFifoConsumeStatements(companyId, fifoConsumptions).map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })));
+      }
       if (paymentType === 'cash') {
         // Cash invoice: record the sale as fully paid so every register and
         // the paid badge stay truthful (status flip + paid_amount together).
@@ -1441,7 +1582,10 @@ export const salesApi = {
       }
       const adapter = await getDbAdapter();
       const returnId = crypto.randomUUID();
-      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId, data.customerId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.reason, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
+      // Phase 0 fix: `undefined` params break pg binding on the $4::uuid
+      // placeholder — normalize a missing source invoice to NULL (the
+      // Electron RPC path already does `p.invoiceId || null`).
+      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId || null, data.customerId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.reason, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
       let sql = `WITH ret AS (INSERT INTO sales_returns (id,company_id,return_number,invoice_id,customer_id,date,subtotal,vat_amount,total_amount,reason,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7,$8,$9,$10,$11,$12,$13::uuid,$14,$15::uuid,$16::uuid) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
@@ -1569,15 +1713,29 @@ export const salesApi = {
       // ── Unified atomic contract (single code path): JE + stock movements +
       // status flip + customer balance all commit together or not at all.
       const check = await adapter.query(
-        'SELECT sr.customer_id, sr.total_amount, sr.return_number, sr.date, c.name as customer_name FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND sr.status = $3',
+        'SELECT sr.customer_id, sr.total_amount, sr.subtotal, sr.vat_amount, sr.invoice_id, sr.return_number, sr.date, c.name as customer_name FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid AND sr.status = $3',
         [id, companyId, 'draft']
       );
       if (!check.success || !check.rows?.[0]) {
         return { success: false, error: 'Return not found or not in draft status' };
       }
       const ret = check.rows[0] as Record<string, unknown>;
+      const { assertPeriodOpen: assertReturnPeriod } = await import('@/modules/tax/engine');
+      const retGate = await assertReturnPeriod(companyId, toDateString(ret.date) || '', adapter);
+      if (!retGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${retGate.period.startDate} – ${retGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
+      }
+      // Phase 5: a closed fiscal year locks its dates for every posting path.
+      const { assertAccountingPeriodOpen: assertFiscalReturnOpen } = await import('@/modules/accounting/yearEnd');
+      const fiscalRetGate = await assertFiscalReturnOpen(companyId, toDateString(ret.date) || '', adapter);
+      if (!fiscalRetGate.open) {
+        return { success: false, error: `السنة المالية ${fiscalRetGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
+      }
       const customerId = String(ret.customer_id);
       const totalAmount = Number(ret.total_amount) || 0;
+      const retSubtotal = Number(ret.subtotal ?? totalAmount) || 0;
+      const retVat = Number(ret.vat_amount ?? Math.max(0, totalAmount - retSubtotal)) || 0;
+      const srcInvoiceId = ret.invoice_id ? String(ret.invoice_id) : null;
       const safeUserIdValue = await resolveExistingUserId(adapter, _userId, companyId);
 
       // Actual COGS reversal: what the ORIGINAL sale took out of stock for
@@ -1603,20 +1761,113 @@ export const salesApi = {
       // NOTE: sales_returns stores net totals only (no discount_amount
       // column) — the return JE posts the balanced net pair. Explicit
       // discount legs are supported by the builder for future wiring.
+      // ── Phase 1 (IAS 2): restore the ORIGINAL posting-time cost per line
+      // (frozen unit_cost on the source invoice lines), NOT today's average
+      // and never the retired 70% estimate.
+      const {
+        getValuationMethod, resolveSaleUnitCosts,
+        buildFifoRestoreStatement, resolveRichestWarehouse, roundMoney, splitBaseTotal,
+      } = await import('@/core/utils/valuation');
+      // Phase 4: preferred source warehouse for the restored stock.
+      const { resolveDefaultWarehouse: resolveRetWh } = await import('@/core/utils/stockPolicy');
+      const preferredWh = await resolveRetWh(companyId, 'issue', adapter);
+      // Phase 2 (IAS 21): revenue/VAT/debtor legs in base, converted at the
+      // SOURCE invoice rate (the return inherits its currency from it).
+      // Without a linked invoice the return is assumed base already.
+      let retBase = { sub: retSubtotal, vat: retVat, total: retSubtotal + retVat };
+      if (srcInvoiceId) {
+        const srcHead = await adapter.query(
+          `SELECT total_amount, exchange_rate, base_currency_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [srcInvoiceId, companyId]
+        );
+        if (srcHead.success && srcHead.rows?.[0]) {
+          const sh = srcHead.rows[0] as Record<string, unknown>;
+          const srcTotal = Number(sh.total_amount) || 0;
+          const srcBase = Number(sh.base_currency_amount) || 0;
+          // Unknown rate means base already (legacy rows default rate 1).
+          const rate = srcTotal > 0 && srcBase > 0 ? srcBase / srcTotal : (Number(sh.exchange_rate) || 1);
+          retBase = splitBaseTotal(
+            roundMoney((retSubtotal + retVat) * rate),
+            retVat,
+            retSubtotal + retVat
+          );
+        }
+      }
+      const retLinesRes = await adapter.query(
+        `SELECT product_id, COALESCE(NULLIF(base_quantity, 0), quantity) AS bq
+           FROM sales_return_lines WHERE return_id = $1`,
+        [id]
+      );
+      if (!retLinesRes.success) return { success: false, error: retLinesRes.error };
+      const retItems = ((retLinesRes.rows || []) as Record<string, unknown>[]).map((r) => ({
+        productId: String(r.product_id),
+        baseQty: Number(r.bq) || 0,
+      })).filter((l) => l.baseQty > 0);
+      const srcCosts = new Map<string, number>();
+      if (srcInvoiceId) {
+        const srcRes = await adapter.query(
+          `SELECT product_id, unit_cost FROM sales_invoice_lines WHERE invoice_id = $1`,
+          [srcInvoiceId]
+        );
+        if (!srcRes.success) return { success: false, error: srcRes.error };
+        for (const r of (srcRes.rows || []) as Record<string, unknown>[]) {
+          if (r.unit_cost !== null && r.unit_cost !== undefined) {
+            srcCosts.set(String(r.product_id), Number(r.unit_cost) || 0);
+          }
+        }
+      }
+      const method = await getValuationMethod(companyId, adapter);
+      const fallback = retItems.length > 0
+        ? await resolveSaleUnitCosts(companyId, retItems, adapter)
+        : { success: true as const, method, costs: new Map<string, number>() };
+      if (!fallback.success) return { success: false, error: (fallback as { error: string }).error };
+      const fallbackCosts = (fallback as { costs: Map<string, number> }).costs;
+      let returnCostTotal = 0;
+      const fifoRestores: Array<{ sql: string; params: unknown[] }> = [];
+      // toDateString (never String()): raw pg DATE values are Date objects
+      // whose locale format PG rejects as ::date (Phase 45 trap).
+      const retDate = toDateString(ret.date) || new Date().toISOString().split('T')[0];
+      for (const it of retItems) {
+        const unit = srcCosts.get(it.productId) ?? fallbackCosts.get(it.productId) ?? 0;
+        returnCostTotal = roundMoney(returnCostTotal + it.baseQty * unit);
+        // FIFO: the returned goods re-enter stock as a layer at ORIGINAL cost.
+        if (method === 'fifo' && it.baseQty > 0) {
+          const wh = await resolveRichestWarehouse(companyId, it.productId, adapter);
+          const stmt = buildFifoRestoreStatement(companyId, {
+            productId: it.productId,
+            warehouseId: wh,
+            qty: it.baseQty,
+            unitCost: unit,
+            receivedDate: retDate,
+            sourceRef: String(ret.return_number || ''),
+          });
+          if (stmt) fifoRestores.push({ sql: stmt.sql, params: (stmt.params ?? []) as unknown[] });
+        }
+      }
       const posting = await buildSalesReturnPostingStatements(companyId, {
         id: id,
         returnNumber: String(ret.return_number || ''),
-        date: String(ret.date || new Date().toISOString().split('T')[0]),
+        date: retDate,
         customer: String(ret.customer_name || ''),
         amount: totalAmount,
         cogsReversal,
-      });
+      }, {
+        subtotal: retSubtotal,
+        vatAmount: retVat,
+        costTotal: returnCostTotal,
+      }, {
+        subtotal: retBase.sub,
+        vatAmount: retBase.vat,
+        totalAmount: retBase.total,
+      }, preferredWh);
       if (!posting.success) {
         return { success: false, error: posting.error };
       }
 
       const txQueries: { sql: string; params: unknown[] }[] = [
         ...posting.statements.map((s) => ({ sql: s.sql, params: (s.params ?? []) as unknown[] })),
+        // FIFO restoration layers ride the same atomic batch.
+        ...fifoRestores,
         {
           sql: `UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft'`,
           params: [id, companyId, safeUserIdValue],
@@ -1747,7 +1998,10 @@ function mapReturnRow(row: Record<string, unknown>): SalesReturn {
     id: String(row.id),
     companyId: String(row.company_id),
     returnNumber: String(row.return_number),
-    invoiceId: String(row.invoice_id),
+    // Phase 0 fix: String(null) === "null" — a return without a source
+    // invoice mapped its invoiceId to the literal string "null", breaking
+    // downstream lookups/filters. NULL stays undefined (mirrors line 1591).
+    invoiceId: row.invoice_id ? String(row.invoice_id) : undefined,
     invoice: row.invoice_number_ref ? { id: String(row.invoice_id), companyId: String(row.company_id), invoiceNumber: String(row.invoice_number_ref), customerId: '', date: '', subtotal: 0, discountAmount: 0, vatAmount: 0, totalAmount: 0, paidAmount: 0, status: 'posted', lines: [] } : undefined,
     customerId: String(row.customer_id),
     customer: row.customer_name ? { id: String(row.customer_id), companyId: String(row.company_id), name: String(row.customer_name), balance: 0, isActive: true } : undefined,

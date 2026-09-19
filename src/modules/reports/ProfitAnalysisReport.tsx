@@ -110,12 +110,15 @@ export const ProfitAnalysisReport: React.FC = () => {
         const range = buildDateRange(from, to, fiscalYearStart);
         const { from: fromD, to: toD } = range;
 
+        // Phase 2 (IAS 21): revenue in BASE currency, cancelled excluded.
+        // (Previously: document-currency sums including cancelled invoices.)
         const revResult = await adapter.query(
-          `SELECT COALESCE(SUM(total_amount), 0) AS revenue,
-                  COALESCE(SUM(vat_amount), 0) AS vat,
+          `SELECT COALESCE(SUM(COALESCE(base_currency_amount, total_amount)), 0) AS revenue,
+                  COALESCE(SUM(COALESCE(vat_amount * NULLIF(exchange_rate, 0), vat_amount)), 0) AS vat,
                   COUNT(*) AS invoice_count
              FROM sales_invoices
-            WHERE company_id = $1 AND date >= $2 AND date <= $3`,
+            WHERE company_id = $1 AND date >= $2 AND date <= $3
+              AND status != 'cancelled'`,
           [companyId, fromD, toD],
         );
         const revRow = (revResult.rows?.[0] || {}) as Record<string, unknown>;
@@ -125,6 +128,7 @@ export const ProfitAnalysisReport: React.FC = () => {
           `SELECT currency_code, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS inv_count
              FROM sales_invoices
             WHERE company_id = $1 AND date >= $2 AND date <= $3
+              AND status != 'cancelled'
             GROUP BY currency_code`,
           [companyId, fromD, toD],
         );
@@ -136,23 +140,28 @@ export const ProfitAnalysisReport: React.FC = () => {
           activeCurrencies,
         );
 
+        // Phase 1+2: TRUE COGS = posted sale lines at frozen posting-time
+        // cost (base units × unit_cost), in base currency by construction.
+        // (Previously: period purchases masquerading as COGS, in mixed
+        // currencies. Legacy lines with NULL unit_cost contribute 0.)
         const cogsResult = await adapter.query(
-          `SELECT COALESCE(SUM(pil.line_total), 0) AS cogs,
-                  COALESCE(SUM(pil.quantity * COALESCE(pil.unit_price, 0)), 0) AS cogs_qty_cost
-             FROM purchase_invoice_lines pil
-             JOIN purchase_invoices pi ON pi.id = pil.invoice_id
-            WHERE pi.company_id = $1 AND pi.date >= $2 AND pi.date <= $3`,
+          `SELECT COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * COALESCE(sil.unit_cost, 0)), 0) AS cogs
+             FROM sales_invoice_lines sil
+             JOIN sales_invoices si ON si.id = sil.invoice_id
+            WHERE si.company_id = $1 AND si.date >= $2 AND si.date <= $3
+              AND si.status != 'cancelled'`,
           [companyId, fromD, toD],
         );
         const cogsRow = (cogsResult.rows?.[0] || {}) as Record<string, unknown>;
         const totalCogs = toNumber(cogsRow.cogs);
 
         const cogsByCurrencyResult = await adapter.query(
-          `SELECT pi.currency_code, COALESCE(SUM(pil.line_total), 0) AS amount
-             FROM purchase_invoice_lines pil
-             JOIN purchase_invoices pi ON pi.id = pil.invoice_id
-            WHERE pi.company_id = $1 AND pi.date >= $2 AND pi.date <= $3
-            GROUP BY pi.currency_code`,
+          `SELECT si.currency_code, COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * COALESCE(sil.unit_cost, 0)), 0) AS amount
+             FROM sales_invoice_lines sil
+             JOIN sales_invoices si ON si.id = sil.invoice_id
+            WHERE si.company_id = $1 AND si.date >= $2 AND si.date <= $3
+              AND si.status != 'cancelled'
+            GROUP BY si.currency_code`,
           [companyId, fromD, toD],
         );
         const cogsBreakdown = buildCurrencyBreakdown(
@@ -204,46 +213,30 @@ export const ProfitAnalysisReport: React.FC = () => {
           e.percent = totalExp > 0 ? Math.round((e.amount / totalExp) * 100) : 0;
         });
 
+        // Phase 1+2: per-product revenue in base + TRUE posted cost from the
+        // frozen line unit_cost (one query, no cross-period purchase proxy).
         const prodResult = await adapter.query(
           `SELECT p.id, p.name_ar,
-                  COALESCE(SUM(sil.line_total), 0) AS revenue,
-                  COALESCE(SUM(sil.quantity), 0) AS qty_sold
+                  COALESCE(SUM(COALESCE(sil.base_currency_line_total, sil.line_total)), 0) AS revenue,
+                  COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity)), 0) AS qty_sold,
+                  COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * COALESCE(sil.unit_cost, 0)), 0) AS cost
              FROM products p
              JOIN sales_invoice_lines sil ON sil.product_id = p.id
              JOIN sales_invoices si ON si.id = sil.invoice_id
             WHERE p.company_id = $1
               AND si.date >= $2
               AND si.date <= $3
+              AND si.status != 'cancelled'
             GROUP BY p.id, p.name_ar
-            HAVING SUM(sil.line_total) > 0
+            HAVING SUM(COALESCE(sil.base_currency_line_total, sil.line_total)) > 0
             ORDER BY revenue DESC
             LIMIT 10`,
           [companyId, fromD, toD],
         );
         const prodsRaw = (prodResult.rows || []) as Record<string, unknown>[];
-        const productIds = prodsRaw.map((p) => String(p.id));
-        const costByProduct = new Map<string, number>();
-        if (productIds.length > 0) {
-          const placeholders = productIds.map((_, i) => `$${i + 3}`).join(', ');
-          const costResult = await adapter.query(
-            `SELECT pil.product_id, COALESCE(SUM(pil.line_total), 0) AS cost
-               FROM purchase_invoice_lines pil
-               JOIN purchase_invoices pi ON pi.id = pil.invoice_id
-              WHERE pi.company_id = $1
-                AND pi.date >= $2
-                AND pil.product_id IN (${placeholders})
-              GROUP BY pil.product_id`,
-            [companyId, fromD, ...productIds],
-          );
-          for (const r of (costResult.rows || []) as Record<string, unknown>[]) {
-            costByProduct.set(String(r.product_id), toNumber(r.cost));
-          }
-        }
         const products: ProductProfit[] = prodsRaw.map((p) => {
           const revenue = toNumber(p.revenue);
-          const qty = toNumber(p.qty_sold);
-          const productCost = costByProduct.get(String(p.id)) || 0;
-          const cost = qty > 0 && productCost > 0 ? (productCost / Math.max(qty, 1)) * qty : productCost;
+          const cost = toNumber(p.cost);
           const profit = revenue - cost;
           return {
             product: String(p.name_ar || ''),
@@ -261,17 +254,19 @@ export const ProfitAnalysisReport: React.FC = () => {
            ),
            rev AS (
              SELECT EXTRACT(MONTH FROM date)::int AS m,
-                    COALESCE(SUM(total_amount), 0) AS revenue
+                    COALESCE(SUM(COALESCE(base_currency_amount, total_amount)), 0) AS revenue
                FROM sales_invoices
               WHERE company_id = $1 AND date >= $2 AND date <= $3
+                AND status != 'cancelled'
               GROUP BY 1
            ),
            cogs AS (
-             SELECT EXTRACT(MONTH FROM pi.date)::int AS m,
-                    COALESCE(SUM(pil.line_total), 0) AS cogs
-               FROM purchase_invoice_lines pil
-               JOIN purchase_invoices pi ON pi.id = pil.invoice_id
-              WHERE pi.company_id = $1 AND pi.date >= $2 AND pi.date <= $3
+             SELECT EXTRACT(MONTH FROM si.date)::int AS m,
+                    COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * COALESCE(sil.unit_cost, 0)), 0) AS cogs
+               FROM sales_invoice_lines sil
+               JOIN sales_invoices si ON si.id = sil.invoice_id
+              WHERE si.company_id = $1 AND si.date >= $2 AND si.date <= $3
+                AND si.status != 'cancelled'
               GROUP BY 1
            ),
            exp AS (

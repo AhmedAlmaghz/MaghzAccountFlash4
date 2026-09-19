@@ -14,6 +14,8 @@ export interface Product {
   productTypeId?: string;
   productTypeName?: string;
   costPrice: number;
+  /** Frozen standard cost (standard-cost method only; null = unset → falls back to costPrice). */
+  standardCost?: number | null;
   salePrice: number;
   isActive: boolean;
   image?: string;

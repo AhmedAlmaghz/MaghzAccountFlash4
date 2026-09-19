@@ -39,6 +39,8 @@ const ACCOUNTS = [
   { code: '11', name_ar: 'الأصول المتداولة', name_en: 'Current Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
   { code: '111', name_ar: 'الصندوق والبنوك', name_en: 'Cash & Treasuries', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
   { code: '11101', name_ar: 'الصندوق الرئيسي', name_en: 'Main Cash', type: 'asset', nature: 'debit', is_group: false, balance: 5000000, parent_code: '111' },
+  { code: '11102', name_ar: 'البنك اليمني الدولي', name_en: 'Yemen International Bank', type: 'asset', nature: 'debit', is_group: false, parent_code: '111' },
+  { code: '11103', name_ar: 'محفظة جيب', name_en: 'Jeeb Wallet', type: 'asset', nature: 'debit', is_group: false, parent_code: '111' },
   { code: '112', name_ar: 'المدينون', name_en: 'Receivables', type: 'asset', nature: 'debit', is_group: true, parent_code: '11' },
   { code: '11201', name_ar: 'المدينون التجاريون', name_en: 'Trade Customers', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
   { code: '11202', name_ar: 'سلف الموظفين', name_en: 'Employee Advances', type: 'asset', nature: 'debit', is_group: false, parent_code: '112' },
@@ -46,6 +48,10 @@ const ACCOUNTS = [
   { code: '11301', name_ar: 'بضاعة أول المدة', name_en: 'Opening Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
   { code: '11302', name_ar: 'بضاعة تحت التشغيل', name_en: 'Work in Progress', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
   { code: '11303', name_ar: 'بضاعة تامة الصنع', name_en: 'Finished Goods Inventory', type: 'asset', nature: 'debit', is_group: false, parent_code: '113' },
+  { code: '12', name_ar: 'الأصول الثابتة', name_en: 'Fixed Assets', type: 'asset', nature: 'debit', is_group: true, parent_code: '1' },
+  { code: '121', name_ar: 'الأصول الثابتة - التكلفة', name_en: 'Fixed Assets at Cost', type: 'asset', nature: 'debit', is_group: true, parent_code: '12' },
+  { code: '12101', name_ar: 'تكلفة الأصول الثابتة', name_en: 'Fixed Assets at Cost', type: 'asset', nature: 'debit', is_group: false, parent_code: '121' },
+  { code: '12102', name_ar: 'مجمع إهلاك الأصول الثابتة', name_en: 'Accumulated Depreciation', type: 'asset', nature: 'credit', is_group: false, parent_code: '121' },
   // Liabilities
   { code: '2', name_ar: 'الالتزامات', name_en: 'Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: null },
   { code: '21', name_ar: 'الالتزامات المتداولة', name_en: 'Current Liabilities', type: 'liability', nature: 'credit', is_group: true, parent_code: '2' },
@@ -53,16 +59,21 @@ const ACCOUNTS = [
   { code: '21101', name_ar: 'الدائنون التجاريون', name_en: 'Trade Suppliers', type: 'liability', nature: 'credit', is_group: false, parent_code: '211' },
   { code: '213', name_ar: 'الضرائب', name_en: 'Taxes', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
   { code: '21301', name_ar: 'ضريبة القيمة المضافة', name_en: 'VAT Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '213' },
+  { code: '21302', name_ar: 'ضريبة القيمة المضافة على المدخلات', name_en: 'VAT Input Recoverable', type: 'liability', nature: 'debit', is_group: false, parent_code: '213' },
   { code: '215', name_ar: 'مستحقات الموظفين', name_en: 'Employee Benefits', type: 'liability', nature: 'credit', is_group: true, parent_code: '21' },
   { code: '21501', name_ar: 'رواتب مستحقة الدفع', name_en: 'Salaries Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
   { code: '21502', name_ar: 'استقطاعات مستحقة', name_en: 'Payroll Deductions Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
   { code: '21503', name_ar: 'مستحقات نهاية الخدمة', name_en: 'End-of-Service Gratuity Payable', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
+  { code: '21504', name_ar: 'مخصص الإجازات', name_en: 'Leave Provision', type: 'liability', nature: 'credit', is_group: false, parent_code: '215' },
   // Equity
   { code: '3', name_ar: 'حقوق الملكية', name_en: 'Equity', type: 'equity', nature: 'credit', is_group: true, parent_code: null },
   { code: '311', name_ar: 'رأس المال', name_en: 'Capital', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
   { code: '31101', name_ar: 'رأس المال المدفوع', name_en: 'Paid-in Capital', type: 'equity', nature: 'credit', is_group: false, balance: 20000000, parent_code: '311' },
   { code: '312', name_ar: 'أرصدة افتتاحية وفروق تسوية', name_en: 'Opening Balance & Adjustments', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
   { code: '31201', name_ar: 'حساب الأرصدة الافتتاحية', name_en: 'Opening Balance Equity', type: 'equity', nature: 'credit', is_group: false, parent_code: '312' },
+  { code: '32', name_ar: 'الأرباح المبقاة والاحتياطيات', name_en: 'Retained Earnings & Reserves', type: 'equity', nature: 'credit', is_group: true, parent_code: '3' },
+  { code: '321', name_ar: 'الأرباح المبقاة', name_en: 'Retained Earnings', type: 'equity', nature: 'credit', is_group: true, parent_code: '32' },
+  { code: '32101', name_ar: 'الأرباح المبقاة', name_en: 'Retained Earnings', type: 'equity', nature: 'credit', is_group: false, parent_code: '321' },
   // Revenues
   { code: '4', name_ar: 'الإيرادات', name_en: 'Revenues', type: 'revenue', nature: 'credit', is_group: true, parent_code: null },
   { code: '41', name_ar: 'إيرادات المبيعات', name_en: 'Sales Revenue', type: 'revenue', nature: 'credit', is_group: true, parent_code: '4' },
@@ -80,12 +91,17 @@ const ACCOUNTS = [
   { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
   { code: '511', name_ar: 'تكلفة البضاعة', name_en: 'COGS', type: 'expense', nature: 'debit', is_group: true, parent_code: '51' },
   { code: '51101', name_ar: 'تكلفة بضاعة مباعة', name_en: 'Cost of Goods Sold', type: 'expense', nature: 'debit', is_group: false, parent_code: '511' },
+  { code: '51901', name_ar: 'فروق أسعار الشراء', name_en: 'Purchase Price Variance', type: 'expense', nature: 'debit', is_group: false, parent_code: '51' },
+  { code: '52902', name_ar: 'فروق أسعار الصرف', name_en: 'Exchange Gain/Loss', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+  { code: '52901', name_ar: 'عجز المخزون', name_en: 'Inventory Shortage Loss', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+  { code: '41901', name_ar: 'فائض المخزون', name_en: 'Inventory Surplus Gain', type: 'revenue', nature: 'credit', is_group: false, parent_code: '41' },
   { code: '52', name_ar: 'مصاريف تشغيلية', name_en: 'Operating Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
   { code: '52101', name_ar: 'رواتب الموظفين', name_en: 'Employee Salaries', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52201', name_ar: 'مصروفات الإيجار', name_en: 'Rent Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52301', name_ar: 'مصروفات متنوعة ونثريات', name_en: 'Miscellaneous Expenses', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52401', name_ar: 'مصروفات نقل وشحن', name_en: 'Shipping & Freight', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   { code: '52501', name_ar: 'مصروف نهاية الخدمة', name_en: 'End-of-Service Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
+  { code: '52601', name_ar: 'مصروف إهلاك الأصول الثابتة', name_en: 'Depreciation Expense', type: 'expense', nature: 'debit', is_group: false, parent_code: '52' },
   // Production costs (capitalized into finished-goods cost on work-order completion)
   { code: '53', name_ar: 'تكاليف الإنتاج', name_en: 'Production Costs', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
   { code: '53101', name_ar: 'تكاليف إنتاج - أجور', name_en: 'Production Costs - Labor', type: 'expense', nature: 'debit', is_group: false, parent_code: '53' },
@@ -127,6 +143,10 @@ const DEFAULT_ACCOUNTS = [
   { key: 'default_cash', code: '11101', required: true,  desc: 'الحساب الافتراضي للصناديق النقدية' },
   { key: 'default_sales', code: '41101', required: true,  desc: 'حساب المبيعات الافتراضي' },
   { key: 'default_cogs', code: '51101', required: true,  desc: 'حساب تكلفة البضاعة المباعة' },
+  { key: 'default_price_variance', code: '51901', required: false, desc: 'حساب فروق أسعار الشراء والتقييم' },
+  { key: 'default_exchange_difference', code: '52902', required: false, desc: 'حساب فروق أسعار الصرف (محققة وغير محققة)' },
+  { key: 'default_inventory_shortage', code: '52901', required: false, desc: 'حساب عجز المخزون (فاقد)' },
+  { key: 'default_inventory_surplus', code: '41901', required: false, desc: 'حساب فائض المخزون (عثور)' },
   { key: 'default_inventory', code: '11301', required: true, desc: 'حساب المخزون الافتراضي' },
   { key: 'default_wip', code: '11302', required: false, desc: 'حساب بضاعة تحت التشغيل' },
   { key: 'default_finished_goods', code: '11303', required: false, desc: 'حساب مخزون البضاعة التامة' },
@@ -142,12 +162,17 @@ const DEFAULT_ACCOUNTS = [
   { key: 'default_debtors', code: '11201', required: true, desc: 'حساب المدينون التجاريون' },
   { key: 'default_creditors', code: '21101', required: true, desc: 'حساب الدائنون التجاريون' },
   { key: 'default_vat_output', code: '21301', required: true, desc: 'ضريبة القيمة المضافة على المبيعات' },
-  { key: 'default_vat_input', code: '21301', required: true, desc: 'ضريبة القيمة المضافة على المشتريات' },
+  { key: 'default_vat_input', code: '21302', required: true, desc: 'ضريبة القيمة المضافة على المشتريات' },
   { key: 'default_salaries', code: '52101', required: false, desc: 'حساب الرواتب' },
   { key: 'default_salaries_payable', code: '21501', required: false, desc: 'حساب الرواتب المستحقة الدفع' },
   { key: 'default_payroll_deductions', code: '21502', required: false, desc: 'حساب الاستقطاعات المستحقة' },
   { key: 'default_eos_payable', code: '21503', required: false, desc: 'حساب مستحقات نهاية الخدمة' },
   { key: 'default_eos_expense', code: '52501', required: false, desc: 'حساب مصروف نهاية الخدمة' },
+  { key: 'default_leave_provision', code: '21504', required: false, desc: 'حساب مخصص الإجازات غير المستخدمة' },
+  { key: 'default_fixed_assets', code: '12101', required: false, desc: 'حساب تكلفة الأصول الثابتة' },
+  { key: 'default_accumulated_depreciation', code: '12102', required: false, desc: 'حساب مجمع الإهلاك' },
+  { key: 'default_depreciation_expense', code: '52601', required: false, desc: 'حساب مصروف الإهلاك' },
+  { key: 'default_retained_earnings', code: '32101', required: false, desc: 'حساب الأرباح المبقاة' },
   { key: 'default_sales_returns', code: '41103', required: false, desc: 'حساب مردودات المبيعات' },
   { key: 'default_discount_allowed', code: '41201', required: false, desc: 'خصم مسموح به (contra-revenue)' },
   { key: 'default_discount_received', code: '42101', required: false, desc: 'خصم مكتسب (other income)' },
@@ -227,6 +252,9 @@ const WAREHOUSES = [
 ];
 
 const CUSTOMERS = [
+    // Phase 6: conventional walk-in customer for cash POS sales (resolved
+    // by posApi when no pos.defaultWalkInCustomerId setting names one).
+    { code: 'CASH', name: 'عملاء النقدية', phone: '', email: '', address: '', balance: 0 },
   { code: 'CUST-001', name: 'شركة البحر الأحمر للتجارة',     phone: '+967334455667', email: 'redsea@ye.com',     address: 'الحديدة - كمران',       balance: 950000 },
   { code: 'CUST-002', name: 'مؤسسة الجود للصناعات الغذائية',  phone: '+967112233445', email: 'aljawd@ye.com',    address: 'صنعاء - شارع الستين',   balance: 1200000 },
   { code: 'CUST-003', name: 'مؤسسة الصافي للمواد الغذائية',   phone: '+967778899001', email: 'alsafi@ye.com',    address: 'صنعاء - شارع الستين',   balance: 650000 },
@@ -472,6 +500,19 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
       [companyId, hp.key, hp.value]
     );
   }
+    // Phase 6: default walk-in customer for cash POS sales.
+    const cashWalkIn = await client.query(
+      `SELECT id FROM customers WHERE company_id = $1::uuid AND code = 'CASH' LIMIT 1`,
+      [companyId]
+    );
+    if (cashWalkIn.rows?.[0]) {
+      await client.query(
+        `INSERT INTO settings (company_id, key, value)
+         SELECT $1::uuid, $2::text, $3::text
+         WHERE NOT EXISTS (SELECT 1 FROM settings WHERE company_id = $1::uuid AND key = $2::text);`,
+        [companyId, 'pos.defaultWalkInCustomerId', String(cashWalkIn.rows[0].id)]
+      );
+    }
 
   // ─── 8. Currencies ───────────────────────────────────────────────────────
   console.log('[SEED] Inserting currencies...');
@@ -512,6 +553,7 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
     { type: 'journal_voucher',   prefix: 'JV-',   start: 1, current: 0,  pad: 7 },
     { type: 'receipt_voucher',   prefix: 'RV-',   start: 1, current: 0,  pad: 6 },
     { type: 'payment_voucher',   prefix: 'PV-',   start: 1, current: 0,  pad: 6 },
+    { type: 'fixed_asset',       prefix: 'FA-',   start: 1, current: 0,  pad: 4 },
     // Manufacturing
     { type: 'work_order',        prefix: 'WO-',   start: 1, current: 0,  pad: 4 },
     { type: 'bom',               prefix: 'BOM-',  start: 1, current: 0,  pad: 4 },

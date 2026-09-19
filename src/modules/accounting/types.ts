@@ -96,10 +96,34 @@ export interface ReceiptVoucher {
   checkNumber?: string;
   checkDate?: string;
   notes?: string;
-  status: 'draft' | 'posted' | 'cancelled';
+  // Phase 5: 'reversed' is terminal (mirror JE netted every effect).
+  status: 'draft' | 'posted' | 'cancelled' | 'reversed';
   createdAt?: string;
   createdBy?: string;
   updatedBy?: string;
+}
+
+/** IAS 7 indirect cash-flow statement (Phase 5: JE-derived, base currency). */
+export interface CashFlowLine {
+  key: string;
+  amount: number;
+}
+
+export interface CashFlowStatement {
+  from: string;
+  to: string;
+  operating: CashFlowLine[];
+  operatingTotal: number;
+  investing: CashFlowLine[];
+  investingTotal: number;
+  financing: CashFlowLine[];
+  financingTotal: number;
+  netChange: number;
+  cashBegin: number;
+  cashEnd: number;
+  cashChange: number;
+  /** netChange − cashChange: nonzero means cash moved outside the GL. */
+  unexplained: number;
 }
 
 export interface PaymentVoucher {
@@ -122,7 +146,8 @@ export interface PaymentVoucher {
   checkNumber?: string;
   checkDate?: string;
   notes?: string;
-  status: 'draft' | 'posted' | 'cancelled';
+  // Phase 5: 'reversed' is terminal (mirror JE netted every effect).
+  status: 'draft' | 'posted' | 'cancelled' | 'reversed';
   createdAt?: string;
   createdBy?: string;
   updatedBy?: string;

@@ -772,13 +772,13 @@ export const accountingWriteTools: ToolDefinition[] = [
   {
     name: 'accounting.post_payment_voucher',
     labelAr: 'ترحيل سند صرف',
-    descriptionAr: 'يرحّل سند صرف من حالة draft إلى posted. لا يمكن تعديل السند بعد الترحيل.',
+    descriptionAr: 'يرحّل سند صرف من حالة draft إلى posted. — نفس تنبيه سند القبض.',
     permission: 'accounting.post',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        voucherId: { type: 'string', description: 'معرف سند الصرف (UUID)' },
+        voucherId: { type: 'string', description: 'معرف السند (UUID)' },
       },
       required: ['voucherId'],
     },
@@ -788,8 +788,109 @@ export const accountingWriteTools: ToolDefinition[] = [
       if (!voucherId) return { error: 'voucherId مطلوب' };
       // P0-4 fix: same as receipt — postVoucher() is the only honest posting path.
       const res = await accountingApi.postVoucher(voucherId, ctx.companyId, 'payment', ctx.userId);
-      if (!res.success) return { error: res.error || 'فشل ترحيل سند الصرف' };
+      if (!res.success) return { error: res.error || 'فشل ترحيل السند' };
       return { posted: true, voucherId, status: 'posted' };
+    },
+  },
+
+  // ─── Phase 5: year-end close / reversal / depreciation ────────────────
+  {
+    name: 'accounting.close_fiscal_year',
+    labelAr: 'إقفال سنة مالية',
+    descriptionAr: 'يرحّل نتيجة السنة (إيرادات/مصروفات) إلى الأرباح المبقاة بقيد CLS ثم يقفل الفترة نهائياً. مع previewOnly=true يعرض المعاينة فقط دون ترحيل — استخدمها أولاً وأعرض الأرقام على المستخدم قبل التأكيد.',
+    permission: 'accounting.post',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        year: { type: 'number', description: 'السنة المالية (مثال 2025)' },
+        previewOnly: { type: 'boolean', description: 'معاينة فقط دون ترحيل (افتراضي true — آمن)' },
+      },
+      required: ['year'],
+    },
+    summarizeArgs: (a) => `إقفال السنة المالية ${a.year}${a.previewOnly === false ? ' (ترحيل فعلي)' : ' (معاينة)'}`,
+    execute: async (args, ctx) => {
+      const year = num(args.year);
+      if (!Number.isInteger(year) || year < 2000 || year > 2100) return { error: 'سنة مالية غير صالحة' };
+      const { previewFiscalClose, closeFiscalYear } = await import('@/modules/accounting/yearEnd');
+      if (args.previewOnly !== false) {
+        const preview = await previewFiscalClose(ctx.companyId, year);
+        if (!preview.success || !preview.data) return { error: preview.error || 'فشلت المعاينة' };
+        const d = preview.data;
+        return {
+          preview: true, year, revenue: d.revenue, expense: d.expense, net: d.net,
+          lines: d.lines.length,
+          note: d.lines.length === 0 ? 'لا توجد حركة — سيُقفل بدون قيد' : 'راجع الأرقام ثم أكد الترحيل بـ previewOnly=false',
+        };
+      }
+      const res = await closeFiscalYear(ctx.companyId, year, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل الإقفال' };
+      return { closed: true, year, reference: res.data?.reference, net: res.data?.net };
+    },
+  },
+  {
+    name: 'accounting.reverse_document',
+    labelAr: 'عكس مستند مرحّل',
+    descriptionAr: 'يعكس مستنداً مرحّلاً: القيد اليدوي بقيد عكسي، والفاتورة بمردود حقيقي مرحّل، والسند بقيد عكسي مع قلب الحالة إلى معكوس. يتطلب سبباً واضحاً — اذكره للمستخدم في البطاقة.',
+    permission: 'accounting.post',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['transaction', 'sales_invoice', 'purchase_invoice', 'receipt_voucher', 'payment_voucher'], description: 'نوع المستند' },
+        id: { type: 'string', description: 'معرف المستند (UUID)' },
+        reason: { type: 'string', description: 'سبب العكس (3 أحرف على الأقل)' },
+        date: { type: 'string', description: 'تاريخ العكس YYYY-MM-DD (افتراضي اليوم)' },
+      },
+      required: ['kind', 'id', 'reason'],
+    },
+    summarizeArgs: (a) => `عكس ${a.kind} — السبب: ${a.reason}`,
+    execute: async (args, ctx) => {
+      const kind = str(args.kind);
+      const id = str(args.id);
+      const reason = str(args.reason) || '';
+      const date = str(args.date) || undefined;
+      if (!id) return { error: 'id مطلوب' };
+      if (reason.trim().length < 3) return { error: 'سبب العكس مطلوب (3 أحرف على الأقل)' };
+      const { reverseTransaction, reverseSalesInvoice, reversePurchaseInvoice, reverseVoucher } =
+        await import('@/modules/accounting/reversal');
+      const input = { date, reason: reason.trim() };
+      let res;
+      if (kind === 'transaction') res = await reverseTransaction(ctx.companyId, id, input, ctx.userId);
+      else if (kind === 'sales_invoice') res = await reverseSalesInvoice(ctx.companyId, id, input, ctx.userId);
+      else if (kind === 'purchase_invoice') res = await reversePurchaseInvoice(ctx.companyId, id, input, ctx.userId);
+      else if (kind === 'receipt_voucher') res = await reverseVoucher(ctx.companyId, id, 'receipt', input, ctx.userId);
+      else if (kind === 'payment_voucher') res = await reverseVoucher(ctx.companyId, id, 'payment', input, ctx.userId);
+      else return { error: 'نوع مستند غير معروف' };
+      if (!res.success) return { error: (res as { error: string }).error || 'فشل العكس' };
+      return { reversed: true, kind, reference: (res as { data: { reference: string } }).data.reference };
+    },
+  },
+  {
+    name: 'accounting.run_depreciation',
+    labelAr: 'تشغيل إهلاك شهري',
+    descriptionAr: 'يرحّل إهلاك شهر لكل الأصول النشطة (Dr مصروف الإهلاك / Cr المجمع) بتاريخ آخر الشهر. متجاوز الشهور المرحّلة سابقاً تلقائياً.',
+    permission: 'accounting.post',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        year: { type: 'number', description: 'السنة (مثال 2026)' },
+        month: { type: 'number', description: 'الشهر 1-12' },
+      },
+      required: ['year', 'month'],
+    },
+    summarizeArgs: (a) => `تشغيل إهلاك ${a.year}/${a.month}`,
+    execute: async (args, ctx) => {
+      const year = num(args.year);
+      const month = num(args.month);
+      if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+        return { error: 'سنة/شهر غير صالح' };
+      }
+      const { fixedAssetsApi } = await import('@/modules/accounting/assets');
+      const res = await fixedAssetsApi.runDepreciation(ctx.companyId, year, month, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل تشغيل الإهلاك' };
+      return { depreciated: true, year, month, posted: res.data?.posted || 0, total: res.data?.total || 0 };
     },
   },
 ];
