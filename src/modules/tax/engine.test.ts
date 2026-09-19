@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getCountryProfile, listCountryProfiles, isSupportedCountry, DEFAULT_COUNTRY_CODE } from './registry';
 import {
   getCompanyTaxContext,
-  setCompanyTaxContext,
+  setCompanyTaxContext as _setCompanyTaxContext,
   computeVat,
   assertPeriodOpen,
   openTaxPeriod,

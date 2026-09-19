@@ -470,7 +470,6 @@ describe('manufacturingApi', () => {
         }
         if (sql.includes('FROM stock st')) {
           return { success: true, rows: [{ warehouse_id: 'wh-1' }] };
-        }
         if (sql.includes('FROM settings')) {
           return { success: true, rows: [{ value: 'standard' }] };
         }
