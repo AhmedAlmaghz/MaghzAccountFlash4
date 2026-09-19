@@ -4,6 +4,7 @@ import { Button, Modal, Input } from '@/core/ui/components';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useIsMobile, useBodyScrollLock } from '@/core/hooks/useResponsive';
 import { cn } from '@/core/utils';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
 
 export interface SmartSelectItem {
   id: string;
@@ -38,6 +39,14 @@ export interface SmartSelectProps<T extends SmartSelectItem> {
   className?: string;
   renderItem?: (item: T, selected: boolean) => React.ReactNode;
   renderTrigger?: (selected: T | T[] | null) => React.ReactNode;
+  /** Debounce in ms for search input — also debounces onSearchChange when provided. */
+  debounceMs?: number;
+  /** Max number of options to render (virtualization-lite). Remainder shown as "+N more". */
+  maxVisibleOptions?: number;
+  /** Called with debounced search string; when provided parent can drive server-search. */
+  onSearchChange?: (q: string) => void;
+  /** When true, skip client-side filtering — parent provides already-filtered options. */
+  serverSearch?: boolean;
 }
 
 export function SmartSelect<T extends SmartSelectItem>({
@@ -59,6 +68,10 @@ export function SmartSelect<T extends SmartSelectItem>({
   className = '',
   renderItem,
   renderTrigger,
+  debounceMs,
+  maxVisibleOptions = 50,
+  onSearchChange,
+  serverSearch = false,
 }: SmartSelectProps<T>) {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('select.default.placeholder');
@@ -67,6 +80,7 @@ export function SmartSelect<T extends SmartSelectItem>({
   const resolvedCreatableLabel = creatableLabel ?? t('select.default.addNew');
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
   const [newValue, setNewValue] = useState('');
@@ -77,6 +91,21 @@ export function SmartSelect<T extends SmartSelectItem>({
   const sheetMode = isMobile; // full-screen picker sheet below lg breakpoint
 
   useBodyScrollLock(open && sheetMode);
+
+  // Debounced search for client filtering and serverSearch callback
+  useEffect(() => {
+    if (!debounceMs || debounceMs <= 0) {
+      setDebouncedSearch(search);
+      return;
+    }
+    const t = setTimeout(() => setDebouncedSearch(search), debounceMs);
+    return () => clearTimeout(t);
+  }, [search, debounceMs]);
+
+  useEffect(() => {
+    if (onSearchChange) onSearchChange(debouncedSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
 
   const selectedValues = useMemo(() => {
     if (multiple) return Array.isArray(value) ? value : [];
@@ -92,13 +121,21 @@ export function SmartSelect<T extends SmartSelectItem>({
   }, [multiple, selectedItems]);
 
   const filteredOptions = useMemo(() => {
-    if (!search) return options;
-    const q = search.toLowerCase();
-    return options.filter(o =>
-      o.label.toLowerCase().includes(q) ||
-      (o.sublabel?.toLowerCase().includes(q) ?? false)
-    );
-  }, [options, search]);
+    if (serverSearch) return options;
+    const qRaw = debounceMs && debounceMs > 0 ? debouncedSearch : search;
+    if (!qRaw) return options;
+    const q = normalizeArabic(qRaw);
+    return options.filter(o => {
+      const label = normalizeArabic(`${o.label} ${o.sublabel ?? ''} ${o.meta?.map(m => m.value).join(' ') ?? ''}`);
+      return label.includes(q);
+    });
+  }, [options, search, debouncedSearch, debounceMs, serverSearch]);
+
+  const visibleOptions = useMemo(() => {
+    return filteredOptions.slice(0, maxVisibleOptions);
+  }, [filteredOptions, maxVisibleOptions]);
+
+  const hiddenCount = filteredOptions.length - visibleOptions.length;
 
   // Reset highlighted index when filtered options change
   useEffect(() => {
@@ -138,14 +175,14 @@ export function SmartSelect<T extends SmartSelectItem>({
     if (!open || sheetMode) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightedIndex(prev => Math.min(prev + 1, filteredOptions.length - 1));
+      setHighlightedIndex(prev => Math.min(prev + 1, visibleOptions.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlightedIndex(prev => Math.max(prev - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (filteredOptions[highlightedIndex] && !filteredOptions[highlightedIndex].disabled) {
-        handleSelect(filteredOptions[highlightedIndex].id);
+      if (visibleOptions[highlightedIndex] && !visibleOptions[highlightedIndex].disabled) {
+        handleSelect(visibleOptions[highlightedIndex].id);
       }
     } else if (e.key === 'Escape') {
       setOpen(false);
@@ -352,7 +389,12 @@ export function SmartSelect<T extends SmartSelectItem>({
               </div>
             ) : (
               <div className="space-y-0.5">
-                {filteredOptions.map(renderOption)}
+                {visibleOptions.map(renderOption)}
+                {hiddenCount > 0 && (
+                  <div className="py-2 text-center text-xs text-zinc-400">
+                    +{hiddenCount} {t('common.more') ?? 'more'} — {t('select.default.searchMore') ?? 'narrow search to see more'}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -421,7 +463,14 @@ export function SmartSelect<T extends SmartSelectItem>({
                   )}
                 </div>
               ) : (
-                filteredOptions.map(renderOption)
+                <>
+                  {visibleOptions.map(renderOption)}
+                  {hiddenCount > 0 && (
+                    <div className="py-3 text-center text-xs text-zinc-400">
+                      +{hiddenCount} {t('common.more') ?? 'more'}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

@@ -23,6 +23,9 @@ interface SalesLine {
   revenue: number;
   /** Base-currency amount (EVERY aggregation: KPIs/pivot/chart). */
   baseRevenue: number;
+  discount: number;
+  baseDiscount: number;
+  discountPercent: number;
   invoiceCount: number;
   avgValue: number;
   currencyCode: string;
@@ -122,7 +125,7 @@ export const SalesAnalysisReport: React.FC = () => {
         date: string;
         customerName: string;
         currencyCode: string;
-        lines: { productName: string; lineTotal: number; baseTotal: number; quantity: number; unitPrice: number }[];
+        lines: { productName: string; lineTotal: number; baseTotal: number; quantity: number; unitPrice: number; discountPercent: number; discount: number; baseDiscount: number }[];
       }>();
       for (const r of dbRows) {
         const invId = String(r.invoice_id || '');
@@ -140,12 +143,22 @@ export const SalesAnalysisReport: React.FC = () => {
         }
         if (r.line_id != null) {
           const lineTotal = Number(r.line_total ?? 0);
+          const quantity = Number(r.quantity ?? 0);
+          const unitPrice = Number(r.unit_price ?? 0);
+          const discountPercent = Number(r.discount_percent ?? 0);
+          const gross = quantity * unitPrice;
+          const discount = gross * (discountPercent / 100);
+          const baseTotal = Number(r.base_line_total ?? lineTotal);
+          const baseDiscount = discount * (baseTotal && lineTotal ? baseTotal / lineTotal : baseTotal / (gross || 1) || 1);
           entry.lines.push({
             productName: String(r.product_name || r.product_name_en || '-'),
             lineTotal,
-            baseTotal: Number(r.base_line_total ?? lineTotal),
-            quantity: Number(r.quantity ?? 0),
-            unitPrice: Number(r.unit_price ?? 0),
+            baseTotal,
+            quantity,
+            unitPrice,
+            discountPercent,
+            discount,
+            baseDiscount: Number.isFinite(baseDiscount) ? baseDiscount : discount,
           });
         }
       }
@@ -162,6 +175,9 @@ export const SalesAnalysisReport: React.FC = () => {
             productName: '-',
             revenue: 0,
             baseRevenue: 0,
+            discount: 0,
+            baseDiscount: 0,
+            discountPercent: 0,
             invoiceCount: 1,
             avgValue: 0,
             currencyCode: entry.currencyCode,
@@ -175,6 +191,9 @@ export const SalesAnalysisReport: React.FC = () => {
               productName: l.productName,
               revenue: l.lineTotal,
               baseRevenue: l.baseTotal,
+              discount: l.discount,
+              baseDiscount: l.baseDiscount,
+              discountPercent: l.discountPercent,
               invoiceCount: 1,
               avgValue: l.lineTotal,
               currencyCode: entry.currencyCode,
@@ -221,12 +240,22 @@ export const SalesAnalysisReport: React.FC = () => {
   }, [filteredData, pivotBy]);
 
   const totalRevenue = filteredData.reduce((s, d) => s + d.baseRevenue, 0);
+  const totalDiscount = filteredData.reduce((s, d) => s + d.baseDiscount, 0);
+  const totalDiscountDoc = filteredData.reduce((s, d) => s + d.discount, 0);
   const totalInvoices = filteredData.reduce((s, d) => s + d.invoiceCount, 0);
   const avgInvoice = totalInvoices > 0 ? Math.floor(totalRevenue / totalInvoices) : 0;
 
   const currencyBreakdown: CurrencyBreakdownResult = useMemo(
     () => buildCurrencyBreakdown(
       filteredData.map((r) => ({ code: r.currencyCode, amount: r.revenue })),
+      currencies,
+    ),
+    [filteredData, currencies],
+  );
+
+  const discountBreakdown: CurrencyBreakdownResult = useMemo(
+    () => buildCurrencyBreakdown(
+      filteredData.map((r) => ({ code: r.currencyCode, amount: r.discount })),
       currencies,
     ),
     [filteredData, currencies],
@@ -246,6 +275,7 @@ export const SalesAnalysisReport: React.FC = () => {
       { key: 'month', header: t('reports.month') },
       { key: 'customerName', header: t('reports.customer') },
       { key: 'productName', header: t('reports.product') },
+      { key: 'discount', header: t('sales.discount'), format: 'money' },
       { key: 'revenue', header: t('reports.revenue'), format: 'money' },
       { key: 'invoiceCount', header: t('reports.invoicesCount'), format: 'quantity' },
     ];
@@ -396,11 +426,18 @@ export const SalesAnalysisReport: React.FC = () => {
       )}
 
       {/* KPI Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <div className="p-4 text-center">
             <p className="text-sm text-slate-500 dark:text-slate-400">{t('reports.totalRevenue')}</p>
             <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(totalRevenue)}</p>
+          </div>
+        </Card>
+        <Card>
+          <div className="p-4 text-center">
+            <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.discount')}</p>
+            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{formatCurrency(totalDiscount)}</p>
+            <p className="text-xs text-slate-400 mt-1">{formatCurrency(totalDiscountDoc)} {t('reports.currency')}</p>
           </div>
         </Card>
         <Card>
@@ -480,6 +517,7 @@ export const SalesAnalysisReport: React.FC = () => {
                 { key: 'customerName', header: t('reports.customer'), mobile: 'title' as const },
                 { key: 'productName', header: t('reports.product'), mobile: 'subtitle' as const },
                 { key: 'currencyCode', header: t('reports.currency'), align: 'right', render: (row) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{row.currencyCode}</span> },
+                { key: 'discount', header: t('sales.discount'), align: 'right', render: (row) => row.discount > 0 ? <span className="tabular-nums text-amber-700">{formatCurrency(row.discount)}</span> : <span className="text-slate-400">—</span> },
                 { key: 'revenue', header: t('reports.revenue'), align: 'right', render: (row) => formatCurrency(row.revenue) },
               ]}
               keyExtractor={(row, i) => `${row.customerName}-${i}`}
@@ -491,6 +529,9 @@ export const SalesAnalysisReport: React.FC = () => {
       {/* Currency Breakdown */}
       {currencyBreakdown.items.length > 0 && (
         <CurrencyBreakdown result={currencyBreakdown} title={t('reports.revenueByCurrency')} />
+      )}
+      {discountBreakdown.items.length > 0 && (
+        <CurrencyBreakdown result={discountBreakdown} title={t('sales.discount')} />
       )}
     </div>
   );

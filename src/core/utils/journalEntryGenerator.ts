@@ -134,8 +134,8 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_salaries: ACC.SALARIES,
     default_sales_returns: ACC.SALES_RETURNS,
     default_purchase_returns: ACC.TRADE_CREDITORS,
-    default_discount_allowed: ACC.SALES,
-    default_discount_received: ACC.TRADE_CREDITORS,
+    default_discount_allowed: ACC.DISCOUNT_ALLOWED,
+    default_discount_received: ACC.DISCOUNT_EARNED,
     default_wip: '11302',
     default_finished_goods: '11303',
     default_production_labor: '53101',
@@ -763,7 +763,7 @@ export interface PurchaseReturnCosting {
 /** JE + stock-movement statements for a purchase return (goods out of stock). */
 export async function buildPurchaseReturnPostingStatements(
   companyId: string,
-  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number },
+  ret: { id?: string; returnNumber: string; date: string; supplier: string; amount: number; discountAmount?: number; grossAmount?: number },
   costing?: PurchaseReturnCosting,
   base?: BaseBooking,
   preferredWarehouseId?: string | null

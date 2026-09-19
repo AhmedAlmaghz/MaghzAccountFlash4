@@ -1625,6 +1625,8 @@ export const purchasesApi = {
         date: String(ret.date || new Date().toISOString().split('T')[0]),
         supplier: String(ret.supplier_name || ''),
         amount: totalAmount,
+        discountAmount: 0,
+        grossAmount: pretSubtotal,
       }, {
         subtotal: pretSubtotal,
         vatAmount: pretVat,

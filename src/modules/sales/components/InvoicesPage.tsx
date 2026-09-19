@@ -563,9 +563,11 @@ export const InvoicesPage: React.FC = () => {
         unit: l.unitName || l.unit,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
+        discount: l.discountPercent,
         total: l.lineTotal,
       })),
       subtotal: invoice.subtotal,
+      discountAmount: invoice.discountAmount,
       vatAmount: invoice.vatAmount,
       totalAmount: invoice.totalAmount,
       notes: invoice.notes,
@@ -594,6 +596,7 @@ export const InvoicesPage: React.FC = () => {
       { key: 'currencyCode', header: t('sales.currency') },
       { key: 'status', header: t('sales.status.label') },
       { key: 'subtotal', header: t('sales.subtotal') },
+      ...(showDiscount ? [{ key: 'discountAmount', header: t('sales.discount') }] : []),
       { key: 'vatAmount', header: t('sales.vat') },
       { key: 'totalAmount', header: t('sales.total') },
       { key: 'paidAmount', header: t('sales.paid') },
@@ -608,6 +611,7 @@ export const InvoicesPage: React.FC = () => {
       currencyCode: i.currencyCode || YER_CODE,
       status: STATUS_FLOW[i.status] || i.status,
       subtotal: i.subtotal,
+      ...(showDiscount ? { discountAmount: i.discountAmount } : {}),
       vatAmount: i.vatAmount,
       totalAmount: i.totalAmount,
       paidAmount: i.paidAmount,
@@ -666,6 +670,7 @@ export const InvoicesPage: React.FC = () => {
     { key: 'date', header: t('sales.date'), width: '110px', render: (row: SalesInvoice) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border tabular-nums">{formatDate(row.date)}</span> },
     { key: 'dueDate', header: t('sales.dueDate'), width: '110px', render: (row: SalesInvoice) => row.dueDate ? <span className="font-mono text-xs tabular-nums">{formatDate(row.dueDate)}</span> : <span className="text-slate-400">—</span> },
     { key: 'subtotal', header: t('sales.subtotal'), align: 'right' as const, render: (row: SalesInvoice) => <span className="tabular-nums text-sm">{formatCurrency(row.subtotal)}</span> },
+    ...(showDiscount ? [{ key: 'discountAmount', header: t('sales.discount'), align: 'right' as const, render: (row: SalesInvoice) => <span className="tabular-nums text-sm text-amber-700 dark:text-amber-300">{formatCurrency(row.discountAmount)}</span> }] : []),
     { key: 'vatAmount', header: t('sales.vat'), align: 'right' as const, render: (row: SalesInvoice) => <span className="tabular-nums text-sm text-slate-600">{formatCurrency(row.vatAmount)}</span> },
     {
       key: 'totalAmount',
@@ -1169,6 +1174,7 @@ export const InvoicesPage: React.FC = () => {
                     <th className="px-3 py-2 text-right">{t('select.product.unit')}</th>
                     <th className="px-3 py-2 text-right">{t('inventory.quantity')}</th>
                     <th className="px-3 py-2 text-right">{t('inventory.unitPrice')}</th>
+                    {showDiscount && <th className="px-3 py-2 text-right">{t('sales.discount')} %</th>}
                     <th className="px-3 py-2 text-right">{t('sales.total')}</th>
                   </tr>
                 </thead>
@@ -1182,6 +1188,7 @@ export const InvoicesPage: React.FC = () => {
                       <td className="px-3 py-2 text-slate-500">{l.unitName || l.unit || '-'}</td>
                       <td className="px-3 py-2">{l.quantity}</td>
                       <td className="px-3 py-2">{formatCurrency(l.unitPrice)}</td>
+                      {showDiscount && <td className="px-3 py-2 text-amber-700 dark:text-amber-300 tabular-nums">{l.discountPercent ? `${l.discountPercent}%` : '—'}</td>}
                       <td className="px-3 py-2 font-medium">{formatCurrency(l.lineTotal)}</td>
                     </tr>
                   ))}
@@ -1191,6 +1198,7 @@ export const InvoicesPage: React.FC = () => {
             <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
               <div className="space-y-1 text-sm">
                 <p className="text-slate-500 dark:text-slate-400">{t('sales.subtotal')}: <span className="font-medium text-slate-900 dark:text-slate-50">{formatCurrency(viewing.subtotal)}</span></p>
+                {showDiscount && viewing.discountAmount > 0 && <p className="text-slate-500 dark:text-slate-400">{t('sales.discount')}: <span className="font-medium text-amber-700 dark:text-amber-300">-{formatCurrency(viewing.discountAmount)}</span></p>}
                 <p className="text-slate-500 dark:text-slate-400">{t('sales.vat')}: <span className="font-medium text-slate-900 dark:text-slate-50">{formatCurrency(viewing.vatAmount)}</span></p>
                 {viewing.baseCurrencyAmount !== undefined && viewing.baseCurrencyAmount > 0 && viewing.currencyCode !== currencySymbol && (
                   <p className="text-slate-500 dark:text-slate-400">{t('sales.baseCurrency')} ({currencySymbol}): <span className="font-medium text-slate-900 dark:text-slate-50">{formatCurrency(viewing.baseCurrencyAmount)}</span></p>

@@ -559,9 +559,11 @@ export const PurchaseInvoicesPage: React.FC = () => {
         unit: l.unitName || l.unit,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
+        discount: l.discountPercent,
         total: l.lineTotal,
       })),
       subtotal: invoice.subtotal,
+      discountAmount: invoice.discountAmount,
       vatAmount: invoice.vatAmount,
       totalAmount: invoice.totalAmount,
       notes: invoice.notes,
@@ -581,17 +583,30 @@ export const PurchaseInvoicesPage: React.FC = () => {
   }, [activeCompany, t, currencySymbol, vatRate]);
 
   const handleExportExcel = useCallback(() => {
-    exportToExcel(invoices, [
+    const exportColumns = [
       { key: 'invoiceNumber', header: t('purchases.invoiceNumber'), width: 20 },
       { key: 'supplierName', header: t('purchases.supplier'), width: 25 },
       { key: 'date', header: t('purchases.date'), width: 15 },
       { key: 'subtotal', header: t('purchases.subtotal'), width: 15 },
+      ...(showDiscount ? [{ key: 'discountAmount', header: t('sales.discount'), width: 15 }] : []),
       { key: 'vatAmount', header: t('purchases.vat'), width: 15 },
       { key: 'totalAmount', header: t('purchases.total'), width: 15 },
       { key: 'paymentType', header: t('purchases.invoice.paymentType'), width: 15 },
       { key: 'status', header: t('purchases.status'), width: 15 },
-    ], 'purchase_invoices');
-  }, [t, invoices]);
+    ];
+    const exportData = invoices.map(i => ({
+      invoiceNumber: i.invoiceNumber,
+      supplierName: i.supplier?.name || i.supplierId,
+      date: i.date,
+      subtotal: i.subtotal,
+      ...(showDiscount ? { discountAmount: i.discountAmount } : {}),
+      vatAmount: i.vatAmount,
+      totalAmount: i.totalAmount,
+      paymentType: i.paymentType,
+      status: i.status,
+    }));
+    exportToExcel(exportData, exportColumns, 'purchase_invoices');
+  }, [t, invoices, showDiscount]);
 
   const handleExportPdf = useCallback(() => {
     exportToPDF(invoices, [
@@ -632,6 +647,9 @@ export const PurchaseInvoicesPage: React.FC = () => {
       header: t('purchases.dueDate'),
       render: (row: PurchaseInvoice) => <span>{row.dueDate ? formatDate(row.dueDate) : '-'}</span>,
     },
+    { key: 'subtotal', header: t('purchases.subtotal'), align: 'right' as const, render: (row: PurchaseInvoice) => <span className="tabular-nums text-sm">{formatCurrency(row.subtotal)}</span> },
+    ...(showDiscount ? [{ key: 'discountAmount', header: t('sales.discount'), align: 'right' as const, render: (row: PurchaseInvoice) => <span className="tabular-nums text-sm text-amber-700 dark:text-amber-300">{formatCurrency(row.discountAmount)}</span> }] : []),
+    { key: 'vatAmount', header: t('purchases.vat'), align: 'right' as const, render: (row: PurchaseInvoice) => <span className="tabular-nums text-sm text-zinc-600">{formatCurrency(row.vatAmount)}</span> },
     {
       key: 'totalAmount',
       header: t('purchases.total'),
@@ -718,7 +736,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
         );
       },
     },
-  ], [t, postingId, openView, handleEditRow, handleDelete, handlePrint, handlePost, formatCurrency, formatDate, getUserName]);
+  ], [t, postingId, openView, handleEditRow, handleDelete, handlePrint, handlePost, formatCurrency, formatDate, getUserName, showDiscount]);
 
   const canSave = form.supplierId && form.lines.length > 0 && form.lines.every(l => l.productId && l.quantity > 0);
 
@@ -1125,6 +1143,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
                     <th className="p-2 text-right">{t('purchases.line.unit')}</th>
                     <th className="p-2 text-right">{t('inventory.quantity')}</th>
                     <th className="p-2 text-right">{t('inventory.unitPrice')}</th>
+                    {showDiscount && <th className="p-2 text-right">{t('sales.discount')} %</th>}
                     <th className="p-2 text-right">{t('purchases.total')}</th>
                   </tr>
                 </thead>
@@ -1136,14 +1155,16 @@ export const PurchaseInvoicesPage: React.FC = () => {
                       <td className="p-2">{line.unitName || line.unit || '-'}</td>
                       <td className="p-2">{line.quantity}</td>
                       <td className="p-2">{formatCurrency(line.unitPrice)}</td>
+                      {showDiscount && <td className="p-2 text-amber-700 dark:text-amber-300 tabular-nums">{line.discountPercent ? `${line.discountPercent}%` : '—'}</td>}
                       <td className="p-2 font-medium">{formatCurrency(line.lineTotal)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="flex justify-end gap-4 text-sm">
+            <div className="flex justify-end gap-4 text-sm flex-wrap">
               <span>{t('purchases.subtotal')}: <strong>{formatCurrency(selectedInvoice.subtotal)}</strong></span>
+              {showDiscount && selectedInvoice.discountAmount > 0 && <span className="text-amber-700 dark:text-amber-300">{t('sales.discount')}: <strong>-{formatCurrency(selectedInvoice.discountAmount)}</strong></span>}
               <span>{t('purchases.vat')}: <strong>{formatCurrency(selectedInvoice.vatAmount)}</strong></span>
               <span className="text-primary-600 font-bold">{t('purchases.total')}: {formatCurrency(selectedInvoice.totalAmount)}</span>
             </div>

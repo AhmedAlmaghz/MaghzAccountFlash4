@@ -1852,6 +1852,8 @@ export const salesApi = {
         customer: String(ret.customer_name || ''),
         amount: totalAmount,
         cogsReversal,
+        discountAmount: 0,
+        grossAmount: retSubtotal,
       }, {
         subtotal: retSubtotal,
         vatAmount: retVat,

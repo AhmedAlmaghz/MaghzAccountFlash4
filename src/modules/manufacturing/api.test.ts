@@ -454,6 +454,35 @@ describe('manufacturingApi', () => {
       const adapter = makeMockAdapter(async (sql) => {
         if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
           return { success: true, rows: [{ status: 'in_progress', quantity: '10', produced_quantity: '0', output_warehouse_id: null, product_id: PRODUCT_ID, order_number: 'WO-009', production_costs: [] }] };
+        }
+        if (sql.includes('FROM work_order_consumptions c')) {
+          return {
+            success: true,
+            rows: [{ material_id: PRODUCT_ID, planned_quantity: '5', actual_quantity: '5', unit_cost: '100', actual_unit_cost: '100' }],
+          };
+        }
+        if (sql.includes('FROM warehouses')) {
+          return { success: true, rows: [{ id: 'wh-out' }] };
+        }
+        if (sql.includes('FROM stock st')) {
+          return { success: true, rows: [{ warehouse_id: 'wh-1' }] };
+        }
+        if (sql.includes('product_types pt')) {
+          return { success: true, rows: [{ default_inventory_account_id: 'inv-acc-1' }] };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 0, userId: USER_ID });
+      expect(res.success).toBe(true);
+      expect(res.data?.producedQuantity).toBe(10);
+
+      const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;
+      const fgReceipt = txQs.find((q) => q.sql.includes("'in'") && String(q.params?.[5]).includes('تام'));
+      expect(fgReceipt?.params?.[3]).toBe(10);
+    });
+
     it('COMPLETE in standard mode never rewrites the frozen standard cost (Phase 1)', async () => {
       const adapter = makeMockAdapter(async (sql) => {
         if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
@@ -470,6 +499,7 @@ describe('manufacturingApi', () => {
         }
         if (sql.includes('FROM stock st')) {
           return { success: true, rows: [{ warehouse_id: 'wh-1' }] };
+        }
         if (sql.includes('FROM settings')) {
           return { success: true, rows: [{ value: 'standard' }] };
         }
@@ -480,13 +510,6 @@ describe('manufacturingApi', () => {
       });
       vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-      const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 0, userId: USER_ID });
-      expect(res.success).toBe(true);
-      expect(res.data?.producedQuantity).toBe(10);
-
-      const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;
-      const fgReceipt = txQs.find((q) => q.sql.includes("'in'") && String(q.params?.[5]).includes('تام'));
-      expect(fgReceipt?.params?.[3]).toBe(10);
       const res = await manufacturingApi.completeWorkOrder(WO_ID, COMPANY_ID, { producedQuantity: 10, userId: USER_ID });
       expect(res.success).toBe(true);
       const txQs = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>;

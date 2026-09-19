@@ -47,8 +47,14 @@ const PRODUCT_UNITS_SELECT = `SELECT pu.*,
 
 export const inventoryApi = {
   // ─── Products ─────────────────────────────────────────────────────────────
+  /**
+   * @deprecated Use getProductsPaginated or getProductsForSelect (paginated, server-filtered)
+   * Fetching ALL products with heavy json_agg per row is deprecated for dropdowns.
+   * Kept for backward compat (ProductsPage paginated already migrated, but legacy callers remain).
+   */
   async getProducts(companyId: string, ownedByUserId?: string): Promise<{ success: boolean; data?: Product[]; error?: string }> {
     try {
+      if (typeof console !== 'undefined' && console.warn) console.warn('[DEPRECATED] inventoryApi.getProducts — use getProductsPaginated or getProductsForSelect (limit 25, server search)');
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
@@ -58,6 +64,57 @@ export const inventoryApi = {
         rows = rows.filter((r) => (r as unknown as { createdBy?: string }).createdBy === ownedByUserId || !(r as unknown as { createdBy?: string }).createdBy);
       }
       return { success: result.success, data: rows, error: result.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
+   * Lightweight fetch for dropdowns (ProductSelect) — no heavy json_agg.
+   * Only id, code, name_ar/en, barcode, sku, unit, product_type_id, sale_price,
+   * cost_price, is_active. Server-filtered ILIKE with limit 25 — indexed on
+   * company_id + ILIKE trigram (pg_trgm) if available, else sequential scan on 25 rows is cheap.
+   */
+  async getProductsForSelect(
+    companyId: string,
+    filters?: { search?: string; isActive?: boolean; productTypeId?: string; limit?: number }
+  ): Promise<{ success: boolean; data?: Product[]; error?: string }> {
+    try {
+      const cidValidation = validateInput(companyIdSchema, companyId);
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      const adapter = await getDbAdapter();
+      const limit = Math.min(Math.max(filters?.limit ?? 25, 1), 100);
+      const conditions: string[] = ['p.company_id = $1'];
+      const params: unknown[] = [companyId];
+      if (filters?.isActive !== undefined) {
+        params.push(filters.isActive);
+        conditions.push(`p.is_active = $${params.length}`);
+      }
+      if (filters?.productTypeId) {
+        params.push(filters.productTypeId);
+        conditions.push(`p.product_type_id = $${params.length}`);
+      }
+      if (filters?.search) {
+        const s = String(filters.search).trim();
+        if (s) {
+          params.push(`%${s}%`);
+          // ILIKE is case-insensitive and handles Arabic without case; indexed via pg_trgm if enabled.
+          conditions.push(`(p.name_ar ILIKE $${params.length} OR p.name_en ILIKE $${params.length} OR p.code ILIKE $${params.length} OR p.barcode ILIKE $${params.length} OR p.sku ILIKE $${params.length})`);
+        }
+      }
+      const where = conditions.join(' AND ');
+      params.push(limit);
+      const result = await adapter.query(
+        `SELECT p.id, p.company_id, p.code, p.name_ar, p.name_en, p.barcode, p.sku, p.unit,
+                p.product_type_id, p.category_id, p.is_active, p.sale_price, p.cost_price, p.standard_cost
+           FROM products p
+          WHERE ${where}
+          ORDER BY p.code, p.name_ar
+          LIMIT $${params.length}`,
+        params
+      );
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, data: mapRows<Product>(result.rows || []) };
     } catch (e) {
       return { success: false, error: String(e) };
     }

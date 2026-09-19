@@ -48,38 +48,44 @@ export const PosTerminalPage: React.FC = () => {
   const customerName = usePosStore((s) => s.customerName);
   const heldCarts = usePosStore((s) => s.heldCarts);
 
-  // POS defaults from settings (pos.defaultWalkInCustomerId + pos.defaultCashBoxId).
-  // Single round-trip for both keys — the terminal reads them on every
+  // POS defaults from settings (pos.defaultWalkInCustomerId + pos.defaultCashBoxId + pos.allowDiscount).
+  // Single round-trip for all keys — the terminal reads them on every
   // company switch, so one query keeps the gate fast.
   const [defaultWalkInCustomerId, setDefaultWalkInCustomerId] = useState<string | null>(null);
   const [defaultCashBoxId, setDefaultCashBoxId] = useState<string | null>(null);
+  const [posAllowDiscount, setPosAllowDiscount] = useState<boolean>(true);
   useEffect(() => {
-    if (!companyId) { setDefaultWalkInCustomerId(null); setDefaultCashBoxId(null); return; }
+    if (!companyId) { setDefaultWalkInCustomerId(null); setDefaultCashBoxId(null); setPosAllowDiscount(true); return; }
     let cancelled = false;
     (async () => {
       try {
         const { getDbAdapter } = await import('@/core/database/adapters');
         const adapter = await getDbAdapter();
         const res = await adapter.query(
-          "SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('pos.defaultWalkInCustomerId', 'pos.defaultCashBoxId')",
+          "SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('pos.defaultWalkInCustomerId', 'pos.defaultCashBoxId', 'pos.allowDiscount')",
           [companyId]
         );
         if (!cancelled && res.success) {
           let customer: string | null = null;
           let box: string | null = null;
+          let allowDiscount: string | null = null;
           for (const row of (res.rows || []) as Array<Record<string, unknown>>) {
             const v = String(row.value ?? '').trim() || null;
             if (String(row.key) === 'pos.defaultWalkInCustomerId') customer = v;
             if (String(row.key) === 'pos.defaultCashBoxId') box = v;
+            if (String(row.key) === 'pos.allowDiscount') allowDiscount = v;
           }
           setDefaultWalkInCustomerId(customer);
           setDefaultCashBoxId(box);
+          if (allowDiscount !== null) setPosAllowDiscount(allowDiscount === 'true');
+          else setPosAllowDiscount(true);
         } else if (!cancelled) {
           setDefaultWalkInCustomerId(null);
           setDefaultCashBoxId(null);
+          setPosAllowDiscount(true);
         }
       } catch {
-        if (!cancelled) { setDefaultWalkInCustomerId(null); setDefaultCashBoxId(null); }
+        if (!cancelled) { setDefaultWalkInCustomerId(null); setDefaultCashBoxId(null); setPosAllowDiscount(true); }
       }
     })();
     return () => { cancelled = true; };
@@ -140,6 +146,7 @@ export const PosTerminalPage: React.FC = () => {
   const vatRate = settings?.vatRate ?? 15;
   const applyVat = settings?.invoiceShowVat ?? true;
   const decimalPlaces = settings?.decimalPlaces ?? 2;
+  const showPosDiscount = posAllowDiscount || (settings?.invoiceShowDiscount ?? true);
   const totals = useMemo(
     () => computeCartTotals(lines, { vatRate, applyVat, decimalPlaces }),
     [lines, vatRate, applyVat, decimalPlaces]
@@ -601,19 +608,28 @@ export const PosTerminalPage: React.FC = () => {
                 />
               </div>
             ) : lines.map((l) => (
-              <div key={`${l.productId}::${l.unitId ?? ''}`} className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-2 flex items-center gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{l.nameAr}</div>
-                  <div className="text-xs text-zinc-500 tabular-nums">
-                    {formatCurrency(l.unitPrice)} × {l.quantity} = <span className="font-semibold text-zinc-700 dark:text-zinc-300">{formatCurrency(l.unitPrice * l.quantity)}</span>
+              <div key={`${l.productId}::${l.unitId ?? ''}`} className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-2 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">{l.nameAr}</div>
+                    <div className="text-xs text-zinc-500 tabular-nums">
+                      {formatCurrency(l.unitPrice)} × {l.quantity}{showPosDiscount && l.discountPercent > 0 ? ` - ${l.discountPercent}%` : ''} = <span className="font-semibold text-zinc-700 dark:text-zinc-300">{formatCurrency(l.unitPrice * l.quantity * (1 - l.discountPercent / 100))}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    <button onClick={() => cart.setQuantity(l.productId, l.quantity - 1, l.unitId)} className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center active:scale-90"><Minus size={13} /></button>
+                    <span className="w-8 text-center text-sm font-semibold tabular-nums">{l.quantity}</span>
+                    <button onClick={() => cart.setQuantity(l.productId, l.quantity + 1, l.unitId)} className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center active:scale-90"><Plus size={13} /></button>
+                    <button onClick={() => cart.removeLine(l.productId, l.unitId)} className="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 text-rose-500 flex items-center justify-center active:scale-90"><X size={13} /></button>
                   </div>
                 </div>
-                <div className="flex items-center gap-0.5">
-                  <button onClick={() => cart.setQuantity(l.productId, l.quantity - 1, l.unitId)} className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center active:scale-90"><Minus size={13} /></button>
-                  <span className="w-8 text-center text-sm font-semibold tabular-nums">{l.quantity}</span>
-                  <button onClick={() => cart.setQuantity(l.productId, l.quantity + 1, l.unitId)} className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center active:scale-90"><Plus size={13} /></button>
-                  <button onClick={() => cart.removeLine(l.productId, l.unitId)} className="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 text-rose-500 flex items-center justify-center active:scale-90"><X size={13} /></button>
-                </div>
+                {showPosDiscount && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-[11px] text-zinc-500 whitespace-nowrap">{t('sales.discount')} %</label>
+                    <Input type="number" min={0} max={100} value={String(l.discountPercent)} onChange={(e) => cart.setDiscount(l.productId, Number(e.target.value) || 0, l.unitId)} size="sm" className="h-7 text-center flex-1" />
+                    {l.discountPercent > 0 && <span className="text-xs text-amber-600 tabular-nums">-{formatCurrency(l.unitPrice * l.quantity * (l.discountPercent / 100))}</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>

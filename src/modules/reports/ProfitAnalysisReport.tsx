@@ -35,11 +35,13 @@ interface PeriodData {
   expenses: ExpenseBreakdown[];
   products: ProductProfit[];
   totalRevenue: number;
+  totalDiscount: number;
   totalCogs: number;
   totalExpenses: number;
   totalProfit: number;
   monthlyProfit: Array<{ month: string; profit: number }>;
   revenueBreakdown: CurrencyBreakdownResult;
+  discountBreakdown: CurrencyBreakdownResult;
   cogsBreakdown: CurrencyBreakdownResult;
 }
 
@@ -134,6 +136,32 @@ export const ProfitAnalysisReport: React.FC = () => {
         );
         const revBreakdown = buildCurrencyBreakdown(
           ((revByCurrencyResult.rows || []) as Record<string, unknown>[]).map((r) => ({
+            code: String(r.currency_code || YER_CODE),
+            amount: toNumber(r.amount),
+          })),
+          activeCurrencies,
+        );
+
+        // Discount aggregation — stored in sales_invoices.discount_amount (line + header), posted via JE discount legs
+        const discountResult = await adapter.query(
+          `SELECT COALESCE(SUM(discount_amount), 0) AS discount
+             FROM sales_invoices
+            WHERE company_id = $1 AND date >= $2 AND date <= $3
+              AND status != 'cancelled'`,
+          [companyId, fromD, toD],
+        );
+        const discountRow = (discountResult.rows?.[0] || {}) as Record<string, unknown>;
+        const totalDiscount = toNumber(discountRow.discount);
+        const discountByCurrencyResult = await adapter.query(
+          `SELECT currency_code, COALESCE(SUM(discount_amount), 0) AS amount
+             FROM sales_invoices
+            WHERE company_id = $1 AND date >= $2 AND date <= $3
+              AND status != 'cancelled'
+            GROUP BY currency_code`,
+          [companyId, fromD, toD],
+        );
+        const discountBreakdown = buildCurrencyBreakdown(
+          ((discountByCurrencyResult.rows || []) as Record<string, unknown>[]).map((r) => ({
             code: String(r.currency_code || YER_CODE),
             amount: toNumber(r.amount),
           })),
@@ -310,11 +338,13 @@ export const ProfitAnalysisReport: React.FC = () => {
           expenses,
           products,
           totalRevenue,
+          totalDiscount,
           totalCogs,
           totalExpenses,
           totalProfit: totalRevenue - totalExpenses,
           monthlyProfit,
           revenueBreakdown: revBreakdown,
+          discountBreakdown,
           cogsBreakdown,
         };
       };
@@ -480,13 +510,22 @@ export const ProfitAnalysisReport: React.FC = () => {
       )}
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <div className="p-4 text-center">
             <p className="text-sm text-slate-500 dark:text-slate-400">{t('reports.totalRevenue')}</p>
             <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(currentPeriod.totalRevenue)}</p>
             {compareMode && previousPeriod && (
               <p className="text-xs text-slate-400 mt-1">{t('reports.previousPeriod')}: {formatCurrency(previousPeriod.totalRevenue)}</p>
+            )}
+          </div>
+        </Card>
+        <Card>
+          <div className="p-4 text-center">
+            <p className="text-sm text-slate-500 dark:text-slate-400">{t('sales.discount')}</p>
+            <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{formatCurrency(currentPeriod.totalDiscount)}</p>
+            {compareMode && previousPeriod && (
+              <p className="text-xs text-slate-400 mt-1">{t('reports.previousPeriod')}: {formatCurrency(previousPeriod.totalDiscount)}</p>
             )}
           </div>
         </Card>
@@ -608,9 +647,10 @@ export const ProfitAnalysisReport: React.FC = () => {
       </Card>
 
       {/* Currency Breakdown */}
-      {(currentPeriod.revenueBreakdown.items.length > 0 || currentPeriod.cogsBreakdown.items.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {(currentPeriod.revenueBreakdown.items.length > 0 || currentPeriod.cogsBreakdown.items.length > 0 || currentPeriod.discountBreakdown.items.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <CurrencyBreakdown result={currentPeriod.revenueBreakdown} title={t('reports.revenueByCurrency')} />
+          <CurrencyBreakdown result={currentPeriod.discountBreakdown} title={t('sales.discount')} />
           <CurrencyBreakdown result={currentPeriod.cogsBreakdown} title={t('reports.costOfGoodsSoldByCurrency')} />
         </div>
       )}

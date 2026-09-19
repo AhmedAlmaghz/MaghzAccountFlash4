@@ -31,6 +31,7 @@ interface PosState {
   setCustomer: (customerId: string | null, customerName: string | null) => void;
   addLine: (line: PosCartLine) => void;
   setQuantity: (productId: string, quantity: number, unitId?: string | null) => void;
+  setDiscount: (productId: string, discountPercent: number, unitId?: string | null) => void;
   removeLine: (productId: string, unitId?: string | null) => void;
   clearCart: () => void;
 
@@ -91,6 +92,19 @@ export const usePosStore = create<PosState>()(
             const k = `${l.productId}::${l.unitId ?? ''}`;
             const match = hasUnit ? k === targetKey : l.productId === productId;
             return match ? { ...l, quantity } : l;
+          }),
+        });
+      },
+
+      setDiscount: (productId, discountPercent, unitId) => {
+        const targetKey = `${productId}::${unitId ?? ''}`;
+        const hasUnit = unitId !== undefined;
+        const clamped = Math.max(0, Math.min(100, Number(discountPercent) || 0));
+        set({
+          lines: get().lines.map((l) => {
+            const k = `${l.productId}::${l.unitId ?? ''}`;
+            const match = hasUnit ? k === targetKey : l.productId === productId;
+            return match ? { ...l, discountPercent: clamped } : l;
           }),
         });
       },

@@ -54,9 +54,14 @@ export const ProductUnitSelect: React.FC<ProductUnitSelectProps> = ({
   const { units, isLoading } = useProductUnits(companyId, productId);
   const { formatCurrency } = useFormatters(companyId);
   const autoFiredRef = useRef<string>('');
+  const lastUnitsKeyRef = useRef<string>('');
 
   useEffect(() => {
-    onUnitsLoad?.(units);
+    const key = units.map(u => u.id).join(',');
+    if (key !== lastUnitsKeyRef.current) {
+      lastUnitsKeyRef.current = key;
+      onUnitsLoad?.(units);
+    }
   }, [units, onUnitsLoad]);
 
   // Auto-select the mode default once per product (guarded by ref so the

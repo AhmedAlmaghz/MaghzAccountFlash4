@@ -1,11 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { SmartSelect, type SmartSelectItem } from '../SmartSelect';
-import { useProducts } from '@/modules/inventory/hooks/useInventory';
+import { inventoryApi } from '@/modules/inventory/api';
 import { useProductTypes } from '@/core/hooks/useSettings';
 import { filterProductsByModule, type ProductModule } from '@/core/utils/productTypeFilter';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useAppStore } from '@/core/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
 import type { Product } from '@/modules/inventory/types';
 
 export interface ProductSelectProps {
@@ -39,6 +40,12 @@ export interface ProductSelectProps {
   manufacturingRole?: 'finished' | 'material';
 }
 
+// Module-level shared cache for product search results — avoids duplicate fetches
+// when many ProductSelect instances (invoice lines) mount simultaneously.
+const productSelectCache = new Map<string, { data: Product[]; ts: number }>();
+const productSelectPending = new Map<string, Promise<{ success: boolean; data?: Product[]; error?: string }>>();
+const CACHE_TTL_MS = 30_000;
+
 export const ProductSelect: React.FC<ProductSelectProps> = ({
   companyId,
   value,
@@ -58,10 +65,80 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
 }) => {
   const { t } = useTranslation();
   const resolvedPlaceholder = placeholder ?? t('select.product.placeholder');
-  const { products, isLoading } = useProducts(companyId);
   const { types: productTypes } = useProductTypes(companyId);
   const { activeCompany } = useAppStore();
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
+
+  const [query, setQuery] = useState('');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [knownMap, setKnownMap] = useState<Map<string, Product>>(() => new Map());
+
+  // Accumulate known products for onProductChange and selected-value retention
+  useEffect(() => {
+    if (products.length === 0) return;
+    setKnownMap((prev) => {
+      const next = new Map(prev);
+      for (const p of products) next.set(p.id, p);
+      return next;
+    });
+  }, [products]);
+
+  const fetchProducts = useCallback(async (search: string) => {
+    if (!companyId) {
+      setProducts([]);
+      return;
+    }
+    const trimmed = search.trim();
+    // Cache key normalized via normalizeArabic so أ/إ variations share cache; server still receives raw trimmed for ILIKE.
+    const cacheKey = `${companyId}:${normalizeArabic(trimmed)}`;
+    const cached = productSelectCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+      setProducts(cached.data);
+      return;
+    }
+    if (productSelectPending.has(cacheKey)) {
+      setIsLoading(true);
+      const res = await productSelectPending.get(cacheKey)!;
+      if (res.success && res.data) {
+        productSelectCache.set(cacheKey, { data: res.data, ts: Date.now() });
+        setProducts(res.data);
+      }
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    const promise = inventoryApi.getProductsForSelect(companyId, {
+      search: trimmed || undefined,
+      isActive: true,
+      limit: 25,
+    });
+    productSelectPending.set(cacheKey, promise);
+    try {
+      const res = await promise;
+      if (res.success && res.data) {
+        productSelectCache.set(cacheKey, { data: res.data, ts: Date.now() });
+        setProducts(res.data);
+      } else {
+        setProducts([]);
+      }
+    } finally {
+      productSelectPending.delete(cacheKey);
+      setIsLoading(false);
+    }
+  }, [companyId]);
+
+  // Initial load and when company changes
+  useEffect(() => {
+    fetchProducts(query);
+  }, [fetchProducts, query]);
+
+  // Handle search from SmartSelect (debounced 300ms inside SmartSelect)
+  const handleSearchChange = useCallback((q: string) => {
+    // Normalize via normalizeArabic for consistent Arabic folding, but keep raw for server fallback.
+    // Server ILIKE is byte-exact, so we pass raw trimmed; client-side filter below also uses normalizeArabic.
+    setQuery(q);
+  }, []);
 
   const options = useMemo<SmartSelectItem[]>(() => {
     let filtered = products;
@@ -69,8 +146,6 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
       filtered = filterProductsByModule(filtered, productTypes, module);
     }
     if (manufacturingRole) {
-      // Finished product: type appears in manufacturing AND does NOT support BOM.
-      // Material:        type appears in manufacturing AND supports BOM.
       const wantBom = manufacturingRole === 'material';
       const typeIds = new Set(
         productTypes
@@ -84,7 +159,18 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
         (p) => p.categoryId === categoryId || p.categoryIds?.includes(categoryId)
       );
     }
-    return filtered.map((p) => {
+    // Ensure selected value(s) remain visible even if not in current 25 results
+    const selectedIds = multiple ? (Array.isArray(value) ? value : []) : value ? [value as string] : [];
+    const missingSelected: Product[] = [];
+    for (const sid of selectedIds) {
+      if (sid && !filtered.some(p => p.id === sid)) {
+        const known = knownMap.get(sid);
+        if (known) missingSelected.push(known);
+      }
+    }
+    const withSelected = missingSelected.length ? [...missingSelected, ...filtered] : filtered;
+
+    return withSelected.map((p) => {
       const type = productTypes.find((tt) => tt.id === p.productTypeId);
       const typeLabel = type ? ` • ${type.nameAr}` : '';
       const meta: Array<{ label: string; value: string }> = [];
@@ -110,7 +196,12 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
         disabled: !p.isActive,
       } as SmartSelectItem;
     });
-  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, manufacturingRole, formatCurrency, t]);
+  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, manufacturingRole, formatCurrency, t, value, multiple, knownMap]);
+
+  // Client-side fallback filter with normalizeArabic is handled by SmartSelect when serverSearch=false,
+  // but we have already server-filtered. Keep serverSearch=true to avoid double-filtering on 25 items,
+  // yet SmartSelect's normalize is still available if needed (we set serverSearch).
+  // For small client filters (module/category) we already applied above on 25 items only.
 
   return (
     <SmartSelect
@@ -118,7 +209,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
       onChange={(v) => onChange(typeof v === 'string' ? v : multiple ? v : null)}
       onItemSelect={(item) => {
         if (!onProductChange) return;
-        const product = products.find((p) => p.id === item.id);
+        const product = knownMap.get(item.id) ?? products.find((p) => p.id === item.id);
         if (product) onProductChange(product);
       }}
       options={options}
@@ -131,6 +222,10 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
       className={className}
       multiple={multiple}
       clearable
+      debounceMs={300}
+      maxVisibleOptions={50}
+      serverSearch
+      onSearchChange={handleSearchChange}
     />
   );
 };
