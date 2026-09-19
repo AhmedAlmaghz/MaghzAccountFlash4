@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getDbAdapter } from '@/core/database/adapters';
 import { YER_CODE } from '@/core/utils/currencyConverter';
+import { getCountryProfile } from '@/modules/tax/registry';
 
 interface AppSettings {
   vatRate: number;
@@ -28,11 +29,30 @@ export function useSettings(companyId: string) {
     try {
       const adapter = await getDbAdapter();
       
-      // Load VAT settings
-      const vatResult = await adapter.query<{ vat_rate: number }>(
-        `SELECT vat_rate FROM vat_settings WHERE company_id = $1 AND is_active = true LIMIT 1`,
-        [companyId]
-      );
+      // Unified VAT rate: country profile (settings.tax.country_code) is the single source of truth.
+      // Fallback to legacy vat_settings only when no country is configured (backwards compat).
+      let vatRate: number | null = null;
+      try {
+        const taxRes = await adapter.query<{ key: string; value: string }>(
+          `SELECT key, value FROM settings WHERE company_id = $1 AND key = 'tax.country_code' LIMIT 1`,
+          [companyId]
+        );
+        const rawCC = taxRes.success && taxRes.rows?.[0]?.value ? String(taxRes.rows[0].value).trim().toUpperCase() : '';
+        if (rawCC) {
+          const profile = getCountryProfile(rawCC);
+          // profile.vat.standard is 0.15 for SA, 0 for YE etc. Convert to percent (15).
+          vatRate = Math.round(profile.vat.standard * 100 * 100) / 100;
+        }
+      } catch {
+        /* ignore, fallback below */
+      }
+      let vatResult: { success: boolean; rows?: Array<{ vat_rate: number }>; error?: string } | null = null;
+      if (vatRate === null) {
+        vatResult = await adapter.query<{ vat_rate: number }>(
+          `SELECT vat_rate FROM vat_settings WHERE company_id = $1 AND is_active = true LIMIT 1`,
+          [companyId]
+        );
+      }
 
       // Load currencies
       const currResult = await adapter.query<{ is_default: boolean; code: string }>(
@@ -58,9 +78,10 @@ export function useSettings(companyId: string) {
         [companyId]
       );
 
-      const vatRate = vatResult.success && vatResult.rows?.[0]
-        ? Number(vatResult.rows[0].vat_rate)
-        : 15;
+      if (vatRate === null) {
+        vatRate = vatResult && vatResult.success && vatResult.rows?.[0] ? Number(vatResult.rows[0].vat_rate) : 15;
+      }
+      const resolvedVatRate: number = vatRate;
 
       const baseCurrency = currResult.success && currResult.rows
         ? currResult.rows.find((c) => c.is_default)?.code || YER_CODE
@@ -116,7 +137,7 @@ export function useSettings(companyId: string) {
       }
 
       setSettings({
-        vatRate,
+        vatRate: resolvedVatRate,
         baseCurrency,
         defaultCurrency: baseCurrency,
         defaultAccounts,

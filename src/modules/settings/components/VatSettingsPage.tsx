@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Receipt, Plus, Pencil, Trash2, Save } from 'lucide-react';
 import { Card, Button, Input, Table, ConfirmDialog, Can, PageHeader } from '@/core/ui/components';
 import { AccountSelect } from '@/core/ui/components/smart';
@@ -9,6 +10,7 @@ import { logAudit } from '@/core/utils/auditLogger';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { VatReturnPanel } from '@/modules/tax/components/VatReturnPanel';
+import { getCountryProfile } from '@/modules/tax/registry';
 
 interface VatType {
   id: string;
@@ -20,6 +22,7 @@ interface VatType {
 
 export const VatSettingsPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
   const user = useAuthStore((state) => state.user);
@@ -32,6 +35,8 @@ export const VatSettingsPage: React.FC = () => {
   const [invoiceShowDiscount, setInvoiceShowDiscount] = useState(false);
   const [invoiceShowVat, setInvoiceShowVat] = useState(false);
   const [invoiceSettingsLoading, setInvoiceSettingsLoading] = useState(false);
+  const [countryVatRate, setCountryVatRate] = useState<number | null>(null);
+  const [countryCode, setCountryCode] = useState<string>('');
 
   const loadData = async () => {
     if (!activeCompany?.id) return;
@@ -83,6 +88,19 @@ export const VatSettingsPage: React.FC = () => {
   };
 
   useEffect(() => { loadInvoiceSettings(); }, [activeCompany?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!activeCompany?.id) return;
+    let cancelled = false;
+    import('@/modules/tax/engine').then(({ getCompanyTaxContext }) =>
+      getCompanyTaxContext(activeCompany.id).then((ctx) => {
+        if (cancelled) return;
+        setCountryVatRate(Math.round(ctx.profile.vat.standard * 100 * 100) / 100);
+        setCountryCode(ctx.countryCode);
+      }).catch(() => {})
+    );
+    return () => { cancelled = true; };
+  }, [activeCompany?.id]);
 
   const saveInvoiceSetting = async (key: string, value: boolean) => {
     if (!activeCompany?.id) return;
@@ -212,6 +230,25 @@ export const VatSettingsPage: React.FC = () => {
           </Can>
         }
       />
+
+      {countryVatRate !== null && (
+        <Card className="border-2 border-primary-200 bg-primary-50 dark:bg-primary-900/10 dark:border-primary-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-1">
+            <div>
+              <p className="text-sm font-bold text-primary-900 dark:text-primary-100 flex items-center gap-2">
+                <Receipt size={16} className="text-primary-600" />
+                {t('settings.vat.unifiedRateTitle')}: {countryVatRate}% {countryCode && `(${countryCode} — ${getCountryProfile(countryCode).countryNameAr})`}
+              </p>
+              <p className="text-xs text-primary-700 dark:text-primary-300 mt-1 leading-relaxed">
+                {t('settings.vat.unifiedRateDesc')}
+              </p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => navigate('/settings/company')}>
+              {t('settings.company.title')}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <Card>
         {(editingId !== null || (formData.name && formData.name.length > 0)) && (

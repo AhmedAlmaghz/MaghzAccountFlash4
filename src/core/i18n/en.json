@@ -2721,7 +2721,9 @@
       "showVat": "Show VAT",
       "showVatDesc": "Show VAT column and calculate VAT on invoice total",
       "invoiceSettingsSaved": "Invoice display settings saved",
-      "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — suited for exempt companies or simplified invoicing."
+      "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — suited for exempt companies or simplified invoicing.",
+      "unifiedRateTitle": "Unified Standard Rate",
+      "unifiedRateDesc": "The standard invoice rate is taken from the country selected in Company Settings. To change it, change the country there."
     },
     "policy": {
       "title": "Stock, Treasury & Credit Controls",

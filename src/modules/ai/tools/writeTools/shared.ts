@@ -55,15 +55,35 @@ export function summarizeDocLines(label: string, lines: unknown): string {
 }
 
 /**
- * Fetch the company VAT rate. Returns null when settings are unreadable —
- * callers must NOT invent a rate (the old silent 15% fallback booked
- * phantom VAT for Yemeni companies where no VAT applies at all).
+ * Fetch the company VAT rate — unified single source of truth.
+ * Country profile (settings.tax.country_code) wins; legacy vat_settings is
+ * fallback only when no country is configured. 0% (YE) is a valid rate and
+ * must NOT be treated as unset (the old `rate > 0 ? rate : null` booked
+ * phantom 15% for Yemen).
  */
 export async function getVatRate(companyId: string): Promise<number | null> {
+  // 1) Country-driven rate (FIN-3 unified)
+  try {
+    const adapter = await getDbAdapter();
+    const taxRes = await adapter.query<{ value: string }>(
+      `SELECT value FROM settings WHERE company_id = $1 AND key = 'tax.country_code' LIMIT 1`,
+      [companyId]
+    );
+    const rawCC = taxRes.success && taxRes.rows?.[0]?.value ? String(taxRes.rows[0].value).trim().toUpperCase() : '';
+    if (rawCC) {
+      const { getCountryProfile } = await import('@/modules/tax/registry');
+      const profile = getCountryProfile(rawCC);
+      // Convert 0.15 -> 15, 0 -> 0, keep 2 decimals
+      return Math.round(profile.vat.standard * 100 * 100) / 100;
+    }
+  } catch {
+    /* ignore, fallback below */
+  }
+  // 2) Legacy fallback: first active vat_settings row
   const res = await coreApi.getVatSettings(companyId);
   if (!res.success || !res.data) return null;
-  const rate = num(res.data.vatRate);
-  return rate > 0 ? rate : null;
+  const rate = num((res.data as unknown as Record<string, unknown>).vatRate ?? (res.data as unknown as Record<string, unknown>).rate);
+  return Number.isFinite(rate) ? rate : null;
 }
 
 export interface InvoiceTaxConfig {
