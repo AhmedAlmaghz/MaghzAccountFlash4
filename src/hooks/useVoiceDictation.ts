@@ -24,9 +24,13 @@ export function useVoiceDictation({
   const [interimText, setInterimText] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState(true);
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const recognitionRef = useRef<any | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const animationRef = useRef<number | null>(null);
 
   // 1. مولد المؤثرات الصوتية الصافي (Web Audio API)
   const playChime = useCallback((type: 'start' | 'stop' | 'command') => {
@@ -70,6 +74,62 @@ export function useVoiceDictation({
       }
     } catch {
       // تجاهل الأخطاء غير الحرجة في الصوت
+    }
+  }, []);
+
+  // 1b. مخطط الموجة الحي — مستوي الصوت من الميكروفون
+  const startWaveform = useCallback(async () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioContextRef.current) audioContextRef.current = new AudioCtx();
+      const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') await ctx.resume();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.7;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const avg = sum / data.length; // 0..255
+        setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animationRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {
+      // fallback: نبضة وهمية
+      let dir = 1;
+      let lvl = 20;
+      const fake = () => {
+        if (!isSupported) return;
+        lvl += dir * (5 + Math.random() * 10);
+        if (lvl > 85) dir = -1;
+        if (lvl < 15) dir = 1;
+        setAudioLevel(Math.round(lvl));
+        animationRef.current = requestAnimationFrame(fake) as unknown as number;
+      };
+      fake();
+    }
+  }, [isSupported]);
+
+  const stopWaveform = useCallback(() => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    analyserRef.current = null;
+    setAudioLevel(0);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
   }, []);
 
@@ -136,10 +196,12 @@ export function useVoiceDictation({
 
     recognition.onerror = () => {
       setIsListening(false);
+      stopWaveform();
     };
 
     recognition.onend = () => {
       setIsListening(false);
+      stopWaveform();
     };
 
     recognitionRef.current = recognition as unknown as any;
@@ -148,18 +210,25 @@ export function useVoiceDictation({
       try {
         recognition.abort();
       } catch {}
+      stopWaveform();
     };
-  }, [speechLang, matchVoiceCommand, onFinalTranscript]);
+  }, [speechLang, matchVoiceCommand, onFinalTranscript, stopWaveform]);
 
-  // 4. تبديل حالة الاستماع
+  // 4. تبديل حالة الاستماع + إيقاف صريح
+  const stopListening = useCallback(() => {
+    if (!recognitionRef.current) return;
+    try { recognitionRef.current.stop(); } catch {}
+    setIsListening(false);
+    playChime('stop');
+    setInterimText('');
+    stopWaveform();
+  }, [playChime, stopWaveform]);
+
   const toggleListening = useCallback(() => {
     if (!recognitionRef.current) return;
 
     if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      playChime('stop');
-      setInterimText('');
+      stopListening();
     } else {
       try {
         (recognitionRef.current as unknown as { lang: string }).lang = speechLang;
@@ -167,11 +236,12 @@ export function useVoiceDictation({
         setIsListening(true);
         playChime('start');
         setToastMessage(null);
+        void startWaveform();
       } catch (err) {
         console.error('Speech recognition error:', err);
       }
     }
-  }, [isListening, speechLang, playChime]);
+  }, [isListening, speechLang, playChime, startWaveform, stopListening]);
 
   // 5. تبديل لغة الصوت (عربي / إنجليزي)
   const toggleSpeechLang = useCallback(() => {
@@ -194,9 +264,11 @@ export function useVoiceDictation({
     isSupported,
     speechLang,
     interimText,
+    audioLevel,
     toastMessage,
     setToastMessage,
     toggleListening,
+    stopListening,
     toggleSpeechLang,
   };
 }
