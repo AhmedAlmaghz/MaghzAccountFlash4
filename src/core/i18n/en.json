@@ -436,7 +436,14 @@
       "stop": "Stop recording",
       "listening": "Listening… speak now",
       "error": "Voice recognition failed — try again",
-      "notAllowed": "Please allow microphone access first"
+      "notAllowed": "Please allow microphone access first",
+      "record": "Record voice note",
+      "stopRecording": "Stop & transcribe",
+      "cancelRecording": "Cancel recording",
+      "transcribing": "Transcribing audio with AI…",
+      "tooLong": "Recording exceeds the 2-minute limit",
+      "noKey": "Voice transcription needs an API key — set it in AI settings or use live dictation",
+      "emptyTranscript": "No text came back from transcription — try again more clearly"
     },
     "attach": {
       "attachFile": "Attach file",
@@ -3162,6 +3169,13 @@
     "calendarType": {
       "gregorian": "Gregorian",
       "hijri": "Hijri"
+    },
+    "groups": {
+      "org": "Organization & Localization",
+      "finance": "Finance & Tax",
+      "inventory": "Inventory & Products",
+      "hr": "Human Resources",
+      "system": "System, Security & AI"
     }
   },
   "status": {

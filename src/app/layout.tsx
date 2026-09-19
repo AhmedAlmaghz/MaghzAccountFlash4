@@ -46,6 +46,7 @@ import { useIsMobile, useBodyScrollLock, useEscapeKey } from '@/core/hooks/useRe
 import { useSessionHeartbeat } from '@/core/hooks/useSessionHeartbeat';
 import { cn } from '@/core/utils';
 import type { Permission } from '@/modules/auth/types';
+import { SETTINGS_GROUPS, type SettingsGroupId } from './settingsGroups';
 
 const ChatWidget = React.lazy(() =>
   import('@/modules/ai/components/ChatWidget').then((m) => ({ default: m.ChatWidget }))
@@ -71,7 +72,7 @@ interface MenuItem {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   path: string;
   module: ModuleId;
-  children?: { labelKey: string; path: string; permission?: Permission }[];
+  children?: { labelKey: string; path: string; permission?: Permission; group?: SettingsGroupId }[];
 }
 
 const menuItems: MenuItem[] = [
@@ -228,27 +229,32 @@ const menuItems: MenuItem[] = [
     path: '/settings',
     module: 'settings',
     children: [
-      { labelKey: 'sidebar.settings.company', path: '/settings/company' },
-      { labelKey: 'settings.menu.themes', path: '/settings/themes' },
-      { labelKey: 'sidebar.settings.currencies', path: '/settings/currencies' },
-      { labelKey: 'sidebar.settings.vat', path: '/settings/vat' },
-      { labelKey: 'sidebar.hrPolicy', path: '/settings/hr-policies' },
-      { labelKey: 'sidebar.settings.payrollComponents', path: '/settings/payroll-components' },
-      { labelKey: 'sidebar.settings.branches', path: '/settings/branches' },
-      { labelKey: 'sidebar.settings.documentSequences', path: '/settings/document-sequences' },
-      { labelKey: 'sidebar.settings.defaultAccounts', path: '/settings/default-accounts' },
-      { labelKey: 'sidebar.settings.productTypes', path: '/settings/product-types' },
-      { labelKey: 'sidebar.settings.productCategories', path: '/settings/product-categories' },
-      { labelKey: 'sidebar.settings.units', path: '/settings/units' },
-      { labelKey: 'sidebar.settings.cashBoxes', path: '/settings/cash-boxes' },
-      { labelKey: 'sidebar.settings.costCenters', path: '/settings/cost-centers' },
-      { labelKey: 'sidebar.settings.database', path: '/settings/database' },
-      { labelKey: 'sidebar.settings.users', path: '/settings/users' },
-      { labelKey: 'sidebar.settings.roles', path: '/roles' },
-      { labelKey: 'sidebar.settings.auditLogs', path: '/audit-logs' },
-      { labelKey: 'sidebar.settings.backup', path: '/settings/backup' },
-      { labelKey: 'sidebar.settings.reset', path: '/settings/reset' },
-      { labelKey: 'sidebar.settings.ai', path: '/settings/ai', permission: 'ai.settings' as Permission },
+      // ── المنشأة والتوطين ──
+      { labelKey: 'sidebar.settings.company', path: '/settings/company', group: 'org' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.branches', path: '/settings/branches', group: 'org' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.currencies', path: '/settings/currencies', group: 'org' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.documentSequences', path: '/settings/document-sequences', group: 'org' as SettingsGroupId },
+      // ── المالية والضرائب ──
+      { labelKey: 'sidebar.settings.vat', path: '/settings/vat', group: 'finance' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.defaultAccounts', path: '/settings/default-accounts', group: 'finance' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.cashBoxes', path: '/settings/cash-boxes', group: 'finance' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.costCenters', path: '/settings/cost-centers', group: 'finance' as SettingsGroupId },
+      // ── المخزون والمنتجات ──
+      { labelKey: 'sidebar.settings.productTypes', path: '/settings/product-types', group: 'inventory' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.productCategories', path: '/settings/product-categories', group: 'inventory' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.units', path: '/settings/units', group: 'inventory' as SettingsGroupId },
+      // ── الموارد البشرية ──
+      { labelKey: 'sidebar.hrPolicy', path: '/settings/hr-policies', group: 'hr' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.payrollComponents', path: '/settings/payroll-components', group: 'hr' as SettingsGroupId },
+      // ── النظام والأمان والذكاء ──
+      { labelKey: 'sidebar.settings.users', path: '/settings/users', group: 'system' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.roles', path: '/roles', group: 'system' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.auditLogs', path: '/audit-logs', group: 'system' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.database', path: '/settings/database', group: 'system' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.backup', path: '/settings/backup', group: 'system' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.reset', path: '/settings/reset', group: 'system' as SettingsGroupId },
+      { labelKey: 'settings.menu.themes', path: '/settings/themes', group: 'system' as SettingsGroupId },
+      { labelKey: 'sidebar.settings.ai', path: '/settings/ai', permission: 'ai.settings' as Permission, group: 'system' as SettingsGroupId },
     ],
   },
 ];
@@ -364,22 +370,52 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
 
       {hasChildren && sidebarOpen && isExpanded && (
         <div className="ms-6 space-y-0.5 border-s border-zinc-200 dark:border-zinc-800 ps-2">
-          {visibleChildren.map((child) => {
-            const childActive = location.pathname === child.path;
-            return (
-              <Link
-                key={child.path}
-                to={child.path}
-                onClick={onNavigate}
-                className={cn(
-                  'flex items-center px-3 py-2 rounded-lg text-sm min-h-11 lg:min-h-9 transition-colors',
-                  childActive ? 'nav-link-active font-medium' : 'nav-link'
-                )}
-              >
-                {t(child.labelKey)}
-              </Link>
-            );
-          })}
+          {item.id === 'settings' ? (
+            SETTINGS_GROUPS.map((g) => {
+              const groupChildren = visibleChildren.filter((c) => c.group === g.id);
+              if (groupChildren.length === 0) return null;
+              return (
+                <div key={g.id}>
+                  <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                    {t(g.titleKey)}
+                  </p>
+                  {groupChildren.map((child) => {
+                    const childActive = location.pathname === child.path;
+                    return (
+                      <Link
+                        key={child.path}
+                        to={child.path}
+                        onClick={onNavigate}
+                        className={cn(
+                          'flex items-center px-3 py-2 rounded-lg text-sm min-h-11 lg:min-h-9 transition-colors',
+                          childActive ? 'nav-link-active font-medium' : 'nav-link'
+                        )}
+                      >
+                        {t(child.labelKey)}
+                      </Link>
+                    );
+                  })}
+                </div>
+              );
+            })
+          ) : (
+            visibleChildren.map((child) => {
+              const childActive = location.pathname === child.path;
+              return (
+                <Link
+                  key={child.path}
+                  to={child.path}
+                  onClick={onNavigate}
+                  className={cn(
+                    'flex items-center px-3 py-2 rounded-lg text-sm min-h-11 lg:min-h-9 transition-colors',
+                    childActive ? 'nav-link-active font-medium' : 'nav-link'
+                  )}
+                >
+                  {t(child.labelKey)}
+                </Link>
+              );
+            })
+          )}
         </div>
       )}
     </div>

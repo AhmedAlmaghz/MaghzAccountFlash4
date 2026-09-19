@@ -1,10 +1,13 @@
 import React, { memo, useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Mic, Square, Paperclip, X, Image as ImageIcon, FileText, Table, Mic as MicIcon, Loader2, Camera } from 'lucide-react';
+import { Send, Mic, Square, Paperclip, X, Image as ImageIcon, FileText, Table, Mic as MicIcon, Loader2, Camera, AudioLines } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { useToastStore } from '@/core/store/toastStore';
 import { cn } from '@/core/utils';
 import { useSpeechRecognition } from './useSpeechRecognition';
+import { useVoiceRecorder } from '../voice/useVoiceRecorder';
+import { warmUpMicrophone } from '../voice/audioConstraints';
+import { aiApi } from '../api';
 import { CameraCapture } from './CameraCapture';
 import { useAiStore } from '../store';
 import {
@@ -146,11 +149,77 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
     setValue(`${speechBaseRef.current}${joiner}${finalText}${finalText && interim ? finalJoiner : ''}${interim}`);
   }, []);
 
+  // ── Voice-note recording (file → AI transcription → textbox) ─────────────
+  // Quality path when an API key exists: MediaRecorder (opus) with DSP
+  // constraints → 16 kHz mono WAV → Gemini transcribes → text appended.
+  // Web Speech below stays the offline/no-key fallback.
+  const recorder = useVoiceRecorder();
+
+  const handleRecordClick = useCallback(async () => {
+    if (recorder.phase !== 'idle') return;
+    if (speech.isListening) speech.stop();
+    const companyId = useAppStore.getState().activeCompany?.id;
+    if (!companyId) {
+      useToastStore.getState().addToast('error', t('ai.voice.error'));
+      return;
+    }
+    // Honest gating: no key → no silent failure, fall back to live dictation.
+    try {
+      const cfg = await aiApi.getConfig(companyId);
+      if (!cfg.success || !cfg.data?.hasApiKey) {
+        useToastStore.getState().addToast('error', t('ai.voice.noKey'));
+        return;
+      }
+    } catch {
+      useToastStore.getState().addToast('error', t('ai.voice.noKey'));
+      return;
+    }
+    const ok = await recorder.start({ companyId, lang: language === 'en' ? 'en' : 'ar' });
+    if (!ok) {
+      useToastStore.getState().addToast('error', t('ai.voice.notAllowed'));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.phase, speech, language, t]);
+
+  const handleRecordStop = useCallback(() => {
+    void recorder.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.phase]);
+
+  // Single append path for AI transcripts (manual stop and timer auto-stop
+  // share lastTranscript, so the text can never double-insert).
+  useEffect(() => {
+    if (!recorder.lastTranscript) return;
+    const text = recorder.lastTranscript;
+    recorder.consumeTranscript();
+    setValue((v) => (v ? `${v.replace(/\s+$/, '')} ${text}` : text));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.lastTranscript]);
+
+  // Recorder errors: known codes map to i18n, provider errors show raw
+  // (they are already honest Arabic from the bridge).
+  useEffect(() => {
+    if (!recorder.error) return;
+    const message = recorder.error === 'not_allowed'
+      ? t('ai.voice.notAllowed')
+      : recorder.error === 'too_long'
+        ? t('ai.voice.tooLong')
+        : recorder.error === 'empty' || recorder.error === 'empty_transcript'
+          ? t('ai.voice.emptyTranscript')
+          : recorder.error;
+    useToastStore.getState().addToast('error', message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.error]);
+
   const handleMicClick = useCallback(() => {
     if (speech.isListening) {
       speech.stop();
       return;
     }
+    // A recording in progress is discarded in favour of live dictation.
+    if (recorder.phase !== 'idle') recorder.cancel();
+    // Warm up permission + browser DSP (AEC/NS/AGC) before the engine starts.
+    void warmUpMicrophone();
     const current = value.trim();
     speechBaseRef.current = current;
     speechFinalRef.current = '';
@@ -184,7 +253,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
     if (!started) {
       useToastStore.getState().addToast('error', t('ai.voice.error'));
     }
-  }, [speech, value, composeFromSpeech, t]);
+  }, [speech, value, composeFromSpeech, t, recorder]);
 
   // Surface recognition errors (mic permission denied, network, …) as toasts.
   useEffect(() => {
@@ -264,6 +333,11 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         handleSend();
       }
 
+      // Escape — while recording, cancel the voice note first (keep text).
+      if (e.key === 'Escape' && recorder.phase !== 'idle') {
+        recorder.cancel();
+        return;
+      }
       // Escape — clear input AND attachments. The old code cleared only the
       // text while the chips (the source of truth at send time) stayed put:
       // the textarea looked empty, the send button stayed enabled, and the
@@ -277,7 +351,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         }
       }
     },
-    [handleSend]
+    [handleSend, recorder]
   );
 
   return (
@@ -318,7 +392,83 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         </div>
       )}
 
+      {/* Voice-note recording panel — file → AI transcription path */}
+      {recorder.phase !== 'idle' && (
+        <div
+          className="flex items-center gap-3 px-3 py-2 rounded-2xl border border-rose-200 dark:border-rose-800/50 bg-rose-50 dark:bg-rose-950/30"
+          role="status"
+          aria-live="polite"
+        >
+          {recorder.phase === 'recording' ? (
+            <>
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+              </span>
+              {/* Live level waveform — 16 bars driven by the AnalyserNode */}
+              <div className="flex items-center gap-[2px] h-6 flex-1 justify-center" aria-hidden="true">
+                {Array.from({ length: 16 }).map((_, i) => {
+                  const wave = Math.abs(Math.sin(i * 0.9 + recorder.elapsedSec)) * 10;
+                  const h = Math.max(4, Math.min(22, 4 + wave + (recorder.level / 100) * 12));
+                  return (
+                    <span
+                      key={i}
+                      className="w-[3px] bg-rose-500 dark:bg-rose-400 rounded-full transition-[height] duration-75"
+                      style={{ height: `${h}px`, opacity: 0.65 + (h / 22) * 0.35 }}
+                    />
+                  );
+                })}
+              </div>
+              <span className="text-xs font-mono tabular-nums text-rose-700 dark:text-rose-300 shrink-0">
+                {Math.floor(recorder.elapsedSec / 60)}:{String(recorder.elapsedSec % 60).padStart(2, '0')}
+              </span>
+              <button
+                onClick={handleRecordStop}
+                className="flex-shrink-0 px-3 h-9 flex items-center gap-1.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 active:scale-95 transition-all"
+                title={t('ai.voice.stopRecording')}
+                aria-label={t('ai.voice.stopRecording')}
+              >
+                <Square size={13} className="fill-current" />
+                {t('ai.voice.stopRecording')}
+              </button>
+              <button
+                onClick={() => recorder.cancel()}
+                className="flex-shrink-0 p-2 rounded-xl text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/40"
+                title={t('ai.voice.cancelRecording')}
+                aria-label={t('ai.voice.cancelRecording')}
+              >
+                <X size={14} />
+              </button>
+            </>
+          ) : (
+            <>
+              <Loader2 size={16} className="animate-spin text-rose-500 shrink-0" />
+              <span className="text-xs font-medium text-rose-700 dark:text-rose-300">
+                {t('ai.voice.transcribing')}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="relative flex items-end gap-2">
+      {/* Voice-note record button (file → AI transcription; mic button = live Web Speech) */}
+      {recorder.isSupported && recorder.phase === 'idle' && (
+        <button
+          onClick={handleRecordClick}
+          disabled={disabled || isProcessing}
+          className={cn(
+            'flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-2xl transition-all active:scale-90',
+            'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400',
+            'hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 dark:hover:text-rose-400',
+            'disabled:opacity-50 disabled:cursor-not-allowed'
+          )}
+          title={t('ai.voice.record')}
+          aria-label={t('ai.voice.record')}
+        >
+          <AudioLines size={19} />
+        </button>
+      )}
       {/* Attach button + menu */}
       <div className="relative flex-shrink-0">
         <button
