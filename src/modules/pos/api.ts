@@ -907,10 +907,9 @@ export const posApi = {
       for (const line of input.lines) {
         const off = params.length;
         const usnap = snapshotLineUnit(line);
-        lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric, $${off + 11}::numeric)`);
-        params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent ?? 0, line.vatPercent ?? 0, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity ?? line.quantity, costByProduct.get(line.productId) || 0);
-        // Phase 1: unit_cost appended LAST (append-at-end rule) — posting-time
-        // cost basis frozen per base unit for exact return reversals later.
+        // Phase 1: unit_cost appended LAST — valuation-aware cost (posUnitCosts) is
+        // the single source of truth; costByProduct is legacy fallback handled
+        // by posUnitCosts itself, so only one VALUES row per line.
         const lineUnitCost = posUnitCosts.get(String(line.productId)) || 0;
         lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric, $${off + 11}::numeric)`);
         params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent ?? 0, line.vatPercent ?? 0, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity ?? line.quantity, lineUnitCost);

@@ -1149,6 +1149,7 @@ export const salesApi = {
                       JOIN sales_invoice_lines sil ON sil.invoice_id = si.id
                       JOIN LATERAL (
                         SELECT COALESCE(
+                          (SELECT s2.warehouse_id FROM stock s2 WHERE s2.product_id = sil.product_id AND s2.company_id = si.company_id AND s2.warehouse_id = $3::uuid AND s2.quantity >= COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) LIMIT 1),
                           (SELECT warehouse_id FROM stock WHERE product_id = sil.product_id AND company_id = si.company_id ORDER BY quantity DESC LIMIT 1),
                           (SELECT id FROM warehouses WHERE company_id = si.company_id ORDER BY created_at LIMIT 1)
                         ) AS warehouse_id
