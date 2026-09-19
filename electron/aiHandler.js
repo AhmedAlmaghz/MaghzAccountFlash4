@@ -28,7 +28,7 @@ const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/opena
 // does not exist — every unconfigured install 404'd until the user set a
 // model by hand). Keep in sync with src/modules/ai/api/browserBridge.ts
 // (enforced by providerDefaults.test.ts).
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const DEFAULT_MODEL = 'gemini-2.0-flash';
 const REQUEST_TIMEOUT_MS = 90000;
 const TEST_TIMEOUT_MS = 30000;
 

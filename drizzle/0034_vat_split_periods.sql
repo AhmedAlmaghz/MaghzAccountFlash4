@@ -1,4 +1,4 @@
--- 00341: VAT input/output split + tax periods (Phase 3 — FIN track, tax engine)
+-- 0034: VAT input/output split + tax periods (Phase 3 — FIN track, tax engine)
 --   1. 21302 input-VAT account (recoverable asset-side balance) + remap of
 --      default_vat_input to it — ONLY where it still points at 21301, so
 --      custom company mappings are never overwritten. History stays on 21301

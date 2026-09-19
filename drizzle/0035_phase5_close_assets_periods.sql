@@ -1,4 +1,4 @@
--- 00352: Phase 5 — year-end close + fixed assets + accounting periods
+-- 0035: Phase 5 — year-end close + fixed assets + accounting periods
 --   1. accounting_periods: fiscal lock per year (open/closed), like tax_periods.
 --   2. fixed_assets: register for straight-line + declining-balance depreciation.
 --   3. Chart groups + leaves: 12/121/12101 (cost), 12102 (accumulated, contra),

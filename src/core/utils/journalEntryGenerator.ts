@@ -466,7 +466,7 @@ export function buildPurchaseInvoicePostingStatements(
   const discount = toMoney(invoice.discountAmount);
   const gross = toMoney(invoice.grossSubtotal ?? ((bSub ?? invoice.subtotal) + discount));
   assertDiscountLeg(discount, gross, ids.discount, 'earned');
-  const inventoryAmount = standard ? Math.round((Number(standard.inventoryAmount) || 0) * 100) / 100 : (bSub !== undefined ? bSub : gross);
+  const inventoryAmount = standard ? Math.round((Number(standard.inventoryAmount) || 0) * 100) / 100 : gross;
   const variance = standard ? Math.round((Number(standard.varianceAmount) || 0) * 100) / 100 : 0;
   const bVatFinal = bVat !== undefined ? bVat : Math.round((Number(invoice.vatAmount) || 0) * 100) / 100;
   const bTotalFinal = bTotal !== undefined ? bTotal : Math.round((Number(invoice.totalAmount) || 0) * 100) / 100;

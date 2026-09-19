@@ -1,4 +1,4 @@
--- 00374: Phase 6 — treasury box GL accounts left behind by the bank
+-- 0037: Phase 6 — treasury box GL accounts left behind by the bank
 -- unification (Phase 62): seed boxes BNK-001/WLT-JEB point at 11102/11103,
 -- which never existed as accounts, so those boxes carry account_id = NULL
 -- and any cash-difference JE on their shifts fails honestly at close.

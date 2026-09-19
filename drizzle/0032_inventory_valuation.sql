@@ -1,4 +1,4 @@
--- 00329: Perpetual inventory valuation (Phase 1 — FIN track)
+-- 0032: Perpetual inventory valuation (Phase 1 — FIN track)
 --   1. inventory_layers: FIFO cost layers (receipts add, sales/returns consume
 --      oldest-first). Moving-average and standard-cost companies ignore it.
 --   2. products.standard_cost: frozen standard cost (standard-cost method only;
@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_layers_fifo_order
 ALTER TABLE products ADD COLUMN IF NOT EXISTS standard_cost numeric(18, 4);
 
 -- ─── 3. Frozen posting-time cost on sales lines ──────────────────────────────
-ALTER TABLE sales_invoice_lines ADD COLUMN IF NOT EXISTS unit_cost numeric(18, 4) NOT NULL DEFAULT 0;
+ALTER TABLE sales_invoice_lines ADD COLUMN IF NOT EXISTS unit_cost numeric(18, 4);
 
 -- ─── 4. Chart accounts (per company, 0012 pattern) ───────────────────────────
 INSERT INTO accounts (id, company_id, code, name_ar, name_en, type, nature, is_group, parent_id, balance, is_active, created_at)

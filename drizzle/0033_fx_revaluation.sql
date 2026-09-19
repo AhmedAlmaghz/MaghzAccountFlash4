@@ -1,4 +1,4 @@
--- 00330: Foreign-exchange differences (Phase 2 — FIN track, IAS 21)
+-- 0033: Foreign-exchange differences (Phase 2 — FIN track, IAS 21)
 --   1. 52902 exchange gain/loss account (P&L, netted: losses Dr, gains Cr)
 --      + default_exchange_difference key, seeded per company (0012 pattern).
 --      Lives under 52 with its 52901 shortage sibling; code matches parent

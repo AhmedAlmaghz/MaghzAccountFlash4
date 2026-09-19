@@ -803,11 +803,17 @@ describe('salesApi perpetual COGS (IAS 2)', () => {
 
   it('postInvoice backfills cost snapshots and books Dr COGS / Cr Inventory', async () => {
     const adapter = makeMockAdapter(async (sql, p) => {
-      if (sql.includes('WITH backfill')) {
-        return { success: true, rows: [{ cogs: 640 }] };
-      }
       if (sql.includes('FROM sales_invoices')) {
         return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-901', date: '2026-01-01', payment_type: 'credit', cash_box_id: null }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines') && sql.includes('COALESCE')) {
+        return { success: true, rows: [{ product_id: 'p1', bq: 10 }] };
+      }
+      if (sql.includes('FROM settings') && sql.includes('inventory.valuation_method')) {
+        return { success: true, rows: [{ value: 'moving_average' }] };
+      }
+      if (sql.includes('FROM products') && sql.includes('cost_price')) {
+        return { success: true, rows: [{ id: 'p1', cost_price: 64, standard_cost: null }] };
       }
       if (sql.includes('default_accounts')) {
         return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
@@ -815,24 +821,29 @@ describe('salesApi perpetual COGS (IAS 2)', () => {
       if (sql.includes('FROM accounts')) {
         return { success: true, rows: [{ id: 'acc-code' }] };
       }
+      if (sql.includes('FROM stock') || sql.includes('FROM customers')) {
+        return { success: true, rows: [{ product_id: 'p1', have: 100 }] };
+      }
+      if (sql.includes('FROM accounting_periods')) {
+        return { success: true, rows: [] };
+      }
       return { success: true, rows: [] };
     });
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await salesApi.postInvoice('inv-901', 'comp-1');
     expect(res.success, 'postInvoice failed: ' + (res.error || '')).toBe(true);
-    // backfill ran before the JE was composed
-    const backfillCall = adapter.query.mock.calls.map((c) => c[0] as string).find((s) => s.includes('WITH backfill'));
-    expect(backfillCall).toContain('UPDATE sales_invoice_lines sil SET unit_cost = COALESCE(p.cost_price, 0)');
     const txStmts = (adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params?: unknown[] }>);
-    const je = txStmts.find((q) => q.sql.includes('WITH new_tx'));
-    expect(je).toBeDefined();
-    // revenue legs + COGS legs: 640 Dr COGS / 640 Cr Inventory
-    expect(je!.params).toContain('acc-default_cogs');
-    expect(je!.params).toContain('acc-default_inventory');
-    const cogsIdx = (je!.params as unknown[]).indexOf('acc-default_cogs');
-    expect(je!.params![cogsIdx + 1]).toBe(640);
-    expect(je!.params![cogsIdx + 2]).toBe(0);
+    const jes = txStmts.filter((q) => q.sql.includes('WITH new_tx'));
+    expect(jes.length).toBeGreaterThanOrEqual(2);
+    const cogsJe = jes.find((q) => (q.params as unknown[]).includes('INV-901-COGS')) || jes[1];
+    expect(cogsJe).toBeDefined();
+    // COGS companion: 640 Dr COGS / 640 Cr Inventory (10 * 64)
+    expect(cogsJe!.params).toContain('acc-default_cogs');
+    expect(cogsJe!.params).toContain('acc-default_inventory');
+    const cogsIdx = (cogsJe!.params as unknown[]).indexOf('acc-default_cogs');
+    expect(cogsJe!.params![cogsIdx + 1]).toBe(640);
+    expect(cogsJe!.params![cogsIdx + 2]).toBe(0);
   });
 
   it('postInvoice skips COGS legs when nothing was taken out of stock', async () => {
@@ -864,17 +875,34 @@ describe('salesApi perpetual COGS (IAS 2)', () => {
 
   it('postReturn reverses the actual sale-time cost, not a ratio', async () => {
     const adapter = makeMockAdapter(async (sql, p) => {
-      if (sql.includes('sales_return_lines')) {
+      if (sql.includes('AS reversal')) {
         return { success: true, rows: [{ reversal: 320 }] };
       }
       if (sql.includes('FROM sales_returns')) {
-        return { success: true, rows: [{ customer_id: 'c1', total_amount: 500, return_number: 'SR-901', date: '2026-01-02', customer_name: 'عميل' }] };
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 500, subtotal: 500, vat_amount: 0, return_number: 'SR-901', date: '2026-01-02', customer_name: 'عميل', invoice_id: null }] };
+      }
+      if (sql.includes('FROM sales_return_lines') && sql.includes('WHERE return_id')) {
+        return { success: true, rows: [{ product_id: 'p1', bq: 5 }] };
+      }
+      if (sql.includes('FROM sales_return_lines')) {
+        return { success: true, rows: [{ product_id: 'p1', quantity: 5, unit_price: 100, line_total: 500, bq: 5 }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines')) {
+        return { success: true, rows: [{ product_id: 'p1', bq: 5, cost: 64, unit_cost: 64 }] };
+      }
+      if (sql.includes('FROM products') || sql.includes('FROM settings') || sql.includes('FROM stock')) {
+        if (sql.includes('FROM settings')) return { success: true, rows: [{ value: 'moving_average' }] };
+        if (sql.includes('FROM products')) return { success: true, rows: [{ id: 'p1', cost_price: 64, standard_cost: null }] };
+        return { success: true, rows: [{ product_id: 'p1', have: 100 }] };
       }
       if (sql.includes('default_accounts')) {
         return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
       }
       if (sql.includes('FROM accounts')) {
         return { success: true, rows: [{ id: 'acc-code' }] };
+      }
+      if (sql.includes('FROM accounting_periods')) {
+        return { success: true, rows: [] };
       }
       return { success: true, rows: [] };
     });
