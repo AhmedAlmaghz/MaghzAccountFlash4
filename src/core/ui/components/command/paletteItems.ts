@@ -44,6 +44,8 @@ export const paletteItems: PaletteItem[] = [
   { id: 'accounting-receipts', labelKey: 'sidebar.accounting.receiptVouchers', path: '/accounting/receipt-vouchers', module: 'accounting', keywords: ['receipt', 'voucher', 'قبض'] },
   { id: 'accounting-payments', labelKey: 'sidebar.accounting.paymentVouchers', path: '/accounting/payment-vouchers', module: 'accounting', keywords: ['payment', 'voucher', 'صرف'] },
   { id: 'accounting-ledger', labelKey: 'accounting.accountLedger', path: '/accounting/ledger', module: 'accounting', keywords: ['ledger', 'دفتر', 'استاذ'] },
+  { id: 'accounting-fixedassets', labelKey: 'sidebar.accounting.fixedAssets', path: '/accounting/fixed-assets', module: 'accounting', keywords: ['fixed', 'assets', 'أصول', 'ثابتة'] },
+  { id: 'accounting-yearend', labelKey: 'sidebar.accounting.yearEnd', path: '/accounting/year-end', module: 'accounting', keywords: ['year', 'close', 'إقفال', 'سنوي'] },
 
   // Inventory
   { id: 'inventory', labelKey: 'sidebar.inventory.title', path: '/inventory', module: 'inventory', keywords: ['inventory', 'مخازن'] },
@@ -63,6 +65,7 @@ export const paletteItems: PaletteItem[] = [
   // POS
   { id: 'pos-terminal', labelKey: 'sidebar.pos.terminal', path: '/pos', module: 'pos', keywords: ['pos', 'cashier', 'نقطة بيع', 'كاشير', 'بيع'] },
   { id: 'pos-shifts', labelKey: 'sidebar.pos.shifts', path: '/pos/shifts', module: 'pos', keywords: ['shifts', 'ورديات', 'وردية'] },
+  { id: 'pos-reports', labelKey: 'sidebar.pos.reports', path: '/pos/reports', module: 'pos', keywords: ['pos', 'reports', 'تقارير', 'مبيعات'] },
   { id: 'pos-settings', labelKey: 'sidebar.pos.settings', path: '/pos/settings', module: 'pos', keywords: ['pos settings', 'إعدادات نقطة بيع'] },
 
   // Purchases

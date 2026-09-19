@@ -170,6 +170,30 @@ const TOOL_ROUTES: Array<{ prefixes: string[]; target: RouteTarget }> = [
     prefixes: ['crm.create_activity', 'crm.update_activity', 'crm.delete_activity', 'crm.rep_performance', 'crm.get_activities', 'crm.sales_funnel', 'crm.lead_conversion'],
     target: { path: '/crm/activities', labelKey: 'ai.actions.openActivities' },
   },
+  {
+    prefixes: ['pos.get_active_shift', 'pos.list_shifts', 'pos.checkout_sale'],
+    target: { path: '/pos', labelKey: 'ai.actions.openPos' },
+  },
+  {
+    prefixes: ['pos.get_shift_summary'],
+    target: { path: '/pos/reports', labelKey: 'ai.actions.openPosReports' },
+  },
+  {
+    prefixes: ['accounting.list_fixed_assets', 'accounting.create_fixed_asset', 'accounting.dispose_fixed_asset', 'accounting.run_depreciation'],
+    target: { path: '/accounting/fixed-assets', labelKey: 'ai.actions.openFixedAssets' },
+  },
+  {
+    prefixes: ['accounting.close_fiscal_year', 'accounting.preview_fiscal_close', 'accounting.reverse_document'],
+    target: { path: '/accounting/year-end', labelKey: 'ai.actions.openYearEnd' },
+  },
+  {
+    prefixes: ['settings.get_tax_country', 'settings.set_tax_country'],
+    target: { path: '/settings/company', labelKey: 'ai.actions.openCompany' },
+  },
+  {
+    prefixes: ['tax.'],
+    target: { path: '/settings/vat', labelKey: 'ai.actions.openVat' },
+  },
 ];
 
 /** Module-level fallbacks for tool prefixes that have no explicit route above. */
@@ -181,6 +205,8 @@ const MODULE_FALLBACKS: Array<{ prefixes: string[]; target: RouteTarget }> = [
   { prefixes: ['manufacturing.'], target: { path: '/manufacturing/work-orders', labelKey: 'ai.actions.openWorkOrders' } },
   { prefixes: ['hr.'], target: { path: '/hr/employees', labelKey: 'ai.actions.openEmployees' } },
   { prefixes: ['crm.'], target: { path: '/crm/leads', labelKey: 'ai.actions.openLeads' } },
+  { prefixes: ['pos.'], target: { path: '/pos', labelKey: 'ai.actions.openPos' } },
+  { prefixes: ['tax.'], target: { path: '/settings/vat', labelKey: 'ai.actions.openVat' } },
   {
     prefixes: ['settings.create_theme', 'settings.generate_theme', 'settings.update_theme', 'settings.activate_theme', 'settings.list_themes', 'settings.delete_theme'],
     target: { path: '/settings/themes', labelKey: 'ai.actions.openThemes' },
@@ -206,6 +232,11 @@ const TEXT_KEYWORDS: Array<{ keywords: string[]; target: RouteTarget }> = [
   { keywords: ['سند قبض', 'receipt voucher'], target: { path: '/accounting/receipt-vouchers', labelKey: 'ai.actions.openReceiptVouchers' } },
   { keywords: ['سند صرف', 'payment voucher'], target: { path: '/accounting/payment-vouchers', labelKey: 'ai.actions.openPaymentVouchers' } },
   { keywords: ['ثيم', 'مظهر', 'سمة', 'الوضع الداكن', 'وضع ليلي', 'theme', 'dark mode', 'appearance'], target: { path: '/settings/themes', labelKey: 'ai.actions.openThemes' } },
+  { keywords: ['نقطة البيع', 'كاشير', 'نقطة بيع', 'pos', 'cashier'], target: { path: '/pos', labelKey: 'ai.actions.openPos' } },
+  { keywords: ['وردية', 'ورديات', 'تقرير z', 'shift', 'z-report'], target: { path: '/pos', labelKey: 'ai.actions.openPos' } },
+  { keywords: ['الأصول الثابتة', 'أصل ثابت', 'إهلاك', 'fixed asset', 'depreciation'], target: { path: '/accounting/fixed-assets', labelKey: 'ai.actions.openFixedAssets' } },
+  { keywords: ['الإقفال السنوي', 'سنة مالية', 'إقفال', 'year-end', 'fiscal close'], target: { path: '/accounting/year-end', labelKey: 'ai.actions.openYearEnd' } },
+  { keywords: ['الإقرار الضريبي', 'إقرار', 'فترة ضريبية', 'vat return', 'tax period'], target: { path: '/settings/vat', labelKey: 'ai.actions.openVat' } },
 ];
 
 function findRoute(toolName: string): RouteTarget | null {
@@ -263,6 +294,9 @@ const NEXT_ACTIONS: Record<string, { promptKey: string; labelKey: string }> = {
   'hr.generate_payroll_run': { promptKey: 'ai.actions.postLatestPayroll', labelKey: 'ai.actions.postLatestPayroll' },
   'manufacturing.create_work_order': { promptKey: 'ai.actions.startLatestWorkOrder', labelKey: 'ai.actions.startLatestWorkOrder' },
   'manufacturing.update_work_order_status': { promptKey: 'ai.actions.productionFollowUp', labelKey: 'ai.actions.productionFollowUp' },
+  'pos.checkout_sale': { promptKey: 'ai.actions.viewPosReceipt', labelKey: 'ai.actions.viewPosReceipt' },
+  'accounting.create_fixed_asset': { promptKey: 'ai.actions.runDepreciationForAsset', labelKey: 'ai.actions.runDepreciationForAsset' },
+  'tax.close_period': { promptKey: 'ai.actions.showVatReturn', labelKey: 'ai.actions.showVatReturn' },
 };
 
 /** Verb-level defaults when no exact tool match exists. */

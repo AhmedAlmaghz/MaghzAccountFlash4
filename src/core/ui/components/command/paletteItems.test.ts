@@ -23,7 +23,7 @@ describe('paletteItems registry', () => {
     for (const p of [
       '/', '/accounting', '/accounting/chart', '/accounting/journal', '/accounting/trial', '/accounting/balance',
       '/accounting/profit', '/accounting/cashflow', '/accounting/receipt-vouchers',
-      '/accounting/payment-vouchers', '/accounting/ledger', '/inventory', '/inventory/products',
+      '/accounting/payment-vouchers', '/accounting/ledger', '/accounting/year-end', '/accounting/fixed-assets', '/inventory', '/inventory/products',
       '/inventory/warehouses', '/inventory/stock', '/inventory/transactions',
       '/inventory/adjustments', '/sales', '/sales/invoices', '/sales/customers', '/sales/quotations',
       '/sales/returns', '/purchases', '/purchases/invoices', '/purchases/suppliers', '/purchases/orders',
@@ -34,7 +34,7 @@ describe('paletteItems registry', () => {
       '/reports/inventory-analysis', '/reports/low-stock-alert', '/reports/stock-movement',
       '/reports/stock-valuation', '/reports/customer-statement', '/reports/supplier-statement',
       '/reports/profit-analysis', '/reports/custom-builder', '/reports/lead-conversion',
-      '/reports/opportunity-pipeline', '/users', '/roles', '/audit-logs', '/settings', '/settings/company',
+      '/reports/opportunity-pipeline', '/pos', '/pos/shifts', '/pos/reports', '/pos/settings', '/users', '/roles', '/audit-logs', '/settings', '/settings/company',
       '/settings/themes', '/settings/currencies', '/settings/vat', '/settings/branches', '/settings/users',
       '/settings/ai', '/settings/document-sequences', '/settings/product-types',
       '/settings/product-categories', '/settings/default-accounts', '/settings/units',

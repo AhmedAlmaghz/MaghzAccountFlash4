@@ -110,11 +110,34 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
+    prefixes: ['pos.'],
+    keywords: [
+      'نقطة بيع', 'نقطة البيع', 'كاشير', 'الكاشير', 'وردية', 'ورديات', 'شيفت',
+      'إيصال', 'إيصالات', 'تقرير z', 'مبيعات نقدية', 'بيع نقدي',
+      'pos', 'cashier', 'shift', 'receipt', 'z',
+    ],
+  },
+  {
     prefixes: ['settings.', 'search.cash_boxes', 'search.cost_centers', 'search.units', 'search.product_types', 'search.document_sequences', 'search.categories'],
     keywords: [
       'إعدادات', 'اعدادات', 'ثيم', 'ثيمات', 'ألوان', 'مظهر', 'واجهة', 'فرع', 'فروع',
       'صندوق', 'صناديق', 'مركز تكلفة', 'وحدة', 'وحدات', 'نوع منتج', 'أنواع منتجات',
       'تسلسل', 'ترقيم', 'قوالب', 'قالب',
+    ],
+  },
+  {
+    // Tax & fixed-assets intent: the tax.* family (plus the accounting.*
+    // tools that host close_fiscal_year / run_depreciation / vat_summary
+    // today) routes in on country/period/return/asset vocabulary.
+    prefixes: ['tax.', 'accounting.'],
+    keywords: [
+      'دولة', 'الدولة', 'السعودية', 'الإمارات', 'مصر', 'اليمن',
+      'إقرار', 'الإقرار', 'فترة ضريبية', 'فترات ضريبية', 'فترة', 'فترات',
+      'إعادة تقييم', 'فروق صرف', 'مخصص إجازات',
+      'أصل', 'أصول', 'الأصول', 'أصل ثابت', 'إهلاك', 'الإهلاك', 'استبعاد',
+      'إقفال', 'الإقفال', 'سنة مالية', 'قفل الفترة',
+      'tax', 'country', 'return', 'period', 'revalue',
+      'fixed', 'depreciation', 'depreciate', 'year-end', 'fiscal',
     ],
   },
   {

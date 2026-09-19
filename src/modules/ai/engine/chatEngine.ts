@@ -395,12 +395,28 @@ class ChatEngine {
     }
     try {
       const tax = await getInvoiceTaxConfig(companyId);
+      let countryCode: string | undefined;
+      try {
+        const { getDbAdapter } = await import('@/core/database/adapters');
+        const adapter = await getDbAdapter();
+        const ccRes = await adapter.query<{ value: string }>(
+          `SELECT value FROM settings WHERE company_id = $1 AND key = 'tax.country_code' LIMIT 1`,
+          [companyId],
+        );
+        const raw = ccRes.success && ccRes.rows?.[0]?.value
+          ? String(ccRes.rows[0].value).trim().toUpperCase()
+          : '';
+        if (raw) countryCode = raw;
+      } catch {
+        /* ignore — the prompt handles an unset country by asking the user */
+      }
       const data: LiveCompanyContext = {
         // vatUnset ⇒ settings unreadable: the rate is UNKNOWN, not zero —
         // omit it so the prompt tells the model to ASK the user instead of
         // booking VAT on a guess (the write layer books 0 in that case).
         ...(tax.vatRate > 0 && !tax.vatUnset ? { vatRate: tax.vatRate } : {}),
         vatOnInvoices: tax.showVat,
+        ...(countryCode ? { countryCode } : {}),
       };
       this.liveContextCache = { at: now, data };
       return data;

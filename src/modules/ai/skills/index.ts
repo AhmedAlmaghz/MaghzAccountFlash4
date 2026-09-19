@@ -6,6 +6,9 @@ import { businessAnalystSkill } from './businessAnalyst';
 import { searchExpertiseSkill } from './searchExpertise';
 import { crmAssistantSkill } from './crmAssistant';
 import { inventoryUnitsSkill } from './inventoryUnits';
+import { posAssistantSkill } from './posAssistant';
+import { taxComplianceSkill } from './taxCompliance';
+import { fixedAssetsSkill } from './fixedAssets';
 import { regionalFluencySkill } from './regionalFluency';
 import { themeDesignerSkill } from './themeDesigner';
 
@@ -27,6 +30,9 @@ export function ensureSkillsRegistered(): void {
     searchExpertiseSkill,
     crmAssistantSkill,
     inventoryUnitsSkill,
+    posAssistantSkill,
+    taxComplianceSkill,
+    fixedAssetsSkill,
     regionalFluencySkill,
     themeDesignerSkill,
   ]);

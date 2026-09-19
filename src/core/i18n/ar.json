@@ -325,6 +325,12 @@
       "openSalesAnalysis": "فتح تحليل المبيعات",
       "openInventoryAnalysis": "فتح تحليل المخزون",
       "openDepartments": "فتح الأقسام",
+      "openPos": "فتح نقطة البيع",
+      "openPosReports": "فتح تقارير نقطة البيع",
+      "openFixedAssets": "فتح الأصول الثابتة",
+      "openYearEnd": "فتح الإقفال السنوي",
+      "openVat": "فتح إعدادات الضريبة",
+      "openCompany": "فتح بيانات الشركة",
       "createAnother": "أنشئ واحدة أخرى",
       "comparePrevious": "قارن مع الفترة السابقة",
       "postLatestInvoice": "رحّل هذه الفاتورة الآن",
@@ -340,7 +346,10 @@
       "startLatestWorkOrder": "ابدأ تنفيذ أمر التشغيل",
       "productionFollowUp": "اعرض حالة أوامر الإنتاج",
       "showLatestPosting": "اعرض القيد المحاسبي الناتج",
-      "summarizeLatestDocument": "اعرض تفاصيل آخر مستند"
+      "summarizeLatestDocument": "اعرض تفاصيل آخر مستند",
+      "viewPosReceipt": "اعرض إيصال نقطة البيع",
+      "runDepreciationForAsset": "شغّل إهلاك الشهر",
+      "showVatReturn": "اعرض الإقرار الضريبي"
     },
     "settings": {
       "title": "إعدادات الذكاء الاصطناعي",
