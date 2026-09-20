@@ -11,6 +11,28 @@
 
 > All figures are **machine-verified**: every entry balances and the balance-sheet equation nets to zero in each example.
 
+## Method of every example (a full system cycle)
+
+Each example follows the same order: **(1)** master data (cash boxes linked to accounts, customers and suppliers, employees, products with units and barcodes, warehouses, plus a BOM or a lead where the business fits) ← **(2)** opening balance ← **(3)** dated transactions with screen paths (sales and purchase invoices, linked vouchers, returns, payroll runs, advances/custodies and their settlements, POS shifts, assets and depreciation) ← **(4)** posted entries ← **(5)** closing statements ← **(6)** the `CLS` closing entry with post-close trial balance ← **(7)** a comparison checklist against system screens.
+
+## Element coverage map
+
+| Element | Where it appears |
+|---|---|
+| Account-linked cash boxes | All examples (box table) + inter-box transfer (02) |
+| Customers and suppliers with balances and settlements | All examples + customer-from-lead (03, 05, 10) |
+| Employees, advances and custodies | 01, 03, 05, 07, 09, 10 |
+| Products, units, barcodes and warehouses | 01, 02, 03, 04, 06, 07, 08, 10 |
+| BOM and work orders | 04 |
+| Sales and purchase invoices (cash and credit) | All examples |
+| Vouchers linked to invoices | 01, 02, 03, 04, 05, 06, 07, 08, 09, 10 |
+| Sales and purchase returns | 01, 02, 03, 04, 06, 10 |
+| Payroll runs and provisions | 05, 09 (+ direct salaries elsewhere) |
+| Fixed assets and depreciation | 01, 08 |
+| POS shifts with automatic differences | 07 |
+| `CLS` year-end close | All examples |
+| Stock-free services | 05, 08, 09 |
+
 ## Index
 
 | # | File | Company | Skill tested |
