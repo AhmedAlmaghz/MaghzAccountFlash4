@@ -105,6 +105,21 @@ After closing (or during it) the Z Report prints — the Shift's official refere
 - **Recurring differences = a warning:** watch the Shifts screen weekly — a cashier with repeated shorts needs training or review.
 - Shifts load page by page (server-side pagination) so they stay fast with thousands of records.
 
+## Automatic Cash-Difference Posting (`POS-DIFF`)
+
+Closing does more than store the difference — it **posts it as an entry** with a `POS-DIFF-` reference (once per shift, and the entry is idempotent: re-closing never duplicates it):
+
+| Difference | Entry |
+|---|---|
+| Short (counted < expected) | Debit shortage `52901` / credit the treasury account |
+| Over (counted > expected) | Debit the treasury account / credit surplus `41901` |
+
+The −1,500 short example above: debit `52901` **1,500** / credit the main-box account **1,500**. Two conditions: the cash box must be **linked to a ledger account** (no account → honest rejection before closing, not after), and the fiscal year must be open.
+
+## Automatic Walk-in Customer (`CASH`)
+
+Pure cash sales (a passer-by with no customer card) need no manual customer creation: when saving without a customer the system provides the `CASH` customer automatically (name lookup first, then single-statement creation with no race window). A cash invoice gets `paid_amount = total` with status **paid**, and the customer balance is **untouched**.
+
 ## Full Numeric Example
 
 | Item | Value (YER) |

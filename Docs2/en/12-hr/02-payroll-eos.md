@@ -81,6 +81,29 @@ Before saving, you can, for each employee:
 
 The payroll totals bar shows: **Gross, Deductions, Net, and total overtime hours** — these are the figures of the journal entry at posting.
 
+### Posting entry (Gross-up) — numeric example
+
+A run with gross 507,500, deductions 27,000, net 480,500. Pressing "Post" executes **one atomic entry together with the status flip** (never an entry without a flip, never a flip without an entry):
+
+| Account | Debit (YER) | Credit (YER) |
+|---|---|---:|
+| Salaries expense (gross) | 507,500 | |
+| Salaries payable `21501` (net) | | 480,500 |
+| Payroll deductions payable `21502` | | 27,000 |
+
+The deductions line is **omitted when zero** (a deduction-free run = two lines only). A zero run (gross or net zero) is **rejected** — zeros are never posted.
+
+### Leave provision (`21504`)
+
+The accrued liability for unused annual leave is posted periodically as a true-up against `21504`:
+
+| Case | Entry |
+|---|---|
+| Provision top-up | Debit salaries expense / credit `21504` |
+| Excess provision | Debit `21504` / credit salaries expense |
+
+> **Why it matters:** without a provision, liabilities surface suddenly at settlement. The provision spreads the cost over the periods it was earned — per IAS 19.
+
 ### Components
 
 Payroll components are defined in **Settings** (not in the payroll run): a code, an Arabic name, a type (earning/deduction/tax/insurance), a method (fixed/percentage), and a default value. Editing a component affects new payroll runs only — posted runs are preserved with their figures.

@@ -96,7 +96,11 @@ Additional card elements:
 | USD $ | 100 | 150,000 | 43% |
 | **Total in Base Currency** | | **350,000 YER** | 100% |
 
-## 5. Step-by-Step Workflow
+## 5. Exchange Differences & Revaluation
+
+Realized differences when a voucher links to an invoice at two different rates, and unrealized ones via periodic revaluation anchored by `last_reval_rate` — fully documented with examples in [`02-fx-revaluation.md`](./02-fx-revaluation.md).
+
+## 6. Step-by-Step Workflow
 
 1. **Define your currencies:** Settings ← Currencies ← add USD at 1500 and SAR at 400 (see `04-settings/02-branches-currencies.md`).
 2. **Update the rate daily with the market:** edit the exchange rates on the currencies page whenever the price changes — new documents pull the new rate automatically.

@@ -1,6 +1,6 @@
 # دليل المستخدم الشامل — MaghzAccountPro
 
-> الدليل الرسمي الكامل لنظام **MaghzAccountPro** (الإصدار v0.15.18): نظام ERP محاسبي متكامل للمنشآت الصغيرة والمتوسطة، بواجهة عربية أولاً، محاسبة مزدوجة متوافقة مع IFRS، ضريبة قيمة مضافة مرنة، عملات متعددة، ووكيل ذكي «مغزى».
+> الدليل الرسمي الكامل لنظام **MaghzAccountPro** (الإصدار v0.21.1): نظام ERP محاسبي متكامل للمنشآت الصغيرة والمتوسطة، بواجهة عربية أولاً، محاسبة مزدوجة متوافقة مع IFRS، ضريبة قيمة مضافة مرنة، عملات متعددة، ووكيل ذكي «مغزى».
 
 ---
 
@@ -35,8 +35,8 @@
 | **[03 — الواجهة العامة](./03-interface/README.md)** | الشريط الجانبي، الهيدر، اللغة والمظهر، الملف الشخصي، الثيمات |
 | **[04 — الإعدادات](./04-settings/README.md)** | [الشركة](./04-settings/01-company.md) · [الفروع والعملات](./04-settings/02-branches-currencies.md) · [ضريبة القيمة المضافة](./04-settings/03-vat.md) · [ترقيم المستندات](./04-settings/04-document-sequences.md) · [الأنواع والتصنيفات والوحدات وصناديق النقد](./04-settings/05-classifications.md) · [الحسابات الافتراضية](./04-settings/06-default-accounts.md) · [إعدادات HR](./04-settings/07-hr-settings.md) · [النسخ الاحتياطي وقاعدة البيانات](./04-settings/08-backup-database.md) |
 | **[05 — المستخدمون والأدوار](./05-users-roles/README.md)** | المستخدمون، الأدوار والصلاحيات، «مستنداتي فقط»، سجل التدقيق |
-| **[06 — المحاسبة](./06-accounting/README.md)** | [شجرة الحسابات](./06-accounting/01-chart-of-accounts.md) · [قيود اليومية](./06-accounting/02-journal-entries.md) · [سندات القبض والصرف](./06-accounting/03-vouchers.md) · [التقارير المالية](./06-accounting/04-financial-reports.md) |
-| **[07 — المخازن](./07-inventory/README.md)** | [المنتجات والوحدات المتعددة](./07-inventory/01-products.md) · [المستودعات والمخزون والتحويلات](./07-inventory/02-warehouses-stock.md) · [تسويات الجرد](./07-inventory/03-adjustments.md) |
+| **[06 — المحاسبة](./06-accounting/README.md)** | [شجرة الحسابات](./06-accounting/01-chart-of-accounts.md) · [قيود اليومية](./06-accounting/02-journal-entries.md) · [سندات القبض والصرف](./06-accounting/03-vouchers.md) · [التقارير المالية](./06-accounting/04-financial-reports.md) · [الضوابط المالية](./06-accounting/05-financial-controls.md) · [الإقفال والأصول والعكس](./06-accounting/06-year-end-assets.md) · [الفترات الضريبية والإقرار](./06-accounting/07-vat-periods.md) |
+| **[07 — المخازن](./07-inventory/README.md)** | [المنتجات والوحدات المتعددة](./07-inventory/01-products.md) · [المستودعات والمخزون والتحويلات](./07-inventory/02-warehouses-stock.md) · [تسويات الجرد](./07-inventory/03-adjustments.md) · [طرق التقييم](./07-inventory/04-valuation.md) |
 | **[08 — المبيعات](./08-sales/README.md)** | [العملاء](./08-sales/01-customers.md) · [الفواتير](./08-sales/02-invoices.md) · [عروض الأسعار](./08-sales/03-quotations.md) · [المرتجعات](./08-sales/04-sales-returns.md) |
 | **[09 — المشتريات](./09-purchases/01-suppliers.md)** | [الموردون](./09-purchases/01-suppliers.md) · [الفواتير وأوامر الشراء](./09-purchases/02-invoices-orders.md) · [المرتجعات](./09-purchases/03-purchase-returns.md) |
 | **[10 — نقاط البيع POS](./10-pos/README.md)** | [شاشة الكاشير](./10-pos/01-terminal.md) · [الورديات وتقرير Z](./10-pos/02-shifts.md) · [الإعدادات والتقارير](./10-pos/03-settings-reports.md) |
@@ -45,7 +45,8 @@
 | **[13 — علاقات العملاء CRM](./13-crm/README.md)** | العملاء المحتملون، الفرص ومراحلها، المهام والأنشطة |
 | **[14 — التقارير](./14-reports/01-dashboard.md)** | [لوحة التحكم](./14-reports/01-dashboard.md) · [مركز التقارير ومنشئ التقارير](./14-reports/02-reports-hub.md) |
 | **[15 — الوكيل الذكي «مغزى»](./15-ai-assistant/README.md)** | الدردشة، المرفقات، الأوامر بالعربية، تأكيد الكتابات، طوابير الدفعات، الإعداد |
-| **[16 — العملات المتعددة](./16-multicurrency/README.md)** | أسعار الصرف، المعادل بالعملة الأساسية، التقارير متعددة العملات |
+| **[16 — العملات المتعددة](./16-multicurrency/README.md)** | [الأساسيات](./16-multicurrency/README.md) · [فروق الصرف وإعادة التقييم](./16-multicurrency/02-fx-revaluation.md) |
+| **[17 — الولايات الضريبية](./17-tax-jurisdictions/README.md)** | ملف لكل دولة (SA/AE/EG/YE)، بطاقة الولاية، التحقق الآلي |
 | **[99 — الملحقات](./99-appendix/01-glossary.md)** | [قاموس المصطلحات](./99-appendix/01-glossary.md) · [مصفوفة الصلاحيات](./99-appendix/02-permissions-matrix.md) · [اختصارات لوحة المفاتيح](./99-appendix/03-shortcuts.md) · [استكشاف الأخطاء](./99-appendix/04-troubleshooting.md) · [الأسئلة الشائعة](./99-appendix/05-faq.md) |
 
 ---
@@ -61,4 +62,4 @@
 
 ---
 
-*دليل المستخدم — MaghzAccountPro v0.15.18 · مُولَّد من مراجعة الكود المصدري · الصيغة: Markdown*
+*دليل المستخدم — MaghzAccountPro v0.21.1 · مُولَّد من مراجعة الكود المصدري · الصيغة: Markdown*

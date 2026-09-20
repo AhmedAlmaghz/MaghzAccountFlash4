@@ -25,7 +25,10 @@ The Accounting module is the reference to which all transactions flow from the o
 1. **Chart of Accounts first** (`01-chart-of-accounts.md`): understand the hierarchy, the five types, and the debit/credit nature. Nothing else makes sense before that — every entry and voucher lands on accounts from the tree.
 2. **Journal Entries second** (`02-journal-entries.md`): the core of double-entry accounting. Learn the line editor, the balance check, and the posting rules — the same ones applied inside vouchers and invoices.
 3. **Receipt and Payment Vouchers third** (`03-vouchers.md`): the most frequent daily cash movement; they are essentially ready-made entries built for you automatically.
-4. **Financial reports last** (`04-financial-reports.md`): Account Ledger, Trial Balance, Balance Sheet, Income Statement, and Cash Flow Statement — the fruit of everything above.
+4. **Financial reports fourth** (`04-financial-reports.md`): Account Ledger, Trial Balance, Balance Sheet, Income Statement, and Cash Flow Statement — the fruit of everything above.
+5. **Financial controls fifth** (`05-financial-controls.md`): the full governance map — who posts, what is blocked, and how periods lock — read before going live.
+6. **Year-end, assets, and reversal sixth** (`06-year-end-assets.md`): closing the year, the asset register with depreciation, and correcting posted records.
+7. **Tax periods and the return seventh** (`07-vat-periods.md`): splitting input from output VAT, period statuses, and the leg-based return.
 
 ## Access & Permissions
 
@@ -66,6 +69,9 @@ Every screen in the module needs `accounting.view` to view. The other actions ar
 | `02-journal-entries.md` | Journal Entries: the multi-line editor, the balance check, the duplicate guard, posting rules, a numeric example |
 | `03-vouchers.md` | Receipt and Payment Vouchers: fields, invoice linking, the lifecycle, numeric examples |
 | `04-financial-reports.md` | Account Ledger, Trial Balance, Balance Sheet, Income Statement, Cash Flow Statement |
+| `05-financial-controls.md` | Financial controls and operation restrictions: permissions, atomic posting, posted finality, period locks, audit trail, gates — with a full cash-sale example |
+| `06-year-end-assets.md` | Year-end close (`CLS-YYYY`), fixed-asset register with depreciation and disposal, true reversal (`REV-`) |
+| `07-vat-periods.md` | Splitting input VAT `21302` from output `21301`, tax-period statuses, the leg-based return |
 
 ## Quick Access Matrix
 

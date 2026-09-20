@@ -15,14 +15,14 @@
 - لوحة تحكم رئيسية (Dashboard) تعرض KPIs من كل الوحدات.
 - تصميم عربي/إنجليزي مع خطوط Cairo/Inter ووضع فاتح/داكن.
 
-- **الإصدار الحالي:** v0.2.0 (Lint clean: 0 errors, 0 warnings | Tables: 60 | i18n: 985 keys متوازنة | Tests: 289 ✓ + **e2e: 10/10 ✓** | 21 pages server-side paginated | RBAC complete (25+ pages) | Multi-currency complete | Playwright e2e foundation | Infinite loading fixed | **i18n: Settings+HR fully converted (~320 strings)** | **Manufacturing P1: phantom columns + cross-tenant fixed** | **console.error/warn cleaned: 0 remaining**)
+- **الإصدار الحالي:** v0.21.1 (مصدر الحقيقة: `package.json` | Migrations: 38 ملف `0000_init` ← `0037_treasury_box_accounts` | i18n: 3246 keys متوازنة ar==en | الوحدات: 14 مجلداً في `src/modules/` بما فيها `tax/` | دليل المستخدم: `Docs2/` — 17 قسماً + ملاحق، مختوم v0.21.1، وسجل الإصدارات في `Docs2/CHANGELOG.md`)
 - **المنصات:** Electron (سطح المكتب) + Web Browser (مستقبلي)
 - **اللغات:** العربية (افتراضي) + الإنجليزية
 - **الترخيص:** خاص (Private)
 
 ---
 
-## 2. الوحدات المنفصلة (13 Modules)
+## 2. الوحدات المنفصلة (14 Modules)
 
 | # | الوحدة | المجلد | الوصف |
 |---|--------|--------|-------|
@@ -39,6 +39,7 @@
 | 11 | **التقارير (Reports)** | `modules/reports/` | Dashboard، تقارير مركزية، تحليلات |
 | 12 | **الوكيل الذكي (AI Harness)** | `modules/ai/` + `electron/aiHandler.js` | مساعد "مغزى": ~256 أداة function-calling، موجّه أدوات ≤48/دورة، كتابات بتأكيد بشري fail-closed، حارس تلفيق، طوابير دفعات، مرفقات متعددة الوسائط، ملخص سياق، Purge للـ PII |
 | 13 | **نقاط البيع (POS)** | `modules/pos/` | شاشة كاشير هجينة (باركود+لمس) بملء الشاشة خارج AppLayout، ورديات (فتح/إغلاق/فرق صندوق/تقرير Z)، دفع نقدي+آجل+مختلط بإيصال POS- بترقيم مستقل، checkout ذري واحد (فاتورة+قيد+مخزون+دفعات+رصيد) على sales_invoices بعمودي is_pos/shift_id |
+| 14 | **الضرائب (Tax)** | `modules/tax/` | محرك ضرائب متعدد الدول (ملف لكل دولة `sa/ae/eg/ye` + `tax.country_code` مصدر النسبة)، فترات `tax_periods` وإقرار VAT من أرجل القيود، بطاقتا `VatReturnPanel` و`TaxJurisdictionCard` |
 
 ---
 

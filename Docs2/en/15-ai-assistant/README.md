@@ -85,6 +85,18 @@ When a request involves more than two write operations (such as «سجّل 50 ف
 - On approval, processing starts gradually with a **progress card** (completed/failed/skipped) and pause/resume/cancel/**retry-failed** buttons.
 - The batch state is **stored in the database**, so if the app closes or the machine loses power, the batch resumes where it stopped when you return.
 
+### Dry-run preview (`ai.preview_batch`)
+
+Any proposed batch over **10 operations** or with complex dependencies is first checked with a dry run **without creating anything**: the system shows a numbered plan (normalization, pre-flight checks, permissions, session duplication, dependency soundness) — review it, then create with `ai.enqueue_batch` only after a "ready" verdict.
+
+## Session Memory (Persistent Task Ledger)
+
+The context window (30 messages) drops the original request in long sessions, so the assistant keeps a **structured task ledger** outside the window, injected every cycle:
+
+- **Your requests in full text** (the original task up to 4,500 chars) — you are never asked to resend a list you already sent.
+- **What was actually executed** (finished batches and created entities) — recreating an entity made in the same session is forbidden (the guard drops duplicates and discloses them).
+- **Task table**: every batch item with its status (done/failed/skipped) — "where did the batch get to?" is answered from the table, not guessed.
+
 ## Language Understanding
 
 - **Modern Standard Arabic and dialects**: it understands common Yemeni and Gulf business phrasing.

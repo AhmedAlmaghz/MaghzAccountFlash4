@@ -131,6 +131,13 @@ When you click **Complete**:
 
 > **An unbalanced journal entry is rejected** — debit and credit are computed before posting, and any difference > 0.01 fails the operation with a message identifying both amounts.
 
+### Precise completion controls
+
+- **Receipt warehouse:** explicit choice first, then the order's saved value, then the **default finished-goods warehouse** (`manufacturing.default_fg_warehouse_id` in settings), then the first — never a random warehouse.
+- **Zero output is rejected:** completing with costs but no produced quantity fails with a "zero output" message — no phantom finished value without a stock receipt.
+- **Soft guard on production costs (53xxx):** before the entry, each category (labor/energy/packaging/other) is compared against its accumulated debit balance in the ledger; an overdraft is **logged as a warning** in the technical log and completion is allowed (simplified flows enter costs directly on the order with no prior voucher). A strict block is a future option via `manufacturing.strictCostGuard` once the full expense → WIP cycle is adopted.
+- **Accounts are configurable:** `default_production_labor/energy/packaging/other`, `default_production_loss`, `default_wip`, and `default_finished_goods` in Default Accounts — the `53101–53501`/`11302`/`11303` codes are fallbacks only.
+
 ## Cancellation
 
 - From "Planned": a clean status change only — no stock and no journal entries.

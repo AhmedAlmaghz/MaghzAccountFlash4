@@ -41,7 +41,7 @@ From **Sidebar ← Reports Hub** you find the inventory reports:
 |---|---|
 | **Low Stock Alert** | Items whose balance has reached the minimum threshold or reorder point |
 | **Item Ledger** | Detailed statement of a single item's movements over a period |
-| **Stock Valuation** | The value of the entire inventory at cost: quantity × cost price |
+| **Stock Valuation** | The value of the entire inventory at cost: quantity × cost price — the three methods (average/FIFO/standard) are documented in `04-valuation.md` |
 
 ## Module Structure
 
@@ -51,7 +51,8 @@ Inventory
 ├── Warehouses          ← Define warehouses + view each warehouse's stock
 ├── Stock               ← Balances + Transfers tab (TRF-)
 ├── Stock Movements     ← Log of all movements (in / out / adjustment / transfer)
-└── Stock Adjustments   ← Stock counts and the approve/post cycle (ADJ-)
+├── Stock Adjustments   ← Stock counts and the approve/post cycle (ADJ-)
+└── Valuation Methods   ← Moving average / FIFO / Standard + layers (`04-valuation.md`)
 ```
 
 ## Important Rules
