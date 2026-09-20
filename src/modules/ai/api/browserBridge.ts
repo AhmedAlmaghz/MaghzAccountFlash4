@@ -1,5 +1,7 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { useAuthStore } from '@/modules/auth/store';
+import { decryptApiKey, encryptApiKey, isEncryptedEnvelope } from './keyVault';
+import { resolveProviderId, validateModelForProvider } from './providers';
 import type {
   AiChatSessionSummary,
   AiPublicConfig,
@@ -35,10 +37,12 @@ import {
  *     the rest of the app's data — it never leaves the machine).
  *   - Chat sessions use the same ai_chat_sessions / ai_chat_messages tables.
  *
- * Security note: unlike Electron, the key is not OS-encrypted. It is only
- * stored in the browser's local database (IndexedDB). This is acceptable for
- * a local-first app, but users should prefer the desktop build for shared
- * machines.
+ * Security note: unlike Electron, there is no OS keychain here — but the
+ * key is NOT stored in plaintext: saveConfig encrypts it with AES-GCM-256
+ * under a non-extractable device key (see keyVault.ts) and the settings
+ * table holds ciphertext only. A per-company kill-switch
+ * (`ai.browser_disabled`) refuses all LLM traffic in browser mode, and the
+ * stored key can be revoked (deleted) from AiSettingsPage at any time.
  */
 
 const AI_CATEGORY = 'ai';
@@ -47,6 +51,16 @@ const PROVIDER_SETTING = 'ai.provider';
 const BASE_URL_SETTING = 'ai.base_url';
 const MODEL_SETTING = 'ai.model';
 const ENABLED_SETTING = 'ai.enabled';
+/** Browser-only kill-switch (P1-1): no LLM traffic leaves the browser when 'true'. */
+const BROWSER_DISABLED_SETTING = 'ai.browser_disabled';
+const BROWSER_DISABLED_ERROR = 'وضع المتصفح للذكاء الاصطناعي معطّل لهذه الشركة — فعّله من إعدادات الذكاء الاصطناعي أو استخدم تطبيق سطح المكتب';
+/** Session token budget (B2): total tokens per chat session; 0/missing = unlimited. */
+const BUDGET_SETTING = 'ai.token_budget_per_session';
+
+function readTokenBudget(settings: Record<string, string>): number | null {
+  const n = Number(settings[BUDGET_SETTING]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 // Real Gemini catalog model — see electron/aiHandler.js (kept in sync by
@@ -127,6 +141,44 @@ async function upsertAiSetting(companyId: string, key: string, value: string): P
      ON CONFLICT (company_id, key) DO UPDATE SET value = $3, updated_at = NOW()`,
     [companyId, key, value, AI_CATEGORY]
   );
+}
+
+async function deleteAiSetting(companyId: string, key: string): Promise<void> {
+  const adapter = await getDbAdapter();
+  await adapter.query(
+    `DELETE FROM settings WHERE company_id = $1::uuid AND key = $2`,
+    [companyId, key]
+  );
+}
+
+function isBrowserDisabled(settings: Record<string, string>): boolean {
+  return settings[BROWSER_DISABLED_SETTING] === 'true';
+}
+
+type StoredKeyState =
+  | { key: null; storage: 'none' }
+  | { key: string; storage: 'encrypted-device' | 'plaintext-legacy' };
+
+/**
+ * Resolve the stored API key to plaintext for a single provider call.
+ * Ciphertext (`enc:v1:`) is decrypted via the device vault; anything else
+ * is a legacy plaintext row (read for backward compatibility, upgraded to
+ * ciphertext on the next save). The plaintext never persists beyond the
+ * request — it lives only in this call's memory.
+ */
+async function readApiKey(
+  companyId: string,
+  preloaded?: Record<string, string>,
+): Promise<StoredKeyState> {
+  const settings = preloaded ?? await readAiSettingsFast(companyId);
+  const raw = settings[KEY_SETTING] || null;
+  if (!raw) return { key: null, storage: 'none' };
+  if (isEncryptedEnvelope(raw)) {
+    const key = await decryptApiKey(raw);
+    // Undecryptable (device key lost) → honest "no key", never a crash.
+    return key ? { key, storage: 'encrypted-device' } : { key: null, storage: 'none' };
+  }
+  return { key: raw, storage: 'plaintext-legacy' };
 }
 
 // ─── Provider HTTP calls ────────────────────────────────────────────────────
@@ -551,7 +603,7 @@ export const browserAiBridge = {
   async getConfig(companyId: string): Promise<{ success: boolean; data?: AiPublicConfig; error?: string }> {
     try {
       const settings = await readAiSettingsFast(companyId);
-      const apiKey = settings[KEY_SETTING] || null;
+      const { key: apiKey, storage } = await readApiKey(companyId, settings);
       return {
         success: true,
         data: {
@@ -562,6 +614,9 @@ export const browserAiBridge = {
           hasApiKey: !!apiKey,
           maskedKey: maskKey(apiKey),
           keySource: apiKey ? 'db' : null,
+          keyStorage: apiKey ? storage : 'none',
+          browserDisabled: isBrowserDisabled(settings),
+          tokenBudget: readTokenBudget(settings),
         },
       };
     } catch (err) {
@@ -573,11 +628,49 @@ export const browserAiBridge = {
     try {
       const { companyId } = payload;
       if (!companyId) return { success: false, error: 'companyId is required' };
+      // Fail fast on catalog-fake model names (B1): a typo'd model 404s at
+      // first chat with a cryptic provider error — catch it here with a hint.
+      if (payload.model !== undefined) {
+        let providerId = payload.provider;
+        if (!providerId) {
+          if (payload.baseUrl) {
+            providerId = resolveProviderId(payload.baseUrl);
+          } else {
+            const current = await readAiSettingsFast(companyId).catch(() => null);
+            const storedBase = current?.[BASE_URL_SETTING];
+            providerId = current?.[PROVIDER_SETTING] ?? (storedBase ? resolveProviderId(storedBase) : 'gemini');
+          }
+        }
+        const check = validateModelForProvider(providerId, payload.model);
+        if (!check.ok) return { success: false, error: `${check.errorAr} — ${check.hintAr}` };
+      }
       if (payload.provider !== undefined) await upsertAiSetting(companyId, PROVIDER_SETTING, payload.provider);
       if (payload.baseUrl !== undefined) await upsertAiSetting(companyId, BASE_URL_SETTING, payload.baseUrl);
       if (payload.model !== undefined) await upsertAiSetting(companyId, MODEL_SETTING, payload.model);
       if (payload.enabled !== undefined) await upsertAiSetting(companyId, ENABLED_SETTING, String(payload.enabled));
-      if (payload.apiKey) await upsertAiSetting(companyId, KEY_SETTING, payload.apiKey);
+      if (payload.browserDisabled !== undefined) {
+        await upsertAiSetting(companyId, BROWSER_DISABLED_SETTING, String(payload.browserDisabled));
+      }
+      if (payload.tokenBudget !== undefined) {
+        // 0/null = unlimited. Reject NaN/negatives loudly — a mistyped
+        // budget must not silently become "unlimited" or lock the chat.
+        if (payload.tokenBudget !== null) {
+          const n = Number(payload.tokenBudget);
+          if (!Number.isFinite(n) || n < 0) {
+            return { success: false, error: 'ميزانية الـ tokens يجب أن تكون رقماً موجباً أو صفراً (غير محدود)' };
+          }
+          await upsertAiSetting(companyId, BUDGET_SETTING, String(Math.floor(n)));
+        } else {
+          await upsertAiSetting(companyId, BUDGET_SETTING, '0');
+        }
+      }
+      // Revocation deletes the row entirely (rotation = revoke here, then
+      // paste the new provider-side key). Runs before apiKey handling so a
+      // single payload can rotate atomically from the UI's perspective.
+      if (payload.revokeKey) await deleteAiSetting(companyId, KEY_SETTING);
+      // The settings table holds CIPHERTEXT only (P1-1) — legacy plaintext
+      // rows are upgraded the first time the key is (re)saved.
+      if (payload.apiKey) await upsertAiSetting(companyId, KEY_SETTING, await encryptApiKey(payload.apiKey));
       return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };
@@ -592,10 +685,15 @@ export const browserAiBridge = {
   }): Promise<{ success: boolean; data?: { model: string }; error?: string }> {
     try {
       const settings = await readAiSettingsFast(payload.companyId);
-      const apiKey = payload.apiKey || settings[KEY_SETTING];
-      if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
+      if (isBrowserDisabled(settings)) return { success: false, error: BROWSER_DISABLED_ERROR };
       const baseUrl = payload.baseUrl || settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
       const model = payload.model || settings[MODEL_SETTING] || DEFAULT_MODEL;
+      const providerId = payload.baseUrl ? resolveProviderId(payload.baseUrl) : settings[PROVIDER_SETTING];
+      const check = validateModelForProvider(providerId, model);
+      if (!check.ok) return { success: false, error: `${check.errorAr} — ${check.hintAr}` };
+      const stored = payload.apiKey ? { key: payload.apiKey } : await readApiKey(payload.companyId, settings);
+      const apiKey = stored.key;
+      if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
 
       const result = await callChatCompletion({
         baseUrl,
@@ -620,7 +718,8 @@ export const browserAiBridge = {
   }): Promise<{ success: boolean; data?: LlmCompletionData; error?: string }> {
     try {
       const settings = await readAiSettingsFast(payload.companyId);
-      const apiKey = settings[KEY_SETTING];
+      if (isBrowserDisabled(settings)) return { success: false, error: BROWSER_DISABLED_ERROR };
+      const { key: apiKey } = await readApiKey(payload.companyId, settings);
       if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
       const baseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
       const model = settings[MODEL_SETTING] || DEFAULT_MODEL;
@@ -653,7 +752,11 @@ export const browserAiBridge = {
         // done, spinner forever): bound the settings read, then let the
         // provider call's own timeout own the rest of the budget.
         const settings = await readAiSettingsFast(payload.companyId);
-        const apiKey = settings[KEY_SETTING];
+        if (isBrowserDisabled(settings)) {
+          emitDone({ success: false, error: BROWSER_DISABLED_ERROR }, payload.streamId);
+          return;
+        }
+        const { key: apiKey } = await readApiKey(payload.companyId, settings);
         if (!apiKey) {
           emitDone({ success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' }, payload.streamId);
           return;

@@ -634,6 +634,12 @@ export function registerAiHandlers() {
           hasApiKey: Boolean(apiKey),
           maskedKey: maskKey(storedKey || envKey),
           keySource: storedKey ? 'db' : envKey ? 'env' : null,
+          keyStorage: storedKey ? 'encrypted-device' : 'none',
+          browserDisabled: settings['ai.browser_disabled'] === 'true',
+          tokenBudget: (() => {
+            const n = Number(settings['ai.token_budget_per_session']);
+            return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+          })(),
         },
       };
     } catch (err) {
@@ -652,12 +658,31 @@ export function registerAiHandlers() {
       }
       if (!auth.ok) return { success: false, error: auth.error };
       const companyId = auth.session.user.companyId;
-      const { provider, baseUrl, model, apiKey, enabled } = payload;
+      const { provider, baseUrl, model, apiKey, enabled, tokenBudget, revokeKey } = payload;
+
+      // Revocation deletes the stored key entirely (rotation = revoke here,
+      // then paste the new provider-side key). Runs before apiKey handling.
+      if (revokeKey) {
+        await upsertAiSetting(companyId, KEY_SETTING, '');
+        cachedApiKeys.delete(companyId);
+      }
 
       if (provider !== undefined) await upsertAiSetting(companyId, PROVIDER_SETTING, String(provider));
       if (baseUrl !== undefined) await upsertAiSetting(companyId, BASE_URL_SETTING, normalizeBaseUrl(String(baseUrl || DEFAULT_BASE_URL)));
       if (model !== undefined) await upsertAiSetting(companyId, MODEL_SETTING, String(model || DEFAULT_MODEL));
       if (enabled !== undefined) await upsertAiSetting(companyId, ENABLED_SETTING, enabled ? 'true' : 'false');
+      if (tokenBudget !== undefined) {
+        // 0/null = unlimited. Reject NaN/negatives loudly (mirror browserBridge).
+        if (tokenBudget !== null) {
+          const n = Number(tokenBudget);
+          if (!Number.isFinite(n) || n < 0) {
+            return { success: false, error: 'ميزانية الـ tokens يجب أن تكون رقماً موجباً أو صفراً (غير محدود)' };
+          }
+          await upsertAiSetting(companyId, 'ai.token_budget_per_session', String(Math.floor(n)));
+        } else {
+          await upsertAiSetting(companyId, 'ai.token_budget_per_session', '0');
+        }
+      }
 
       if (typeof apiKey === 'string' && apiKey.trim()) {
         await upsertAiSetting(companyId, KEY_SETTING, encryptApiKey(apiKey.trim()));

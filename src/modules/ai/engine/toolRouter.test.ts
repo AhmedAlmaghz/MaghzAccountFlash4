@@ -140,4 +140,50 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     expect(names).toContain('app.navigate');
     expect(names).toContain('ai.enqueue_batch');
   });
+
+  describe('C1 workflow continuity (history-aware routing)', () => {
+    const assistantCall = (name: string): LlmMessage => ({
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'c1', type: 'function', function: { name, arguments: '{}' } }],
+    }) as unknown as LlmMessage;
+
+    it('keeps the called tool domain routed on keyword-less follow-ups', () => {
+      // Mid-chain "تابع" carries zero keywords — without continuity the
+      // whole sales workflow would drop and the model would stall.
+      seedRegistry();
+      const routed = routeToolsForCycle([
+        userMsg('مرحبا'),
+        assistantCall('sales.tool_3'),
+        userMsg('تمام'),
+      ]);
+      expect(routed.routedByIntent).toBe(true);
+      const names = routed.tools.map((t) => t.name);
+      expect(names).toContain('sales.tool_3'); // the called tool itself
+      expect(names).toContain('sales.tool_0'); // its domain siblings
+      expect(names).not.toContain('hr.tool_0'); // unrelated domains stay out
+    });
+
+    it('reads both function.name and legacy name shapes', () => {
+      seedRegistry();
+      const legacy = {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c2', name: 'hr.tool_7' }],
+      } as unknown as LlmMessage;
+      const routed = routeToolsForCycle([userMsg('مرحبا'), legacy, userMsg('ok')]);
+      expect(routed.tools.map((t) => t.name)).toContain('hr.tool_0');
+    });
+
+    it('ignores unregistered called tools without crashing', () => {
+      seedRegistry();
+      const routed = routeToolsForCycle([
+        userMsg('مرحبا'),
+        assistantCall('ghost.tool_1'),
+        userMsg('تمام'),
+      ]);
+      expect(routed.routedByIntent).toBe(false);
+      expect(routed.tools.length).toBe(15);
+    });
+  });
 });

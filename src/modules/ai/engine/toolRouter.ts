@@ -12,7 +12,10 @@ import { getVisibleTools } from '../tools/registry';
  *   2. Intent keywords in the last user messages route the matching DOMAIN
  *      group (sales / purchases / inventory / hr / crm / manufacturing /
  *      settings / accounting) into the advertised set.
- *   3. Adaptive expansion: when the model calls a registered tool that was
+ *   3. Workflow continuity (C1): domains of tools the model ALREADY called
+ *      in recent turns stay routed — a keyword-less follow-up ("تابع")
+ *      mid-chain (create → post → voucher) keeps the whole workflow.
+ *   4. Adaptive expansion: when the model calls a registered tool that was
  *      not advertised, that tool (and its domain siblings) join the set for
  *      the rest of the cycle — a mistaken route degrades to one wasted turn,
  *      never a hard failure.
@@ -51,6 +54,12 @@ interface DomainGroup {
   prefixes: readonly string[];
   /** Arabic keywords that signal the user's intent involves this domain. */
   keywords: readonly string[];
+  /**
+   * Mega-groups (the reports bundle: 9 domains) route on keywords ONLY —
+   * workflow continuity must not drag all nine domains in just because the
+   * model called one sales tool mid-chain.
+   */
+  keywordOnly?: boolean;
 }
 
 /**
@@ -163,6 +172,9 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
   {
     // Reports family is expensive to advertise (large schemas) — route it
     // whenever the user asks for analysis/summary/comparison vocabulary.
+    // keywordOnly: a called sales.* tool mid-workflow must NOT pull all nine
+    // domains in (continuity routes the tool's own narrow domain only).
+    keywordOnly: true,
     prefixes: ['sales.', 'purchases.', 'inventory.', 'hr.', 'crm.', 'manufacturing.', 'accounting.', 'reports.', 'read.'],
     keywords: [
       'تقرير', 'تقارير', 'تحليل', 'توليد', 'ملخص', 'أفضل', 'أعلى', 'أقل', 'قارن',
@@ -197,6 +209,24 @@ function recentUserText(messages: LlmMessage[], lookback: number): string {
   return texts.join(' ');
 }
 
+/** Tool names the model called in recent turns (C1 workflow continuity). */
+function recentCalledToolNames(messages: LlmMessage[], lookback: number): string[] {
+  const out: string[] = [];
+  for (let i = messages.length - 1; i >= 0 && out.length < lookback; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const calls = (m as { tool_calls?: Array<{ function?: { name?: string }; name?: string }> }).tool_calls;
+    if (!Array.isArray(calls)) continue;
+    for (const tc of calls) {
+      const name = typeof tc?.function?.name === 'string' && tc.function.name
+        ? tc.function.name
+        : typeof tc?.name === 'string' ? tc.name : '';
+      if (name && !out.includes(name)) out.push(name);
+    }
+  }
+  return out;
+}
+
 /** Compute the routed tool set for a cycle. */
 export function routeToolsForCycle(messages: LlmMessage[], extraToolNames: ReadonlySet<string> = new Set()): RoutedTools {
   const visible = getVisibleTools();
@@ -217,6 +247,24 @@ export function routeToolsForCycle(messages: LlmMessage[], extraToolNames: Reado
     for (const group of DOMAIN_GROUPS) {
       const matches = group.keywords.some((k) => intentText.includes(k));
       if (!matches) continue;
+      routedByIntent = true;
+      matchedGroups.push(group);
+      for (const t of visible) {
+        if (group.prefixes.some((p) => t.name.startsWith(p))) selected.add(t.name);
+      }
+    }
+  }
+
+  // C1 — workflow continuity: the model just called these tools (create →
+  // post → voucher chains), so their DOMAINS stay routed even when the
+  // follow-up carries no keywords at all ("تابع", "استمر", "تمام").
+  // Keyword matching alone would drop the whole workflow mid-chain.
+  for (const called of recentCalledToolNames(messages, 6)) {
+    if (visibleByName.has(called)) selected.add(called);
+    for (const group of DOMAIN_GROUPS) {
+      if (matchedGroups.includes(group)) continue;
+      if (group.keywordOnly) continue;
+      if (!group.prefixes.some((p) => called.startsWith(p))) continue;
       routedByIntent = true;
       matchedGroups.push(group);
       for (const t of visible) {

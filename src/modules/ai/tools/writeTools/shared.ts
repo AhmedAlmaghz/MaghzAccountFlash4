@@ -1,6 +1,6 @@
 import { parseFlexibleNumber } from '../../engine/argNormalizers';
 import { coreApi } from '@/modules/core/api';
-import { getDbAdapter } from '@/core/database/adapters';
+import { guardedQuery } from '../reportCommon';
 
 /**
  * Shared helpers for ALL write-tool domains (Phase 77 split). Extracted
@@ -62,14 +62,15 @@ export function summarizeDocLines(label: string, lines: unknown): string {
  * phantom 15% for Yemen).
  */
 export async function getVatRate(companyId: string): Promise<number | null> {
-  // 1) Country-driven rate (FIN-3 unified)
+  // 1) Country-driven rate (FIN-3 unified) — via the guarded SELECT-only
+  // path (same allow-list gate every other AI read uses).
   try {
-    const adapter = await getDbAdapter();
-    const taxRes = await adapter.query<{ value: string }>(
+    const taxRes = await guardedQuery(
       `SELECT value FROM settings WHERE company_id = $1 AND key = 'tax.country_code' LIMIT 1`,
       [companyId]
     );
-    const rawCC = taxRes.success && taxRes.rows?.[0]?.value ? String(taxRes.rows[0].value).trim().toUpperCase() : '';
+    const taxRows = (taxRes.success ? (taxRes.rows as Array<{ value?: unknown }> | undefined) : undefined) ?? [];
+    const rawCC = taxRows[0]?.value ? String(taxRows[0].value).trim().toUpperCase() : '';
     if (rawCC) {
       const { getCountryProfile } = await import('@/modules/tax/registry');
       const profile = getCountryProfile(rawCC);
@@ -113,13 +114,13 @@ export async function getInvoiceTaxConfig(companyId: string): Promise<InvoiceTax
   let showDiscount = true;
   let settingsUnread = false;
   try {
-    const adapter = await getDbAdapter();
-    const res = await adapter.query<{ key: string; value: string }>(
+    const res = await guardedQuery(
       `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showVat', 'invoice.showDiscount')`,
       [companyId],
     );
-    if (res.success && res.rows) {
-      for (const row of res.rows) {
+    const flagRows = res.success ? (res.rows as Array<{ key: string; value: string }> | undefined) : undefined;
+    if (flagRows) {
+      for (const row of flagRows) {
         if (row.key === 'invoice.showVat') showVat = row.value === 'true';
         if (row.key === 'invoice.showDiscount') showDiscount = row.value === 'true';
       }

@@ -1,5 +1,5 @@
 import type { LlmMessage } from '../types';
-import { llmTextOf } from './llmParts';
+import { llmTextOf, stripUntrustedFences } from './llmParts';
 
 /**
  * Progressive conversation summarizer.
@@ -46,7 +46,10 @@ function digestLine(m: LlmMessage): string | null {
   }
   if (m.role === 'tool') {
     // Executed tool outcome — the strongest memory (documents/IDs created).
-    return `🔧 نتيجة أداة: ${llmTextOf(m.content).replace(/\s+/g, ' ').slice(0, 140)}`;
+    // Fence markers are stripped (readability); the line stays a capped
+    // extractive quote, never executed content.
+    const clean = stripUntrustedFences(llmTextOf(m.content)).replace(/\s+/g, ' ').slice(0, 140);
+    return `🔧 نتيجة أداة: ${clean}`;
   }
   return null;
 }

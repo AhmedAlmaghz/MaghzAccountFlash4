@@ -45,6 +45,7 @@ vi.mock('@/core/database/adapters', () => ({
 }));
 
 import { getChatEngine } from './chatEngine';
+import { getDbAdapter } from '@/core/database/adapters';
 import { useAiStore } from '../store';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
@@ -612,6 +613,141 @@ describe('ChatEngine', () => {
       // …and it was NOT replaced by a fabrication correction
       expect(String(last.content)).not.toContain('تنبيه نظام');
       expect(mocks.executeToolCall).toHaveBeenCalledTimes(1);
+    });
+
+    it('P1-3: an honest NUMBERLESS follow-up summary after a real write passes', async () => {
+      // "قمت بإنشاء العميل بنجاح" (no document number) after a real
+      // customer write whose JSON result carries English keys — the AR↔EN
+      // evidence bridge must let it through, or the model re-executes and
+      // mints a duplicate customer.
+      mocks.resolveTool.mockReturnValue(tool('write'));
+      mocks.executeToolCall.mockResolvedValueOnce({
+        ok: true,
+        result: { customerId: 'c-1', customerName: 'شركة الأمل', code: 'CUST-0042' },
+      });
+      mocks.complete
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            content: '',
+            toolCalls: [{ id: 'w-cust', name: 'test.write', arguments: { name: 'شركة الأمل' } }],
+            finishReason: 'tool_calls',
+            usage: null,
+          },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'تم إنشاء العميل CUST-0042', toolCalls: [], finishReason: 'stop', usage: null },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'نعم — قمت بإنشاء العميل شركة الأمل بنجاح.', toolCalls: [], finishReason: 'stop', usage: null },
+        });
+
+      const engine = getChatEngine();
+      await engine.send('أنشئ عميل شركة الأمل');
+      await engine.resolveConfirmation('w-cust', true);
+      await engine.send('شو صار بالعميل؟');
+
+      const messages = useAiStore.getState().messages;
+      const last = messages[messages.length - 1];
+      expect(last.content).toContain('شركة الأمل');
+      expect(String(last.content)).not.toContain('تنبيه نظام');
+      expect(mocks.executeToolCall).toHaveBeenCalledTimes(1);
+    });
+
+    it('P1-3: a numberless claim with NO supporting write is still corrected', async () => {
+      // Same words, zero executions anywhere — fabrication must be caught.
+      vi.mocked(mocks.resolveTool).mockReturnValue(undefined);
+      mocks.complete
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'قمت بإنشاء العميل شركة الأمل بنجاح.', toolCalls: [], finishReason: 'stop', usage: null },
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          data: { content: 'لم يُنفَّذ شيء — سأستدعي أداة الإنشاء الآن.', toolCalls: [], finishReason: 'stop', usage: null },
+        });
+
+      await getChatEngine().send('أنشئ عميلاً جديداً');
+
+      const messages = useAiStore.getState().messages;
+      expect(messages.some((m) => m.kind === 'text' && m.content.includes('شركة الأمل'))).toBe(false);
+      expect(messages[messages.length - 1].content).toContain('لم يُنفَّذ شيء');
+    });
+  });
+
+  describe('session token budget (B2)', () => {
+    function mockBudgetedSettings(budget: string) {
+      vi.mocked(getDbAdapter).mockResolvedValue({
+        query: vi.fn(async (sql: string) => {
+          if (typeof sql === 'string' && sql.includes('ai.token_budget_per_session')) {
+            return { success: true, rows: [{ key: 'ai.token_budget_per_session', value: budget }] };
+          }
+          return { success: true, rows: [] };
+        }),
+      } as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
+    }
+
+    it('warns once at 80% but still answers', async () => {
+      mockBudgetedSettings('1000');
+      mocks.complete.mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: 'تم',
+          toolCalls: [],
+          finishReason: 'stop',
+          usage: { prompt_tokens: 800, completion_tokens: 50, total_tokens: 850 },
+        },
+      });
+
+      await getChatEngine().send('مرحبا');
+
+      const texts = useAiStore.getState().messages.filter((m) => m.kind === 'text').map((m) => m.content);
+      expect(texts.some((c) => String(c).includes('80%'))).toBe(true);
+      expect(texts[texts.length - 1]).toBe('تم');
+    });
+
+    it('stops honestly at 100% before the next provider call', async () => {
+      mockBudgetedSettings('1000');
+      mocks.resolveTool.mockReturnValue(tool('read'));
+      mocks.executeToolCall.mockResolvedValue({ ok: true, result: { total: 1 } });
+      mocks.complete.mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'r-1', name: 'test.read', arguments: {} }],
+          finishReason: 'tool_calls',
+          usage: { prompt_tokens: 900, completion_tokens: 300, total_tokens: 1200 },
+        },
+      });
+
+      await getChatEngine().send('احسب');
+
+      // The over-budget turn finished (read executed), but NO second
+      // provider call was issued — the loop stopped with an honest error.
+      expect(mocks.complete).toHaveBeenCalledTimes(1);
+      const last = useAiStore.getState().messages[useAiStore.getState().messages.length - 1];
+      expect(last.kind).toBe('error');
+      expect(String(last.content)).toContain('ميزانية');
+    });
+
+    it('unlimited budget (no setting) never warns or stops', async () => {
+      mocks.complete.mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: 'تم',
+          toolCalls: [],
+          finishReason: 'stop',
+          usage: { prompt_tokens: 50000, completion_tokens: 50000, total_tokens: 100000 },
+        },
+      });
+
+      await getChatEngine().send('مرحبا');
+
+      const texts = useAiStore.getState().messages.filter((m) => m.kind === 'text').map((m) => String(m.content));
+      expect(texts.some((c) => c.includes('80%'))).toBe(false);
+      expect(texts[texts.length - 1]).toBe('تم');
     });
   });
 

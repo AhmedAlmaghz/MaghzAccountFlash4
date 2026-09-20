@@ -71,6 +71,12 @@ export interface AiPublicConfig {
   hasApiKey: boolean;
   maskedKey: string | null;
   keySource: 'env' | 'db' | null;
+  /** How the browser-mode key is stored at rest (P1-1). */
+  keyStorage: 'encrypted-device' | 'plaintext-legacy' | 'none';
+  /** Browser-only kill-switch (P1-1): when true the browser bridge refuses all LLM traffic. */
+  browserDisabled: boolean;
+  /** Session token budget (B2): max total tokens per chat session; null/0 = unlimited. */
+  tokenBudget: number | null;
 }
 
 export interface AiSaveConfigPayload {
@@ -80,6 +86,12 @@ export interface AiSaveConfigPayload {
   model?: string;
   apiKey?: string;
   enabled?: boolean;
+  /** Browser-only kill-switch for LLM traffic in web/PGlite mode. */
+  browserDisabled?: boolean;
+  /** Delete the stored browser-mode key (rotation/revocation). */
+  revokeKey?: boolean;
+  /** Session token budget (B2): 0/null = unlimited. */
+  tokenBudget?: number | null;
 }
 
 // ─── Chat persistence ───────────────────────────────────────────────────────

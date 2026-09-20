@@ -218,4 +218,29 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('ممنوع تكرار الإنشاء');
     expect(prompt).toContain('استأنف من نقطة التوقف');
   });
+
+  // ── الحقائق المثبتة (C2 — long-term memory) ───────────────────────────────
+
+  it('injects the memory block verbatim when the engine provides it', () => {
+    const prompt = buildSystemPrompt({
+      tools: [],
+      memoryBlock: 'حقائق مثبتة عن الشركة (حفظها المستخدم بأداة التذكر):\n- المالك أحمد',
+    });
+    expect(prompt).toContain('حقائق مثبتة عن الشركة');
+    expect(prompt).toContain('المالك أحمد');
+  });
+
+  it('omits any memory section when no facts are pinned', () => {
+    const prompt = buildSystemPrompt({ tools: [] });
+    // Rule 50 itself names the section — assert on the BLOCK's signature
+    // (user-pinned facts), not the rule text.
+    expect(prompt).not.toContain('(حفظها المستخدم بأداة التذكر');
+  });
+
+  it('teaches the remember/recall/forget tool workflow (rule 50)', () => {
+    const prompt = buildSystemPrompt({ tools: [] });
+    expect(prompt).toContain('ai.remember_fact');
+    expect(prompt).toContain('ai.recall_facts');
+    expect(prompt).toContain('ai.forget_fact');
+  });
 });

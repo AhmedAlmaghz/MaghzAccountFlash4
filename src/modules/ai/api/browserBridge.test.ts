@@ -168,4 +168,55 @@ describe('browser AI bridge (PGlite)', () => {
 
     await browserAiBridge.deleteSession({ companyId, userId, sessionId: sid });
   }, 120000);
+
+  it('P1-1: stores the API key as ciphertext, decrypts on read, honors kill-switch + revoke', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+
+    const save = await browserAiBridge.saveConfig({
+      companyId,
+      provider: 'gemini',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+      model: 'gemini-2.0-flash',
+      apiKey: 'sk-live-abcdef1234567890',
+      enabled: true,
+    });
+    expect(save.success).toBe(true);
+
+    // Raw row must be ciphertext, never the plaintext key.
+    const raw = await adapter.query<{ value: string | null }>(
+      `SELECT value FROM settings WHERE company_id = $1 AND key = 'ai.api_key'`,
+      [companyId]
+    );
+    const stored = raw.rows?.[0]?.value || '';
+    expect(stored.startsWith('enc:v1:')).toBe(true);
+    expect(stored).not.toContain('sk-live-abcdef1234567890');
+
+    // ...but reads still work (decrypt → mask).
+    const cfg = await browserAiBridge.getConfig(companyId);
+    expect(cfg.success).toBe(true);
+    expect(cfg.data?.hasApiKey).toBe(true);
+    expect(cfg.data?.keyStorage).toBe('encrypted-device');
+    expect(cfg.data?.maskedKey).toMatch(/sk-l/);
+    expect(cfg.data?.maskedKey).not.toContain('abcdef1234567890');
+
+    // Kill-switch blocks LLM traffic...
+    const off = await browserAiBridge.saveConfig({ companyId, browserDisabled: true });
+    expect(off.success).toBe(true);
+    const blocked = await browserAiBridge.testConnection({ companyId });
+    expect(blocked.success).toBe(false);
+
+    // ...and re-enabling restores it (stored key untouched).
+    await browserAiBridge.saveConfig({ companyId, browserDisabled: false });
+    const cfg2 = await browserAiBridge.getConfig(companyId);
+    expect(cfg2.data?.hasApiKey).toBe(true);
+
+    // Revocation deletes the row entirely.
+    const revoked = await browserAiBridge.saveConfig({ companyId, revokeKey: true });
+    expect(revoked.success).toBe(true);
+    const cfg3 = await browserAiBridge.getConfig(companyId);
+    expect(cfg3.data?.hasApiKey).toBe(false);
+    expect(cfg3.data?.keyStorage).toBe('none');
+  }, 120000);
 });

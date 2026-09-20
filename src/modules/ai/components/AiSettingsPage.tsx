@@ -5,6 +5,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
 import { aiApi } from '../api';
+import { PROVIDER_PRESETS } from '../api/providers';
 import type { AiPublicConfig } from '../types';
 import { Button } from '@/core/ui/components/Button';
 import { Card, CardTitle, CardDescription } from '@/core/ui/components/Card';
@@ -12,14 +13,7 @@ import { Input } from '@/core/ui/components/Input';
 import { useToastStore } from '@/core/store/toastStore';
 import { cn } from '@/core/utils';
 
-const PROVIDERS = [
-  { id: 'gemini', label: 'ai.settings.presets.gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/' },
-  { id: 'openai', label: 'ai.settings.presets.openai', baseUrl: 'https://api.openai.com/v1' },
-  { id: 'openrouter', label: 'ai.settings.presets.openrouter', baseUrl: 'https://openrouter.ai/api/v1' },
-  { id: 'groq', label: 'ai.settings.presets.groq', baseUrl: 'https://api.groq.com/openai/v1' },
-  { id: 'ollama', label: 'ai.settings.presets.ollama', baseUrl: 'http://localhost:11434/v1' },
-  { id: 'custom', label: 'ai.settings.presets.custom', baseUrl: '' },
-];
+const PROVIDERS = PROVIDER_PRESETS.map((p) => ({ id: p.id, label: `ai.settings.presets.${p.id}`, baseUrl: p.baseUrl }));
 
 export default function AiSettingsPage() {
   const { t } = useTranslation();
@@ -44,6 +38,12 @@ export default function AiSettingsPage() {
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [enabled, setEnabled] = useState(true);
+  // P1-1 browser hardening: desktop-only kill-switch + key revocation.
+  const [browserDisabled, setBrowserDisabled] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revokeArmed, setRevokeArmed] = useState(false);
+  // B2 session token budget (0/empty = unlimited).
+  const [tokenBudget, setTokenBudget] = useState('');
 
   // Load config
   useEffect(() => {
@@ -58,6 +58,8 @@ export default function AiSettingsPage() {
         setBaseUrl(res.data.baseUrl || '');
         setModel(res.data.model || '');
         setEnabled(res.data.enabled);
+        setBrowserDisabled(res.data.browserDisabled);
+        setTokenBudget(res.data.tokenBudget && res.data.tokenBudget > 0 ? String(res.data.tokenBudget) : '');
       }
       setLoading(false);
     }
@@ -77,6 +79,7 @@ export default function AiSettingsPage() {
     if (!company?.id) return;
     setSaving(true);
     try {
+      const budgetRaw = tokenBudget.trim();
       const res = await aiApi.saveConfig({
         companyId: company.id,
         provider,
@@ -84,12 +87,20 @@ export default function AiSettingsPage() {
         model,
         apiKey: apiKey || undefined,
         enabled,
+        browserDisabled,
+        // Empty = unlimited (bridge stores '0'); invalid text is rejected
+        // by the bridge with an honest error, never silently coerced.
+        tokenBudget: budgetRaw === '' ? 0 : Number(budgetRaw),
       });
       if (res.success) {
         addToast('success', t('ai.settings.saved'));
         // Refresh config to get updated masked key
         const fresh = await aiApi.getConfig(company.id);
-        if (fresh.success && fresh.data) setConfig(fresh.data);
+        if (fresh.success && fresh.data) {
+          setConfig(fresh.data);
+          setBrowserDisabled(fresh.data.browserDisabled);
+          setTokenBudget(fresh.data.tokenBudget && fresh.data.tokenBudget > 0 ? String(fresh.data.tokenBudget) : '');
+        }
       } else {
         addToast('error', res.error || t('ai.errors.generic'));
       }
@@ -100,7 +111,31 @@ export default function AiSettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [company?.id, provider, baseUrl, model, apiKey, enabled, addToast, t]);
+  }, [company?.id, provider, baseUrl, model, apiKey, enabled, browserDisabled, tokenBudget, addToast, t]);
+
+  const handleRevoke = useCallback(async () => {
+    if (!company?.id) return;
+    if (!revokeArmed) {
+      setRevokeArmed(true);
+      return;
+    }
+    setRevoking(true);
+    try {
+      const res = await aiApi.saveConfig({ companyId: company.id, revokeKey: true });
+      if (res.success) {
+        addToast('success', t('ai.settings.revoked'));
+        setRevokeArmed(false);
+        const fresh = await aiApi.getConfig(company.id);
+        if (fresh.success && fresh.data) setConfig(fresh.data);
+      } else {
+        addToast('error', res.error || t('ai.settings.revokeFailed'));
+      }
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : t('ai.settings.revokeFailed'));
+    } finally {
+      setRevoking(false);
+    }
+  }, [company?.id, revokeArmed, addToast, t]);
 
   const handleTest = useCallback(async () => {
     if (!company?.id) return;
@@ -254,15 +289,84 @@ export default function AiSettingsPage() {
             <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.enabled')}</span>
           </label>
 
+          {/* Session token budget (B2) */}
+          <div>
+            <Input
+              label={t('ai.settings.tokenBudget')}
+              type="number"
+              min={0}
+              step={1000}
+              value={tokenBudget}
+              onChange={(e) => setTokenBudget(e.target.value)}
+              placeholder={t('ai.settings.tokenBudgetPlaceholder')}
+            />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {t('ai.settings.tokenBudgetHint')}
+            </p>
+          </div>
+
           {/* Security note */}
           <p className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 leading-relaxed">
             🔒 {t('ai.settings.securityNote')}
           </p>
           {/* Browser-mode warning: no OS keychain encryption outside Electron */}
           {isBrowserMode && (
-            <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-xl p-3 leading-relaxed">
-              ⚠️ {t('ai.settings.browserKeyWarning')}
-            </p>
+            <>
+              <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-xl p-3 leading-relaxed">
+                ⚠️ {t('ai.settings.browserKeyWarning')}
+              </p>
+              {config?.keyStorage === 'encrypted-device' && (
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/40 rounded-xl p-3 leading-relaxed">
+                  🔒 {t('ai.settings.browserEncryptedNote')}
+                </p>
+              )}
+              {config?.keyStorage === 'plaintext-legacy' && (
+                <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/40 rounded-xl p-3 leading-relaxed">
+                  ⚠️ {t('ai.settings.browserLegacyKeyNote')}
+                </p>
+              )}
+              {/* Desktop-only kill-switch for shared machines (browser only —
+                  meaningless in Electron, where traffic never leaves the app) */}
+              <label
+                className="flex items-start gap-3 cursor-pointer select-none"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setBrowserDisabled(!browserDisabled);
+                }}
+              >
+                <div
+                  role="switch"
+                  aria-checked={browserDisabled}
+                  className={cn(
+                    'relative w-11 h-6 rounded-full transition-colors shrink-0 mt-0.5',
+                    browserDisabled ? 'bg-primary-600' : 'bg-zinc-300 dark:bg-zinc-700'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all',
+                      browserDisabled ? 'start-6' : 'start-1'
+                    )}
+                  />
+                </div>
+                <span>
+                  <span className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.serverOnlyMode')}</span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('ai.settings.serverOnlyModeHint')}</span>
+                </span>
+              </label>
+            </>
+          )}
+          {/* Key revocation (two-click confirm) — works in BOTH modes whenever
+              a company key is stored (browser vault row / Electron safeStorage
+              row); env-provided keys are read-only and hide this control. */}
+          {config?.hasApiKey && config?.keySource === 'db' && (
+            <Button
+              variant="outline"
+              onClick={handleRevoke}
+              isLoading={revoking}
+            >
+              {revokeArmed ? t('ai.settings.revokeKeyConfirm') : t('ai.settings.revokeKey')}
+            </Button>
           )}
         </div>
 

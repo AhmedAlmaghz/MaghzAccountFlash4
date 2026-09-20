@@ -32,7 +32,8 @@ vi.mock('@/core/database/adapters', () => ({
   isElectronPg: vi.fn(() => false),
 }));
 
-import { getChatEngine, deadlineOr, getSendTrace } from './chatEngine';
+import { getChatEngine, deadlineOr } from './chatEngine';
+import { getSendTrace, traceSend } from './sendTrace';
 import { useAiStore } from '../store';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
@@ -143,6 +144,13 @@ describe('stall heartbeat + recovery', () => {
     expect(first.role).toBe('user');
     expect(first.content).toBe('مرحبا');
     expect(useAiStore.getState().isProcessing).toBe(false);
+  });
+
+  it('sendTrace module records phases directly (extraction proof)', () => {
+    traceSend('probe-phase');
+    const tail = getSendTrace().slice(-1)[0];
+    expect(tail.phase).toBe('probe-phase');
+    expect(typeof tail.at).toBe('number');
   });
 });
 

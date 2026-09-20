@@ -9,7 +9,7 @@ import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
 import { isBatchActive, isAnyBatchActive, runBatch, batchProgressLine } from './batchRunner';
-import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget } from './llmParts';
+import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget, untrustedDataBlock } from './llmParts';
 import { extractiveDigest, digestMessage } from './summarizer';
 import { TaskLedger } from './taskLedger';
 import { summarizeBatchOutcomeForModel, batchItemLabel } from './batchQueue';
@@ -20,6 +20,9 @@ import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
 import { attachmentContextBlock } from './llmParts';
 import { resolveArgsForCard } from './cardResolvers';
+import { DOC_ANY_RE, NOUN_EN, claimsBusinessAction, extractClaimedEntities } from './claims';
+import { loadMemoryBlock } from '../tools/memoryTools';
+import { addUsage, checkBudget, emptyUsage, formatUsage, type TokenUsage } from './usageMeter';
 import { expandDialectText } from './dialectMap';
 import { resolveEntitiesInText } from '../entityResolver';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
@@ -217,52 +220,21 @@ export function stripImitationToolBlocks(content: string): string {
 
 let engineInstance: ChatEngine | null = null;
 
-/**
- * Detects replies that CLAIM a business action happened (document created /
- * posted / voucher paid…) without any real tool execution behind them.
- *
- * The failing pattern from real sessions: the model drifts off the tool
- * loop and imitates earlier success summaries — inventing sequential doc
- * numbers (RV-000002…), "مرحّل Posted" status lines, even account codes —
- * while NOTHING was written to the DB.
- */
-const DOC_NUMBER_RE = /\b(?:INV|PINV|QTN|RV|PV|JE|SRT|PRT|WO|PRD|EMP|CUST|LEAD|OPP|DEP|POS)-?\s?\d{2,}\b/i;
-const ACTION_CLAIM_RE =
-  /(قمت\s+ب?\s*(إنشاء|تسجيل|ترحيل|إصدار|صرف|قبض|سداد|دفع))|(تم\s+(الآن\s+)?(إنشاء|تسجيل|ترحيل|إصدار|صرف|قبض|سداد))|(أنشأت|سجّلت|سجلت|رحّلت|رحلت|أصدرت|صرفت|قبضت|سدّدت|سددت|دفعت)/;
-
-/** True when the reply asserts a completed business action. */
-export function claimsBusinessAction(content: string): boolean {
-  if (!content) return false;
-  if (!ACTION_CLAIM_RE.test(content)) return false;
-  return DOC_NUMBER_RE.test(content) || /مرحّل|مُرحّل|Posted/i.test(content);
-}
+// Anti-fabrication claim detection lives in ./claims (D1-light extraction);
+// re-exported here so existing importers keep working untouched.
+export { claimsBusinessAction, extractClaimedEntities };
 
 export function getChatEngine(): ChatEngine {
   if (!engineInstance) engineInstance = new ChatEngine();
   return engineInstance;
 }
 
-/**
- * Send-phase trace: every send records its progress through a tiny ring
- * buffer (press → context → entities → stream → first chunk → end), one
- * console line per phase. When a user reports "pressed send and everything
- * froze", the console shows EXACTLY which phase never completed — no more
- * guessing between a dead UI, a wedged DB read, and a stalled provider.
- */
-const SEND_TRACE_CAP = 60;
-const sendTrace: Array<{ at: number; phase: string }> = [];
-export function traceSend(phase: string): void {
-  sendTrace.push({ at: Date.now(), phase });
-  if (sendTrace.length > SEND_TRACE_CAP) sendTrace.splice(0, sendTrace.length - SEND_TRACE_CAP);
-  console.info(`[ai/send] ${phase}`);
-}
-/** Full phase history (oldest first) — also reachable live as window.__aiTrace. */
-export function getSendTrace(): Array<{ at: number; phase: string }> {
-  return sendTrace.slice();
-}
-if (typeof window !== 'undefined') {
-  (window as unknown as { __aiTrace?: unknown }).__aiTrace = getSendTrace;
-}
+// Send-phase trace lives in ./sendTrace (D-phase decomposition, second
+// block); re-exported so existing importers keep working untouched.
+import { traceSend } from './sendTrace';
+
+// Re-exported so existing importers (tests, debug tooling) keep working.
+export { getSendTrace, traceSend } from './sendTrace';
 
 /**
  * runLoop stage contracts (Phase-4 decomposition).
@@ -350,6 +322,18 @@ class ChatEngine {
   /** عدد عمليات البحث عديمة النتيجة في هذا الطلب (لتحفيز التوقف والسؤال). */
   private zeroResultSearches = 0;
 
+  /**
+   * Token metering (B2): every provider round-trip funnels through
+   * recordAssistantTurn, which accumulates here. sendUsage resets per send;
+   * sessionUsage spans the chat session (reset on new chat / tenant switch).
+   * The budget comes from live context (`ai.token_budget_per_session`);
+   * budgetWarned fires the 80% notice once per session.
+   */
+  private sendUsage: TokenUsage = emptyUsage();
+  private sessionUsage: TokenUsage = emptyUsage();
+  private sessionTokenBudget: number | null = null;
+  private budgetWarned = false;
+
   /** Stable key for a (toolName, args) pair — key order must not matter. */
   private static writeAttemptKey(toolName: string, args: unknown): string {
     const stable = (v: unknown): unknown => {
@@ -378,6 +362,15 @@ class ChatEngine {
   }
 
   /**
+   * Token-meter snapshot for UI display (ProcessingStatus reads it on its
+   * per-second tick while processing and once on completion — no store
+   * round-trip needed; the values only grow during a cycle).
+   */
+  getUsageSnapshot(): { send: TokenUsage; session: TokenUsage; budget: number | null } {
+    return { send: this.sendUsage, session: this.sessionUsage, budget: this.sessionTokenBudget };
+  }
+
+  /**
    * Live financial context for the system prompt (VAT rate + invoice
    * display flags). Cached for LIVE_CONTEXT_TTL_MS — the engine rebuilds
    * the prompt on every send, and a settings round-trip per message would
@@ -396,19 +389,28 @@ class ChatEngine {
     try {
       const tax = await getInvoiceTaxConfig(companyId);
       let countryCode: string | undefined;
+      let tokenBudget: number | undefined;
       try {
         const { getDbAdapter } = await import('@/core/database/adapters');
         const adapter = await getDbAdapter();
-        const ccRes = await adapter.query<{ value: string }>(
-          `SELECT value FROM settings WHERE company_id = $1 AND key = 'tax.country_code' LIMIT 1`,
+        const ccRes = await adapter.query<{ key: string; value: string }>(
+          `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('tax.country_code', 'ai.token_budget_per_session')`,
           [companyId],
         );
-        const raw = ccRes.success && ccRes.rows?.[0]?.value
-          ? String(ccRes.rows[0].value).trim().toUpperCase()
-          : '';
-        if (raw) countryCode = raw;
+        if (ccRes.success && ccRes.rows) {
+          for (const row of ccRes.rows) {
+            if (row.key === 'tax.country_code') {
+              const raw = row.value ? String(row.value).trim().toUpperCase() : '';
+              if (raw) countryCode = raw;
+            } else if (row.key === 'ai.token_budget_per_session') {
+              const n = Number(row.value);
+              if (Number.isFinite(n) && n > 0) tokenBudget = Math.floor(n);
+            }
+          }
+        }
       } catch {
-        /* ignore — the prompt handles an unset country by asking the user */
+        /* ignore — the prompt handles an unset country by asking the user;
+           an unreadable budget means unlimited */
       }
       const data: LiveCompanyContext = {
         // vatUnset ⇒ settings unreadable: the rate is UNKNOWN, not zero —
@@ -417,6 +419,7 @@ class ChatEngine {
         ...(tax.vatRate > 0 && !tax.vatUnset ? { vatRate: tax.vatRate } : {}),
         vatOnInvoices: tax.showVat,
         ...(countryCode ? { countryCode } : {}),
+        ...(tokenBudget ? { tokenBudget } : {}),
       };
       this.liveContextCache = { at: now, data };
       return data;
@@ -517,11 +520,16 @@ class ChatEngine {
       // سجّل الطلب قبل بناء البرومبت ليظهر نصه الكامل في سجل المهمة من أول
       // دورة — النص الخام كما كتبه المستخدم هو المرجع (ليس النص المطبَّع).
       this.ledger.recordRequest(text);
+      // الحقائق المثبتة (C2): deadline-guarded مثل السياق الحي — مخزن معطوب
+      // يعني "بلا حقائق"، لا تعليق أبداً.
+      const memoryBlock = await deadlineOr(loadMemoryBlock(this.ctx.companyId), PRE_LLM_DEADLINE_MS, null, 'memory')
+        .catch(() => null);
       const systemContent = buildSystemPrompt({
         tools,
         activeSkills,
         liveContext,
         ledgerBlock: this.ledger.render(),
+        memoryBlock,
       });
       traceSend('context-ready');
 
@@ -625,6 +633,9 @@ class ChatEngine {
       this.writeCounter = 0;
       this.zeroResultSearches = 0;
       this.abortRequested = false; // fresh request — previous stop is consumed
+      this.sendUsage = emptyUsage();
+      // Refresh the session budget from live context (cached ≤60s).
+      this.sessionTokenBudget = this.liveContextCache?.data?.tokenBudget ?? null;
 
       await this.runLoop();
     } catch (e) {
@@ -646,27 +657,46 @@ class ChatEngine {
    */
   private claimMatchesExecutedWrite(content: string): boolean {
     const claimed = new Set<string>();
-    const re = new RegExp(DOC_NUMBER_RE.source, 'gi');
+    const re = new RegExp(DOC_ANY_RE.source, 'gi');
     let m: RegExpExecArray | null;
     while ((m = re.exec(content)) !== null) {
       claimed.add(m[0].toUpperCase());
     }
-    if (claimed.size === 0) return false;
     const squash = (s: string): string => s.replace(/[\s-]+/g, '');
-    for (const h of this.history) {
+    // Recent SUCCESSFUL tool payloads only (failures/rejections are not evidence).
+    const evidence: string[] = [];
+    for (let i = this.history.length - 1; i >= 0 && evidence.length < 15; i--) {
+      const h = this.history[i];
       if (h.role !== 'tool' || typeof h.content !== 'string') continue;
       // Failure results start with "خطأ:" / rejection text — only success
       // payloads count as evidence.
       if (/^\s*(خطأ:|تم رفض العملية)/.test(h.content)) continue;
-      const flat = h.content.toUpperCase();
-      const flatSquashed = squash(flat);
-      for (const doc of claimed) {
-        // Match raw AND separator-insensitive ("PV-000123" ≡ "PV 000123")
-        // — comparing only squashed forms broke the common hyphenated case.
-        if (doc && (flat.includes(doc) || flatSquashed.includes(squash(doc)))) return true;
-      }
+      evidence.push(h.content.toUpperCase());
     }
-    return false;
+    if (claimed.size > 0) {
+      for (const flat of evidence) {
+        const flatSquashed = squash(flat);
+        for (const doc of claimed) {
+          // Match raw AND separator-insensitive ("PV-000123" ≡ "PV 000123")
+          // — comparing only squashed forms broke the common hyphenated case.
+          if (doc && (flat.includes(doc) || flatSquashed.includes(squash(doc)))) return true;
+        }
+      }
+      return false;
+    }
+    // Numberless claim ("أنشأت العميل بنجاح"): pass only when a recent
+    // successful tool result mentions the same entity noun — an honest
+    // follow-up summary after a real write. Otherwise it is fabrication.
+    // (Numbered claims above stay strict: invented numbers need numbers.)
+    const nouns = extractClaimedEntities(content);
+    if (nouns.length === 0) return false;
+    return evidence.some((flat) =>
+      nouns.some((n) => {
+        const up = n.toUpperCase();
+        const en = NOUN_EN[n]?.toUpperCase();
+        return flat.includes(up) || (en !== undefined && flat.includes(en));
+      }),
+    );
   }
 
   /**
@@ -751,9 +781,9 @@ class ChatEngine {
               ...(outcome.result as Record<string, unknown>),
               batchOutcome: summarizeBatchOutcomeForModel(detail),
             };
-            this.pushToolResultAfterPartner(callId, JSON.stringify(enriched));
+            this.pushToolResultAfterPartner(callId, untrustedDataBlock('نتيجة أداة', JSON.stringify(enriched)));
           } else {
-            this.pushToolResultAfterPartner(callId, JSON.stringify(outcome.result));
+            this.pushToolResultAfterPartner(callId, untrustedDataBlock('نتيجة أداة', JSON.stringify(outcome.result)));
           }
         } else {
           store.updateToolCall(messageId, {
@@ -1008,6 +1038,10 @@ class ChatEngine {
     this.liveContextCache = null;
     this.scopedCompanyId = null;
     this.ledger.clear();
+    this.sendUsage = emptyUsage();
+    this.sessionUsage = emptyUsage();
+    this.sessionTokenBudget = null;
+    this.budgetWarned = false;
     this.store().clearMessages();
   }
 
@@ -1089,6 +1123,11 @@ class ChatEngine {
     this.extraAdvertisedTools.clear();
     // سجل المهمة يخص مستأجراً واحداً — طلبه وكياناته لا يعبَران عبر الشركات.
     this.ledger.clear();
+    // Token meter belongs to the session too — a new tenant starts at zero.
+    this.sendUsage = emptyUsage();
+    this.sessionUsage = emptyUsage();
+    this.sessionTokenBudget = null;
+    this.budgetWarned = false;
     // P1 fix: bump the epoch so an in-flight runLoop from the OLD tenant dies
     // at its next epoch check instead of writing old-tenant tool results into
     // the NEW tenant's (emptied) history without a system prompt.
@@ -1729,6 +1768,19 @@ class ChatEngine {
    * text so the empty bubble must not linger.
    */
   private recordAssistantTurn(data: LlmCompletionData, streamingId: string | null, streamedContent: boolean): void {
+    // Token metering (B2): EVERY provider round-trip funnels through here.
+    this.sendUsage = addUsage(this.sendUsage, data.usage);
+    this.sessionUsage = addUsage(this.sessionUsage, data.usage);
+    // 80% notice — once per session, as a visible assistant bubble (honest
+    // and testable; toasts are a UI-layer concern the engine must not own).
+    if (!this.budgetWarned && checkBudget(this.sessionUsage.totalTokens, this.sessionTokenBudget) === 'warn') {
+      this.budgetWarned = true;
+      this.store().addMessage({
+        role: 'assistant',
+        kind: 'text',
+        content: `⚠️ استهلكت هذه الجلسة ${formatUsage(this.sessionUsage)} (80% من الميزانية) — أكمل طلبك الحالي ثم ابدأ جلسة جديدة عند الحاجة.`,
+      });
+    }
     // Append assistant message to history (with tool_calls if present).
     // Content is sanitized so hallucinated [تم تنفيذ: ...] / [TOOL_RESULT: ...]
     // imitation blocks never re-enter the LLM context as assistant text.
@@ -2039,6 +2091,17 @@ class ChatEngine {
         this.emitStoppedNotice();
         return;
       }
+      // Token budget (B2): stop BEFORE the next provider call — never cut a
+      // turn mid-flight, and never fail silently. The cap counts settled
+      // round-trips only (recordAssistantTurn), so this check is exact.
+      if (checkBudget(this.sessionUsage.totalTokens, this.sessionTokenBudget) === 'exceeded') {
+        this.store().addMessage({
+          role: 'assistant',
+          kind: 'error',
+          content: `⏹️ تجاوزت هذه الجلسة ميزانية الـ tokens (${formatUsage(this.sessionUsage)}) — توقفت قبل طلب جديد. ما نُفِّذ فعلاً محفوظ في البطاقات أعلاه؛ ابدأ جلسة جديدة للمتابعة.`,
+        });
+        return;
+      }
 
       this.iterationCount++;
       this.touchProgress();
@@ -2307,7 +2370,9 @@ function compactToolResultForLlm(result: unknown): string {
   } catch {
     return '✅ تم بنجاح';
   }
-  if (json.length <= TOOL_RESULT_MAX_CHARS) return json;
+  // Every DB-sourced payload rides inside the untrusted-data fence (P1-2):
+  // notes/customer names inside the JSON are DATA, never instructions.
+  if (json.length <= TOOL_RESULT_MAX_CHARS) return untrustedDataBlock('نتيجة أداة', json);
 
   // Try trimming array payloads first (search/list tools) so the model keeps
   // whole items rather than a cut-off JSON fragment.
@@ -2320,13 +2385,16 @@ function compactToolResultForLlm(result: unknown): string {
         try {
           json = JSON.stringify(trimmed, (k, v) => (NOISY_FIELDS.has(k) ? undefined : v));
           if (json.length <= TOOL_RESULT_MAX_CHARS) {
-            return `${json}\n(تم اقتطاع النتيجة — ${arr.length} عنصراً متاحاً؛ استخدم بحثاً أدق لرؤية البقية)`;
+            return untrustedDataBlock(
+              'نتيجة أداة',
+              `${json}\n(تم اقتطاع النتيجة — ${arr.length} عنصراً متاحاً؛ استخدم بحثاً أدق لرؤية البقية)`,
+            );
           }
         } catch { /* fall through */ }
       }
     }
   }
-  return json.slice(0, TOOL_RESULT_MAX_CHARS) + '\n…(نتيجة كبيرة تم اقتصاصها)';
+  return untrustedDataBlock('نتيجة أداة', `${json.slice(0, TOOL_RESULT_MAX_CHARS)}\n…(نتيجة كبيرة تم اقتصاصها)`);
 }
 
 /** Human-readable one-liner for a tool outcome (approval cards + history). Exported for unit tests. */

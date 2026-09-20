@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { claimsBusinessAction } from './chatEngine';
+import { claimsBusinessAction, extractClaimedEntities } from './claims';
 
 /**
  * P1-4 regression: DOC_NUMBER_RE only knew INV/PINV/QTN/RV/PV/JE/SRT/PRT —
@@ -51,14 +51,29 @@ describe('claimsBusinessAction — full document-number coverage', () => {
     expect(claimsBusinessAction('المستند المرحّل السابق كان INV-0001')).toBe(false);
   });
 
-  it('does NOT fire on claims without any document number or posted marker', () => {
-    expect(claimsBusinessAction('قمت بإنشاء العميل بنجاح')).toBe(false);
-    expect(claimsBusinessAction('سجّلت العملية وكل شيء تمام')).toBe(false);
+  it('NOW fires on entity-noun claims without any document number', () => {
+    // P1-3 blind spot: "قمت بإنشاء العميل بنجاح" (no number) sailed past
+    // the guard. A completion verb aimed at a business entity IS a claim.
+    expect(claimsBusinessAction('قمت بإنشاء العميل بنجاح')).toBe(true);
+    expect(claimsBusinessAction('تم ترحيل الفاتورة بنجاح')).toBe(true);
+    expect(claimsBusinessAction('سجّلت الموظف الجديد في النظام')).toBe(true);
   });
 
-  it('requires at least 2 digits — WO-5 (weak) alone does not match', () => {
-    // NOTE: the claim() helper ends with "مرحّل" which independently fires the
-    // guard — use a bare claim here to isolate the digit-count rule.
-    expect(claimsBusinessAction('قمت بإنشاء أمر تشغيل WO-5 بنجاح')).toBe(false);
+  it('still does NOT fire on vague acknowledgements without an entity noun', () => {
+    expect(claimsBusinessAction('سجّلت العملية وكل شيء تمام')).toBe(false);
+    expect(claimsBusinessAction('تم كل شيء بنجاح')).toBe(false);
+  });
+
+  it('NOW fires on single-digit document numbers (WO-5)', () => {
+    // P1-3 blind spot: the ≥2-digit rule let WO-5 through. Digit count is
+    // not evidence — evidence matching decides truth.
+    expect(claimsBusinessAction('قمت بإنشاء أمر تشغيل WO-5 بنجاح')).toBe(true);
+    expect(claimsBusinessAction('أنشأت فاتورة INV-3 وهي مرحّلة')).toBe(true);
+  });
+
+  it('D1-light: the block moved to ./claims byte-identical (extraction proof)', () => {
+    // Entity extraction + AR↔EN bridge travel with the guard.
+    expect(extractClaimedEntities('قمت بإنشاء العميل والمورد بنجاح')).toEqual(['عميل', 'مورد']);
+    expect(extractClaimedEntities('سجّلت العملية')).toEqual([]);
   });
 });

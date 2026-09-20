@@ -2,6 +2,8 @@ import { memo, useEffect, useState } from 'react';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAiStore } from '../store';
+import { getChatEngine } from '../engine/chatEngine';
+import { formatUsage } from '../engine/usageMeter';
 
 /** How long the "reply complete" pill stays visible after a cycle ends. */
 const DONE_PILL_MS = 6000;
@@ -54,6 +56,9 @@ export const ProcessingStatus = memo(function ProcessingStatus({ startedAt, comp
   }, [isProcessing, completedAt, lastKind]);
 
   if (isProcessing && startedAt) {
+    // Token meter: read live on every per-second tick (no store round-trip —
+    // the engine values only grow during the cycle).
+    const sendUsage = getChatEngine().getUsageSnapshot().send;
     return (
       <div className="flex justify-center pt-2" role="status" aria-live="polite">
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800">
@@ -65,17 +70,28 @@ export const ProcessingStatus = memo(function ProcessingStatus({ startedAt, comp
           <span aria-hidden="true" className="tabular-nums text-primary-500 dark:text-primary-400">
             {formatElapsed(Date.now() - startedAt)}
           </span>
+          {sendUsage.calls > 0 && (
+            <span aria-hidden="true" className="tabular-nums text-primary-500 dark:text-primary-400">
+              · {t('ai.settings.tokenUsage', { usage: formatUsage(sendUsage) })}
+            </span>
+          )}
         </span>
       </div>
     );
   }
 
   if (showDone) {
+    const sessionUsage = getChatEngine().getUsageSnapshot().session;
     return (
       <div className="flex justify-center pt-2" role="status" aria-live="polite">
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
           <CheckCircle2 size={12} />
           {t('ai.replyDone')}
+          {sessionUsage.calls > 0 && (
+            <span className="tabular-nums opacity-80">
+              · {t('ai.settings.tokenUsage', { usage: formatUsage(sessionUsage) })}
+            </span>
+          )}
         </span>
       </div>
     );

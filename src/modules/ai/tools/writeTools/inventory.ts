@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '../../types';
 import { getNextDocumentNumber } from '@/core/api';
 import { inventoryApi } from '@/modules/inventory/api';
-import { getDbAdapter } from '@/core/database/adapters';
+import { guardedQuery } from '../reportCommon';
 import {
   num,
   str,
@@ -175,8 +175,8 @@ export const inventoryWriteTools: ToolDefinition[] = [
       const productTypeName = str(args.productTypeName) ?? str(args.productType);
       if (!productTypeId && productTypeName) {
         try {
-          const typesRes = await getDbAdapter().then(adapter => adapter.query(`SELECT id, name_ar, name_en, code FROM product_types WHERE company_id = $1 AND is_active = true`, [ctx.companyId]));
-          if (typesRes.success && typesRes.rows) {
+          const typesRes = await guardedQuery(`SELECT id, name_ar, name_en, code FROM product_types WHERE company_id = $1 AND is_active = true`, [ctx.companyId]);
+          if (typesRes.success && Array.isArray(typesRes.rows)) {
             const norm = (s: string) => s.replace(/[أإآ]/g, 'ا').replace(/[ةه]/g, 'ه').toLowerCase().trim();
             const target = norm(productTypeName);
             const hit = (v: unknown) => {
