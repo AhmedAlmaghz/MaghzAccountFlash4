@@ -39,11 +39,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel: 'gemini-2.0-flash',
+    defaultModel: 'gemini-3.5-flash-lite',
     pattern: /^gemini-\d+\.\d+-[a-z-]+$/,
     hosts: ['generativelanguage.googleapis.com'],
-    hintAr: 'أسماء نماذج Gemini مثل gemini-2.0-flash أو gemini-1.5-pro',
-    hintEn: 'Gemini model names look like gemini-2.0-flash or gemini-1.5-pro',
+    hintAr: 'أسماء نماذج Gemini مثل gemini-3.7-flash أو gemini-3.5-flash-lite أو gemini-3.1-pro',
+    hintEn: 'Gemini model names look like gemini-3.5-flash-lite, gemini-3.7-flash or gemini-3.1-pro',
   },
   {
     id: 'openai',
@@ -57,7 +57,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'google/gemini-2.0-flash-001',
+    defaultModel: 'google/gemini-3.-flash-001',
     pattern: /^[\w-]+\/[\w:.-]+$/,
     hosts: ['openrouter.ai'],
     hintAr: 'أسماء OpenRouter بصيغة vendor/model مثل google/gemini-2.0-flash-001',
@@ -127,7 +127,7 @@ export interface ModelValidation {
  * family pattern would otherwise accept them.
  */
 const NEVER_EXISTED: Array<{ test: RegExp; name: string }> = [
-  { test: /gemini-3\.5/i, name: 'gemini-3.5-*' },
+  { test: /gemini-2\.5/i, name: 'gemini-1.5-*' },
 ];
 
 export function validateModelForProvider(
