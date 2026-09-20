@@ -22,12 +22,12 @@ Docs2/
 ├── ar/                ← Arabic guide (source) / الدليل العربي (المصدر)
 │   ├── CONVENTIONS.md
 │   ├── README.md
-│   ├── 01-introduction … 17-tax-jurisdictions, 99-appendix
+│   ├── 01-introduction … 17-tax-jurisdictions, Examples/, 99-appendix
 │   └── assets/        ← 80 screenshots
 └── en/                ← English guide / الدليل الإنجليزي
     ├── CONVENTIONS.md
     ├── README.md
-    ├── 01-introduction … 17-tax-jurisdictions, 99-appendix
+    ├── 01-introduction … 17-tax-jurisdictions, Examples/, 99-appendix
     └── assets/        ← 80 screenshots
 ```
 

@@ -51,6 +51,7 @@
 | **[15 — "Maghz" AI Assistant](./15-ai-assistant/README.md)** | Chat, attachments, Arabic commands, write confirmation, batch queues, setup |
 | **[16 — Multi-Currency](./16-multicurrency/README.md)** | [Basics](./16-multicurrency/README.md) · [Exchange Differences & Revaluation](./16-multicurrency/02-fx-revaluation.md) |
 | **[17 — Tax Jurisdictions](./17-tax-jurisdictions/README.md)** | One file per country (SA/AE/EG/YE), jurisdiction card, auto-validation |
+| **[Solved Training Examples](./Examples/README.md)** | 10 complete examples for diverse companies with closing statements and comparison checklists |
 | **[99 — Appendices](./99-appendix/01-glossary.md)** | [Glossary](./99-appendix/01-glossary.md) · [Permissions Matrix](./99-appendix/02-permissions-matrix.md) · [Keyboard Shortcuts](./99-appendix/03-shortcuts.md) · [Troubleshooting](./99-appendix/04-troubleshooting.md) · [FAQ](./99-appendix/05-faq.md) |
 
 ---

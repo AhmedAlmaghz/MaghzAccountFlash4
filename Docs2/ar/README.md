@@ -47,6 +47,7 @@
 | **[15 — الوكيل الذكي «مغزى»](./15-ai-assistant/README.md)** | الدردشة، المرفقات، الأوامر بالعربية، تأكيد الكتابات، طوابير الدفعات، الإعداد |
 | **[16 — العملات المتعددة](./16-multicurrency/README.md)** | [الأساسيات](./16-multicurrency/README.md) · [فروق الصرف وإعادة التقييم](./16-multicurrency/02-fx-revaluation.md) |
 | **[17 — الولايات الضريبية](./17-tax-jurisdictions/README.md)** | ملف لكل دولة (SA/AE/EG/YE)، بطاقة الولاية، التحقق الآلي |
+| **[أمثلة تدريبية محلولة](./Examples/README.md)** | 10 أمثلة كاملة لشركات متنوعة مع القوائم الختامية وقوائم المقارنة |
 | **[99 — الملحقات](./99-appendix/01-glossary.md)** | [قاموس المصطلحات](./99-appendix/01-glossary.md) · [مصفوفة الصلاحيات](./99-appendix/02-permissions-matrix.md) · [اختصارات لوحة المفاتيح](./99-appendix/03-shortcuts.md) · [استكشاف الأخطاء](./99-appendix/04-troubleshooting.md) · [الأسئلة الشائعة](./99-appendix/05-faq.md) |
 
 ---
