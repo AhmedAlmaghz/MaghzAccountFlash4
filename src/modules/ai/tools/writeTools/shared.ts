@@ -60,6 +60,8 @@ export function summarizeDocLines(label: string, lines: unknown): string {
  * fallback only when no country is configured. 0% (YE) is a valid rate and
  * must NOT be treated as unset (the old `rate > 0 ? rate : null` booked
  * phantom 15% for Yemen).
+ * Returns null when settings are unreadable — callers must book zero VAT
+ * and flag vatUnset so the model asks instead of inventing a rate.
  */
 export async function getVatRate(companyId: string): Promise<number | null> {
   // 1) Country-driven rate (FIN-3 unified) — via the guarded SELECT-only

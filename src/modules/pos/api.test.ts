@@ -59,6 +59,9 @@ const DEBTORS_ID = '00000000-0000-0000-0000-000000000060';
 const SALES_ID = '00000000-0000-0000-0000-000000000061';
 const VAT_ID = '00000000-0000-0000-0000-000000000062';
 const CASH_ACCOUNT_ID = '00000000-0000-0000-0000-000000000063';
+const PRODUCT_COST = 60;
+const COGS_ID = '00000000-0000-0000-0000-000000000070';
+const INV_ACC_ID = '00000000-0000-0000-0000-000000000071';
 
 /** Adapter that answers the posting-account + cash-box lookups checkout makes. */
 function makeCheckoutAdapter() {
@@ -84,7 +87,7 @@ function makeCheckoutAdapter() {
       return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
     }
     if (/FROM products WHERE/.test(sql)) {
-      return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+      return { success: true, rows: [{ id: PRODUCT_ID, name_ar: 'صنف' }] };
     }
     if (/FROM pos_shifts WHERE id = /.test(sql)) {
       return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
@@ -170,8 +173,8 @@ describe('posApi.checkout', () => {
     expect(batch[3].params).toContain(VAT_ID);
     expect(batch[3].params).not.toContain(DEBTORS_ID);
     // Arabic memo carries the POS receipt number + cash wording
-    expect(batch[3].params).toContain('┘┘é╪»┘è╪ر ┘┘é╪╖╪ر ╪ذ┘è╪╣ POS-000042');
-    expect(batch[3].params).toContain('┘é┘è╪» ╪ز┘┘é╪د╪خ┘è - ╪ح┘è╪╡╪د┘ ┘┘é╪╖╪ر ╪ذ┘è╪╣ POS-000042');
+    expect(batch[3].params).toContain('نقدية نقطة بيع POS-000042');
+    expect(batch[3].params).toContain('قيد تلقائي - إيصال نقطة بيع POS-000042');
 
     // Statements D/E/F ظ¤ stock ensure + movements + decrement (same SQL as salesApi)
     expect(sqls[4]).toMatch(/INSERT INTO stock \(/);
@@ -216,6 +219,38 @@ describe('posApi.checkout', () => {
   it('books perpetual COGS legs and freezes the sale-time cost snapshot', async () => {
     const { adapter } = makeCheckoutAdapter();
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    // Sale-time costs come from the live moving average (server-side truth):
+    // serve cost_price + COGS/inventory accounts so the COGS legs materialize.
+    adapter.query.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (/FROM pos_shifts WHERE id = /.test(sql)) {
+        return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
+      }
+      if (/FROM users WHERE id = /.test(sql) || /SELECT 1 FROM users/.test(sql)) {
+        return { success: true, rows: [{ id: USER_ID }] };
+      }
+      if (/FROM settings/.test(sql)) return { success: true, rows: [{ value: 'moving_average' }] };
+      if (/FROM products WHERE/.test(sql)) {
+        return { success: true, rows: [{ id: PRODUCT_ID, cost_price: PRODUCT_COST, standard_cost: null, name_ar: 'صنف' }] };
+      }
+      if (/FROM default_accounts/.test(sql)) {
+        const key = String((params as unknown[])[1] || '');
+        const map: Record<string, string> = {
+          default_debtors: DEBTORS_ID,
+          default_sales: SALES_ID,
+          default_vat_output: VAT_ID,
+          default_cogs: COGS_ID,
+          default_inventory: INV_ACC_ID,
+        };
+        return { success: true, rows: [{ account_id: map[key] || SALES_ID }] };
+      }
+      if (/FROM cash_boxes/.test(sql)) {
+        return { success: true, rows: [{ account_id: CASH_ACCOUNT_ID }] };
+      }
+      if (/FROM stock/.test(sql)) {
+        return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
+      }
+      return { success: true, rows: [] };
+    });
 
     const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
     expect(res.success).toBe(true);
@@ -228,8 +263,11 @@ describe('posApi.checkout', () => {
     // lines CTE carries the frozen unit_cost (2 base units x 60 = snapshot 60/line)
     expect(batch[1].sql).toMatch(/unit_cost/);
     expect(batch[1].params).toContain(PRODUCT_COST);
-    // JE: Dr COGS 120 / Cr Inventory 120 alongside the revenue legs
-    const jeParams = batch[3].params as unknown[];
+    // COGS companion JE (separate statement, like the Phase-1 test asserts):
+    // Dr COGS 120 / Cr Inventory 120 alongside the revenue legs.
+    const cogsJe = batch.find((q) => (q.params || []).includes('POS-000042-COGS'));
+    expect(cogsJe).toBeDefined();
+    const jeParams = cogsJe!.params as unknown[];
     expect(jeParams).toContain(COGS_ID);
     expect(jeParams).toContain(INV_ACC_ID);
     const cogsIdx = jeParams.indexOf(COGS_ID);
@@ -249,7 +287,7 @@ describe('posApi.checkout', () => {
       }
       if (/FROM settings/.test(sql)) return { success: true, rows: [{ value: 'moving_average' }] };
       if (/FROM products WHERE/.test(sql)) {
-        return { success: true, rows: [{ id: PRODUCT_ID, cost_price: 60, standard_cost: null, name_ar: '╪╡┘┘' }] };
+        return { success: true, rows: [{ id: PRODUCT_ID, cost_price: 60, standard_cost: null, name_ar: 'صنف' }] };
       }
       if (/FROM default_accounts/.test(sql)) {
         const key = String(params[1] || '');
@@ -276,7 +314,7 @@ describe('posApi.checkout', () => {
     const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
     expect(res.success, 'checkout failed: ' + (res.error || '')).toBe(true);
     const batch = adapter.transaction.mock.calls[0][0] as { sql: string; params?: unknown[] }[];
-    // lines CTE carries the frozen posting-time cost (2 units ├ù 60)
+    // lines CTE carries the frozen posting-time cost (2 units × 60)
     const linesCte = batch.find((q) => q.sql.includes('lines_ins AS (INSERT INTO sales_invoice_lines'))!;
     expect(linesCte.sql).toContain('unit_cost');
     expect(linesCte.params).toContain(60);
@@ -293,7 +331,7 @@ describe('posApi.checkout', () => {
     adapter.query.mockImplementation(async (sql: string, params: unknown[]) => {
       if (/FROM stock/.test(sql)) return { success: true, rows: [] };
       if (/FROM products WHERE/.test(sql)) {
-        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: 'صنف' }] };
       }
       if (/FROM pos_shifts WHERE id = /.test(sql)) {
         return { success: true, rows: [{ id: SHIFT_ID, cash_box_id: CASH_BOX_ID, status: 'open', user_id: USER_ID }] };
@@ -312,7 +350,7 @@ describe('posApi.checkout', () => {
 
     const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/╪د┘┘à╪«╪▓┘ê┘ ┘╪د ┘è┘â┘┘è/);
+    expect(res.error).toMatch(/المخزون لا يكفي/);
     expect(adapter.transaction).not.toHaveBeenCalled();
   });
 
@@ -348,14 +386,14 @@ describe('posApi.checkout', () => {
         return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
       }
       if (/FROM products WHERE/.test(sql)) {
-        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: 'صنف' }] };
       }
       return { success: true, rows: [] };
     });
 
     const res = await posApi.checkout(makeCheckoutInput(), USER_ID);
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/┘à┘é┘┘╪ر/);
+    expect(res.error).toMatch(/مقفلة/);
     expect(adapter.transaction).not.toHaveBeenCalled();
   });
 
@@ -384,7 +422,7 @@ describe('posApi.checkout', () => {
         return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
       }
       if (/FROM products WHERE/.test(sql)) {
-        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: 'صنف' }] };
       }
       return { success: true, rows: [] };
     });
@@ -422,7 +460,7 @@ describe('posApi.checkout', () => {
         return { success: true, rows: [{ product_id: PRODUCT_ID, have: 1000000 }] };
       }
       if (/FROM products WHERE/.test(sql)) {
-        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: '╪╡┘┘' }] };
+        return { success: true, rows: [{ id: PRODUCT_ID, name_ar: 'صنف' }] };
       }
       return { success: true, rows: [] };
     });
@@ -634,7 +672,7 @@ describe('posApi.openShift / closeShift', () => {
 
     const res = await posApi.closeShift(COMPANY_ID, SHIFT_ID, 17000, undefined, USER_ID);
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/┘à┘é┘┘╪ر/);
+    expect(res.error).toMatch(/مقفلة/);
   });
 
   it('closeShift rejects an unknown/already-closed shift', async () => {
@@ -661,29 +699,29 @@ describe('posApi.getProducts', () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
       rows: [{
-        id: PRODUCT_ID, code: 'P-1', name_ar: '╪┤╪د┘è', name_en: 'Tea', barcode: '123',
-        sku: 'SKU1', unit: '╪╣┘╪ذ╪ر', sale_price: '150.0000', product_type_id: null,
+        id: PRODUCT_ID, code: 'P-1', name_ar: 'شاي', name_en: 'Tea', barcode: '123',
+        sku: 'SKU1', unit: 'علبة', sale_price: '150.0000', product_type_id: null,
         product_type_name: null, stock_qty: '42', category_ids: null,
       }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
-    const res = await posApi.getProducts(COMPANY_ID, '╪┤╪د┘è');
+    const res = await posApi.getProducts(COMPANY_ID, 'شاي');
     expect(res.success).toBe(true);
     expect(res.data?.[0].salePrice).toBe(150);
     expect(res.data?.[0].stockQty).toBe(42);
     const [sql, params] = adapter.query.mock.calls[0];
     expect(sql).toMatch(/COALESCE\(s\.total_qty, 0\) AS stock_qty/);
     expect(sql).toMatch(/p\.barcode ILIKE \$2/);
-    expect(params).toEqual([COMPANY_ID, '%╪┤╪د┘è%']);
+    expect(params).toEqual([COMPANY_ID, '%شاي%']);
   });
 
   it('findProductByCode prefers an exact barcode match', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
       rows: [
-        { id: PRODUCT_ID, code: 'P-1', name_ar: '╪┤╪د┘è', barcode: '62901234', sku: 'SKU1', unit: '╪╣┘╪ذ╪ر', sale_price: '150', stock_qty: '10', category_ids: null },
-        { id: '00000000-0000-0000-0000-000000000051', code: '62901234', name_ar: '┘é┘ç┘ê╪ر', barcode: '9999', sku: 'X', unit: '┘â┘è╪│', sale_price: '250', stock_qty: '5', category_ids: null },
+        { id: PRODUCT_ID, code: 'P-1', name_ar: 'شاي', barcode: '62901234', sku: 'SKU1', unit: 'علبة', sale_price: '150', stock_qty: '10', category_ids: null },
+        { id: '00000000-0000-0000-0000-000000000051', code: '62901234', name_ar: 'قهوة', barcode: '9999', sku: 'X', unit: 'كيس', sale_price: '250', stock_qty: '5', category_ids: null },
       ],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);

@@ -45,6 +45,7 @@ vi.mock('@/core/database/adapters', () => ({
 }));
 
 import { getChatEngine } from './chatEngine';
+import { stripUntrustedFences } from './llmParts';
 import { getDbAdapter } from '@/core/database/adapters';
 import { useAiStore } from '../store';
 import { useAppStore } from '@/core/store';
@@ -110,8 +111,11 @@ describe('ChatEngine', () => {
   });
 
   it('does NOT duplicate a streamed final text answer (placeholder is the bubble)', async () => {
+    // NOTE: the streamed text must NOT be claim-shaped ('تم إنشاء المورد…'
+    // would now — correctly — trip the anti-fabrication guard since zero
+    // tools executed). This test pins placeholder dedup, not the guard.
     mocks.startStream.mockReturnValueOnce((async function* () {
-      yield { type: 'content', content: 'تم إنشاء المورد بنجاح.' };
+      yield { type: 'content', content: 'تم استلام طلبك، كيف أساعدك؟' };
     })());
 
     await getChatEngine().send('اضف مورد باسم الشجاع للتجارة');
@@ -122,7 +126,7 @@ describe('ChatEngine', () => {
       (m) => m.role === 'assistant' && m.kind === 'text'
     );
     expect(assistantTexts).toHaveLength(1);
-    expect(assistantTexts[0].content).toBe('تم إنشاء المورد بنجاح.');
+    expect(assistantTexts[0].content).toBe('تم استلام طلبك، كيف أساعدك؟');
     expect(useAiStore.getState().isProcessing).toBe(false);
   });
 
@@ -944,11 +948,12 @@ describe('ChatEngine', () => {
     await getChatEngine().send('أضف 15 منتجاً');
     await getChatEngine().resolveConfirmation('batch-1', true);
 
-    // نتيجة الأداة للنموذج تحمل الحالة النهائية بأسماء الفاشل + الإرشاد
+    // نتيجة الأداة للنموذج تحمل الحالة النهائية بأسماء الفاشل + الإرشاد.
+    // (الحمولة مسيّجة بـ untrusted fence — تُجرَّد قبل التحليل.)
     const history = (getChatEngine() as unknown as { history: Array<{ role: string; tool_call_id?: string; content?: string }> }).history;
     const toolResult = history.find((m) => m.role === 'tool' && m.tool_call_id === 'batch-1');
     expect(toolResult).toBeDefined();
-    const parsed = JSON.parse(String(toolResult!.content));
+    const parsed = JSON.parse(stripUntrustedFences(String(toolResult!.content)));
     expect(parsed.batchOutcome.status).toBe('partial');
     expect(parsed.batchOutcome.failed).toHaveLength(1);
     expect(parsed.batchOutcome.failed[0].name).toBe('كنافة');

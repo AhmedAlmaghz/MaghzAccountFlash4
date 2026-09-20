@@ -63,7 +63,14 @@ function mockInvoiceSettings(showVat: boolean | null, showDiscount: boolean | nu
   if (showVat !== null) rows.push({ key: 'invoice.showVat', value: String(showVat) });
   if (showDiscount !== null) rows.push({ key: 'invoice.showDiscount', value: String(showDiscount) });
   vi.mocked(getDbAdapter).mockResolvedValue({
-    query: vi.fn(async () => ({ success: true, rows })),
+    // Dispatch by SQL: the country-code lookup sees NO configured country
+    // (falls through to the mocked getVatSettings), while the flags query
+    // sees the invoice display flags. A catch-all mock returning flag rows
+    // for every query would poison the country lookup with 'true' → YE → 0.
+    query: vi.fn(async (sql: string) => ({
+      success: true,
+      rows: typeof sql === 'string' && sql.includes('tax.country_code') ? [] : rows,
+    })),
   } as unknown as Awaited<ReturnType<typeof getDbAdapter>>);
 }
 
