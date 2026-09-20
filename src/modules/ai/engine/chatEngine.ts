@@ -163,60 +163,12 @@ const PRE_LLM_DEADLINE_MS = 30_000;
  * short enough that the user does not stare at a frozen chat.
  */
 const TRANSIENT_RETRY_DELAY_MS = 15_000;
-/**
- * Race a promise against a wall clock. On expiry the loser is detached
- * (late rejection swallowed) and `fallback` is returned — the caller
- * proceeds degraded instead of hanging. Real rejections propagate.
- * The timeout is traced + warned with its label so the console tells slow
- * (deadline-hit logged) apart from stuck (nothing logged at all).
- */
-export function deadlineOr<T>(p: Promise<T>, ms: number, fallback: T, label = 'op'): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('__deadline__')), ms);
-  });
-  return Promise.race([
-    p.then(
-      (v) => { clearTimeout(timer); return v; },
-      (e) => { clearTimeout(timer); throw e; },
-    ),
-    timeout,
-  ]).catch((e) => {
-    if (e instanceof Error && e.message === '__deadline__') {
-      p.catch(() => { /* detached loser stays unobserved */ });
-      console.warn(`[ai] deadline hit: ${label} — proceeding degraded`);
-      traceSend(`deadline-hit:${label}`);
-      return fallback;
-    }
-    throw e;
-  });
-}
-
-/**
- * Remove fake tool-execution blocks that some models imitate from the
- * flattened-history format (e.g. `[تم تنفيذ: search.accounts] {...}` or
- * `[TOOL_RESULT: search.accounts] {...}`). A model writing one of these
- * lines in its reply means the tool was NOT actually executed — the text
- * is a hallucinated imitation of internal context and must never reach the
- * UI, where it would look like a real tool result.
- */
-export function stripImitationToolBlocks(content: string): string {
-  if (!content) return content;
-  const BLOCK_START = /^\s*(?:\[(?:تم (?:تنفيذ|استدعاء):|TOOL_RESULT:|TOOL_CALLED:)|@@@call:)/;
-  const PAYLOAD_LINE = /^\s*[{}[\]"']/;
-  const filtered: string[] = [];
-  let skipPayload = false;
-  for (const line of content.split('\n')) {
-    if (BLOCK_START.test(line)) {
-      skipPayload = true;
-      continue;
-    }
-    if (skipPayload && PAYLOAD_LINE.test(line)) continue;
-    skipPayload = false;
-    filtered.push(line);
-  }
-  return filtered.join('\n').trim();
-}
+// deadlineOr lives in ./deadline, stripImitationToolBlocks in ./claims
+// (D-phase decomposition); re-exported so existing importers keep working.
+import { deadlineOr } from './deadline';
+import { stripImitationToolBlocks } from './claims';
+export { deadlineOr } from './deadline';
+export { stripImitationToolBlocks } from './claims';
 
 let engineInstance: ChatEngine | null = null;
 
@@ -231,7 +183,7 @@ export function getChatEngine(): ChatEngine {
 
 // Send-phase trace lives in ./sendTrace (D-phase decomposition, second
 // block); re-exported so existing importers keep working untouched.
-import { traceSend } from './sendTrace';
+import { getSendTrace, traceSend } from './sendTrace';
 
 // Re-exported so existing importers (tests, debug tooling) keep working.
 export { getSendTrace, traceSend } from './sendTrace';
@@ -368,6 +320,33 @@ class ChatEngine {
    */
   getUsageSnapshot(): { send: TokenUsage; session: TokenUsage; budget: number | null } {
     return { send: this.sendUsage, session: this.sessionUsage, budget: this.sessionTokenBudget };
+  }
+
+  /**
+   * PII-free diagnostics snapshot for support (E1): send-phase trace,
+   * token counts, and structural counters ONLY — never message contents,
+   * names, balances, or keys. Safe to paste into a bug report.
+   */
+  getDiagnosticsSnapshot(): Record<string, unknown> {
+    let toolCallTurns = 0;
+    for (const m of this.history) {
+      const calls = (m as { tool_calls?: unknown[] }).tool_calls;
+      if (m.role === 'assistant' && Array.isArray(calls)) toolCallTurns++;
+    }
+    return {
+      at: new Date().toISOString(),
+      phases: getSendTrace().map((e) => e.phase),
+      usage: {
+        send: this.sendUsage,
+        session: this.sessionUsage,
+        budget: this.sessionTokenBudget,
+      },
+      history: {
+        turns: this.history.length,
+        toolCallTurns,
+        pendingWrites: this.pendingWriteCalls.length,
+      },
+    };
   }
 
   /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripImitationToolBlocks } from './chatEngine';
+import { stripImitationToolBlocks } from './claims';
 
 describe('stripImitationToolBlocks', () => {
   it('returns empty/undefined/null input unchanged', () => {

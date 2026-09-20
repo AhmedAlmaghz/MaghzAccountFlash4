@@ -27,8 +27,8 @@ const resume = batchTools.find((t) => t.name === 'ai.resume_batch')!;
 const status = batchTools.find((t) => t.name === 'ai.batch_status')!;
 
 describe('batchTools registration', () => {
-  it('exposes enqueue / resume / status with summaries and ai.use gate', () => {
-    expect(batchTools).toHaveLength(3);
+  it('exposes enqueue / preview / resume / status with summaries and ai.use gate', () => {
+    expect(batchTools).toHaveLength(4);
     for (const t of batchTools) {
       expect(t.permission).toBe('ai.use');
       expect(typeof t.summarizeArgs === 'function' || t.dangerLevel === 'read').toBe(true);
@@ -451,5 +451,120 @@ describe('ai.enqueue_batch pre-flight validation', () => {
     expect(invalids[1].index).toBe(1);
     expect(String(out.error)).toContain('العنصر 1');
     expect(String(out.error)).toContain('العنصر 2');
+  });
+});
+
+describe('ai.preview_batch (dry run)', () => {
+  const preview = batchTools.find((t) => t.name === 'ai.preview_batch')!;
+  const UUID = '11111111-1111-4111-8111-111111111111';
+  const UUID2 = '22222222-2222-4222-8222-222222222222';
+
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+    registerTool({
+      name: 'sales.create_invoice',
+      labelAr: 'أداة',
+      descriptionAr: 'وصف',
+      permission: 'sales.create',
+      dangerLevel: 'write',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({}),
+    });
+    registerTool({
+      name: 'purchases.create_supplier',
+      labelAr: 'أداة',
+      descriptionAr: 'وصف',
+      permission: 'purchases.create',
+      dangerLevel: 'write',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({}),
+    });
+  });
+
+  it('is a read tool with ai.use gate (no confirmation card of its own)', () => {
+    expect(preview.dangerLevel).toBe('read');
+    expect(preview.permission).toBe('ai.use');
+  });
+
+  it('returns a ready numbered plan for valid items (creates nothing)', async () => {
+    // NOTE: the two items carry distinct args — identical tool+args collapse
+    // by idempotency key (correct engine behavior, not a preview bug).
+    const out = (await preview.execute({
+      items: [
+        { tool: 'sales.create_invoice', args: { customerId: UUID }, ref: 'inv1' },
+        { tool: 'sales.create_invoice', args: { customerId: UUID2 }, after: 'inv1' },
+      ],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.verdict).toBe('ready');
+    expect(out.total).toBe(2);
+    expect(out.effective).toBe(2);
+    const plan = out.plan as Array<{ seq: number; tool: string; after?: number }>;
+    expect(plan.map((p) => p.seq)).toEqual([1, 2]);
+    expect(plan[1].after).toBe(1);
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+  });
+
+  it('flags unknown tools without creating', async () => {
+    const out = (await preview.execute({
+      items: [{ tool: 'nope.x', args: { a: 1 } }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.verdict).toBe('fix-first');
+    expect(String(JSON.stringify(out.problems))).toContain('غير معروفة');
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+  });
+
+  it('flags non-UUID reference fields like the real preflight', async () => {
+    const out = (await preview.execute({
+      items: [{ tool: 'sales.create_invoice', args: { customerId: 'bank' } }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.verdict).toBe('fix-first');
+    expect(String(JSON.stringify(out.problems))).toContain('customerId');
+  });
+
+  it('flags forward references (DAG violation)', async () => {
+    const out = (await preview.execute({
+      items: [
+        { tool: 'sales.create_invoice', args: { customerId: UUID }, after: 1 },
+        { tool: 'sales.create_invoice', args: { customerId: UUID } },
+      ],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.verdict).toBe('fix-first');
+    expect(String(JSON.stringify(out.problems))).toContain('سابق فقط');
+  });
+
+  it('refuses items outside the caller permissions (RBAC pre-check)', async () => {
+    useAuthStore.getState().logout();
+    useAuthStore.getState().login({ ...adminUser, role: 'viewer' } as never);
+    const out = (await preview.execute({
+      items: [{ tool: 'sales.create_invoice', args: { customerId: UUID } }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.verdict).toBe('fix-first');
+    expect(String(JSON.stringify(out.problems))).toContain('صلاحياتك');
+  });
+
+  it('previews session duplicates instead of executing them', async () => {
+    const ledger = new TaskLedger();
+    ledger.registerEntities([{ tool: 'purchases.create_supplier', name: 'مورد مكرر' }]);
+    const dupCtx: ToolContext = { ...ctx, ledger };
+    const out = (await preview.execute({
+      items: [{ tool: 'purchases.create_supplier', args: { name: 'مورد مكرر' } }],
+    }, dupCtx)) as Record<string, unknown>;
+    expect(out.effective).toBe(0);
+    expect((out.skippedDuplicates as unknown[]).length).toBe(1);
+    expect(out.verdict).toBe('fix-first');
+    expect(String(JSON.stringify(out.problems))).toContain('أُنشئت سابقاً');
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+  });
+
+  it('tolerates the {name, type, data} alias shape in preview too', async () => {
+    const out = (await preview.execute({
+      items: [{ name: 'فاتورة', type: 'sales.create_invoice', data: { customerId: UUID } }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.verdict).toBe('ready');
+    const plan = out.plan as Array<{ tool: string }>;
+    expect(plan[0].tool).toBe('sales.create_invoice');
   });
 });

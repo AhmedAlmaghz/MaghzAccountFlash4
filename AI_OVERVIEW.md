@@ -22,14 +22,14 @@ confirmation card**. Long jobs run as idempotent batches under **one approval**.
 | Prompt | `engine/systemPrompt.ts` (~50 rules) | Identity + live company context (VAT/country/calendar) + skills + ledger + memory |
 | Memory (session) | `engine/taskLedger.ts` (8k chars) | Full requests + batch outcomes + created entities, outside the 30-msg window |
 | Memory (long-term) | `tools/memoryTools.ts` (`ai.remember/recall/forget_fact`) | User-pinned facts on `coreApi` settings (`ai_memory`), auto-injected |
-| Batches | `engine/batchQueue.ts` + `batchRunner.ts` + `api/batch*.ts` | DAG (`after_seq` backwards-only), idempotency keys, `{{ref}}` substitution |
+| Batches | `engine/batchQueue.ts` + `batchRunner.ts` + `api/batch*.ts` | DAG (`after_seq` backwards-only), idempotency keys, `{{ref}}` substitution; `ai.preview_batch` dry-runs the whole pipeline (normalize→preflight→RBAC→duplicates→DAG) with a numbered plan and `ready`/`fix-first` verdict |
 | Errors | `engine/errorTaxonomy.ts` (22 codes) | Regex-classified → guidance injected for the model, raw never lost |
 | Cards | `engine/cardResolvers.ts` | Resolves UUIDs to human names on approval cards (fire-and-forget) |
 | Input hygiene | `engine/argNormalizers.ts`, `engine/dialectMap.ts` | Indic digits/thousands/currency, Hijri+Grep dates, 14 dialect families |
 | Direction | `engine/docDirection.ts` + `tools/directionTools.ts` | Ours/external/ambiguous invoice classifier (fail-ASK) |
 | Media | `attachments/*` + `engine/llmParts.ts` | Layered extraction, base64 never in Postgres, latest-turn-only wiring |
 | Usage | `engine/usageMeter.ts` | Per-send/session token meter; warn 80%, honest stop 100% |
-| Providers | `api/providers.ts` | One preset table (hosts, models, name rules); fail-fast 404 hints |
+| Providers | `api/providers.ts` | One preset table (hosts, models, name rules); fail-fast 404 hints; B3 failover plan (transient-only, pre-chunk) |
 | Key vault | `api/keyVault.ts` | Browser AES-GCM device vault (`enc:v1:`), kill-switch, revocation |
 | SQL guard | `security/sqlGuard.ts` | SELECT-only + table allow-list + no `;`/comments |
 | Search | `tools/searchTools.ts` | Token-aware Arabic fuzzy search per entity |

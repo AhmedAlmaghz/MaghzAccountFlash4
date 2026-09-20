@@ -32,7 +32,8 @@ vi.mock('@/core/database/adapters', () => ({
   isElectronPg: vi.fn(() => false),
 }));
 
-import { getChatEngine, deadlineOr } from './chatEngine';
+import { getChatEngine } from './chatEngine';
+import { deadlineOr } from './deadline';
 import { getSendTrace, traceSend } from './sendTrace';
 import { useAiStore } from '../store';
 import { useAppStore } from '@/core/store';

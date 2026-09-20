@@ -59,6 +59,11 @@ export interface LlmCompletionData {
   toolCalls: LlmToolCallResult[];
   finishReason: string | null;
   usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+  /**
+   * Failover provenance (B3): host that served this turn when it was NOT the
+   * primary. Optional — transports set it, the engine ignores it.
+   */
+  failoverFrom?: string | null;
 }
 
 // ─── Public AI configuration (as seen by the renderer — key always masked) ──
@@ -77,6 +82,13 @@ export interface AiPublicConfig {
   browserDisabled: boolean;
   /** Session token budget (B2): max total tokens per chat session; null/0 = unlimited. */
   tokenBudget: number | null;
+  /** Fallback provider presence (B3): a second key is stored (masked below). */
+  hasFallbackKey: boolean;
+  maskedFallbackKey: string | null;
+  /** Fallback route (non-secret parts, B3) for prefilling the settings form. */
+  fallbackProvider: string | null;
+  fallbackBaseUrl: string | null;
+  fallbackModel: string | null;
 }
 
 export interface AiSaveConfigPayload {
@@ -92,6 +104,13 @@ export interface AiSaveConfigPayload {
   revokeKey?: boolean;
   /** Session token budget (B2): 0/null = unlimited. */
   tokenBudget?: number | null;
+  /** Fallback provider (B3): second route tried once on transient primary failure. */
+  fallbackProvider?: string;
+  fallbackBaseUrl?: string;
+  fallbackModel?: string;
+  fallbackApiKey?: string;
+  /** Delete the stored fallback key. */
+  revokeFallbackKey?: boolean;
 }
 
 // ─── Chat persistence ───────────────────────────────────────────────────────

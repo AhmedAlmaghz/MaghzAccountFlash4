@@ -246,6 +246,11 @@
     "busySend": "Wait for the current reply to finish — or stop it with the stop button before sending a new request",
     "executing": "Working…",
     "replyDone": "Reply complete — you can type your next request",
+    "diagnostics": {
+      "copy": "Copy diagnostics for support",
+      "copied": "Diagnostics copied (no private data) — paste into the ticket",
+      "copyFailed": "Copy failed — copy the visible error message instead"
+    },
     "stalledRecovered": "The assistant stopped responding for a while so it was reset automatically — please resend your request",
     "send": "Send",
     "thinking": "Thinking...",
@@ -349,7 +354,8 @@
       "summarizeLatestDocument": "Show the latest document details",
       "viewPosReceipt": "Show the POS receipt",
       "runDepreciationForAsset": "Run this month's depreciation",
-      "showVatReturn": "Show the VAT return"
+      "showVatReturn": "Show the VAT return",
+      "enqueuePreviewedBatch": "Create the previewed batch now"
     },
     "settings": {
       "title": "AI Settings",
@@ -385,6 +391,9 @@
       "tokenBudgetPlaceholder": "e.g. 200000 (empty for unlimited)",
       "tokenBudgetHint": "Max total tokens per chat session — warning at 80%, honest stop at 100%. Zero or empty = unlimited.",
       "tokenUsage": "Usage {usage}",
+      "fallbackTitle": "Fallback provider",
+      "fallbackSubtitle": "Tried once when the primary fails transiently (429/503/529) — saved with the form above",
+      "revokeFallbackKey": "Revoke fallback key",
       "presets": {
         "gemini": "Gemini",
         "openai": "OpenAI",

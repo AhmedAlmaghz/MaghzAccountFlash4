@@ -3,7 +3,10 @@ import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   PROVIDER_PRESETS,
+  buildFailoverPlan,
   getProviderPreset,
+  isTransientProviderError,
+  isTransientProviderStatus,
   resolveProviderId,
   validateModelForProvider,
 } from './providers';
@@ -81,5 +84,63 @@ describe('provider registry (B1)', () => {
     expect(validateModelForProvider('ollama', 'qwen2.5:14b').ok).toBe(true);
     expect(validateModelForProvider('custom', 'anything-at-all').ok).toBe(true);
     expect(validateModelForProvider('unknown-id', 'whatever').ok).toBe(true);
+  });
+});
+
+describe('provider failover plan (B3)', () => {
+  const primary = {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-2.0-flash',
+    apiKey: 'sk-primary',
+    label: 'generativelanguage.googleapis.com',
+  };
+
+  it('classifies transient statuses and errors (and only those)', () => {
+    expect(isTransientProviderStatus(429)).toBe(true);
+    expect(isTransientProviderStatus(503)).toBe(true);
+    expect(isTransientProviderStatus(529)).toBe(true);
+    expect(isTransientProviderStatus(401)).toBe(false);
+    expect(isTransientProviderStatus(404)).toBe(false);
+    expect(isTransientProviderStatus(500)).toBe(false);
+    expect(isTransientProviderError('LLM provider error (503): overloaded')).toBe(true);
+    expect(isTransientProviderError('انتهت مهلة الاتصال بمزود الذكاء الاصطناعي (timeout)')).toBe(true);
+    expect(isTransientProviderError('LLM provider error (401): invalid key')).toBe(false);
+    expect(isTransientProviderError('invalid temperature')).toBe(false);
+    expect(isTransientProviderError(null)).toBe(false);
+  });
+
+  it('builds a plan when the fallback is fully configured and different', () => {
+    const plan = buildFailoverPlan(primary, {
+      baseUrl: 'https://api.openai.com/v1/',
+      model: 'gpt-4o-mini',
+      apiKey: 'sk-fallback',
+    });
+    expect(plan?.fallback.label).toBe('api.openai.com');
+    expect(plan?.fallback.model).toBe('gpt-4o-mini');
+    expect(plan?.primary).toBe(primary);
+  });
+
+  it('refuses failover when fallback is missing, partial, or identical', () => {
+    expect(buildFailoverPlan(primary, null)).toBeNull();
+    expect(buildFailoverPlan(null, { baseUrl: 'https://x/v1', model: 'm', apiKey: 'k' })).toBeNull();
+    expect(buildFailoverPlan(primary, { baseUrl: '', model: 'm', apiKey: 'k' })).toBeNull();
+    expect(buildFailoverPlan(primary, { baseUrl: 'https://api.openai.com/v1', model: '', apiKey: 'k' })).toBeNull();
+    expect(buildFailoverPlan(primary, { baseUrl: 'https://api.openai.com/v1', model: 'm', apiKey: '' })).toBeNull();
+    // Same endpoint (host case-insensitive, trailing slash ignored) = engine retry territory, not failover.
+    expect(
+      buildFailoverPlan(primary, {
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        model: 'gemini-2.0-flash',
+        apiKey: 'sk-other',
+      }),
+    ).toBeNull();
+    // Same host but different model IS a valid failover (quota per model).
+    expect(
+      buildFailoverPlan(primary, {
+        baseUrl: primary.baseUrl,
+        model: 'gemini-1.5-pro',
+        apiKey: 'sk-other',
+      }),
+    ).not.toBeNull();
   });
 });

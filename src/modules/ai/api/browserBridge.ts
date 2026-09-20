@@ -1,7 +1,12 @@
 import { getDbAdapter } from '@/core/database/adapters';
 import { useAuthStore } from '@/modules/auth/store';
 import { decryptApiKey, encryptApiKey, isEncryptedEnvelope } from './keyVault';
-import { resolveProviderId, validateModelForProvider } from './providers';
+import {
+  buildFailoverPlan,
+  isTransientProviderError,
+  resolveProviderId,
+  validateModelForProvider,
+} from './providers';
 import type {
   AiChatSessionSummary,
   AiPublicConfig,
@@ -56,10 +61,38 @@ const BROWSER_DISABLED_SETTING = 'ai.browser_disabled';
 const BROWSER_DISABLED_ERROR = 'وضع المتصفح للذكاء الاصطناعي معطّل لهذه الشركة — فعّله من إعدادات الذكاء الاصطناعي أو استخدم تطبيق سطح المكتب';
 /** Session token budget (B2): total tokens per chat session; 0/missing = unlimited. */
 const BUDGET_SETTING = 'ai.token_budget_per_session';
+/** Fallback provider (B3): tried ONCE when the primary fails transiently. */
+const FALLBACK_PROVIDER_SETTING = 'ai.fallback_provider';
+const FALLBACK_BASE_URL_SETTING = 'ai.fallback_base_url';
+const FALLBACK_MODEL_SETTING = 'ai.fallback_model';
+const FALLBACK_KEY_SETTING = 'ai.fallback_api_key';
 
 function readTokenBudget(settings: Record<string, string>): number | null {
   const n = Number(settings[BUDGET_SETTING]);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
+/**
+ * Resolve the stored fallback trip (B3). The key rides the same device
+ * vault as the primary (ciphertext at rest, legacy plaintext honored).
+ * Returns raw partial config — buildFailoverPlan decides sufficiency.
+ */
+async function readFallbackConfig(
+  companyId: string,
+  preloaded?: Record<string, string>,
+): Promise<{ provider?: string; baseUrl?: string; model?: string; apiKey?: string }> {
+  const settings = preloaded ?? await readAiSettingsFast(companyId);
+  const raw = settings[FALLBACK_KEY_SETTING] || null;
+  let apiKey = '';
+  if (raw) {
+    apiKey = isEncryptedEnvelope(raw) ? (await decryptApiKey(raw)) || '' : raw;
+  }
+  return {
+    provider: settings[FALLBACK_PROVIDER_SETTING] || undefined,
+    baseUrl: settings[FALLBACK_BASE_URL_SETTING] || undefined,
+    model: settings[FALLBACK_MODEL_SETTING] || undefined,
+    apiKey: apiKey || undefined,
+  };
 }
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
@@ -192,6 +225,8 @@ interface CallOptions {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** Fallback route for B3 failover (raw partial config; plan decides). */
+  fallback?: { provider?: string; baseUrl?: string; model?: string; apiKey?: string };
 }
 
 async function callChatCompletion(opts: CallOptions): Promise<{ success: boolean; data?: LlmCompletionData; error?: string }> {
@@ -339,17 +374,41 @@ async function runStream(opts: CallOptions & { streamId?: string }): Promise<voi
   const controller = new AbortController();
   trackController(opts.streamId, controller);
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/chat/completions`, {
+  const openStream = async (baseUrl: string, apiKey: string): Promise<Response> =>
+    fetch(`${normalizeBaseUrl(baseUrl)}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${opts.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-
+  try {
+    let res = await openStream(opts.baseUrl, opts.apiKey);
+    // B3 failover — pre-chunk only: nothing has been read yet at this
+    // point, so re-opening the SAME request on the fallback is safe. Once
+    // bytes flow there is no resume protocol — the turn stays primary.
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const probe = `LLM provider error (${res.status}): ${text?.slice(0, 300)}`;
+      if (isTransientProviderError(probe) && opts.fallback) {
+        let host = opts.baseUrl;
+        try {
+          host = new URL(opts.baseUrl).hostname;
+        } catch { /* keep raw */ }
+        const plan = buildFailoverPlan(
+          { baseUrl: opts.baseUrl, model: opts.model, apiKey: opts.apiKey, label: host },
+          opts.fallback,
+        );
+        if (plan) {
+          console.warn(`[ai] failover: primary ${host} failed pre-stream — retrying once on ${plan.fallback.label}`);
+          res = await openStream(plan.fallback.baseUrl, plan.fallback.apiKey);
+          // Swap identity so usage/attribution follow the serving route.
+          opts = { ...opts, baseUrl: plan.fallback.baseUrl, model: plan.fallback.model, apiKey: plan.fallback.apiKey };
+        }
+      }
+    }
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       const msg = text?.slice(0, 300) || `HTTP ${res.status}`;
@@ -604,6 +663,8 @@ export const browserAiBridge = {
     try {
       const settings = await readAiSettingsFast(companyId);
       const { key: apiKey, storage } = await readApiKey(companyId, settings);
+      const fallbackCfg = await readFallbackConfig(companyId, settings);
+      const fallbackKey = fallbackCfg.apiKey || null;
       return {
         success: true,
         data: {
@@ -617,6 +678,11 @@ export const browserAiBridge = {
           keyStorage: apiKey ? storage : 'none',
           browserDisabled: isBrowserDisabled(settings),
           tokenBudget: readTokenBudget(settings),
+          hasFallbackKey: !!fallbackKey,
+          maskedFallbackKey: maskKey(fallbackKey),
+          fallbackProvider: fallbackCfg.provider || null,
+          fallbackBaseUrl: fallbackCfg.baseUrl || null,
+          fallbackModel: fallbackCfg.model || null,
         },
       };
     } catch (err) {
@@ -671,6 +737,32 @@ export const browserAiBridge = {
       // The settings table holds CIPHERTEXT only (P1-1) — legacy plaintext
       // rows are upgraded the first time the key is (re)saved.
       if (payload.apiKey) await upsertAiSetting(companyId, KEY_SETTING, await encryptApiKey(payload.apiKey));
+      // Fallback route (B3) — same vault, same validation, independent row.
+      if (payload.fallbackProvider !== undefined) {
+        await upsertAiSetting(companyId, FALLBACK_PROVIDER_SETTING, String(payload.fallbackProvider));
+      }
+      if (payload.fallbackBaseUrl !== undefined) {
+        await upsertAiSetting(companyId, FALLBACK_BASE_URL_SETTING, String(payload.fallbackBaseUrl));
+      }
+      if (payload.fallbackModel !== undefined) {
+        let providerId = payload.fallbackProvider;
+        if (!providerId) {
+          if (payload.fallbackBaseUrl) {
+            providerId = resolveProviderId(payload.fallbackBaseUrl);
+          } else {
+            const current = await readAiSettingsFast(companyId).catch(() => null);
+            const storedBase = current?.[FALLBACK_BASE_URL_SETTING];
+            providerId = current?.[FALLBACK_PROVIDER_SETTING] ?? (storedBase ? resolveProviderId(storedBase) : 'custom');
+          }
+        }
+        const check = validateModelForProvider(providerId, payload.fallbackModel);
+        if (!check.ok) return { success: false, error: `${check.errorAr} — ${check.hintAr}` };
+        await upsertAiSetting(companyId, FALLBACK_MODEL_SETTING, String(payload.fallbackModel));
+      }
+      if (payload.revokeFallbackKey) await deleteAiSetting(companyId, FALLBACK_KEY_SETTING);
+      if (payload.fallbackApiKey) {
+        await upsertAiSetting(companyId, FALLBACK_KEY_SETTING, await encryptApiKey(payload.fallbackApiKey));
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };
@@ -724,15 +816,35 @@ export const browserAiBridge = {
       const baseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
       const model = settings[MODEL_SETTING] || DEFAULT_MODEL;
 
-      return await callChatCompletion({
+      const attempt = {
         baseUrl,
-        apiKey,
         model,
         messages: payload.messages,
         tools: payload.tools,
         temperature: payload.temperature,
         maxTokens: payload.maxTokens,
-      });
+      };
+      const first = await callChatCompletion({ ...attempt, apiKey });
+      if (first.success) return first;
+      // B3 failover: ONE extra attempt on the fallback route when the
+      // primary fails transiently (429/503/529/timeout). Auth/model/
+      // validation failures fail fast — another provider won't fix them.
+      if (!isTransientProviderError(first.error)) return first;
+      let host = baseUrl;
+      try {
+        host = new URL(baseUrl).hostname;
+      } catch { /* keep raw */ }
+      const plan = buildFailoverPlan(
+        { baseUrl, model, apiKey, label: host },
+        await readFallbackConfig(payload.companyId, settings),
+      );
+      if (!plan) return first;
+      console.warn(`[ai] failover: primary ${host} failed transiently — retrying once on ${plan.fallback.label}`);
+      const second = await callChatCompletion({ ...attempt, ...plan.fallback });
+      if (second.success && second.data) {
+        return { success: true, data: { ...second.data, failoverFrom: host } };
+      }
+      return second.success ? second : first;
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
@@ -772,6 +884,7 @@ export const browserAiBridge = {
           temperature: payload.temperature,
           maxTokens: payload.maxTokens,
           streamId: payload.streamId,
+          fallback: await readFallbackConfig(payload.companyId, settings),
         });
       } catch (err) {
         emitDone({ success: false, error: (err as Error).message }, payload.streamId);

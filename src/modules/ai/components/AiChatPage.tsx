@@ -10,6 +10,7 @@ import {
   FileJson,
   FileText,
   Sparkles,
+  Stethoscope,
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/core/i18n/useTranslation';
@@ -25,6 +26,7 @@ import { ChatPanel } from './ChatPanel';
 import { SessionsDrawer } from './SessionsDrawer';
 import { Button } from '@/core/ui/components/Button';
 import { Card } from '@/core/ui/components/Card';
+import { useToastStore } from '@/core/store/toastStore';
 import { useIsMobile, useBodyScrollLock, useEscapeKey } from '@/core/hooks/useResponsive';
 import { cn } from '@/core/utils';
 
@@ -119,6 +121,18 @@ export default function AiChatPage() {
   const handleGoToSettings = () => {
     navigate('/settings/ai');
   };
+
+  const handleCopyDiagnostics = useCallback(async () => {
+    // PII-free by construction (phases + counters only — see
+    // getDiagnosticsSnapshot): safe to paste into a support ticket.
+    try {
+      const snap = getChatEngine().getDiagnosticsSnapshot();
+      await navigator.clipboard.writeText(JSON.stringify(snap, null, 2));
+      useToastStore.getState().addToast('success', t('ai.diagnostics.copied'));
+    } catch {
+      useToastStore.getState().addToast('error', t('ai.diagnostics.copyFailed'));
+    }
+  }, [t]);
 
   const handleSelectSession = async (sid: string) => {
     // Background save of the conversation we're leaving (snapshot is taken
@@ -332,6 +346,14 @@ export default function AiChatPage() {
           <Settings size={18} />
         </button>
       )}
+      <button
+        onClick={() => void handleCopyDiagnostics()}
+        className="p-2.5 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+        title={t('ai.diagnostics.copy')}
+        aria-label={t('ai.diagnostics.copy')}
+      >
+        <Stethoscope size={18} />
+      </button>
     </>
   );
 

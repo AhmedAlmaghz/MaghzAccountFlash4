@@ -50,6 +50,35 @@ export function extractClaimedEntities(content: string): string[] {
 }
 
 /**
+ * Remove fake tool-execution blocks that some models imitate from the
+ * flattened-history format (e.g. `[تم تنفيذ: search.accounts] {...}` or
+ * `[TOOL_RESULT: search.accounts] {...}`). A model writing one of these
+ * lines in its reply means the tool was NOT actually executed — the text
+ * is a hallucinated imitation of internal context and must never reach the
+ * UI, where it would look like a real tool result.
+ *
+ * Moved here from chatEngine.ts alongside the fabrication guard (same
+ * threat family: model-imitated execution evidence).
+ */
+export function stripImitationToolBlocks(content: string): string {
+  if (!content) return content;
+  const BLOCK_START = /^\s*(?:\[(?:تم (?:تنفيذ|استدعاء):|TOOL_RESULT:|TOOL_CALLED:)|@@@call:)/;
+  const PAYLOAD_LINE = /^\s*[{}[\]"']/;
+  const filtered: string[] = [];
+  let skipPayload = false;
+  for (const line of content.split('\n')) {
+    if (BLOCK_START.test(line)) {
+      skipPayload = true;
+      continue;
+    }
+    if (skipPayload && PAYLOAD_LINE.test(line)) continue;
+    skipPayload = false;
+    filtered.push(line);
+  }
+  return filtered.join('\n').trim();
+}
+
+/**
  * Arabic noun → English tool-payload counterpart. Tool results are JSON with
  * English keys/values (`customerId`, `voucherNumber`…), while honest
  * follow-up summaries are Arabic ("أنشأت العميل بنجاح"). Without this

@@ -62,4 +62,27 @@ test.describe('AI settings hardening (budget + kill-switch + revoke)', () => {
     await page.getByRole('button', { name: /اضغط مجدداً للتأكيد/i }).click();
     await expect(page.getByRole('button', { name: /إلغاء المفتاح/i })).toBeHidden({ timeout: 15_000 });
   });
+
+  test('fallback route: save a fallback key, revoke it, gone', async ({ page }) => {
+    // B3: the stateful e2e stub persists the fallback key like the real
+    // bridges do — full save → revoke round-trip through the UI.
+    await loginAs(page);
+    await page.goto('/settings/ai');
+    await page.waitForLoadState('networkidle', { timeout: 15_000 });
+
+    // Fallback card inputs follow the main card in DOM order; the fallback
+    // key field is the second password input on the page.
+    const fbKeyInput = page.locator('input[type="password"]').nth(1);
+    await expect(fbKeyInput).toBeVisible({ timeout: 15_000 });
+    await fbKeyInput.fill('sk-e2e-fallback-probe-67890');
+    await page.getByRole('button', { name: /حفظ الإعدادات/i }).click();
+    await page.waitForTimeout(2_000);
+
+    const revokeFb = page.getByRole('button', { name: /إلغاء مفتاح الاحتياطي/i });
+    await expect(revokeFb).toBeVisible({ timeout: 15_000 });
+    await revokeFb.click();
+    await expect(page.getByRole('button', { name: /اضغط مجدداً للتأكيد/i })).toBeVisible({ timeout: 5_000 });
+    await page.getByRole('button', { name: /اضغط مجدداً للتأكيد/i }).click();
+    await expect(page.getByRole('button', { name: /إلغاء مفتاح الاحتياطي/i })).toBeHidden({ timeout: 15_000 });
+  });
 });

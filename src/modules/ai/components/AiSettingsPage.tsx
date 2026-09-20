@@ -44,6 +44,15 @@ export default function AiSettingsPage() {
   const [revokeArmed, setRevokeArmed] = useState(false);
   // B2 session token budget (0/empty = unlimited).
   const [tokenBudget, setTokenBudget] = useState('');
+  // B3 fallback route (tried once on transient primary failure).
+  const [fbProvider, setFbProvider] = useState('openai');
+  const [fbBaseUrl, setFbBaseUrl] = useState('');
+  const [fbModel, setFbModel] = useState('');
+  const [fbApiKey, setFbApiKey] = useState('');
+  const [testingFb, setTestingFb] = useState(false);
+  const [fbTestResult, setFbTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [fbRevokeArmed, setFbRevokeArmed] = useState(false);
+  const [revokingFb, setRevokingFb] = useState(false);
 
   // Load config
   useEffect(() => {
@@ -60,6 +69,9 @@ export default function AiSettingsPage() {
         setEnabled(res.data.enabled);
         setBrowserDisabled(res.data.browserDisabled);
         setTokenBudget(res.data.tokenBudget && res.data.tokenBudget > 0 ? String(res.data.tokenBudget) : '');
+        setFbProvider(res.data.fallbackProvider || 'openai');
+        setFbBaseUrl(res.data.fallbackBaseUrl || '');
+        setFbModel(res.data.fallbackModel || '');
       }
       setLoading(false);
     }
@@ -72,6 +84,14 @@ export default function AiSettingsPage() {
     const preset = PROVIDERS.find((p) => p.id === id);
     if (preset && preset.baseUrl) {
       setBaseUrl(preset.baseUrl);
+    }
+  }, []);
+
+  const handleFbProviderChange = useCallback((id: string) => {
+    setFbProvider(id);
+    const preset = PROVIDERS.find((p) => p.id === id);
+    if (preset && preset.baseUrl) {
+      setFbBaseUrl(preset.baseUrl);
     }
   }, []);
 
@@ -91,6 +111,10 @@ export default function AiSettingsPage() {
         // Empty = unlimited (bridge stores '0'); invalid text is rejected
         // by the bridge with an honest error, never silently coerced.
         tokenBudget: budgetRaw === '' ? 0 : Number(budgetRaw),
+        fallbackProvider: fbProvider,
+        fallbackBaseUrl: fbBaseUrl || undefined,
+        fallbackModel: fbModel || undefined,
+        fallbackApiKey: fbApiKey || undefined,
       });
       if (res.success) {
         addToast('success', t('ai.settings.saved'));
@@ -100,6 +124,7 @@ export default function AiSettingsPage() {
           setConfig(fresh.data);
           setBrowserDisabled(fresh.data.browserDisabled);
           setTokenBudget(fresh.data.tokenBudget && fresh.data.tokenBudget > 0 ? String(fresh.data.tokenBudget) : '');
+          setFbApiKey('');
         }
       } else {
         addToast('error', res.error || t('ai.errors.generic'));
@@ -111,7 +136,7 @@ export default function AiSettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [company?.id, provider, baseUrl, model, apiKey, enabled, browserDisabled, tokenBudget, addToast, t]);
+  }, [company?.id, provider, baseUrl, model, apiKey, enabled, browserDisabled, tokenBudget, fbProvider, fbBaseUrl, fbModel, fbApiKey, addToast, t]);
 
   const handleRevoke = useCallback(async () => {
     if (!company?.id) return;
@@ -159,6 +184,55 @@ export default function AiSettingsPage() {
       setTesting(false);
     }
   }, [company?.id, baseUrl, model, apiKey, t]);
+
+  const handleTestFb = useCallback(async () => {
+    if (!company?.id) return;
+    setTestingFb(true);
+    setFbTestResult(null);
+    try {
+      // testConnection accepts explicit credentials — no bridge change
+      // needed to probe the fallback route.
+      const res = await aiApi.testConnection({
+        companyId: company.id,
+        baseUrl: fbBaseUrl || undefined,
+        model: fbModel || undefined,
+        apiKey: fbApiKey || undefined,
+      });
+      if (res.success && res.data) {
+        setFbTestResult({ ok: true, message: `${t('ai.settings.testSuccess')} — ${res.data.model}` });
+      } else {
+        setFbTestResult({ ok: false, message: res.error || t('ai.settings.testFailed') });
+      }
+    } catch {
+      setFbTestResult({ ok: false, message: t('ai.settings.testFailed') });
+    } finally {
+      setTestingFb(false);
+    }
+  }, [company?.id, fbBaseUrl, fbModel, fbApiKey, t]);
+
+  const handleRevokeFb = useCallback(async () => {
+    if (!company?.id) return;
+    if (!fbRevokeArmed) {
+      setFbRevokeArmed(true);
+      return;
+    }
+    setRevokingFb(true);
+    try {
+      const res = await aiApi.saveConfig({ companyId: company.id, revokeFallbackKey: true });
+      if (res.success) {
+        addToast('success', t('ai.settings.revoked'));
+        setFbRevokeArmed(false);
+        const fresh = await aiApi.getConfig(company.id);
+        if (fresh.success && fresh.data) setConfig(fresh.data);
+      } else {
+        addToast('error', res.error || t('ai.settings.revokeFailed'));
+      }
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : t('ai.settings.revokeFailed'));
+    } finally {
+      setRevokingFb(false);
+    }
+  }, [company?.id, fbRevokeArmed, addToast, t]);
 
   if (!canConfigure) {
     return (
@@ -402,6 +476,88 @@ export default function AiSettingsPage() {
           >
             {testResult.ok ? <Wifi size={14} className="inline ms-1 -mt-0.5" /> : <WifiOff size={14} className="inline ms-1 -mt-0.5" />}
             {testResult.message}
+          </div>
+        )}
+      </Card>
+
+      {/* Fallback provider (B3) — tried ONCE when the primary fails
+          transiently (429/503/529/timeout). Saved with the main form above;
+          tested independently below. */}
+      <Card>
+        <CardTitle>{t('ai.settings.fallbackTitle')}</CardTitle>
+        <CardDescription>{t('ai.settings.fallbackSubtitle')}</CardDescription>
+        <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 gap-2">
+          {PROVIDERS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => handleFbProviderChange(p.id)}
+              className={cn(
+                'px-3 py-2.5 min-h-10 text-xs font-semibold rounded-xl border transition-all active:scale-95',
+                fbProvider === p.id
+                  ? 'bg-primary-50 dark:bg-primary-950/50 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 shadow-card'
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-primary-200 dark:hover:border-primary-800'
+              )}
+            >
+              {t(p.label)}
+            </button>
+          ))}
+        </div>
+        <div className="space-y-4 mt-4">
+          <Input
+            label={t('ai.settings.baseUrl')}
+            value={fbBaseUrl}
+            onChange={(e) => setFbBaseUrl(e.target.value)}
+            placeholder={PROVIDERS.find((p) => p.id === fbProvider)?.baseUrl || 'https://...'}
+          />
+          <Input
+            label={t('ai.settings.model')}
+            value={fbModel}
+            onChange={(e) => setFbModel(e.target.value)}
+            placeholder="gpt-4o-mini, llama-3.3-70b-versatile, ..."
+          />
+          <Input
+            label={t('ai.settings.apiKey')}
+            type={showKey ? 'text' : 'password'}
+            value={fbApiKey}
+            onChange={(e) => setFbApiKey(e.target.value)}
+            placeholder={t('ai.settings.apiKeyPlaceholder')}
+          />
+          {config?.hasFallbackKey && !fbApiKey && (
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {t('ai.settings.apiKeySet', { key: config.maskedFallbackKey || '****' })}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 mt-6 pt-4 border-t border-zinc-200/70 dark:border-zinc-800">
+          <Button
+            variant="outline"
+            onClick={handleTestFb}
+            isLoading={testingFb}
+            leftIcon={testingFb ? undefined : <Wifi size={16} />}
+          >
+            {testingFb ? t('ai.settings.testing') : t('ai.settings.testConnection')}
+          </Button>
+          {config?.hasFallbackKey && (
+            <Button
+              variant="outline"
+              onClick={handleRevokeFb}
+              isLoading={revokingFb}
+            >
+              {fbRevokeArmed ? t('ai.settings.revokeKeyConfirm') : t('ai.settings.revokeFallbackKey')}
+            </Button>
+          )}
+        </div>
+        {fbTestResult && (
+          <div
+            className={cn(
+              'mt-3 px-4 py-2.5 rounded-xl text-sm',
+              fbTestResult.ok
+                ? 'bg-success-50 dark:bg-success-900/20 text-success-700 dark:text-success-300 border border-success-200 dark:border-success-800'
+                : 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800'
+            )}
+          >
+            {fbTestResult.ok ? <Wifi size={14} className="inline ms-1 -mt-0.5" /> : <WifiOff size={14} className="inline ms-1 -mt-0.5" />}
+            {fbTestResult.message}
           </div>
         )}
       </Card>

@@ -1,10 +1,11 @@
 import type { ToolDefinition, ToolLedgerView } from '../types';
 import { aiApi } from '../api/index';
 import { enqueueBatch, getBatch, listBatches } from '../api/batch';
-import { planBatchResume, summarizeBatchProgress } from '../engine/batchQueue';
+import { planBatchResume, resolveBatchItems, summarizeBatchProgress, type BatchItemInput } from '../engine/batchQueue';
 import { BATCH_CREATE_CHUNK } from '../api/batchTypes';
 import { isBatchActive } from '../engine/batchRunner';
 import { getTool } from './registry';
+import { canExecute } from '../engine/toolExecutor';
 import { extractLedgerEntity, normalizeEntityName } from '../engine/taskLedger';
 
 /**
@@ -119,6 +120,42 @@ interface NormalizedBatchItem {
   after?: number | string;
   ref?: string;
   label?: string;
+}
+
+/**
+ * Normalize one raw model-emitted item into canonical {tool, args, after,
+ * ref, label} — hoisting stray top-level params into args and tolerating
+ * the {name,type,data} / {action,payload,ref} shapes seen in real sessions.
+ * Exported for ai.preview_batch (dry-run validation without creation).
+ */
+export function normalizeBatchItems(rawItems: unknown): NormalizedBatchItem[] {
+  const list = Array.isArray(rawItems) ? (rawItems as Array<Record<string, unknown>>) : [];
+  // Hoist stray top-level params into args (the model sometimes emits
+  // e.g. customerId as a sibling of args). Liberal at the boundary —
+  // tools ignore unknown keys, but a silently DROPPED customerId would
+  // create a document without its party. args wins on conflict.
+  // Shape aliases: the model emits item shapes from several conventions
+  // ({tool,args} canonical; {name,type,data} and {action,payload,ref}
+  // seen in real sessions) — normalize (type|action→tool,
+  // data|payload→args) so the batch fails only on genuinely unknown
+  // tools, never on a renamed key. Stray siblings (e.g. name) still
+  // hoist into args below.
+  const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label', 'type', 'data', 'action', 'payload']);
+  return list.map((it) => {
+    const rawArgs = it.args ?? it.data ?? it.payload;
+    const base = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
+    const stray: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(it)) {
+      if (!KNOWN_ITEM_KEYS.has(k) && v !== undefined) stray[k] = v;
+    }
+    return {
+      tool: sanitizeBatchToolName(String(it.tool || it.type || it.action || '')),
+      args: { ...stray, ...base },
+      after: (it.after as number | string | undefined) ?? undefined,
+      ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,
+      label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
+    };
+  });
 }
 
 /**
@@ -276,32 +313,7 @@ export const batchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
       if (rawItems.length === 0) return { error: 'items فارغة — لا توجد عناصر للدفعة' };
-      // Hoist stray top-level params into args (the model sometimes emits
-      // e.g. customerId as a sibling of args). Liberal at the boundary —
-      // tools ignore unknown keys, but a silently DROPPED customerId would
-      // create a document without its party. args wins on conflict.
-      // Shape aliases: the model emits item shapes from several conventions
-      // ({tool,args} canonical; {name,type,data} and {action,payload,ref}
-      // seen in real sessions) — normalize (type|action→tool,
-      // data|payload→args) so the batch fails only on genuinely unknown
-      // tools, never on a renamed key. Stray siblings (e.g. name) still
-      // hoist into args below.
-      const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label', 'type', 'data', 'action', 'payload']);
-      const items = rawItems.map((it) => {
-        const rawArgs = it.args ?? it.data ?? it.payload;
-        const base = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
-        const stray: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(it)) {
-          if (!KNOWN_ITEM_KEYS.has(k) && v !== undefined) stray[k] = v;
-        }
-        return {
-          tool: sanitizeBatchToolName(String(it.tool || it.type || it.action || '')),
-          args: { ...stray, ...base },
-          after: (it.after as number | string | undefined) ?? undefined,
-          ref: typeof it.ref === 'string' && it.ref.trim() ? it.ref.trim() : undefined,
-          label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
-        };
-      });
+      const items = normalizeBatchItems(rawItems);
       // فحص مسبق (Pre-flight) قبل الإرسال: العناصر المكسورة تموت هنا بإفصاح
       // لكل عنصر بدل أن تموت بعد الموافقة وقت التنفيذ. الجلسة 2026-09-14:
       // فاتورتا مبيعات أُرسلتا بلا customerId (MISSING_ID) بعد موافقة
@@ -344,6 +356,99 @@ export const batchTools: ToolDefinition[] = [
         ...(skippedDuplicates.length > 0 ? { skippedDuplicates } : {}),
         summary: `أُنشئت الدفعة (${res.data.total} عملية${deduped > 0 ? ` بعد إسقاط ${deduped} مكرر` : ''})${dupNote} — ستبدأ فور موافقتك، وتستطيع متابعة التقدم لحظة بلحظة`,
         startBatchRun: res.data.batchId,
+      };
+    },
+  },
+  {
+    name: 'ai.preview_batch',
+    labelAr: 'معاينة دفعة (تجربة جافة)',
+    descriptionAr:
+      'يفحص دفعة مقترحة دون إنشائها: التطبيع، الفحص المسبق، الصلاحيات المسبقة، التكرار الجلسي، وسلامة الاعتمادات (DAG) — ثم يعرض خطة مرقمة بما سيُنفَّذ. استخدمه للدفعات الكبيرة (>10) أو المعقدة قبل ai.enqueue_batch، واعرض خطته على المستخدم للمراجعة.',
+    permission: 'ai.use',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: `عناصر الدفعة المقترحة بنفس صيغة ai.enqueue_batch (حتى ${BATCH_CREATE_CHUNK} عنصر)`,
+          items: BATCH_ITEM_SCHEMA,
+        },
+      },
+      required: ['items'],
+    },
+    execute: async (args, ctx) => {
+      // Dry run — mirrors the enqueue pipeline (normalize → preflight →
+      // duplicates → DAG) plus upfront RBAC, but creates NOTHING.
+      const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
+      if (rawItems.length === 0) return { error: 'items فارغة — لا توجد عناصر للمعاينة' };
+      const items = normalizeBatchItems(rawItems);
+      const problems: Array<{ index: number; problem: string }> = [];
+
+      // 1. Unknown tools + upfront RBAC (same wall the worker enforces).
+      for (let i = 0; i < items.length; i++) {
+        const tool = items[i].tool ? getTool(items[i].tool) : undefined;
+        if (!tool) {
+          problems.push({ index: i, problem: `الأداة "${items[i].tool || '؟'}" غير معروفة — راجع أسماء الأدوات` });
+          continue;
+        }
+        if (!canExecute(tool)) {
+          problems.push({ index: i, problem: `${items[i].tool} خارج صلاحياتك الحالية — اطلب صلاحية أعلى أو أسقط العنصر` });
+        }
+      }
+      // 2. Preflight (UUIDs, empty args) — identical to enqueue's gate.
+      for (const p of preflightValidateItems(items)) problems.push(p);
+      // 3. Session duplicates (preview only — nothing dropped for real).
+      const { effective, skippedDuplicates } = filterSessionDuplicates(items, ctx.ledger ?? null);
+      if (effective.length === 0) {
+        // Mirrors enqueue's honest refusal (same words): everything proposed
+        // already exists this session — previewing an empty DAG would only
+        // produce a confusing "empty batch" error.
+        return {
+          verdict: 'fix-first',
+          total: items.length,
+          effective: 0,
+          skippedDuplicates: skippedDuplicates.map((d) => ({ name: d.name, reason: d.reason })),
+          problems: [{
+            index: -1,
+            problem: 'كل عناصر الدفعة كيانات أُنشئت سابقاً في هذه الجلسة — لا شيء لمعاينته. استخدم أدوات البحث (search.*) للوصول إليها بدل إعادة الإنشاء.',
+          }],
+          plan: [],
+          summary: 'لا توجد عناصر فعّالة للمعاينة — كل المقترح مكرر من هذه الجلسة',
+        };
+      }
+      // 4. DAG proof on the effective set (dedup + forward-ref + cycle).
+      const dagInputs: BatchItemInput[] = effective.map((it) => ({
+        tool: it.tool,
+        args: it.args,
+        ...(it.after !== undefined ? { after: it.after } : {}),
+        ...(it.ref ? { ref: it.ref } : {}),
+        ...(it.label ? { label: it.label } : {}),
+      }));
+      const dag = resolveBatchItems(dagInputs);
+      if (!dag.ok) {
+        problems.push({ index: -1, problem: `اعتمادات الدفعة مكسورة: ${dag.error}` });
+      }
+      const verdict = problems.length === 0 ? 'ready' : 'fix-first';
+      const plan = dag.ok
+        ? dag.items.map((it) => ({
+          seq: it.seq + 1,
+          tool: it.tool,
+          ...(it.label ? { label: it.label } : {}),
+          ...(it.ref ? { ref: it.ref } : {}),
+          ...(it.afterSeq !== null ? { after: it.afterSeq + 1 } : {}),
+        }))
+        : [];
+      return {
+        verdict,
+        total: items.length,
+        effective: effective.length,
+        skippedDuplicates: skippedDuplicates.map((d) => ({ name: d.name, reason: d.reason })),
+        problems: problems.slice(0, 12),
+        plan,
+        summary: verdict === 'ready'
+          ? `الخطة سليمة: ${effective.length} عملية جاهزة للتنفيذ — اعرضها على المستخدم ثم أنشئها بـ ai.enqueue_batch`
+          : `الخطة تحتاج إصلاحاً (${problems.length} مشكلة) — أصلحها وأعد المعاينة قبل الإنشاء`,
       };
     },
   },

@@ -170,6 +170,7 @@ describe('AI tools contract gate (CI)', () => {
     const AI_USE_READ_ALLOWLIST = new Set([
       'ai.classify_document', // reads own-company identity only
       'ai.batch_status',     // own batches only (user+company scoped)
+      'ai.preview_batch',    // validates the caller's own draft items only (no data read)
       'ai.recall_facts',     // user-pinned company facts only (ai_memory category, company scoped)
       'app.list_pages',      // navigation catalog (permission-filtered)
       'app.navigate',        // navigation (guard-checked target)

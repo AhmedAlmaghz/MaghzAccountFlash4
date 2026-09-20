@@ -297,6 +297,7 @@ const NEXT_ACTIONS: Record<string, { promptKey: string; labelKey: string }> = {
   'pos.checkout_sale': { promptKey: 'ai.actions.viewPosReceipt', labelKey: 'ai.actions.viewPosReceipt' },
   'accounting.create_fixed_asset': { promptKey: 'ai.actions.runDepreciationForAsset', labelKey: 'ai.actions.runDepreciationForAsset' },
   'tax.close_period': { promptKey: 'ai.actions.showVatReturn', labelKey: 'ai.actions.showVatReturn' },
+  'ai.preview_batch': { promptKey: 'ai.actions.enqueuePreviewedBatch', labelKey: 'ai.actions.enqueuePreviewedBatch' },
 };
 
 /** Verb-level defaults when no exact tool match exists. */

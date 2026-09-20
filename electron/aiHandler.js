@@ -22,6 +22,11 @@ const PROVIDER_SETTING = 'ai.provider';
 const BASE_URL_SETTING = 'ai.base_url';
 const MODEL_SETTING = 'ai.model';
 const ENABLED_SETTING = 'ai.enabled';
+// Fallback route (B3): tried ONCE when the primary fails transiently.
+const FALLBACK_PROVIDER_SETTING = 'ai.fallback_provider';
+const FALLBACK_BASE_URL_SETTING = 'ai.fallback_base_url';
+const FALLBACK_MODEL_SETTING = 'ai.fallback_model';
+const FALLBACK_KEY_SETTING = 'ai.fallback_api_key';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 // Real model in the Gemini catalog (the old default 'gemini-3.5-flash-lite'
@@ -165,6 +170,46 @@ async function resolveApiKey(companyId) {
   // routes every tenant's traffic (and bills) to a single account.
   if (process.env.AI_API_KEY) return process.env.AI_API_KEY;
   return null;
+}
+
+// ─── Failover (B3) ──────────────────────────────────────────────────────
+// Mirrors src/modules/ai/api/providers.ts (isTransientProviderError +
+// buildFailoverPlan) — duplicated here because the main process cannot
+// import the renderer's TS module. Keep the two in sync: transient means
+// 429/503/529/timeout/overload ONLY; auth/model/validation fail fast.
+function isTransientProviderErrorMain(message) {
+  if (!message) return false;
+  return /\b(429|503|529)\b/.test(message) || /انتهت مهلة|انتهت حصة|overloaded|timeout|مهلة الاتصال|مثقل/i.test(message);
+}
+
+/**
+ * Resolve the stored fallback trip, or null when unconfigured/identical.
+ * Same-envelope rule as the bridge: missing piece OR same host+model as
+ * the primary ⇒ no failover (the engine's retry owns that case).
+ */
+async function resolveFallbackTrip(companyId, settings, primary) {
+  const baseUrl = String(settings[FALLBACK_BASE_URL_SETTING] || '').replace(/\/+$/, '');
+  const model = String(settings[FALLBACK_MODEL_SETTING] || '').trim();
+  const rawKey = settings[FALLBACK_KEY_SETTING] || '';
+  const apiKey = rawKey ? decryptApiKey(rawKey) || '' : '';
+  if (!baseUrl || !model || !apiKey) return null;
+  const sameEndpoint =
+    baseUrl.toLowerCase() === String(primary.baseUrl || '').replace(/\/+$/, '').toLowerCase() &&
+    model === primary.model;
+  if (sameEndpoint) return null;
+  let host = baseUrl;
+  try {
+    host = new URL(baseUrl).hostname;
+  } catch { /* keep raw */ }
+  return { baseUrl, model, apiKey, label: host };
+}
+
+function mainHostOf(baseUrl) {
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return String(baseUrl || '');
+  }
 }
 
 function maskKey(key) {
@@ -640,6 +685,11 @@ export function registerAiHandlers() {
             const n = Number(settings['ai.token_budget_per_session']);
             return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
           })(),
+          hasFallbackKey: Boolean(decryptApiKey(settings[FALLBACK_KEY_SETTING])),
+          maskedFallbackKey: maskKey(decryptApiKey(settings[FALLBACK_KEY_SETTING])),
+          fallbackProvider: settings[FALLBACK_PROVIDER_SETTING] || null,
+          fallbackBaseUrl: settings[FALLBACK_BASE_URL_SETTING] || null,
+          fallbackModel: settings[FALLBACK_MODEL_SETTING] || null,
         },
       };
     } catch (err) {
@@ -665,6 +715,23 @@ export function registerAiHandlers() {
       if (revokeKey) {
         await upsertAiSetting(companyId, KEY_SETTING, '');
         cachedApiKeys.delete(companyId);
+      }
+      // Fallback route (B3) — independent row, same vault. Revocation first
+      // so one payload can rotate atomically from the UI's perspective.
+      if (payload.fallbackProvider !== undefined) {
+        await upsertAiSetting(companyId, FALLBACK_PROVIDER_SETTING, String(payload.fallbackProvider));
+      }
+      if (payload.fallbackBaseUrl !== undefined) {
+        await upsertAiSetting(companyId, FALLBACK_BASE_URL_SETTING, String(payload.fallbackBaseUrl));
+      }
+      if (payload.fallbackModel !== undefined) {
+        await upsertAiSetting(companyId, FALLBACK_MODEL_SETTING, String(payload.fallbackModel));
+      }
+      if (payload.revokeFallbackKey) {
+        await upsertAiSetting(companyId, FALLBACK_KEY_SETTING, '');
+      }
+      if (typeof payload.fallbackApiKey === 'string' && payload.fallbackApiKey.trim()) {
+        await upsertAiSetting(companyId, FALLBACK_KEY_SETTING, encryptApiKey(payload.fallbackApiKey.trim()));
       }
 
       if (provider !== undefined) await upsertAiSetting(companyId, PROVIDER_SETTING, String(provider));
@@ -761,16 +828,45 @@ export function registerAiHandlers() {
         return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
       }
 
+      const primaryBaseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
+      const primaryModel = settings[MODEL_SETTING] || DEFAULT_MODEL;
       const completion = await callChatCompletion({
-        baseUrl: settings[BASE_URL_SETTING] || DEFAULT_BASE_URL,
+        baseUrl: primaryBaseUrl,
         apiKey,
-        model: settings[MODEL_SETTING] || DEFAULT_MODEL,
+        model: primaryModel,
         messages,
         tools,
         temperature,
         maxTokens,
       });
-      if (completion.success) recordProviderCall(auth.session.user.id);
+      if (completion.success) {
+        recordProviderCall(auth.session.user.id);
+        return completion;
+      }
+      // B3 failover: ONE extra attempt on the fallback route when the
+      // primary fails transiently. Anything else fails fast.
+      if (!isTransientProviderErrorMain(completion.error)) return completion;
+      const host = mainHostOf(primaryBaseUrl);
+      const plan = await resolveFallbackTrip(companyId, settings, {
+        baseUrl: primaryBaseUrl,
+        model: primaryModel,
+        apiKey,
+      });
+      if (!plan) return completion;
+      console.warn(`[ai] failover: primary ${host} failed transiently — retrying once on ${plan.fallback.label}`);
+      const second = await callChatCompletion({
+        baseUrl: plan.fallback.baseUrl,
+        apiKey: plan.fallback.apiKey,
+        model: plan.fallback.model,
+        messages,
+        tools,
+        temperature,
+        maxTokens,
+      });
+      if (second.success) {
+        recordProviderCall(auth.session.user.id);
+        return { success: true, data: { ...second.data, failoverFrom: host } };
+      }
       return completion;
     } catch (err) {
       return { success: false, error: err.message };
@@ -877,30 +973,57 @@ export function registerAiHandlers() {
         return;
       }
 
-      const stream = callChatCompletionStream({
-        baseUrl: settings[BASE_URL_SETTING] || DEFAULT_BASE_URL,
-        apiKey,
-        model: settings[MODEL_SETTING] || DEFAULT_MODEL,
-        messages,
-        tools,
-        temperature,
-        maxTokens,
-      });
+      const primaryBaseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
+      const primaryModel = settings[MODEL_SETTING] || DEFAULT_MODEL;
+      // B3 failover needs the loop restartable: pre-chunk failures may
+      // re-open on the fallback, post-chunk failures must not (no resume).
+      let emitted = false;
+      const runWith = async (cfg) => {
+        const stream = callChatCompletionStream({
+          baseUrl: cfg.baseUrl,
+          apiKey: cfg.apiKey,
+          model: cfg.model,
+          messages,
+          tools,
+          temperature,
+          maxTokens,
+        });
+        for await (const chunk of stream) {
+          // Renderer moved on (stop button / watchdog timeout) or the window
+          // died: stop provider traffic instead of spraying chunks into
+          // nobody — or worse, into a NEWER stream sharing the channel.
+          if (!senderAlive()) {
+            if (streamId) forgetStream(streamId);
+            return 'abandoned';
+          }
+          if (streamId && cancelledStreams.has(streamId)) {
+            cancelledStreams.delete(streamId);
+            forgetStream(streamId);
+            return 'abandoned';
+          }
+          emitted = true;
+          sendChunk(chunk);
+        }
+        return 'done';
+      };
 
-      for await (const chunk of stream) {
-        // Renderer moved on (stop button / watchdog timeout) or the window
-        // died: stop provider traffic instead of spraying chunks into
-        // nobody — or worse, into a NEWER stream sharing the channel.
-        if (!senderAlive()) {
-          if (streamId) forgetStream(streamId);
-          return;
-        }
-        if (streamId && cancelledStreams.has(streamId)) {
-          cancelledStreams.delete(streamId);
-          forgetStream(streamId);
-          return;
-        }
-        sendChunk(chunk);
+      try {
+        const outcome = await runWith({ baseUrl: primaryBaseUrl, apiKey, model: primaryModel });
+        if (outcome === 'abandoned') return;
+      } catch (err) {
+        // Pre-chunk transient failure ⇒ ONE fallback attempt from scratch.
+        const host = mainHostOf(primaryBaseUrl);
+        const plan = !emitted && isTransientProviderErrorMain(err.message)
+          ? await resolveFallbackTrip(companyId, settings, {
+              baseUrl: primaryBaseUrl,
+              model: primaryModel,
+              apiKey,
+            })
+          : null;
+        if (!plan) throw err;
+        console.warn(`[ai] failover: primary ${host} failed pre-stream — retrying once on ${plan.fallback.label}`);
+        const retry = await runWith(plan.fallback);
+        if (retry === 'abandoned') return;
       }
       recordProviderCall(auth.session.user.id);
       sendDone({ success: true });

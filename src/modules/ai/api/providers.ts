@@ -155,3 +155,63 @@ export function validateModelForProvider(
     hintAr: preset.hintAr,
   };
 }
+
+// ─── Failover (B3) ───────────────────────────────────────────────────
+// One extra attempt on a SECOND provider when the primary fails
+// transiently (429/503/529/timeout). Non-transient failures (auth, model,
+// validation) fail fast — retrying them on another provider only burns
+// quota. Both transports (Electron main + browser bridge) implement the
+// same rule; the main-process copy is a 3-line duplicate (JS cannot import
+// this TS module) and points back here.
+
+/** HTTP statuses worth one failover attempt (mirrors the engine retry set). */
+export function isTransientProviderStatus(status: number): boolean {
+  return status === 429 || status === 503 || status === 529;
+}
+
+/** Classify an error message the same way (timeouts, overloads, quota). */
+export function isTransientProviderError(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /\b(429|503|529)\b/.test(message) || /انتهت مهلة|انتهت حصة|overloaded|timeout|مهلة الاتصال|مثقل/i.test(message);
+}
+
+export interface TripConfig {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  /** Human label for honest logging (host only, never the key). */
+  label: string;
+}
+
+/** Failover decision: null = serve the primary failure honestly, no retry. */
+export interface FailoverPlan {
+  primary: TripConfig;
+  fallback: TripConfig;
+}
+
+/**
+ * Build the failover plan from resolved configs. Returns null (no failover)
+ * when the fallback is unconfigured OR identical to the primary endpoint —
+ * retrying the same URL+model is the engine's retry job, not failover's.
+ * Key comparison is the caller's job (keys are secret); endpoint equality
+ * here covers host+model.
+ */
+export function buildFailoverPlan(
+  primary: TripConfig | null,
+  fallback: { baseUrl?: string; model?: string; apiKey?: string } | null,
+): FailoverPlan | null {
+  if (!primary || !primary.baseUrl || !primary.model || !primary.apiKey) return null;
+  const baseUrl = (fallback?.baseUrl || '').replace(/\/+$/, '');
+  const model = (fallback?.model || '').trim();
+  const apiKey = fallback?.apiKey || '';
+  if (!baseUrl || !model || !apiKey) return null;
+  const sameEndpoint =
+    baseUrl.toLowerCase() === primary.baseUrl.replace(/\/+$/, '').toLowerCase() &&
+    model === primary.model;
+  if (sameEndpoint) return null;
+  let host = baseUrl;
+  try {
+    host = new URL(baseUrl).hostname;
+  } catch { /* keep raw */ }
+  return { primary, fallback: { baseUrl, model, apiKey, label: host } };
+}
