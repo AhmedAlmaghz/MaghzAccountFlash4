@@ -1,13 +1,13 @@
 {
-  "name": "MaghzAccountPro",
+  "name": "MaghzERP",
   "private": true,
-  "version": "0.22.2",
+  "version": "0.22.3",
   "author": "Ahmed Almaghz",
   "keywords": [
     "maghzaccount",
+    "maghz-erp",
     "maghzaccount-pro",
-    "maghzaccount-pro",
-    "maghzaccount-pro-desktop",
+    "maghz-erp-desktop",
     "accounting",
     "accounting software",
     "accounting software desktop",
@@ -61,18 +61,39 @@
   "build": {
     "appId": "com.maghzaccount.pro",
     "productName": "maghzaccount-pro",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "drizzle/**/*",
       "package.json"
     ],
     "win": {
       "target": [
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MaghzAccount Pro"
     }
   },
   "dependencies": {
