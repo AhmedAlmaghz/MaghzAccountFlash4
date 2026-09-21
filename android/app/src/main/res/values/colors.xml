@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand identity (Emerald / Gold / Charcoal) -->
+    <color name="brand_emerald">#0B7A5E</color>
+    <color name="brand_gold">#D4A017</color>
+    <color name="brand_charcoal">#1A1A2E</color>
+    <color name="ic_launcher_background">#0B7A5E</color>
+</resources>

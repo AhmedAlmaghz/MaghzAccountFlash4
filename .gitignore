@@ -39,3 +39,10 @@ release-local/
 .npmrc
 
 .capture
+
+# Android build output (see also android/.gitignore)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/release.keystore

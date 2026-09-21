@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ============ 1) Desktop app (Electron / Windows) ============
+  electron:
+    name: Electron (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer (tsc + vite)
+        run: npm run build
+
+      - name: Resolve tag version
+        shell: pwsh
+        run: |
+          $v = $env:GITHUB_REF_NAME -replace '^v', ''
+          "RELEASE_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Electron (portable exe)
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win portable --publish never "-c.extraMetadata.version=$env:RELEASE_VERSION"
+
+      - name: Upload Electron artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-windows
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # ============ 2) Mobile app (Android WebView shell) ============
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Resolve tag version
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          echo "RELEASE_VERSION=$V" >> "$GITHUB_ENV"
+          MAJOR=$(echo "$V" | cut -d. -f1 | grep -o '[0-9]*')
+          MINOR=$(echo "$V" | cut -d. -f2 | grep -o '[0-9]*')
+          PATCH=$(echo "$V" | cut -d. -f3 | grep -o '[0-9]*')
+          MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
+          echo "VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))" >> "$GITHUB_ENV"
+
+      - name: Prepare signing keystore
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 --decode > android/release.keystore
+            echo "Signing: repository keystore secrets" >> "$GITHUB_STEP_SUMMARY"
+          else
+            keytool -genkeypair -v \
+              -keystore android/release.keystore \
+              -alias maghzaccount \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass maghz-account-release -keypass maghz-account-release \
+              -dname "CN=MaghzAccount Pro, OU=Mobile, O=Maghz, L=Sanaa, C=YE"
+            echo "Signing: ephemeral generated keystore (set ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD secrets for a stable signature)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Build release APK
+        run: |
+          gradle -p android assembleRelease \
+            -PwebappUrl="${APP_URL:-https://maghz-account.vercel.app}" \
+            -PversionName="${RELEASE_VERSION}" \
+            -PversionCode="${VERSION_CODE}" \
+            -PreleaseStoreFile=release.keystore \
+            -PreleaseStorePassword="${KS_PASS:-maghz-account-release}" \
+            -PreleaseKeyAlias="${KEY_ALIAS:-maghzaccount}" \
+            -PreleaseKeyPassword="${KEY_PASS:-maghz-account-release}"
+
+      - name: Collect APK
+        run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk "artifacts/MaghzAccount-${RELEASE_VERSION}.apk"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  # ============ 3) Publish GitHub Release ============
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [electron, android]
+
+    steps:
+      - name: Download Electron artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: electron-windows
+          path: dist
+
+      - name: Download Android artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true

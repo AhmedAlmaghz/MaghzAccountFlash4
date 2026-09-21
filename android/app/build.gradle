@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+def resolve = { String key, String defVal ->
+    def v = project.findProperty(key) ?: System.getenv(key)
+    return (v != null && !v.toString().isEmpty()) ? v.toString() : defVal
+}
+
+// Web app URL displayed inside the WebView shell (override via -PwebappUrl=...).
+def webappUrl = resolve('webappUrl', 'https://maghz-account.vercel.app')
+
+// Version from the git tag, e.g. v0.22.1 -> versionName "0.22.1"
+def verName = resolve('versionName', '0.0.0')
+def parts = verName.findAll(/\d+/)
+def verMajor = parts.size() > 0 ? parts[0].toInteger() : 0
+def verMinor = parts.size() > 1 ? parts[1].toInteger() : 0
+def verPatch = parts.size() > 2 ? parts[2].toInteger() : 0
+def verCode = project.hasProperty('versionCode')
+        ? project.property('versionCode').toString().toInteger()
+        : (verMajor * 1000000 + verMinor * 1000 + verPatch)
+
+android {
+    namespace 'com.maghzaccount.pro'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.maghzaccount.pro'
+        minSdk 26
+        targetSdk 35
+        versionCode verCode
+        versionName verName
+        buildConfigField 'String', 'WEBAPP_URL', "\"${webappUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            if (project.hasProperty('releaseStoreFile')) {
+                storeFile file(project.property('releaseStoreFile').toString())
+                storePassword resolve('releaseStorePassword', '')
+                keyAlias resolve('releaseKeyAlias', '')
+                keyPassword resolve('releaseKeyPassword', '')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (project.hasProperty('releaseStoreFile')) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
