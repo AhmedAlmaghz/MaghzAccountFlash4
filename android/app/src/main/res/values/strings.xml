@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">مغزى المحاسبة</string>
+    <string name="app_name">MaghzERP</string>
     <string name="cannot_open_link">لا يوجد تطبيق يمكنه فتح هذا الرابط</string>
+    <string name="permission_denied_media">تم رفض إذن الكاميرا أو الميكروفون. لتشغيل الماسح الضوئي أو التسجيل الصوتي، فعّل إذن الكاميرا والميكروفون من إعدادات التطبيق.</string>
 </resources>

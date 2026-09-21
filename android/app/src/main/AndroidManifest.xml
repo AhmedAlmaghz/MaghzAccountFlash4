@@ -1,7 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Network: the shell loads the deployed ERP over HTTPS inside the WebView. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Camera: POS barcode scanner (BarcodeDetector + getUserMedia) and the
+         camera capture inside the AI assistant chat. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Microphone: voice dictation (useVoiceDictation) and AI voice notes
+         (MediaRecorder) plus the audio routing they rely on. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- The camera / microphone are OPTIONAL hardware. Declaring the permissions
+         above would otherwise make the store listing require them and hide the
+         app from devices (tablets, POS terminals) without a camera or a mic.
+         Granting stays runtime-only: the WebView asks per page via
+         WebChromeClient.onPermissionRequest (see MainActivity). -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:label="@string/app_name"
