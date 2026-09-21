@@ -23,7 +23,7 @@ test-output.txt
 
 # Electron build output
 release/
-release-local/
+release-*
 
 # Editor directories and files
 .vscode/*
