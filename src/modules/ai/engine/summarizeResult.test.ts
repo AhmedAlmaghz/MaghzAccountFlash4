@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeResult } from './chatEngine';
+import { summarizeResult } from './resultCards';
 
 describe('summarizeResult — empty-search fallback visibility', () => {
   // Real session 2026-09-10: search.accounts found nothing for "إنترنت"
