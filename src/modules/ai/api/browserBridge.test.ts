@@ -178,7 +178,7 @@ describe('browser AI bridge (PGlite)', () => {
       companyId,
       provider: 'gemini',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3.5-flash-lite',
       apiKey: 'sk-live-abcdef1234567890',
       enabled: true,
     });

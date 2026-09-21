@@ -31,9 +31,9 @@
 
 ### 3) أدخل الموديل
 مثال للنص الحر حسب المزود:
-- Gemini: `gemini-2.0-flash` (سريع ومجاني) أو `gemini-2.5-pro`
+- Gemini: `gemini-3.5-flash-lite` (سريع ومجاني) أو `gemini-3.7-flash`
 - OpenAI: `gpt-4o` / `gpt-4o-mini`
-- OpenRouter: `google/gemini-2.0-flash-001`
+- OpenRouter: `google/gemini-3.8-flash`
 - Ollama: `llama3.1` أو `qwen2.5` (جيد للعربية)
 
 > 💡 **توصية عربية**: موديلات Gemini و GPT-4o هي الأقوى بالعربية المحاسبية. Ollama مع `qwen2.5` خيار محلي جيد إن كان الإنترنت مشكلة.

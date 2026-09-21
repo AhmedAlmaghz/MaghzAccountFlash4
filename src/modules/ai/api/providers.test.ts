@@ -68,17 +68,20 @@ describe('provider registry (B1)', () => {
     }
   });
 
-  it('accepts real catalog names and rejects the blocklisted ghost', () => {
-    expect(validateModelForProvider('gemini', 'gemini-2.0-flash').ok).toBe(true);
-    expect(validateModelForProvider('gemini', 'gemini-1.5-pro').ok).toBe(true);
+  it('accepts real catalog names and rejects the blocklisted families', () => {
     expect(validateModelForProvider('gemini', 'gemini-3.5-flash-lite').ok).toBe(true);
     expect(validateModelForProvider('gemini', 'gemini-3.7-flash').ok).toBe(true);
-    const ghost = validateModelForProvider('gemini', 'gemini-2.5-pro');
-    expect(ghost.ok).toBe(false);
-    expect(ghost.errorAr).toContain('404');
+    expect(validateModelForProvider('gemini', 'gemini-3.1-pro').ok).toBe(true);
+    // Whole 2.* and 1.* families never existed — dedicated 404 message.
+    for (const dead of ['gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-1.0-ultra']) {
+      const ghost = validateModelForProvider('gemini', dead);
+      expect(ghost.ok).toBe(false);
+      expect(ghost.errorAr).toContain('404');
+    }
     expect(validateModelForProvider('openai', 'gpt-4o-mini').ok).toBe(true);
-    expect(validateModelForProvider('openai', 'gemini-2.0-flash').ok).toBe(false);
-    expect(validateModelForProvider('openrouter', 'google/gemini-2.0-flash-001').ok).toBe(true);
+    expect(validateModelForProvider('openai', 'gemini-3.5-flash-lite').ok).toBe(false);
+    expect(validateModelForProvider('openrouter', 'google/gemini-3.8-flash').ok).toBe(true);
+    expect(validateModelForProvider('openrouter', 'google/gemini-2.0-flash-001').ok).toBe(false);
     expect(validateModelForProvider('openrouter', 'gpt-4o-mini').ok).toBe(false);
   });
 
@@ -103,7 +106,7 @@ describe('provider registry (B1)', () => {
 describe('provider failover plan (B3)', () => {
   const primary = {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3.5-flash-lite',
     apiKey: 'sk-primary',
     label: 'generativelanguage.googleapis.com',
   };
@@ -143,7 +146,7 @@ describe('provider failover plan (B3)', () => {
     expect(
       buildFailoverPlan(primary, {
         baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3.5-flash-lite',
         apiKey: 'sk-other',
       }),
     ).toBeNull();
@@ -151,7 +154,7 @@ describe('provider failover plan (B3)', () => {
     expect(
       buildFailoverPlan(primary, {
         baseUrl: primary.baseUrl,
-        model: 'gemini-1.5-pro',
+        model: 'gemini-3.7-flash',
         apiKey: 'sk-other',
       }),
     ).not.toBeNull();

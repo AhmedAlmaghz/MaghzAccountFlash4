@@ -57,11 +57,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'google/gemini-3.-flash-001',
+    defaultModel: 'google/gemini-3.8-flash',
     pattern: /^[\w-]+\/[\w:.-]+$/,
     hosts: ['openrouter.ai'],
-    hintAr: 'أسماء OpenRouter بصيغة vendor/model مثل google/gemini-2.0-flash-001',
-    hintEn: 'OpenRouter names use vendor/model form, e.g. google/gemini-2.0-flash-001',
+    hintAr: 'أسماء OpenRouter بصيغة vendor/model مثل google/gemini-3.8-flash',
+    hintEn: 'OpenRouter names use vendor/model form, e.g. google/gemini-3.8-flash',
   },
   {
     id: 'groq',
@@ -123,12 +123,13 @@ export interface ModelValidation {
  * first chat. Empty model = "use the provider default" (always valid).
  */
 /**
- * Model names that never existed in their provider's catalog but look
+ * Model families that never existed in their provider's catalog but look
  * plausible. Rejected with a dedicated message even if the family pattern
  * would otherwise accept them.
  */
 const NEVER_EXISTED: Array<{ test: RegExp; name: string }> = [
-  { test: /gemini-2\.5/i, name: 'gemini-1.5-*' },
+  { test: /gemini-2\./i, name: 'gemini-2.*' },
+  { test: /gemini-1\./i, name: 'gemini-1.*' },
 ];
 
 export function validateModelForProvider(
