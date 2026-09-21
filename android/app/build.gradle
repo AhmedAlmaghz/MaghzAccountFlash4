@@ -21,11 +21,11 @@ def verCode = project.hasProperty('versionCode')
         : (verMajor * 1000000 + verMinor * 1000 + verPatch)
 
 android {
-    namespace 'com.maghzaccount.pro'
+    namespace 'com.maghzaccount.aierp'
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.maghzaccount.pro'
+        applicationId 'com.maghzaccount.aierp'
         minSdk 26
         targetSdk 35
         versionCode verCode
@@ -40,7 +40,9 @@ android {
     signingConfigs {
         release {
             if (project.hasProperty('releaseStoreFile')) {
-                storeFile file(project.property('releaseStoreFile').toString())
+                // Keystore lives at android/<file>; resolve relative to the ROOT project,
+                // not the :app module (file() would look in android/app/).
+                storeFile rootProject.file(project.property('releaseStoreFile').toString())
                 storePassword resolve('releaseStorePassword', '')
                 keyAlias resolve('releaseKeyAlias', '')
                 keyPassword resolve('releaseKeyPassword', '')
