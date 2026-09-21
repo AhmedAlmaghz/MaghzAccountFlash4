@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Server, HardDrive, CheckCircle, XCircle, RefreshCw, Save } from 'lucide-react';
 import { Card, Button, Input, Can } from '@/core/ui/components';
-import { getDbAdapter, getDbMode, setDbMode, type DbMode, isElectron } from '@/core/database/adapters';
+import { getDbAdapter, getDbMode, setDbMode, type DbMode, isElectron, getTransportMode, setTransportMode, type PgliteTransportMode } from '@/core/database/adapters';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 
@@ -36,6 +36,9 @@ export const DatabaseSettingsPage: React.FC = () => {
   const [testMessage, setTestMessage] = useState('');
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // PGlite engine placement (main thread vs background worker). Takes effect
+  // on reload — the engine owner (and its IndexedDB lock) is decided at boot.
+  const [transport, setTransport] = useState<PgliteTransportMode>(() => getTransportMode());
 
   // Load current PG config from onboarding store if available
   useEffect(() => {
@@ -88,6 +91,7 @@ export const DatabaseSettingsPage: React.FC = () => {
     setIsSaving(true);
     try {
       setDbMode(mode);
+      setTransportMode(transport);
 
       // If PG mode, persist the connection config for Electron main process
       if (mode === 'pg' && typeof window !== 'undefined' && (window as { electronDB?: { updateConfig?: (c: object) => Promise<{ success: boolean; error?: string }> } }).electronDB?.updateConfig) {
@@ -196,6 +200,40 @@ export const DatabaseSettingsPage: React.FC = () => {
           <div className="mt-4">
             <Input label={t('auth.password')} type="password" value={pgConfig.password} onChange={e => setPgConfig({ ...pgConfig, password: e.target.value })} />
           </div>
+        </Card>
+      )}
+
+      {/* PGlite engine placement (only for local mode) */}
+      {mode === 'pglite' && (
+        <Card className="p-5">
+          <div className="flex items-center gap-2 text-primary-600 dark:text-primary-400 mb-1">
+            <HardDrive size={16} />
+            <span className="text-sm font-medium">{t('settings.database.engineTitle')}</span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{t('settings.database.engineDesc')}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {(['main', 'worker'] as PgliteTransportMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setTransport(v)}
+                className={`p-4 rounded-xl border-2 text-right transition-all ${
+                  transport === v
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                }`}
+              >
+                <p className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                  {v === 'main' ? t('settings.database.engineMain') : t('settings.database.engineWorker')}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  {v === 'main' ? t('settings.database.engineMainDesc') : t('settings.database.engineWorkerDesc')}
+                </p>
+              </button>
+            ))}
+          </div>
+          {transport === 'worker' && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">{t('settings.database.engineSlowBoot')}</p>
+          )}
         </Card>
       )}
 

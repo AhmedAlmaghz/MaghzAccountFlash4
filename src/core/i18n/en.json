@@ -2663,7 +2663,14 @@
       "current": "Current",
       "desktopOnly": "Desktop app only",
       "desktopOnlyShort": "Desktop only",
-      "postgresDescWeb": "On the web (Vercel) use PGlite — PostgreSQL server is desktop-only."
+      "postgresDescWeb": "On the web (Vercel) use PGlite — PostgreSQL server is desktop-only.",
+      "engineTitle": "PGlite engine",
+      "engineDesc": "Where does the local database engine run? Switching requires a reload.",
+      "engineMain": "Main thread",
+      "engineMainDesc": "Current behaviour — heavy queries may briefly freeze the UI.",
+      "engineWorker": "Background worker",
+      "engineWorkerDesc": "Engine off the UI thread — reports and batches never freeze the browser.",
+      "engineSlowBoot": "First worker boot is slow (WASM compile) — later boots are faster."
     },
     "company": {
       "title": "Company Info",

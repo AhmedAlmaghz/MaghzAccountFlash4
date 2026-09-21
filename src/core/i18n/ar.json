@@ -2663,7 +2663,14 @@
       "current": "الحالية",
       "desktopOnly": "متاح فقط في تطبيق سطح المكتب",
       "desktopOnlyShort": "سطح المكتب فقط",
-      "postgresDescWeb": "على الويب (Vercel) استخدم PGlite — خادم PostgreSQL غير متاح في المتصفح."
+      "postgresDescWeb": "على الويب (Vercel) استخدم PGlite — خادم PostgreSQL غير متاح في المتصفح.",
+      "engineTitle": "محرك PGlite",
+      "engineDesc": "أين يعمل محرك قاعدة البيانات المحلي؟ يتطلب التبديل إعادة تحميل.",
+      "engineMain": "الخيط الرئيسي",
+      "engineMainDesc": "الوضع الحالي — الاستعلامات الثقيلة قد تجمّد الواجهة لحظياً.",
+      "engineWorker": "عامل خلفية (Worker)",
+      "engineWorkerDesc": "المحرك خارج خيط الواجهة — التقارير والدفعات لا تجمّد المتصفح.",
+      "engineSlowBoot": "أول إقلاع للعامل بطيء (تجميع WASM) — الإقلاعات التالية أسرع."
     },
     "company": {
       "title": "بيانات الشركة",

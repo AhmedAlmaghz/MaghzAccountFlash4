@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { DbAdapter, CompanySeedProfile } from './types';
-import { PGlite } from '@electric-sql/pglite';
+import { mainThreadTransport } from './pgliteTransport';
+import type { DbTransport } from './pgliteTransport';
+import { getTransportMode } from './transportMode';
+import { getWorkerTransport } from './pgliteWorkerTransport';
 
 /**
  * PGlite (PostgreSQL WASM) Adapter
@@ -12,71 +15,18 @@ import { PGlite } from '@electric-sql/pglite';
  * (JOINs, CTEs, RETURNING, ::uuid casts, ILIKE, generate_series, ...).
  */
 
-// In-memory fallback for environments without IndexedDB (e.g. some tests / SSR)
-let pglite: PGlite | null = null;
-let initPromise: Promise<PGlite> | null = null;
-
-function isBrowserIndexedDB(): boolean {
-  return typeof indexedDB !== 'undefined';
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// PGlite instance ownership lives in ./pgliteTransport (single source —
+// two instances would fight over one IndexedDB lock). Re-exported so any
+// existing deep importers keep working untouched.
+export { getInstance } from './pgliteTransport';
 
 /**
- * Per-attempt ceiling for PGlite boot. `waitReady` has no built-in timeout —
- * on an IDB lock or a thrashed disk it can stall forever, freezing the whole
- * app at the spinner with zero feedback. The retry loop in getInstance turns
- * this rejection into another attempt, then a named error.
+ * The transport that owns the engine this session. Whole-engine switching:
+ * per-query read/write splitting is unsound on one IndexedDB lock, so the
+ * flag flips reads, writes, transactions AND migrations together.
  */
-const PG_BOOT_TIMEOUT_MS = 30_000;
-
-async function openInstance(): Promise<PGlite> {
-  const dataDir = isBrowserIndexedDB() ? 'idb://maghzaccount-pglite' : undefined;
-  const instance = new PGlite({ dataDir });
-  await Promise.race([
-    instance.waitReady,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`PGlite boot timed out after ${PG_BOOT_TIMEOUT_MS / 1000}s (IndexedDB lock?)`)), PG_BOOT_TIMEOUT_MS),
-    ),
-  ]);
-  return instance;
-}
-
-async function getInstance(): Promise<PGlite> {
-  if (pglite) return pglite;
-  if (initPromise) return initPromise;
-
-  // IndexedDB locks are transient by nature (second tab, slow disk, AV
-  // scan): retry a few times with backoff before declaring the database
-  // dead. Each attempt gets a FRESH promise so a poisoned one never sticks.
-  initPromise = (async () => {
-    // NOTE: initPromise is nulled ONLY on final failure (see catch below).
-    // Nulling it between attempts would let a concurrent caller spawn a
-    // second instance mid-retry — two writers fighting over one IndexedDB.
-    let lastError: unknown = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const instance = await openInstance();
-        pglite = instance;
-        return instance;
-      } catch (err) {
-        lastError = err;
-        if (attempt < 3) await sleep(attempt * 1000);
-      }
-    }
-    throw lastError instanceof Error
-      ? new Error(`PGlite init failed after 3 attempts: ${lastError.message}`)
-      : lastError;
-  })();
-
-  try {
-    return await initPromise;
-  } catch (err) {
-    initPromise = null;
-    throw err;
-  }
+function activeTransport(): DbTransport {
+  return getTransportMode() === 'worker' ? getWorkerTransport() : mainThreadTransport;
 }
 
 /** Convert SQLite-style `?` placeholders to PostgreSQL `$1, $2...` */
@@ -259,9 +209,9 @@ export function runPgliteMigrations(): Promise<{ success: boolean; error?: strin
 
 async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?: string }> {
   try {
-    const db = await getInstance();
+    const t = activeTransport();
     // Create migration tracking table if needed
-    await db.exec(`
+    await t.execRaw(`
       CREATE TABLE IF NOT EXISTS __pglite_migrations (
         name TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ DEFAULT NOW()
@@ -269,19 +219,19 @@ async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?
     `);
 
     for (const migration of MIGRATIONS) {
-      const existing = await db.query('SELECT 1 FROM __pglite_migrations WHERE name = $1 LIMIT 1', [migration.name]);
+      const existing = await t.queryRaw('SELECT 1 FROM __pglite_migrations WHERE name = $1 LIMIT 1', [migration.name]);
       if (existing.rows.length > 0) continue;
       // Name the file on failure — a bare PG error never tells WHICH of the
       // 26 migrations broke the boot, leaving users with a dead error screen.
       try {
-        await db.exec(normalizeIdempotent(migration.sql));
+        await t.execRaw(normalizeIdempotent(migration.sql));
       } catch (err) {
         throw new Error(
           `PGlite migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`,
           { cause: err },
         );
       }
-      await db.query('INSERT INTO __pglite_migrations (name) VALUES ($1)', [migration.name]);
+      await t.queryRaw('INSERT INTO __pglite_migrations (name) VALUES ($1)', [migration.name]);
     }
 
     return { success: true };
@@ -1246,8 +1196,7 @@ async function seedLeads(this: DbAdapter, companyId: string, adminId: string): P
 export const pgliteAdapter: DbAdapter = {
   async ping() {
     try {
-      const db = await getInstance();
-      const res = await db.query('SELECT version() AS version');
+      const res = await activeTransport().queryRaw('SELECT version() AS version');
       const version = (res.rows[0] as { version?: string } | undefined)?.version || 'PostgreSQL (PGlite)';
       return { success: true, db: 'PGlite (local)', message: version };
     } catch (err) {
@@ -1257,10 +1206,10 @@ export const pgliteAdapter: DbAdapter = {
 
   async query<T = any>(sql: string, params?: any[]): Promise<{ success: boolean; rows?: T[]; error?: string }> {
     try {
-      const db = await getInstance();
+      const t = activeTransport();
       await runPgliteMigrations();
       const pgSql = convertPlaceholders(sql);
-      const result = await db.query(pgSql, params || []);
+      const result = await t.queryRaw(pgSql, params || []);
       return normalizeResult(result);
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -1269,20 +1218,20 @@ export const pgliteAdapter: DbAdapter = {
 
   async transaction(queries: { sql: string; params?: any[] }[]): Promise<{ success: boolean; results?: any[]; error?: string }> {
     try {
-      const db = await getInstance();
+      const t = activeTransport();
       await runPgliteMigrations();
       const results: any[] = [];
-      await db.exec('BEGIN');
+      await t.execRaw('BEGIN');
       try {
         for (const q of queries) {
           const pgSql = convertPlaceholders(q.sql);
-          const result = await db.query(pgSql, q.params || []);
+          const result = await t.queryRaw(pgSql, q.params || []);
           results.push({ rows: result.rows, rowCount: result.rows?.length || 0 });
         }
-        await db.exec('COMMIT');
+        await t.execRaw('COMMIT');
         return { success: true, results };
       } catch (err) {
-        await db.exec('ROLLBACK');
+        await t.execRaw('ROLLBACK');
         throw err;
       }
     } catch (err) {

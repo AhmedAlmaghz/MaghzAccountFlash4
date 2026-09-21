@@ -4823,3 +4823,28 @@ npx drizzle-kit migrate
   - **احذر truncation المضلل**: أول 300 حرف من المعاملات أوهمت بـ shifted-params — اقرأ المصفوفة كاملة (`count` + كل عنصر) قبل الاستنتاج
   - **t() بلا default = مفاتيح خام في الواجهة**: أي `t(key, {default})` قبل هذا الإصلاح كان يعرض المفتاح — الآن يعرض البديل. لا تضف مفاتيح وهمية لإسكاتها
   - **e2e على DB مشترك = كتابة معزولة فقط**: أسماء فريدة (`Date.now()`)، إلغاء بدل تأكيد، لا قفل فترات/سنوات أبداً — وإلا كسرت كل الجولات اللاحقة
+
+### المهمتان الاستراتيجيتان: تفكيك المحرك + عامل PGlite خارج الخيط
+- **التفكيك (3 شرائح نقية، بلا تغيير سلوكي)**:
+  - `streaming.ts`: `reconstructResponseFromChunks` + `MAX_COMPLETION_TOKENS` + `STREAM_TOTAL_TIMEOUT_MS` + `ProviderResponse`/`StreamOutcome` (+`streaming.test.ts` يقفل الاستيراد الإنتاجي — المرآة القديمة في `streamingReconstructor.test.ts` لا تختبر الإنتاج)
+  - `confirmations.ts`: `writeAttemptKey` + `WRITE_RETRY_LIMIT` + `findPendingCall`/`prunePendingCall` (قاتل النقر المزدوج: التقليم قبل أي `await`) + `hasExhaustedRetries` — التنسيق بقي في المحرك عمداً (يملك `store`/`runLoop`)
+  - `runLoop.ts`: `MAX_ITERATIONS` + `isTransientProviderError` — الحلقة نفسها (~100 سطر) بقيت منسقاً نحيفاً عمداً (حقن ~10 تبعيات مقابل فائدة هامشية)
+  - النمط: نقل حرفي + `export` إعادة للتوافق (كالسابق: `deadline`/`claims`/`sendTrace`) + قفل تكافؤ لكل شريحة + `chatEngine.test` خضراء بعد كل شريحة
+- **العامل (4 خطوات)**:
+  1. `pgliteTransport.ts`: شق `DbTransport` + `MainThreadTransport` — الملكية **نُقلت لا نُسخت** (`getInstance`/`openInstance`/الـ singleton) — مالك واحد لقفل IDB
+  2. `pgliteWorkerTransport.ts` + `pgliteWorkerHost.ts`: `WorkerTransport` بنفس الشق + مهلة صريحة على كل استدعاء (استعلام/تنفيذ/إقلاع) + إقلاع single-flight لا يلتصق بالفشل. بروتوكول `0.5.4` = `worker({init})` + `PGliteWorker.create` (ليست `worker.host` — API أحدث غير موجود هنا)
+  3. `transportMode.ts` + توجيه المهايئ: **تصحيح معماري** — تقسيم قراءة/كتابة على قفل IDB واحد غير سليم (محركان يتصارعان) → التدرج = محرك كامل لكل وضع (flag من localStorage، افتراضي `main`، VITE_E2E يُجبر `main`). `ping`/`query`/`transaction`/`runPgliteMigrations` كلها عبر `activeTransport()`
+  4. `DatabaseSettingsPage`: بطاقة «محرك PGlite» (خيط رئيسي/عامل خلفية) + تحذير بطء الإقلاع الأول + الحفظ يعيد التحميل (المالك يُحسم عند الإقلاع) + 6 مفاتيح i18n متوازنة
+- **التحقق النهائي**: `vitest` **2610/2610** (203 ملفات) ✓ | `e2e/22-pglite-worker` **1/1** (إقلاع حي + COUNT 3M + rAF حي أثناء الاستعلام) ✓ | `e2e/15-settings` **15/15** ✓ | `pgliteSmoke` **4/4** عبر مسار النقل ✓ | `tsc` 0 ✓ | `eslint` 0/0 ✓ | `build` أخضر مع chunk الـ Worker ✓ | i18n متوازن ✓
+
+### قواعد ذهبية مضافة (التفكيك + العامل)
+- **التقسيم الميكانيكي = إثبات تكافؤ لا افتراض**: نقل حرفي + re-export + قفل اختبار لكل شريحة + المجموعة الأم خضراء — الدماغ يصدق "متطابق" والـ verifier لا
+- **الحالة المشتركة لا تُنقل**: `drainStreaming`/`resolveConfirmation` تنسيقهما يبقى في المحرك (يملكان `history`/`pendingWriteCalls`/الـ store) — تُنقل القرارات النقية فقط
+- **محرك واحد لكل `dataDir`**: أي قفل IDB مشترك = مالك واحد. تقسيم قراءة/كتابة على محركين تصارع مؤكد — التدرج بالـ flag الكامل لا بالاستعلام
+- **الـ singleton يُنقل لا يُنسخ**: نسختان من `getInstance` = محركان يتصارعان على القفل. النقل + re-export يحفظ المصدر الواحد والمتوردين القدامى معاً
+- **المهلة الصريحة على كل حدّ**: أي `await` بلا سقف (استعلام/إقلاع worker) = تجميد مؤكد يوماً ما — `withQueryTimeout` + إقلاع لا يلتصق بالفشل
+- **مدخل Worker يُفحص بـ `vite build` لا بالـ dev وحده**: حزمة الـ Worker بصيغة `iife` تمنع `await` العلوي — الـ dev مرّ والبناء كسر. `void worker({...})` + الفشل يُرى عبر مهلة الإقلاع المسماة
+- **مسبار e2e خارج الشل**: إقلاع التطبيق ممنوع — صفحة `/__e2e/ping` بلا إقلاع تطبيق = بلا صراع قفل؛ الناقل يُستورد مباشرة (بلا بيانات مُبذرة). الاستجابة تُقاس بـ rAF أثناء استعلام ثقيل لا بعده
+- **`import type` + حقول صريحة في ملفات النقل**: `verbatimModuleSyntax` يمنع `import` الأنواع العادي، و`erasableSyntaxOnly` يمنع `constructor(private x)` — أي كسر هنا يسقط `tsc` قبل أي اختبار
+
+*آخر تحديث: 2026-09-21 | الإصدار: maghzaccount-pro v0.21.2 (المهمتان الاستراتيجيتان: تفكيك المحرك 3 شرائح + عامل PGlite خارج الخيط مع مفتاح الإعدادات)*

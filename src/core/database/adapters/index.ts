@@ -143,3 +143,4 @@ export async function getDbAdapter(): Promise<DbAdapter> {
 }
 
 export { isElectron, isElectronPg };
+export { getTransportMode, setTransportMode, type PgliteTransportMode } from './transportMode';
