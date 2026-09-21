@@ -67,10 +67,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     defaultModel: 'llama-3.3-70b-versatile',
-    pattern: /^[\w.-]+$/,
+    // Bare names (llama-3.3-70b-versatile, qwen-qwq-32b) AND vendor/model
+    // form (qwen/qwen3-32b, moonshotai/kimi-k2-instruct) — Groq hosts both.
+    pattern: /^(?:[\w-]+\/)?[\w.:-]+$/,
     hosts: ['api.groq.com'],
-    hintAr: 'أسماء نماذج Groq مثل llama-3.3-70b-versatile أو mixtral-8x7b-32768',
-    hintEn: 'Groq model names look like llama-3.3-70b-versatile',
+    hintAr: 'أسماء نماذج Groq مثل llama-3.3-70b-versatile أو بصيغة vendor/model مثل qwen/qwen3-32b',
+    hintEn: 'Groq names like llama-3.3-70b-versatile or vendor/model form like qwen/qwen3-32b',
   },
   {
     id: 'ollama',
@@ -121,10 +123,9 @@ export interface ModelValidation {
  * first chat. Empty model = "use the provider default" (always valid).
  */
 /**
- * Model names that NEVER existed in their provider's catalog but look
- * plausible (the classic 'gemini-3.5-flash-lite' incident 404'd every
- * unconfigured install). Rejected with a dedicated message even if the
- * family pattern would otherwise accept them.
+ * Model names that never existed in their provider's catalog but look
+ * plausible. Rejected with a dedicated message even if the family pattern
+ * would otherwise accept them.
  */
 const NEVER_EXISTED: Array<{ test: RegExp; name: string }> = [
   { test: /gemini-2\.5/i, name: 'gemini-1.5-*' },

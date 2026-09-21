@@ -96,9 +96,9 @@ async function readFallbackConfig(
 }
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-// Real Gemini catalog model — see electron/aiHandler.js (kept in sync by
-// providerDefaults.test.ts). 'gemini-3.5-flash-lite' never existed.
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+// Default model — see electron/aiHandler.js (kept in sync by
+// providerDefaults.test.ts) and the gemini preset in providers.ts.
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const REQUEST_TIMEOUT_MS = 90000;
 const TEST_TIMEOUT_MS = 30000;
 

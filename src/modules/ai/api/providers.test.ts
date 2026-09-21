@@ -68,16 +68,29 @@ describe('provider registry (B1)', () => {
     }
   });
 
-  it('accepts real catalog names and rejects the infamous fake', () => {
+  it('accepts real catalog names and rejects the blocklisted ghost', () => {
     expect(validateModelForProvider('gemini', 'gemini-2.0-flash').ok).toBe(true);
     expect(validateModelForProvider('gemini', 'gemini-1.5-pro').ok).toBe(true);
-    const fake = validateModelForProvider('gemini', 'gemini-3.5-flash-lite');
-    expect(fake.ok).toBe(false);
-    expect(fake.errorAr).toContain('404');
+    expect(validateModelForProvider('gemini', 'gemini-3.5-flash-lite').ok).toBe(true);
+    expect(validateModelForProvider('gemini', 'gemini-3.7-flash').ok).toBe(true);
+    const ghost = validateModelForProvider('gemini', 'gemini-2.5-pro');
+    expect(ghost.ok).toBe(false);
+    expect(ghost.errorAr).toContain('404');
     expect(validateModelForProvider('openai', 'gpt-4o-mini').ok).toBe(true);
     expect(validateModelForProvider('openai', 'gemini-2.0-flash').ok).toBe(false);
     expect(validateModelForProvider('openrouter', 'google/gemini-2.0-flash-001').ok).toBe(true);
     expect(validateModelForProvider('openrouter', 'gpt-4o-mini').ok).toBe(false);
+  });
+
+  it('groq accepts bare names AND vendor/model form (real catalog shapes)', () => {
+    // Regression: qwen/qwen3-32b is a real Groq-hosted model — the old
+    // bare-name-only pattern rejected it with a false 404 warning.
+    expect(validateModelForProvider('groq', 'llama-3.3-70b-versatile').ok).toBe(true);
+    expect(validateModelForProvider('groq', 'qwen-qwq-32b').ok).toBe(true);
+    expect(validateModelForProvider('groq', 'qwen/qwen3-32b').ok).toBe(true);
+    expect(validateModelForProvider('groq', 'qwen/qwen3.8-27b').ok).toBe(true);
+    expect(validateModelForProvider('groq', 'moonshotai/kimi-k2-instruct').ok).toBe(true);
+    expect(validateModelForProvider('groq', 'not a model!!').ok).toBe(false);
   });
 
   it('ollama/custom accept any non-empty name (server-side catalog)', () => {

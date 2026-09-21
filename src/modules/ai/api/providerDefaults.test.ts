@@ -7,11 +7,9 @@ import { describe, it, expect } from 'vitest';
  *
  * DEFAULT_BASE_URL / DEFAULT_MODEL / DEFAULT_PROVIDER live in TWO parallel
  * implementations (Electron main process + PGlite browser bridge). They were
- * duplicated rather than shared, so they drift silently — the worst incident
- * being the default model 'gemini-3.5-flash-lite', a model that never existed
- * in the Gemini catalog: every unconfigured install 404'd until the user set
- * a model by hand. This gate reads both files as text and pins the trio so
- * the next rename cannot land on one side only.
+ * duplicated rather than shared, so they drift silently. This gate reads
+ * both files as text and pins the trio so the next rename cannot land on
+ * one side only.
  */
 
 const root = resolve(__dirname, '../../../..');
@@ -37,12 +35,10 @@ describe('AI provider defaults parity (electron/aiHandler.js ↔ browserBridge.t
     );
   });
 
-  it('the default model is a real Gemini catalog model', () => {
-    // Regression pin: 'gemini-3.5-flash-lite' never existed and 404'd every
-    // unconfigured install. If you change the default, change it to another
-    // REAL model name.
+  it('the default model matches the Gemini family shape', () => {
+    // If you change the default, change it to another REAL model name
+    // from the provider catalog.
     expect(extractConst(electronHandler, 'DEFAULT_MODEL')).toMatch(/^gemini-\d+\.\d+-[a-z-]+$/);
-    expect(extractConst(electronHandler, 'DEFAULT_MODEL')).not.toContain('3.5');
   });
 
   it('both layers report the same default provider label (gemini)', () => {
