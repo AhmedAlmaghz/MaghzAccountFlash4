@@ -29,125 +29,25 @@ import { resolveEntitiesInText } from '../entityResolver';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, LlmTool, PendingToolCall, ToolContext } from '../types';
 import type { Skill } from '../skills/types';
-
-/**
- * Merge streaming SSE chunks into a complete LlmCompletionData response.
- * Handles content deltas and incremental tool_call deltas from OpenAI-compatible
- * streaming endpoints.
- */
-function reconstructResponseFromChunks(chunks: LlmStreamChunk[]): LlmCompletionData {
-  let content = '';
-  // Keyed by composite key (index or `index_id` when Gemini reuses index for parallel calls).
-  const toolCallAccumulators: Record<string, {
-    id: string;
-    name: string;
-    args: string;
-    extraFunctionProps: Record<string, unknown>;
-  }> = {};
-  // Tracks the last composite key used per numeric index so deltas without id
-  // still reach the correct accumulator.
-  const indexToKey: Record<number, string> = {};
-  let lastThoughtSignature: string | undefined;
-  let finishReason: string | null = null;
-
-  for (const chunk of chunks) {
-    if (chunk.type === 'content' && chunk.content) {
-      content += chunk.content;
-    }
-
-    if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
-      const tc = chunk.toolCall;
-      const idx = tc.index;
-
-      // Determine the composite key for this delta.
-      let key: string;
-      const existingEntry = toolCallAccumulators[String(idx)];
-      if (tc.id && existingEntry && existingEntry.id && existingEntry.id !== tc.id) {
-        // Gemini reuses the same numeric index for a new parallel tool call.
-        key = `${idx}_${tc.id}`;
-      } else {
-        key = indexToKey[idx] ?? String(idx);
-      }
-      indexToKey[idx] = key;
-      if (!toolCallAccumulators[key]) {
-        toolCallAccumulators[key] = { id: tc.id ?? '', name: '', args: '', extraFunctionProps: {} };
-      }
-      if (tc.id) toolCallAccumulators[key].id = tc.id;
-      if (tc.function?.name) toolCallAccumulators[key].name += tc.function.name;
-      if (tc.function?.arguments) toolCallAccumulators[key].args += tc.function.arguments;
-      if (tc.function) {
-        for (const k of Object.keys(tc.function)) {
-          if (k !== 'name' && k !== 'arguments') {
-            toolCallAccumulators[key].extraFunctionProps[k] = (tc.function as Record<string, unknown>)[k];
-            // Gemini may put thought_signature inside the function object too.
-            if (k === 'thought_signature') {
-              lastThoughtSignature = (tc.function as Record<string, unknown>)[k] as string;
-            }
-          }
-        }
-      }
-      if (typeof (tc as Record<string, unknown>).thought_signature === 'string') {
-        lastThoughtSignature = (tc as Record<string, unknown>).thought_signature as string;
-      }
-    }
-
-    // Special chunk emitted by aiHandler.js when Gemini returns
-    // thought_signature at the message level instead of on the function.
-    if (chunk.thoughtSignature) {
-      lastThoughtSignature = chunk.thoughtSignature;
-    }
-
-    if (chunk.type === 'finish' && chunk.finishReason) {
-      finishReason = chunk.finishReason;
-    }
-  }
-
-  // Attach thought_signature to ALL tool call accumulators because Gemini
-  // requires it on every tool_call in the history, not just the last one.
-  if (lastThoughtSignature) {
-    for (const acc of Object.values(toolCallAccumulators)) {
-      acc.extraFunctionProps.thought_signature = lastThoughtSignature;
-    }
-  }
-
-  const toolCalls = Object.values(toolCallAccumulators).map((tc) => ({
-    id: tc.id,
-    name: tc.name,
-    arguments: (() => {
-      try { return JSON.parse(tc.args || '{}'); } catch { return {}; }
-    })(),
-    function: Object.keys(tc.extraFunctionProps).length > 0 ? tc.extraFunctionProps : {},
-  }));
-
-  return {
-    content: content || '',
-    toolCalls,
-    finishReason,
-    usage: null,
-  };
-}
+import {
+  MAX_COMPLETION_TOKENS,
+  STREAM_TOTAL_TIMEOUT_MS,
+  reconstructResponseFromChunks,
+  type ProviderResponse,
+  type StreamOutcome,
+} from './streaming';
+export {
+  MAX_COMPLETION_TOKENS,
+  STREAM_TOTAL_TIMEOUT_MS,
+  reconstructResponseFromChunks,
+  type ProviderResponse,
+  type StreamOutcome,
+} from './streaming';
+import { MAX_ITERATIONS, isTransientProviderError } from './runLoop';
+export { MAX_ITERATIONS, isTransientProviderError } from './runLoop';
 
 // Room for: searches → write confirmation → resume → up to 2 anti-fabrication
-// correction cycles, without starving legitimate multi-document requests.
-const MAX_ITERATIONS = 10;
-
-/**
- * Unified completion budget. The three call sites (streaming, empty-stream
- * fallback, streaming-failure fallback) previously disagreed — 4096 vs
- * 10240 — so long reports were silently truncated on the streaming path but
- * not the fallback. One constant, one behaviour.
- */
-const MAX_COMPLETION_TOKENS = 10240;
-
-/**
- * Hard ceiling for one streaming round-trip. The main process already aborts
- * provider stalls at 90s, but if the done-event itself is lost (dead IPC,
- * destroyed sender, bridge glitch) the renderer's `for await` would wait
- * FOREVER — isProcessing stuck, every later send ignored, app "frozen".
- * This watchdog abandons the drain and falls through to the non-streaming
- * fallback instead. Must exceed the main-process 90s abort.
- */
-const STREAM_TOTAL_TIMEOUT_MS = 120_000;
+// correction cycles (value lives in ./runLoop).
 
 /**
  * Budget for the pre-LLM preamble (live settings read + entity resolution).
@@ -188,23 +88,17 @@ import { getSendTrace, traceSend } from './sendTrace';
 
 // Re-exported so existing importers (tests, debug tooling) keep working.
 export { getSendTrace, traceSend } from './sendTrace';
+import {
+  findPendingCall,
+  prunePendingCall,
+  WRITE_RETRY_LIMIT,
+  writeAttemptKey as writeAttemptKeyFn,
+} from './confirmations';
+export { WRITE_RETRY_LIMIT, findPendingCall, hasExhaustedRetries, prunePendingCall, writeAttemptKey } from './confirmations';
 
 /**
- * runLoop stage contracts (Phase-4 decomposition).
- *
- * runLoop used to be one ~500-line method where the three stream-failure
- * paths drifted apart (the flags reset existed in one twin but not the
- * other — the swallowed-fallback-answer P1). The loop is now an
- * orchestrator over small stages with explicit in/out contracts:
- *  - ProviderResponse: one provider round-trip result.
- *  - StreamOutcome: the streaming stage either stopped (user abort) or
- *    produced a response plus the placeholder bookkeeping the render
- *    stages need (streamingId/streamedContent).
+ * runLoop stage contracts live in ./streaming (imported above).
  */
-type ProviderResponse = { success: boolean; data?: LlmCompletionData; error?: string };
-type StreamOutcome =
-  | { outcome: 'stopped' }
-  | { outcome: 'responded'; response: ProviderResponse; streamingId: string | null; streamedContent: boolean };
 
 /**
  * The core agent loop.
@@ -252,7 +146,7 @@ class ChatEngine {
    * Key = toolName + stable-stringified args; value = failures so far.
    */
   private failedWriteAttempts = new Map<string, number>();
-  private static readonly WRITE_RETRY_LIMIT = 2;
+  // WRITE_RETRY_LIMIT lives in ./confirmations (single source of truth).
 
   /**
    * Adaptive tool-routing state (per `send()` invocation): names of tools
@@ -287,20 +181,9 @@ class ChatEngine {
   private sessionTokenBudget: number | null = null;
   private budgetWarned = false;
 
-  /** Stable key for a (toolName, args) pair — key order must not matter. */
+  /** Stable key for a (toolName, args) pair — single source in ./confirmations. */
   private static writeAttemptKey(toolName: string, args: unknown): string {
-    const stable = (v: unknown): unknown => {
-      if (Array.isArray(v)) return v.map(stable);
-      if (v && typeof v === 'object') {
-        return Object.fromEntries(
-          Object.keys(v as Record<string, unknown>)
-            .sort()
-            .map((k) => [k, stable((v as Record<string, unknown>)[k])]),
-        );
-      }
-      return v;
-    };
-    return `${toolName}::${JSON.stringify(stable(args))}`;
+    return writeAttemptKeyFn(toolName, args);
   }
 
   private get ctx(): ToolContext {
@@ -713,14 +596,14 @@ class ChatEngine {
     // buttons on the synchronous status flip, but main-thread saturation can
     // process a second queued activation before React flushes — the old
     // "prune after execute" window executed the same financial write twice.
-    const pending = this.pendingWriteCalls.find((c) => c.callId === callId);
+    const pending = findPendingCall(this.pendingWriteCalls, callId);
     if (!pending) return;
     const messageId = store.messages.find((m) => m.toolCall?.callId === callId)?.id;
     if (!messageId) {
-      this.pendingWriteCalls = this.pendingWriteCalls.filter((c) => c.callId !== callId);
+      this.pendingWriteCalls = prunePendingCall(this.pendingWriteCalls, callId);
       return;
     }
-    this.pendingWriteCalls = this.pendingWriteCalls.filter((c) => c.callId !== callId);
+    this.pendingWriteCalls = prunePendingCall(this.pendingWriteCalls, callId);
     if (store.messages.find((m) => m.id === messageId)?.toolCall?.status === 'executing') return;
 
     store.setProcessing(true);
@@ -1985,7 +1868,7 @@ class ChatEngine {
       for (const tc of writeCalls) {
         const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
         const failures = this.failedWriteAttempts.get(key) ?? 0;
-        if (failures >= ChatEngine.WRITE_RETRY_LIMIT) {
+        if (failures >= WRITE_RETRY_LIMIT) {
           exhausted.push({
             callId: tc.id,
             name: tc.name,
@@ -2103,9 +1986,7 @@ class ChatEngine {
       const response = firstResponse;
       if (!response.success || !response.data) {
         const errText = String(response.error ?? '');
-        const transient =
-          /\b(429|503|529)\b/.test(errText) ||
-          /انتهت مهلة البث|انتهت حصة|overloaded|timeout/i.test(errText);
+        const transient = isTransientProviderError(errText);
         if (transient && !retriedOnce) {
           retriedOnce = true;
           traceSend('transient-retry');
