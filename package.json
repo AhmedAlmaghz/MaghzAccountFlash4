@@ -1,7 +1,7 @@
 {
   "name": "MaghzERP",
   "private": true,
-  "version": "0.22.3",
+  "version": "0.23.0",
   "author": "Ahmed Almaghz",
   "keywords": [
     "maghzaccount",
@@ -94,10 +94,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "MaghzAccount Pro"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
     }
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "@neondatabase/serverless": "^1.1.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-table": "^8.21.3",
     "arabic-reshaper": "^1.1.0",

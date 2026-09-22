@@ -4848,3 +4848,35 @@ npx drizzle-kit migrate
 - **`import type` + حقول صريحة في ملفات النقل**: `verbatimModuleSyntax` يمنع `import` الأنواع العادي، و`erasableSyntaxOnly` يمنع `constructor(private x)` — أي كسر هنا يسقط `tsc` قبل أي اختبار
 
 *آخر تحديث: 2026-09-21 | الإصدار: maghzaccount-pro v0.21.2 (المهمتان الاستراتيجيتان: تفكيك المحرك 3 شرائح + عامل PGlite خارج الخيط مع مفتاح الإعدادات)*
+
+### إصلاح v0.22.3: المثبت كان ينتج تطبيقاً ميتاً — لا نافذة أبداً على جهاز المستخدم
+- **العرض**: `maghzaccount-pro-Setup-*.exe` يُثبَّت لكن التطبيق لا يفتح أي نافذة (عمليات حية بلا renderer). التشخيص بسجل `%APPDATA%\MaghzERP\maghzaccount-main.log` الجديد كشف: `DB_HOST is not set. Check .env.local` يُرمى من `registerDatabaseHandlers()` **قبل** `createWindow()` — والملف `.env.local` موجود في بيئة التطوير فقط، فالتطبيق المعبأ كان يموت عند كل مستخدم نهائي
+- **الإصلاحات (4 ملفات)**:
+  - `electron/dbHandler.js`: `getRequiredEnv` (ترمي عند الغياب) ← `getOptionalEnv` بقيم localhost الافتراضية + تحذير. الـ Pool لا يتصل إلا عند أول استعلام، وكل قنوات IPC تلتقط الفشل أصلاً → ميزات الخادم "غير متوفرة" بدل موت التطبيق. العارض يعمل افتراضياً على PGlite المحلي
+  - `electron/migrationRunner.js`: تخطٍّ فوري بلا انتظار 15s عندما لا يوجد `DB_HOST` (ترحيلات PGlite مجمعة في العارض نفسه)
+  - `electron/main.js`: النافذة تُفتح **أولاً** والترحيل في الخلفية + معالجا `uncaughtException/unhandledRejection` يكتبان في `maghzaccount-main.log` داخل userData (أي "لا يعمل" قادم يأتي مشخّصاً)
+  - `package.json`: `portable.artifactName` منفصل — قبله كان NSIS والـ portable يتقاسمان نفس اسم `Setup-*.exe` فيكتب أحدهما فوق الآخر
+- **التحقق**: مثبت NSIS يُثبَّت صامتاً (`/S`) + التطبيق المثبت يفتح نافذة معنونة + العارض يعرض معالج الإعداد بالعربية من `app.asar` عبر `file://` (مثبت عبر CDP) + `tsc`/`eslint`صفران
+- **القواعد الذهبية المضافة**:
+  - **الحزمة المعبأة بلا `.env.local` أبداً**: أي `throw` على غياب env في مسار الإقلاع = موت مؤكد عند كل مستخدم — الافتراض الآمن + الفشل الناعم في القنوات
+  - **النافذة قبل أي I/O شبكي**: الترحيل/الاتصال في الخلفية دائماً — الانتظار الأسود يُقرأ "مثبت فاضٍ"
+  - **سجل إقلاع في userData من اليوم الأول**: شاشة بلا سبب دين تقني — `maghzaccount-main.log` هو أول ما يُطلب عند أي بلاغ "لا يعمل"
+  - **اسم قطعة مميز لكل هدف**: `nsis` و`portable` ينتجان `.exe` — نفس القالب يعني سحقاً صامتاً لأحدهما
+
+### قاعدة البيانات الشاملة + لغات الأونبوردينج (v0.23.0)
+- **النموذج**: `connection.ts` الخالص (parse/redact/provider/capabilities) + `connectionVault.ts` (أسرار safeStorage في main مقابل device-storage في الويب) + 3 مشغلات: `pglite` محلي (افتراضي كل المنصات)، `postgres-direct` عبر TCP في Electron لأي مزود، `postgres-http` عبر `@neondatabase/serverless` للويب/الموبايل (Neon فقط — المتصفح بلا TCP)
+- **المستخدم يلصق DATABASE_URL واحداً** (محلي/Supabase/Neon/GCP/خاص) في الإعدادات أو الأونبوردينج: تحليل + شارة مزود + اختبار دون حفظ + حفظ مشفر + تفعيل. SSL بتوافق libpq (require افتراضياً للبعيد، verify-* يثبّت السلسلة، disable للمحلي)
+- **الـ main يبني التجمع من الـ vault** (لا env) ويبقى عبر إعادة التشغيل؛ `db:test-connection` و`db:update-config` يقبلان URL أو الحقول القديمة؛ قنوات `db:connections-*` الجديدة في preload.cjs/js معاً (بوابة parity)
+- **مخطط واحد لكل الخلفيات**: `getBundledMigrations` + `splitMigrationStatements` + `ensureRemoteSchema` تعيد تشغيل نفس ملفات drizzle على البعيد (تتبع `__pglite_migrations`)؛ البذور المشتركة عبر `withoutInternalMigration` (لا إقلاع PGlite عبثي)
+- **القدرات الصادقة**: `resolveDriver` + `RemoteCapabilityError` (no-remote-connection/non-neon-on-web/invalid-remote-url) — لا فشل شبكي غامض؛ Supabase/خاص على الويب = إرشاد لسطح المكتب
+- **الأونبوردينج**: حقل URL يعبئ الحقول تلقائياً + `databaseUrl` ذاكرة-فقط (partialize يجرّده مع كلمة المرور)؛ مبدل لغة عربي/English في الترحيب + `detectDeviceLanguage` عند فتح المعالج فقط (لا كشف صامت عند الإقلاع — يبقي الافتراضي `ar` حتمياً للاختبارات والـ e2e)؛ `main.tsx` بلا تجاوز ثابت (كان يسحق `en` المحفوظة)
+- **الموبايل** = ويب الموبايل (لا غلاف native): نفس مساري PGlite/Neon-HTTP
+- **التحقق**: `tsc` 0 | `eslint src+electron` 0/0 | فحص داخل-العملية 39/39 على الكود الحقيقي | i18n متوازن 3287=3287 | build ناجح | عمال vitest ميتة بيئياً → ملفات الاختبار (6) لـ CI
+- **القواعد الذهبية المضافة**:
+  - **المتصفح بلا TCP — صمّم حول الجدار لا ضده**: direct للسطح، HTTP لـ Neon على الويب، وخطأ قدرات صريح لما عداهما
+  - **السر يُخزَّن مشفراً أو لا يُخزَّن**: safeStorage في main، وتحذير صريح لتخزين الجهاز على الويب؛ الـ renderer لا يرى أسرار سطح المكتب أبداً
+  - **SSL بتوافق libpq حرفياً**: نفس URL يعمل في psql وهنا — require=تشفير بلا تثبيت، verify-*=تثبيت، disable=صريح فقط
+  - **مخطط واحد يُرحَّل في كل مكان**: أي نسخة ثانية من DDL تنحرف حتماً — البعيد يعيد تشغيل نفس الحزمة بنفس التتبع
+  - **البذور المشتركة بإسقاط الإقلاع الداخلي**: `withoutInternalMigration` حول التفويض وإلا أقلعت WASM عبثاً
+  - **الكشف اللغوي في المعالج لا عند الإقلاع**: الافتراضي الحتمي يحمي مئات الاختبارات؛ `VITE_E2E`-style الاستثناءات في كود الإنتاج دين
+  - **أي `*Summary`/قدرة تُحسب تُعرض**: `webTcpUnsupported` كود مستقر تترجمه الواجهة — لا نص خام من السائق

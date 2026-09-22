@@ -71,6 +71,14 @@ function normalizeIdempotent(rawSql) {
  * credentials, SSL — rather than re-reading env).
  */
 export async function runDrizzleMigrations(overrideConfig = null) {
+  // Packaged builds have no .env.local and usually no server to sync:
+  // skip fast instead of burning a 15s connection timeout on every launch.
+  // (PGlite runs its own bundled migrations inside the renderer.)
+  const hostHint = String(process.env.DB_HOST ?? '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
+  if (!overrideConfig && !hostHint) {
+    console.log('[Schema] No PostgreSQL configured — skipping server schema sync (local database migrates itself).');
+    return;
+  }
   console.log('[Schema] Starting PostgreSQL schema sync...');
   // Sanitize env values: .env files may carry BOM/CRLF/invisible padding that
   // silently breaks pg connections ("connection terminated", bad hostnames).

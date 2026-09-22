@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Database,
   Server,
@@ -20,7 +20,7 @@ import {
   HardDrive,
 } from 'lucide-react';
 import { useOnboardingStore } from '@/core/store/onboardingStore';
-import { useAppStore } from '@/core/store';
+import { useAppStore, detectDeviceLanguage } from '@/core/store';
 import { Button, Input, Card } from '@/core/ui/components';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { getDbAdapter } from '@/core/database/adapters';
@@ -35,6 +35,17 @@ const getSteps = (t: (key: string) => string) => [
 
 export const OnboardingWizard: React.FC = () => {
   const { t } = useTranslation();
+  // Device language on wizard mount: a new user starts the whole flow in
+  // their own language, with a visible switcher on the welcome step. The
+  // wizard only renders pre-completion, so this never overrides a deliberate
+  // choice made inside the app.
+  useEffect(() => {
+    try {
+      useAppStore.getState().setLanguage(detectDeviceLanguage());
+    } catch {
+      /* store unavailable — default language stands */
+    }
+  }, []);
   const steps = getSteps(t);
   const { currentStep, setCurrentStep, dbConfig, companyConfig, setCompleted, setProcessing, isProcessing, processingMessage, error, setError } = useOnboardingStore();
   const setActiveCompany = useAppStore((state) => state.setActiveCompany);
@@ -95,16 +106,25 @@ export const OnboardingWizard: React.FC = () => {
         fiscalYearStart: c?.fiscalYearStart || companyConfig.fiscalYearStart || undefined,
       });
 
-      // Persist DB config via the active adapter (works in both web and Electron modes)
+      // Persist DB config via the active adapter (works in both web and Electron modes).
+      // A pasted DATABASE_URL travels along so the desktop vault (or the web
+      // vault) stores the exact string the user tested — secrets never persist elsewhere.
       try {
         const adapter = await getDbAdapter();
-        await adapter.updateConfig({
+        const updated = await adapter.updateConfig({
           host: dbConfig.host,
           port: dbConfig.port,
           database: dbConfig.database,
           user: dbConfig.user,
           password: dbConfig.password,
+          databaseUrl: dbConfig.databaseUrl || undefined,
         });
+        // Keep the renderer's active-connection pointer in sync with the
+        // vault (desktop main returns the saved id; Neon web persists itself).
+        if (updated?.connectionId) {
+          const { setStoredActiveRemoteId } = await import('@/core/database/connectionVault');
+          setStoredActiveRemoteId(updated.connectionId);
+        }
       } catch (configErr) {
         // Non-fatal: PGlite has no external config; Electron adapter may not be wired in dev
         console.warn('updateConfig skipped:', configErr);
@@ -176,7 +196,8 @@ export const OnboardingWizard: React.FC = () => {
 
 // ─── Step 1: Welcome ─────────────────────────────────────────────────────────
 function WelcomeStep({ onNext }: { onNext: () => void }) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const setLanguage = useAppStore((state) => state.setLanguage);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [resetError, setResetError] = useState('');
@@ -227,6 +248,26 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
         <div className="flex items-center gap-1"><Database size={16} /> PostgreSQL</div>
         <div className="flex items-center gap-1"><Globe size={16} /> {t('onboarding.multiCurrency')}</div>
         <div className="flex items-center gap-1"><Sparkles size={16} /> {t('onboarding.defaultData')}</div>
+      </div>
+      {/* Interface language — device language is pre-selected, changeable anytime */}
+      <div className="flex items-center justify-center gap-2">
+        <Globe size={16} className="text-slate-400" />
+        <span className="text-sm text-slate-500 dark:text-slate-400">{t('onboarding.language')}</span>
+        <div className="flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden" role="group" aria-label={t('onboarding.language')}>
+          {(['ar', 'en'] as const).map((lng) => (
+            <button
+              key={lng}
+              onClick={() => setLanguage(lng)}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+                language === lng
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              {lng === 'ar' ? 'العربية' : 'English'}
+            </button>
+          ))}
+        </div>
       </div>
       <Button variant="primary" size="lg" leftIcon={<ArrowRight size={18} />} onClick={onNext}>
         {t('onboarding.start')}
@@ -329,10 +370,59 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
   const [dbMode, setDbMode] = useState<'pglite' | 'pg'>('pglite');
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState('');
+  const [urlInput, setUrlInput] = useState(dbConfig.databaseUrl || '');
+  const [urlParsedNote, setUrlParsedNote] = useState('');
+
+  const handleUrlChange = async (raw: string) => {
+    setUrlInput(raw);
+    setUrlParsedNote('');
+    if (!raw.trim()) {
+      setDbConfig({ databaseUrl: undefined });
+      return;
+    }
+    try {
+      const { parseDatabaseUrl, providerLabel } = await import('@/core/database/connection');
+      const parsed = parseDatabaseUrl(raw);
+      setDbConfig({
+        databaseUrl: parsed.raw,
+        host: parsed.host,
+        port: String(parsed.port),
+        database: parsed.database,
+        user: parsed.user,
+        password: parsed.password,
+      });
+      setUrlParsedNote(`${providerLabel(parsed.provider)} · ${parsed.host}`);
+    } catch {
+      /* invalid while typing — parts form stays authoritative */
+    }
+  };
 
   const handleTest = async () => {
     setTestStatus('idle');
     setError(null);
+
+    // A pasted DATABASE_URL is tested directly on every platform
+    // (desktop TCP in main, Neon HTTP on web) without saving anything.
+    const effectiveUrl = urlInput.trim() || dbConfig.databaseUrl;
+    if (dbMode === 'pg' && effectiveUrl) {
+      setProcessing(true, t('onboarding.testingConnection'));
+      try {
+        const { testRemoteConnection } = await import('@/core/database/connectionVault');
+        const result = await testRemoteConnection(effectiveUrl);
+        if (result.success) {
+          setTestStatus('success');
+          setTestMessage(t('onboarding.connectedTo', { db: result.db || 'PostgreSQL', version: (result.version || '').split(' ')[0] }));
+        } else {
+          setTestStatus('error');
+          setTestMessage(result.error === 'webTcpUnsupported' ? t('settings.database.webTcpDesc') : (result.error || t('onboarding.connectionFailed')));
+        }
+      } catch (err) {
+        setTestStatus('error');
+        setTestMessage(err instanceof Error ? err.message : t('onboarding.connectionFailed'));
+      }
+      setProcessing(false);
+      return;
+    }
 
     if (dbMode === 'pglite') {
       // Test PGlite (local PostgreSQL WASM)
@@ -369,7 +459,7 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
         });
         if (result.success) {
           setTestStatus('success');
-          setTestMessage(`متصل بـ: ${result.db} | النسخة: ${(result.version || '').split(' ')[0]}`);
+          setTestMessage(t('onboarding.connectedTo', { db: result.db || 'PostgreSQL', version: (result.version || '').split(' ')[0] }));
         } else {
           setTestStatus('error');
           setTestMessage(result.error || t('onboarding.connectionFailed'));
@@ -446,6 +536,23 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
           <div className="flex items-center gap-2 text-primary-600 dark:text-primary-400 mb-2">
             <Server size={16} />
             <span className="text-sm font-medium">PostgreSQL</span>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300" htmlFor="onboarding-db-url">
+              {t('onboarding.databaseUrl')}
+            </label>
+            <input
+              id="onboarding-db-url"
+              type="password"
+              value={urlInput}
+              onChange={(e) => handleUrlChange(e.target.value)}
+              placeholder={t('onboarding.databaseUrlPh')}
+              dir="ltr"
+              autoComplete="off"
+              className="mt-1 w-full px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('onboarding.databaseUrlHint')}</p>
+            {urlParsedNote && <p className="text-xs text-emerald-600 mt-1">{urlParsedNote}</p>}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('onboarding.host')} value={dbConfig.host || ''} onChange={e => setDbConfig({ host: e.target.value })} />
@@ -598,10 +705,10 @@ function CompanyStep({ onNext, onBack }: { onNext: () => void; onBack: () => voi
               }}
               className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
-              <option value="YE">اليمن — Yemen</option>
-              <option value="SA">السعودية — Saudi Arabia</option>
-              <option value="AE">الإمارات — UAE</option>
-              <option value="EG">مصر — Egypt</option>
+              <option value="YE">{t('settings.tax.countryYE')}</option>
+              <option value="SA">{t('settings.tax.countrySA')}</option>
+              <option value="AE">{t('settings.tax.countryAE')}</option>
+              <option value="EG">{t('settings.tax.countryEG')}</option>
             </select>
           </div>
           <div>

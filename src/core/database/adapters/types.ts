@@ -35,7 +35,9 @@ export interface DbAdapter {
   createContact(data: any): Promise<{ success: boolean; id?: string; error?: string }>;
 
   // Onboarding / Seeding (must be implemented by ALL adapters — not Electron-specific)
-  updateConfig(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
+  // A full DATABASE_URL is the preferred form (one paste for any provider);
+  // the legacy host/port parts are converted to a URL by the receiver.
+  updateConfig(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }): Promise<{ success: boolean; connectionId?: string; error?: string }>;
   clearAll(payload?: { confirm?: boolean; username?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
   seedDefault(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   seedDemo(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;

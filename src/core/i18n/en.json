@@ -114,7 +114,12 @@
     "currencyUsd": "US Dollar (USD)",
     "currencyAed": "UAE Dirham (AED)",
     "currencyKwd": "Kuwaiti Dinar (KWD)",
-    "currencyQar": "Qatari Riyal (QAR)"
+    "currencyQar": "Qatari Riyal (QAR)",
+    "language": "Interface language",
+    "databaseUrl": "Connection string (DATABASE_URL)",
+    "databaseUrlPh": "postgres://user:password@host:5432/dbname",
+    "databaseUrlHint": "Paste to auto-fill the connection fields — works locally and on clouds like Supabase and Neon",
+    "connectedTo": "Connected to: {{db}} | Version: {{version}}"
   },
   "sidebar": {
     "dashboard": "Dashboard",
@@ -2670,7 +2675,32 @@
       "engineMainDesc": "Current behaviour — heavy queries may briefly freeze the UI.",
       "engineWorker": "Background worker",
       "engineWorkerDesc": "Engine off the UI thread — reports and batches never freeze the browser.",
-      "engineSlowBoot": "First worker boot is slow (WASM compile) — later boots are faster."
+      "engineSlowBoot": "First worker boot is slow (WASM compile) — later boots are faster.",
+      "remoteTitle": "Remote PostgreSQL connections",
+      "remoteDesc": "Paste one DATABASE_URL for any provider — local, Supabase, Neon, Google Cloud, or self-hosted. On desktop everything works over direct TCP.",
+      "remoteWebNote": "On web and mobile only Neon connections work (HTTP) — other providers need the desktop app.",
+      "secretOnDevice": "On web the URL is kept in device storage — anyone with the device can read it.",
+      "addConnection": "Add connection",
+      "connName": "Connection name",
+      "connNamePh": "e.g. Production cloud",
+      "connUrl": "DATABASE_URL",
+      "connUrlPh": "postgres://user:password@host:5432/dbname",
+      "connUrlHint": "Stored encrypted with the OS keychain on desktop.",
+      "connShow": "Show",
+      "connHide": "Hide",
+      "connAdvanced": "Advanced input (host/port…)",
+      "connSsl": "Encrypted TLS connection",
+      "connTest": "Test",
+      "connSave": "Save connection",
+      "connActive": "Active",
+      "connActivate": "Activate",
+      "connDelete": "Delete connection",
+      "connSaved": "Connection saved",
+      "connDeleted": "Connection deleted",
+      "connActivated": "Remote connection activated",
+      "connEmpty": "No saved connections yet — add the first one with a DATABASE_URL.",
+      "webTcpDesc": "Browsers cannot open TCP sockets — this provider (Supabase/self-hosted/local) only works in the desktop app. On web, use Neon.",
+      "useLocal": "Back to local database"
     },
     "company": {
       "title": "Company Info",
@@ -2831,7 +2861,11 @@
       "noPeriods": "No tax periods — open the first one",
       "periodOpened": "Tax period opened",
       "periodStatusSaved": "Period status saved",
-      "returnError": "Could not compute the VAT return"
+      "returnError": "Could not compute the VAT return",
+      "countryYE": "Yemen",
+      "countrySA": "Saudi Arabia",
+      "countryAE": "UAE",
+      "countryEG": "Egypt"
     },
     "inventory": {
       "title": "Inventory Policies",

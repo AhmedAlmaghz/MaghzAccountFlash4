@@ -8,6 +8,8 @@ export interface DbConfig {
   database?: string;
   user?: string;
   password?: string;
+  /** Full connection string (memory-only, never persisted — see partialize). */
+  databaseUrl?: string;
 }
 
 export interface CompanyConfig {
@@ -119,7 +121,8 @@ export const useOnboardingStore = create<OnboardingState>()(
       name: 'maghzaccount-onboarding',
       partialize: (state) => {
         const { dbConfig, adminPassword: _ap, ...rest } = state;
-        const { password: _pw, ...safeDbConfig } = dbConfig;
+        // Secrets (password AND full URL) never touch disk — the vault owns them.
+        const { password: _pw, databaseUrl: _url, ...safeDbConfig } = dbConfig;
         return { ...rest, dbConfig: safeDbConfig };
       },
     }

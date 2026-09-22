@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
@@ -59,7 +60,39 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(async () => {
+// Diagnosability: a silent early exit is the worst failure mode for a
+// desktop app ("the installer does nothing"). Persist main-process crashes
+// to a log file inside userData so any future "does not start" report
+// arrives with the real reason attached.
+function appendMainLog(line) {
+  try {
+    let dir = null;
+    try {
+      dir = app.getPath('userData');
+    } catch {
+      dir = null;
+    }
+    if (!dir) return;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'maghzaccount-main.log'), `[${new Date().toISOString()}] ${line}\n`);
+  } catch {
+    // logging must never crash the app
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  const msg = `UNCAUGHT: ${(err && err.stack) || err}`;
+  console.error('[App]', msg);
+  appendMainLog(msg);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const msg = `UNHANDLED REJECTION: ${(reason && reason.stack) || reason}`;
+  console.error('[App]', msg);
+  appendMainLog(msg);
+});
+
+app.whenReady().then(() => {
   // Register PostgreSQL IPC handlers (Drizzle ORM bridge)
   registerDatabaseHandlers();
   registerAuthHandlers();
@@ -70,16 +103,20 @@ app.whenReady().then(async () => {
   // Register AI Harness IPC handlers (LLM proxy — key stays in main process)
   registerAiHandlers();
 
-  // Run Drizzle migrations on PostgreSQL (single source of truth for schema)
-  try {
-    await runDrizzleMigrations();
-    console.log('[App] PostgreSQL (Drizzle) ready.');
-  } catch (err) {
-    console.error('[App] PostgreSQL migration failed:', err.message);
-    console.warn('[App] PostgreSQL unavailable — Mock adapter will serve as demo fallback.');
-  }
-
+  // Open the window FIRST. Migrations can take 15s+ on a machine without a
+  // local PostgreSQL (connection timeout) — blocking the window behind them
+  // looks exactly like "the installer produced an empty app that does nothing".
+  // Migrations heal in the background; the renderer (PGlite-first) works meanwhile.
   createWindow();
+
+  // Run Drizzle migrations on PostgreSQL (single source of truth for schema)
+  runDrizzleMigrations()
+    .then(() => console.log('[App] PostgreSQL (Drizzle) ready.'))
+    .catch((err) => {
+      console.error('[App] PostgreSQL migration failed:', err.message);
+      appendMainLog(`migration failed: ${err.message}`);
+      console.warn('[App] PostgreSQL unavailable — PGlite local database remains available.');
+    });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

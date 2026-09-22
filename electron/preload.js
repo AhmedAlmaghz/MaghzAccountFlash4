@@ -46,6 +46,16 @@ contextBridge.exposeInMainWorld('electronDB', {
   backupCompany: () => ipcRenderer.invoke('db:backup-company', { sessionToken }),
   restoreCompany: (payload) => ipcRenderer.invoke('db:restore-company', { ...(payload || {}), sessionToken }),
 
+  // Saved remote connections (universal DATABASE_URL vault). Secrets stay
+  // encrypted in the main process — only metadata crosses this bridge.
+  connections: {
+    list: () => ipcRenderer.invoke('db:connections-list', { sessionToken }),
+    save: (payload) => ipcRenderer.invoke('db:connections-save', { ...payload, sessionToken }),
+    remove: (payload) => ipcRenderer.invoke('db:connections-remove', { ...payload, sessionToken }),
+    setActive: (payload) => ipcRenderer.invoke('db:connections-set-active', { ...payload, sessionToken }),
+    test: (payload) => ipcRenderer.invoke('db:test-connection', { ...payload, sessionToken }),
+  },
+
   // ── Typed RPC surface (Phase 4) ─────────────────────────────────────
   accounting: {
     getAccounts: (payload) => ipcRenderer.invoke('db:rpc:accounting.getAccounts', { ...payload, sessionToken }),

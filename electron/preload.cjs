@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld('electronDB', {
   getDbInfo: () => ipcRenderer.invoke('db:info'),
   backupCompany: () => ipcRenderer.invoke('db:backup-company', { sessionToken }),
   restoreCompany: (payload) => ipcRenderer.invoke('db:restore-company', { ...(payload || {}), sessionToken }),
+
+  // Saved remote connections (universal DATABASE_URL vault). Secrets stay
+  // encrypted in the main process — only metadata crosses this bridge.
+  connections: {
+    list: () => ipcRenderer.invoke('db:connections-list', { sessionToken }),
+    save: (payload) => ipcRenderer.invoke('db:connections-save', { ...payload, sessionToken }),
+    remove: (payload) => ipcRenderer.invoke('db:connections-remove', { ...payload, sessionToken }),
+    setActive: (payload) => ipcRenderer.invoke('db:connections-set-active', { ...payload, sessionToken }),
+    test: (payload) => ipcRenderer.invoke('db:test-connection', { ...payload, sessionToken }),
+  },
   
   // Internal use only - NOT for direct renderer access
   // These methods are used by the adapter layer which implements business logic

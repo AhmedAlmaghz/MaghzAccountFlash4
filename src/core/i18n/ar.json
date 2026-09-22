@@ -114,7 +114,12 @@
     "currencyUsd": "دولار أمريكي (USD)",
     "currencyAed": "درهم إماراتي (AED)",
     "currencyKwd": "دينار كويتي (KWD)",
-    "currencyQar": "ريال قطري (QAR)"
+    "currencyQar": "ريال قطري (QAR)",
+    "language": "لغة الواجهة",
+    "databaseUrl": "رابط الاتصال DATABASE_URL",
+    "databaseUrlPh": "postgres://user:password@host:5432/dbname",
+    "databaseUrlHint": "الصقه لتعبئة حقول الاتصال تلقائياً — يعمل محلياً وعلى سحابات مثل Supabase وNeon",
+    "connectedTo": "متصل بـ: {{db}} | النسخة: {{version}}"
   },
   "sidebar": {
     "dashboard": "لوحة التحكم",
@@ -2670,7 +2675,32 @@
       "engineMainDesc": "الوضع الحالي — الاستعلامات الثقيلة قد تجمّد الواجهة لحظياً.",
       "engineWorker": "عامل خلفية (Worker)",
       "engineWorkerDesc": "المحرك خارج خيط الواجهة — التقارير والدفعات لا تجمّد المتصفح.",
-      "engineSlowBoot": "أول إقلاع للعامل بطيء (تجميع WASM) — الإقلاعات التالية أسرع."
+      "engineSlowBoot": "أول إقلاع للعامل بطيء (تجميع WASM) — الإقلاعات التالية أسرع.",
+      "remoteTitle": "اتصالات PostgreSQL البعيدة",
+      "remoteDesc": "الصق DATABASE_URL واحداً لأي مزود — محلي، Supabase، Neon، Google Cloud، أو خادم خاص. على سطح المكتب يعمل الكل عبر TCP المباشر.",
+      "remoteWebNote": "على الويب والجوال تعمل اتصالات Neon فقط (HTTP) — بقية المزودات تحتاج تطبيق سطح المكتب.",
+      "secretOnDevice": "على الويب يُحفظ الرابط في تخزين الجهاز — أي شخص يصل إلى الجهاز يمكنه قراءته.",
+      "addConnection": "إضافة اتصال",
+      "connName": "اسم الاتصال",
+      "connNamePh": "مثال: سحابة الإنتاج",
+      "connUrl": "DATABASE_URL",
+      "connUrlPh": "postgres://user:password@host:5432/dbname",
+      "connUrlHint": "يُحفظ مشفراً بمفتاح نظام التشغيل على سطح المكتب.",
+      "connShow": "إظهار",
+      "connHide": "إخفاء",
+      "connAdvanced": "إدخال متقدم (مضيف/منفذ…)",
+      "connSsl": "اتصال مشفر TLS",
+      "connTest": "اختبار",
+      "connSave": "حفظ الاتصال",
+      "connActive": "نشط",
+      "connActivate": "تفعيل",
+      "connDelete": "حذف الاتصال",
+      "connSaved": "تم حفظ الاتصال",
+      "connDeleted": "تم حذف الاتصال",
+      "connActivated": "تم تفعيل الاتصال البعيد",
+      "connEmpty": "لا اتصالات محفوظة بعد — أضف الأول عبر DATABASE_URL.",
+      "webTcpDesc": "المتصفح لا يفتح اتصالات TCP — هذا المزود (Supabase/خاص/محلي) يعمل في تطبيق سطح المكتب فقط. على الويب استخدم Neon.",
+      "useLocal": "العودة للقاعدة المحلية"
     },
     "company": {
       "title": "بيانات الشركة",
@@ -2831,7 +2861,11 @@
       "noPeriods": "لا توجد فترات ضريبية — أنشئ الأولى",
       "periodOpened": "تم فتح الفترة الضريبية",
       "periodStatusSaved": "تم حفظ حالة الفترة",
-      "returnError": "تعذر حساب الإقرار الضريبي"
+      "returnError": "تعذر حساب الإقرار الضريبي",
+      "countryYE": "اليمن",
+      "countrySA": "السعودية",
+      "countryAE": "الإمارات",
+      "countryEG": "مصر"
     },
     "inventory": {
       "title": "سياسات المخزون",

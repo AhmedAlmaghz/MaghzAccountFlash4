@@ -36,7 +36,7 @@ function convertPlaceholders(sql: string): string {
 }
 
 /** Auto-convert known numeric columns to actual JS numbers (like the PG adapter). */
-const NUMERIC_COLUMNS = new Set([
+export const NUMERIC_COLUMNS = new Set([
   'balance', 'debit', 'credit', 'total_amount', 'subtotal', 'vat_amount',
   'paid_amount', 'discount_amount', 'cost_price', 'sale_price', 'stock_qty',
   'min_stock_alert', 'unit_price', 'line_total', 'quantity', 'exchange_rate',
@@ -52,7 +52,7 @@ const NUMERIC_COLUMNS = new Set([
   'system_qty', 'actual_qty', 'difference',
 ]);
 
-function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
+export function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
   if (!row || typeof row !== 'object') return row;
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(row)) {
@@ -1449,7 +1449,7 @@ export const pgliteAdapter: DbAdapter = {
   },
 
   // Onboarding / Seeding — PGlite is local, no external config needed
-  async updateConfig(_config: { host?: string; port?: number | string; database?: string; user?: string; password?: string }) {
+  async updateConfig(_config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }) {
     try {
       // PGlite is local (IndexedDB in browser, file in Node). No external config to update.
       return { success: true };
@@ -1529,8 +1529,10 @@ export const pgliteAdapter: DbAdapter = {
 
   async seedDefault(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
     try {
-      // Ensure migrations are applied
-      await runPgliteMigrations();
+      // Ensure migrations are applied (skipped when a remote adapter drives
+      // the seed after ensuring the schema itself — see
+      // withoutInternalMigration below).
+      if (!skipEnsureMigrations) await runPgliteMigrations();
 
       // Use provided password if >= 8 chars, otherwise generate a random one
       const provided = typeof adminPassword === 'string' && adminPassword.length >= 8;
@@ -1576,8 +1578,8 @@ export const pgliteAdapter: DbAdapter = {
 
   async seedDemo(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
     try {
-      // Ensure migrations are applied
-      await runPgliteMigrations();
+      // Ensure migrations are applied (see skip note on seedDefault).
+      if (!skipEnsureMigrations) await runPgliteMigrations();
 
       // Use provided password if >= 8 chars, otherwise generate a random one
       const provided = typeof adminPassword === 'string' && adminPassword.length >= 8;
@@ -1631,3 +1633,48 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 };
+
+// =====================================================================
+// Shared backend support (remote Postgres over HTTP, e.g. Neon).
+// The bundled schema is backend-agnostic SQL, so a remote driver replays
+// the SAME migrations instead of maintaining a second copy.
+// =====================================================================
+
+/**
+ * When a remote adapter (Neon HTTP) drives seedDefault/seedDemo, the
+ * PGlite-internal migration boot would spin up a useless local engine.
+ * The remote path ensures its own schema first, then runs the shared seed
+ * bodies with the local boot skipped.
+ */
+let skipEnsureMigrations = false;
+
+export async function withoutInternalMigration<T>(fn: () => Promise<T>): Promise<T> {
+  skipEnsureMigrations = true;
+  try {
+    return await fn();
+  } finally {
+    skipEnsureMigrations = false;
+  }
+}
+
+/** Bundled schema with idempotency guards applied (mirrors the PGlite boot). */
+export function getBundledMigrations(): { name: string; sql: string }[] {
+  return MIGRATIONS.map((m) => ({ name: m.name, sql: normalizeIdempotent(m.sql) }));
+}
+
+/**
+ * Split a migration file into single statements. The HTTP query endpoint
+ * executes one statement per call, so multi-statement files must be split
+ * on the drizzle breakpoint marker (same convention as
+ * electron/migrationRunner.js). DO-blocks stay intact — they contain no
+ * breakpoint markers.
+ */
+export function splitMigrationStatements(sql: string): string[] {
+  return sql
+    .split('--> statement-breakpoint')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Migration-tracking table shared by every backend (idempotent replays). */
+export const MIGRATION_TRACKING_TABLE = '__pglite_migrations';

@@ -12,9 +12,10 @@ import { Button, ErrorBoundary } from './core/ui/components';
 import { useTranslation } from './core/i18n/useTranslation';
 import { setDbMode } from './core/database/adapters';
 
-// Set RTL and Arabic as default
-document.documentElement.dir = 'rtl';
-document.documentElement.lang = 'ar';
+// Direction/language are owned by the app store (imported above): the saved
+// preference wins, otherwise the device language detected at first run (see
+// detectDeviceLanguage). No hardcoded override here — it would stomp the
+// user's choice on every boot.
 
 // ─── Stale-deploy recovery ─────────────────────────────────────────────────
 // After a NEW deploy, a browser holding the OLD index.html lazy-loads chunk

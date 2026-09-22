@@ -84,6 +84,26 @@ function applyLanguage(language: 'ar' | 'en') {
   document.documentElement.lang = language === 'ar' ? 'ar' : 'en';
 }
 
+/**
+ * Device language detection for first run. Arabic devices get Arabic,
+ * English devices get English, everything else falls back to Arabic (the
+ * product default). It is applied by the onboarding wizard — the first
+ * screen a new user sees, with a visible switcher — never silently at
+ * boot, so tests and locale-pinned environments keep a deterministic
+ * default. A header switcher always lets the user override afterwards.
+ */
+export function detectDeviceLanguage(): 'ar' | 'en' {
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator.language || '' : '';
+    const tag = String(nav).toLowerCase();
+    if (tag.startsWith('ar')) return 'ar';
+    if (tag.startsWith('en')) return 'en';
+  } catch {
+    /* ignore */
+  }
+  return 'ar';
+}
+
 // Apply saved theme/language on module load
 const saved = (() => {
   try {
@@ -107,6 +127,10 @@ export const useAppStore = create<AppState>()(
       theme: 'light',
       themeId: DEFAULT_LIGHT_THEME_ID,
       customThemes: [],
+      // NOTE: stays 'ar' by default on purpose — device-language detection
+      // happens in the onboarding wizard (visible + changeable), never
+      // silently at boot, so tests and locale-pinned environments keep a
+      // deterministic default.
       language: 'ar',
       activeCompany: null,
       selectedBranchId: null,

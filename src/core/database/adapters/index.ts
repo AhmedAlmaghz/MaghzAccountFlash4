@@ -127,14 +127,30 @@ export async function getDbAdapter(): Promise<DbAdapter> {
     }
   }
 
-  // Web (Vercel) has no Electron IPC and no HTTP bridge in production.
-  // Detecting this specific state gives a much clearer message than the
-  // generic one below — previously it said "تأكد من تشغيل Electron" even
-  // on vercel.app, which confused users who were correctly using PGlite.
+  // Web / mobile browser with a remote database selected. Browsers cannot
+  // open TCP sockets, so only Neon-compatible endpoints are routable here
+  // (official HTTP driver). Anything else raises a structured capability
+  // error the settings UI maps to guidance — never a transport mystery.
   if (mode === 'pg' && !isElectron() && !isE2E) {
-    throw new Error(
-      'وضع خادم PostgreSQL متاح فقط في تطبيق سطح المكتب (Electron). على الاستضافة السحابية (Vercel) اختر "PGlite محلي" — يعمل مباشرة في المتصفح بدون خادم.'
-    );
+    const { resolveActiveWebRemote } = await import('../connectionVault');
+    const remote = await resolveActiveWebRemote();
+    try {
+      const { configureNeonHttp, neonHttpAdapter } = await import('./neonHttpAdapter');
+      configureNeonHttp(remote.databaseUrl);
+      const ping = await neonHttpAdapter.ping();
+      if (ping.success) {
+        console.log('[DB Adapter] Neon Postgres via HTTPS (web)');
+        adapter = neonHttpAdapter;
+        adapterMode = mode;
+        lastPingAt = Date.now();
+        return adapter;
+      }
+      throw new Error(ping.message || 'Neon ping failed');
+    } catch (err) {
+      adapter = null;
+      if (err instanceof Error && err.name === 'RemoteCapabilityError') throw err;
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   throw new Error(

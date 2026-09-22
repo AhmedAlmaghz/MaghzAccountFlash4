@@ -1,4 +1,4 @@
-import { ipcMain, app } from 'electron';
+import { ipcMain, app, safeStorage } from 'electron';
 import pg from 'pg';
 import { randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
 import fs from 'fs';
@@ -569,27 +569,45 @@ function wrapClient(client) {
   return client;
 }
 
-function getRequiredEnv(key) {
+function getOptionalEnv(key, fallback = '') {
   const val = process.env[key];
   const trimmed = typeof val === 'string' ? val.replace(/^[\uFEFF\s]+|[\s\r]+$/g, '') : val;
-  if (!trimmed) {
-    throw new Error(`Environment variable ${key} is not set. Check .env.local`);
-  }
-  return trimmed;
+  return trimmed || fallback;
 }
 
 /** Config of the ACTIVE pool — used by schema self-heal to connect identically
  *  (same host/credentials/SSL) as the working application connection. */
 let activeDbConfig = null;
 
-// Create database connection pool
+// Create database connection pool.
+//
+// Packaged builds ship WITHOUT .env.local (dev-only file), so the env is
+// absent on every end-user machine. Throwing here killed startup entirely:
+// registerDatabaseHandlers() runs before createWindow(), so a throw meant
+// no window ever opened — "the installer produced an empty app that does
+// nothing". Instead we fall back to harmless localhost defaults; the pool
+// never connects until a query runs, and every IPC handler already
+// try/catches query failures into { success: false }. The renderer defaults
+// to the local PGlite database, so server features simply report
+// "unavailable" instead of crashing the app.
 function createPool() {
+  // A saved DATABASE_URL (Settings → Database) wins over everything —
+  // this is what makes the desktop app work on machines that never had
+  // a .env.local, across restarts.
+  try {
+    if (rebuildPoolFromVault()) return pool;
+  } catch {
+    /* fall through to env */
+  }
+  if (!getOptionalEnv('DB_HOST')) {
+    console.warn('[DB] No PostgreSQL configured (.env.local absent) — local PGlite database will serve the app.');
+  }
   activeDbConfig = {
-    host: getRequiredEnv('DB_HOST'),
-    port: parseInt(getRequiredEnv('DB_PORT'), 10),
-    database: getRequiredEnv('DB_NAME'),
-    user: getRequiredEnv('DB_USER'),
-    password: getRequiredEnv('DB_PASSWORD'),
+    host: getOptionalEnv('DB_HOST', 'localhost'),
+    port: parseInt(getOptionalEnv('DB_PORT', '5432'), 10) || 5432,
+    database: getOptionalEnv('DB_NAME', ''),
+    user: getOptionalEnv('DB_USER', ''),
+    password: getOptionalEnv('DB_PASSWORD', ''),
     // Neon / managed providers require SSL; local does not.
     ssl: /^true$/i.test(process.env.DB_SSL || '') || /neon\.tech/i.test(process.env.DB_HOST || ''),
     max: 20,
@@ -603,6 +621,163 @@ function createPool() {
   });
 
   return pool;
+}
+
+// ─── Connection vault (universal DATABASE_URL) ────────────────────────────
+// Packaged apps have no .env.local, and a real user must be able to point
+// the desktop app at ANY Postgres (local, Supabase, Neon, GCP, …) by pasting
+// one DATABASE_URL — then keep working across restarts. Secrets are
+// encrypted with the OS keychain (safeStorage); the renderer only ever sees
+// metadata. Env vars remain as a dev-time fallback when the vault is empty.
+
+const CONN_VAULT_FILE = 'connections.json';
+const CONN_ENC_PREFIX = 'enc1:';
+
+function connVaultPath() {
+  return path.join(app.getPath('userData'), CONN_VAULT_FILE);
+}
+
+function loadConnVault() {
+  try {
+    const raw = fs.readFileSync(connVaultPath(), 'utf8');
+    const v = JSON.parse(raw);
+    if (v && Array.isArray(v.connections)) {
+      return { activeId: typeof v.activeId === 'string' ? v.activeId : null, connections: v.connections };
+    }
+  } catch {
+    /* missing or corrupt — start empty */
+  }
+  return { activeId: null, connections: [] };
+}
+
+function saveConnVault(v) {
+  fs.mkdirSync(path.dirname(connVaultPath()), { recursive: true });
+  fs.writeFileSync(connVaultPath(), JSON.stringify(v, null, 2), 'utf8');
+}
+
+function encryptConnSecret(plain) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('OS keychain unavailable — cannot store the connection securely on this machine');
+  }
+  return CONN_ENC_PREFIX + safeStorage.encryptString(String(plain)).toString('base64');
+}
+
+function decryptConnSecret(stored) {
+  if (!stored) return null;
+  try {
+    if (String(stored).startsWith(CONN_ENC_PREFIX)) {
+      return safeStorage.decryptString(Buffer.from(String(stored).slice(CONN_ENC_PREFIX.length), 'base64'));
+    }
+    // Never silently accept legacy plaintext: a stored secret must be
+    // encrypted. Returning null forces re-entry through the UI.
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a postgres connection string (mirrors src/core/database/connection.ts
+ * parseDatabaseUrl — keep both in sync; the main process cannot import TS).
+ */
+function parseDbUrl(raw) {
+  const s = String(raw ?? '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
+  if (!s) throw new Error('DATABASE_URL is empty');
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    throw new Error('DATABASE_URL is not a valid URL');
+  }
+  const scheme = u.protocol.replace(/:$/, '').toLowerCase();
+  if (scheme !== 'postgres' && scheme !== 'postgresql') {
+    throw new Error('URL must start with postgres:// or postgresql://');
+  }
+  if (!u.hostname) throw new Error('URL is missing a host');
+  const port = u.port ? Number(u.port) : 5432;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('URL has an invalid port');
+  const database = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  if (!database) throw new Error('URL is missing a database name');
+  const user = decodeURIComponent(u.username || '');
+  if (!user) throw new Error('URL is missing a user');
+  const password = u.password ? decodeURIComponent(u.password) : '';
+  const sslMode = (u.searchParams.get('sslmode') || '').toLowerCase();
+  const h = u.hostname.toLowerCase();
+  const isLocal = h === 'localhost' || h === '127.0.0.1' || h === '::1';
+  let ssl;
+  if (sslMode === 'disable' || sslMode === 'allow') ssl = false;
+  else if (sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full') ssl = true;
+  else ssl = !isLocal;
+  const strictVerify = sslMode === 'verify-ca' || sslMode === 'verify-full';
+  let provider = 'generic';
+  if (/(^|\.)neon\.tech$/.test(h)) provider = 'neon';
+  else if (/(^|\.)supabase\.(co|in|net)$/.test(h)) provider = 'supabase';
+  else if (isLocal) provider = 'localhost';
+  return { raw: s, host: u.hostname, port, database, user, password, ssl, strictVerify, provider };
+}
+
+/**
+ * libpq-compatible SSL mapping: `require` (and the remote default) means
+ * encrypted transport without CA pinning; `verify-*` pins the chain;
+ * `disable` (and the localhost default) means plain TCP. This matches what
+ * `psql` does with the same URL, so a URL that works in psql works here.
+ */
+function poolConfigFromParsed(p, timeoutMs = 15000) {
+  return {
+    host: p.host,
+    port: p.port,
+    database: p.database,
+    user: p.user,
+    password: p.password,
+    ssl: p.ssl ? (p.strictVerify ? { rejectUnauthorized: true } : { require: true, rejectUnauthorized: false }) : undefined,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: timeoutMs,
+  };
+}
+
+function attachPoolGuard(next) {
+  next.on('error', (err) => {
+    console.error('[DB] Unexpected pool error:', err.message);
+  });
+  return next;
+}
+
+/**
+ * Rebuild the active pool from the vault's active connection. Returns true
+ * when a vault connection took over, false when there is nothing stored
+ * (caller falls back to env). Never throws — startup must survive.
+ */
+function rebuildPoolFromVault() {
+  try {
+    const vault = loadConnVault();
+    const active = vault.connections.find((c) => c.id === vault.activeId);
+    if (!active) return false;
+    const url = decryptConnSecret(active.databaseUrlEnc);
+    if (!url) {
+      console.warn('[DB] Active connection secret unreadable — re-enter it in Settings → Database.');
+      return false;
+    }
+    const parsed = parseDbUrl(url);
+    if (pool) {
+      try {
+        pool.end();
+      } catch {
+        /* ignore */
+      }
+    }
+    activeDbConfig = poolConfigFromParsed(parsed);
+    pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
+    return true;
+  } catch (err) {
+    console.warn('[DB] Vault pool rebuild skipped:', err.message);
+    return false;
+  }
+}
+
+function connMeta(entry) {
+  const { databaseUrlEnc: _secret, ...meta } = entry;
+  return meta;
 }
 
 // Expose the shared pool to other main-process modules (e.g. aiHandler.js)
@@ -4858,22 +5033,35 @@ export async function seedInitialData(adminPassword, company) {
 // â”€â”€â”€ IPC Handlers for Onboarding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function registerOnboardingHandlers() {
-  // Test connection with provided config
+  // Test connection with provided config. Accepts either a full
+  // DATABASE_URL (preferred — one paste works for local, Supabase, Neon,
+  // GCP, self-hosted) or the legacy host/port parts. Never switches the
+  // active pool and never persists anything.
   ipcMain.handle('db:test-connection', async (event, config, sessionToken) => {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
       return { success: false, error: err.message };
     }
-    const testPool = new Pool({
-      host: config.host || 'localhost',
-      port: parseInt(config.port || '5432'),
-      database: config.database || 'postgres',
-      user: config.user || 'postgres',
-      password: config.password || '',
-      connectionTimeoutMillis: 5000,
-      max: 2,
-    });
+    let poolCfg;
+    try {
+      if (config && config.databaseUrl) {
+        poolCfg = poolConfigFromParsed(parseDbUrl(config.databaseUrl), 8000);
+      } else {
+        poolCfg = {
+          host: (config && config.host) || 'localhost',
+          port: parseInt((config && config.port) || '5432', 10) || 5432,
+          database: (config && config.database) || 'postgres',
+          user: (config && config.user) || 'postgres',
+          password: (config && config.password) || '',
+          connectionTimeoutMillis: 8000,
+          max: 2,
+        };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+    const testPool = new Pool(poolCfg);
     try {
       const client = await testPool.connect();
       const result = await client.query('SELECT NOW() as time, current_database() as db, version() as version');
@@ -4881,34 +5069,172 @@ export function registerOnboardingHandlers() {
       await testPool.end();
       return { success: true, time: result.rows[0].time, db: result.rows[0].db, version: result.rows[0].version };
     } catch (err) {
-      await testPool.end();
+      try {
+        await testPool.end();
+      } catch {
+        /* ignore */
+      }
       return { success: false, error: err.message };
     }
   });
 
-  // Update active pool config
+  // Update active pool config. Accepts a DATABASE_URL (persisted encrypted
+  // in the vault → survives restarts) or legacy parts (converted to a URL
+  // and persisted the same way). Unifies what used to be memory-only.
   ipcMain.handle('db:update-config', async (event, config, sessionToken) => {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
       return { success: false, error: err.message };
     }
-    if (pool) {
-      await pool.end();
+    try {
+      let rawUrl = config && config.databaseUrl ? String(config.databaseUrl) : null;
+      if (!rawUrl) {
+        const host = (config && config.host) || 'localhost';
+        const port = parseInt((config && config.port) || '5432', 10) || 5432;
+        const database = (config && config.database) || 'MaghzAccountFlash35';
+        const user = (config && config.user) || 'maghz';
+        const password = (config && config.password) || '';
+        rawUrl =
+          `postgres://${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ''}` +
+          `@${host}:${port}/${encodeURIComponent(database)}`;
+      }
+      const parsed = parseDbUrl(rawUrl);
+      const vault = loadConnVault();
+      let entry = vault.connections.find(
+        (c) => c.host === parsed.host && c.database === parsed.database && c.user === parsed.user,
+      );
+      const name = `${parsed.provider} · ${parsed.host}`;
+      if (entry) {
+        entry.name = entry.name || name;
+        entry.provider = parsed.provider;
+        entry.databaseUrlEnc = encryptConnSecret(parsed.raw);
+      } else {
+        entry = {
+          id: `conn-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+          name,
+          provider: parsed.provider,
+          host: parsed.host,
+          database: parsed.database,
+          user: parsed.user,
+          driver: 'direct',
+          createdAt: new Date().toISOString(),
+          databaseUrlEnc: encryptConnSecret(parsed.raw),
+        };
+        vault.connections.push(entry);
+      }
+      vault.activeId = entry.id;
+      saveConnVault(vault);
+      if (pool) {
+        try {
+          await pool.end();
+        } catch {
+          /* ignore */
+        }
+      }
+      activeDbConfig = poolConfigFromParsed(parsed, 5000);
+      pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
+      return { success: true, connectionId: entry.id };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
-    pool = new Pool({
-      host: config.host || 'localhost',
-      port: parseInt(config.port || '5432'),
-      database: config.database || 'MaghzAccountFlash35',
-      user: config.user || 'maghz',
-      password: config.password || '',
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-    });
-    pool.on('error', (err) => {
-      console.error('[DB] Unexpected pool error:', err.message);
-    });
+  });
+
+  // ─── Saved connections vault (metadata only crosses IPC) ──────────────
+  ipcMain.handle('db:connections-list', async (event, { sessionToken } = {}) => {
+    try {
+      await assertOnboardingAllowed(event, sessionToken);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+    const vault = loadConnVault();
+    return { success: true, connections: vault.connections.map(connMeta), activeId: vault.activeId };
+  });
+
+  ipcMain.handle('db:connections-save', async (event, { sessionToken, id, name, databaseUrl } = {}) => {
+    try {
+      await assertOnboardingAllowed(event, sessionToken);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+    try {
+      const parsed = parseDbUrl(databaseUrl);
+      const vault = loadConnVault();
+      const cleanName = String(name || '').trim() || `${parsed.provider} · ${parsed.host}`;
+      let entry = id ? vault.connections.find((c) => c.id === id) : null;
+      if (entry) {
+        entry.name = cleanName;
+        entry.provider = parsed.provider;
+        entry.host = parsed.host;
+        entry.database = parsed.database;
+        entry.user = parsed.user;
+        entry.databaseUrlEnc = encryptConnSecret(parsed.raw);
+      } else {
+        entry = {
+          id: `conn-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+          name: cleanName,
+          provider: parsed.provider,
+          host: parsed.host,
+          database: parsed.database,
+          user: parsed.user,
+          driver: 'direct',
+          createdAt: new Date().toISOString(),
+          databaseUrlEnc: encryptConnSecret(parsed.raw),
+        };
+        vault.connections.push(entry);
+      }
+      saveConnVault(vault);
+      return { success: true, connection: connMeta(entry) };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('db:connections-remove', async (event, { sessionToken, id } = {}) => {
+    try {
+      await assertOnboardingAllowed(event, sessionToken);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+    const vault = loadConnVault();
+    vault.connections = vault.connections.filter((c) => c.id !== id);
+    if (vault.activeId === id) {
+      vault.activeId = null;
+      if (pool) {
+        try {
+          await pool.end();
+        } catch {
+          /* ignore */
+        }
+      }
+      pool = null;
+      createPool();
+    }
+    saveConnVault(vault);
+    return { success: true };
+  });
+
+  ipcMain.handle('db:connections-set-active', async (event, { sessionToken, id } = {}) => {
+    try {
+      await assertOnboardingAllowed(event, sessionToken);
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+    const vault = loadConnVault();
+    if (id !== null && !vault.connections.some((c) => c.id === id)) {
+      return { success: false, error: 'Connection not found' };
+    }
+    vault.activeId = id;
+    saveConnVault(vault);
+    if (pool) {
+      try {
+        await pool.end();
+      } catch {
+        /* ignore */
+      }
+    }
+    pool = null;
+    createPool();
     return { success: true };
   });
 
