@@ -398,7 +398,7 @@ export const ProductsPage: React.FC = () => {
         code: p.code,
         nameAr: p.nameAr,
         salePrice: formatCurrency(p.salePrice),
-        isActive: p.isActive ? 'نشط' : 'موقوف',
+        isActive: p.isActive ? t('inventory.active') : t('inventory.suspended'),
       })),
       [
         { key: 'code', header: t('inventory.productCode') },
@@ -529,9 +529,9 @@ export const ProductsPage: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي المنتجات</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.products.totalProducts')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
-              <p className="text-xs text-slate-500">{filteredProducts.length} في الصفحة</p>
+              <p className="text-xs text-slate-500">{filteredProducts.length} {t('inventory.products.inPage')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
               <Package size={18} className="text-primary-600" />
@@ -539,9 +539,9 @@ export const ProductsPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">نشط</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('settings.common.active')}</p>
               <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.activePage}</p>
-              <p className="text-xs text-slate-500">{stats.inactivePage} موقوف</p>
+              <p className="text-xs text-slate-500">{stats.inactivePage} {t('inventory.suspended')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
               <CheckCircle2 size={18} className="text-emerald-600" />
@@ -549,9 +549,9 @@ export const ProductsPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">التصنيفات</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.products.categoriesLabel')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{categories.length}</p>
-              <p className="text-xs text-slate-500">{productTypes.length} أنواع</p>
+              <p className="text-xs text-slate-500">{productTypes.length} {t('inventory.products.typesLabel')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
               <Layers size={18} className="text-blue-600" />
@@ -559,7 +559,7 @@ export const ProductsPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">متوسط التكلفة</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.products.avgCost')}</p>
               <p className="text-lg font-bold text-amber-600 dark:text-amber-400 tabular-nums">{formatCurrency(stats.avgCost)}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
@@ -572,7 +572,7 @@ export const ProductsPage: React.FC = () => {
         <FilterBar
           search={searchTerm}
           onSearchChange={setSearchTerm}
-          searchPlaceholder={`${t('search')} — كود / اسم / باركود`}
+          searchPlaceholder={`${t('search')} — ${t('inventory.products.searchHint')}`}
           actions={
             <>
               <select
@@ -598,7 +598,7 @@ export const ProductsPage: React.FC = () => {
                 ))}
               </select>
               <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-                <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+                <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">{t('common.excel')}</span>
               </Button>
               <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
                 <Receipt size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
@@ -608,8 +608,8 @@ export const ProductsPage: React.FC = () => {
         />
         {hasFilters && (
           <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span>{total} منتج • {searchTerm ? `"${searchTerm}"` : ''} {filterCategoryId ? '• تصفية تصنيف (صفحة)' : ''}</span>
-            <button onClick={() => { setSearchTerm(''); setFilterTypeId(''); setFilterCategoryId(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
+            <span>{total} {t('inventory.products.unit')} • {searchTerm ? `"${searchTerm}"` : ''} {filterCategoryId ? `• ${t('inventory.products.categoryPageFilter')}` : ''}</span>
+            <button onClick={() => { setSearchTerm(''); setFilterTypeId(''); setFilterCategoryId(''); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
           </div>
         )}
 
@@ -618,9 +618,9 @@ export const ProductsPage: React.FC = () => {
           <div className="py-10">
             <EmptyState
               icon={hasFilters ? 'search' : 'inbox'}
-              title={hasFilters ? 'لا توجد نتائج' : t('inventory.empty.products.title')}
-              description={hasFilters ? 'جرّب تغيير البحث أو الفلترة' : t('inventory.empty.products.description')}
-              action={hasFilters ? <Button variant="secondary" onClick={() => { setSearchTerm(''); setFilterTypeId(''); setFilterCategoryId(''); }}>مسح الفلترة</Button> : <Can action="create" module="inventory"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate}>{t('inventory.newProduct')}</Button></Can>}
+              title={hasFilters ? t('common.noResults') : t('inventory.empty.products.title')}
+              description={hasFilters ? t('inventory.products.tryDifferentSearch') : t('inventory.empty.products.description')}
+              action={hasFilters ? <Button variant="secondary" onClick={() => { setSearchTerm(''); setFilterTypeId(''); setFilterCategoryId(''); }}>{t('sales.filter.clearFilters')}</Button> : <Can action="create" module="inventory"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate}>{t('inventory.newProduct')}</Button></Can>}
             />
           </div>
         ) : (
@@ -638,11 +638,11 @@ export const ProductsPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={closeModal}
         title={editingId ? t('inventory.editProduct') : t('inventory.newProduct')}
-        description={editingId ? 'تعديل بيانات المنتج' : 'إضافة منتج جديد — الحقول المميزة بـ * مطلوبة'}
+        description={editingId ? t('inventory.products.editDesc') : t('inventory.products.createDesc')}
         size="xl"
         footer={
           <div className="flex items-center justify-between w-full">
-            <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5"><AlertCircle size={12} /> * حقول مطلوبة</p>
+            <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5"><AlertCircle size={12} /> {t('inventory.products.requiredFields')}</p>
             <div className="flex gap-2 ml-auto">
               <Button variant="secondary" onClick={closeModal} disabled={saving}>{t('cancel')}</Button>
               <Button variant="primary" onClick={handleSave} isLoading={saving}>{t('save')}</Button>
@@ -652,7 +652,7 @@ export const ProductsPage: React.FC = () => {
       >
         <div className="space-y-5">
           <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><Package size={12} /> الصورة والباركود</h4>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><Package size={12} /> {t('inventory.products.mediaSection')}</h4>
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex items-center gap-4">
                 <div className="relative shrink-0">

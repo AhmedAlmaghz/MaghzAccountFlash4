@@ -744,7 +744,7 @@ export const QuotationsPage: React.FC = () => {
                     {t('sales.invoice.lines')}
                     <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{lines.length} {t('sales.itemsCount')}</span>
                   </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">أضف المنتجات — الأسعار تُملأ تلقائياً</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{t('sales.quotation.linesDesc')}</p>
                 </div>
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
@@ -835,12 +835,12 @@ export const QuotationsPage: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-3">
-              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder="ملاحظات العرض..." />
+              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder={t('sales.quotation.notesPlaceholder')} />
             </div>
             <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
               <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
-                <span className="text-sm font-semibold">الملخص</span>
-                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} صنف</span>
+                <span className="text-sm font-semibold">{t('sales.quotation.summary')}</span>
+                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} {t('sales.quotation.itemUnit')}</span>
               </div>
               <div className="p-4 space-y-2 text-sm">
                 <div className="flex justify-between py-2 border-b border-dashed border-slate-200 dark:border-slate-700"><span className="text-slate-600 dark:text-slate-300">{t('sales.subtotal')}</span><span className="font-semibold tabular-nums">{formatCurrency(calculations.subtotal)}</span></div>
