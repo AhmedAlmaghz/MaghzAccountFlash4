@@ -98,7 +98,7 @@ export const ReceiptVouchersPage: React.FC = () => {
     if (!form.customerId) e.customerId = t('validation.required') || 'مطلوب';
     if (!form.amount || Number(form.amount) <= 0) e.amount = t('accounting.enterAmount') || 'مبلغ غير صحيح';
     if (!form.date) e.date = t('validation.required') || 'مطلوب';
-    if (form.invoiceId && Number(form.amountApplied || 0) > Number(form.amount || 0)) e.amount = 'المبلغ المطبق لا يمكن أن يتجاوز مبلغ السند';
+    if (form.invoiceId && Number(form.amountApplied || 0) > Number(form.amount || 0)) e.amount = t('accounting.voucher.appliedExceeds');
     setFormErrors(e);
     return Object.keys(e).length === 0;
   }, [form, t]);
@@ -137,7 +137,7 @@ export const ReceiptVouchersPage: React.FC = () => {
         companyLogoUrl: activeCompany?.logoUrl,
         currency: voucher.currencyCode || currencySymbol,
         vatRate: settings?.vatRate,
-        paymentMethod: voucher.paymentMethod === 'cash' ? 'نقداً' : voucher.paymentMethod === 'bank' ? 'تحويل بنكي' : 'شيك',
+        paymentMethod: voucher.paymentMethod === 'cash' ? t('accounting.voucher.methodCash') : voucher.paymentMethod === 'bank' ? t('accounting.voucher.methodBank') : t('accounting.voucher.methodCheck'),
         checkNumber: voucher.checkNumber,
         checkDate: voucher.checkDate,
         createdBy: voucher.createdBy ? getUserName(voucher.createdBy) : undefined,
@@ -165,7 +165,7 @@ export const ReceiptVouchersPage: React.FC = () => {
   const handleSave = async () => {
     if (!activeCompany?.id) return;
     if (!validateForm()) {
-      addToast('error', t('validation.required') || 'يرجى تصحيح الحقول');
+      addToast('error', t('accounting.voucher.fixFields'));
       return;
     }
     setIsSaving(true);
@@ -278,7 +278,7 @@ export const ReceiptVouchersPage: React.FC = () => {
 
   const handleEdit = (voucher: ReceiptVoucher) => {
     if (voucher.status === 'posted') {
-      addToast('error', 'لا يمكن تعديل سند مرحّل');
+      addToast('error', t('accounting.voucher.postedLocked'));
       return;
     }
     setForm({ ...voucher });
@@ -382,7 +382,7 @@ export const ReceiptVouchersPage: React.FC = () => {
             <p className="font-bold tabular-nums text-slate-900 dark:text-slate-100">{formatCurrency(row.amount)}</p>
             <p className="text-[11px] text-slate-500 flex items-center justify-end gap-1">
               <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border text-[10px]">{row.currencyCode || YER_CODE}</span>
-              {row.invoiceId ? <span className="text-emerald-600">• مرتبط</span> : null}
+              {row.invoiceId ? <span className="text-emerald-600">• {t('accounting.voucher.linked')}</span> : null}
             </p>
           </div>
         ),
@@ -456,7 +456,7 @@ export const ReceiptVouchersPage: React.FC = () => {
               )}
               {row.status === 'draft' && (
               <Button size="sm" variant="secondary" leftIcon={<CheckSquare size={13} />} onClick={() => handlePost(row)} disabled={postingId === row.id} className="h-7 text-xs px-2">
-                {postingId === row.id ? t('accounting.posting') : 'ترحيل'}
+                {postingId === row.id ? t('accounting.posting') : t('accounting.post')}
               </Button>
             )}
           </div>
@@ -473,7 +473,7 @@ export const ReceiptVouchersPage: React.FC = () => {
       <PageHeader
         icon={<Receipt size={22} />}
         title={t('accounting.receiptVouchers')}
-        subtitle="سندات القبض — تحصيلات العملاء نقداً / بنكاً / شيكات"
+        subtitle={t('accounting.voucher.receiptSubtitle')}
         actions={
           <Can action="create" module="accounting">
             <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }} className="shadow-sm">
@@ -499,7 +499,7 @@ export const ReceiptVouchersPage: React.FC = () => {
           <>
             <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
               {[
-                { v: '', l: 'الكل' },
+                { v: '', l: t('common.all') },
                 { v: 'cash', l: t('accounting.cash') },
                 { v: 'bank', l: t('accounting.bank') },
                 { v: 'check', l: t('accounting.check') },
@@ -514,7 +514,7 @@ export const ReceiptVouchersPage: React.FC = () => {
               ))}
             </div>
             <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-              <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+              <FileText size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">{t('common.excel')}</span>
             </Button>
             <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
               <Receipt size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
@@ -525,11 +525,11 @@ export const ReceiptVouchersPage: React.FC = () => {
       {hasActiveFilter && (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span>
-            {total} سند • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter}` : ''} {methodFilter ? `• ${methodFilter}` : ''}
+              {total} {t('accounting.voucher.unit')} • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter === 'draft' ? t('accounting.voucher.draft') : statusFilter === 'cancelled' ? t('accounting.voucher.cancelled') : t('accounting.voucher.posted')}` : ''} {methodFilter ? `• ${methodFilter === 'cash' ? t('accounting.voucher.methodCash') : methodFilter === 'bank' ? t('accounting.voucher.methodBank') : t('accounting.voucher.methodCheck')}` : ''}
           </span>
-          <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
-            مسح الفلترة
-          </button>
+              <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
+                {t('sales.filter.clearFilters')}
+              </button>
         </div>
       )}
 
@@ -539,7 +539,7 @@ export const ReceiptVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalCashReceipts')}</p>
               <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(totalCash)}</p>
-              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • مرحّلة نقداً</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • {t('accounting.voucher.postedCash')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center">
               <Wallet size={20} className="text-emerald-600 dark:text-emerald-400" />
@@ -552,7 +552,7 @@ export const ReceiptVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalBankReceipts')}</p>
               <p className="mt-1 text-2xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totalBank)}</p>
-              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • مرحّلة بنكاً</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • {t('accounting.voucher.postedBank')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 flex items-center justify-center">
               <Landmark size={20} className="text-blue-600 dark:text-blue-400" />
@@ -565,7 +565,7 @@ export const ReceiptVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.voucherCount')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
-              <p className="text-xs text-slate-500 mt-1">{draftCount} مسودة • {total - draftCount} مرحّل</p>
+              <p className="text-xs text-slate-500 mt-1">{draftCount} {t('accounting.voucher.draft')} • {total - draftCount} {t('accounting.voucher.posted')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
               <FileText size={20} className="text-slate-600 dark:text-slate-400" />
@@ -586,13 +586,13 @@ export const ReceiptVouchersPage: React.FC = () => {
           <div className="py-8">
             <EmptyState
               icon={hasActiveFilter ? 'search' : 'inbox'}
-              title={hasActiveFilter ? 'لا توجد نتائج' : t('accounting.noData')}
-              description={hasActiveFilter ? 'جرّب تغيير البحث أو الفلترة' : 'أنشئ أول سند قبض'}
+              title={hasActiveFilter ? t('common.noResults') : t('accounting.noData')}
+              description={hasActiveFilter ? t('accounting.voucher.tryDifferentSearch') : t('accounting.voucher.receiptCreateHint')}
               action={
                 hasActiveFilter ? (
-                  <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }}>
-                    مسح الفلترة
-                  </Button>
+                <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }}>
+                {t('sales.filter.clearFilters')}
+                </Button>
                 ) : (
                   <Can action="create" module="accounting">
                     <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }}>
@@ -616,7 +616,7 @@ export const ReceiptVouchersPage: React.FC = () => {
       <Modal
         isOpen={isOpen}
         title={isEditMode ? t('accounting.editVoucher') : t('accounting.newReceiptVoucher')}
-        description={isEditMode ? 'تعديل سند القبض — لا يمكن تعديل الحقول المرتبطة بعد الترحيل' : 'إنشاء سند قبض جديد — اختر العميل وطريقة القبض'}
+        description={isEditMode ? t('accounting.voucher.receiptEditDesc') : t('accounting.voucher.receiptCreateDesc')}
         onClose={() => {
           setIsOpen(false);
           resetForm();
@@ -625,7 +625,7 @@ export const ReceiptVouchersPage: React.FC = () => {
         footer={
           <div className="flex items-center justify-between w-full">
             <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
-              <AlertCircle size={12} /> الحقول المميزة بـ * مطلوبة
+              <AlertCircle size={12} /> {t('accounting.voucher.requiredFields')}
             </p>
             <div className="flex gap-2 ml-auto">
               <Button variant="secondary" onClick={() => { setIsOpen(false); resetForm(); }}>
@@ -642,16 +642,16 @@ export const ReceiptVouchersPage: React.FC = () => {
           {/* Voucher info */}
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Hash size={12} /> بيانات السند
+              <Hash size={12} /> {t('accounting.voucher.docSection')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Input label={`${t('accounting.voucherNumber')} (تلقائي)`} value={form.voucherNumber || ''} onChange={(e) => setForm({ ...form, voucherNumber: e.target.value })} placeholder="تلقائي" error={formErrors.voucherNumber} helperText={!isEditMode ? 'يُنشأ تلقائياً عند الحفظ' : undefined} />
+              <Input label={`${t('accounting.voucherNumber')} (${t('accounting.voucher.auto')})`} value={form.voucherNumber || ''} onChange={(e) => setForm({ ...form, voucherNumber: e.target.value })} placeholder={t('accounting.voucher.auto')} error={formErrors.voucherNumber} helperText={!isEditMode ? t('accounting.voucher.autoHint') : undefined} />
               <Input label={`${t('accounting.date')} *`} type="date" value={form.date || ''} onChange={(e) => setForm({ ...form, date: e.target.value })} error={formErrors.date} required />
               <div>
-                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">الحالة</label>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.status')}</label>
                 <div className="h-[42px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center px-3">
                   <StatusBadge status={(form.status as string) || 'draft'} size="sm" />
-                  <span className="ml-auto text-xs text-slate-500">{form.status === 'posted' ? 'مرحّل' : form.status === 'cancelled' ? 'ملغى' : 'مسودة'}</span>
+                  <span className="ml-auto text-xs text-slate-500">{form.status === 'posted' ? t('accounting.voucher.posted') : form.status === 'cancelled' ? t('accounting.voucher.cancelled') : t('accounting.voucher.draft')}</span>
                 </div>
               </div>
             </div>
@@ -662,7 +662,7 @@ export const ReceiptVouchersPage: React.FC = () => {
           {/* Party + Invoice linking */}
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Users size={12} /> العميل والربط
+              <Users size={12} /> {t('accounting.voucher.receiptClientSection')}
             </h4>
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">
@@ -705,7 +705,7 @@ export const ReceiptVouchersPage: React.FC = () => {
                     <CheckSquare size={12} /> {t('accounting.amountWillBeApplied')} — {formatCurrency(Number(form.amountApplied) || 0)}
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-500 mt-1">اختياري — اتركه فارغاً لدفعة على الحساب</p>
+                  <p className="text-xs text-slate-500 mt-1">{t('accounting.voucher.receiptOnAccountHint')}</p>
                 )}
               </div>
             )}
@@ -716,7 +716,7 @@ export const ReceiptVouchersPage: React.FC = () => {
           {/* Amount + Currency */}
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Wallet size={12} /> المبلغ والعملة
+              <Wallet size={12} /> {t('accounting.voucher.amountSection')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-1">
@@ -756,7 +756,7 @@ export const ReceiptVouchersPage: React.FC = () => {
 
           {/* Payment method */}
           <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3">طريقة القبض</h4>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3">{t('accounting.voucher.receiptMethodTitle')}</h4>
             <div className="grid grid-cols-3 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-800">
               {(
                 [
@@ -796,7 +796,7 @@ export const ReceiptVouchersPage: React.FC = () => {
             </div>
             {form.paymentMethod === 'check' && (
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Input label={t('accounting.checkNumber')} value={form.checkNumber || ''} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} placeholder="رقم الشيك" />
+                <Input label={t('accounting.checkNumber')} value={form.checkNumber || ''} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} placeholder={t('accounting.voucher.checkNumberPlaceholder')} />
                 <Input label={t('accounting.checkDate')} type="date" value={form.checkDate || ''} onChange={(e) => setForm({ ...form, checkDate: e.target.value })} />
               </div>
             )}
@@ -807,7 +807,7 @@ export const ReceiptVouchersPage: React.FC = () => {
             <textarea
               value={form.notes || ''}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              placeholder="ملاحظات إضافية..."
+                placeholder={t('accounting.voucher.notesPlaceholder')}
               rows={2}
               className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition resize-none"
             />

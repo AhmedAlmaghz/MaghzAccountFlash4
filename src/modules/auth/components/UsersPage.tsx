@@ -489,21 +489,21 @@ export const UsersPage: React.FC = () => {
       <Modal
         isOpen={isResetPasswordOpen}
         onClose={() => { setIsResetPasswordOpen(false); setNewPassword(''); setSelectedUser(null); }}
-        title="إعادة تعيين كلمة المرور"
+        title={t('auth.users.resetPasswordTitle')}
         size="sm"
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => { setIsResetPasswordOpen(false); setNewPassword(''); }}>إلغاء</Button>
-            <Button variant="primary" onClick={handleResetPassword} disabled={!newPassword}>تأكيد</Button>
+            <Button variant="secondary" onClick={() => { setIsResetPasswordOpen(false); setNewPassword(''); }}>{t('common.cancel')}</Button>
+            <Button variant="primary" onClick={handleResetPassword} disabled={!newPassword}>{t('common.confirm')}</Button>
           </div>
         }
       >
         <div className="space-y-3">
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            سيتم إعادة تعيين كلمة المرور للمستخدم: <strong>{selectedUser?.username}</strong>
+            {t('auth.users.resetPasswordConfirm')} <strong>{selectedUser?.username}</strong>
           </p>
           <Input
-            label="كلمة المرور الجديدة"
+            label={t('auth.users.newPassword')}
             type="password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}

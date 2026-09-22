@@ -142,7 +142,7 @@ export const ReportsHubPage: React.FC = () => {
             <span className="inline-flex items-center gap-1.5 text-xs font-medium tracking-wide text-blue-100 bg-white/10 px-2.5 py-1 rounded-full backdrop-blur-sm border border-white/10">
               <BarChart2 size={12} /> {t('sidebar.reports.title')}
             </span>
-            <span className="inline-flex items-center gap-1 text-xs font-medium tracking-wide text-blue-100/60">{reportModules.length} تقارير متاحة</span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium tracking-wide text-blue-100/60">{t('reports.hub.availableCount', { count: reportModules.length })}</span>
           </div>
           <h2 className="text-3xl font-extrabold tracking-tight mb-2">{t('sidebar.reports.title')}</h2>
           <p className="text-blue-100/80 text-base max-w-lg">{t('reports.hub.subtitle')}</p>
@@ -168,7 +168,7 @@ export const ReportsHubPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="mt-4 flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 group-hover:gap-2 transition-all">
-                  فتح التقرير <span aria-hidden>←</span>
+                  {t('reports.hub.openReport')} <span aria-hidden>←</span>
                 </div>
               </div>
             </Link>

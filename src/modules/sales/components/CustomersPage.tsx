@@ -117,8 +117,8 @@ export const CustomersPage: React.FC = () => {
   const validateForm = useCallback((): boolean => {
     const errors: FormErrors = {};
     if (!formData.name.trim()) errors.name = t('validation.required') || 'مطلوب';
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = 'بريد إلكتروني غير صحيح';
-    if (formData.phone && formData.phone.length < 7) errors.phone = 'رقم هاتف غير صحيح';
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = t('validation.invalidEmail');
+    if (formData.phone && formData.phone.length < 7) errors.phone = t('validation.invalidPhone');
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   }, [formData, t]);
@@ -447,7 +447,7 @@ export const CustomersPage: React.FC = () => {
                 {formatCurrency(bal)}
               </span>
               {bal !== 0 && (
-                <p className={`text-[11px] mt-0.5 ${isDebit ? 'text-amber-600' : 'text-emerald-600'}`}>{isDebit ? 'مدين' : 'دائن'}</p>
+                <p className={`text-[11px] mt-0.5 ${isDebit ? 'text-amber-600' : 'text-emerald-600'}`}>{isDebit ? t('sales.customer.debit') : t('sales.customer.credit')}</p>
               )}
             </div>
           );
@@ -526,7 +526,7 @@ export const CustomersPage: React.FC = () => {
               <>
                 <Button size="sm" variant="ghost" onClick={handleExportExcel} title={t('export')} className="gap-1.5">
                   <FileText size={15} className="text-emerald-600" />
-                  <span className="hidden sm:inline text-xs">Excel</span>
+                  <span className="hidden sm:inline text-xs">{t('common.excel')}</span>
                 </Button>
                 <Button size="sm" variant="ghost" onClick={handleExportPdf} title={t('export')} className="gap-1.5">
                   <Receipt size={15} className="text-rose-600" />
@@ -540,9 +540,9 @@ export const CustomersPage: React.FC = () => {
               <span>
                 {total} {t('sales.customer.invoices')} • {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `• ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
               </span>
-              <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
-                مسح الفلترة
-              </button>
+                <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
+                {t('sales.filter.clearFilters')}
+                </button>
             </div>
           )}
         </div>
@@ -556,7 +556,7 @@ export const CustomersPage: React.FC = () => {
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{t('sales.customer.total')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
               <p className="mt-1 text-xs text-slate-500">
-                {activeCount} نشط • {inactiveCount} غير نشط
+                {activeCount} {t('settings.common.active')} • {inactiveCount} {t('settings.common.inactive')}
               </p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-primary-50 dark:bg-primary-900/30 border border-primary-100 dark:border-primary-800 flex items-center justify-center">
@@ -570,7 +570,7 @@ export const CustomersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{t('sales.customer.active')}</p>
               <p className="mt-1 text-3xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{activeCount}</p>
-              <p className="mt-1 text-xs text-slate-500">من إجمالي {total}</p>
+              <p className="mt-1 text-xs text-slate-500">{t('sales.customer.ofTotal')} {total}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center">
               <UserCheck size={20} className="text-emerald-600 dark:text-emerald-400" />
@@ -591,12 +591,12 @@ export const CustomersPage: React.FC = () => {
               <p className="mt-1 text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="inline-flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  مدين: <span className="font-semibold tabular-nums">{formatCurrency(receivableTotal)}</span>
+                  {t('sales.customer.debit')}: <span className="font-semibold tabular-nums">{formatCurrency(receivableTotal)}</span>
                 </span>
                 {creditTotal > 0 && (
                   <span className="inline-flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    دائن: <span className="font-semibold tabular-nums">{formatCurrency(creditTotal)}</span>
+                    {t('sales.customer.credit')}: <span className="font-semibold tabular-nums">{formatCurrency(creditTotal)}</span>
                   </span>
                 )}
               </p>
@@ -622,13 +622,13 @@ export const CustomersPage: React.FC = () => {
           <div className="py-8">
             <EmptyState
               icon={hasActiveFilter ? 'search' : 'inbox'}
-              title={hasActiveFilter ? 'لا توجد نتائج' : t('sales.customer.emptyTitle')}
-              description={hasActiveFilter ? 'جرّب تغيير كلمات البحث أو الفلترة' : t('sales.customer.emptyDesc')}
+              title={hasActiveFilter ? t('common.noResults') : t('sales.customer.emptyTitle')}
+              description={hasActiveFilter ? t('sales.customer.noResultsHint') : t('sales.customer.emptyDesc')}
               action={
                 hasActiveFilter ? (
-                  <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter('all'); }}>
-                    مسح الفلترة
-                  </Button>
+                    <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter('all'); }}>
+                    {t('sales.filter.clearFilters')}
+                    </Button>
                 ) : (
                   <Can action="create" module="sales">
                     <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>
@@ -658,10 +658,10 @@ export const CustomersPage: React.FC = () => {
         }}
         size="lg"
         title={editingId ? t('sales.customer.edit') : t('sales.customer.new')}
-        description={editingId ? 'تعديل بيانات العميل' : 'إضافة عميل جديد — الحقول المميزة بـ * مطلوبة'}
+        description={editingId ? t('sales.customer.editDesc') : t('sales.customer.createDesc')}
         footer={
           <div className="flex items-center justify-between w-full">
-            <p className="text-xs text-slate-500 hidden sm:block">* حقول مطلوبة</p>
+            <p className="text-xs text-slate-500 hidden sm:block">{t('sales.customer.requiredFields')}</p>
             <div className="flex gap-2 ml-auto">
               <Button
                 variant="secondary"
@@ -683,7 +683,7 @@ export const CustomersPage: React.FC = () => {
           {/* Basic */}
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-2">
-              <Hash size={12} /> البيانات الأساسية
+              <Hash size={12} /> {t('sales.customer.sectionBasic')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <Input
@@ -692,14 +692,14 @@ export const CustomersPage: React.FC = () => {
                 onChange={(e) => setFormData((p) => ({ ...p, code: e.target.value }))}
                 placeholder="CUST-001"
                 error={formErrors.code}
-                helperText={!formErrors.code ? 'يُنشأ تلقائياً إن تُرك فارغاً' : undefined}
+                helperText={!formErrors.code ? t('sales.customer.codeAutoHint') : undefined}
               />
               <div className="sm:col-span-2">
                 <Input
                   label={`${t('sales.customer.name')} *`}
                   value={formData.name}
                   onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="مثال: شركة الأمل للتجارة"
+                  placeholder={t('sales.customer.namePlaceholder')}
                   error={formErrors.name}
                   required
                 />
@@ -712,7 +712,7 @@ export const CustomersPage: React.FC = () => {
           {/* Contact */}
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-2">
-              <Phone size={12} /> التواصل
+              <Phone size={12} /> {t('sales.customer.sectionContact')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
@@ -742,7 +742,7 @@ export const CustomersPage: React.FC = () => {
               <textarea
                 value={formData.address}
                 onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))}
-                placeholder="العنوان التفصيلي..."
+                placeholder={t('sales.customer.addressPlaceholder')}
                 rows={2}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition resize-none"
               />
@@ -754,14 +754,14 @@ export const CustomersPage: React.FC = () => {
           {/* Financial */}
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 dark:text-slate-400 mb-3 flex items-center gap-2">
-              <Wallet size={12} /> البيانات المالية والحالة
+              <Wallet size={12} /> {t('sales.customer.sectionFinancial')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
                 label={t('sales.customer.taxNumber')}
                 value={formData.taxNumber}
                 onChange={(e) => setFormData((p) => ({ ...p, taxNumber: e.target.value }))}
-                placeholder="الرقم الضريبي"
+                placeholder={t('sales.customer.taxNumberPlaceholder')}
                 dir="ltr"
               />
               <Input
@@ -804,9 +804,9 @@ export const CustomersPage: React.FC = () => {
               />
               <div>
                 <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('sales.customer.isActive')}</p>
-                <p className="text-xs text-slate-500">{formData.isActive ? 'العميل نشط ويمكن التعامل معه' : 'العميل موقوف مؤقتاً'}</p>
+                <p className="text-xs text-slate-500">{formData.isActive ? t('sales.customer.activeHint') : t('sales.customer.inactiveHint')}</p>
               </div>
-              <Badge className={`ml-auto ${formData.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'} border`}>{formData.isActive ? 'نشط' : 'موقوف'}</Badge>
+              <Badge className={`ml-auto ${formData.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'} border`}>{formData.isActive ? t('settings.common.active') : t('settings.common.inactive')}</Badge>
             </label>
           </div>
         </div>
@@ -908,7 +908,7 @@ export const CustomersPage: React.FC = () => {
                     )}
                     {Number(viewing.balance) !== 0 && (
                       <span className={`inline-flex mt-2 text-xs px-2 py-1 rounded-full border ${Number(viewing.balance) > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-                        {Number(viewing.balance) > 0 ? 'ذمة مدينة على العميل' : 'رصيد دائن للعميل'}
+                        {Number(viewing.balance) > 0 ? t('sales.customer.debitBadge') : t('sales.customer.creditBadge')}
                       </span>
                     )}
                   </Card>
@@ -920,7 +920,7 @@ export const CustomersPage: React.FC = () => {
                     {Number(viewing.creditLimit) > 0 && (
                       <div className="mt-3">
                         <div className="flex justify-between text-xs text-slate-500 mb-1">
-                          <span>الاستهلاك</span>
+                          <span>{t('sales.customer.usage')}</span>
                           <span>{Math.min(100, Math.round((Math.abs(Number(viewing.balance) || 0) / Number(viewing.creditLimit)) * 100))}%</span>
                         </div>
                         <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
@@ -1034,15 +1034,15 @@ function CustomerStatementTab({ customerId }: { customerId: string }) {
       {rows.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-center">
-            <p className="text-xs text-amber-700 dark:text-amber-300">إجمالي مدين</p>
+            <p className="text-xs text-amber-700 dark:text-amber-300">{t('sales.customer.totalDebit')}</p>
             <p className="text-sm font-bold text-amber-800 dark:text-amber-200 tabular-nums">{formatCurrency(totals.debit)}</p>
           </div>
           <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3 text-center">
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">إجمالي دائن</p>
+            <p className="text-xs text-emerald-700 dark:text-emerald-300">{t('sales.customer.totalCredit')}</p>
             <p className="text-sm font-bold text-emerald-800 dark:text-emerald-200 tabular-nums">{formatCurrency(totals.credit)}</p>
           </div>
           <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 text-center">
-            <p className="text-xs text-slate-600 dark:text-slate-400">الرصيد الختامي</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400">{t('sales.customer.closingBalance')}</p>
             <p className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(totals.balance)}</p>
           </div>
         </div>
@@ -1077,10 +1077,10 @@ function CustomerAgingTab({
   if (!aging) return <EmptyState icon="search" title={t('sales.customer.noAging')} description={t('sales.customer.noAgingDesc')} />;
 
   const bucketMeta: Record<string, { label: string; color: string; bg: string; border: string; dot: string }> = {
-    '0-30': { label: '0–30 يوم', color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800', dot: 'bg-emerald-500' },
-    '31-60': { label: '31–60 يوم', color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', dot: 'bg-amber-500' },
-    '61-90': { label: '61–90 يوم', color: 'text-orange-700 dark:text-orange-300', bg: 'bg-orange-50 dark:bg-orange-900/20', border: 'border-orange-200 dark:border-orange-800', dot: 'bg-orange-500' },
-    '>90': { label: '> 90 يوم', color: 'text-rose-700 dark:text-rose-300', bg: 'bg-rose-50 dark:bg-rose-900/20', border: 'border-rose-200 dark:border-rose-800', dot: 'bg-rose-600' },
+    '0-30': { label: t('sales.customer.bucket30'), color: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800', dot: 'bg-emerald-500' },
+    '31-60': { label: t('sales.customer.bucket3160'), color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', dot: 'bg-amber-500' },
+    '61-90': { label: t('sales.customer.bucket6190'), color: 'text-orange-700 dark:text-orange-300', bg: 'bg-orange-50 dark:bg-orange-900/20', border: 'border-orange-200 dark:border-orange-800', dot: 'bg-orange-500' },
+    '>90': { label: t('sales.customer.bucket90'), color: 'text-rose-700 dark:text-rose-300', bg: 'bg-rose-50 dark:bg-rose-900/20', border: 'border-rose-200 dark:border-rose-800', dot: 'bg-rose-600' },
   };
 
   const maxAmt = Math.max(...aging.buckets.map((b) => b.amount), 1);
@@ -1117,7 +1117,7 @@ function CustomerAgingTab({
             </div>
             <div>
               <p className="text-sm text-slate-300">{t('sales.customer.totalDue')}</p>
-              <p className="text-xs text-slate-400">إجمالي المستحق المتأخر</p>
+              <p className="text-xs text-slate-400">{t('sales.customer.overdueDesc')}</p>
             </div>
           </div>
           <p className="text-2xl font-bold tabular-nums">{formatCurrency(aging.totalDue)}</p>

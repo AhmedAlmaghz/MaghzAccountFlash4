@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 
 /**
@@ -140,16 +141,18 @@ function TableNoMemo<T>({
   columns,
   keyExtractor,
   isLoading,
-  emptyMessage = 'لا توجد بيانات',
+  emptyMessage,
   className,
   onRowClick,
 }: TableProps<T>) {
+  const { t } = useTranslation();
+  const resolvedEmptyMessage = emptyMessage ?? t('common.noData');
   if (isLoading) return <TableSkeleton />;
 
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center py-12 text-zinc-400">
-        {emptyMessage}
+        {resolvedEmptyMessage}
       </div>
     );
   }
@@ -169,7 +172,7 @@ function TableNoMemo<T>({
           columns={columns}
           keyExtractor={keyExtractor}
           onRowClick={onRowClick}
-          emptyMessage={emptyMessage}
+          emptyMessage={resolvedEmptyMessage}
         />
       </div>
 

@@ -96,7 +96,7 @@ export const SupplierStatementReport: React.FC = () => {
       columns,
       rows: suppliers as unknown as Record<string, unknown>[],
       meta: {
-        title: t('reports.supplierStatement'),
+        title: t('reports.supplierStatement.title'),
         subtitle: branding.companyName,
         ...(periodLabel ? { periodLabel } : {}),
         direction,
@@ -163,7 +163,7 @@ export const SupplierStatementReport: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         icon={<Truck size={22} />}
-        title={t('reports.supplierStatement')}
+        title={t('reports.supplierStatement.title')}
         subtitle={t('reports.supplierStatement.subtitle')}
         actions={
           <>

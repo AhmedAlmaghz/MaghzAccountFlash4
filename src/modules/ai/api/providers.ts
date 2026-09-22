@@ -84,6 +84,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     hintEn: 'Any locally pulled model name (check with ollama list)',
   },
   {
+    id: 'typesafe',
+    baseUrl: 'https://api.typesafe.ai',
+    defaultModel: 'jev-latest',
+    pattern: /^jev(-latest|-preview|-1\.\d+(\.\d+)?)?$/,
+    hosts: ['api.typesafe.ai'],
+    hintAr: 'أسماء JEV مثل jev-latest أو jev-1.13.0',
+    hintEn: 'JEV names like jev-latest or jev-1.13.0',
+  },
+  {
     id: 'custom',
     baseUrl: '',
     defaultModel: '',

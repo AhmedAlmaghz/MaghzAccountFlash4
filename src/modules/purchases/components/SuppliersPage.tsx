@@ -87,8 +87,8 @@ export const SuppliersPage: React.FC = () => {
   const validateForm = useCallback((): boolean => {
     const errors: FormErrors = {};
     if (!form.name.trim()) errors.name = t('validation.required') || 'مطلوب';
-    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'بريد إلكتروني غير صحيح';
-    if (form.phone && form.phone.length < 7) errors.phone = 'رقم هاتف غير صحيح';
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = t('validation.invalidEmail');
+    if (form.phone && form.phone.length < 7) errors.phone = t('validation.invalidPhone');
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   }, [form, t]);
@@ -383,7 +383,7 @@ export const SuppliersPage: React.FC = () => {
               >
                 {formatCurrency(bal)}
               </span>
-              {bal !== 0 && <p className={`text-[11px] mt-0.5 ${isDebit ? 'text-amber-600' : 'text-emerald-600'}`}>{isDebit ? 'مدين' : 'دائن'}</p>}
+              {bal !== 0 && <p className={`text-[11px] mt-0.5 ${isDebit ? 'text-amber-600' : 'text-emerald-600'}`}>{isDebit ? t('accounting.debit') : t('accounting.credit')}</p>}
             </div>
           );
         },
@@ -466,11 +466,11 @@ export const SuppliersPage: React.FC = () => {
           <>
             <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
               <FileText size={15} className="text-emerald-600" />
-              <span className="hidden sm:inline text-xs">Excel</span>
+              <span className="hidden sm:inline text-xs">{t('common.excel')}</span>
             </Button>
             <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
               <Receipt size={15} className="text-rose-600" />
-              <span className="hidden sm:inline text-xs">PDF</span>
+              <span className="hidden sm:inline text-xs">{t('common.pdf')}</span>
             </Button>
           </>
         }
@@ -481,7 +481,7 @@ export const SuppliersPage: React.FC = () => {
             {total} {t('purchases.supplier.invoices')} • {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `• ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
           </span>
           <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
-            مسح الفلترة
+            {t('sales.filter.clearFilters')}
           </button>
         </div>
       )}
@@ -493,7 +493,7 @@ export const SuppliersPage: React.FC = () => {
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.supplier.total')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
               <p className="mt-1 text-xs text-slate-500">
-                {activeCount} نشط • {inactiveCount} غير نشط
+                {activeCount} {t('settings.common.active')} • {inactiveCount} {t('settings.common.inactive')}
               </p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 flex items-center justify-center">
@@ -507,7 +507,7 @@ export const SuppliersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.supplier.active')}</p>
               <p className="mt-1 text-3xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{activeCount}</p>
-              <p className="mt-1 text-xs text-slate-500">من إجمالي {total}</p>
+              <p className="mt-1 text-xs text-slate-500">{t('purchases.supplier.ofTotal')} {total}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 flex items-center justify-center">
               <UserCheck size={20} className="text-emerald-600 dark:text-emerald-400" />
@@ -525,12 +525,12 @@ export const SuppliersPage: React.FC = () => {
               <p className="mt-1 text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="inline-flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  دائن (مستحق لنا للمورد): <span className="font-semibold tabular-nums">{formatCurrency(payableTotal)}</span>
+                  {t('accounting.credit')} ({t('purchases.supplier.payableHint')}): <span className="font-semibold tabular-nums">{formatCurrency(payableTotal)}</span>
                 </span>
                 {creditTotal > 0 && (
                   <span className="inline-flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    مدين: <span className="font-semibold tabular-nums">{formatCurrency(creditTotal)}</span>
+                    {t('accounting.debit')}: <span className="font-semibold tabular-nums">{formatCurrency(creditTotal)}</span>
                   </span>
                 )}
               </p>
@@ -554,12 +554,12 @@ export const SuppliersPage: React.FC = () => {
           <div className="py-8">
             <EmptyState
               icon={hasActiveFilter ? 'search' : 'inbox'}
-              title={hasActiveFilter ? 'لا توجد نتائج' : t('purchases.supplier.emptyTitle')}
-              description={hasActiveFilter ? 'جرّب تغيير كلمات البحث أو الفلترة' : t('purchases.supplier.emptyDesc')}
+              title={hasActiveFilter ? t('sales.filter.noResults') : t('purchases.supplier.emptyTitle')}
+              description={hasActiveFilter ? t('purchases.supplier.noResultsHint') : t('purchases.supplier.emptyDesc')}
               action={
                 hasActiveFilter ? (
                   <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter('all'); }}>
-                    مسح الفلترة
+                    {t('sales.filter.clearFilters')}
                   </Button>
                 ) : (
                   <Can action="create" module="purchases">
@@ -585,7 +585,7 @@ export const SuppliersPage: React.FC = () => {
       <Modal
         isOpen={modalOpen}
         title={editingId ? t('purchases.supplier.edit') : t('purchases.supplier.new')}
-        description={editingId ? 'تعديل بيانات المورد' : 'إضافة مورد جديد — الحقول المميزة بـ * مطلوبة'}
+        description={editingId ? t('purchases.supplier.editDesc') : t('purchases.supplier.createDesc')}
         onClose={() => {
           setModalOpen(false);
           setEditingId(null);
@@ -595,7 +595,7 @@ export const SuppliersPage: React.FC = () => {
         size="lg"
         footer={
           <div className="flex items-center justify-between w-full">
-            <p className="text-xs text-slate-500 hidden sm:block">* حقول مطلوبة</p>
+            <p className="text-xs text-slate-500 hidden sm:block">{t('purchases.supplier.requiredFields')}</p>
             <div className="flex gap-2 ml-auto">
               <Button variant="secondary" onClick={() => { setModalOpen(false); setEditingId(null); }}>
                 {t('cancel')}
@@ -610,19 +610,19 @@ export const SuppliersPage: React.FC = () => {
         <div className="space-y-5">
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Hash size={12} /> البيانات الأساسية
+              <Hash size={12} /> {t('purchases.supplier.sectionBasic')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Input label={`${t('purchases.supplier.code')} (${t('optional')})`} value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} placeholder="SUP-001" error={formErrors.code} helperText={!formErrors.code ? 'يُنشأ تلقائياً إن تُرك فارغاً' : undefined} />
+              <Input label={`${t('purchases.supplier.code')} (${t('optional')})`} value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} placeholder="SUP-001" error={formErrors.code} helperText={!formErrors.code ? t('purchases.supplier.codeAutoHint') : undefined} />
               <div className="sm:col-span-2">
-                <Input label={`${t('purchases.supplier.name')} *`} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="مثال: شركة التوريد المتكاملة" error={formErrors.name} required />
+                <Input label={`${t('purchases.supplier.name')} *`} value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder={t('purchases.supplier.namePlaceholder')} error={formErrors.name} required />
               </div>
             </div>
           </div>
           <div className="h-px bg-slate-100 dark:bg-slate-800" />
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Phone size={12} /> التواصل
+              <Phone size={12} /> {t('purchases.supplier.sectionContact')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input label={t('purchases.supplier.phone')} value={form.phone} onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))} placeholder="77xxxxxxx" leftIcon={<Phone size={14} />} error={formErrors.phone} dir="ltr" />
@@ -635,7 +635,7 @@ export const SuppliersPage: React.FC = () => {
               <textarea
                 value={form.address}
                 onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-                placeholder="العنوان التفصيلي..."
+                placeholder={t('purchases.supplier.addressPlaceholder')}
                 rows={2}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition resize-none"
               />
@@ -644,9 +644,9 @@ export const SuppliersPage: React.FC = () => {
           <div className="h-px bg-slate-100 dark:bg-slate-800" />
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Wallet size={12} /> البيانات المالية والحالة
+              <Wallet size={12} /> {t('purchases.supplier.sectionFinancial')}
             </h4>
-            <Input label={t('purchases.supplier.taxNumber')} value={form.taxNumber} onChange={(e) => setForm((prev) => ({ ...prev, taxNumber: e.target.value }))} placeholder="الرقم الضريبي" dir="ltr" />
+            <Input label={t('purchases.supplier.taxNumber')} value={form.taxNumber} onChange={(e) => setForm((prev) => ({ ...prev, taxNumber: e.target.value }))} placeholder={t('purchases.supplier.taxNumber')} dir="ltr" />
             <Input
               label={t('openingBalance.title')}
               type="number"
@@ -671,9 +671,9 @@ export const SuppliersPage: React.FC = () => {
               <input type="checkbox" checked={form.isActive} onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
               <div>
                 <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('purchases.supplier.isActive')}</p>
-                <p className="text-xs text-slate-500">{form.isActive ? 'المورد نشط ويمكن التعامل معه' : 'المورد موقوف مؤقتاً'}</p>
+                <p className="text-xs text-slate-500">{form.isActive ? t('purchases.supplier.activeHint') : t('purchases.supplier.inactiveHint')}</p>
               </div>
-              <Badge className={`ml-auto ${form.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'} border`}>{form.isActive ? 'نشط' : 'موقوف'}</Badge>
+              <Badge className={`ml-auto ${form.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'} border`}>{form.isActive ? t('settings.common.active') : t('purchases.supplier.suspended')}</Badge>
             </label>
           </div>
         </div>
@@ -754,12 +754,12 @@ export const SuppliersPage: React.FC = () => {
                       </p>
                     )}
                     {Number(supplier.balance) !== 0 && (
-                      <span className={`inline-flex mt-2 text-xs px-2 py-1 rounded-full border ${Number(supplier.balance) > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>{Number(supplier.balance) > 0 ? 'ذمة مدينة للمورد' : 'رصيد دائن'}</span>
+                      <span className={`inline-flex mt-2 text-xs px-2 py-1 rounded-full border ${Number(supplier.balance) > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>{Number(supplier.balance) > 0 ? t('purchases.supplier.debitBadge') : t('purchases.supplier.creditBadge')}</span>
                     )}
                   </Card>
                   <Card className="p-5 bg-slate-50 dark:bg-slate-800/50 border-dashed">
-                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2"><FileText size={14} /> كشف سريع</p>
-                    <p className="text-xs text-slate-500 mt-1">اعرض كشف الحساب وتقسيم الاستحقاق من التبويبات أعلاه</p>
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-2"><FileText size={14} /> {t('purchases.supplier.quickStatement')}</p>
+                    <p className="text-xs text-slate-500 mt-1">{t('purchases.supplier.quickStatementHint')}</p>
                   </Card>
                 </div>
               </div>
@@ -770,15 +770,15 @@ export const SuppliersPage: React.FC = () => {
                 {statementTotals && (
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-center">
-                      <p className="text-xs text-amber-700 dark:text-amber-300">إجمالي مدين</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-300">{t('purchases.supplier.totalDebit')}</p>
                       <p className="text-sm font-bold text-amber-800 dark:text-amber-200 tabular-nums">{formatCurrency(statementTotals.debit)}</p>
                     </div>
                     <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3 text-center">
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300">إجمالي دائن</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-300">{t('purchases.supplier.totalCredit')}</p>
                       <p className="text-sm font-bold text-emerald-800 dark:text-emerald-200 tabular-nums">{formatCurrency(statementTotals.credit)}</p>
                     </div>
                     <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 text-center">
-                      <p className="text-xs text-slate-600 dark:text-slate-400">الرصيد الختامي</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">{t('purchases.supplier.closingBalance')}</p>
                       <p className="text-sm font-bold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(statementTotals.bal)}</p>
                     </div>
                   </div>
@@ -825,10 +825,10 @@ export const SuppliersPage: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                       {aging.map((bucket) => {
                         const meta: Record<string, { bg: string; border: string; dot: string; text: string; label: string }> = {
-                          '0-30': { bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800', dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-300', label: '0–30 يوم' },
-                          '31-60': { bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-300', label: '31–60 يوم' },
-                          '61-90': { bg: 'bg-orange-50 dark:bg-orange-900/20', border: 'border-orange-200 dark:border-orange-800', dot: 'bg-orange-500', text: 'text-orange-700 dark:text-orange-300', label: '61–90 يوم' },
-                          '>90': { bg: 'bg-rose-50 dark:bg-rose-900/20', border: 'border-rose-200 dark:border-rose-800', dot: 'bg-rose-600', text: 'text-rose-700 dark:text-rose-300', label: '> 90 يوم' },
+                          '0-30': { bg: 'bg-emerald-50 dark:bg-emerald-900/20', border: 'border-emerald-200 dark:border-emerald-800', dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-300', label: t('purchases.supplier.bucket30') },
+                          '31-60': { bg: 'bg-amber-50 dark:bg-amber-900/20', border: 'border-amber-200 dark:border-amber-800', dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-300', label: t('purchases.supplier.bucket3160') },
+                          '61-90': { bg: 'bg-orange-50 dark:bg-orange-900/20', border: 'border-orange-200 dark:border-orange-800', dot: 'bg-orange-500', text: 'text-orange-700 dark:text-orange-300', label: t('purchases.supplier.bucket6190') },
+                          '>90': { bg: 'bg-rose-50 dark:bg-rose-900/20', border: 'border-rose-200 dark:border-rose-800', dot: 'bg-rose-600', text: 'text-rose-700 dark:text-rose-300', label: t('purchases.supplier.bucket90') },
                         };
                         const bucketKey = bucket.bucket.includes('>') ? '>90' : bucket.bucket.includes('61') ? '61-90' : bucket.bucket.includes('31') ? '31-60' : '0-30';
                         const m = meta[bucketKey] || meta['0-30'];

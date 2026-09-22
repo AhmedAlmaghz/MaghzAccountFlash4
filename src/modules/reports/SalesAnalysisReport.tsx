@@ -286,7 +286,7 @@ export const SalesAnalysisReport: React.FC = () => {
       columns,
       rows: filteredData as unknown as Record<string, unknown>[],
       meta: {
-        title: t('reports.salesAnalysis'),
+        title: t('reports.salesAnalysis.title'),
         subtitle: branding.companyName,
         ...(periodLabel ? { periodLabel } : {}),
         direction,
@@ -357,7 +357,7 @@ export const SalesAnalysisReport: React.FC = () => {
       {/* Header */}
       <PageHeader
         icon={<BarChart3 size={22} />}
-        title={t('reports.salesAnalysis')}
+        title={t('reports.salesAnalysis.title')}
         subtitle={t('reports.salesAnalysis.subtitle')}
         actions={
           <>
@@ -458,7 +458,7 @@ export const SalesAnalysisReport: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <div className="p-4">
-            <h3 className="font-semibold text-slate-900 dark:text-slate-50 mb-4">{t('reports.salesAnalysis')}</h3>
+            <h3 className="font-semibold text-slate-900 dark:text-slate-50 mb-4">{t('reports.salesAnalysis.title')}</h3>
             <div style={{ height: 300 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}>

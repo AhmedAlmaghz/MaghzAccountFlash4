@@ -296,7 +296,7 @@ export const PosTerminalPage: React.FC = () => {
     credit = Math.max(0, Math.min(credit, totals.totalAmount));
     const requiredCash = totals.totalAmount - credit;
     if (payMode !== 'credit' && received + 0.0001 < requiredCash) {
-      addToast('error', t('pos.insufficientCash', { default: `المبلغ النقدي غير كافٍ — المطلوب ${formatCurrency(requiredCash)}` }));
+      addToast('error', t('pos.insufficientCash', { required: formatCurrency(requiredCash) }));
       return;
     }
     const cashPart = payMode === 'credit' ? 0 : requiredCash;
@@ -408,7 +408,7 @@ export const PosTerminalPage: React.FC = () => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'F2') { e.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); }
       if (e.key === 'F9') { e.preventDefault(); openPay(); }
-      if (e.key === 'F10') { e.preventDefault(); if (lines.length) { cart.holdCart(`سلة ${new Date().toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })}`); addToast('success', t('pos.heldCarts')); } }
+      if (e.key === 'F10') { e.preventDefault(); if (lines.length) { cart.holdCart(`${t('pos.cartLabel')} ${new Date().toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })}`); addToast('success', t('pos.heldCarts')); } }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -585,7 +585,7 @@ export const PosTerminalPage: React.FC = () => {
               {t('pos.cart')} ({totals.itemsCount})
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" leftIcon={<Pause size={14} />} onClick={() => cart.holdCart(`سلة ${heldCarts.length + 1}`)} disabled={lines.length === 0} title={t('pos.holdCart')} />
+              <Button variant="ghost" size="sm" leftIcon={<Pause size={14} />} onClick={() => cart.holdCart(`${t('pos.cartLabel')} ${heldCarts.length + 1}`)} disabled={lines.length === 0} title={t('pos.holdCart')} />
               <Button variant="ghost" size="sm" leftIcon={<Trash2 size={14} className="text-rose-500" />} onClick={() => cart.clearCart()} disabled={lines.length === 0} title={t('pos.clearCart')} />
             </div>
           </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Inbox, Search, FileX } from 'lucide-react';
+import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 
 interface EmptyStateProps {
@@ -12,11 +13,14 @@ interface EmptyStateProps {
 
 export const EmptyState: React.FC<EmptyStateProps> = ({
   icon = 'inbox',
-  title = 'لا توجد بيانات',
-  description = 'لم يتم العثور على أي سجلات في الوقت الحالي',
+  title,
+  description,
   action,
   className,
 }) => {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t('common.noData');
+  const resolvedDescription = description ?? t('empty.description');
   const icons = {
     inbox: Inbox,
     search: Search,
@@ -31,10 +35,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         <Icon className="w-8 h-8 text-slate-400" />
       </div>
       <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-1">
-        {title}
+        {resolvedTitle}
       </h3>
       <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md text-center mb-4">
-        {description}
+        {resolvedDescription}
       </p>
       {action && <div className="mt-2">{action}</div>}
     </div>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Pencil, Trash2, Printer, Download, Eye, MoreVertical } from 'lucide-react';
 import { Button } from './Button';
+import { useTranslation } from '@/core/i18n/useTranslation';
 import { cn } from '@/core/utils';
 
 interface ActionButtonsProps {
@@ -52,43 +53,44 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
   disabledDelete = false,
 }) => {
   const iconSize = size === 'sm' ? 15 : 17;
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const actions: Action[] = [];
   if (showView && onView)
     actions.push({
-      key: 'view', label: 'عرض', onClick: onView, disabled,
+      key: 'view', label: t('common.view'), onClick: onView, disabled,
       icon: <Eye size={iconSize} />,
       btnClass: 'text-sky-600 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-900/20',
     });
   if (showPreview && onPreview)
     actions.push({
-      key: 'preview', label: 'معاينة', onClick: onPreview, disabled,
+      key: 'preview', label: t('common.preview'), onClick: onPreview, disabled,
       icon: <Eye size={iconSize} />,
       btnClass: 'text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20',
     });
   if (showEdit && onEdit)
     actions.push({
-      key: 'edit', label: 'تعديل', onClick: onEdit, disabled: disabled || disabledEdit,
+      key: 'edit', label: t('edit'), onClick: onEdit, disabled: disabled || disabledEdit,
       icon: <Pencil size={iconSize} />,
       btnClass: 'text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20',
     });
   if (showDelete && onDelete)
     actions.push({
-      key: 'delete', label: 'حذف', onClick: onDelete, disabled: disabled || disabledDelete,
+      key: 'delete', label: t('delete'), onClick: onDelete, disabled: disabled || disabledDelete,
       icon: <Trash2 size={iconSize} />,
       btnClass: 'text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-900/20',
     });
   if (showPrint && onPrint)
     actions.push({
-      key: 'print', label: 'طباعة', onClick: onPrint, disabled,
+      key: 'print', label: t('print'), onClick: onPrint, disabled,
       icon: <Printer size={iconSize} />,
       btnClass: 'text-zinc-600 hover:text-zinc-800 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
     });
   if (showExport && onExport)
     actions.push({
-      key: 'export', label: 'تصدير', onClick: onExport, disabled,
+      key: 'export', label: t('export'), onClick: onExport, disabled,
       icon: <Download size={iconSize} />,
       btnClass: 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20',
     });
@@ -128,7 +130,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
             setMenuOpen((o) => !o);
           }}
           className="flex items-center justify-center w-10 h-10 rounded-xl text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-          aria-label="إجراءات"
+          aria-label={t('common.actions')}
           aria-expanded={menuOpen}
         >
           <MoreVertical size={18} />

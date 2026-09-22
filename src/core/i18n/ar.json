@@ -26,11 +26,21 @@
   "edit": "تعديل",
   "create": "إنشاء",
   "search": "بحث",
-  "filter": "تصفية",
+  "filter": {
+    "title": "تصفية",
+    "showAll": "عرض الكل",
+    "myDocsOnly": "مستنداتي فقط",
+    "allDocs": "كل المستندات"
+  },
   "export": "تصدير",
   "print": "طباعة",
   "close": "إغلاق",
-  "confirm": "تأكيد",
+  "confirm": {
+    "title": "تأكيد",
+    "message": "هل أنت متأكد من تنفيذ هذا الإجراء؟",
+    "confirmText": "تأكيد",
+    "cancelText": "إلغاء"
+  },
   "back": "رجوع",
   "next": "التالي",
   "previous": "السابق",
@@ -406,7 +416,27 @@
         "groq": "Groq",
         "ollama": "Ollama (محلي)",
         "custom": "مخصص"
-      }
+      },
+      "noKey": "بلا مفتاح",
+      "jevTitle": "تسريع JEV — قرارات فائقة السرعة",
+      "jevSubtitle": "نموذج System One يتخذ قرارات مكتوبة في 70–500ms بثقة معايرة — يكمّل المزود الأساسي",
+      "jevEnabled": "تفعيل JEV",
+      "jevEnabledHint": "عند التفعيل تُوجَّه قرارات النية والكيانات عبر JEV قبل المزود الأساسي — أسرع 15× وأرخص 5× للقرارات",
+      "jevApiKey": "مفتاح TypeSafe (TYPESAFE_API_KEY)",
+      "jevApiKeyPlaceholder": "ts_... — من https://console.typesafe.ai/keys",
+      "jevModel": "نموذج JEV",
+      "jevModelPlaceholder": "jev-latest",
+      "jevRouterEnabled": "توجيه النية عبر JEV",
+      "jevRouterHint": "يستبدل مطابقة الكلمات المفتاحية بتصنيف احتمالي معاير (Choice + confidence)",
+      "jevGuardEnabled": "حراسة JEV (حقن/هلوسة)",
+      "jevGuardHint": "يفحص الرسائل قبل التنفيذ بأسئلة Noul متوازية",
+      "jevTest": "اختبار JEV",
+      "jevTesting": "جاري اختبار JEV...",
+      "jevTestSuccess": "JEV يستجيب",
+      "jevTestFailed": "فشل JEV",
+      "jevMetricsTitle": "مقاييس JEV",
+      "jevMetricsHint": "متوسط/وسيط زمن الاستجابة والتكلفة والثقة — تُصفَّر عند إغلاق التطبيق",
+      "jevNoMetrics": "لا توجد مقاييس بعد — أرسل رسالة لتفعيل JEV"
     },
     "errors": {
       "generic": "حدث خطأ أثناء معالجة طلبك",
@@ -632,7 +662,9 @@
       "cloneSuffix": "نسخة",
       "created": "تم إنشاء الدور بنجاح",
       "updated": "تم تحديث الدور بنجاح",
-      "deleted": "تم حذف الدور بنجاح"
+      "deleted": "تم حذف الدور بنجاح",
+      "nameRequired": "اسم الدور مطلوب",
+      "permissionsRequired": "اختر صلاحية واحدة على الأقل"
     },
     "auditLog": {
       "title": "سجل العمليات",
@@ -681,7 +713,10 @@
       "table_employees": "الموظفين",
       "table_warehouses": "المستودعات",
       "recordsCount": "السجلات ({{count}})",
-      "logTitle": "سجل عمليات النظام"
+      "logTitle": "سجل عمليات النظام",
+      "noPermissionTitle": "ليس لديك صلاحية عرض سجل التدقيق",
+      "noPermissionDesc": "سجل التدقيق متاح فقط للمستخدمين المصرح لهم (الإدارة). تواصل مع مدير النظام لمنحك الصلاحية",
+      "backHome": "العودة للرئيسية"
     },
     "profile": {
       "title": "الملف الشخصي",
@@ -727,14 +762,48 @@
     "subtitle": "النظام المحاسبي المزدوج والتقارير المالية",
     "chartOfAccounts": "شجرة الحسابات",
     "journalEntries": "القيود اليومية",
-    "trialBalance": "ميزان المراجعة",
+    "trialBalance": {
+      "title": "ميزان المراجعة",
+      "today": "اليوم",
+      "monthEnd": "آخر الشهر",
+      "yearEnd": "آخر السنة",
+      "total": "الإجمالي",
+      "filtered": "(مُفلتر)",
+      "accountUnit": "حساب",
+      "balanced": "متوازن",
+      "difference": "فرق",
+      "balancedHint": "المدين = الدائن",
+      "needsReview": "يحتاج مراجعة",
+      "balancedCheck": "متوازن ✓",
+      "unbalanced": "غير متوازن",
+      "searchHint": "كود / اسم الحساب",
+      "tryDifferentSearch": "جرّب تغيير البحث أو التاريخ",
+      "totalDebit": "إجمالي مدين",
+      "totalCredit": "إجمالي دائن",
+      "clearFilter": "مسح الفلترة"
+    },
     "balanceSheet": {
       "title": "الميزانية العمومية",
       "total": "الإجمالي",
       "assets": "الأصول",
       "liabilities": "الالتزامات",
       "equity": "حقوق الملكية",
-      "today": "اليوم"
+      "today": "اليوم",
+      "monthEnd": "آخر الشهر",
+      "yearEnd": "آخر السنة",
+      "accountUnit": "حساب",
+      "totalLiabilitiesEquity": "المجموع (التزامات + حقوق ملكية)",
+      "compareWithAssets": "المقارنة بالأصول",
+      "balancedCheck": "متوازنة ✓",
+      "balanced": "متوازنة",
+      "unbalanced": "غير متوازنة",
+      "balancedEquation": "الأصول = الالتزامات + حقوق الملكية",
+      "needsReview": "تحتاج مراجعة قيود",
+      "difference": "فرق",
+      "noBalances": "لا توجد أرصدة في هذا البند",
+      "equationHint": "المعادلة: الأصول = الالتزامات + حقوق الملكية",
+      "liabilitiesAndEquity": "الالتزامات + حقوق الملكية",
+      "statusTitle": "حالة الميزانية"
     },
     "profitLoss": {
       "title": "قائمة الدخل",
@@ -743,7 +812,18 @@
       "totalRevenue": "إجمالي الإيرادات",
       "totalExpenses": "إجمالي المصروفات",
       "netProfit": "صافي الربح",
-      "item": "البند"
+      "item": "البند",
+      "profit": "ربح",
+      "loss": "خسارة",
+      "marginLabel": "هامش",
+      "marginTitle": "هامش الربح",
+      "thisMonth": "هذا الشهر",
+      "thisQuarter": "هذا الربع",
+      "thisYear": "هذه السنة",
+      "noDataInPeriod": "لا توجد إيرادات أو مصروفات في الفترة المحددة",
+      "revenueBadge": "إيراد",
+      "expenseBadge": "مصروف",
+      "visualSummary": "ملخص مرئي"
     },
     "cashFlow": {
       "title": "التدفقات النقدية",
@@ -772,7 +852,12 @@
       "cashEnd": "النقدية آخر الفترة",
       "cashChange": "التغير الفعلي في النقدية",
       "unexplained": "فرق غير مفسّر",
-      "reconcileTitle": "التسوية مع رصيد النقدية"
+      "reconcileTitle": "التسوية مع رصيد النقدية",
+      "positive": "إيجابي",
+      "negative": "سلبي",
+      "thisMonth": "هذا الشهر",
+      "thisQuarter": "هذا الربع",
+      "thisYear": "هذه السنة"
     },
     "accountLedger": "دفتر الأستاذ",
     "accountCode": "رمز الحساب",
@@ -976,12 +1061,44 @@
       "fundingPayable": "آجل (ذمم دائنة)",
       "fundingOpening": "رصيد افتتاحي"
     },
-    "month": "الشهر"
+    "month": "الشهر",
+    "ledger": {
+      "accountLabel": "حساب",
+      "thisMonth": "هذا الشهر",
+      "thisYear": "هذه السنة",
+      "searchHint": "مرجع / بيان",
+      "selectAccount": "اختر حساباً",
+      "selectAccountHint": "اختر حساباً من الأعلى لعرض دفتر الأستاذ",
+      "tryDifferentSearch": "جرّب تغيير كلمات البحث",
+      "noMovements": "لا توجد حركات في الفترة المحددة",
+      "result": "نتيجة",
+      "totalDebit": "إجمالي مدين",
+      "totalCredit": "إجمالي دائن",
+      "closingBalance": "الرصيد الختامي",
+      "entriesCount": "عدد الحركات",
+      "total": "الإجمالي",
+      "movement": "حركة"
+    },
+    "code": "الكود",
+    "post": "ترحيل",
+    "ledgerSubtitle": "دفتر الأستاذ العام للحسابات",
+    "chartOfAccountsSubtitle": "دليل الحسابات وشجرة الحسابات",
+    "journalEntriesSubtitle": "القيود اليومية المرحلة والمسودات",
+    "voucherNumberError": "تعذر إنشاء رقم السند",
+    "cashBox": "الصندوق"
   },
   "inventory": {
-    "products": "المنتجات",
+    "products": {
+      "title": "المنتجات",
+      "notFound": "المنتج غير موجود"
+    },
     "warehouses": "المستودعات",
-    "stock": "المخزون",
+    "stock": {
+      "title": "المخزون",
+      "completeFields": "الرجاء إكمال جميع الحقول المطلوبة",
+      "differentWarehouses": "مستودع المصدر والوجهة يجب أن يكونا مختلفين",
+      "positiveQty": "الكمية يجب أن تكون أكبر من صفر"
+    },
     "stockCount": "الجرد",
     "transfers": "التحويلات",
     "transactions": "الحركات المخزنية",
@@ -1003,7 +1120,26 @@
     "warehouse": {
       "created": "تم إنشاء المستودع بنجاح",
       "updated": "تم تحديث المستودع بنجاح",
-      "deleted": "تم حذف المستودع بنجاح"
+      "deleted": "تم حذف المستودع بنجاح",
+      "label": "المستودع",
+      "codeLabel": "كود: {{code}}",
+      "searchPlaceholder": "اسم / كود المستودع",
+      "nameExample": "مثال: المستودع الرئيسي",
+      "editDescription": "تعديل بيانات المستودع",
+      "createDescription": "إضافة مستودع جديد",
+      "activeHint": "نشط ويمكن التعامل معه",
+      "inactiveHint": "موقوف مؤقتاً",
+      "stockSummary": "{{count}} صنف • قيمة {{value}} • {{low}}",
+      "lowCount": "{{count}} منخفض",
+      "noLowStock": "لا يوجد منخفض",
+      "nameRequired": "الرجاء إدخال اسم المستودع",
+      "itemCount": "{{count}} صنف",
+      "totalLabel": "إجمالي المستودعات",
+      "linkedBranch": "فرع مرتبط",
+      "stockItems": "{{count}} بند مخزني",
+      "ofTotal": "من {{total}}",
+      "itemsLabel": "الأصناف",
+      "valueLabel": "القيمة"
     },
     "branch": "الفرع",
     "lowStock": "مخزون منخفض",
@@ -1172,7 +1308,11 @@
     "line": {
       "unit": "الوحدة",
       "baseEquivalent": "بالأساسية"
-    }
+    },
+    "suspended": "موقوف",
+    "low": "منخفض",
+    "basicInfo": "البيانات الأساسية",
+    "tryDifferentSearch": "جرّب تغيير البحث"
   },
   "sales": {
     "invoices": "فواتير المبيعات",
@@ -1293,7 +1433,14 @@
       "zeroCostHint": "أصناف بلا تكلفة مخزنية — راجع بطاقة الصنف عند الحاجة",
       "attachments": "المرفقات",
       "addAttachment": "إضافة مرفق",
-      "attachmentTooLarge": "حجم المرفق يتجاوز 2 ميجابايت"
+      "attachmentTooLarge": "حجم المرفق يتجاوز 2 ميجابايت",
+      "linesDesc": "أضف المنتجات والكميات — الأسعار تُملأ تلقائياً",
+      "emptyLines": "لا توجد سطور — أضف منتجاً للبدء",
+      "notesHint": "ستظهر الملاحظات في الطباعة وكشف الحساب",
+      "summary": "ملخص الفاتورة",
+      "baseTotal": "بالأساسية",
+      "numberError": "تعذر إنشاء الرقم التسلسلي",
+      "emptyDescription": "أنشئ فاتورتك الأولى للبدء"
     },
     "quotation": {
       "new": "عرض سعر جديد",
@@ -1321,7 +1468,8 @@
       "total": "إجمالي العروض",
       "accepted": "مقبولة",
       "drafts": "المسودات",
-      "convertedCount": "محوّلة"
+      "convertedCount": "محوّلة",
+      "numberError": "تعذر إنشاء الرقم التسلسلي"
     },
     "return": {
       "new": "مردود مبيعات جديد",
@@ -1350,7 +1498,8 @@
       "created": "تم إنشاء مردود المبيعات بنجاح",
       "updated": "تم تحديث مردود المبيعات بنجاح",
       "deleted": "تم حذف مردود المبيعات",
-      "posted": "تم ترحيل مردود المبيعات بنجاح"
+      "posted": "تم ترحيل مردود المبيعات بنجاح",
+      "numberError": "تعذر إنشاء الرقم التسلسلي"
     },
     "filter": {
       "all": "الكل",
@@ -1361,7 +1510,8 @@
     "line": {
       "unit": "الوحدة",
       "baseEquivalent": "بالأساسية"
-    }
+    },
+    "notesPlaceholder": "ملاحظات إضافية للفاتورة..."
   },
   "purchases": {
     "invoices": "فواتير المشتريات",
@@ -1404,7 +1554,34 @@
       "noAgingDesc": "لا توجد فواتير مستحقة لهذا المورد",
       "created": "تم إنشاء المورد بنجاح",
       "updated": "تم تحديث المورد بنجاح",
-      "deleted": "تم حذف المورد"
+      "deleted": "تم حذف المورد",
+      "title": "المورد",
+      "noResultsHint": "جرّب تغيير كلمات البحث أو الفلترة",
+      "editDesc": "تعديل بيانات المورد",
+      "createDesc": "إضافة مورد جديد — الحقول المميزة بـ * مطلوبة",
+      "codeAutoHint": "يُنشأ تلقائياً إن تُرك فارغاً",
+      "namePlaceholder": "مثال: شركة التوريد المتكاملة",
+      "addressPlaceholder": "العنوان التفصيلي...",
+      "activeHint": "المورد نشط ويمكن التعامل معه",
+      "inactiveHint": "المورد موقوف مؤقتاً",
+      "suspended": "موقوف",
+      "debitBadge": "ذمة مدينة للمورد",
+      "creditBadge": "رصيد دائن",
+      "quickStatement": "كشف سريع",
+      "quickStatementHint": "اعرض كشف الحساب وتقسيم الاستحقاق من التبويبات أعلاه",
+      "totalDebit": "إجمالي مدين",
+      "totalCredit": "إجمالي دائن",
+      "closingBalance": "الرصيد الختامي",
+      "bucket30": "0–30 يوم",
+      "bucket3160": "31–60 يوم",
+      "bucket6190": "61–90 يوم",
+      "bucket90": "> 90 يوم",
+      "ofTotal": "من إجمالي",
+      "payableHint": "مستحق لنا للمورد",
+      "requiredFields": "* حقول مطلوبة",
+      "sectionBasic": "البيانات الأساسية",
+      "sectionContact": "التواصل",
+      "sectionFinancial": "البيانات المالية والحالة"
     },
     "purchaseOrder": "أمر شراء",
     "invoiceNumber": "رقم الفاتورة",
@@ -1654,7 +1831,8 @@
       "description": "الوصف",
       "descriptionPlaceholder": "وصف اختياري للتكلفة",
       "amount": "المبلغ",
-      "total": "إجمالي تكاليف الإنتاج"
+      "total": "إجمالي تكاليف الإنتاج",
+      "title": "تكاليف الإنتاج"
     },
     "productionCostReport": "تحليل تكاليف الإنتاج",
     "totalPlannedCost": "التكلفة المخططة",
@@ -1773,7 +1951,8 @@
     "line": {
       "unit": "الوحدة",
       "baseEquivalent": "بالأساسية"
-    }
+    },
+    "varianceReport": "تقرير الانحرافات"
   },
   "hr": {
     "activeEmployees": "الموظفين النشطين",
@@ -2323,19 +2502,50 @@
     "newProduct": "منتج جديد",
     "newCustomer": "عميل جديد",
     "alerts": "التنبيهات",
-    "salesAnalysis": "تحليل المبيعات",
-    "inventoryAnalysis": "تحليل المخزون",
-    "customerStatement": "كشف حساب العملاء",
-    "supplierStatement": "كشف حساب الموردين",
-    "profitAnalysis": "تحليل الربحية",
-    "customReportBuilder": "منشئ التقارير المخصصة",
+    "salesAnalysis": {
+      "title": "تحليل المبيعات",
+      "subtitle": "تحليل المبيعات حسب الفترة والعميل والمنتج",
+      "details": "تفاصيل المبيعات"
+    },
+    "inventoryAnalysis": {
+      "title": "تحليل المخزون",
+      "statusDistribution": "توزيع الحالات",
+      "details": "تفاصيل المخزون"
+    },
+    "customerStatement": {
+      "title": "كشف حساب العملاء",
+      "emptyTitle": "لا يوجد عملاء مطابقون",
+      "emptyDesc": "لم يتم العثور على عملاء مطابقين لمعايير البحث الحالية",
+      "subtitle": "كشف حسابات العملاء والأرصدة وأعمار الديون",
+      "agingDetails": "تفاصيل أعمار الديون"
+    },
+    "supplierStatement": {
+      "title": "كشف حساب الموردين",
+      "emptyTitle": "لا يوجد موردون مطابقون",
+      "emptyDesc": "لم يتم العثور على موردين مطابقين لمعايير البحث الحالية",
+      "subtitle": "كشف حسابات الموردين والأرصدة وأعمار الديون",
+      "agingDetails": "تفاصيل أعمار الديون"
+    },
+    "profitAnalysis": {
+      "title": "تحليل الربحية",
+      "subtitle": "تحليل الربحية وهوامش الربح",
+      "noDataDesc": "لا توجد بيانات للفترة المحددة"
+    },
+    "customReportBuilder": {
+      "title": "منشئ التقارير المخصصة",
+      "subtitle": "أنشئ تقارير مخصصة من جداول النظام المتاحة"
+    },
     "slowMoving": "بطيء الحركة",
     "lowStockItems": "منخفض المخزون",
     "lowStockAlert": "تنبيه المخزون",
     "stockMovement": "تحليل حركة المخزون",
     "stockValuation": "تقييم المخزون",
     "productProfitability": "ربحية المنتج",
-    "abcAnalysis": "تحليل ABC",
+    "abcAnalysis": {
+      "title": "تحليل ABC",
+      "cumulativePercent": "النسبة التراكمية %",
+      "grade": "الدرجة"
+    },
     "pivotTable": "جدول محوري",
     "chartType": "نوع الرسم البياني",
     "line": "خطي",
@@ -2422,7 +2632,9 @@
       },
       "financialOverview": {
         "desc": "الأصول، الالتزامات، حقوق الملكية، النقدية"
-      }
+      },
+      "availableCount": "{{count}} تقارير متاحة",
+      "openReport": "فتح التقرير"
     },
     "months": {
       "jan": "يناير",
@@ -2587,7 +2799,26 @@
     "noRepData": "لا توجد بيانات لمندوبي المبيعات",
     "wonDeals": "الصفقات المغلقة",
     "lostDeals": "الصفقات الخاسرة",
-    "avgDealValue": "متوسط قيمة الصفقة"
+    "avgDealValue": "متوسط قيمة الصفقة",
+    "loadDataError": "فشل تحميل البيانات",
+    "top10": "أعلى 10",
+    "deficit": "العجز",
+    "costPrice": "سعر التكلفة",
+    "valueAtRisk": "القيمة المعرضة للخطر",
+    "purchaseOrder": "أمر شراء",
+    "outOfStock": "نفد المخزون",
+    "totalDeficit": "إجمالي العجز",
+    "atRisk": "معرض للخطر",
+    "search": "بحث",
+    "searchProduct": "ابحث عن منتج...",
+    "allWarehouses": "كل المستودعات",
+    "lowStockDetails": "تفاصيل المخزون المنخفض",
+    "filterAll": "الكل",
+    "sortBy": "ترتيب حسب",
+    "sortDir": "اتجاه الترتيب",
+    "desc": "تنازلي",
+    "asc": "تصاعدي",
+    "rows": "صف"
   },
   "settings": {
     "pageTitle": "الإعدادات",
@@ -2751,7 +2982,11 @@
       "deleteConfirm": "حذف",
       "created": "تم إنشاء الفرع بنجاح",
       "updated": "تم تحديث الفرع بنجاح",
-      "deleted": "تم حذف الفرع بنجاح"
+      "deleted": "تم حذف الفرع بنجاح",
+      "updateError": "حدث خطأ أثناء تحديث الفرع",
+      "createError": "حدث خطأ أثناء إنشاء الفرع",
+      "nameRequired": "اسم الفرع مطلوب",
+      "deleteError": "حدث خطأ أثناء حذف الفرع"
     },
     "currencies": {
       "title": "العملات",
@@ -2774,7 +3009,12 @@
       "revalueDate": "تاريخ التقييم",
       "revalueRun": "تشغيل إعادة التقييم",
       "revalueEmpty": "لا توجد فروق صرف مستحقة — الأرصدة مطابقة للأسعار الحالية",
-      "revalueDone": "تم ترحيل {{lines}} بنداً بالقيد {{ref}}"
+      "revalueDone": "تم ترحيل {{lines}} بنداً بالقيد {{ref}}",
+      "saveError": "حدث خطأ أثناء حفظ العملة",
+      "codeAndNameRequired": "رمز العملة واسمها مطلوبان",
+      "codeLength": "رمز العملة يجب أن يكون 3 أحرف",
+      "setDefaultSuccess": "تم تعيين العملة الأساسية بنجاح",
+      "deleteError": "حدث خطأ أثناء حذف العملة"
     },
     "vat": {
       "title": "إعدادات الضريبة",
@@ -2798,7 +3038,14 @@
       "invoiceSettingsSaved": "تم حفظ إعدادات عرض الفواتير",
       "invoiceSettingsHint": "عند الإخفاء، لن تظهر حقول الخصم/الضريبة في الفواتير، ولن تُحتسب في الإجمالي — مناسب للشركات المعفاة أو التي تفضل الفوترة المبسطة.",
       "unifiedRateTitle": "المعدل القياسي الموحّد",
-      "unifiedRateDesc": "المعدل القياسي للفواتير مأخوذ من الدولة المحددة في إعدادات الشركة. لتغييره، غيّر الدولة في إعدادات الشركة."
+      "unifiedRateDesc": "المعدل القياسي للفواتير مأخوذ من الدولة المحددة في إعدادات الشركة. لتغييره، غيّر الدولة في إعدادات الشركة.",
+      "saveError": "حدث خطأ أثناء حفظ الضريبة",
+      "nameRequired": "اسم الضريبة مطلوب",
+      "rateInvalid": "نسبة الضريبة غير صالحة (0-100)",
+      "deleted": "تم حذف نوع الضريبة بنجاح",
+      "deleteError": "حدث خطأ أثناء حذف نوع الضريبة",
+      "account": "الحساب المحاسبي",
+      "disabled": "غير مفعّل"
     },
     "policy": {
       "title": "ضوابط المخزون والخزينة والائتمان",
@@ -2942,7 +3189,16 @@
       "accountant": "محاسب",
       "salesRep": "مندوب مبيعات",
       "hrAdmin": "موارد بشرية",
-      "viewer": "مشاهد فقط"
+      "viewer": "مشاهد فقط",
+      "usernameRequired": "اسم المستخدم مطلوب",
+      "passwordRequired": "كلمة المرور مطلوبة",
+      "saveError": "حدث خطأ أثناء حفظ المستخدم",
+      "cannotDeleteSelf": "لا يمكنك حذف حسابك الخاص",
+      "deleteError": "حدث خطأ أثناء حذف المستخدم",
+      "passwordTooShort": "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+      "passwordInsecure": "كلمة المرور هذه غير آمنة",
+      "passwordWeak": "كلمة المرور يجب أن تحوي حرفاً ورقماً",
+      "passwordReset": "تم إعادة تعيين كلمة المرور بنجاح"
     },
     "roles": "الأدوار والصلاحيات",
     "backup": {
@@ -3041,7 +3297,9 @@
       "close": "إغلاق",
       "print": "طباعة",
       "export": "تصدير",
-      "view": "عرض"
+      "view": "عرض",
+      "notes": "ملاحظات",
+      "saving": "جارٍ الحفظ..."
     },
     "units": {
       "title": "وحدات القياس",
@@ -3059,7 +3317,10 @@
       "codeHeader": "الرمز",
       "created": "تم إنشاء الوحدة بنجاح",
       "updated": "تم تحديث الوحدة بنجاح",
-      "deleted": "تم حذف الوحدة بنجاح"
+      "deleted": "تم حذف الوحدة بنجاح",
+      "nameRequired": "اسم الوحدة مطلوب",
+      "deleteTitle": "حذف الوحدة",
+      "deleteMessage": "هل أنت متأكد من حذف هذه الوحدة؟"
     },
     "sequences": {
       "title": "الترقيم المتسلسل",
@@ -3079,7 +3340,9 @@
       "activate": "تفعيل",
       "created": "تم إنشاء الترقيم بنجاح",
       "updated": "تم تحديث الترقيم بنجاح",
-      "deleted": "تم حذف الترقيم بنجاح"
+      "deleted": "تم حذف الترقيم بنجاح",
+      "updateError": "حدث خطأ أثناء تحديث الترقيم",
+      "previewError": "حدث خطأ أثناء معاينة الرقم"
     },
     "documentTypes": {
       "salesInvoice": "فاتورة مبيعات",
@@ -3137,7 +3400,11 @@
       "usageFinished": "منتج نهائي / تام الإنتاج",
       "usageRaw": "مادة أولية / خام",
       "usageOther": "أخرى",
-      "usageHint": "يحدد ظهور المنتج في قوائم التصنيع (منتج نهائي أو مادة خام)"
+      "usageHint": "يحدد ظهور المنتج في قوائم التصنيع (منتج نهائي أو مادة خام)",
+      "nameRequired": "اسم النوع مطلوب",
+      "updateError": "حدث خطأ أثناء تحديث النوع",
+      "createError": "حدث خطأ أثناء إنشاء النوع",
+      "deleteError": "حدث خطأ أثناء حذف النوع"
     },
     "productCategories": {
       "title": "تصنيفات المنتجات",
@@ -3154,7 +3421,11 @@
       "deleteMessage": "هل أنت متأكد من حذف هذا التصنيف؟ لا يمكن التراجع.",
       "created": "تم إنشاء التصنيف بنجاح",
       "updated": "تم تحديث التصنيف بنجاح",
-      "deleted": "تم حذف التصنيف بنجاح"
+      "deleted": "تم حذف التصنيف بنجاح",
+      "nameRequired": "اسم التصنيف مطلوب",
+      "updateError": "حدث خطأ أثناء تحديث التصنيف",
+      "createError": "حدث خطأ أثناء إنشاء التصنيف",
+      "deleteError": "حدث خطأ أثناء حذف التصنيف"
     },
     "cashBoxes": {
       "title": "النقدية والخزائن",
@@ -3174,7 +3445,11 @@
       "deleteMessage": "هل أنت متأكد من حذف هذا الصندوق؟",
       "created": "تم إنشاء الصندوق بنجاح",
       "updated": "تم تحديث الصندوق بنجاح",
-      "deleted": "تم حذف الصندوق بنجاح"
+      "deleted": "تم حذف الصندوق بنجاح",
+      "nameRequired": "اسم الصندوق مطلوب",
+      "updateError": "حدث خطأ أثناء تحديث الصندوق",
+      "createError": "حدث خطأ أثناء إنشاء الصندوق",
+      "deleteError": "حدث خطأ أثناء حذف الصندوق"
     },
     "costCenters": {
       "title": "مراكز التكلفة",
@@ -3195,7 +3470,14 @@
       "noParent": "بدون (مركز رئيسي)",
       "empty": "لا توجد مراكز تكلفة",
       "created": "تم إنشاء مركز التكلفة بنجاح",
-      "updated": "تم تحديث مركز التكلفة بنجاح"
+      "updated": "تم تحديث مركز التكلفة بنجاح",
+      "nameRequired": "اسم مركز التكلفة مطلوب",
+      "updateError": "حدث خطأ أثناء تحديث مركز التكلفة",
+      "createError": "حدث خطأ أثناء إنشاء مركز التكلفة",
+      "deleted": "تم حذف مركز التكلفة بنجاح",
+      "removeError": "حدث خطأ أثناء حذف مركز التكلفة",
+      "deleteTitle": "حذف مركز التكلفة",
+      "deleteMessage": "هل أنت متأكد من حذف مركز التكلفة؟"
     },
     "defaultAccounts": {
       "title": "الحسابات الافتراضية",
@@ -3212,7 +3494,10 @@
       "templateTrading": "قالب تجاري",
       "templateManufacturing": "قالب تصنيعي",
       "templateServices": "قالب خدمات",
-      "empty": "لا توجد إعدادات"
+      "empty": "لا توجد إعدادات",
+      "updateError": "حدث خطأ أثناء تحديث الحساب الافتراضي",
+      "applied": "تم تطبيق القالب بنجاح",
+      "applyError": "حدث خطأ أثناء تطبيق القالب"
     },
     "reset": {
       "title": "إعادة تهيئة النظام",
@@ -3294,7 +3579,8 @@
       "changePassword": "تغيير كلمة السر",
       "settings": "الإعدادات",
       "logout": "تسجيل الخروج"
-    }
+    },
+    "collapseSidebar": "طي القائمة"
   },
   "common": {
     "loading": "جارٍ التحميل...",
@@ -3323,7 +3609,21 @@
     "close": "إغلاق",
     "usePglite": "استخدام PGlite محلي (دون خادم)",
     "confirm": "تأكيد",
-    "back": "رجوع"
+    "back": "رجوع",
+    "view": "عرض",
+    "preview": "معاينة",
+    "actions": "إجراءات",
+    "all": "الكل",
+    "createdBy": "أنشأ",
+    "saved": "تم الحفظ",
+    "deleted": "تم الحذف",
+    "enabled": "مفعّل",
+    "disabled": "معطّل",
+    "invalidAmount": "قيمة غير صحيحة",
+    "search": "بحث",
+    "more": "المزيد",
+    "excel": "Excel",
+    "pdf": "PDF"
   },
   "pagination": {
     "first": "الأولى",
@@ -3340,7 +3640,8 @@
       "placeholder": "اختر...",
       "search": "بحث...",
       "empty": "لا توجد نتائج",
-      "addNew": "إضافة جديد"
+      "addNew": "إضافة جديد",
+      "searchMore": "ضيّق البحث لرؤية المزيد"
     },
     "customer": {
       "placeholder": "اختر العميل...",
@@ -3915,6 +4216,30 @@
       "byProduct": "حسب المنتج",
       "byPayment": "حسب طريقة الدفع",
       "groupedTable": "الجدول المجمع"
-    }
-  }
+    },
+    "cartLabel": "سلة",
+    "insufficientCash": "المبلغ النقدي غير كافٍ — المطلوب {{required}}"
+  },
+  "all": "الكل",
+  "description": "البيان",
+  "date": "التاريخ",
+  "documentNumber": "رقم المستند",
+  "balance": "الرصيد",
+  "empty": {
+    "description": "لم يتم العثور على أي سجلات في الوقت الحالي",
+    "title": "لا توجد بيانات"
+  },
+  "table": {
+    "exportExcel": "تصدير Excel",
+    "exportPdf": "تصدير PDF",
+    "print": "طباعة",
+    "show": "عرض",
+    "recordsCount": "من {{count}} سجل"
+  },
+  "validation": {
+    "required": "مطلوب",
+    "invalidEmail": "بريد إلكتروني غير صحيح",
+    "invalidPhone": "رقم هاتف غير صحيح"
+  },
+  "notes": "ملاحظات"
 }

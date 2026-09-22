@@ -366,7 +366,7 @@ export const VarianceAnalysisReport: React.FC = () => {
               { label: t('manufacturing.variance.unfavorable'), value: String(unfavorableCount), color: 'text-rose-600 dark:text-rose-400' },
               { label: t('manufacturing.variance.favorable'), value: String(favorableCount), color: 'text-emerald-600 dark:text-emerald-400' },
               { label: t('manufacturing.avgCostPerUnit'), value: formatCurrency(avgVariance), color: 'text-primary-600 dark:text-primary-400' },
-              { label: t('manufacturing.workOrders'), value: String(rows.length), color: 'text-violet-600 dark:text-violet-400' },
+              { label: t('manufacturing.workOrders.title'), value: String(rows.length), color: 'text-violet-600 dark:text-violet-400' },
             ].map((kpi, i) => (
               <Card key={i} className="p-4">
                 <p className="text-xs text-slate-500 dark:text-slate-400">{kpi.label}</p>

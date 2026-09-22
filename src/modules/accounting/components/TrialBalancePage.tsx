@@ -57,7 +57,7 @@ export const TrialBalancePage: React.FC = () => {
       ],
       `TrialBalance_${asOfDate || 'all'}`,
       {
-        title: t('accounting.trialBalance'),
+        title: t('accounting.trialBalance.title'),
         subtitle: `${activeCompany?.name || ''} — ${asOfDate ? formatDate(asOfDate) : t('accounting.all')}`,
         rtl: true,
       },
@@ -93,15 +93,15 @@ export const TrialBalancePage: React.FC = () => {
               <Scale size={22} className="text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('accounting.trialBalance')}</h1>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('accounting.trialBalance.title')}</h1>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {asOfDate ? `${t('accounting.toDate')}: ${formatDate(asOfDate)}` : t('accounting.all')} • {filteredRows.length} حساب
+                {asOfDate ? `${t('accounting.toDate')}: ${formatDate(asOfDate)}` : t('accounting.all')} • {filteredRows.length} {t('accounting.trialBalance.accountUnit')}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             <Button variant="secondary" size="sm" leftIcon={<Calendar size={14} />} onClick={() => setShowFilters(!showFilters)}>
-              {t('filter')}
+              {t('filter.title')}
             </Button>
             <Button variant="secondary" size="sm" leftIcon={<FileDown size={14} />} onClick={handleExportExcel}>
               Excel
@@ -116,7 +116,7 @@ export const TrialBalancePage: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي مدين</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.trialBalance.totalDebit')}</p>
               <p className="text-xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totalDebit)}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -125,7 +125,7 @@ export const TrialBalancePage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي دائن</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.trialBalance.totalCredit')}</p>
               <p className="text-xl font-bold text-rose-600 dark:text-rose-400 tabular-nums">{formatCurrency(totalCredit)}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
@@ -136,12 +136,12 @@ export const TrialBalancePage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 flex items-center gap-1">
                 {isBalanced ? <CheckCircle2 size={12} className="text-emerald-600" /> : <AlertTriangle size={12} className="text-amber-600" />}
-                {isBalanced ? 'متوازن' : 'فرق'}
+                {isBalanced ? t('accounting.trialBalance.balanced') : t('accounting.trialBalance.difference')}
               </p>
               <p className={cn('text-xl font-bold tabular-nums', isBalanced ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')}>{formatCurrency(diff)}</p>
-              <p className="text-xs text-slate-500">{isBalanced ? 'المدين = الدائن' : 'يحتاج مراجعة'}</p>
+              <p className="text-xs text-slate-500">{isBalanced ? t('accounting.trialBalance.balancedHint') : t('accounting.trialBalance.needsReview')}</p>
             </div>
-            <Badge className={cn('text-xs border', isBalanced ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200')}>{isBalanced ? 'متوازن ✓' : 'غير متوازن'}</Badge>
+            <Badge className={cn('text-xs border', isBalanced ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200')}>{isBalanced ? t('accounting.trialBalance.balancedCheck') : t('accounting.trialBalance.unbalanced')}</Badge>
           </Card>
         </div>
 
@@ -153,7 +153,7 @@ export const TrialBalancePage: React.FC = () => {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={`${t('search')} — كود / اسم الحساب`}
+                placeholder={`${t('search')} — ${t('accounting.trialBalance.searchHint')}`}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
               />
               {search && (
@@ -166,7 +166,7 @@ export const TrialBalancePage: React.FC = () => {
               <span className="text-xs text-slate-500 hidden sm:block">{filteredRows.length} من {rows.length}</span>
               {hasFilters && (
                 <Button size="sm" variant="ghost" onClick={() => { setAsOfDate(''); setSearch(''); }}>
-                  مسح الفلترة
+                  {t('accounting.trialBalance.clearFilter')}
                 </Button>
               )}
             </div>
@@ -184,7 +184,7 @@ export const TrialBalancePage: React.FC = () => {
                   onClick={() => preset(r)}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-slate-700 shadow-sm border border-slate-200 dark:border-slate-600 hover:bg-slate-50"
                 >
-                  {r === 'all' ? t('accounting.all') : r === 'today' ? 'اليوم' : r === 'month' ? 'آخر الشهر' : 'آخر السنة'}
+                  {r === 'all' ? t('accounting.all') : r === 'today' ? t('accounting.trialBalance.today') : r === 'month' ? t('accounting.trialBalance.monthEnd') : t('accounting.trialBalance.yearEnd')}
                 </button>
               ))}
             </div>
@@ -237,14 +237,14 @@ export const TrialBalancePage: React.FC = () => {
               {filteredRows.length === 0 && (
                 <tr>
                   <td colSpan={6} className="py-10">
-                    <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? 'لا توجد نتائج' : t('accounting.noData')} description={hasFilters ? 'جرّب تغيير البحث أو التاريخ' : t('accounting.noData')} />
+                    <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? t('common.noResults') : t('accounting.noData')} description={hasFilters ? t('accounting.trialBalance.tryDifferentSearch') : t('accounting.noData')} />
                   </td>
                 </tr>
               )}
               {filteredRows.length > 0 && (
                 <tr className="bg-slate-900 dark:bg-slate-800 text-white font-bold">
                   <td className="px-4 py-3 text-sm" colSpan={2}>
-                    الإجمالي {hasFilters ? '(مُفلتر)' : ''} — {filteredRows.length} حساب
+                    {t('accounting.trialBalance.total')} {hasFilters ? t('accounting.trialBalance.filtered') : ''} — {filteredRows.length} {t('accounting.trialBalance.accountUnit')}
                   </td>
                   <td className="px-4 py-3 text-sm text-right tabular-nums">{formatCurrency(totalDebit)}</td>
                   <td className="px-4 py-3 text-sm text-right tabular-nums">{formatCurrency(totalCredit)}</td>

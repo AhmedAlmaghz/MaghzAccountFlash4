@@ -130,7 +130,7 @@ export const BalanceSheetReport: React.FC = () => {
   };
 
   const renderRows = (rows: BSRow[]) => {
-    if (!rows.length) return <div className="py-8"><EmptyState icon="inbox" title={t('accounting.noData')} description="لا توجد أرصدة في هذا البند" /></div>;
+    if (!rows.length) return <div className="py-8"><EmptyState icon="inbox" title={t('accounting.noData')} description={t('accounting.balanceSheet.noBalances')} /></div>;
     return (
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {rows.map((row, idx) => {
@@ -178,13 +178,13 @@ export const BalanceSheetReport: React.FC = () => {
             <div>
               <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">{t('accounting.balanceSheet.title')}</h1>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {asOfDate ? `${t('accounting.date')}: ${formatDate(asOfDate)}` : `${t('accounting.date')}: ${t('accounting.balanceSheet.today')}`} • المعادلة: الأصول = الالتزامات + حقوق الملكية
+                {asOfDate ? `${t('accounting.date')}: ${formatDate(asOfDate)}` : `${t('accounting.date')}: ${t('accounting.balanceSheet.today')}`} • {t('accounting.balanceSheet.equationHint')}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             <Button variant="secondary" size="sm" leftIcon={<Calendar size={14} />} onClick={() => setShowFilters(!showFilters)}>
-              {t('filter')}
+              {t('filter.title')}
             </Button>
             <Button variant="secondary" size="sm" leftIcon={<FileDown size={14} />} onClick={handleExportExcel}>
               Excel
@@ -201,7 +201,7 @@ export const BalanceSheetReport: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.balanceSheet.assets')}</p>
               <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(totals.a)}</p>
-              <p className="text-xs text-slate-500">{assets.filter((r) => !r.isTotal).length} حساب</p>
+              <p className="text-xs text-slate-500">{assets.filter((r) => !r.isTotal).length} {t('accounting.balanceSheet.accountUnit')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
               <Wallet size={18} className="text-emerald-600" />
@@ -209,7 +209,7 @@ export const BalanceSheetReport: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الالتزامات + حقوق الملكية</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.balanceSheet.liabilitiesAndEquity')}</p>
               <p className="text-xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totals.le)}</p>
               <p className="text-xs text-slate-500">
                 {formatCurrency(totals.l)} + {formatCurrency(totals.e)}
@@ -223,12 +223,12 @@ export const BalanceSheetReport: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 flex items-center gap-1">
                 {totals.balanced ? <CheckCircle2 size={12} className="text-emerald-600" /> : <AlertTriangle size={12} className="text-amber-600" />}
-                حالة الميزانية
+                {t('accounting.balanceSheet.statusTitle')}
               </p>
-              <p className={cn('text-lg font-bold tabular-nums', totals.balanced ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')}>{totals.balanced ? 'متوازنة ✓' : `فرق ${formatCurrency(totals.diff)}`}</p>
-              <p className="text-xs text-slate-500">{totals.balanced ? 'الأصول = الالتزامات + حقوق الملكية' : 'تحتاج مراجعة قيود'}</p>
+              <p className={cn('text-lg font-bold tabular-nums', totals.balanced ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')}>{totals.balanced ? t('accounting.balanceSheet.balancedCheck') : `${t('accounting.balanceSheet.difference')} ${formatCurrency(totals.diff)}`}</p>
+              <p className="text-xs text-slate-500">{totals.balanced ? t('accounting.balanceSheet.balancedEquation') : t('accounting.balanceSheet.needsReview')}</p>
             </div>
-            <Badge className={cn('border', totals.balanced ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200')}>{totals.balanced ? 'متوازنة' : 'غير متوازنة'}</Badge>
+            <Badge className={cn('border', totals.balanced ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200')}>{totals.balanced ? t('accounting.balanceSheet.balanced') : t('accounting.balanceSheet.unbalanced')}</Badge>
           </Card>
         </div>
       </div>
@@ -250,7 +250,7 @@ export const BalanceSheetReport: React.FC = () => {
                   }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-slate-700 shadow-sm border"
                 >
-                  {p === 'today' ? 'اليوم' : p === 'month' ? 'آخر الشهر' : 'آخر السنة'}
+                  {p === 'today' ? t('accounting.balanceSheet.today') : p === 'month' ? t('accounting.balanceSheet.monthEnd') : t('accounting.balanceSheet.yearEnd')}
                 </button>
               ))}
             </div>
@@ -294,13 +294,13 @@ export const BalanceSheetReport: React.FC = () => {
           </Card>
           <Card className="p-4 bg-slate-900 dark:bg-slate-800 text-white">
             <div className="flex justify-between items-center">
-              <span className="font-bold">المجموع (التزامات + حقوق ملكية)</span>
+              <span className="font-bold">{t('accounting.balanceSheet.totalLiabilitiesEquity')}</span>
               <span className="font-bold tabular-nums text-lg">{formatCurrency(totals.le)}</span>
             </div>
             <div className="mt-2 h-px bg-white/10" />
             <div className="mt-2 flex justify-between text-sm text-slate-300">
-              <span>المقارنة بالأصول</span>
-              <span className={cn('font-mono', totals.balanced ? 'text-emerald-400' : 'text-amber-400')}>{totals.balanced ? 'متوازنة' : `فرق ${formatCurrency(totals.diff)}`}</span>
+              <span>{t('accounting.balanceSheet.compareWithAssets')}</span>
+              <span className={cn('font-mono', totals.balanced ? 'text-emerald-400' : 'text-amber-400')}>{totals.balanced ? t('accounting.balanceSheet.balanced') : `${t('accounting.balanceSheet.difference')} ${formatCurrency(totals.diff)}`}</span>
             </div>
           </Card>
         </div>

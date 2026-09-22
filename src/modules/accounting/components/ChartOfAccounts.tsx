@@ -203,7 +203,7 @@ const AccountRow: React.FC<TreeRowProps> = ({ account, level, expandedIds, toggl
           </span>
           <span className="font-medium text-sm text-slate-900 dark:text-slate-100 truncate">{account.nameAr}</span>
           {account.nameEn && <span className="text-xs text-slate-400 truncate hidden sm:inline">({account.nameEn})</span>}
-          {account.isGroup && <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] hidden sm:inline-flex">مجموعة</Badge>}
+          {account.isGroup && <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] hidden sm:inline-flex">{t('accounting.chart.groups')}</Badge>}
         </div>
 
         <div className="hidden lg:flex items-center gap-2 shrink-0">
@@ -340,14 +340,14 @@ export const ChartOfAccounts: React.FC = () => {
     const e: Record<string, string> = {};
     if (!formData.code?.trim()) e.code = t('validation.required') || 'مطلوب';
     if (!formData.nameAr?.trim()) e.nameAr = t('validation.required') || 'مطلوب';
-    if (formData.code && flatList.some((a) => a.code === formData.code && a.id !== editingId)) e.code = 'الرمز مكرر';
+      if (formData.code && flatList.some((a) => a.code === formData.code && a.id !== editingId)) e.code = t('accounting.chart.codeDuplicate');
     setFormErrors(e);
     return Object.keys(e).length === 0;
   }, [formData, flatList, editingId, t]);
 
   const handleSave = async () => {
     if (!activeCompany || !validate()) {
-      if (!validate()) addToast('error', 'يرجى تصحيح الحقول المطلوبة');
+      if (!validate()) addToast('error', t('accounting.chart.fixFields'));
       return;
     }
     const inputName = (formData.nameAr || '').trim() || (formData.nameEn || '').trim();
@@ -467,7 +467,7 @@ export const ChartOfAccounts: React.FC = () => {
       nameEn: a.nameEn || '',
       type: t(TYPE_META[a.type]?.labelKey || a.type),
       nature: a.nature === 'debit' ? t('accounting.debit') : t('accounting.credit'),
-      isGroup: a.isGroup ? 'مجموعة' : 'حساب',
+      isGroup: a.isGroup ? t('accounting.chart.groups') : t('accounting.chart.accountLabel'),
       isActive: a.isActive ? t('settings.common.active') : t('settings.common.inactive'),
       balance: Number(a.balance) || 0,
     }));
@@ -476,7 +476,7 @@ export const ChartOfAccounts: React.FC = () => {
       [
         { key: 'code', header: t('accounting.accountCode'), width: 12 },
         { key: 'nameAr', header: t('accounting.accountName'), width: 28 },
-        { key: 'nameEn', header: 'Name EN', width: 20 },
+        { key: 'nameEn', header: t('accounting.chart.nameEn'), width: 20 },
         { key: 'type', header: t('accounting.accountType'), width: 14 },
         { key: 'nature', header: t('accounting.nature'), width: 10 },
         { key: 'isGroup', header: t('accounting.isGroup'), width: 10 },
@@ -575,9 +575,9 @@ export const ChartOfAccounts: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي الحسابات</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.chart.totalAccounts')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stats.total}</p>
-              <p className="text-xs text-slate-500">{stats.groups} مجموعة • {stats.total - stats.groups} حساب فرعي</p>
+              <p className="text-xs text-slate-500">{stats.groups} {t('accounting.chart.groups')} • {stats.total - stats.groups} {t('accounting.chart.subAccounts')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
               <Hash size={18} className="text-slate-600" />
@@ -585,9 +585,9 @@ export const ChartOfAccounts: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">النشطة</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.chart.activeAccounts')}</p>
               <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.active}</p>
-              <p className="text-xs text-slate-500">{stats.total - stats.active} موقوف</p>
+              <p className="text-xs text-slate-500">{stats.total - stats.active} {t('accounting.chart.suspended')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
               <CheckCircle2 size={18} className="text-emerald-600" />
@@ -595,7 +595,7 @@ export const ChartOfAccounts: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي مدين</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.chart.totalDebit')}</p>
               <p className="text-lg font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(stats.debitTotal)}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -604,7 +604,7 @@ export const ChartOfAccounts: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي دائن</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.chart.totalCredit')}</p>
               <p className="text-lg font-bold text-rose-600 dark:text-rose-400 tabular-nums">{formatCurrency(stats.creditTotal)}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
@@ -621,7 +621,7 @@ export const ChartOfAccounts: React.FC = () => {
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`${t('accounting.searchAccounts')} — كود / اسم عربي / إنجليزي`}
+                placeholder={`${t('accounting.searchAccounts')} — ${t('accounting.chart.searchHint')}`}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition"
               />
               {searchQuery && (
@@ -634,7 +634,7 @@ export const ChartOfAccounts: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <Filter size={14} className="text-slate-400 hidden sm:block" />
                 <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20">
-                  <option value="">{t('accounting.accountType')} — الكل</option>
+                  <option value="">{t('accounting.accountType')} — {t('common.all')}</option>
                   <option value="asset">{t('accounting.asset')}</option>
                   <option value="liability">{t('accounting.liability')}</option>
                   <option value="equity">{t('accounting.equity')}</option>
@@ -642,30 +642,30 @@ export const ChartOfAccounts: React.FC = () => {
                   <option value="expense">{t('accounting.expense')}</option>
                 </select>
                 <select value={natureFilter} onChange={(e) => setNatureFilter(e.target.value)} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20">
-                  <option value="">الطبيعة — الكل</option>
+                  <option value="">{t('accounting.nature')} — {t('common.all')}</option>
                   <option value="debit">{t('accounting.debit')}</option>
                   <option value="credit">{t('accounting.credit')}</option>
                 </select>
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20">
-                  <option value="">الحالة — الكل</option>
+                  <option value="">{t('accounting.status')} — {t('common.all')}</option>
                   <option value="active">{t('accounting.active')}</option>
                   <option value="inactive">{t('accounting.inactive')}</option>
                 </select>
               </div>
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
               <Button size="sm" variant="secondary" onClick={expandAll} leftIcon={<ChevronDown size={14} />}>
-                توسيع الكل
+                {t('accounting.chart.expandAll')}
               </Button>
               <Button size="sm" variant="secondary" onClick={collapseAll} leftIcon={<ChevronUp size={14} />}>
-                طي الكل
+                {t('accounting.chart.collapseAll')}
               </Button>
             </div>
           </div>
           {hasFilters && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-              <span>{filteredAccounts.length} مجموعة ظاهر • {flatList.length} إجمالي</span>
+              <span>{filteredAccounts.length} {t('accounting.chart.visibleGroups')} • {flatList.length} {t('accounting.chart.totalItems')}</span>
               <button onClick={() => { setSearchQuery(''); setTypeFilter(''); setNatureFilter(''); setStatusFilter(''); }} className="text-primary-600 hover:underline font-medium">
-                مسح الفلترة
+                {t('sales.filter.clearFilters')}
               </button>
             </div>
           )}
@@ -677,15 +677,15 @@ export const ChartOfAccounts: React.FC = () => {
         <div className="hidden md:flex items-center gap-2 px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold tracking-wider uppercase text-slate-500">
           <div style={{ width: flatList.length ? 20 * 1 : 0 }} className="shrink-0" />
           <div className="w-6 shrink-0" />
-          <div className="w-[110px] shrink-0">الكود</div>
-          <div className="flex-1">الحساب</div>
+          <div className="w-[110px] shrink-0">{t('accounting.chart.codeHeader')}</div>
+          <div className="flex-1">{t('accounting.chart.accountHeader')}</div>
           <div className="w-[340px] hidden lg:flex justify-end gap-2">
-            <span className="w-[110px] text-center">النوع</span>
+            <span className="w-[110px] text-center">{t('accounting.chart.typeHeader')}</span>
             <span className="w-[70px] text-center">الطبيعة</span>
             <span className="w-[70px] text-center">الحالة</span>
           </div>
           <div className="w-[140px] text-end">الرصيد</div>
-          <div className="w-[90px] text-center">إجراءات</div>
+          <div className="w-[90px] text-center">{t('common.actions')}</div>
         </div>
 
         <div className="divide-y divide-slate-100 dark:divide-slate-800/50">
@@ -706,13 +706,13 @@ export const ChartOfAccounts: React.FC = () => {
             <div className="py-10">
               <EmptyState
                 icon={hasFilters ? 'search' : 'inbox'}
-                title={hasFilters ? 'لا توجد نتائج' : t('accounting.noData')}
-                description={hasFilters ? 'جرّب تغيير البحث أو الفلترة' : 'أنشئ أول حساب في شجرة الحسابات'}
+                title={hasFilters ? t('common.noResults') : t('accounting.noData')}
+                description={hasFilters ? t('accounting.chart.tryDifferentSearch') : t('accounting.chart.createHint')}
                 action={
                   hasFilters ? (
-                    <Button variant="secondary" onClick={() => { setSearchQuery(''); setTypeFilter(''); setNatureFilter(''); setStatusFilter(''); }}>
-                      مسح الفلترة
-                    </Button>
+                <Button variant="secondary" onClick={() => { setSearchQuery(''); setTypeFilter(''); setNatureFilter(''); setStatusFilter(''); }}>
+                {t('sales.filter.clearFilters')}
+                </Button>
                   ) : (
                     <Can action="create" module="accounting">
                       <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsModalOpen(true); }}>
@@ -732,12 +732,12 @@ export const ChartOfAccounts: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => { setIsModalOpen(false); resetForm(); }}
         title={isEditMode ? t('accounting.editAccount') : t('accounting.addAccount')}
-        description={isEditMode ? 'تعديل بيانات الحساب — يراعي التسلسل الهرمي' : 'اختر الحساب الأب واكتب الاسم — الكود والنوع والطبيعة تُولَّد تلقائياً'}
+        description={isEditMode ? t('accounting.chart.editDesc') : t('accounting.chart.createDesc')}
         size="lg"
         footer={
           <div className="flex items-center justify-between w-full">
             <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
-              <AlertCircle size={12} /> الحقول المميزة بـ * مطلوبة
+              <AlertCircle size={12} /> {t('accounting.chart.requiredFields')}
             </p>
             <div className="flex gap-2 ml-auto">
               <Button variant="secondary" onClick={() => { setIsModalOpen(false); resetForm(); }}>
@@ -753,7 +753,7 @@ export const ChartOfAccounts: React.FC = () => {
         <div className="space-y-5">
           <div>
             <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Hash size={12} /> البيانات الأساسية
+              <Hash size={12} /> {t('accounting.chart.sectionBasic')}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
@@ -783,11 +783,11 @@ export const ChartOfAccounts: React.FC = () => {
                 )}
               </div>
               <div className="sm:col-span-2">
-                <Input label={`${t('accounting.accountName')} (${t('accounting.arabic')}) *`} value={formData.nameAr || ''} onChange={(e) => setFormData((p) => ({ ...p, nameAr: e.target.value }))} placeholder="الصندوق" error={formErrors.nameAr} required />
+                <Input label={`${t('accounting.accountName')} (${t('accounting.arabic')}) *`} value={formData.nameAr || ''} onChange={(e) => setFormData((p) => ({ ...p, nameAr: e.target.value }))} placeholder={t('accounting.chart.nameArPlaceholder')} error={formErrors.nameAr} required />
               </div>
             </div>
             <div className="mt-4">
-              <Input label={`${t('accounting.accountName')} (${t('accounting.english')})`} value={formData.nameEn || ''} onChange={(e) => setFormData((p) => ({ ...p, nameEn: e.target.value }))} placeholder="Cash on Hand" dir="ltr" />
+              <Input label={`${t('accounting.accountName')} (${t('accounting.english')})`} value={formData.nameEn || ''} onChange={(e) => setFormData((p) => ({ ...p, nameEn: e.target.value }))} placeholder={t('accounting.chart.nameEnPlaceholder')} dir="ltr" />
             </div>
           </div>
 
@@ -908,7 +908,7 @@ export const ChartOfAccounts: React.FC = () => {
           <div className="h-px bg-slate-100 dark:bg-slate-800" />
 
           <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3">الخصائص</h4>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3">{t('accounting.chart.properties')}</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition">
                 <input type="checkbox" checked={!!formData.isGroup} onChange={(e) => setFormData((p) => ({ ...p, isGroup: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
@@ -918,7 +918,7 @@ export const ChartOfAccounts: React.FC = () => {
                   </p>
                   <p className="text-xs text-slate-500">{t('accounting.form.groupHint')}</p>
                 </div>
-                {formData.isGroup && <span className="ml-auto text-xs px-2 py-1 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-200">مجموعة</span>}
+                {formData.isGroup && <span className="ml-auto text-xs px-2 py-1 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-200">{t('accounting.chart.groups')}</span>}
               </label>
               <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition">
                 <input type="checkbox" checked={formData.isActive ?? true} onChange={(e) => setFormData((p) => ({ ...p, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
@@ -926,9 +926,9 @@ export const ChartOfAccounts: React.FC = () => {
                   <p className="text-sm font-medium text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                     <Eye size={14} /> {t('accounting.active')}
                   </p>
-                  <p className="text-xs text-slate-500">{formData.isActive ?? true ? 'نشط ويمكن التعامل معه' : 'موقوف مؤقتاً'}</p>
+                  <p className="text-xs text-slate-500">{formData.isActive ?? true ? t('accounting.chart.activeHint') : t('accounting.chart.inactiveHint')}</p>
                 </div>
-                <span className={cn('ml-auto text-xs px-2 py-1 rounded-full border', formData.isActive ?? true ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300')}>{formData.isActive ?? true ? 'نشط' : 'موقوف'}</span>
+                <span className={cn('ml-auto text-xs px-2 py-1 rounded-full border', formData.isActive ?? true ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300')}>{formData.isActive ?? true ? t('settings.common.active') : t('settings.common.inactive')}</span>
               </label>
             </div>
           </div>

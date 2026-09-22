@@ -140,15 +140,15 @@ export const StockPage: React.FC = () => {
   const handleCreateTransfer = async () => {
     if (!activeCompany) return;
     if (!transferForm.productId || !transferForm.fromWarehouseId || !transferForm.toWarehouseId) {
-      addToast('error', 'الرجاء إكمال جميع الحقول المطلوبة');
+      addToast('error', t('inventory.stock.completeFields'));
       return;
     }
     if (transferForm.fromWarehouseId === transferForm.toWarehouseId) {
-      addToast('error', 'مستودع المصدر والوجهة يجب أن يكونا مختلفين');
+      addToast('error', t('inventory.stock.differentWarehouses'));
       return;
     }
     if (!transferForm.quantity || Number(transferForm.quantity) <= 0) {
-      addToast('error', 'الكمية يجب أن تكون أكبر من صفر');
+      addToast('error', t('inventory.stock.positiveQty'));
       return;
     }
     setSaving(true);
@@ -203,7 +203,7 @@ export const StockPage: React.FC = () => {
       [
         { key: 'productCode', header: t('inventory.productCode'), width: 12 },
         { key: 'productName', header: t('inventory.productName'), width: 28 },
-        { key: 'warehouseName', header: t('inventory.warehouse'), width: 18 },
+        { key: 'warehouseName', header: t('inventory.warehouse.label'), width: 18 },
         { key: 'quantity', header: t('inventory.quantity'), width: 10 },
         { key: 'minStockAlert', header: t('inventory.minStock'), width: 12 },
         { key: 'costPrice', header: t('inventory.costPrice'), width: 12 },
@@ -223,11 +223,11 @@ export const StockPage: React.FC = () => {
       [
         { key: 'productCode', header: t('inventory.productCode') },
         { key: 'productName', header: t('inventory.productName') },
-        { key: 'warehouseName', header: t('inventory.warehouse') },
+        { key: 'warehouseName', header: t('inventory.warehouse.label') },
         { key: 'quantity', header: t('inventory.quantity') },
       ],
       `stock_${new Date().toISOString().split('T')[0]}`,
-      { title: t('inventory.stock'), rtl: true, companyName: activeCompany?.name },
+      { title: t('inventory.stock.title'), rtl: true, companyName: activeCompany?.name },
     );
   };
 
@@ -254,7 +254,7 @@ export const StockPage: React.FC = () => {
     },
     {
       key: 'warehouseName',
-      header: t('inventory.warehouse'),
+      header: t('inventory.warehouse.label'),
       width: '150px',
       mobile: 'subtitle' as const,
       render: (row: StockItem) => row.warehouseName ? (
@@ -372,7 +372,7 @@ export const StockPage: React.FC = () => {
       <div className="flex flex-col gap-4">
         <PageHeader
           icon={<Boxes size={22} />}
-          title={t('inventory.stock')}
+          title={t('inventory.stock.title')}
           subtitle={t('inventory.stockByWarehouse')}
           actions={
             <div className="flex items-center gap-2 flex-wrap">

@@ -7,6 +7,9 @@ import { usePermission } from '@/modules/auth/hooks/usePermission';
 import { aiApi } from '../api';
 import { PROVIDER_PRESETS } from '../api/providers';
 import type { AiPublicConfig } from '../types';
+import { getJevConfig, setJevSetting, JEV_DEFAULT_MODEL, JEV_SETTINGS_KEYS } from '../jev/jevConfig';
+import { jevHealthCheck } from '../jev/jevClient';
+import { getJevMetricsSummary } from '../jev/jevMetrics';
 import { Button } from '@/core/ui/components/Button';
 import { Card, CardTitle, CardDescription } from '@/core/ui/components/Card';
 import { Input } from '@/core/ui/components/Input';
@@ -54,6 +57,19 @@ export default function AiSettingsPage() {
   const [fbRevokeArmed, setFbRevokeArmed] = useState(false);
   const [revokingFb, setRevokingFb] = useState(false);
 
+  // JEV — System One
+  const [jevEnabled, setJevEnabled] = useState(false);
+  const [jevApiKey, setJevApiKey] = useState('');
+  const [jevModel, setJevModel] = useState(JEV_DEFAULT_MODEL);
+  const [jevRouterEnabled, setJevRouterEnabled] = useState(true);
+  const [jevGuardEnabled, setJevGuardEnabled] = useState(false);
+  const [jevHasKey, setJevHasKey] = useState(false);
+  const [jevMaskedKey, setJevMaskedKey] = useState<string | null>(null);
+  const [jevTesting, setJevTesting] = useState(false);
+  const [jevTestResult, setJevTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [jevSaving, setJevSaving] = useState(false);
+  const [jevMetricsTick, setJevMetricsTick] = useState(0);
+
   // Load config
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +89,17 @@ export default function AiSettingsPage() {
         setFbBaseUrl(res.data.fallbackBaseUrl || '');
         setFbModel(res.data.fallbackModel || '');
       }
+      // JEV config — per-company
+      try {
+        const jev = await getJevConfig(company.id);
+        if (cancelled) return;
+        setJevEnabled(jev.enabled);
+        setJevModel(jev.model || JEV_DEFAULT_MODEL);
+        setJevRouterEnabled(jev.routerEnabled);
+        setJevGuardEnabled(jev.guardEnabled);
+        setJevHasKey(!!jev.apiKey);
+        setJevMaskedKey(jev.apiKey ? `${jev.apiKey.slice(0, 6)}****${jev.apiKey.slice(-4)}` : null);
+      } catch { /* ignore */ }
       setLoading(false);
     }
     load();
@@ -233,6 +260,78 @@ export default function AiSettingsPage() {
       setRevokingFb(false);
     }
   }, [company?.id, fbRevokeArmed, addToast, t]);
+
+  const handleJevSave = useCallback(async () => {
+    if (!company?.id) return;
+    setJevSaving(true);
+    try {
+      const ops: Promise<{ success: boolean; error?: string }>[] = [];
+      ops.push(setJevSetting(company.id, JEV_SETTINGS_KEYS.enabled, jevEnabled ? 'true' : 'false'));
+      ops.push(setJevSetting(company.id, JEV_SETTINGS_KEYS.routerEnabled, jevRouterEnabled ? 'true' : 'false'));
+      ops.push(setJevSetting(company.id, JEV_SETTINGS_KEYS.guardEnabled, jevGuardEnabled ? 'true' : 'false'));
+      ops.push(setJevSetting(company.id, JEV_SETTINGS_KEYS.model, jevModel || JEV_DEFAULT_MODEL));
+      if (jevApiKey.trim()) {
+        ops.push(setJevSetting(company.id, JEV_SETTINGS_KEYS.apiKey, jevApiKey.trim()));
+      }
+      const results = await Promise.all(ops);
+      const failed = results.find((r) => !r.success);
+      if (failed) {
+        addToast('error', failed.error || t('ai.errors.generic'));
+      } else {
+        addToast('success', t('ai.settings.saved'));
+        setJevApiKey('');
+        // refresh masked
+        const jev = await getJevConfig(company.id);
+        setJevHasKey(!!jev.apiKey);
+        setJevMaskedKey(jev.apiKey ? `${jev.apiKey.slice(0, 6)}****${jev.apiKey.slice(-4)}` : null);
+        setJevMetricsTick((x) => x + 1);
+      }
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : t('ai.errors.generic'));
+    } finally {
+      setJevSaving(false);
+    }
+  }, [company?.id, jevEnabled, jevRouterEnabled, jevGuardEnabled, jevModel, jevApiKey, addToast, t]);
+
+  const handleJevTest = useCallback(async () => {
+    if (!company?.id) return;
+    setJevTesting(true);
+    setJevTestResult(null);
+    try {
+      // If user typed a new key but didn't save yet, test with that key transiently
+      // by saving it temporarily? For now test with stored key.
+      if (jevApiKey.trim()) {
+        // Quick inline test with typed key without persisting
+        const { TypeSafeClient } = await import('@typesafe-ai/sdk');
+        const c = new TypeSafeClient({ apiKey: jevApiKey.trim(), timeout: 6000, dangerouslyAllowBrowser: true });
+        const start = Date.now();
+        const res = await c.systemOne({
+          state: 'ping',
+          questions: { ping: { type: 'noul', instructions: 'Is the state exactly "ping"?' } },
+        });
+        const ms = Date.now() - start;
+        setJevTestResult({ ok: true, message: `${t('ai.settings.jevTestSuccess')} — ${res.model} ${ms}ms` });
+      } else {
+        const res = await jevHealthCheck(company.id);
+        if (res.ok) setJevTestResult({ ok: true, message: `${t('ai.settings.jevTestSuccess')} — ${res.model} ${res.latencyMs}ms` });
+        else setJevTestResult({ ok: false, message: res.error || t('ai.settings.jevTestFailed') });
+      }
+    } catch (err) {
+      setJevTestResult({ ok: false, message: err instanceof Error ? err.message : t('ai.settings.jevTestFailed') });
+    } finally {
+      setJevTesting(false);
+    }
+  }, [company?.id, jevApiKey, t]);
+
+  const handleJevRevoke = useCallback(async () => {
+    if (!company?.id) return;
+    const res = await setJevSetting(company.id, JEV_SETTINGS_KEYS.apiKey, null);
+    if (res.success) {
+      addToast('success', t('ai.settings.revoked'));
+      setJevHasKey(false);
+      setJevMaskedKey(null);
+    } else addToast('error', res.error || t('ai.settings.revokeFailed'));
+  }, [company?.id, addToast, t]);
 
   if (!canConfigure) {
     return (
@@ -476,6 +575,90 @@ export default function AiSettingsPage() {
           >
             {testResult.ok ? <Wifi size={14} className="inline ms-1 -mt-0.5" /> : <WifiOff size={14} className="inline ms-1 -mt-0.5" />}
             {testResult.message}
+          </div>
+        )}
+      </Card>
+
+      {/* JEV — System One (TypeSafe) */}
+      <Card>
+        <CardTitle>{t('ai.settings.jevTitle')}</CardTitle>
+        <CardDescription>{t('ai.settings.jevSubtitle')}</CardDescription>
+        <div className="space-y-4 mt-4">
+          <label className="flex items-center gap-3 cursor-pointer select-none" onClick={(e) => { e.preventDefault(); setJevEnabled(!jevEnabled); }}>
+            <div role="switch" aria-checked={jevEnabled} className={cn('relative w-11 h-6 rounded-full transition-colors shrink-0', jevEnabled ? 'bg-primary-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
+              <div className={cn('absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all', jevEnabled ? 'start-6' : 'start-1')} />
+            </div>
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.jevEnabled')}</span>
+          </label>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 -mt-2 ms-14">{t('ai.settings.jevEnabledHint')}</p>
+
+          <div className="relative">
+            <Input
+              label={t('ai.settings.jevApiKey')}
+              type={showKey ? 'text' : 'password'}
+              value={jevApiKey}
+              onChange={(e) => setJevApiKey(e.target.value)}
+              placeholder={t('ai.settings.jevApiKeyPlaceholder')}
+              rightIcon={
+                <button type="button" onClick={() => setShowKey(!showKey)} className="pointer-events-auto cursor-pointer text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors" aria-label={showKey ? t('ai.settings.hideApiKey') : t('ai.settings.showApiKey')}>
+                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              }
+            />
+            {jevHasKey && !jevApiKey && (
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{t('ai.settings.apiKeySet', { key: jevMaskedKey || '****' })}</p>
+            )}
+          </div>
+
+          <Input label={t('ai.settings.jevModel')} value={jevModel} onChange={(e) => setJevModel(e.target.value)} placeholder={t('ai.settings.jevModelPlaceholder')} />
+
+          <label className="flex items-center gap-3 cursor-pointer select-none" onClick={(e) => { e.preventDefault(); setJevRouterEnabled(!jevRouterEnabled); }}>
+            <div role="switch" aria-checked={jevRouterEnabled} className={cn('relative w-11 h-6 rounded-full transition-colors shrink-0', jevRouterEnabled ? 'bg-primary-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
+              <div className={cn('absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all', jevRouterEnabled ? 'start-6' : 'start-1')} />
+            </div>
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.jevRouterEnabled')}</span>
+          </label>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 -mt-2 ms-14">{t('ai.settings.jevRouterHint')}</p>
+
+          <label className="flex items-center gap-3 cursor-pointer select-none" onClick={(e) => { e.preventDefault(); setJevGuardEnabled(!jevGuardEnabled); }}>
+            <div role="switch" aria-checked={jevGuardEnabled} className={cn('relative w-11 h-6 rounded-full transition-colors shrink-0', jevGuardEnabled ? 'bg-primary-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
+              <div className={cn('absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all', jevGuardEnabled ? 'start-6' : 'start-1')} />
+            </div>
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.jevGuardEnabled')}</span>
+          </label>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 -mt-2 ms-14">{t('ai.settings.jevGuardHint')}</p>
+
+          {jevHasKey && (
+            <Button variant="outline" onClick={handleJevRevoke}>{t('ai.settings.revokeKey')}</Button>
+          )}
+
+          {/* Metrics */}
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-3 bg-zinc-50 dark:bg-zinc-800/50">
+            <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('ai.settings.jevMetricsTitle')}</div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{t('ai.settings.jevMetricsHint')}</p>
+            {(() => {
+              void jevMetricsTick;
+              const s = getJevMetricsSummary();
+              if (s.totalCalls === 0) return <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">{t('ai.settings.jevNoMetrics')}</p>;
+              return (
+                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div><span className="text-zinc-500">calls</span><div className="font-mono font-semibold">{s.totalCalls} (jev {s.jevCalls})</div></div>
+                  <div><span className="text-zinc-500">avg</span><div className="font-mono font-semibold">{s.avgLatencyMs != null ? `${s.avgLatencyMs.toFixed(0)}ms` : '—'}</div></div>
+                  <div><span className="text-zinc-500">p95</span><div className="font-mono font-semibold">{s.p95LatencyMs != null ? `${s.p95LatencyMs.toFixed(0)}ms` : '—'}</div></div>
+                  <div><span className="text-zinc-500">cost</span><div className="font-mono font-semibold">${s.totalCostUsd.toFixed(6)}</div></div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 mt-6 pt-4 border-t border-zinc-200/70 dark:border-zinc-800">
+          <Button variant="primary" onClick={handleJevSave} isLoading={jevSaving} leftIcon={<Save size={16} />}>{t('ai.settings.save')}</Button>
+          <Button variant="outline" onClick={handleJevTest} isLoading={jevTesting} leftIcon={jevTesting ? undefined : <Wifi size={16} />}>{jevTesting ? t('ai.settings.jevTesting') : t('ai.settings.jevTest')}</Button>
+        </div>
+        {jevTestResult && (
+          <div className={cn('mt-3 px-4 py-2.5 rounded-xl text-sm', jevTestResult.ok ? 'bg-success-50 dark:bg-success-900/20 text-success-700 dark:text-success-300 border border-success-200 dark:border-success-800' : 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800')}>
+            {jevTestResult.ok ? <Wifi size={14} className="inline ms-1 -mt-0.5" /> : <WifiOff size={14} className="inline ms-1 -mt-0.5" />}{jevTestResult.message}
           </div>
         )}
       </Card>

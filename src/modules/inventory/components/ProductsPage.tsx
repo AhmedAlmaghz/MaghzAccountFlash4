@@ -407,7 +407,7 @@ export const ProductsPage: React.FC = () => {
         { key: 'isActive', header: t('inventory.status') },
       ],
       `products_${new Date().toISOString().split('T')[0]}`,
-      { title: t('inventory.products'), rtl: true, companyName: activeCompany?.name },
+      { title: t('inventory.products.title'), rtl: true, companyName: activeCompany?.name },
     );
   };
 
@@ -514,7 +514,7 @@ export const ProductsPage: React.FC = () => {
       {/* Page Header */}
       <PageHeader
         icon={<Package size={22} />}
-        title={t('inventory.products')}
+        title={t('inventory.products.title')}
         subtitle={t('inventory.page.subtitle')}
         actions={
           <Can action="create" module="inventory">
@@ -940,7 +940,7 @@ export const ProductsPage: React.FC = () => {
           void handleSave();
         }}
         inputName={duplicateInputName}
-        entityLabel={t('inventory.products')}
+        entityLabel={t('inventory.products.title')}
         exactMatch={duplicateExact}
         nearMatches={duplicateNear}
         isEdit={!!editingId}

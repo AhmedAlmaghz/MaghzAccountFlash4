@@ -143,11 +143,11 @@ export const StockMovementReport: React.FC = () => {
       setTopProducts(mapRows<TopProduct>(topResult.rows));
       setProducts(mapRows<ProductOption>(productsResult.rows));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      setError(err instanceof Error ? err.message : t('reports.loadDataError'));
     } finally {
       setIsLoading(false);
     }
-  }, [companyId, dateFrom, dateTo, productFilter]);
+  }, [companyId, dateFrom, dateTo, productFilter, t]);
 
   useEffect(() => {
     loadData();

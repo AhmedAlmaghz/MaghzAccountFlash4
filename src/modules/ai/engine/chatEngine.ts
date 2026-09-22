@@ -5,6 +5,9 @@ import { useAiStore } from '../store';
 import { getVisibleTools, toLlmTools } from '../tools/registry';
 import { ensureToolsRegistered } from '../tools/index';
 import { routeToolsForCycle } from './toolRouter';
+import { jevRouteToolsForCycle } from '../jev/jevToolRouter';
+import { recordJevMetric, estimateJevCost } from '../jev/jevMetrics';
+import { jevGuardCheck } from '../jev/jevGuard';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
@@ -471,6 +474,38 @@ class ChatEngine {
         // Entity resolution is best-effort — never block the user's message
       }
       traceSend('entities-done');
+
+      // ── JEV Guard (J2) — prompt injection / PII check on user input ─────
+      // Speculative fan-out Nouls in one JEV call (~100ms). Block is rare
+      // (explicit injection), review is advisory. Never hangs — deadlineOr 2s.
+      try {
+        const guard = await deadlineOr(
+          jevGuardCheck(this.ctx.companyId, userText),
+          2000,
+          null,
+          'jev-guard-input',
+        );
+        if (guard?.jevUsed) {
+          recordJevMetric({
+            at: Date.now(), label: 'guard-input', latencyMs: 120, inputTokens: 180, outputTokens: 0,
+            costUsd: estimateJevCost(180), confidence: guard.scores.injection, jevUsed: true,
+          });
+          if (guard.verdict === 'block') {
+            const blockMsg = '⛔ تم حظر الرسالة تلقائياً: تحتوي على محاولة توجيه للنظام أو بيانات حساسة. أعد صياغتها بدون تعليمات للنظام.';
+            store.addMessage({ role: 'assistant', kind: 'error', content: blockMsg });
+            store.setProcessing(false);
+            traceSend('cycle-end');
+            return;
+          }
+          if (guard.verdict === 'review') {
+            // Advisory — prepend warning chip, but continue
+            store.addMessage({
+              role: 'assistant', kind: 'text',
+              content: `⚠️ تنبيه حراسة: الرسالة تحتوي على محتوى قد يكون توجيهاً للنظام (injection ${guard.scores.injection.toFixed(2)}). سيتم التعامل معها بحذر.`,
+            });
+          }
+        }
+      } catch { /* guard best-effort */ }
 
       // Append the (possibly corrected) user turn to the LLM history. The UI
       // bubble was already stored optimistically at press time above.
@@ -1424,27 +1459,73 @@ class ChatEngine {
    * Intent-routed tool selection for one loop turn: ALWAYS-ON core + domain
    * groups matched against the user's recent messages + tools the model
    * already called (adaptive expansion). Bounded ≤ MAX_ADVERTISED_TOOLS.
+   *
+   * JEV hybrid (Phase J1): tries jevRouteToolsForCycle (calibrated Choice,
+   * ~80ms) first; on miss/timeout/disabled falls back to keyword router.
+   * Never blocks chat — every failure path returns legacy routing.
    */
-  private routeCycleTools(): LlmTool[] {
-    // Intent-routed tool selection: ALWAYS-ON core + domain groups matched
-    // against the user's recent messages + tools the model already called
-    // (adaptive expansion). Bounded ≤ MAX_ADVERTISED_TOOLS — the full
-    // registry (~265 tools) would be rejected by the main-process guard
-    // (cap 128) and by the providers themselves.
+  private async routeCycleToolsAsync(): Promise<LlmTool[]> {
+    const start = Date.now();
+    let jevUsed = false;
+    let jevIntent: string | null = null;
+    let jevConfidence: number | undefined;
+    try {
+      const jevRouted = await jevRouteToolsForCycle(this.ctx.companyId, this.history, this.extraAdvertisedTools);
+      if (jevRouted.jevUsed) {
+        jevUsed = true;
+        jevIntent = String(jevRouted.intent);
+        jevConfidence = jevRouted.confidence;
+        const latencyMs = Date.now() - start;
+        // Estimate tokens: userText ~ 50 + questions ~ 200 tokens
+        const estTokens = 250;
+        recordJevMetric({
+          at: Date.now(),
+          label: 'router',
+          latencyMs,
+          inputTokens: estTokens,
+          outputTokens: 0,
+          costUsd: estimateJevCost(estTokens),
+          confidence: jevConfidence,
+          intent: jevIntent,
+          jevUsed: true,
+        });
+        if (jevRouted.dropped > 0) {
+          console.warn(
+            `[ai][jev] router dropped ${jevRouted.dropped} tools ` +
+            `(intent=${jevRouted.intent} conf=${jevRouted.confidence.toFixed(2)}); advertised=${jevRouted.tools.length}`,
+          );
+        } else if (jevRouted.confidence > 0) {
+          console.info(`[ai][jev] router intent=${jevRouted.intent} conf=${jevRouted.confidence.toFixed(2)} ${latencyMs}ms`);
+        }
+        return toLlmTools(jevRouted.tools);
+      }
+    } catch (e) {
+      console.warn('[ai][jev] router failed, falling back to keyword router', e);
+    }
+    // Fallback — legacy keyword router (always succeeds)
     const routed = routeToolsForCycle(this.history, this.extraAdvertisedTools);
-    const llmTools = toLlmTools(routed.tools);
-    // P1: the cap drop used to be silent — a broad intent could lose the
-    // very tools it routed (sliced by registration order). With relevance
-    // ordering the intent domains survive; log the remainder honestly so a
-    // "model never calls X" report starts from the routing line, not a guess.
+    const latencyMs = Date.now() - start;
+    recordJevMetric({
+      at: Date.now(),
+      label: 'router-fallback',
+      latencyMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      jevUsed: false,
+    });
     if (routed.dropped > 0) {
       console.warn(
-        `[ai] tool-router dropped ${routed.dropped} tools this cycle ` +
+        `[ai] tool-router (fallback) dropped ${routed.dropped} tools this cycle ` +
         `(routedByIntent=${routed.routedByIntent}); advertised=${routed.tools.length}`,
       );
     }
-    return llmTools;
+    // Record that fallback was used (for metrics)
+    if (jevUsed) void jevUsed;
+    return toLlmTools(routed.tools);
   }
+
+
 
   /**
    * Non-streaming provider call shared by the three stream-failure paths
@@ -1722,6 +1803,25 @@ class ChatEngine {
       return;
     }
 
+    // ── JEV draft guard (J2) — check LLM reply for reflected injection ──
+    // Best-effort, never blocks — flags only. Runs in parallel with render.
+    try {
+      const draftGuard = await deadlineOr(
+        jevGuardCheck(this.ctx.companyId, raw.slice(0, 4000)),
+        1500, null, 'jev-guard-draft',
+      );
+      if (draftGuard?.jevUsed && draftGuard.verdict === 'block') {
+        console.warn('[ai][jev] draft guard block', draftGuard.scores);
+        // Don't display raw — show sanitized + warning
+        const sanitized = stripImitationToolBlocks(raw).slice(0, 6000);
+        const warn = '⚠️ تم تنقيح الرد تلقائياً: احتوى على محتوى غير آمن وتمت إزالته.';
+        const safe = `${sanitized}\n\n${warn}`;
+        if (streamedContent && streamingId) this.store().updateMessageContent(streamingId, safe);
+        else this.store().addMessage({ role: 'assistant', kind: 'text', content: safe });
+        return;
+      }
+    } catch { /* guard best-effort */ }
+
     const cleaned = stripImitationToolBlocks(raw);
     if (streamedContent && streamingId) {
       // Streaming already displayed this content in the placeholder
@@ -1930,6 +2030,30 @@ class ChatEngine {
             argsSummary: [pending.argsSummary, ...labels].filter(Boolean).join(' — '),
           });
         }).catch(() => { /* best-effort enrichment */ });
+
+        // J4 — Posting guard enrichment (fire-and-forget, never blocks card)
+        // For high-stakes docs (invoice/voucher/payroll/stock) JEV evaluates
+        // posting risk in ~120ms and appends a badge to the card.
+        const postingTools = new Set([
+          'sales.create_invoice', 'sales.create_and_post_invoice', 'sales.post_invoice',
+          'purchases.create_invoice', 'purchases.create_and_post_invoice', 'purchases.post_invoice',
+          'accounting.create_receipt_voucher', 'accounting.create_payment_voucher',
+          'accounting.create_journal_entry', 'hr.create_payroll_run', 'hr.post_payroll_run',
+        ]);
+        if (postingTools.has(tc.name)) {
+          void import('../jev/jevPostingGuard').then(({ jevPostingGuard, postingBadge }) =>
+            jevPostingGuard(this.ctx.companyId, {
+              docType: tc.name, amount: (tc.arguments as Record<string, unknown>).amount as number | undefined,
+              notes: (tc.arguments as Record<string, unknown>).notes as string | undefined,
+            }).then((g) => {
+              if (!g.jevUsed) return;
+              const badge = postingBadge(g);
+              if (!badge) return;
+              const current = this.store().messages.find((m) => m.id === messageId)?.toolCall?.argsSummary ?? pending.argsSummary ?? '';
+              this.store().updateToolCall(messageId, { argsSummary: [current, badge].filter(Boolean).join(' — ') });
+            }).catch(() => { /* best-effort */ }),
+          );
+        }
       }
 
       // Stop loop — waiting for user confirmation
@@ -1969,7 +2093,7 @@ class ChatEngine {
       this.iterationCount++;
       this.touchProgress();
 
-      const llmTools = this.routeCycleTools();
+      const llmTools = await this.routeCycleToolsAsync();
       const stream = await this.drainStreaming(llmTools);
       if (stream.outcome === 'stopped') return;
       const { response: firstResponse, streamingId, streamedContent } = stream;

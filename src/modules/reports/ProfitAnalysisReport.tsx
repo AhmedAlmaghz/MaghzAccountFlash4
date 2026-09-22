@@ -401,7 +401,7 @@ export const ProfitAnalysisReport: React.FC = () => {
       columns,
       rows: expenses as unknown as Record<string, unknown>[],
       meta: {
-        title: t('reports.profitAnalysis'),
+        title: t('reports.profitAnalysis.title'),
         subtitle: branding.companyName,
         ...(periodLabel ? { periodLabel } : {}),
         direction,
@@ -463,7 +463,7 @@ export const ProfitAnalysisReport: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         icon={<PieChart size={22} />}
-        title={t('reports.profitAnalysis')}
+        title={t('reports.profitAnalysis.title')}
         subtitle={t('reports.profitAnalysis.subtitle')}
         actions={
           <>

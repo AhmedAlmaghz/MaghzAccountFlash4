@@ -400,7 +400,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       docNumber: order.orderNumber,
       date: order.date,
       partyName: order.supplier?.name || order.supplierId,
-      partyLabel: t('purchases.supplier'),
+      partyLabel: t('purchases.supplier.title'),
       partyTaxNumber: order.supplier?.taxNumber,
       partyAddress: order.supplier?.address,
       lines: (lines || []).map(l => ({
@@ -434,7 +434,7 @@ export const PurchaseOrdersPage: React.FC = () => {
 
   const columns = useMemo(() => [
     { key: 'orderNumber', header: t('purchases.orderNumber'), mobile: 'title' as const, render: (row: PurchaseOrder) => <span className="font-medium text-zinc-900 dark:text-zinc-100">{row.orderNumber}</span> },
-    { key: 'supplier', header: t('purchases.supplier'), mobile: 'subtitle' as const, render: (row: PurchaseOrder) => <span>{row.supplier?.name || row.supplierId}</span> },
+    { key: 'supplier', header: t('purchases.supplier.title'), mobile: 'subtitle' as const, render: (row: PurchaseOrder) => <span>{row.supplier?.name || row.supplierId}</span> },
     { key: 'date', header: t('purchases.date'), render: (row: PurchaseOrder) => <span>{row.date ? formatDate(row.date) : '-'}</span> },
     { key: 'expectedDate', header: t('purchases.order.expectedDate'), render: (row: PurchaseOrder) => <span>{row.expectedDate ? formatDate(row.expectedDate) : '-'}</span> },
     { key: 'totalAmount', header: t('purchases.total'), render: (row: PurchaseOrder) => <span className="font-medium">{formatCurrency(row.totalAmount)}</span> },
@@ -588,7 +588,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         <div className="space-y-4 p-1">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier')}</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier.title')}</label>
               <SupplierSelect companyId={activeCompany?.id || ''} value={form.supplierId} onChange={v => setForm(prev => ({ ...prev, supplierId: v || '' }))} />
             </div>
             <Input label={t('purchases.date')} type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
@@ -829,7 +829,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="text-slate-500">{t('purchases.orderNumber')}:</span> <strong>{selectedOrder.orderNumber}</strong></div>
-              <div><span className="text-slate-500">{t('purchases.supplier')}:</span> <strong>{selectedOrder.supplier?.name || selectedOrder.supplierId}</strong></div>
+              <div><span className="text-slate-500">{t('purchases.supplier.title')}:</span> <strong>{selectedOrder.supplier?.name || selectedOrder.supplierId}</strong></div>
               <div><span className="text-slate-500">{t('purchases.date')}:</span> {selectedOrder.date}</div>
               <div><span className="text-slate-500">{t('purchases.order.expectedDate')}:</span> {selectedOrder.expectedDate || '-'}</div>
               <div><span className="text-slate-500">{t('purchases.status')}:</span> <StatusBadge status={selectedOrder.status} /></div>

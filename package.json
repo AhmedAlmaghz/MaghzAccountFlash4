@@ -1,7 +1,7 @@
 {
   "name": "MaghzERP",
   "private": true,
-  "version": "0.23.0",
+  "version": "0.25.0",
   "author": "Ahmed Almaghz",
   "keywords": [
     "maghzaccount",
@@ -104,6 +104,7 @@
     "@neondatabase/serverless": "^1.1.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-table": "^8.21.3",
+    "@typesafe-ai/sdk": "^0.6.0",
     "arabic-reshaper": "^1.1.0",
     "autoprefixer": "^10.5.0",
     "bidi-js": "^1.0.3",

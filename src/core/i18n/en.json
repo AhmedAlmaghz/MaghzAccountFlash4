@@ -26,11 +26,21 @@
   "edit": "Edit",
   "create": "Create",
   "search": "Search",
-  "filter": "Filter",
+  "filter": {
+    "title": "Filter",
+    "showAll": "Show all",
+    "myDocsOnly": "My documents only",
+    "allDocs": "All documents"
+  },
   "export": "Export",
   "print": "Print",
   "close": "Close",
-  "confirm": "Confirm",
+  "confirm": {
+    "title": "Confirm",
+    "message": "Are you sure you want to proceed?",
+    "confirmText": "Confirm",
+    "cancelText": "Cancel"
+  },
   "back": "Back",
   "next": "Next",
   "previous": "Previous",
@@ -406,7 +416,27 @@
         "groq": "Groq",
         "ollama": "Ollama (local)",
         "custom": "Custom"
-      }
+      },
+      "noKey": "No key",
+      "jevTitle": "JEV Boost — ultra-fast decisions",
+      "jevSubtitle": "System One model: typed decisions in 70–500ms with calibrated confidence — complements your primary provider",
+      "jevEnabled": "Enable JEV",
+      "jevEnabledHint": "When enabled, intent & entity decisions are routed via JEV before the primary provider — 15× faster, 5× cheaper",
+      "jevApiKey": "TypeSafe API key (TYPESAFE_API_KEY)",
+      "jevApiKeyPlaceholder": "ts_... — from https://console.typesafe.ai/keys",
+      "jevModel": "JEV model",
+      "jevModelPlaceholder": "jev-latest",
+      "jevRouterEnabled": "Intent routing via JEV",
+      "jevRouterHint": "Replaces keyword matching with calibrated probabilistic Choice",
+      "jevGuardEnabled": "JEV guard (injection/hallucination)",
+      "jevGuardHint": "Checks messages before execution with parallel Noul questions",
+      "jevTest": "Test JEV",
+      "jevTesting": "Testing JEV...",
+      "jevTestSuccess": "JEV responding",
+      "jevTestFailed": "JEV failed",
+      "jevMetricsTitle": "JEV metrics",
+      "jevMetricsHint": "Avg / p95 latency, cost & confidence — cleared on app restart",
+      "jevNoMetrics": "No metrics yet — send a message to activate JEV"
     },
     "errors": {
       "generic": "An error occurred while processing your request",
@@ -632,7 +662,9 @@
       "cloneSuffix": "copy",
       "created": "Role created successfully",
       "updated": "Role updated successfully",
-      "deleted": "Role deleted successfully"
+      "deleted": "Role deleted successfully",
+      "nameRequired": "Role name is required",
+      "permissionsRequired": "Select at least one permission"
     },
     "auditLog": {
       "title": "Audit Log",
@@ -681,7 +713,10 @@
       "table_employees": "Employees",
       "table_warehouses": "Warehouses",
       "recordsCount": "Records ({{count}})",
-      "logTitle": "System Audit Log"
+      "logTitle": "System Audit Log",
+      "noPermissionTitle": "You do not have permission to view the audit log",
+      "noPermissionDesc": "The audit log is available only to authorized users (management). Contact your system administrator to grant you access",
+      "backHome": "Back to Home"
     },
     "profile": {
       "title": "Profile",
@@ -727,14 +762,48 @@
     "subtitle": "Double-entry accounting system and financial reports",
     "chartOfAccounts": "Chart of Accounts",
     "journalEntries": "Journal Entries",
-    "trialBalance": "Trial Balance",
+    "trialBalance": {
+      "title": "Trial Balance",
+      "today": "Today",
+      "monthEnd": "End of month",
+      "yearEnd": "End of year",
+      "total": "Total",
+      "filtered": "(filtered)",
+      "accountUnit": "Account",
+      "balanced": "Balanced",
+      "difference": "Difference",
+      "balancedHint": "Debit = Credit",
+      "needsReview": "Needs review",
+      "balancedCheck": "Balanced ✓",
+      "unbalanced": "Not balanced",
+      "searchHint": "Account code / name",
+      "tryDifferentSearch": "Try changing search or date",
+      "totalDebit": "Total debit",
+      "totalCredit": "Total credit",
+      "clearFilter": "Clear filters"
+    },
     "balanceSheet": {
       "title": "Balance Sheet",
       "total": "Total",
       "assets": "Assets",
       "liabilities": "Liabilities",
       "equity": "Equity",
-      "today": "Today"
+      "today": "Today",
+      "monthEnd": "End of month",
+      "yearEnd": "End of year",
+      "accountUnit": "Account",
+      "totalLiabilitiesEquity": "Total liabilities & equity",
+      "compareWithAssets": "Compare with assets",
+      "balancedCheck": "Balanced ✓",
+      "balanced": "Balanced",
+      "unbalanced": "Not balanced",
+      "balancedEquation": "Assets = Liabilities + Equity",
+      "needsReview": "Needs journal review",
+      "difference": "Difference",
+      "noBalances": "No balances in this section",
+      "equationHint": "Equation: Assets = Liabilities + Equity",
+      "liabilitiesAndEquity": "Liabilities + Equity",
+      "statusTitle": "Balance sheet status"
     },
     "profitLoss": {
       "title": "Profit & Loss",
@@ -743,7 +812,18 @@
       "totalRevenue": "Total Revenue",
       "totalExpenses": "Total Expenses",
       "netProfit": "Net Profit",
-      "item": "Item"
+      "item": "Item",
+      "profit": "Profit",
+      "loss": "Loss",
+      "marginLabel": "Margin",
+      "marginTitle": "Profit margin",
+      "thisMonth": "This month",
+      "thisQuarter": "This quarter",
+      "thisYear": "This year",
+      "noDataInPeriod": "No revenues or expenses in the selected period",
+      "revenueBadge": "Revenue",
+      "expenseBadge": "Expense",
+      "visualSummary": "Visual summary"
     },
     "cashFlow": {
       "title": "Cash Flow",
@@ -772,7 +852,12 @@
       "cashEnd": "Cash at period end",
       "cashChange": "Actual change in cash",
       "unexplained": "Unexplained difference",
-      "reconcileTitle": "Reconciliation to cash balance"
+      "reconcileTitle": "Reconciliation to cash balance",
+      "positive": "Positive",
+      "negative": "Negative",
+      "thisMonth": "This month",
+      "thisQuarter": "This quarter",
+      "thisYear": "This year"
     },
     "accountLedger": "Account Ledger",
     "accountCode": "Account Code",
@@ -976,12 +1061,44 @@
       "fundingPayable": "Credit (payables)",
       "fundingOpening": "Opening balance"
     },
-    "month": "Month"
+    "month": "Month",
+    "ledger": {
+      "accountLabel": "Account",
+      "thisMonth": "This month",
+      "thisYear": "This year",
+      "searchHint": "Reference / statement",
+      "selectAccount": "Select an account",
+      "selectAccountHint": "Select an account above to view its ledger",
+      "tryDifferentSearch": "Try different search terms",
+      "noMovements": "No movements in the selected period",
+      "result": "Result",
+      "totalDebit": "Total debit",
+      "totalCredit": "Total credit",
+      "closingBalance": "Closing balance",
+      "entriesCount": "Entries count",
+      "total": "Total",
+      "movement": "Movement"
+    },
+    "code": "Code",
+    "post": "Post",
+    "ledgerSubtitle": "General ledger by account",
+    "chartOfAccountsSubtitle": "Chart of accounts tree",
+    "journalEntriesSubtitle": "Posted and draft journal entries",
+    "voucherNumberError": "Could not generate voucher number",
+    "cashBox": "Cash box"
   },
   "inventory": {
-    "products": "Products",
+    "products": {
+      "title": "Products",
+      "notFound": "Product not found"
+    },
     "warehouses": "Warehouses",
-    "stock": "Stock",
+    "stock": {
+      "title": "Stock",
+      "completeFields": "Please complete all required fields",
+      "differentWarehouses": "Source and destination warehouses must differ",
+      "positiveQty": "Quantity must be greater than zero"
+    },
     "stockCount": "Stock Count",
     "transfers": "Transfers",
     "transactions": "Inventory Transactions",
@@ -1003,7 +1120,26 @@
     "warehouse": {
       "created": "Warehouse created successfully",
       "updated": "Warehouse updated successfully",
-      "deleted": "Warehouse deleted successfully"
+      "deleted": "Warehouse deleted successfully",
+      "label": "Warehouse",
+      "codeLabel": "Code: {{code}}",
+      "searchPlaceholder": "Warehouse name / code",
+      "nameExample": "e.g. Main warehouse",
+      "editDescription": "Edit warehouse details",
+      "createDescription": "Add a new warehouse",
+      "activeHint": "Active and usable",
+      "inactiveHint": "Temporarily suspended",
+      "stockSummary": "{{count}} items • value {{value}} • {{low}}",
+      "lowCount": "{{count}} low",
+      "noLowStock": "No low-stock",
+      "nameRequired": "Please enter the warehouse name",
+      "itemCount": "{{count}} items",
+      "totalLabel": "Total warehouses",
+      "linkedBranch": "Linked branch",
+      "stockItems": "{{count}} stock items",
+      "ofTotal": "of {{total}}",
+      "itemsLabel": "Items",
+      "valueLabel": "Value"
     },
     "branch": "Branch",
     "lowStock": "Low Stock",
@@ -1172,7 +1308,11 @@
     "line": {
       "unit": "Unit",
       "baseEquivalent": "In base"
-    }
+    },
+    "suspended": "Suspended",
+    "low": "Low",
+    "basicInfo": "Basic info",
+    "tryDifferentSearch": "Try changing search"
   },
   "sales": {
     "invoices": "Sales Invoices",
@@ -1293,7 +1433,14 @@
       "zeroCostHint": "Lines without a stock cost — review the product card if needed",
       "attachments": "Attachments",
       "addAttachment": "Add Attachment",
-      "attachmentTooLarge": "Attachment size exceeds 2 MB"
+      "attachmentTooLarge": "Attachment size exceeds 2 MB",
+      "linesDesc": "Add products and quantities — prices auto-fill",
+      "emptyLines": "No lines yet — add a product to start",
+      "notesHint": "Notes appear on printouts and statements",
+      "summary": "Invoice summary",
+      "baseTotal": "In base",
+      "numberError": "Could not generate sequence number",
+      "emptyDescription": "Create your first invoice to get started"
     },
     "quotation": {
       "new": "New Quotation",
@@ -1321,7 +1468,8 @@
       "total": "Total Quotations",
       "accepted": "Accepted",
       "drafts": "Drafts",
-      "convertedCount": "Converted"
+      "convertedCount": "Converted",
+      "numberError": "Could not generate sequence number"
     },
     "return": {
       "new": "New Sales Return",
@@ -1350,7 +1498,8 @@
       "created": "Sales return created successfully",
       "updated": "Sales return updated successfully",
       "deleted": "Sales return deleted",
-      "posted": "Sales return posted successfully"
+      "posted": "Sales return posted successfully",
+      "numberError": "Could not generate sequence number"
     },
     "filter": {
       "all": "All",
@@ -1361,7 +1510,8 @@
     "line": {
       "unit": "Unit",
       "baseEquivalent": "In base"
-    }
+    },
+    "notesPlaceholder": "Extra invoice notes..."
   },
   "purchases": {
     "invoices": "Purchase Invoices",
@@ -1404,7 +1554,34 @@
       "noAgingDesc": "No overdue invoices for this supplier",
       "created": "Supplier created successfully",
       "updated": "Supplier updated successfully",
-      "deleted": "Supplier deleted"
+      "deleted": "Supplier deleted",
+      "title": "Supplier",
+      "noResultsHint": "Try changing search or filters",
+      "editDesc": "Edit supplier details",
+      "createDesc": "Add a new supplier — * fields are required",
+      "codeAutoHint": "Auto-generated if left empty",
+      "namePlaceholder": "e.g. Integrated Supply Co.",
+      "addressPlaceholder": "Detailed address…",
+      "activeHint": "Supplier is active",
+      "inactiveHint": "Supplier is suspended",
+      "suspended": "Suspended",
+      "debitBadge": "Payable to supplier",
+      "creditBadge": "Credit balance",
+      "quickStatement": "Quick statement",
+      "quickStatementHint": "View the statement and aging split in the tabs above",
+      "totalDebit": "Total debit",
+      "totalCredit": "Total credit",
+      "closingBalance": "Closing balance",
+      "bucket30": "0–30 days",
+      "bucket3160": "31–60 days",
+      "bucket6190": "61–90 days",
+      "bucket90": "> 90 days",
+      "ofTotal": "of total",
+      "payableHint": "due to us from supplier",
+      "requiredFields": "* required fields",
+      "sectionBasic": "Basic info",
+      "sectionContact": "Contact",
+      "sectionFinancial": "Financial & status"
     },
     "purchaseOrder": "Purchase Order",
     "invoiceNumber": "Invoice Number",
@@ -1654,7 +1831,8 @@
       "description": "Description",
       "descriptionPlaceholder": "Optional cost description",
       "amount": "Amount",
-      "total": "Total Production Costs"
+      "total": "Total Production Costs",
+      "title": "Production costs"
     },
     "productionCostReport": "Production Cost Analysis",
     "totalPlannedCost": "Total Planned Cost",
@@ -1773,7 +1951,8 @@
     "line": {
       "unit": "Unit",
       "baseEquivalent": "In base"
-    }
+    },
+    "varianceReport": "Variance Report"
   },
   "hr": {
     "activeEmployees": "Active Employees",
@@ -2323,19 +2502,50 @@
     "newProduct": "New Product",
     "newCustomer": "New Customer",
     "alerts": "Alerts",
-    "salesAnalysis": "Sales Analysis",
-    "inventoryAnalysis": "Inventory Analysis",
-    "customerStatement": "Customer Statement",
-    "supplierStatement": "Supplier Statement",
-    "profitAnalysis": "Profit Analysis",
-    "customReportBuilder": "Custom Report Builder",
+    "salesAnalysis": {
+      "title": "Sales Analysis",
+      "subtitle": "Sales analysis by period, customer and product",
+      "details": "Sales Details"
+    },
+    "inventoryAnalysis": {
+      "title": "Inventory Analysis",
+      "statusDistribution": "Status Distribution",
+      "details": "Inventory Details"
+    },
+    "customerStatement": {
+      "title": "Customer Statement",
+      "emptyTitle": "No matching customers",
+      "emptyDesc": "No customers match the current search criteria",
+      "subtitle": "Customer statements, balances and debt aging",
+      "agingDetails": "Debt aging details"
+    },
+    "supplierStatement": {
+      "title": "Supplier Statement",
+      "emptyTitle": "No matching suppliers",
+      "emptyDesc": "No suppliers match the current search criteria",
+      "subtitle": "Supplier statements, balances and debt aging",
+      "agingDetails": "Debt aging details"
+    },
+    "profitAnalysis": {
+      "title": "Profit Analysis",
+      "subtitle": "Profitability and margin analysis",
+      "noDataDesc": "No data for the selected period"
+    },
+    "customReportBuilder": {
+      "title": "Custom Report Builder",
+      "subtitle": "Build custom reports from the available system tables"
+    },
     "slowMoving": "Slow Moving",
     "lowStockItems": "Low Stock Items",
     "lowStockAlert": "Low Stock Alert",
     "stockMovement": "Stock Movement Analysis",
     "stockValuation": "Stock Valuation",
     "productProfitability": "Product Profitability",
-    "abcAnalysis": "ABC Analysis",
+    "abcAnalysis": {
+      "title": "ABC Analysis",
+      "cumulativePercent": "Cumulative %",
+      "grade": "Grade"
+    },
     "pivotTable": "Pivot Table",
     "chartType": "Chart Type",
     "line": "Line",
@@ -2422,7 +2632,9 @@
       },
       "financialOverview": {
         "desc": "Assets, liabilities, equity, cash"
-      }
+      },
+      "availableCount": "{{count}} reports available",
+      "openReport": "Open Report"
     },
     "months": {
       "jan": "January",
@@ -2587,7 +2799,26 @@
     "noRepData": "No rep performance data",
     "wonDeals": "Won Deals",
     "lostDeals": "Lost Deals",
-    "avgDealValue": "Avg Deal Value"
+    "avgDealValue": "Avg Deal Value",
+    "loadDataError": "Failed to load data",
+    "top10": "Top 10",
+    "deficit": "Deficit",
+    "costPrice": "Cost Price",
+    "valueAtRisk": "Value at Risk",
+    "purchaseOrder": "Purchase Order",
+    "outOfStock": "Out of Stock",
+    "totalDeficit": "Total Deficit",
+    "atRisk": "At Risk",
+    "search": "Search",
+    "searchProduct": "Search for a product...",
+    "allWarehouses": "All Warehouses",
+    "lowStockDetails": "Low Stock Details",
+    "filterAll": "All",
+    "sortBy": "Sort by",
+    "sortDir": "Sort direction",
+    "desc": "Descending",
+    "asc": "Ascending",
+    "rows": "rows"
   },
   "settings": {
     "pageTitle": "Settings",
@@ -2751,7 +2982,11 @@
       "deleteConfirm": "Delete",
       "created": "Branch created successfully",
       "updated": "Branch updated successfully",
-      "deleted": "Branch deleted successfully"
+      "deleted": "Branch deleted successfully",
+      "updateError": "Failed to update branch",
+      "createError": "Failed to create branch",
+      "nameRequired": "Branch name is required",
+      "deleteError": "Failed to delete branch"
     },
     "currencies": {
       "title": "Currencies",
@@ -2774,7 +3009,12 @@
       "revalueDate": "Revaluation date",
       "revalueRun": "Run revaluation",
       "revalueEmpty": "No exchange differences due — balances match current rates",
-      "revalueDone": "Posted {{lines}} lines under {{ref}}"
+      "revalueDone": "Posted {{lines}} lines under {{ref}}",
+      "saveError": "Failed to save currency",
+      "codeAndNameRequired": "Currency code and name are required",
+      "codeLength": "Currency code must be 3 characters",
+      "setDefaultSuccess": "Default currency set successfully",
+      "deleteError": "Failed to delete currency"
     },
     "vat": {
       "title": "VAT Settings",
@@ -2798,7 +3038,14 @@
       "invoiceSettingsSaved": "Invoice display settings saved",
       "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — suited for exempt companies or simplified invoicing.",
       "unifiedRateTitle": "Unified Standard Rate",
-      "unifiedRateDesc": "The standard invoice rate is taken from the country selected in Company Settings. To change it, change the country there."
+      "unifiedRateDesc": "The standard invoice rate is taken from the country selected in Company Settings. To change it, change the country there.",
+      "saveError": "Failed to save tax",
+      "nameRequired": "Tax name is required",
+      "rateInvalid": "Invalid tax rate (0-100)",
+      "deleted": "Tax type deleted successfully",
+      "deleteError": "Failed to delete tax type",
+      "account": "Accounting Account",
+      "disabled": "Disabled"
     },
     "policy": {
       "title": "Stock, Treasury & Credit Controls",
@@ -2942,7 +3189,16 @@
       "accountant": "Accountant",
       "salesRep": "Sales Rep",
       "hrAdmin": "HR Admin",
-      "viewer": "Viewer"
+      "viewer": "Viewer",
+      "usernameRequired": "Username is required",
+      "passwordRequired": "Password is required",
+      "saveError": "Failed to save user",
+      "cannotDeleteSelf": "You cannot delete your own account",
+      "deleteError": "Failed to delete user",
+      "passwordTooShort": "Password must be at least 6 characters",
+      "passwordInsecure": "This password is insecure",
+      "passwordWeak": "Password must contain a letter and a number",
+      "passwordReset": "Password reset successfully"
     },
     "roles": "Roles & Permissions",
     "backup": {
@@ -3041,7 +3297,9 @@
       "close": "Close",
       "print": "Print",
       "export": "Export",
-      "view": "View"
+      "view": "View",
+      "notes": "Notes",
+      "saving": "Saving..."
     },
     "units": {
       "title": "Units of Measure",
@@ -3059,7 +3317,10 @@
       "codeHeader": "Code",
       "created": "Unit created successfully",
       "updated": "Unit updated successfully",
-      "deleted": "Unit deleted successfully"
+      "deleted": "Unit deleted successfully",
+      "nameRequired": "Unit name is required",
+      "deleteTitle": "Delete Unit",
+      "deleteMessage": "Are you sure you want to delete this unit?"
     },
     "sequences": {
       "title": "Document Numbering",
@@ -3079,7 +3340,9 @@
       "activate": "Activate",
       "created": "Sequence created successfully",
       "updated": "Sequence updated successfully",
-      "deleted": "Sequence deleted successfully"
+      "deleted": "Sequence deleted successfully",
+      "updateError": "Failed to update sequence",
+      "previewError": "Failed to preview number"
     },
     "documentTypes": {
       "salesInvoice": "Sales Invoice",
@@ -3137,7 +3400,11 @@
       "usageFinished": "Finished Product",
       "usageRaw": "Raw Material",
       "usageOther": "Other",
-      "usageHint": "Determines product visibility in manufacturing lists (finished product or raw material)"
+      "usageHint": "Determines product visibility in manufacturing lists (finished product or raw material)",
+      "nameRequired": "Product type name is required",
+      "updateError": "Failed to update product type",
+      "createError": "Failed to create product type",
+      "deleteError": "Failed to delete product type"
     },
     "productCategories": {
       "title": "Product Categories",
@@ -3154,7 +3421,11 @@
       "deleteMessage": "Are you sure you want to delete this category? This cannot be undone.",
       "created": "Category created successfully",
       "updated": "Category updated successfully",
-      "deleted": "Category deleted successfully"
+      "deleted": "Category deleted successfully",
+      "nameRequired": "Category name is required",
+      "updateError": "Failed to update category",
+      "createError": "Failed to create category",
+      "deleteError": "Failed to delete category"
     },
     "cashBoxes": {
       "title": "Cash & Treasuries",
@@ -3174,7 +3445,11 @@
       "deleteMessage": "Are you sure you want to delete this cash box?",
       "created": "Cash box created successfully",
       "updated": "Cash box updated successfully",
-      "deleted": "Cash box deleted successfully"
+      "deleted": "Cash box deleted successfully",
+      "nameRequired": "Cash box name is required",
+      "updateError": "Failed to update cash box",
+      "createError": "Failed to create cash box",
+      "deleteError": "Failed to delete cash box"
     },
     "costCenters": {
       "title": "Cost Centers",
@@ -3195,7 +3470,14 @@
       "noParent": "None (Root Center)",
       "empty": "No cost centers found",
       "created": "Cost center created successfully",
-      "updated": "Cost center updated successfully"
+      "updated": "Cost center updated successfully",
+      "nameRequired": "Cost center name is required",
+      "updateError": "Failed to update cost center",
+      "createError": "Failed to create cost center",
+      "deleted": "Cost center deleted successfully",
+      "removeError": "Failed to remove cost center",
+      "deleteTitle": "Delete Cost Center",
+      "deleteMessage": "Are you sure you want to delete this cost center?"
     },
     "defaultAccounts": {
       "title": "Default Accounts",
@@ -3212,7 +3494,10 @@
       "templateTrading": "Trading Template",
       "templateManufacturing": "Manufacturing Template",
       "templateServices": "Services Template",
-      "empty": "No settings found"
+      "empty": "No settings found",
+      "updateError": "Failed to update default account",
+      "applied": "Template applied successfully",
+      "applyError": "Failed to apply template"
     },
     "reset": {
       "title": "Reset System",
@@ -3294,7 +3579,8 @@
       "changePassword": "Change password",
       "settings": "Settings",
       "logout": "Logout"
-    }
+    },
+    "collapseSidebar": "Collapse sidebar"
   },
   "common": {
     "loading": "Loading...",
@@ -3323,7 +3609,21 @@
     "close": "Close",
     "usePglite": "Use PGlite local (no server)",
     "confirm": "Confirm",
-    "back": "Back"
+    "back": "Back",
+    "view": "View",
+    "preview": "Preview",
+    "actions": "Actions",
+    "all": "All",
+    "createdBy": "Created by",
+    "saved": "Saved",
+    "deleted": "Deleted",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "invalidAmount": "Invalid amount",
+    "search": "Search",
+    "more": "more",
+    "excel": "Excel",
+    "pdf": "PDF"
   },
   "pagination": {
     "first": "First",
@@ -3340,7 +3640,8 @@
       "placeholder": "Select...",
       "search": "Search...",
       "empty": "No results",
-      "addNew": "Add new"
+      "addNew": "Add new",
+      "searchMore": "narrow search to see more"
     },
     "customer": {
       "placeholder": "Select customer...",
@@ -3915,6 +4216,30 @@
       "byProduct": "By product",
       "byPayment": "By payment method",
       "groupedTable": "Grouped Table"
-    }
-  }
+    },
+    "cartLabel": "Cart",
+    "insufficientCash": "Insufficient cash — required {{required}}"
+  },
+  "all": "All",
+  "description": "Description",
+  "date": "Date",
+  "documentNumber": "Document no.",
+  "balance": "Balance",
+  "empty": {
+    "description": "No records found at the moment",
+    "title": "No data"
+  },
+  "table": {
+    "exportExcel": "Export Excel",
+    "exportPdf": "Export PDF",
+    "print": "Print",
+    "show": "Show",
+    "recordsCount": "of {{count}} records"
+  },
+  "validation": {
+    "required": "Required",
+    "invalidEmail": "Invalid email address",
+    "invalidPhone": "Invalid phone number"
+  },
+  "notes": "Notes"
 }

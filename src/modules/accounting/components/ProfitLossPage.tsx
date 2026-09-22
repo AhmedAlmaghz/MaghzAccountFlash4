@@ -173,7 +173,7 @@ export const ProfitLossReport: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             <Button variant="secondary" size="sm" leftIcon={<Calendar size={14} />} onClick={() => setShowFilters(!showFilters)}>
-              {t('filter')}
+              {t('filter.title')}
             </Button>
             <Button variant="secondary" size="sm" leftIcon={<FileDown size={14} />} onClick={handleExportExcel}>
               Excel
@@ -196,7 +196,7 @@ export const ProfitLossReport: React.FC = () => {
                 <TrendingUp size={18} className="text-emerald-600" />
               </div>
             </div>
-            <Badge className="mt-3 bg-emerald-50 text-emerald-700 border-emerald-200 border">إيراد</Badge>
+            <Badge className="mt-3 bg-emerald-50 text-emerald-700 border-emerald-200 border">{t('accounting.profitLoss.revenueBadge')}</Badge>
           </Card>
           <Card className="p-4">
             <div className="flex items-start justify-between">
@@ -208,7 +208,7 @@ export const ProfitLossReport: React.FC = () => {
                 <TrendingDown size={18} className="text-rose-600" />
               </div>
             </div>
-            <Badge className="mt-3 bg-rose-50 text-rose-700 border-rose-200 border">مصروف</Badge>
+            <Badge className="mt-3 bg-rose-50 text-rose-700 border-rose-200 border">{t('accounting.profitLoss.expenseBadge')}</Badge>
           </Card>
           <Card className={cn('p-4 border', summary.isProfit ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800')}>
             <div className="flex items-start justify-between">
@@ -223,12 +223,12 @@ export const ProfitLossReport: React.FC = () => {
                 <Wallet size={18} className={summary.isProfit ? 'text-emerald-600' : 'text-amber-600'} />
               </div>
             </div>
-            <p className="text-xs mt-2 flex items-center gap-1 text-slate-500">{summary.isProfit ? 'ربح' : 'خسارة'} • هامش {summary.margin.toFixed(1)}%</p>
+            <p className="text-xs mt-2 flex items-center gap-1 text-slate-500">{summary.isProfit ? t('accounting.profitLoss.profit') : t('accounting.profitLoss.loss')} • {t('accounting.profitLoss.marginLabel')} {summary.margin.toFixed(1)}%</p>
           </Card>
           <Card className="p-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">هامش الربح</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.profitLoss.marginTitle')}</p>
                 <p className="text-xl font-bold text-slate-900 dark:text-slate-100 tabular-nums mt-1">{summary.margin.toFixed(1)}%</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -267,7 +267,7 @@ export const ProfitLossReport: React.FC = () => {
                   }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-slate-700 shadow-sm border"
                 >
-                  {p === 'month' ? 'هذا الشهر' : p === 'quarter' ? 'هذا الربع' : 'هذه السنة'}
+                  {p === 'month' ? t('accounting.profitLoss.thisMonth') : p === 'quarter' ? t('accounting.profitLoss.thisQuarter') : t('accounting.profitLoss.thisYear')}
                 </button>
               ))}
             </div>
@@ -284,7 +284,7 @@ export const ProfitLossReport: React.FC = () => {
       {/* Chart */}
       <Card className="p-4">
         <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
-          <BarChart3 size={16} /> ملخص مرئي
+          <BarChart3 size={16} /> {t('accounting.profitLoss.visualSummary')}
         </h3>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
@@ -306,7 +306,7 @@ export const ProfitLossReport: React.FC = () => {
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {(pnlDataResult ?? []).length === 0 ? (
             <div className="py-10">
-              <EmptyState icon="inbox" title={t('accounting.noData')} description="لا توجد إيرادات أو مصروفات في الفترة المحددة" />
+              <EmptyState icon="inbox" title={t('accounting.noData')} description={t('accounting.profitLoss.noDataInPeriod')} />
             </div>
           ) : (
             (pnlDataResult ?? []).map((row, idx) => {

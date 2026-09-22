@@ -107,13 +107,13 @@ export const LowStockAlertReport: React.FC = () => {
           name: String(r.name),
         })));
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
+        setError(err instanceof Error ? err.message : t('reports.loadDataError'));
       } finally {
         setIsLoading(false);
       }
     }
     load();
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, t]);
 
   const filteredItems = useMemo(() => {
     let data = [...items];

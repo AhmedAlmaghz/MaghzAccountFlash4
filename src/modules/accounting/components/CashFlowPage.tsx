@@ -177,7 +177,7 @@ export const CashFlowReport: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             <Button variant="secondary" size="sm" leftIcon={<Calendar size={14} />} onClick={() => setShowFilters(!showFilters)}>
-              {t('filter')}
+              {t('filter.title')}
             </Button>
             <Button variant="secondary" size="sm" leftIcon={<FileDown size={14} />} onClick={() => exportToExcel(allRows.map((r) => ({ activity: r.activity, amount: r.amount })), [{ key: 'activity', header: t('accounting.cashFlow.activity'), width: 40 }, { key: 'amount', header: t('accounting.amount'), width: 18 }], 'CashFlow_Report')}>
               Excel
@@ -222,7 +222,7 @@ export const CashFlowReport: React.FC = () => {
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 flex items-center gap-1"><TrendingUp size={12} /> {t('accounting.cashFlow.netChange')}</p>
               <p className={cn('text-lg font-bold tabular-nums mt-1', netChange >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300')}>{netChange >= 0 ? '+' : ''}{formatCurrency(netChange)}</p>
             </div>
-            <Badge className={cn('border', netChange >= 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-rose-100 text-rose-700 border-rose-200')}>{netChange >= 0 ? 'إيجابي' : 'سلبي'}</Badge>
+            <Badge className={cn('border', netChange >= 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-rose-100 text-rose-700 border-rose-200')}>{netChange >= 0 ? t('accounting.cashFlow.positive') : t('accounting.cashFlow.negative')}</Badge>
           </Card>
         </div>
       </div>
@@ -244,7 +244,7 @@ export const CashFlowReport: React.FC = () => {
                   }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-slate-700 shadow-sm border"
                 >
-                  {p === 'month' ? 'هذا الشهر' : p === 'quarter' ? 'هذا الربع' : 'هذه السنة'}
+                  {p === 'month' ? t('accounting.cashFlow.thisMonth') : p === 'quarter' ? t('accounting.cashFlow.thisQuarter') : t('accounting.cashFlow.thisYear')}
                 </button>
               ))}
             </div>

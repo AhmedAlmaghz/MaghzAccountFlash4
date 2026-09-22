@@ -180,11 +180,11 @@ export const AuditLogPage: React.FC = () => {
         <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
           <ScrollText size={28} className="text-amber-600" />
         </div>
-        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50">ليس لديك صلاحية عرض سجل التدقيق</h2>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50">{t('auth.auditLog.noPermissionTitle')}</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 text-center max-w-md">
-          سجل التدقيق متاح فقط للمستخدمين المصرح لهم (الإدارة). تواصل مع مدير النظام لمنحك الصلاحية <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs">settings.audit_log</code>.
+          {t('auth.auditLog.noPermissionDesc')} <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs">settings.audit_log</code>.
         </p>
-        <Button variant="secondary" onClick={() => navigate('/')}>العودة للرئيسية</Button>
+        <Button variant="secondary" onClick={() => navigate('/')}>{t('auth.auditLog.backHome')}</Button>
       </div>
     );
   }

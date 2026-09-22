@@ -82,7 +82,7 @@ export const WarehousesPage: React.FC = () => {
   const handleSave = async () => {
     if (!activeCompany) return;
     if (!formData.name.trim()) {
-      addToast('error', 'الرجاء إدخال اسم المستودع');
+      addToast('error', t('inventory.warehouse.nameRequired'));
       return;
     }
     setSaving(true);
@@ -139,7 +139,7 @@ export const WarehousesPage: React.FC = () => {
       })),
       [
         { key: 'code', header: t('inventory.productCode'), width: 12 },
-        { key: 'name', header: t('inventory.warehouse'), width: 28 },
+        { key: 'name', header: t('inventory.warehouse.label'), width: 28 },
         { key: 'branchId', header: t('inventory.branch'), width: 16 },
         { key: 'isActive', header: t('inventory.status'), width: 12 },
       ],
@@ -149,10 +149,10 @@ export const WarehousesPage: React.FC = () => {
 
   const handleExportPdf = () => {
     exportToPDF(
-      filteredWarehouses.map((w) => ({ code: w.code || '-', name: w.name, isActive: w.isActive ? 'نشط' : 'موقوف' })),
+      filteredWarehouses.map((w) => ({ code: w.code || '-', name: w.name, isActive: w.isActive ? t('inventory.active') : t('inventory.suspended') })),
       [
         { key: 'code', header: t('inventory.productCode') },
-        { key: 'name', header: t('inventory.warehouse') },
+        { key: 'name', header: t('inventory.warehouse.label') },
         { key: 'isActive', header: t('inventory.status') },
       ],
       `warehouses_${new Date().toISOString().split('T')[0]}`,
@@ -176,7 +176,7 @@ export const WarehousesPage: React.FC = () => {
     },
     {
       key: 'name',
-      header: t('inventory.warehouse'),
+      header: t('inventory.warehouse.label'),
       mobile: 'title' as const,
       render: (row: WarehouseType) => (
         <div className="flex items-center gap-3">
@@ -185,7 +185,7 @@ export const WarehousesPage: React.FC = () => {
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">{row.name}</p>
-            <p className="text-xs text-zinc-500 truncate">{row.code ? `كود: ${row.code}` : ''}</p>
+            <p className="text-xs text-zinc-500 truncate">{row.code ? t('inventory.warehouse.codeLabel', { code: row.code }) : ''}</p>
           </div>
         </div>
       ),
@@ -203,7 +203,7 @@ export const WarehousesPage: React.FC = () => {
     },
     {
       key: 'stockInfo',
-      header: 'المخزون',
+      header: t('inventory.stock.title'),
       width: '140px',
       render: (row: WarehouseType) => {
         const count = stock.filter((s) => s.warehouseId === row.id).length;
@@ -211,7 +211,7 @@ export const WarehousesPage: React.FC = () => {
         if (!count) return <span className="text-xs text-zinc-400">—</span>;
         return (
           <div className="text-xs">
-            <p className="font-medium text-zinc-900 dark:text-zinc-100">{count} صنف</p>
+            <p className="font-medium text-zinc-900 dark:text-zinc-100">{t('inventory.warehouse.itemCount', { count })}</p>
             <p className="text-zinc-500 tabular-nums">{formatCurrency(value)}</p>
           </div>
         );
@@ -260,9 +260,9 @@ export const WarehousesPage: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي المستودعات</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.warehouse.totalLabel')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stats.total}</p>
-              <p className="text-xs text-slate-500">{stats.active} نشط • {stats.inactive} موقوف</p>
+              <p className="text-xs text-slate-500">{stats.active} {t('inventory.active')} • {stats.inactive} {t('inventory.suspended')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
               <Warehouse size={18} className="text-primary-600" />
@@ -270,9 +270,9 @@ export const WarehousesPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الفروع</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('settings.branches.title')}</p>
               <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{stats.branches}</p>
-              <p className="text-xs text-slate-500">فرع مرتبط</p>
+              <p className="text-xs text-slate-500">{t('inventory.warehouse.linkedBranch')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
               <Building2 size={18} className="text-blue-600" />
@@ -280,9 +280,9 @@ export const WarehousesPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">قيمة المخزون</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.stockValue')}</p>
               <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(stats.stockValue)}</p>
-              <p className="text-xs text-slate-500">{stock.length} بند مخزني</p>
+              <p className="text-xs text-slate-500">{t('inventory.warehouse.stockItems', { count: stock.length })}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
               <Wallet size={18} className="text-emerald-600" />
@@ -290,9 +290,9 @@ export const WarehousesPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">نشط</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.active')}</p>
               <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.active}</p>
-              <p className="text-xs text-slate-500">من {stats.total}</p>
+              <p className="text-xs text-slate-500">{t('inventory.warehouse.ofTotal', { total: stats.total })}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
               <CheckCircle2 size={18} className="text-emerald-600" />
@@ -307,7 +307,7 @@ export const WarehousesPage: React.FC = () => {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={`${t('search')} — اسم / كود المستودع`}
+                placeholder={t('inventory.warehouse.searchPlaceholder')}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
               />
               {search && (
@@ -318,7 +318,7 @@ export const WarehousesPage: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm">
-                <option value="">كل الفروع</option>
+                <option value="">{t('auth.users.allBranches')}</option>
                 {uniqueBranches.map((b) => (
                   <option key={b} value={b}>{b.slice(0, 8)}</option>
                 ))}
@@ -331,7 +331,7 @@ export const WarehousesPage: React.FC = () => {
           {hasFilters && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
               <span>{filteredWarehouses.length} من {warehouses.length} • {search ? `"${search}"` : ''}</span>
-              <button onClick={() => { setSearch(''); setBranchFilter(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
+              <button onClick={() => { setSearch(''); setBranchFilter(''); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
             </div>
           )}
         </Card>
@@ -342,9 +342,9 @@ export const WarehousesPage: React.FC = () => {
           <div className="py-10">
             <EmptyState
               icon={hasFilters ? 'search' : 'inbox'}
-              title={hasFilters ? 'لا توجد نتائج' : t('inventory.empty.warehouses.title')}
-              description={hasFilters ? 'جرّب تغيير البحث' : t('inventory.empty.warehouses.description')}
-              action={hasFilters ? <Button variant="secondary" onClick={() => { setSearch(''); setBranchFilter(''); }}>مسح الفلترة</Button> : <Can action="create" module="inventory"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate}>{t('inventory.newWarehouse')}</Button></Can>}
+              title={hasFilters ? t('common.noResults') : t('inventory.empty.warehouses.title')}
+              description={hasFilters ? t('inventory.tryDifferentSearch') : t('inventory.empty.warehouses.description')}
+              action={hasFilters ? <Button variant="secondary" onClick={() => { setSearch(''); setBranchFilter(''); }}>{t('sales.filter.clearFilters')}</Button> : <Can action="create" module="inventory"><Button variant="primary" leftIcon={<Plus size={16} />} onClick={handleOpenCreate}>{t('inventory.newWarehouse')}</Button></Can>}
             />
           </div>
         ) : (
@@ -356,7 +356,7 @@ export const WarehousesPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={closeModal}
         title={editingId ? t('inventory.editWarehouse') || 'تعديل المستودع' : t('inventory.newWarehouse')}
-        description={editingId ? 'تعديل بيانات المستودع' : 'إضافة مستودع جديد'}
+        description={editingId ? t('inventory.warehouse.editDescription') : t('inventory.warehouse.createDescription')}
         size="md"
         footer={
           <div className="flex gap-2 ml-auto">
@@ -367,9 +367,9 @@ export const WarehousesPage: React.FC = () => {
       >
         <div className="space-y-5">
           <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><Warehouse size={12} /> البيانات الأساسية</h4>
+            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><Warehouse size={12} /> {t('inventory.basicInfo')}</h4>
             <div className="space-y-4">
-              <Input label={`${t('inventory.warehouse')} *`} value={formData.name} onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))} placeholder="مثال: المستودع الرئيسي" required />
+              <Input label={`${t('inventory.warehouse.label')} *`} value={formData.name} onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))} placeholder={t('inventory.warehouse.nameExample')} required />
               <Input label={t('inventory.productCode')} value={formData.code} onChange={(e) => setFormData((prev) => ({ ...prev, code: e.target.value }))} placeholder="WH-001" dir="ltr" />
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1.5"><Building2 size={12} /> {t('inventory.branch')}</label>
@@ -379,9 +379,9 @@ export const WarehousesPage: React.FC = () => {
                 <input type="checkbox" checked={formData.isActive} onChange={(e) => setFormData((prev) => ({ ...prev, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
                 <div>
                   <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{t('inventory.active')}</p>
-                  <p className="text-xs text-slate-500">{formData.isActive ? 'نشط ويمكن التعامل معه' : 'موقوف مؤقتاً'}</p>
+                  <p className="text-xs text-slate-500">{formData.isActive ? t('inventory.warehouse.activeHint') : t('inventory.warehouse.inactiveHint')}</p>
                 </div>
-                <Badge className={`ml-auto border text-xs ${formData.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'}`}>{formData.isActive ? 'نشط' : 'موقوف'}</Badge>
+                <Badge className={`ml-auto border text-xs ${formData.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'}`}>{formData.isActive ? t('inventory.active') : t('inventory.suspended')}</Badge>
               </label>
             </div>
           </div>
@@ -392,25 +392,25 @@ export const WarehousesPage: React.FC = () => {
         isOpen={isStockModalOpen}
         onClose={() => setIsStockModalOpen(false)}
         title={`${t('inventory.stockByWarehouse')} — ${selectedWarehouse?.name || ''}`}
-        description={selectedWarehouse ? `${warehouseItemCount} صنف • قيمة ${formatCurrency(warehouseStockValue)} • ${lowStockCount ? `${lowStockCount} منخفض` : 'لا يوجد منخفض'}` : undefined}
+        description={selectedWarehouse ? t('inventory.warehouse.stockSummary', { count: warehouseItemCount, value: formatCurrency(warehouseStockValue), low: lowStockCount ? t('inventory.warehouse.lowCount', { count: lowStockCount }) : t('inventory.warehouse.noLowStock') }) : undefined}
         size="lg"
         footer={<Button variant="secondary" onClick={() => setIsStockModalOpen(false)}>{t('close')}</Button>}
       >
         {warehouseStock.length === 0 ? (
-          <EmptyState icon="inbox" title={t('inventory.empty.stock.title')} description={t('inventory.empty.warehouseProducts.description')} />
+          <EmptyState icon="inbox" title={t('inventory.empty.stock.title')} description={t('inventory.empty.warehouses.warehouseProducts')} />
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-primary-50 dark:bg-primary-900/20 p-3 rounded-xl border border-primary-200 dark:border-primary-800 text-center">
-                <p className="text-xs text-slate-500">الأصناف</p>
+                <p className="text-xs text-slate-500">{t('inventory.warehouse.itemsLabel')}</p>
                 <p className="text-lg font-bold text-primary-700 dark:text-primary-300">{warehouseItemCount}</p>
               </div>
               <div className="bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800 text-center">
-                <p className="text-xs text-slate-500">القيمة</p>
+                <p className="text-xs text-slate-500">{t('inventory.warehouse.valueLabel')}</p>
                 <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{formatCurrency(warehouseStockValue)}</p>
               </div>
               <div className={`p-3 rounded-xl border text-center ${lowStockCount ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
-                <p className="text-xs text-slate-500">منخفض</p>
+                <p className="text-xs text-slate-500">{t('inventory.low')}</p>
                 <p className={`text-lg font-bold ${lowStockCount ? 'text-amber-600' : 'text-slate-700 dark:text-slate-300'}`}>{lowStockCount}</p>
               </div>
             </div>

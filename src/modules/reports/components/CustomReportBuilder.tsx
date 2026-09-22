@@ -224,7 +224,7 @@ export const CustomReportBuilder: React.FC = () => {
       columns,
       rows: previewData,
       meta: {
-        title: reportName || t('reports.customReportBuilder'),
+        title: reportName || t('reports.customReportBuilder.title'),
         subtitle: branding.companyName,
         direction,
       },
@@ -274,7 +274,7 @@ export const CustomReportBuilder: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         icon={<Settings size={22} />}
-        title={t('reports.customReportBuilder')}
+        title={t('reports.customReportBuilder.title')}
         subtitle={t('reports.customReportBuilder.subtitle')}
       />
 

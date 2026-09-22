@@ -548,7 +548,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
       date: invoice.date,
       dueDate: invoice.dueDate,
       partyName: invoice.supplier?.name || invoice.supplierId,
-      partyLabel: t('purchases.supplier'),
+      partyLabel: t('purchases.supplier.title'),
       partyTaxNumber: invoice.supplier?.taxNumber,
       partyAddress: invoice.supplier?.address,
       lines: (lines || []).map(l => ({
@@ -585,7 +585,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const handleExportExcel = useCallback(() => {
     const exportColumns = [
       { key: 'invoiceNumber', header: t('purchases.invoiceNumber'), width: 20 },
-      { key: 'supplierName', header: t('purchases.supplier'), width: 25 },
+      { key: 'supplierName', header: t('purchases.supplier.title'), width: 25 },
       { key: 'date', header: t('purchases.date'), width: 15 },
       { key: 'subtotal', header: t('purchases.subtotal'), width: 15 },
       ...(showDiscount ? [{ key: 'discountAmount', header: t('sales.discount'), width: 15 }] : []),
@@ -611,7 +611,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
   const handleExportPdf = useCallback(() => {
     exportToPDF(invoices, [
       { key: 'invoiceNumber', header: t('purchases.invoiceNumber') },
-      { key: 'supplierName', header: t('purchases.supplier') },
+      { key: 'supplierName', header: t('purchases.supplier.title') },
       { key: 'date', header: t('purchases.date') },
       { key: 'subtotal', header: t('purchases.subtotal') },
       { key: 'totalAmount', header: t('purchases.total') },
@@ -633,7 +633,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
     },
     {
       key: 'supplier',
-      header: t('purchases.supplier'),
+      header: t('purchases.supplier.title'),
       mobile: 'subtitle' as const,
       render: (row: PurchaseInvoice) => <span>{row.supplier?.name || row.supplierId}</span>,
     },
@@ -804,10 +804,10 @@ export const PurchaseInvoicesPage: React.FC = () => {
           <>
             <OwnerFilterToggle isOwnOnly={isOwnOnly} showToggle={showOwnerToggle} onToggle={toggleOwnOnly} />
             <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-              <FileText size={15} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+              <FileText size={15} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">{t('common.excel')}</span>
             </Button>
             <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5">
-              <Receipt size={15} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>
+              <Receipt size={15} className="text-rose-600" /> <span className="hidden sm:inline text-xs">{t('common.pdf')}</span>
             </Button>
           </>
         }
@@ -854,7 +854,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
         <div className="space-y-4 p-1">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier')}</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier.title')}</label>
               <SupplierSelect companyId={activeCompany?.id || ''} value={form.supplierId} onChange={v => setForm(prev => ({ ...prev, supplierId: v || '' }))} />
             </div>
             <Input label={t('purchases.date')} type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
@@ -1129,7 +1129,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="text-slate-500">{t('purchases.invoiceNumber')}:</span> <strong>{selectedInvoice.invoiceNumber}</strong></div>
-              <div><span className="text-slate-500">{t('purchases.supplier')}:</span> <strong>{selectedInvoice.supplier?.name || selectedInvoice.supplierId}</strong></div>
+              <div><span className="text-slate-500">{t('purchases.supplier.title')}:</span> <strong>{selectedInvoice.supplier?.name || selectedInvoice.supplierId}</strong></div>
               <div><span className="text-slate-500">{t('purchases.date')}:</span> {selectedInvoice.date}</div>
               <div><span className="text-slate-500">{t('purchases.dueDate')}:</span> {selectedInvoice.dueDate}</div>
               <div><span className="text-slate-500">{t('purchases.status')}:</span> <StatusBadge status={selectedInvoice.status} /></div>

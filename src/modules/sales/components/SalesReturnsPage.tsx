@@ -914,7 +914,7 @@ export const SalesReturnsPage: React.FC = () => {
         title={confirmConfig?.title || ''}
         message={confirmConfig?.message || ''}
         variant={confirmConfig?.variant || 'warning'}
-        confirmText={confirmConfig?.confirmText || (t('confirm'))}
+        confirmText={confirmConfig?.confirmText || (t('confirm.confirmText'))}
         cancelText={t('cancel')}
       />
 

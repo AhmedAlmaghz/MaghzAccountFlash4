@@ -178,7 +178,7 @@ export const InventoryAnalysisReport: React.FC = () => {
       columns,
       rows: exportData as unknown as Record<string, unknown>[],
       meta: {
-        title: t('reports.inventoryAnalysis'),
+        title: t('reports.inventoryAnalysis.title'),
         subtitle: branding.companyName,
         direction,
       },
@@ -225,7 +225,7 @@ export const InventoryAnalysisReport: React.FC = () => {
       {/* Header */}
       <PageHeader
         icon={<Package size={22} />}
-        title={t('reports.inventoryAnalysis')}
+        title={t('reports.inventoryAnalysis.title')}
         actions={
           <>
             <Button variant="secondary" leftIcon={<Filter size={16} />} onClick={() => setShowFilters((s) => !s)}>
@@ -250,7 +250,7 @@ export const InventoryAnalysisReport: React.FC = () => {
           { key: 'all', label: t('reports.all') },
           { key: 'lowStock', label: t('reports.lowStockItems') },
           { key: 'slowMoving', label: t('reports.slowMoving') },
-          { key: 'abc', label: t('reports.abcAnalysis') },
+          { key: 'abc', label: t('reports.abcAnalysis.title') },
         ] as const).map((tab) => (
           <button
             key={tab.key}
@@ -362,7 +362,7 @@ export const InventoryAnalysisReport: React.FC = () => {
       <Card>
         <div className="p-4">
           <h3 className="font-semibold text-slate-900 dark:text-slate-50 mb-4">
-            {view === 'abc' ? t('reports.abcAnalysis') : t('reports.inventoryAnalysis.details')}
+            {view === 'abc' ? t('reports.abcAnalysis.title') : t('reports.inventoryAnalysis.details')}
           </h3>
           {view === 'abc' ? (
             <Table

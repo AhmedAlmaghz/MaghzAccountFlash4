@@ -47,19 +47,19 @@ export function Pagination({
       </div>
 
       <div className="flex items-center gap-1">
-        <button className={cn(navBtn, 'hidden sm:flex')} onClick={() => onPageChange(1)} disabled={!canPrev} title={t('pagination.first')} aria-label="First page">
+        <button className={cn(navBtn, 'hidden sm:flex')} onClick={() => onPageChange(1)} disabled={!canPrev} title={t('pagination.first')} aria-label={t('pagination.first')}>
           <ChevronsRight size={18} />
         </button>
-        <button className={navBtn} onClick={() => onPageChange(page - 1)} disabled={!canPrev} title={t('pagination.previous')} aria-label="Previous page">
+        <button className={navBtn} onClick={() => onPageChange(page - 1)} disabled={!canPrev} title={t('pagination.previous')} aria-label={t('pagination.previous')}>
           <ChevronRight size={18} />
         </button>
         <span className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 px-2 tabular rounded-xl bg-zinc-100 dark:bg-zinc-800 min-w-16 text-center py-1.5">
           {t('pagination.pageOf', { page: String(page), total: String(totalPages) })}
         </span>
-        <button className={navBtn} onClick={() => onPageChange(page + 1)} disabled={!canNext} title={t('pagination.next')} aria-label="Next page">
+        <button className={navBtn} onClick={() => onPageChange(page + 1)} disabled={!canNext} title={t('pagination.next')} aria-label={t('pagination.next')}>
           <ChevronLeft size={18} />
         </button>
-        <button className={cn(navBtn, 'hidden sm:flex')} onClick={() => onPageChange(totalPages)} disabled={!canNext} title={t('pagination.last')} aria-label="Last page">
+        <button className={cn(navBtn, 'hidden sm:flex')} onClick={() => onPageChange(totalPages)} disabled={!canNext} title={t('pagination.last')} aria-label={t('pagination.last')}>
           <ChevronsLeft size={18} />
         </button>
       </div>
@@ -71,7 +71,7 @@ export function Pagination({
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
             className="text-xs sm:text-sm border border-zinc-300 dark:border-zinc-600 rounded-xl px-2 py-2 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 min-h-9"
-            aria-label="Page size"
+            aria-label={t('pagination.pageSize')}
           >
             {pageSizeOptions.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>

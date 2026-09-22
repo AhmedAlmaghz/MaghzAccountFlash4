@@ -470,10 +470,10 @@ function ManufacturingKpiSection({ companyId }: { companyId: string }) {
         <h2 className="font-semibold text-slate-900 dark:text-slate-50">{t('manufacturing.production')}</h2>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCardPro title={t('manufacturing.workOrders')} value={kpis.totalWorkOrders} icon={Factory} color="blue" onClick={() => navigate('/manufacturing/work-orders')} />
+        <KpiCardPro title={t('manufacturing.workOrders.title')} value={kpis.totalWorkOrders} icon={Factory} color="blue" onClick={() => navigate('/manufacturing/work-orders')} />
         <KpiCardPro title={t('manufacturing.planned')} value={kpis.activeOrders} icon={Factory} color="purple" onClick={() => navigate('/manufacturing/work-orders')} />
         <KpiCardPro title={t('manufacturing.completed')} value={kpis.completedOrders} icon={TrendingUp} color="emerald" onClick={() => navigate('/manufacturing/work-orders')} />
-        <KpiCardPro title={t('manufacturing.costs')} value={formatCurrency(kpis.totalProductionCost)} icon={DollarSign} color="amber" onClick={() => navigate('/manufacturing/cost-report')} />
+        <KpiCardPro title={t('manufacturing.costs.title')} value={formatCurrency(kpis.totalProductionCost)} icon={DollarSign} color="amber" onClick={() => navigate('/manufacturing/cost-report')} />
       </div>
     </div>
   );
@@ -531,7 +531,7 @@ function InventoryKpiSection({ companyId }: { companyId: string }) {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Package size={18} className="text-primary-600" />
-        <h2 className="font-semibold text-slate-900 dark:text-slate-50">{t('inventory.stock')}</h2>
+        <h2 className="font-semibold text-slate-900 dark:text-slate-50">{t('inventory.stock.title')}</h2>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCardPro title={t('inventory.stockValue')} value={formatCurrency(kpis.stockValue)} icon={Package} color="blue" onClick={() => navigate('/inventory/products')} />

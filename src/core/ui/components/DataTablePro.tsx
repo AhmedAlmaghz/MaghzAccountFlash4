@@ -24,6 +24,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { Button } from './Button';
+import { useTranslation } from '@/core/i18n/useTranslation';
 
 interface DataTableProProps<TData> {
   data: TData[];
@@ -48,9 +49,9 @@ export function DataTablePro<TData>({
   columns,
   keyExtractor,
   isLoading,
-  emptyMessage = 'لا توجد بيانات',
+  emptyMessage,
   searchable = true,
-  searchPlaceholder = 'بحث...',
+  searchPlaceholder,
   pageSize = 10,
   pageSizeOptions = [10, 25, 50, 100],
   onRowClick,
@@ -60,6 +61,9 @@ export function DataTablePro<TData>({
   className,
   title,
 }: DataTableProProps<TData>) {
+  const { t } = useTranslation();
+  const resolvedEmptyMessage = emptyMessage ?? t('common.noData');
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t('select.default.search');
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -95,7 +99,7 @@ export function DataTablePro<TData>({
   if (data.length === 0) {
     return (
       <div className="empty-state">
-        <p className="text-lg font-medium">{emptyMessage}</p>
+        <p className="text-lg font-medium">{resolvedEmptyMessage}</p>
       </div>
     );
   }
@@ -114,7 +118,7 @@ export function DataTablePro<TData>({
                 type="text"
                 value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
-                placeholder={searchPlaceholder}
+                placeholder={resolvedSearchPlaceholder}
                 className="form-control pr-9 w-full sm:w-64"
               />
             </div>
@@ -122,17 +126,17 @@ export function DataTablePro<TData>({
           
           <div className="flex items-center gap-1">
             {onExportExcel && (
-              <Button size="sm" variant="ghost" onClick={onExportExcel} title="تصدير Excel">
+              <Button size="sm" variant="ghost" onClick={onExportExcel} title={t('table.exportExcel')}>
                 <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
               </Button>
             )}
             {onExportPdf && (
-              <Button size="sm" variant="ghost" onClick={onExportPdf} title="تصدير PDF">
+              <Button size="sm" variant="ghost" onClick={onExportPdf} title={t('table.exportPdf')}>
                 <FileText className="w-4 h-4 text-rose-600" />
               </Button>
             )}
             {onPrint && (
-              <Button size="sm" variant="ghost" onClick={onPrint} title="طباعة">
+              <Button size="sm" variant="ghost" onClick={onPrint} title={t('table.print')}>
                 <Printer className="w-4 h-4 text-slate-600" />
               </Button>
             )}
@@ -196,7 +200,7 @@ export function DataTablePro<TData>({
       {/* Pagination */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-slate-600 dark:text-slate-400">
         <div className="flex items-center gap-2">
-          <span>عرض</span>
+          <span>{t('table.show')}</span>
           <select
             value={table.getState().pagination.pageSize}
             onChange={(e) => table.setPageSize(Number(e.target.value))}
@@ -206,7 +210,7 @@ export function DataTablePro<TData>({
               <option key={size} value={size}>{size}</option>
             ))}
           </select>
-          <span>من {table.getFilteredRowModel().rows.length} سجل</span>
+          <span>{t('table.recordsCount', { count: String(table.getFilteredRowModel().rows.length) })}</span>
         </div>
         
         <div className="flex items-center gap-1">

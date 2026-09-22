@@ -84,11 +84,11 @@ export const StockAdjustmentPage: React.FC = () => {
 
   const handleAdd = async () => {
     if (!activeCompany || !form.productId) {
-      addToast('error', 'الرجاء اختيار المنتج');
+      addToast('error', t('inventory.adjustment.selectProduct'));
       return;
     }
     if (!form.warehouseId) {
-      addToast('error', 'الرجاء اختيار المستودع');
+      addToast('error', t('inventory.adjustment.selectWarehouse'));
       return;
     }
     setSaving(true);
@@ -153,14 +153,14 @@ export const StockAdjustmentPage: React.FC = () => {
   const handleApprove = async (id: string) => {
     if (!user?.id) return;
     const result = await approve(id, user.id);
-    if (result?.success) addToast('success', 'تم اعتماد التسوية بنجاح');
+    if (result?.success) addToast('success', t('inventory.adjustment.approvedToast'));
     else addToast('error', result?.error || t('common.error'));
     setConfirmApprove(null);
   };
 
   const handlePost = async (adj: StockAdjustment) => {
     if (!activeCompany?.id || adj.difference === 0) {
-      addToast('error', 'لا يمكن ترحيل تسوية بفرق صفر');
+      addToast('error', t('inventory.adjustment.zeroDiff'));
       return;
     }
     setPostingId(adj.id);
@@ -189,7 +189,7 @@ export const StockAdjustmentPage: React.FC = () => {
         { key: 'date', header: t('inventory.date'), width: 12 },
         { key: 'adjustmentNumber', header: t('inventory.adjustment.number'), width: 14 },
         { key: 'productName', header: t('inventory.productName'), width: 22 },
-        { key: 'warehouseName', header: t('inventory.warehouse'), width: 16 },
+        { key: 'warehouseName', header: t('inventory.warehouse.label'), width: 16 },
         { key: 'systemQty', header: t('inventory.systemQty'), width: 10 },
         { key: 'actualQty', header: t('inventory.actualQty'), width: 10 },
         { key: 'difference', header: t('inventory.difference'), width: 10 },
@@ -207,7 +207,7 @@ export const StockAdjustmentPage: React.FC = () => {
         { key: 'date', header: t('inventory.date') },
         { key: 'adjustmentNumber', header: t('inventory.adjustment.number') },
         { key: 'productName', header: t('inventory.productName') },
-        { key: 'warehouseName', header: t('inventory.warehouse') },
+        { key: 'warehouseName', header: t('inventory.warehouse.label') },
         { key: 'systemQty', header: t('inventory.systemQty') },
         { key: 'actualQty', header: t('inventory.actualQty') },
         { key: 'difference', header: t('inventory.difference') },
@@ -222,7 +222,7 @@ export const StockAdjustmentPage: React.FC = () => {
     const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${t('inventory.adjustments')}</title>
 <style>body{font-family:'Cairo',sans-serif;padding:24px;color:#1e293b}table{width:100%;border-collapse:collapse;font-size:13px}th{background:#4f46e5;color:#fff;padding:10px 12px;border:1px solid #4f46e5}td{border:1px solid #e2e8f0;padding:8px 12px}tr:nth-child(even){background:#f8fafc}.header{text-align:center;margin-bottom:16px}.header h1{font-size:18px;font-weight:700;color:#4f46e5}</style>
 </head><body><div class="header"><h1>${t('inventory.adjustments')}</h1><p>${activeCompany?.name || ''}</p></div>
-<table><thead><tr><th>${t('inventory.date')}</th><th>${t('inventory.adjustment.number')}</th><th>${t('inventory.productName')}</th><th>${t('inventory.warehouse')}</th><th>${t('inventory.systemQty')}</th><th>${t('inventory.actualQty')}</th><th>${t('inventory.difference')}</th><th>${t('inventory.reason')}</th><th>${t('inventory.status')}</th></tr></thead>
+<table><thead><tr><th>${t('inventory.date')}</th><th>${t('inventory.adjustment.number')}</th><th>${t('inventory.productName')}</th><th>${t('inventory.warehouse.label')}</th><th>${t('inventory.systemQty')}</th><th>${t('inventory.actualQty')}</th><th>${t('inventory.difference')}</th><th>${t('inventory.reason')}</th><th>${t('inventory.status')}</th></tr></thead>
 <tbody>${filtered.map((a) => `<tr><td>${a.date}</td><td>${a.adjustmentNumber || '-'}</td><td>${a.productName || a.productId}</td><td>${a.warehouseName || a.warehouseId}</td><td>${a.systemQty}</td><td>${a.actualQty}</td><td>${a.difference > 0 ? '+' : ''}${a.difference}</td><td>${a.reason || '-'}</td><td>${a.status}</td></tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`;
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
@@ -282,9 +282,9 @@ export const StockAdjustmentPage: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الإجمالي</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.transactions.total')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stats.total}</p>
-              <p className="text-xs text-slate-500">{filtered.length} ظاهر</p>
+              <p className="text-xs text-slate-500">{filtered.length} {t('inventory.transactions.visible')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
               <ClipboardList size={18} className="text-slate-600" />
@@ -292,7 +292,7 @@ export const StockAdjustmentPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">مسودة</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.adjustment.draft')}</p>
               <p className="text-xl font-bold text-slate-600 dark:text-slate-300 tabular-nums">{stats.draft}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -301,7 +301,7 @@ export const StockAdjustmentPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-blue-600">معتمدة</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-blue-600">{t('inventory.adjustment.approved')}</p>
               <p className="text-xl font-bold text-blue-600 tabular-nums">{stats.approved}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -310,7 +310,7 @@ export const StockAdjustmentPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">مرحلة</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">{t('inventory.adjustment.posted')}</p>
               <p className="text-xl font-bold text-emerald-600 tabular-nums">{stats.posted}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
@@ -319,7 +319,7 @@ export const StockAdjustmentPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">صافي الفرق</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.adjustment.netDifference')}</p>
               <p className="text-sm font-bold tabular-nums flex items-center gap-1">
                 <span className="text-emerald-600 flex items-center gap-0.5"><ArrowUpCircle size={12} />{stats.positive}</span>
                 <span className="text-slate-300">/</span>
@@ -338,7 +338,7 @@ export const StockAdjustmentPage: React.FC = () => {
               <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
-                placeholder={`${t('search')} — منتج / مستودع / سبب / رقم`}
+                placeholder={`${t('search')} — ${t('inventory.adjustment.searchHint')}`}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
@@ -381,7 +381,7 @@ export const StockAdjustmentPage: React.FC = () => {
           {hasFilters && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
               <span>{filtered.length} من {adjustments.length} • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter}` : ''}</span>
-              <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
+              <button onClick={() => { setSearch(''); setStatusFilter(''); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
             </div>
           )}
         </Card>
@@ -390,7 +390,7 @@ export const StockAdjustmentPage: React.FC = () => {
       <Card noPadding>
         {filtered.length === 0 && !isLoading ? (
           <div className="py-10">
-            <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? 'لا توجد نتائج' : t('inventory.empty.adjustments.title')} description={hasFilters ? 'جرّب تغيير البحث أو الحالة' : t('inventory.empty.adjustments.description')} />
+            <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? t('common.noResults') : t('inventory.empty.adjustments.title')} description={hasFilters ? t('inventory.adjustment.tryDifferentSearch') : t('inventory.empty.adjustments.description')} />
           </div>
         ) : (
           <Table<StockAdjustment>
@@ -497,7 +497,7 @@ export const StockAdjustmentPage: React.FC = () => {
         isOpen={isOpen}
         onClose={closeCreateModal}
         title={t('inventory.newAdjustment')}
-        description="تسوية جردية — مقارنة كمية النظام بالفعلي"
+        description={t('inventory.adjustment.createDesc')}
         size="lg"
         footer={
           <div className="flex gap-2 ml-auto">
@@ -513,7 +513,7 @@ export const StockAdjustmentPage: React.FC = () => {
               <ProductSelect companyId={activeCompany?.id || ''} value={form.productId || ''} onChange={(v) => setForm((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock module="inventory" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.warehouse')} *</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.warehouse.label')} *</label>
               <WarehouseSelect companyId={activeCompany?.id || ''} value={form.warehouseId || ''} onChange={(v) => setForm((prev) => ({ ...prev, warehouseId: typeof v === 'string' ? v : '' }))} />
             </div>
           </div>
@@ -525,13 +525,13 @@ export const StockAdjustmentPage: React.FC = () => {
               <div className={`h-10 rounded-lg border flex items-center justify-center font-bold tabular-nums ${diff > 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 border-emerald-200' : diff < 0 ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 border-rose-200' : 'bg-slate-50 dark:bg-slate-800 text-slate-600 border-slate-200'}`}>
                 {diff > 0 ? '+' : ''}{diff}
               </div>
-              <p className="text-xs text-slate-500 mt-1">{diff === 0 ? 'لا يوجد فرق' : diff > 0 ? 'زيادة' : 'عجز'}</p>
+              <p className="text-xs text-slate-500 mt-1">{diff === 0 ? t('inventory.adjustment.noDifference') : diff > 0 ? t('inventory.adjustment.surplus') : t('inventory.adjustment.shortage')}</p>
             </div>
           </div>
           <Input label={t('inventory.costPrice')} type="number" step="0.01" min="0" value={String(form.unitCost ?? '')} onChange={(e) => setForm((prev) => ({ ...prev, unitCost: Number(e.target.value) }))} />
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.reason')}</label>
-            <textarea value={form.reason || ''} onChange={(e) => setForm((prev) => ({ ...prev, reason: e.target.value }))} placeholder="سبب التسوية..." rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
+            <textarea value={form.reason || ''} onChange={(e) => setForm((prev) => ({ ...prev, reason: e.target.value }))} placeholder={t('inventory.adjustment.reasonPlaceholder')} rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
           </div>
         </div>
       </Modal>

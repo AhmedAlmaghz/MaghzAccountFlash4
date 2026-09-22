@@ -1,6 +1,24 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 import { Button } from './Button';
+import { useAppStore } from '@/core/store';
+import ar from '@/core/i18n/ar.json';
+import en from '@/core/i18n/en.json';
+
+/** Hook-free lookup for the class component (mirrors useTranslation). */
+function te(key: string): string {
+  const lang = useAppStore.getState().language === 'en' ? 'en' : 'ar';
+  const dict = (lang === 'en' ? en : ar) as unknown as Record<string, unknown>;
+  let value: unknown = dict;
+  for (const k of key.split('.')) {
+    if (value && typeof value === 'object' && k in (value as Record<string, unknown>)) {
+      value = (value as Record<string, unknown>)[k];
+    } else {
+      return key;
+    }
+  }
+  return typeof value === 'string' ? value : key;
+}
 
 interface Props {
   children: ReactNode;
@@ -57,10 +75,10 @@ export class ErrorBoundary extends Component<Props, State> {
               <AlertTriangle size={32} className="text-rose-600 dark:text-rose-400" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 mb-2">
-              حدث خطأ غير متوقع
+              {te('error.title')}
             </h1>
             <p className="text-slate-600 dark:text-slate-400 mb-6">
-              نأسف للإزعاج. يرجى إعادة المحاولة أو العودة إلى الصفحة الرئيسية.
+              {te('error.description')}
             </p>
             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 mb-6 text-right">
               <p className="text-xs font-mono text-slate-500 dark:text-slate-400 break-all">
@@ -69,13 +87,13 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
             <div className="flex gap-2 justify-center flex-wrap">
               <Button variant="primary" onClick={this.handleReset} leftIcon={<RefreshCw size={16} />}>
-                إعادة المحاولة
+                {te('common.retry')}
               </Button>
               <Button variant="secondary" onClick={this.handleHome} leftIcon={<Home size={16} />}>
-                الرئيسية
+                {te('error.home')}
               </Button>
               <Button variant="ghost" onClick={this.handleReload}>
-                إعادة تحميل
+                {te('error.reload')}
               </Button>
             </div>
           </div>

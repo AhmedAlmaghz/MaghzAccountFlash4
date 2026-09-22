@@ -71,11 +71,11 @@ export const InventoryTransactionsPage: React.FC = () => {
 
   const handleAdd = async () => {
     if (!activeCompany || !form.productId || !form.warehouseId) {
-      addToast('error', 'الرجاء اختيار المنتج والمستودع');
+      addToast('error', t('inventory.transactions.completeFields'));
       return;
     }
     if (!form.quantity || Number(form.quantity) <= 0) {
-      addToast('error', 'الكمية يجب أن تكون أكبر من صفر');
+      addToast('error', t('inventory.stock.positiveQty'));
       return;
     }
     setSaving(true);
@@ -115,7 +115,7 @@ export const InventoryTransactionsPage: React.FC = () => {
         { key: 'date', header: t('inventory.date'), width: 12 },
         { key: 'type', header: t('inventory.type'), width: 12 },
         { key: 'productName', header: t('inventory.productName'), width: 24 },
-        { key: 'warehouseName', header: t('inventory.warehouse'), width: 18 },
+        { key: 'warehouseName', header: t('inventory.warehouse.label'), width: 18 },
         { key: 'quantity', header: t('inventory.quantity'), width: 10 },
         { key: 'reference', header: t('inventory.reference'), width: 16 },
       ],
@@ -130,7 +130,7 @@ export const InventoryTransactionsPage: React.FC = () => {
         { key: 'date', header: t('inventory.date') },
         { key: 'type', header: t('inventory.type') },
         { key: 'productName', header: t('inventory.productName') },
-        { key: 'warehouseName', header: t('inventory.warehouse') },
+        { key: 'warehouseName', header: t('inventory.warehouse.label') },
         { key: 'quantity', header: t('inventory.quantity') },
         { key: 'reference', header: t('inventory.reference') },
       ],
@@ -143,7 +143,7 @@ export const InventoryTransactionsPage: React.FC = () => {
     const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${t('inventory.transactions')}</title>
 <style>body{font-family:'Cairo',sans-serif;padding:24px;color:#1e293b}table{width:100%;border-collapse:collapse;font-size:13px}th{background:#4f46e5;color:#fff;padding:10px 12px;border:1px solid #4f46e5}td{border:1px solid #e2e8f0;padding:8px 12px}tr:nth-child(even){background:#f8fafc}.header{text-align:center;margin-bottom:16px}.header h1{font-size:18px;font-weight:700;color:#4f46e5}</style>
 </head><body><div class="header"><h1>${t('inventory.transactions')}</h1><p>${activeCompany?.name || ''}</p></div>
-<table><thead><tr><th>${t('inventory.date')}</th><th>${t('inventory.type')}</th><th>${t('inventory.productName')}</th><th>${t('inventory.warehouse')}</th><th>${t('inventory.quantity')}</th><th>${t('inventory.reference')}</th></tr></thead>
+<table><thead><tr><th>${t('inventory.date')}</th><th>${t('inventory.type')}</th><th>${t('inventory.productName')}</th><th>${t('inventory.warehouse.label')}</th><th>${t('inventory.quantity')}</th><th>${t('inventory.reference')}</th></tr></thead>
 <tbody>${filtered.map((tx) => `<tr><td>${tx.date}</td><td>${t(TYPE_CONFIG[tx.type]?.label || tx.type)}</td><td>${tx.productName || tx.productId}</td><td>${tx.warehouseName || tx.warehouseId}</td><td>${tx.quantity}</td><td>${tx.reference || '-'}</td></tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`;
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
@@ -168,9 +168,9 @@ export const InventoryTransactionsPage: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الإجمالي</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.transactions.total')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
-              <p className="text-xs text-slate-500">{filtered.length} ظاهر</p>
+              <p className="text-xs text-slate-500">{filtered.length} {t('inventory.transactions.visible')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
               <Package size={18} className="text-slate-600" />
@@ -178,7 +178,7 @@ export const InventoryTransactionsPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">وارد</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">{t('inventory.transactions.typeIn')}</p>
               <p className="text-xl font-bold text-emerald-600 tabular-nums">{stats.inCount}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
@@ -187,7 +187,7 @@ export const InventoryTransactionsPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-rose-600">صادر</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-rose-600">{t('inventory.transactions.typeOut')}</p>
               <p className="text-xl font-bold text-rose-600 tabular-nums">{stats.outCount}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
@@ -196,7 +196,7 @@ export const InventoryTransactionsPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-amber-600">تسوية</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-amber-600">{t('inventory.transactions.typeAdjustment')}</p>
               <p className="text-xl font-bold text-amber-600 tabular-nums">{stats.adjCount}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
@@ -205,7 +205,7 @@ export const InventoryTransactionsPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-blue-600">تحويل</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-blue-600">{t('inventory.transactions.typeTransfer')}</p>
               <p className="text-xl font-bold text-blue-600 tabular-nums">{stats.trCount}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -217,12 +217,12 @@ export const InventoryTransactionsPage: React.FC = () => {
         <FilterBar
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder={`${t('search')} — منتج / مستودع / مرجع`}
+          searchPlaceholder={`${t('search')} — ${t('inventory.transactions.searchHint')}`}
           filterOptions={[
             { key: '', label: t('all') },
             { key: 'in', label: t('inventory.in') },
             { key: 'out', label: t('inventory.out') },
-            { key: 'adjustment', label: 'تسوية' },
+            { key: 'adjustment', label: t('inventory.transactions.typeAdjustment') },
             { key: 'transfer', label: t('inventory.transfer') },
           ]}
           activeFilter={typeFilter}
@@ -244,7 +244,7 @@ export const InventoryTransactionsPage: React.FC = () => {
         {hasFilters && (
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span>{filtered.length} من {transactions.length} • {search ? `"${search}"` : ''} {typeFilter ? `• ${typeFilter}` : ''}</span>
-            <button onClick={() => { setSearch(''); setTypeFilter(''); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
+            <button onClick={() => { setSearch(''); setTypeFilter(''); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
           </div>
         )}
       </div>
@@ -252,7 +252,7 @@ export const InventoryTransactionsPage: React.FC = () => {
       <Card noPadding>
         {filtered.length === 0 && !isLoading ? (
           <div className="py-10">
-            <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? 'لا توجد نتائج' : t('inventory.empty.transactions.title')} description={hasFilters ? 'جرّب تغيير البحث أو النوع' : t('inventory.empty.transactions.description')} />
+            <EmptyState icon={hasFilters ? 'search' : 'inbox'} title={hasFilters ? t('common.noResults') : t('inventory.empty.transactions.title')} description={hasFilters ? t('inventory.transactions.tryDifferentSearch') : t('inventory.empty.transactions.description')} />
           </div>
         ) : (
           <>
@@ -294,7 +294,7 @@ export const InventoryTransactionsPage: React.FC = () => {
                 },
                 {
                   key: 'warehouseName',
-                  header: t('inventory.warehouse'),
+                  header: t('inventory.warehouse.label'),
                   width: '150px',
                   mobile: 'hidden' as const,
                   render: (row: InventoryTransaction) => row.warehouseName ? (
@@ -340,7 +340,7 @@ export const InventoryTransactionsPage: React.FC = () => {
         isOpen={isOpen}
         onClose={closeModal}
         title={t('inventory.newTransaction')}
-        description="إضافة حركة مخزنية يدوية"
+        description={t('inventory.transactions.createDesc')}
         size="lg"
         footer={
           <div className="flex gap-2 ml-auto">
@@ -376,14 +376,14 @@ export const InventoryTransactionsPage: React.FC = () => {
             <ProductSelect companyId={activeCompany?.id || ''} value={form.productId || ''} onChange={(v) => setForm((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock module="inventory" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.warehouse')} *</label>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.warehouse.label')} *</label>
             <WarehouseSelect companyId={activeCompany?.id || ''} value={form.warehouseId || ''} onChange={(v) => setForm((prev) => ({ ...prev, warehouseId: typeof v === 'string' ? v : '' }))} />
           </div>
           <Input label={`${t('inventory.quantity')} *`} type="number" min="0.01" step="0.01" value={String(form.quantity || '')} onChange={(e) => setForm((prev) => ({ ...prev, quantity: Number(e.target.value) }))} required />
-          <Input label={t('inventory.reference')} value={form.reference || ''} onChange={(e) => setForm((prev) => ({ ...prev, reference: e.target.value }))} placeholder="مرجع اختياري" />
+          <Input label={t('inventory.reference')} value={form.reference || ''} onChange={(e) => setForm((prev) => ({ ...prev, reference: e.target.value }))} placeholder={t('inventory.transactions.referencePlaceholder')} />
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.notes')}</label>
-            <textarea value={form.notes || ''} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder="ملاحظات..." rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
+            <textarea value={form.notes || ''} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t('inventory.transactions.notesPlaceholder')} rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
           </div>
         </div>
       </Modal>

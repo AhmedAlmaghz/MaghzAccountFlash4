@@ -98,7 +98,7 @@ export const CustomerStatementReport: React.FC = () => {
       columns,
       rows: customers as unknown as Record<string, unknown>[],
       meta: {
-        title: t('reports.customerStatement'),
+        title: t('reports.customerStatement.title'),
         subtitle: branding.companyName,
         ...(periodLabel ? { periodLabel } : {}),
         direction,
@@ -165,7 +165,7 @@ export const CustomerStatementReport: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         icon={<Users size={22} />}
-        title={t('reports.customerStatement')}
+        title={t('reports.customerStatement.title')}
         subtitle={t('reports.customerStatement.subtitle')}
         actions={
           <>

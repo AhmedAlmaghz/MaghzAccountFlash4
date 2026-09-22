@@ -65,7 +65,7 @@ export const AccountLedgerPage: React.FC = () => {
       `AccountLedger_${accountId || 'all'}`,
       {
         title: t('accounting.accountLedger'),
-        subtitle: `${activeCompany?.name || ''} — ${accountId ? `حساب ${accountId}` : ''}`,
+        subtitle: `${activeCompany?.name || ''} — ${accountId ? `${t('accounting.ledger.accountLabel')} ${accountId}` : ''}`,
         rtl: true,
       },
     );
@@ -112,7 +112,7 @@ export const AccountLedgerPage: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             <Button variant="secondary" size="sm" leftIcon={<Calendar size={14} />} onClick={() => setShowFilters(!showFilters)}>
-              {t('filter')}
+              {t('filter.title')}
             </Button>
             <Button variant="secondary" size="sm" leftIcon={<FileDown size={14} />} onClick={handleExportExcel} disabled={!accountId || !filteredRows.length}>
               Excel
@@ -130,7 +130,7 @@ export const AccountLedgerPage: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي مدين</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.ledger.totalDebit')}</p>
                 <p className="text-lg font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totals.debit)}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -139,7 +139,7 @@ export const AccountLedgerPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي دائن</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.ledger.totalCredit')}</p>
                 <p className="text-lg font-bold text-rose-600 dark:text-rose-400 tabular-nums">{formatCurrency(totals.credit)}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
@@ -148,7 +148,7 @@ export const AccountLedgerPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الرصيد الختامي</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.ledger.closingBalance')}</p>
                 <p className={cn('text-lg font-bold tabular-nums', totals.balance >= 0 ? 'text-blue-700 dark:text-blue-300' : 'text-rose-700 dark:text-rose-300')}>{formatCurrency(totals.balance)}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -157,7 +157,7 @@ export const AccountLedgerPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">عدد الحركات</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.ledger.entriesCount')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{totals.count}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -188,7 +188,7 @@ export const AccountLedgerPage: React.FC = () => {
                   }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-slate-700 shadow-sm border"
                 >
-                  {p === 'month' ? 'هذا الشهر' : 'هذه السنة'}
+                  {p === 'month' ? t('accounting.ledger.thisMonth') : t('accounting.ledger.thisYear')}
                 </button>
               ))}
             </div>
@@ -204,7 +204,7 @@ export const AccountLedgerPage: React.FC = () => {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={`${t('search')} — مرجع / بيان`}
+                placeholder={`${t('search')} — ${t('accounting.ledger.searchHint')}`}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2 pr-9 pl-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
               />
               {search && (
@@ -213,7 +213,7 @@ export const AccountLedgerPage: React.FC = () => {
                 </button>
               )}
             </div>
-            {search && <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 border">{filteredRows.length} نتيجة</Badge>}
+            {search && <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 border">{filteredRows.length} {t('accounting.ledger.result')}</Badge>}
           </div>
         )}
       </Card>
@@ -221,7 +221,7 @@ export const AccountLedgerPage: React.FC = () => {
       <Card noPadding>
         {!accountId ? (
           <div className="py-12">
-            <EmptyState icon="search" title="اختر حساباً" description="اختر حساباً من الأعلى لعرض دفتر الأستاذ" />
+            <EmptyState icon="search" title={t('accounting.ledger.selectAccount')} description={t('accounting.ledger.selectAccountHint')} />
           </div>
         ) : isLoading ? (
           <div className="space-y-3 p-4">
@@ -231,7 +231,7 @@ export const AccountLedgerPage: React.FC = () => {
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="py-10">
-            <EmptyState icon={search ? 'search' : 'inbox'} title={search ? 'لا توجد نتائج' : t('accounting.noData')} description={search ? 'جرّب تغيير كلمات البحث' : 'لا توجد حركات في الفترة المحددة'} />
+            <EmptyState icon={search ? 'search' : 'inbox'} title={search ? t('common.noResults') : t('accounting.noData')} description={search ? t('accounting.ledger.tryDifferentSearch') : t('accounting.ledger.noMovements')} />
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -264,7 +264,7 @@ export const AccountLedgerPage: React.FC = () => {
                 })}
                 <tr className="bg-slate-900 dark:bg-slate-800 text-white font-bold">
                   <td className="px-4 py-3 text-sm" colSpan={3}>
-                    الإجمالي — {filteredRows.length} حركة
+                    {t('accounting.ledger.total')} — {filteredRows.length} {t('accounting.ledger.movement')}
                   </td>
                   <td className="px-4 py-3 text-sm text-right tabular-nums">{formatCurrency(totals.debit)}</td>
                   <td className="px-4 py-3 text-sm text-right tabular-nums">{formatCurrency(totals.credit)}</td>

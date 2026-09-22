@@ -14,6 +14,7 @@ import { posTools } from './posTools';
 import { fixedAssetTools } from './fixedAssetTools';
 import { taxTools } from './taxTools';
 import { memoryTools } from './memoryTools';
+import { jevTools } from '../jev/jevTools';
 
 /**
  * Registers every built-in tool. Import this module once (side effect) before
@@ -23,7 +24,7 @@ let registered = false;
 
 export function ensureToolsRegistered(): void {
   if (registered) return;
-  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools, ...batchTools, ...directionTools, ...posTools, ...fixedAssetTools, ...taxTools, ...memoryTools]);
+  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools, ...batchTools, ...directionTools, ...posTools, ...fixedAssetTools, ...taxTools, ...memoryTools, ...jevTools]);
   registered = true;
 }
 

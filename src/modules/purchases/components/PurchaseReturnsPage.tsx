@@ -401,7 +401,7 @@ export const PurchaseReturnsPage: React.FC = () => {
       docNumber: ret.returnNumber,
       date: ret.date,
       partyName: ret.supplier?.name || ret.supplierId,
-      partyLabel: t('purchases.supplier'),
+      partyLabel: t('purchases.supplier.title'),
       partyTaxNumber: ret.supplier?.taxNumber,
       partyAddress: ret.supplier?.address,
       lines: (lines || []).map(l => ({
@@ -449,7 +449,7 @@ export const PurchaseReturnsPage: React.FC = () => {
   const columns = useMemo(() => [
     { key: 'returnNumber', header: t('purchases.return.number'), mobile: 'title' as const, render: (row: PurchaseReturn) => <span className="font-medium text-zinc-900 dark:text-zinc-100">{row.returnNumber}</span> },
     { key: 'invoiceNumber', header: t('purchases.return.originalInvoice'), mobile: 'hidden' as const, render: (row: PurchaseReturn) => <span className="flex items-center gap-1 text-blue-600"><FileText size={14} /> {row.invoiceNumber || '-'}</span> },
-    { key: 'supplier', header: t('purchases.supplier'), mobile: 'subtitle' as const, render: (row: PurchaseReturn) => <span>{row.supplier?.name || row.supplierId}</span> },
+    { key: 'supplier', header: t('purchases.supplier.title'), mobile: 'subtitle' as const, render: (row: PurchaseReturn) => <span>{row.supplier?.name || row.supplierId}</span> },
     { key: 'date', header: t('purchases.date'), render: (row: PurchaseReturn) => <span>{row.date ? formatDate(row.date) : '-'}</span> },
     { key: 'totalAmount', header: t('purchases.total'), render: (row: PurchaseReturn) => <span className="font-medium">{formatCurrency(row.totalAmount)}</span> },
     { key: 'status', header: t('purchases.status'), mobile: 'status' as const, render: (row: PurchaseReturn) => <StatusBadge status={row.status} /> },
@@ -587,7 +587,7 @@ export const PurchaseReturnsPage: React.FC = () => {
         <div className="space-y-4 p-1">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier')}</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('purchases.supplier.title')}</label>
               <SupplierSelect companyId={activeCompany?.id || ''} value={form.supplierId} onChange={v => setForm(prev => ({ ...prev, supplierId: v || '' }))} />
             </div>
             <Input label={t('purchases.date')} type="date" value={form.date} onChange={e => setForm(prev => ({ ...prev, date: e.target.value }))} />
@@ -844,7 +844,7 @@ export const PurchaseReturnsPage: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="text-slate-500">{t('purchases.return.number')}:</span> <strong>{selectedReturn.returnNumber}</strong></div>
-              <div><span className="text-slate-500">{t('purchases.supplier')}:</span> <strong>{selectedReturn.supplier?.name || selectedReturn.supplierId}</strong></div>
+              <div><span className="text-slate-500">{t('purchases.supplier.title')}:</span> <strong>{selectedReturn.supplier?.name || selectedReturn.supplierId}</strong></div>
               <div><span className="text-slate-500">{t('purchases.date')}:</span> {selectedReturn.date}</div>
               <div><span className="text-slate-500">{t('purchases.return.originalInvoice')}:</span> {selectedReturn.invoiceNumber || '-'}</div>
               <div><span className="text-slate-500">{t('purchases.status')}:</span> <StatusBadge status={selectedReturn.status} /></div>
