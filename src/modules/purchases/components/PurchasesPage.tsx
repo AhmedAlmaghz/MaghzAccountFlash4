@@ -27,10 +27,10 @@ export const PurchasesPage: React.FC = () => {
   }), [invoicesTotal, suppliersTotal, ordersTotal, returnsTotal]);
 
   const purchasesMenu: Array<{ id: string; label: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
-    { id: 'invoices', label: t('purchases.tabs.invoices'), desc: 'فواتير الموردين والضريبة والمدفوعات', icon: FileText, path: '/purchases/invoices', color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', count: stats.invoices },
-    { id: 'orders', label: t('purchases.tabs.orders'), desc: 'أوامر الشراء والتحويل إلى فواتير', icon: ClipboardList, path: '/purchases/orders', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: stats.orders },
-    { id: 'suppliers', label: t('purchases.tabs.suppliers'), desc: 'بيانات الموردين وكشوف الحسابات والذمم', icon: Store, path: '/purchases/suppliers', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: stats.suppliers },
-    { id: 'returns', label: t('purchases.tabs.returns'), desc: 'مردودات المشتريات والأثر المخزني والمحاسبي', icon: Undo2, path: '/purchases/returns', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: stats.returns },
+    { id: 'invoices', label: t('purchases.tabs.invoices'), desc: t('purchases.hub.invoicesDesc'), icon: FileText, path: '/purchases/invoices', color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', count: stats.invoices },
+    { id: 'orders', label: t('purchases.tabs.orders'), desc: t('purchases.hub.ordersDesc'), icon: ClipboardList, path: '/purchases/orders', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: stats.orders },
+    { id: 'suppliers', label: t('purchases.tabs.suppliers'), desc: t('purchases.hub.suppliersDesc'), icon: Store, path: '/purchases/suppliers', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: stats.suppliers },
+    { id: 'returns', label: t('purchases.tabs.returns'), desc: t('purchases.hub.returnsDesc'), icon: Undo2, path: '/purchases/returns', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: stats.returns },
   ];
 
   return (
@@ -52,7 +52,7 @@ export const PurchasesPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.tabs.invoices')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stats.invoices}</p>
-                <p className="text-xs text-slate-500">إجمالي فواتير المشتريات</p>
+                <p className="text-xs text-slate-500">{t('purchases.hub.invoicesTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center">
                 <FileText size={18} className="text-indigo-600" />
@@ -62,7 +62,7 @@ export const PurchasesPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.tabs.orders')}</p>
                 <p className="text-2xl font-bold text-blue-600 tabular-nums">{stats.orders}</p>
-                <p className="text-xs text-slate-500">أوامر شراء نشطة</p>
+                <p className="text-xs text-slate-500">{t('purchases.hub.activeOrders')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
                 <ClipboardList size={18} className="text-blue-600" />
@@ -72,7 +72,7 @@ export const PurchasesPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.tabs.suppliers')}</p>
                 <p className="text-2xl font-bold text-emerald-600 tabular-nums">{stats.suppliers}</p>
-                <p className="text-xs text-slate-500">قاعدة الموردين</p>
+                <p className="text-xs text-slate-500">{t('purchases.hub.suppliersTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
                 <Store size={18} className="text-emerald-600" />

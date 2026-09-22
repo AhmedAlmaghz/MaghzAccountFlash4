@@ -127,7 +127,7 @@ export const SalesPage: React.FC = () => {
               </div>
               <div>
                 <p className="font-semibold">{t('sales.hub.tipsTitle')}</p>
-                <p className="text-sm text-white/80">تابع الفواتير المسودة يومياً، ورحّلها لإنشاء القيود تلقائياً، واستخدم عروض الأسعار لتحويلها إلى فواتير بضغطة واحدة، وراقب مردودات العملاء وأثرها المخزني.</p>
+                <p className="text-sm text-white/80">{t('sales.hub.tipsDesc')}</p>
               </div>
             </div>
           </Card>
