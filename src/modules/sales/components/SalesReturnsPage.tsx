@@ -720,7 +720,7 @@ export const SalesReturnsPage: React.FC = () => {
                     {t('sales.invoice.lines')}
                     <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{lines.length} {t('sales.itemsCount')}</span>
                   </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">حدد المنتجات المرتجعة — الأسعار تُملأ تلقائياً</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{t('sales.return.linesDesc')}</p>
                 </div>
               </div>
               <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
@@ -808,8 +808,8 @@ export const SalesReturnsPage: React.FC = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-3 space-y-4">
-              <Input label={t('sales.return.reason')} value={header.reason} onChange={e => setHeader(p => ({ ...p, reason: e.target.value }))} placeholder="سبب الإرجاع..." />
-              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder="ملاحظات إضافية..." />
+              <Input label={t('sales.return.reason')} value={header.reason} onChange={e => setHeader(p => ({ ...p, reason: e.target.value }))} placeholder={t('sales.return.reasonPlaceholder')} />
+              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder={t('sales.return.notesPlaceholder')} />
             </div>
             <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
               <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
@@ -836,7 +836,7 @@ export const SalesReturnsPage: React.FC = () => {
                 {showVat ? (
                   <div className="flex justify-between py-2 border-b border-dashed border-slate-200 dark:border-slate-700"><span className="text-slate-600 dark:text-slate-300 flex items-center gap-1">{t('sales.vat')} <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{calculations.vatRate}%</span></span><span className="font-semibold text-emerald-700">{formatCurrency(calculations.vatAmount)}</span></div>
                 ) : (
-                  <div className="flex justify-between py-2 border-b border-dashed opacity-60 text-xs"><span>{t('sales.vat')} — غير مفعّل</span><span>{formatCurrency(0)}</span></div>
+                  <div className="flex justify-between py-2 border-b border-dashed opacity-60 text-xs"><span>{t('sales.vat')} — {t('settings.vat.disabled')}</span><span>{formatCurrency(0)}</span></div>
                 )}
                 <div className="flex justify-between items-center pt-2"><span className="font-black text-slate-900 dark:text-white">{t('sales.total')}</span><span className="text-xl font-black text-rose-600">{formatCurrency(calculations.totalAmount)}</span></div>
               </div>

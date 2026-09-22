@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Mic, MicOff, Send, Sparkles, X, Globe } from 'lucide-react';
 import { useVoiceDictation, type VoiceCommand } from '@/hooks/useVoiceDictation';
+import { useTranslation } from '@/core/i18n/useTranslation';
 
 interface VoiceInputBarProps {
   onSendMessage: (text: string) => void;
@@ -10,9 +11,11 @@ interface VoiceInputBarProps {
 
 export const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
   onSendMessage,
-  placeholder = 'اكتب رسالتك أو تحدث صوتياً...',
+  placeholder,
   isRtl = true,
 }) => {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t('ai.voiceBar.placeholder');
   const [inputText, setInputText] = useState('');
 
   const commands: VoiceCommand[] = useMemo(() => [
@@ -72,7 +75,7 @@ export const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
   if (!isSupported) {
     return (
       <div className="text-xs text-amber-600 dark:text-amber-400 p-2 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 rounded-xl">
-        المتصفح لا يدعم Web Speech API. يُرجى استخدام Google Chrome أو Edge.
+        {t('ai.voiceBar.unsupported')}
       </div>
     );
   }
@@ -107,7 +110,7 @@ export const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
                 </span>
-                <span className="font-semibold text-[11px] text-rose-700 dark:text-rose-300">جاري الاستماع...</span>
+                <span className="font-semibold text-[11px] text-rose-700 dark:text-rose-300">{t('ai.voiceBar.listening')}</span>
                 {interimText && (
                   <span className="text-zinc-600 dark:text-zinc-400 italic text-[11px] truncate max-w-[160px]">
                     &quot;{interimText}&quot;
@@ -129,7 +132,7 @@ export const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
                   className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm"
                 >
                   <X className="w-3 h-3" />
-                  إيقاف
+                  {t('ai.voiceBar.stop')}
                 </button>
               </div>
             </div>
@@ -147,14 +150,14 @@ export const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
                 );
               })}
             </div>
-            <p className="text-[10px] text-center text-rose-600/70 dark:text-rose-400/70">تحدث الآن — سيُضاف كلامك إلى النص الحالي تلقائياً</p>
+            <p className="text-[10px] text-center text-rose-600/70 dark:text-rose-400/70">{t('ai.voiceBar.speakHint')}</p>
           </div>
         )}
 
         <textarea
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           rows={2}
           className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-500 focus:outline-none resize-none leading-relaxed"
         />
@@ -168,10 +171,10 @@ export const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
                 ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/20 animate-pulse'
                 : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
             }`}
-            title="تفعيل الإملاء الصوتي والأوامر"
+            title={t('ai.voiceBar.enableTitle')}
           >
             {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            <span>{isListening ? 'إيقاف' : 'إملاء صوتي'}</span>
+            <span>{isListening ? t('ai.voiceBar.stop') : t('ai.voiceBar.dictate')}</span>
           </button>
 
           <button

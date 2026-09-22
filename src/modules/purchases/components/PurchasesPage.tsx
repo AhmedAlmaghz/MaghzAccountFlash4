@@ -82,7 +82,7 @@ export const PurchasesPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.tabs.returns')}</p>
                 <p className="text-2xl font-bold text-amber-600 tabular-nums">{stats.returns}</p>
-                <p className="text-xs text-slate-500">مردودات مسجلة</p>
+                <p className="text-xs text-slate-500">{t('purchases.hub.returnsTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
                 <Undo2 size={18} className="text-amber-600" />
@@ -113,7 +113,7 @@ export const PurchasesPage: React.FC = () => {
                   <h3 className="mt-4 font-bold text-slate-900 dark:text-slate-50">{item.label}</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{item.desc}</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400 group-hover:gap-2 transition-all">
-                    فتح <span aria-hidden>←</span>
+                    {t('purchases.hub.open')} <span aria-hidden>←</span>
                   </div>
                 </Link>
               );
@@ -126,8 +126,8 @@ export const PurchasesPage: React.FC = () => {
                 <Sparkles size={18} className="text-white" />
               </div>
               <div>
-                <p className="font-semibold">نصائح المشتريات</p>
-                <p className="text-sm text-white/80">أنشئ أمر الشراء أولاً ثم حوّله إلى فاتورة عند الاستلام، وراقب فواتير المسودة ورحّلها لتوليد القيود تلقائياً، وتابع مردودات المشتريات وأثرها على المخزون وذمم الموردين.</p>
+                <p className="font-semibold">{t('purchases.hub.tipsTitle')}</p>
+                <p className="text-sm text-white/80">{t('purchases.hub.tipsDesc')}</p>
               </div>
             </div>
           </Card>

@@ -15,6 +15,7 @@ import type {
   JobBatchItemInput,
   JobBatchSummary,
 } from './batchTypes';
+import { getDbMode } from '@/core/database/adapters';
 
 /**
  * Renderer-side client for the AI Harness IPC bridge (window.electronAI).
@@ -146,9 +147,28 @@ function newStreamId(): string {
  * (no Electron main process). The browser bridge implements the same
  * surface using the local PGlite DB + direct fetch to the LLM provider.
  */
+/**
+ * In desktop the main-process bridge (window.electronAI) always exists, but
+ * the ACTIVE data backend may be PGlite (the onboarding default). In that
+ * mode the users/settings tables live in the renderer's PGlite DB, not in
+ * the main-process PG pool — using the main bridge would hit an empty pool
+ * and reject every save with "Login required" (no main session was ever
+ * created, because authApi.login correctly routed to the adapter).
+ * Mirror the auth fix: the main bridge is authoritative ONLY when db mode
+ * is 'pg'; otherwise use the browser bridge even inside Electron.
+ */
 async function getEffectiveBridge(): Promise<ElectronAI | null> {
   const b = bridge();
-  if (b) return b;
+  if (b) {
+    try {
+      if (typeof getDbMode === 'function' && getDbMode() !== 'pg') {
+        return (await loadBrowserBridge()) as unknown as ElectronAI;
+      }
+    } catch {
+      // getDbMode unavailable in some test mocks — fall through to main
+    }
+    return b;
+  }
   try {
     return (await loadBrowserBridge()) as unknown as ElectronAI;
   } catch {
