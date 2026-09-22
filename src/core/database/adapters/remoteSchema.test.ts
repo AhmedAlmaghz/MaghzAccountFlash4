@@ -63,9 +63,20 @@ describe('ensureRemoteSchema', () => {
   it('names the failing migration file', async () => {
     const log: string[] = [];
     const r = await ensureRemoteSchema(
-      makeAdapter(log, { failOn: (sql) => (sql.includes('CREATE TABLE') ? 'boom' : null) }),
+      makeAdapter(log, {
+        // Fail inside a migration file, not on the tracking-table DDL
+        // (a tracking-table failure correctly returns the raw error —
+        // no file is involved there).
+        failOn: (sql) => (sql.includes('CREATE TABLE') && !sql.includes('__pglite_migrations') ? 'boom' : null),
+      }),
     );
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/Remote migration \S+ failed: boom/);
+  });
+  it('returns the raw error when the tracking table itself fails', async () => {
+    const log: string[] = [];
+    const r = await ensureRemoteSchema(makeAdapter(log, { failOn: () => 'boom' }));
+    expect(r.success).toBe(false);
+    expect(r.error).toBe('boom');
   });
 });
