@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Plus, UserCheck, UserPlus, Layers, Flame, ThumbsUp, Handshake, FileSpreadsheet } from 'lucide-react';
+import { Plus, UserCheck, UserPlus, Layers, Flame, ThumbsUp, Handshake, FileSpreadsheet, Sparkles, Loader2 } from 'lucide-react';
+import { jevScoreLead, type CompositeResult } from '@/modules/ai/jev/jevScoring';
 import { Card, Button, Input, Modal, Table, Pagination, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
@@ -77,6 +78,11 @@ export const LeadsPage: React.FC = () => {
   const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
   const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
   const duplicateConfirmedRef = useRef(false);
+
+  // JEV scoring (J3)
+  const [jevScoringId, setJevScoringId] = useState<string | null>(null);
+  const [jevResult, setJevResult] = useState<CompositeResult | null>(null);
+  const [isJevModalOpen, setIsJevModalOpen] = useState(false);
 
   const resetForm = () => {
     setFormData({ name: '', phone: '', email: '', company: '', source: '', estimatedValue: '', rating: 'warm', status: 'new', assignedTo: '', notes: '' });
@@ -247,6 +253,25 @@ export const LeadsPage: React.FC = () => {
     }
   };
 
+  const handleJevScore = async (lead: Lead) => {
+    setJevScoringId(lead.id);
+    setJevResult(null);
+    setIsJevModalOpen(true);
+    try {
+      const res = await jevScoreLead(companyId, {
+        name: lead.name,
+        message: lead.notes || lead.company || lead.name,
+        estimatedValue: lead.estimatedValue ?? undefined,
+      });
+      setJevResult(res);
+    } catch {
+      addToast('error', t('ai.errors.generic'));
+      setIsJevModalOpen(false);
+    } finally {
+      setJevScoringId(null);
+    }
+  };
+
   const handleExport = () => {
     const cols = [
       { key: 'name', header: t('crm.lead.name') },
@@ -298,10 +323,21 @@ export const LeadsPage: React.FC = () => {
     {
       key: 'actions',
       header: '',
-      width: '200px',
+      width: '240px',
       mobile: 'actions' as const,
       render: (row: Lead) => (
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-violet-600 hover:text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+            onClick={() => handleJevScore(row)}
+            disabled={jevScoringId === row.id}
+            title="تقييم JEV"
+            aria-label="تقييم JEV"
+          >
+            {jevScoringId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          </Button>
           <ActionButtons
             onView={() => {
               setSelectedLead(row);
@@ -582,6 +618,54 @@ export const LeadsPage: React.FC = () => {
         nearMatches={duplicateNear}
         isEdit={!!editing}
       />
+
+      {/* JEV Scoring Result Modal (J3) */}
+      <Modal
+        isOpen={isJevModalOpen}
+        onClose={() => setIsJevModalOpen(false)}
+        title="تقييم JEV — تأهيل العميل المحتمل"
+        size="md"
+        footer={
+          <div className="flex items-center gap-2 justify-end w-full">
+            <Button variant="secondary" onClick={() => setIsJevModalOpen(false)}>{t('settings.common.close')}</Button>
+          </div>
+        }
+      >
+        {!jevResult ? (
+          <div className="flex flex-col items-center justify-center py-8 gap-3">
+            <Loader2 size={24} className="animate-spin text-violet-600" />
+            <p className="text-sm text-slate-500">جاري التقييم عبر JEV — 4 درجات متوازية (80–150ms)...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-violet-700 dark:text-violet-300">المركب</p>
+                <p className="text-2xl font-bold text-violet-800 dark:text-violet-200 tabular-nums">{(jevResult.composite * 100).toFixed(0)}%</p>
+                <p className="text-xs text-slate-500">{jevResult.jevUsed ? `JEV — ثقة ${(jevResult.confidence * 100).toFixed(0)}%` : 'تقدير محلي (JEV غير متاح)'} · {jevResult.latencyMs}ms</p>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-sm font-semibold border ${jevResult.composite > 0.65 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : jevResult.composite > 0.40 ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                {jevResult.composite > 0.65 ? 'مؤهل' : jevResult.composite > 0.40 ? 'يحتاج متابعة' : 'غير مؤهل'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {jevResult.dimensions.map((d) => (
+                <div key={d.key} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 capitalize">{d.key === 'need' ? 'الحاجة' : d.key === 'budget' ? 'الميزانية' : d.key === 'authority' ? 'الصلاحية' : 'التوقيت'}</p>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-lg font-bold tabular-nums">{(d.normalized * 100).toFixed(0)}%</span>
+                    <span className="text-xs text-slate-500">ثقة {(d.confidence * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div className="h-full bg-violet-600 transition-all" style={{ width: `${d.normalized * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">الأوزان: حاجة 30% + ميزانية 30% + صلاحية 25% + توقيت 15% — عدّلها في <code>jevScoring.ts:LEAD_WEIGHTS</code> دون لمس الـ prompt.</p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

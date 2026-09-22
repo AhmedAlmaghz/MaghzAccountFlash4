@@ -27,10 +27,10 @@ export const SalesPage: React.FC = () => {
   }), [invoicesTotal, customersTotal, quotationsTotal, returnsTotal]);
 
   const salesMenu: Array<{ id: string; label: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
-    { id: 'invoices', label: t('sales.tabs.invoices'), desc: 'فواتير المبيعات والضريبة والتحصيل', icon: FileText, path: '/sales/invoices', color: 'from-primary-600 to-primary-700', bg: 'bg-primary-50 dark:bg-primary-900/20', count: stats.invoices },
-    { id: 'customers', label: t('sales.tabs.customers'), desc: 'بيانات العملاء وكشوف الحسابات والذمم', icon: Users, path: '/sales/customers', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: stats.customers },
-    { id: 'quotations', label: t('sales.tabs.quotations'), desc: 'عروض الأسعار والتحويل إلى فواتير', icon: Tag, path: '/sales/quotations', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: stats.quotations },
-    { id: 'returns', label: t('sales.tabs.returns'), desc: 'مردودات العملاء والأثر المخزني والمحاسبي', icon: Undo2, path: '/sales/returns', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: stats.returns },
+    { id: 'invoices', label: t('sales.tabs.invoices'), desc: t('sales.hub.invoicesDesc'), icon: FileText, path: '/sales/invoices', color: 'from-primary-600 to-primary-700', bg: 'bg-primary-50 dark:bg-primary-900/20', count: stats.invoices },
+    { id: 'customers', label: t('sales.tabs.customers'), desc: t('sales.hub.customersDesc'), icon: Users, path: '/sales/customers', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: stats.customers },
+    { id: 'quotations', label: t('sales.tabs.quotations'), desc: t('sales.hub.quotationsDesc'), icon: Tag, path: '/sales/quotations', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: stats.quotations },
+    { id: 'returns', label: t('sales.tabs.returns'), desc: t('sales.hub.returnsDesc'), icon: Undo2, path: '/sales/returns', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: stats.returns },
   ];
 
   return (
@@ -50,9 +50,9 @@ export const SalesPage: React.FC = () => {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">الفواتير</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.hub.invoices')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stats.invoices}</p>
-                <p className="text-xs text-slate-500">إجمالي فواتير المبيعات</p>
+                <p className="text-xs text-slate-500">{t('sales.hub.invoicesTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
                 <FileText size={18} className="text-primary-600" />
@@ -60,9 +60,9 @@ export const SalesPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">العملاء</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.hub.customers')}</p>
                 <p className="text-2xl font-bold text-emerald-600 tabular-nums">{stats.customers}</p>
-                <p className="text-xs text-slate-500">قاعدة العملاء</p>
+                <p className="text-xs text-slate-500">{t('sales.hub.customersTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
                 <Users size={18} className="text-emerald-600" />
@@ -70,9 +70,9 @@ export const SalesPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">عروض الأسعار</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.hub.quotations')}</p>
                 <p className="text-2xl font-bold text-blue-600 tabular-nums">{stats.quotations}</p>
-                <p className="text-xs text-slate-500">عروض نشطة</p>
+                <p className="text-xs text-slate-500">{t('sales.hub.activeQuotations')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
                 <Tag size={18} className="text-blue-600" />
@@ -80,9 +80,9 @@ export const SalesPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">المردودات</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('sales.hub.returns')}</p>
                 <p className="text-2xl font-bold text-amber-600 tabular-nums">{stats.returns}</p>
-                <p className="text-xs text-slate-500">مردودات مسجلة</p>
+                <p className="text-xs text-slate-500">{t('sales.hub.returnsTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
                 <Undo2 size={18} className="text-amber-600" />
@@ -113,7 +113,7 @@ export const SalesPage: React.FC = () => {
                   <h3 className="mt-4 font-bold text-slate-900 dark:text-slate-50">{item.label}</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{item.desc}</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 group-hover:gap-2 transition-all">
-                    فتح <span aria-hidden>←</span>
+                    {t('sales.hub.open')} <span aria-hidden>←</span>
                   </div>
                 </Link>
               );
@@ -126,7 +126,7 @@ export const SalesPage: React.FC = () => {
                 <Sparkles size={18} className="text-white" />
               </div>
               <div>
-                <p className="font-semibold">نصائح المبيعات</p>
+                <p className="font-semibold">{t('sales.hub.tipsTitle')}</p>
                 <p className="text-sm text-white/80">تابع الفواتير المسودة يومياً، ورحّلها لإنشاء القيود تلقائياً، واستخدم عروض الأسعار لتحويلها إلى فواتير بضغطة واحدة، وراقب مردودات العملاء وأثرها المخزني.</p>
               </div>
             </div>
