@@ -10,6 +10,9 @@ if (typeof globalThis.crypto === 'undefined' || !globalThis.crypto.subtle) {
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
   isElectronPg: vi.fn(() => false),
+  // Server-PG mode by default so the Electron-IPC delegation tests below
+  // exercise the main-process path; routing tests override per case.
+  getDbMode: vi.fn(() => 'pg'),
 }));
 
 vi.mock('@/core/utils/validation', () => ({
@@ -19,7 +22,7 @@ vi.mock('@/core/utils/validation', () => ({
 }));
 
 import { authApi } from './api';
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, getDbMode } from '@/core/database/adapters';
 
 const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
 const USER_ID = '00000000-0000-0000-0000-000000000002';
@@ -165,5 +168,64 @@ describe('updateProfile (Electron IPC)', () => {
     expect(updateProfile).toHaveBeenCalledWith({ fullName: 'أحمد', phone: null, photoUrl: null });
     expect(res.user).toMatchObject({ id: USER_ID });
     expect(query).not.toHaveBeenCalled();
+  });
+});
+
+describe('login routing (main bridge vs active adapter)', () => {
+  const PASSWORD = 'AdminPassword123';
+  function userRowsImpl(role = 'admin') {
+    const hash = makeStoredHash(PASSWORD);
+    return async (sql: string) => {
+      if (sql.includes('FROM users WHERE username')) {
+        return {
+          success: true,
+          rows: [{
+            id: USER_ID, company_id: COMPANY_ID, username: 'admin', email: null,
+            full_name: 'المدير', phone: null, photo_url: null, role,
+            branch_id: null, is_active: true, password_hash: hash,
+          }],
+        };
+      }
+      if (sql.includes('FROM roles WHERE name')) {
+        return { success: true, rows: [{ id: 'role-1', permissions: ['settings.view'] }] };
+      }
+      return { success: true, rows: [] };
+    };
+  }
+
+  it('uses the ACTIVE adapter when the desktop runs on PGlite (bridge present but mode is not pg)', async () => {
+    // Regression: the packaged desktop seeded users into PGlite while login
+    // queried the main-process pool (empty/unreachable) — every valid
+    // account got "wrong username or password".
+    vi.mocked(getDbMode).mockReturnValueOnce('pglite');
+    const bridgeLogin = vi.fn(async () => ({ success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }));
+    (window as unknown as Record<string, unknown>).electronAuth = { login: bridgeLogin };
+    mockAdapter(userRowsImpl());
+    const res = await authApi.login({ username: 'admin', password: PASSWORD });
+    expect(res.success).toBe(true);
+    expect(res.user?.username).toBe('admin');
+    expect(bridgeLogin).not.toHaveBeenCalled();
+  });
+
+  it('uses the main bridge when the desktop runs on server Postgres', async () => {
+    vi.mocked(getDbMode).mockReturnValueOnce('pg');
+    const bridgeLogin = vi.fn(async () => ({
+      success: true,
+      user: { id: USER_ID, companyId: COMPANY_ID, username: 'admin', role: 'admin', isActive: true },
+      permissions: [],
+    }));
+    (window as unknown as Record<string, unknown>).electronAuth = { login: bridgeLogin };
+    const query = mockAdapter(async () => ({ success: true, rows: [] }));
+    const res = await authApi.login({ username: 'admin', password: 'whatever' });
+    expect(res.success).toBe(true);
+    expect(bridgeLogin).toHaveBeenCalledWith({ username: 'admin', password: 'whatever' });
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('uses the adapter when there is no bridge at all (web)', async () => {
+    const query = mockAdapter(userRowsImpl('viewer'));
+    const res = await authApi.login({ username: 'admin', password: PASSWORD });
+    expect(res.success).toBe(true);
+    expect(query).toHaveBeenCalled();
   });
 });

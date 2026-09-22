@@ -1,5 +1,25 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, getDbMode } from '@/core/database/adapters';
 import { mapRows } from '@/core/utils/mapPgRow';
+
+/**
+ * Main-process auth bridge — authoritative ONLY when the desktop app runs
+ * on server Postgres (db mode 'pg'). In PGlite/remote-web modes the users
+ * table lives in the ACTIVE adapter (renderer-side) while the main pool
+ * points elsewhere (usually nowhere): routing auth there rejects perfectly
+ * valid accounts with "wrong username or password". Returns null on web,
+ * in tests, or whenever the mode is not server-PG.
+ */
+function mainAuthBridge(): Window['electronAuth'] | null {
+  try {
+    if (typeof window === 'undefined' || !window.electronAuth) return null;
+    // getDbMode may be absent in unit-test module mocks — treat unreadable
+    // mode as "not server-PG" (adapter path), never as main.
+    if (typeof getDbMode !== 'function' || getDbMode() !== 'pg') return null;
+    return window.electronAuth;
+  } catch {
+    return null;
+  }
+}
 import { validateInput, companyIdSchema, idCompanySchema } from '@/core/utils/validation';
 import type {
   User,
@@ -164,7 +184,8 @@ function safeJsonParse(value: string): Record<string, unknown> | undefined {
 export const authApi = {
   async login(credentials: LoginCredentials): Promise<{ success: boolean; user?: User; permissions?: Permission[]; error?: string }> {
     try {
-      if (!window.electronAuth) {
+      const mainAuth = mainAuthBridge();
+      if (!mainAuth) {
         // Browser/PGlite fallback — verify against the users table directly.
         const rate = pgliteCheckRateLimit(credentials.username);
         if (!rate.allowed) {
@@ -235,7 +256,7 @@ export const authApi = {
 
         return { success: true, user, permissions };
       }
-      const result = await window.electronAuth.login({
+      const result = await mainAuth.login({
         username: credentials.username,
         password: credentials.password,
       });
@@ -281,8 +302,9 @@ export const authApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      if (window.electronAuth) {
-        const result = await window.electronAuth.listUsers();
+      const mainAuth = mainAuthBridge();
+      if (mainAuth) {
+        const result = await mainAuth.listUsers();
         if (!result.success) return { success: false, error: result.error };
         let users = mapRows<User>(result.data || []);
         if (filters?.search) {
@@ -348,8 +370,9 @@ export const authApi = {
       if (!pw) {
         return { success: false, error: 'كلمة المرور مطلوبة' };
       }
-      if (window.electronAuth) {
-        return window.electronAuth.createUser({
+      const mainAuth = mainAuthBridge();
+      if (mainAuth) {
+        return mainAuth.createUser({
           username: data.username,
           email: data.email,
           fullName: data.fullName,
@@ -395,7 +418,8 @@ export const authApi = {
 
   async updateUser(companyId: string, id: string, data: Partial<User>): Promise<{ success: boolean; error?: string }> {
     try {
-      if (window.electronAuth) return window.electronAuth.updateUser(id, data as Record<string, unknown>);
+      const mainAuth = mainAuthBridge();
+      if (mainAuth) return mainAuth.updateUser(id, data as Record<string, unknown>);
       const { validateInput: _validate, updateUserSchema: _schema } = await import('@/core/utils/validation');
       const parsed = _validate(_schema, data);
       if (!parsed.success) return { success: false, error: parsed.error };
@@ -427,7 +451,8 @@ export const authApi = {
 
   async deleteUser(companyId: string, id: string): Promise<{ success: boolean; error?: string }> {
     try {
-      if (window.electronAuth) return window.electronAuth.deleteUser(id);
+      const mainAuth = mainAuthBridge();
+      if (mainAuth) return mainAuth.deleteUser(id);
       const adapter = await getDbAdapter();
       return adapter.query('DELETE FROM users WHERE id = $1 AND company_id = $2', [id, companyId]);
     } catch {
@@ -439,7 +464,8 @@ export const authApi = {
     try {
       const cidValidation = validateInput(idCompanySchema, { id, companyId });
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      if (window.electronAuth) return window.electronAuth.resetPassword(id, newPassword);
+      const mainAuth = mainAuthBridge();
+      if (mainAuth) return mainAuth.resetPassword(id, newPassword);
       const adapter = await getDbAdapter();
       const passwordHash = await hashPassword(newPassword);
       return adapter.query(
@@ -480,8 +506,9 @@ export const authApi = {
     try {
       const cidValidation = validateInput(idCompanySchema, { id, companyId });
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      if (window.electronAuth?.updateProfile) {
-        const result = await window.electronAuth.updateProfile({
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.updateProfile) {
+        const result = await mainAuth.updateProfile({
           fullName: data.fullName ?? null,
           phone: data.phone ?? null,
           photoUrl: data.photoUrl ?? null,
@@ -521,8 +548,9 @@ export const authApi = {
       if (!this.meetsPasswordPolicy(newPassword)) {
         return { success: false, error: 'كلمة المرور الجديدة لا تطابق السياسة (12 حرفاً على الأقل مع حرف ورقم)' };
       }
-      if (window.electronAuth?.changePassword) {
-        return window.electronAuth.changePassword(currentPassword, newPassword);
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.changePassword) {
+        return mainAuth.changePassword(currentPassword, newPassword);
       }
       const adapter = await getDbAdapter();
       const found = await adapter.query(
@@ -549,8 +577,9 @@ export const authApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      if (window.electronAuth?.listRoles) {
-        const result = await window.electronAuth.listRoles();
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.listRoles) {
+        const result = await mainAuth.listRoles();
         if (!result.success) return { success: false, error: result.error };
         let roles = (result.data || []).map((row) => mapRowToRole(row as Record<string, unknown>)) as Role[];
         if (filters?.search) {
@@ -595,8 +624,9 @@ export const authApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      if (window.electronAuth?.createRole) {
-        const result = await window.electronAuth.createRole({
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.createRole) {
+        const result = await mainAuth.createRole({
           name: data.name,
           description: data.description,
           permissions: data.permissions,
@@ -623,8 +653,9 @@ export const authApi = {
 
   async updateRole(companyId: string, id: string, data: Partial<Role>): Promise<{ success: boolean; error?: string }> {
     try {
-      if (window.electronAuth?.updateRole) {
-        const result = await window.electronAuth.updateRole(id, {
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.updateRole) {
+        const result = await mainAuth.updateRole(id, {
           name: data.name,
           description: data.description,
           permissions: data.permissions,
@@ -645,8 +676,9 @@ export const authApi = {
 
   async deleteRole(companyId: string, id: string): Promise<{ success: boolean; error?: string }> {
     try {
-      if (window.electronAuth?.deleteRole) {
-        const result = await window.electronAuth.deleteRole(id);
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.deleteRole) {
+        const result = await mainAuth.deleteRole(id);
         return result.success ? { success: true } : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
@@ -660,8 +692,9 @@ export const authApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      if (window.electronAuth?.getAuditLogs) {
-        const result = await window.electronAuth.getAuditLogs(filters);
+      const mainAuth = mainAuthBridge();
+      if (mainAuth?.getAuditLogs) {
+        const result = await mainAuth.getAuditLogs(filters);
         if (!result.success) return { success: false, error: result.error };
         const logs = (result.data || []).map((row) => mapRowToAuditLog(row as Record<string, unknown>)) as AuditLog[];
         return { success: true, data: logs };
