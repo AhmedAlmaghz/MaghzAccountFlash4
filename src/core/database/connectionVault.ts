@@ -125,6 +125,15 @@ export async function saveRemoteConnection(
 ): Promise<{ success: boolean; connection?: VaultConnectionMeta; error?: string }> {
   const name = (input.name || '').trim() || 'PostgreSQL';
   const parsed = parseDatabaseUrl(input.databaseUrl); // throws on invalid
+  // Platform wall: browsers cannot open TCP — only Neon works on web.
+  // Save would succeed but activation would always fail with "desktop-only".
+  // Fail fast with honest guidance instead of a silent dead connection.
+  if (!isElectronEnv() && parsed.provider !== 'neon') {
+    return {
+      success: false,
+      error: 'webTcpUnsupported',
+    };
+  }
   const b = bridge();
   if (b?.save) {
     return b.save({ name, databaseUrl: parsed.raw, id: input.id });

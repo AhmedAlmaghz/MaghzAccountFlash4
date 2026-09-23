@@ -2,6 +2,15 @@
 
 > تاريخ التوثيق مقابل إصدارات التطبيق (`package.json`). القاعدة: كل إصدار تطبيق يغيّر سلوكاً ظاهراً للمستخدم يستلزم إدخالاً هنا وتحديث الختم في `ar/README.md` و`en/README.md`.
 
+## v0.25.4 — إصلاحات الاتصال الشامل + استقرار الوكيل (2026-09-23)
+
+- **البذر المحلي**: `runPgliteMigrations` يعيد المحاولة بعد فشل عابر (قفل IndexedDB) عبر `resetPgliteMigrationsCache()` + بذر `seedDefault/demo` يعيد المحاولة تلقائياً عند `relation does not exist` — أغلق `companies does not exist` في الخطوة 4.
+- **Neon على الويب**: `DatabaseStep.handleNext` يحفظ `DATABASE_URL` في الخزنة (`saveRemoteConnection` + `setStoredActiveRemoteId`) قبل الانتقال — `SeedStep` يدافع بخزنة احتياطية من `onboardingStore` — أغلق `No remote database selected` بعد اختبار ناجح.
+- **جدار المتصفح**: `connectionVault.saveRemoteConnection` يرفض `webTcpUnsupported` مبكراً + `connection.ts` يوثق سياسة `PGlite محلي في كل مكان / Neon HTTP على الويب / أي مزود TCP على سطح المكتب` + واجهة الأونبوردينج تظهر تحذير `webTcpDesc` و`remoteWebNote` + منع حفظ Supabase على الويب برسالة صادقة.
+- **Supabase ENOTFOUND**: `electron/dbHandler.js:db:test-connection` يترجم `ENOTFOUND/ETIMEDOUT/28P01/SSL` إلى إرشاد عربي (تحقق من المضيف/المنفذ 5432 مقابل 6543 للـ pooler/المشروع النشط/كلمة المرور/`?sslmode=require`).
+- **مصادقة دفعات الوكيل**: `getSession(token)` يهاجر `webContentsId` بعد إعادة التحميل بدل رفض التوكن (كان كل تحديث يقتل الدفعات بـ `Authentication required`) + `errorTaxonomy` تصنف `Authentication/Login required` كـ `PERMISSION_DENIED` غير قابل لإعادة المحاولة (بدل `UNKNOWN` القابل) — الدفعات تفشل بصدق وتوجّه لإعادة تسجيل الدخول بدل الحلقة اللانهائية.
+- **الاستقرار**: `eslint.config.js` يعطّل `no-useless-assignment` الضوضائي + `tsc 0`/`eslint 0`/`build` أخضر.
+
 ## v0.25.3 — مسح i18n الشامل + نقل تقارير JEV (2026-09-23)
 
 - **مسح i18n الشامل**: ماسح آلي عبر 430 ملفاً كشف 272 مفتاحاً ناقصاً + 14 عائلة متعارضة string↔object (الأب يُحفظ كـ `{title}`) — أصلحت جميعاً مع إعادة توجيه ~60 موقع استخدام؛ التوازن الحالي **3959=3959** (متوازنة ar==en).

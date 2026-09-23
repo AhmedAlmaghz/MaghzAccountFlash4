@@ -147,9 +147,12 @@ export function buildDatabaseUrl(parts: {
 
 /**
  * Capability matrix: which driver can serve a provider on a platform.
- * Browsers cannot open TCP sockets — that is a platform wall, not an app
- * limitation — so only Neon-compatible HTTP endpoints work on web/mobile.
- * Returns null when the combination is unsupported (caller shows guidance).
+ * Browsers (web/mobile) cannot open raw TCP sockets — a platform wall, not
+ * an app limit — so only Neon-compatible HTTP endpoints are routable there
+ * (via @neondatabase/serverless). PGlite (local) works everywhere and is the
+ * zero-config default. On desktop (Electron) every provider works via direct
+ * TCP, plus PGlite local. Returns null when the combination is unsupported
+ * (caller shows t('settings.database.webTcpDesc') guidance).
  */
 export function resolveDriver(
   provider: ConnectionProvider,

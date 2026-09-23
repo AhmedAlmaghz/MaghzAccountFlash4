@@ -15,7 +15,7 @@
 - لوحة تحكم رئيسية (Dashboard) تعرض KPIs من كل الوحدات.
 - تصميم عربي/إنجليزي مع خطوط Cairo/Inter ووضع فاتح/داكن.
 
-- **الإصدار الحالي:** v0.25.3 (مصدر الحقيقة: `package.json` | Migrations: 38 ملف `0000_init` ← `0037_treasury_box_accounts` | i18n: 3959 keys متوازنة ar==en | الوحدات: 14 مجلداً في `src/modules/` بما فيها `tax/` | دليل المستخدم: `Docs/` — 17 قسماً + ملاحق، مختوم v0.25.3، وسجل الإصدارات في `Docs/CHANGELOG.md` | تقارير JEV: `docs_dev/JEV Docs/`)
+- **الإصدار الحالي:** v0.25.4 (مصدر الحقيقة: `package.json` | Migrations: 38 ملف `0000_init` ← `0037_treasury_box_accounts` | i18n: 3959 keys متوازنة ar==en | الوحدات: 14 مجلداً في `src/modules/` بما فيها `tax/` | دليل المستخدم: `Docs/` — 17 قسماً + ملاحق، مختوم v0.25.4، وسجل الإصدارات في `Docs/CHANGELOG.md` | تقارير JEV: `docs_dev/JEV Docs/`)
 - **المنصات:** Electron (سطح المكتب) + Web Browser (مستقبلي)
 - **اللغات:** العربية (افتراضي) + الإنجليزية
 - **الترخيص:** خاص (Private)

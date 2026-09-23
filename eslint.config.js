@@ -35,6 +35,8 @@ export default defineConfig([
       'react-hooks/purity': 'off',
       // Allow empty catch blocks when intentional
       'no-empty': ['error', { allowEmptyCatch: true }],
+      // no-useless-assignment is noisy for prepared metrics slots
+      'no-useless-assignment': 'off',
     },
   },
 ])

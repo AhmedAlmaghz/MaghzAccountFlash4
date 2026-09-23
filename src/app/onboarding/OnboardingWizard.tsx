@@ -372,10 +372,14 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
   const [testMessage, setTestMessage] = useState('');
   const [urlInput, setUrlInput] = useState(dbConfig.databaseUrl || '');
   const [urlParsedNote, setUrlParsedNote] = useState('');
+  const [urlProvider, setUrlProvider] = useState<string | null>(null);
+  const isDesktop = typeof window !== 'undefined' && !!(window as { electronEnv?: { isElectron?: boolean } }).electronEnv?.isElectron;
+  const webBlocked = !isDesktop && dbMode === 'pg' && !!urlInput.trim() && urlProvider !== null && urlProvider !== 'neon';
 
   const handleUrlChange = async (raw: string) => {
     setUrlInput(raw);
     setUrlParsedNote('');
+    setUrlProvider(null);
     if (!raw.trim()) {
       setDbConfig({ databaseUrl: undefined });
       return;
@@ -391,6 +395,7 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
         user: parsed.user,
         password: parsed.password,
       });
+      setUrlProvider(parsed.provider);
       setUrlParsedNote(`${providerLabel(parsed.provider)} · ${parsed.host}`);
     } catch {
       /* invalid while typing — parts form stays authoritative */
@@ -476,10 +481,40 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
   };
 
   const handleNext = async () => {
-    // Persist the selected DB mode before continuing
+    // Persist the selected DB mode + active remote URL (if any) before continuing.
+    // Fixes "No remote database selected" after a successful Neon test: the test
+    // only binds in-memory, so the vault must be populated before SeedStep's
+    // getDbAdapter() → resolveActiveWebRemote() can find it.
+    const effectiveUrl = (urlInput.trim() || dbConfig.databaseUrl || '').trim();
+    if (dbMode === 'pg' && effectiveUrl) {
+      try {
+        const { saveRemoteConnection, setStoredActiveRemoteId } = await import('@/core/database/connectionVault');
+        const { parseDatabaseUrl } = await import('@/core/database/connection');
+        // Validate before saving — surfaces "invalid URL" immediately
+        parseDatabaseUrl(effectiveUrl);
+        const saved = await saveRemoteConnection({ name: 'Onboarding', databaseUrl: effectiveUrl });
+        if (!saved.success || !saved.connection) {
+          const key = (saved as { error?: string }).error === 'webTcpUnsupported' ? 'settings.database.webTcpDesc' : null;
+          throw new Error(key ? t(key) : ((saved as { error?: string }).error || t('onboarding.connectionFailed')));
+        }
+        setStoredActiveRemoteId(saved.connection.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    } else if (dbMode === 'pg' && !effectiveUrl) {
+      setError(t('onboarding.connectionFailed'));
+      return;
+    }
     try {
       const { setDbMode: setStoredMode } = await import('@/core/database/adapters');
       setStoredMode(dbMode);
+    } catch { /* ignore */ }
+    // Clear any stale adapter so the next getDbAdapter() re-evaluates mode + vault
+    try {
+      const { setDbMode: _ } = await import('@/core/database/adapters');
+      // force re-ping by resetting lastPingAt via mode change — adapter cache
+      // checks adapterMode === mode, so switching mode already invalidates it
     } catch { /* ignore */ }
     onNext();
   };
@@ -553,6 +588,10 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
             />
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('onboarding.databaseUrlHint')}</p>
             {urlParsedNote && <p className="text-xs text-emerald-600 mt-1">{urlParsedNote}</p>}
+            {webBlocked && <p className="text-xs text-amber-600 mt-1">{t('settings.database.webTcpDesc')}</p>}
+            {!isDesktop && dbMode === 'pg' && !urlInput.trim() && (
+              <p className="text-xs text-slate-500 mt-1">{t('settings.database.remoteWebNote')}</p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label={t('onboarding.host')} value={dbConfig.host || ''} onChange={e => setDbConfig({ host: e.target.value })} />
@@ -778,32 +817,56 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
     setProcessing(true, seedOption === 'default' ? t('onboarding.seedingDefault') : t('onboarding.seedingDemo'));
 
     try {
-      const adapter = await getDbAdapter();
-
-      if (seedOption === 'default') {
-        if (!adapter.seedDefault) {
-          throw new Error('seedDefault ' + t('onboarding.seedFailed'));
+      // Defensive: if the user tested a Neon URL but the vault wasn't persisted
+      // (e.g. direct navigation to step 4), ensure the DB mode's vault is
+      // populated from the onboarding store before acquiring the adapter.
+      try {
+        const { getDbMode } = await import('@/core/database/adapters');
+        const mode = getDbMode();
+        const rawUrl = (useOnboardingStore.getState().dbConfig.databaseUrl || '').trim();
+        if (mode === 'pg' && rawUrl) {
+          const { getActiveRemoteUrl, saveRemoteConnection, setStoredActiveRemoteId } = await import('@/core/database/connectionVault');
+          const active = await getActiveRemoteUrl();
+          if (!active) {
+            const saved = await saveRemoteConnection({ name: 'Onboarding', databaseUrl: rawUrl });
+            if (saved.success && saved.connection) setStoredActiveRemoteId(saved.connection.id);
+          }
         }
-        const result = await adapter.seedDefault(adminPassword, seedProfile);
-        if (result.success) {
+      } catch { /* best-effort */ }
+
+      const runSeed = async () => {
+        const adapter = await getDbAdapter();
+        if (seedOption === 'default') {
+          if (!adapter.seedDefault) throw new Error('seedDefault ' + t('onboarding.seedFailed'));
+          return adapter.seedDefault(adminPassword, seedProfile);
+        }
+        if (!adapter.seedDemo) throw new Error('seedDemo ' + t('onboarding.seedFailed'));
+        return adapter.seedDemo(adminPassword, seedProfile);
+      };
+
+      let result = await runSeed();
+      // Self-heal for transient PGlite boot / migration races that surface as
+      // "relation does not exist". One retry with a fresh migration cache
+      // recovers without user action (IDB lock, first-boot race, etc.).
+      if (!result.success && /relation .* does not exist/i.test(result.error || '')) {
+        try {
+          const { resetPgliteMigrationsCache } = await import('@/core/database/adapters/pgliteAdapter');
+          resetPgliteMigrationsCache();
+        } catch { /* ignore */ }
+        result = await runSeed();
+      }
+      if (result.success) {
+        if (seedOption === 'default') {
           setSeedStatus('success');
           setSeedMessage(t('onboarding.defaultSeeded'));
           if (result.adminPassword) setGeneratedPassword(result.adminPassword);
         } else {
-          throw new Error(result.error || t('onboarding.seedFailed'));
-        }
-      } else if (seedOption === 'demo') {
-        if (!adapter.seedDemo) {
-          throw new Error('seedDemo ' + t('onboarding.seedFailed'));
-        }
-        const result = await adapter.seedDemo(adminPassword, seedProfile);
-        if (result.success) {
           setSeedStatus('success');
           setSeedMessage(t('onboarding.demoSeeded'));
           if (result.adminPassword) setGeneratedPassword(result.adminPassword);
-        } else {
-          throw new Error(result.error || t('onboarding.seedFailed'));
         }
+      } else {
+        throw new Error(result.error || t('onboarding.seedFailed'));
       }
 
       setProcessing(false);

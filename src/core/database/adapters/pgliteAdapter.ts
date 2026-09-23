@@ -202,9 +202,20 @@ let migrationsPromise: Promise<{ success: boolean; error?: string }> | null = nu
 
 export function runPgliteMigrations(): Promise<{ success: boolean; error?: string }> {
   if (!migrationsPromise) {
-    migrationsPromise = runPgliteMigrationsInternal();
+    migrationsPromise = runPgliteMigrationsInternal().then((res) => {
+      if (!res.success) migrationsPromise = null;
+      return res;
+    }).catch((err) => {
+      migrationsPromise = null;
+      throw err;
+    });
   }
   return migrationsPromise;
+}
+
+/** For onboarding / recovery: force re-run after a transient failure (IDB lock, etc.). */
+export function resetPgliteMigrationsCache(): void {
+  migrationsPromise = null;
 }
 
 async function runPgliteMigrationsInternal(): Promise<{ success: boolean; error?: string }> {
@@ -1531,8 +1542,16 @@ export const pgliteAdapter: DbAdapter = {
     try {
       // Ensure migrations are applied (skipped when a remote adapter drives
       // the seed after ensuring the schema itself — see
-      // withoutInternalMigration below).
-      if (!skipEnsureMigrations) await runPgliteMigrations();
+      // withoutInternalMigration below). On transient failure (IDB lock) the
+      // cached promise is reset, so a retry actually re-runs.
+      if (!skipEnsureMigrations) {
+        const mig = await runPgliteMigrations();
+        if (!mig.success) {
+          resetPgliteMigrationsCache();
+          const retry = await runPgliteMigrations();
+          if (!retry.success) return { success: false, error: retry.error };
+        }
+      }
 
       // Use provided password if >= 8 chars, otherwise generate a random one
       const provided = typeof adminPassword === 'string' && adminPassword.length >= 8;
@@ -1578,8 +1597,16 @@ export const pgliteAdapter: DbAdapter = {
 
   async seedDemo(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
     try {
-      // Ensure migrations are applied (see skip note on seedDefault).
-      if (!skipEnsureMigrations) await runPgliteMigrations();
+      // Ensure migrations are applied (see skip note on seedDefault). Retry once
+      // on transient IDB failure — same logic as seedDefault.
+      if (!skipEnsureMigrations) {
+        const mig = await runPgliteMigrations();
+        if (!mig.success) {
+          resetPgliteMigrationsCache();
+          const retry = await runPgliteMigrations();
+          if (!retry.success) return { success: false, error: retry.error };
+        }
+      }
 
       // Use provided password if >= 8 chars, otherwise generate a random one
       const provided = typeof adminPassword === 'string' && adminPassword.length >= 8;

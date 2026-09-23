@@ -83,16 +83,28 @@ function createSession(webContentsId, user, permissions) {
 }
 
 function getSession(webContentsId, token) {
-  const session = token
-    ? sessions.get(token)
-    : [...sessions.values()].find((candidate) => candidate.webContentsId === webContentsId);
+  // Token-based lookup (explicit sessionToken from preload) survives reloads:
+  // after a renderer reload the webContentsId changes, but the token stays
+  // valid. We migrate the session to the new webContentsId instead of
+  // rejecting it — otherwise every reload would force a re-login and every
+  // in-flight AI batch would die with "Authentication required".
+  if (token) {
+    const session = sessions.get(token);
+    if (!session || session.expiresAt <= Date.now() || session.absoluteExpiresAt <= Date.now()) {
+      if (token) sessions.delete(token);
+      return null;
+    }
+    // Migrate session to the current webContents (reload / window recreation)
+    if (session.webContentsId !== webContentsId) session.webContentsId = webContentsId;
+    session.expiresAt = Date.now() + SESSION_TTL_MS;
+    return session;
+  }
+  const session = [...sessions.values()].find((candidate) => candidate.webContentsId === webContentsId);
   if (
     !session ||
-    session.webContentsId !== webContentsId ||
     session.expiresAt <= Date.now() ||
     session.absoluteExpiresAt <= Date.now()
   ) {
-    if (token) sessions.delete(token);
     return null;
   }
   session.expiresAt = Date.now() + SESSION_TTL_MS;
@@ -5074,7 +5086,24 @@ export function registerOnboardingHandlers() {
       } catch {
         /* ignore */
       }
-      return { success: false, error: err.message };
+      const raw = err instanceof Error ? err.message : String(err);
+      // Translate cryptic DNS/pool errors into actionable Arabic guidance
+      if (/ENOTFOUND|getaddrinfo/i.test(raw)) {
+        return {
+          success: false,
+          error: `تعذر الوصول للمضيف — تحقق من DATABASE_URL (المضيف غير موجود). للـ Supabase تأكد من نسخ الرابط من Dashboard > Connect (يستخدم المنفذ 5432 أو 6543 للـ pooler) وأن المشروع نشط وليس متوقفاً مؤقتاً.`,
+        };
+      }
+      if (/ETIMEDOUT|timeout/i.test(raw)) {
+        return { success: false, error: `انتهت مهلة الاتصال — تحقق من الشبكة/الجدار الناري والمنفذ (${poolCfg.port}). للـ Supabase جرّب المنفذ 6543 (pooler) بدل 5432.` };
+      }
+      if (/password authentication failed|28P01/i.test(raw)) {
+        return { success: false, error: 'فشل التوثيق — تحقق من اسم المستخدم وكلمة المرور في DATABASE_URL.' };
+      }
+      if (/self signed certificate|SSL/i.test(raw)) {
+        return { success: false, error: 'فشل SSL — أضف ?sslmode=require للـ remote أو تأكد من صحة الشهادة.' };
+      }
+      return { success: false, error: raw };
     }
   });
 

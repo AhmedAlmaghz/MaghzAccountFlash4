@@ -106,7 +106,10 @@ export const DatabaseSettingsPage: React.FC = () => {
         url = buildDatabaseUrl({ host: parts.host, port: parts.port, database: parts.database, user: parts.user, password: parts.password, ssl: parts.ssl });
       }
       const saved = await saveRemoteConnection({ name: connName, databaseUrl: url });
-      if (!saved.success || !saved.connection) throw new Error(saved.error || t('settings.database.saveError'));
+      if (!saved.success || !saved.connection) {
+        const key = saved.error === 'webTcpUnsupported' ? 'settings.database.webTcpDesc' : null;
+        throw new Error(key ? t(key) : (saved.error || t('settings.database.saveError')));
+      }
       addToast('success', t('settings.database.connSaved'));
       setConnName('');
       setConnUrl('');

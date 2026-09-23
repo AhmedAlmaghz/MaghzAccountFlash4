@@ -172,9 +172,11 @@ const PATTERNS: Pattern[] = [
   },
   {
     code: 'PERMISSION_DENIED',
-    re: /ليس لديك صلاحية|صلاحية/,
-    reason: 'دور المستخدم الحالي لا يملك صلاحية هذه العملية — الحارس يعمل على مستوى RBAC قبل أي تنفيذ.',
-    fixHint: 'أخبر المستخدم بالصلاحية المطلوبة تحديداً، واقترح طلبها من مدير النظام (أو نفّذ العملية من الشاشة إن كانت متاحة لدوره).',
+    // Must precede generic DB_ERROR: auth strings contain "Authentication required" which
+    // also matches DB's "authentication" substring. Classify as PERMISSION, not DB.
+    re: /ليس لديك صلاحية|صلاحية|Authentication required|Login required|غير مصرح|انتهت الجلسة|expired session/i,
+    reason: 'انتهت جلسة العمل أو لا يملك المستخدم صلاحية هذه العملية — النظام يطلب إعادة تسجيل الدخول.',
+    fixHint: 'سجّل خروجك ثم دخولك من جديد لإحياء الجلسة، أو اطلب صلاحية ai.use/الوحدة المطلوبة من مدير النظام. لا تعيد نفس الدفعة قبل تجديد الجلسة.',
     retryable: false,
   },
   {
