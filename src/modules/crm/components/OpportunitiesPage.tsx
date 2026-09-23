@@ -280,7 +280,7 @@ export const OpportunitiesPage: React.FC = () => {
               className="w-full pr-9 pl-9 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors"
             />
             {search && (
-              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Search size={13} /></button>
+              <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label={t('common.clear')}><Search size={13} /></button>
             )}
           </div>
           <Button size="sm" variant="ghost" onClick={handleExport} title={t('export')} aria-label={t('export')}>
@@ -452,12 +452,12 @@ export const OpportunitiesPage: React.FC = () => {
               <UserSelect companyId={companyId} value={formData.assignedTo || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, assignedTo: String(v || '') }))} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل المحتمل</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('crm.common.lead')}</label>
               <LeadSelect companyId={companyId} value={formData.leadId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, leadId: String(v || '') }))} />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">العميل</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('crm.common.customer')}</label>
             <CustomerSelect companyId={companyId} value={formData.customerId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, customerId: String(v || '') }))} />
           </div>
           <Input label={t('crm.form.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} />

@@ -579,7 +579,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
       createdBy: invoice.createdBy,
       statusBadge: STATUS_LABELS[invoice.status] || invoice.status,
       statusTone: invoice.status === 'paid' ? 'success' : (isOverdue ? 'warning' : 'muted'),
-    });
+    }, false, t);
   }, [activeCompany, t, currencySymbol, vatRate]);
 
   const handleExportExcel = useCallback(() => {
@@ -1175,7 +1175,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
             )}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setViewModalOpen(false)}>{t('close')}</Button>
-              <Button variant="primary" leftIcon={<Printer size={16} />} onClick={() => handlePrint(selectedInvoice)}>{t('print')}</Button>
+              <Button variant="primary" leftIcon={<Printer size={16} />} onClick={() => handlePrint(selectedInvoice)}>{t('print.title')}</Button>
             </div>
           </div>
         )}

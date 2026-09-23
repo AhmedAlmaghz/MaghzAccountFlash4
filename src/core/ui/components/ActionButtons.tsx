@@ -84,7 +84,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
     });
   if (showPrint && onPrint)
     actions.push({
-      key: 'print', label: t('print'), onClick: onPrint, disabled,
+      key: 'print', label: t('print.title'), onClick: onPrint, disabled,
       icon: <Printer size={iconSize} />,
       btnClass: 'text-zinc-600 hover:text-zinc-800 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
     });

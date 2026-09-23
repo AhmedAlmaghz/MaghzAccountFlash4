@@ -272,7 +272,7 @@ export const PosShiftsPage: React.FC = () => {
               variant="primary"
               leftIcon={<Printer size={16} />}
               disabled={!summary}
-              onClick={() => summary && printPosZReport({ company: activeCompany, shift: reportShift, summary, fmtCurrency: formatCurrency })}
+              onClick={() => summary && printPosZReport({ company: activeCompany, shift: reportShift, summary, fmtCurrency: formatCurrency }, t)}
             >
               {t('pos.print')}
             </Button>

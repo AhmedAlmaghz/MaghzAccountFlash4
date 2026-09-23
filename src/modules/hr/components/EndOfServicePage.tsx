@@ -224,7 +224,7 @@ export const EndOfServicePage: React.FC = () => {
           { label: t('settings.common.all'), value: String(total), icon: <LogOut size={18} />, tone: 'primary' },
           { label: t('hr.eos.draft'), value: String(items.filter((i) => i.status === 'draft').length), icon: <Calculator size={18} />, tone: 'warning' },
           { label: t('hr.eos.approved'), value: String(items.filter((i) => i.status === 'approved').length), icon: <CheckCircle2 size={18} />, tone: 'success' },
-          { label: t('hr.eos.totalAmount') || 'إجمالي المستحقات', value: formatCurrency(items.reduce((s, i) => s + Number(i.eosAmount || 0), 0)), icon: <Wallet size={18} />, tone: 'info' },
+          { label: t('hr.eos.totalAmount'), value: formatCurrency(items.reduce((s, i) => s + Number(i.eosAmount || 0), 0)), icon: <Wallet size={18} />, tone: 'info' },
         ]}
       />
 
@@ -248,8 +248,8 @@ export const EndOfServicePage: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 mr-auto">
-            <Button variant="ghost" onClick={handleExportExcel} title="Excel"><Download size={16} className="text-emerald-600" /></Button>
-            <Button variant="ghost" onClick={handleExportPDF} title="PDF"><Download size={16} className="text-rose-600" /></Button>
+            <Button variant="ghost" onClick={handleExportExcel} title={t('common.excel')}><Download size={16} className="text-emerald-600" /></Button>
+            <Button variant="ghost" onClick={handleExportPDF} title={t('common.pdf')}><Download size={16} className="text-rose-600" /></Button>
           </div>
         </div>
       </Card>

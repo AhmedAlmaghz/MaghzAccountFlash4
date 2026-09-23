@@ -20,10 +20,10 @@ export const CrmPage: React.FC = () => {
   const { total: activitiesTotal } = useActivitiesPaginated(companyId, {});
 
   const crmMenu: Array<{ id: string; label: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
-    { id: 'leads', label: t('crm.tabs.leads'), desc: 'العملاء المحتملون والتقييم والتحويل إلى عملاء', icon: Target, path: '/crm/leads', color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', count: leadsTotal },
-    { id: 'opportunities', label: t('crm.tabs.opportunities'), desc: 'الفرص البيعية ومراحل التفاوض والإغلاق', icon: Handshake, path: '/crm/opportunities', color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-fuchsia-50 dark:bg-fuchsia-900/20', count: opportunitiesTotal },
-    { id: 'tasks', label: t('crm.tabs.tasks'), desc: 'مهام المتابعة والأولويات وتواريخ الاستحقاق', icon: ListTodo, path: '/crm/tasks', color: 'from-sky-600 to-sky-700', bg: 'bg-sky-50 dark:bg-sky-900/20', count: tasksTotal },
-    { id: 'activities', label: t('crm.tabs.activities'), desc: 'سجل المكالمات والاجتماعات والزيارات', icon: Activity, path: '/crm/activities', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: activitiesTotal },
+    { id: 'leads', label: t('crm.tabs.leads'), desc: t('crm.hub.leadsDesc'), icon: Target, path: '/crm/leads', color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', count: leadsTotal },
+    { id: 'opportunities', label: t('crm.tabs.opportunities'), desc: t('crm.hub.opportunitiesDesc'), icon: Handshake, path: '/crm/opportunities', color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-fuchsia-50 dark:bg-fuchsia-900/20', count: opportunitiesTotal },
+    { id: 'tasks', label: t('crm.tabs.tasks'), desc: t('crm.hub.tasksDesc'), icon: ListTodo, path: '/crm/tasks', color: 'from-sky-600 to-sky-700', bg: 'bg-sky-50 dark:bg-sky-900/20', count: tasksTotal },
+    { id: 'activities', label: t('crm.tabs.activities'), desc: t('crm.hub.activitiesDesc'), icon: Activity, path: '/crm/activities', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: activitiesTotal },
   ];
 
   return (
@@ -45,7 +45,7 @@ export const CrmPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('crm.tabs.leads')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{leadsTotal}</p>
-                <p className="text-xs text-slate-500">عملاء محتملون</p>
+                <p className="text-xs text-slate-500">{t('crm.hub.leadsTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
                 <Target size={18} className="text-rose-600" />
@@ -55,7 +55,7 @@ export const CrmPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('crm.tabs.opportunities')}</p>
                 <p className="text-2xl font-bold text-fuchsia-600 tabular-nums">{opportunitiesTotal}</p>
-                <p className="text-xs text-slate-500">فرص بيعية نشطة</p>
+                <p className="text-xs text-slate-500">{t('crm.hub.opportunitiesTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-fuchsia-50 dark:bg-fuchsia-900/20 flex items-center justify-center">
                 <Handshake size={18} className="text-fuchsia-600" />
@@ -65,7 +65,7 @@ export const CrmPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('crm.tabs.tasks')}</p>
                 <p className="text-2xl font-bold text-sky-600 tabular-nums">{tasksTotal}</p>
-                <p className="text-xs text-slate-500">مهام متابعة</p>
+                <p className="text-xs text-slate-500">{t('crm.hub.tasksTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-sky-50 dark:bg-sky-900/20 flex items-center justify-center">
                 <ListTodo size={18} className="text-sky-600" />
@@ -75,7 +75,7 @@ export const CrmPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('crm.tabs.activities')}</p>
                 <p className="text-2xl font-bold text-teal-600 tabular-nums">{activitiesTotal}</p>
-                <p className="text-xs text-slate-500">سجل التواصل مع العملاء</p>
+                <p className="text-xs text-slate-500">{t('crm.hub.activitiesTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-900/20 flex items-center justify-center">
                 <Activity size={18} className="text-teal-600" />
@@ -106,7 +106,7 @@ export const CrmPage: React.FC = () => {
                   <h3 className="mt-4 font-bold text-slate-900 dark:text-slate-50">{item.label}</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{item.desc}</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-rose-600 dark:text-rose-400 group-hover:gap-2 transition-all">
-                    فتح <span aria-hidden>←</span>
+                    {t('crm.hub.open')} <span aria-hidden>←</span>
                   </div>
                 </Link>
               );
@@ -119,8 +119,8 @@ export const CrmPage: React.FC = () => {
                 <Sparkles size={18} className="text-white" />
               </div>
               <div>
-                <p className="font-semibold">نصائح إدارة العلاقات</p>
-                <p className="text-sm text-white/80">صنّف العملاء المحتملين (ساخن/دافئ/بارد) وتابع الساخنين أولاً، وحرّك الفرص في لوحة المراحل بالسحب والإفلات، وسجّل كل مكالمة أو زيارة في النشاطات، وأنجز مهام المتابعة قبل تاريخ الاستحقاق.</p>
+                <p className="font-semibold">{t('crm.hub.tipsTitle')}</p>
+                <p className="text-sm text-white/80">{t('crm.hub.tipsDesc')}</p>
               </div>
             </div>
           </Card>

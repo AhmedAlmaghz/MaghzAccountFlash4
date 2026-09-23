@@ -38,14 +38,15 @@ const PRINT_CSS = `
   @media print { .no-print { display: none; } }
 `;
 
-function openPrintWindow(title: string, bodyHtml: string): boolean {
+function openPrintWindow(title: string, bodyHtml: string, t?: PosPrintT): boolean {
   const win = window.open('', '_blank');
   if (!win) return false;
+  const printLabel = t ? t('pos.receipt.printButton', { default: '🖨️ طباعة' }) : '🖨️ طباعة';
   win.document.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${esc(title)}</title>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
     <style>${PRINT_CSS}</style></head><body>${bodyHtml}
     <div class="center no-print" style="margin-top:8px">
-      <button onclick="window.print()">🖨️ طباعة</button>
+      <button onclick="window.print()">${printLabel}</button>
     </div>
     <script>window.onload = () => { window.print(); };</script>
     </body></html>`);
@@ -71,8 +72,12 @@ export interface PosReceiptData {
   fmtCurrency: (v: number) => string;
 }
 
+export type PosPrintT = (key: string, params?: Record<string, string | number>) => string;
+
 /** Print a POS sale receipt (80mm). Returns false when popup blocked. */
-export function printPosReceipt(data: PosReceiptData): boolean {
+export function printPosReceipt(data: PosReceiptData, t?: PosPrintT): boolean {
+  const T = (key: string, fallback: string): string =>
+    t ? t(key, { default: fallback }) : fallback;
   const c = data.fmtCurrency;
   const rows = data.lines.map((l) => `
     <tr>
@@ -85,29 +90,29 @@ export function printPosReceipt(data: PosReceiptData): boolean {
 
   const body = `
     <div class="center bold big">${esc(data.company?.name || '')}</div>
-    ${data.company?.taxNumber ? `<div class="center meta">الرقم الضريبي: ${esc(data.company.taxNumber)}</div>` : ''}
+    ${data.company?.taxNumber ? `<div class="center meta">${T('pos.receipt.taxNumber', 'الرقم الضريبي:')} ${esc(data.company.taxNumber)}</div>` : ''}
     ${data.company?.address ? `<div class="center meta">${esc(data.company.address)}</div>` : ''}
     ${data.company?.phone ? `<div class="center meta">${esc(data.company.phone)}</div>` : ''}
     <div class="line"></div>
-    <div class="row"><span>إيصال نقطة بيع</span><span class="num">${esc(data.invoiceNumber)}</span></div>
-    <div class="row"><span>التاريخ</span><span class="num">${esc(data.date)}</span></div>
-    ${data.cashierName ? `<div class="row"><span>الكاشير</span><span>${esc(data.cashierName)}</span></div>` : ''}
-    ${data.customerName ? `<div class="row"><span>العميل</span><span>${esc(data.customerName)}</span></div>` : ''}
+    <div class="row"><span>${T('pos.receipt.title', 'إيصال نقطة بيع')}</span><span class="num">${esc(data.invoiceNumber)}</span></div>
+    <div class="row"><span>${T('pos.receipt.date', 'التاريخ')}</span><span class="num">${esc(data.date)}</span></div>
+    ${data.cashierName ? `<div class="row"><span>${T('pos.receipt.cashier', 'الكاشير')}</span><span>${esc(data.cashierName)}</span></div>` : ''}
+    ${data.customerName ? `<div class="row"><span>${T('pos.receipt.customer', 'العميل')}</span><span>${esc(data.customerName)}</span></div>` : ''}
     <div class="line"></div>
     <table>${rows}</table>
     <div class="line"></div>
-    <div class="row"><span>الإجمالي قبل الضريبة</span><span class="num">${c(data.subtotal)}</span></div>
-    ${data.discountAmount > 0 ? `<div class="row"><span>الخصم</span><span class="num">-${c(data.discountAmount)}</span></div>` : ''}
-    ${data.vatAmount > 0 ? `<div class="row"><span>الضريبة</span><span class="num">${c(data.vatAmount)}</span></div>` : ''}
-    <div class="row big bold"><span>الإجمالي</span><span class="num">${c(data.totalAmount)}</span></div>
-    ${data.cashAmount > 0 ? `<div class="row"><span>نقدي</span><span class="num">${c(data.cashAmount)}</span></div>` : ''}
-    ${data.creditAmount > 0 ? `<div class="row"><span>آجل</span><span class="num">${c(data.creditAmount)}</span></div>` : ''}
-    ${data.change > 0 ? `<div class="row bold"><span>الباقي</span><span class="num">${c(data.change)}</span></div>` : ''}
+    <div class="row"><span>${T('pos.receipt.subtotal', 'الإجمالي قبل الضريبة')}</span><span class="num">${c(data.subtotal)}</span></div>
+    ${data.discountAmount > 0 ? `<div class="row"><span>${T('pos.receipt.discount', 'الخصم')}</span><span class="num">-${c(data.discountAmount)}</span></div>` : ''}
+    ${data.vatAmount > 0 ? `<div class="row"><span>${T('pos.receipt.vat', 'الضريبة')}</span><span class="num">${c(data.vatAmount)}</span></div>` : ''}
+    <div class="row big bold"><span>${T('pos.receipt.total', 'الإجمالي')}</span><span class="num">${c(data.totalAmount)}</span></div>
+    ${data.cashAmount > 0 ? `<div class="row"><span>${T('pos.receipt.cash', 'نقدي')}</span><span class="num">${c(data.cashAmount)}</span></div>` : ''}
+    ${data.creditAmount > 0 ? `<div class="row"><span>${T('pos.receipt.credit', 'آجل')}</span><span class="num">${c(data.creditAmount)}</span></div>` : ''}
+    ${data.change > 0 ? `<div class="row bold"><span>${T('pos.receipt.change', 'الباقي')}</span><span class="num">${c(data.change)}</span></div>` : ''}
     <div class="line"></div>
     ${data.footer ? `<div class="center">${esc(data.footer)}</div>` : ''}
     <div class="center meta">${esc(data.company?.name || '')}</div>
   `;
-  return openPrintWindow(`إيصال ${data.invoiceNumber}`, body);
+  return openPrintWindow(`${T('pos.receipt.docPrefix', 'إيصال')} ${data.invoiceNumber}`, body, t);
 }
 
 export interface PosZReportData {
@@ -118,34 +123,36 @@ export interface PosZReportData {
 }
 
 /** Print the shift Z-report (80mm). Returns false when popup blocked. */
-export function printPosZReport(data: PosZReportData): boolean {
+export function printPosZReport(data: PosZReportData, t?: PosPrintT): boolean {
+  const T = (key: string, fallback: string): string =>
+    t ? t(key, { default: fallback }) : fallback;
   const { company, shift, summary } = data;
   const c = data.fmtCurrency;
   const diff = shift.difference ?? 0;
-  const diffLabel = Math.abs(diff) < 0.005 ? 'مطابق' : diff > 0 ? 'زيادة' : 'نقص';
+  const diffLabel = Math.abs(diff) < 0.005 ? T('pos.receipt.matched', 'مطابق') : diff > 0 ? T('pos.receipt.surplus', 'زيادة') : T('pos.receipt.shortage', 'نقص');
 
   const body = `
     <div class="center bold big">${esc(company?.name || '')}</div>
-    <div class="center bold">تقرير إغلاق وردية (Z)</div>
+    <div class="center bold">${T('pos.receipt.zTitle', 'تقرير إغلاق وردية (Z)')}</div>
     <div class="line"></div>
-    <div class="row"><span>الصندوق</span><span>${esc(shift.cashBoxName || '-')}</span></div>
-    <div class="row"><span>الكاشير</span><span>${esc(shift.cashierName || '-')}</span></div>
-    <div class="row"><span>الفتح</span><span class="num">${esc(shift.openedAt?.slice(0, 16).replace('T', ' ') || '-')}</span></div>
-    <div class="row"><span>الإغلاق</span><span class="num">${shift.closedAt ? esc(shift.closedAt.slice(0, 16).replace('T', ' ')) : '-'}</span></div>
+    <div class="row"><span>${T('pos.receipt.cashBox', 'الصندوق')}</span><span>${esc(shift.cashBoxName || '-')}</span></div>
+    <div class="row"><span>${T('pos.receipt.cashier', 'الكاشير')}</span><span>${esc(shift.cashierName || '-')}</span></div>
+    <div class="row"><span>${T('pos.receipt.openedAt', 'الفتح')}</span><span class="num">${esc(shift.openedAt?.slice(0, 16).replace('T', ' ') || '-')}</span></div>
+    <div class="row"><span>${T('pos.receipt.closedAt', 'الإغلاق')}</span><span class="num">${shift.closedAt ? esc(shift.closedAt.slice(0, 16).replace('T', ' ')) : '-'}</span></div>
     <div class="line"></div>
-    <div class="row"><span>عدد الفواتير</span><span class="num bold">${esc(summary.invoicesCount)}</span></div>
-    <div class="row"><span>إجمالي المبيعات</span><span class="num">${c(summary.netTotal)}</span></div>
-    <div class="row"><span>الخصومات</span><span class="num">${c(summary.discountAmount)}</span></div>
-    <div class="row"><span>الضريبة</span><span class="num">${c(summary.vatAmount)}</span></div>
+    <div class="row"><span>${T('pos.receipt.invoicesCount', 'عدد الفواتير')}</span><span class="num bold">${esc(summary.invoicesCount)}</span></div>
+    <div class="row"><span>${T('pos.receipt.netTotal', 'إجمالي المبيعات')}</span><span class="num">${c(summary.netTotal)}</span></div>
+    <div class="row"><span>${T('pos.receipt.discountTotal', 'الخصومات')}</span><span class="num">${c(summary.discountAmount)}</span></div>
+    <div class="row"><span>${T('pos.receipt.vatTotal', 'الضريبة')}</span><span class="num">${c(summary.vatAmount)}</span></div>
     <div class="line"></div>
-    <div class="row"><span>دفعات نقدية</span><span class="num">${c(summary.cashTotal)}</span></div>
-    <div class="row"><span>مبالغ آجلة</span><span class="num">${c(summary.creditTotal)}</span></div>
+    <div class="row"><span>${T('pos.receipt.cashTotal', 'دفعات نقدية')}</span><span class="num">${c(summary.cashTotal)}</span></div>
+    <div class="row"><span>${T('pos.receipt.creditTotal', 'مبالغ آجلة')}</span><span class="num">${c(summary.creditTotal)}</span></div>
     <div class="line"></div>
-    <div class="row"><span>الرصيد الافتتاحي</span><span class="num">${c(summary.openingAmount)}</span></div>
-    <div class="row bold"><span>المتوقع بالصندوق</span><span class="num">${c(summary.expectedAmount)}</span></div>
-    <div class="row"><span>المعدود فعلياً</span><span class="num">${shift.closingAmount != null ? c(shift.closingAmount) : '-'}</span></div>
-    <div class="row big bold"><span>الفرق (${diffLabel})</span><span class="num">${c(diff)}</span></div>
-    ${shift.notes ? `<div class="line"></div><div class="meta">ملاحظات: ${esc(shift.notes)}</div>` : ''}
+    <div class="row"><span>${T('pos.receipt.opening', 'الرصيد الافتتاحي')}</span><span class="num">${c(summary.openingAmount)}</span></div>
+    <div class="row bold"><span>${T('pos.receipt.expected', 'المتوقع بالصندوق')}</span><span class="num">${c(summary.expectedAmount)}</span></div>
+    <div class="row"><span>${T('pos.receipt.counted', 'المعدود فعلياً')}</span><span class="num">${shift.closingAmount != null ? c(shift.closingAmount) : '-'}</span></div>
+    <div class="row big bold"><span>${T('pos.receipt.difference', 'الفرق')} (${diffLabel})</span><span class="num">${c(diff)}</span></div>
+    ${shift.notes ? `<div class="line"></div><div class="meta">${T('pos.receipt.notes', 'ملاحظات:')} ${esc(shift.notes)}</div>` : ''}
   `;
-  return openPrintWindow('تقرير Z', body);
+  return openPrintWindow(T('pos.receipt.zDocTitle', 'تقرير Z'), body, t);
 }

@@ -256,7 +256,7 @@ export const JournalEntriesPage: React.FC = () => {
       currency: currencySymbol,
       vatRate: settings?.vatRate,
       createdBy: tx.createdBy,
-    });
+    }, false, t);
   };
 
   const columns = [

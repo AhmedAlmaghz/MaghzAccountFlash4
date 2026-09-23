@@ -583,7 +583,7 @@ export const InvoicesPage: React.FC = () => {
       createdBy: invoice.createdBy,
       statusBadge: STATUS_FLOW[invoice.status] || invoice.status,
       statusTone: invoice.status === 'paid' ? 'success' : (isOverdue ? 'warning' : 'muted'),
-    });
+    }, false, t);
   };
 
   const handleExportExcel = () => {
@@ -1229,7 +1229,7 @@ export const InvoicesPage: React.FC = () => {
             )}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setDetailOpen(false)}>{t('close')}</Button>
-              <Button variant="primary" onClick={() => { handlePrint(viewing); }} leftIcon={<Printer size={16} />}>{t('print')}</Button>
+              <Button variant="primary" onClick={() => { handlePrint(viewing); }} leftIcon={<Printer size={16} />}>{t('print.title')}</Button>
             </div>
           </div>
         )}

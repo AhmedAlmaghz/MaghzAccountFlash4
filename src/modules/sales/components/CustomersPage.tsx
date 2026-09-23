@@ -311,8 +311,8 @@ export const CustomersPage: React.FC = () => {
         companyPhone: activeCompany.phone,
         companyAddress: activeCompany.address,
         companyLogoUrl: activeCompany.logoUrl,
-        currency: activeCompany.currency || YER_CODE,
-      });
+      currency: activeCompany.currency || YER_CODE,
+    }, false, t);
     } catch (err) {
       addToast('error', String(err));
     }

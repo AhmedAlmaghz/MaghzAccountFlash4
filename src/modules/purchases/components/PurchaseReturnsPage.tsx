@@ -430,7 +430,7 @@ export const PurchaseReturnsPage: React.FC = () => {
       createdBy: ret.createdBy,
       statusBadge: STATUS_LABELS[ret.status] || ret.status,
       statusTone: ret.status === 'posted' ? 'success' : 'muted',
-    });
+    }, false, t);
   }, [activeCompany, t, currencySymbol, vatRate]);
 
   const totalPosted = useMemo(() => returns.filter(r => r.status === 'posted').reduce((s, r) => s + r.totalAmount, 0), [returns]);
@@ -890,7 +890,7 @@ export const PurchaseReturnsPage: React.FC = () => {
             )}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setViewModalOpen(false)}>{t('close')}</Button>
-              <Button variant="primary" leftIcon={<Printer size={16} />} onClick={() => handlePrint(selectedReturn)}>{t('print')}</Button>
+              <Button variant="primary" leftIcon={<Printer size={16} />} onClick={() => handlePrint(selectedReturn)}>{t('print.title')}</Button>
             </div>
           </div>
         )}

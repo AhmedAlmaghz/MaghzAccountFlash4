@@ -19,10 +19,10 @@ export const ManufacturingPage: React.FC = () => {
   const activeBoms = useMemo(() => bomItems.filter((b) => b.isActive).length, [bomItems]);
 
   const mfgMenu: Array<{ id: string; label: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
-    { id: 'work-orders', label: t('manufacturing.tabs.workOrders'), desc: 'أوامر التشغيل ومتابعة مراحل الإنتاج والتكاليف', icon: Wrench, path: '/manufacturing/work-orders', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: workOrdersTotal },
-    { id: 'bom', label: t('manufacturing.tabs.boms'), desc: 'فاتير المواد ومكونات المنتجات وتكاليفها', icon: GitBranch, path: '/manufacturing/bom', color: 'from-cyan-600 to-cyan-700', bg: 'bg-cyan-50 dark:bg-cyan-900/20', count: bomsTotal },
-    { id: 'cost-report', label: t('manufacturing.tabs.costReport'), desc: 'تحليل تكاليف الإنتاج الفعلية مقابل المخططة', icon: BarChart3, path: '/manufacturing/cost-report', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: null },
-    { id: 'variance-report', label: t('manufacturing.tabs.varianceReport'), desc: 'انحرافات الكمية والتكلفة وأسبابها الجذرية', icon: TrendingDown, path: '/manufacturing/variance-report', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: null },
+    { id: 'work-orders', label: t('manufacturing.tabs.workOrders'), desc: t('manufacturing.hub.workOrdersDesc'), icon: Wrench, path: '/manufacturing/work-orders', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: workOrdersTotal },
+    { id: 'bom', label: t('manufacturing.tabs.boms'), desc: t('manufacturing.hub.bomDesc'), icon: GitBranch, path: '/manufacturing/bom', color: 'from-cyan-600 to-cyan-700', bg: 'bg-cyan-50 dark:bg-cyan-900/20', count: bomsTotal },
+    { id: 'cost-report', label: t('manufacturing.tabs.costReport'), desc: t('manufacturing.hub.costReportDesc'), icon: BarChart3, path: '/manufacturing/cost-report', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: null },
+    { id: 'variance-report', label: t('manufacturing.tabs.varianceReport'), desc: t('manufacturing.hub.varianceDesc'), icon: TrendingDown, path: '/manufacturing/variance-report', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: null },
   ];
 
   return (
@@ -44,7 +44,7 @@ export const ManufacturingPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('manufacturing.tabs.workOrders')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{workOrdersTotal}</p>
-                <p className="text-xs text-slate-500">إجمالي أوامر التشغيل</p>
+                <p className="text-xs text-slate-500">{t('manufacturing.hub.workOrdersTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-900/20 flex items-center justify-center">
                 <Wrench size={18} className="text-teal-600" />
@@ -54,7 +54,7 @@ export const ManufacturingPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('manufacturing.tabs.boms')}</p>
                 <p className="text-2xl font-bold text-cyan-600 tabular-nums">{bomsTotal}</p>
-                <p className="text-xs text-slate-500">فاتير مواد مسجلة</p>
+                <p className="text-xs text-slate-500">{t('manufacturing.hub.bomsTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-cyan-50 dark:bg-cyan-900/20 flex items-center justify-center">
                 <GitBranch size={18} className="text-cyan-600" />
@@ -62,9 +62,9 @@ export const ManufacturingPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">فاتير نشطة</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('manufacturing.hub.activeBoms')}</p>
                 <p className="text-2xl font-bold text-emerald-600 tabular-nums">{activeBoms}</p>
-                <p className="text-xs text-slate-500">جاهزة للتنفيذ (بالصفحة الحالية)</p>
+                <p className="text-xs text-slate-500">{t('manufacturing.hub.readyToExecute')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
                 <GitBranch size={18} className="text-emerald-600" />
@@ -72,9 +72,9 @@ export const ManufacturingPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">التقارير</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('manufacturing.hub.reports')}</p>
                 <p className="text-2xl font-bold text-blue-600 tabular-nums">2</p>
-                <p className="text-xs text-slate-500">تكاليف وانحرافات</p>
+                <p className="text-xs text-slate-500">{t('manufacturing.hub.reportsTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
                 <BarChart3 size={18} className="text-blue-600" />
@@ -105,7 +105,7 @@ export const ManufacturingPage: React.FC = () => {
                   <h3 className="mt-4 font-bold text-slate-900 dark:text-slate-50">{item.label}</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{item.desc}</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-teal-600 dark:text-teal-400 group-hover:gap-2 transition-all">
-                    فتح <span aria-hidden>←</span>
+                    {t('manufacturing.hub.open')} <span aria-hidden>←</span>
                   </div>
                 </Link>
               );
@@ -118,8 +118,8 @@ export const ManufacturingPage: React.FC = () => {
                 <Sparkles size={18} className="text-white" />
               </div>
               <div>
-                <p className="font-semibold">نصائح التصنيع</p>
-                <p className="text-sm text-white/80">عرّف فاتير المواد (BOM) لكل منتج أولاً، ثم أنشئ أوامر التشغيل منها لترحيل المواد تلقائياً. راقب الانحرافات بين الكميات المخططة والفعلية لتقليل الهدر، وحلّل تكاليف الإنتاج دورياً.</p>
+                <p className="font-semibold">{t('manufacturing.hub.tipsTitle')}</p>
+                <p className="text-sm text-white/80">{t('manufacturing.hub.tipsDesc')}</p>
               </div>
             </div>
           </Card>

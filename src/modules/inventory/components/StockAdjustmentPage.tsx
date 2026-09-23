@@ -368,7 +368,7 @@ export const StockAdjustmentPage: React.FC = () => {
               </div>
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
               <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={handlePrint} className="gap-1.5">
-                {t('print')}
+                {t('print.title')}
               </Button>
               <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={handleExportExcel} className="gap-1.5">
                 Excel

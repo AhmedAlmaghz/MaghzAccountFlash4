@@ -681,10 +681,10 @@ export const ChartOfAccounts: React.FC = () => {
           <div className="flex-1">{t('accounting.chart.accountHeader')}</div>
           <div className="w-[340px] hidden lg:flex justify-end gap-2">
             <span className="w-[110px] text-center">{t('accounting.chart.typeHeader')}</span>
-            <span className="w-[70px] text-center">الطبيعة</span>
-            <span className="w-[70px] text-center">الحالة</span>
+            <span className="w-[70px] text-center">{t('accounting.nature')}</span>
+            <span className="w-[70px] text-center">{t('accounting.status')}</span>
           </div>
-          <div className="w-[140px] text-end">الرصيد</div>
+          <div className="w-[140px] text-end">{t('accounting.balance')}</div>
           <div className="w-[90px] text-center">{t('common.actions')}</div>
         </div>
 

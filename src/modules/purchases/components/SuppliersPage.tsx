@@ -278,8 +278,8 @@ export const SuppliersPage: React.FC = () => {
           companyPhone: activeCompany.phone,
           companyAddress: activeCompany.address,
           companyLogoUrl: activeCompany.logoUrl,
-          currency: activeCompany.currency || 'YER',
-        });
+      currency: activeCompany.currency || 'YER',
+    }, false, t);
       } catch (err) {
         addToast('error', String(err));
       }
@@ -854,8 +854,8 @@ export const SuppliersPage: React.FC = () => {
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Wallet size={18} className="text-white" /></div>
                           <div>
-                            <p className="text-sm text-slate-300">إجمالي المستحق</p>
-                            <p className="text-xs text-slate-400">ذمم دائنة متأخرة</p>
+<p className="text-sm text-slate-300">{t('purchases.supplier.overdueTotal')}</p>
+                <p className="text-xs text-slate-400">{t('purchases.supplier.overdueDesc')}</p>
                           </div>
                         </div>
                         <p className="text-2xl font-bold tabular-nums">{formatCurrency(aging.reduce((s, b) => s + (b.amount || 0), 0))}</p>

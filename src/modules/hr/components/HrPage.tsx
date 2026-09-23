@@ -21,13 +21,13 @@ export const HrPage: React.FC = () => {
   const activeEmployees = useMemo(() => employeeItems.filter((e) => e.isActive).length, [employeeItems]);
 
   const hrMenu: Array<{ id: string; labelKey: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
-    { id: 'employees', labelKey: 'hr.page.menu.employees', desc: 'ملفات الموظفين والرواتب الأساسية والأقسام', icon: Users, path: '/hr/employees', color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', count: employeesTotal },
-    { id: 'departments', labelKey: 'sidebar.hr.departments', desc: 'إدارة أقسام الموظفين ومديريها', icon: Building2, path: '/hr/departments', color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', count: null },
-    { id: 'attendance', labelKey: 'hr.page.menu.attendance', desc: 'تسجيل الحضور اليومي والساعات الإضافية', icon: UserCheck, path: '/hr/attendance', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: null },
-    { id: 'payroll', labelKey: 'hr.page.menu.payroll', desc: 'مسيرات الرواتب الشهرية والترحيل المحاسبي', icon: Banknote, path: '/hr/payroll', color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', count: payrollTotal },
-    { id: 'leaves', labelKey: 'hr.page.menu.leaves', desc: 'طلبات الإجازات والموافقات والأرصدة', icon: Calendar, path: '/hr/leaves', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: pendingLeavesTotal },
-    { id: 'end-of-service', labelKey: 'hr.page.menu.endOfService', desc: 'حسابات نهاية الخدمة والمكافآت', icon: LogOut, path: '/hr/end-of-service', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: eosTotal },
-    { id: 'hr-policies', labelKey: 'hr.policy.title', desc: 'أرصدة الإجازات وساعات العمل ومعاملات نهاية الخدمة', icon: Sliders, path: '/settings/hr-policies', color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', count: null },
+    { id: 'employees', labelKey: 'hr.page.menu.employees', desc: t('hr.hub.employeesDesc'), icon: Users, path: '/hr/employees', color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', count: employeesTotal },
+    { id: 'departments', labelKey: 'sidebar.hr.departments', desc: t('hr.hub.departmentsDesc'), icon: Building2, path: '/hr/departments', color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', count: null },
+    { id: 'attendance', labelKey: 'hr.page.menu.attendance', desc: t('hr.hub.attendanceDesc'), icon: UserCheck, path: '/hr/attendance', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: null },
+    { id: 'payroll', labelKey: 'hr.page.menu.payroll', desc: t('hr.hub.payrollDesc'), icon: Banknote, path: '/hr/payroll', color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', count: payrollTotal },
+    { id: 'leaves', labelKey: 'hr.page.menu.leaves', desc: t('hr.hub.leavesDesc'), icon: Calendar, path: '/hr/leaves', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: pendingLeavesTotal },
+    { id: 'end-of-service', labelKey: 'hr.page.menu.endOfService', desc: t('hr.hub.endOfServiceDesc'), icon: LogOut, path: '/hr/end-of-service', color: 'from-amber-600 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: eosTotal },
+    { id: 'hr-policies', labelKey: 'hr.policy.title', desc: t('hr.hub.policiesDesc'), icon: Sliders, path: '/settings/hr-policies', color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', count: null },
   ];
 
   return (
@@ -49,7 +49,7 @@ export const HrPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('hr.employeesPage.title')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{employeesTotal}</p>
-                <p className="text-xs text-slate-500">إجمالي الموظفين</p>
+                <p className="text-xs text-slate-500">{t('hr.hub.employeesTotal')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center">
                 <Users size={18} className="text-indigo-600" />
@@ -59,7 +59,7 @@ export const HrPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('settings.common.active')}</p>
                 <p className="text-2xl font-bold text-emerald-600 tabular-nums">{activeEmployees}</p>
-                <p className="text-xs text-slate-500">على رأس العمل (بالصفحة الحالية)</p>
+                <p className="text-xs text-slate-500">{t('hr.hub.activeSub')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
                 <UserCheck size={18} className="text-emerald-600" />
@@ -69,7 +69,7 @@ export const HrPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('hr.leaves.pending')}</p>
                 <p className="text-2xl font-bold text-amber-600 tabular-nums">{pendingLeavesTotal}</p>
-                <p className="text-xs text-slate-500">بانتظار الموافقة</p>
+                <p className="text-xs text-slate-500">{t('hr.hub.pendingSub')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
                 <Calendar size={18} className="text-amber-600" />
@@ -79,7 +79,7 @@ export const HrPage: React.FC = () => {
               <div>
                 <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('hr.payroll.title')}</p>
                 <p className="text-2xl font-bold text-violet-600 tabular-nums">{payrollTotal}</p>
-                <p className="text-xs text-slate-500">مسيرات مسجلة</p>
+                <p className="text-xs text-slate-500">{t('hr.hub.payrollSub')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-900/20 flex items-center justify-center">
                 <Banknote size={18} className="text-violet-600" />
@@ -110,7 +110,7 @@ export const HrPage: React.FC = () => {
                   <h3 className="mt-4 font-bold text-slate-900 dark:text-slate-50">{t(item.labelKey)}</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{item.desc}</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-violet-600 dark:text-violet-400 group-hover:gap-2 transition-all">
-                    فتح <span aria-hidden>←</span>
+                    {t('hr.hub.open')} <span aria-hidden>←</span>
                   </div>
                 </Link>
               );
@@ -123,8 +123,8 @@ export const HrPage: React.FC = () => {
                 <Sparkles size={18} className="text-white" />
               </div>
               <div>
-                <p className="font-semibold">نصائح الموارد البشرية</p>
-                <p className="text-sm text-white/80">سجّل الحضور يومياً لتغذية مسير الرواتب تلقائياً، وراجع طلبات الإجازات المعلقة أولاً، وعند إنشاء مسير رواتب راجعه ثم رحّله لإنشاء القيد المحاسبي، واحسب نهاية الخدمة قبل اعتماد أي إخلاء طرف.</p>
+                <p className="font-semibold">{t('hr.hub.tipsTitle')}</p>
+                <p className="text-sm text-white/80">{t('hr.hub.tipsDesc')}</p>
               </div>
             </div>
           </Card>

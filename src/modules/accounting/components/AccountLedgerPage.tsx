@@ -94,7 +94,7 @@ export const AccountLedgerPage: React.FC = () => {
       companyEmail: activeCompany?.email,
       companyLogoUrl: activeCompany?.logoUrl,
       currency: activeCompany?.currency,
-    });
+    }, false, t);
   };
 
   return (
@@ -121,7 +121,7 @@ export const AccountLedgerPage: React.FC = () => {
               PDF
             </Button>
             <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={handlePrint} disabled={!accountId || !filteredRows.length}>
-              {t('print')}
+              {t('print.title')}
             </Button>
           </div>
         </div>

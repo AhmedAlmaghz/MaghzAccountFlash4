@@ -59,9 +59,9 @@ export const InventoryPage: React.FC = () => {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">المنتجات</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.hub.products')}</p>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stats.totalProducts}</p>
-                <p className="text-xs text-slate-500">{stats.categories} تصنيف</p>
+                <p className="text-xs text-slate-500">{stats.categories} {t('inventory.hub.categoriesUnit')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
                 <Package size={18} className="text-primary-600" />
@@ -69,7 +69,7 @@ export const InventoryPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">المستودعات</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.hub.warehouses')}</p>
                 <p className="text-2xl font-bold text-blue-600 tabular-nums">{stats.warehouses}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
@@ -78,9 +78,9 @@ export const InventoryPage: React.FC = () => {
             </Card>
             <Card className="p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">بنود المخزون</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.hub.stockItems')}</p>
                 <p className="text-2xl font-bold text-emerald-600 tabular-nums">{stats.totalStockItems}</p>
-                <p className="text-xs text-slate-500">{stats.totalQty} وحدة</p>
+                <p className="text-xs text-slate-500">{stats.totalQty} {t('inventory.hub.qtyUnit')}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
                 <Layers size={18} className="text-emerald-600" />
@@ -88,9 +88,9 @@ export const InventoryPage: React.FC = () => {
             </Card>
             <Card className={`p-4 flex items-center justify-between border ${stats.lowCount ? 'bg-amber-50/50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800' : ''}`}>
               <div>
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">قيمة المخزون</p>
+                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.hub.valueTitle')}</p>
                 <p className="text-lg font-bold text-slate-900 dark:text-slate-50 tabular-nums">{formatCurrency(stats.totalValue)}</p>
-                <p className={`text-xs ${stats.lowCount ? 'text-amber-600 font-medium' : 'text-slate-500'}`}>{stats.lowCount ? `${stats.lowCount} منخفض` : 'لا يوجد منخفض'}</p>
+                <p className={`text-xs ${stats.lowCount ? 'text-amber-600 font-medium' : 'text-slate-500'}`}>{stats.lowCount ? `${stats.lowCount} ${t('inventory.hub.lowUnit')}` : t('inventory.hub.noLow')}</p>
               </div>
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stats.lowCount ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-slate-100 dark:bg-slate-800'}`}>
                 <TrendingUp size={18} className={stats.lowCount ? 'text-amber-600' : 'text-slate-500'} />
@@ -121,7 +121,7 @@ export const InventoryPage: React.FC = () => {
                   <h3 className="mt-4 font-bold text-slate-900 dark:text-slate-50">{item.label}</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{item.desc}</p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 group-hover:gap-2 transition-all">
-                    فتح <span aria-hidden>←</span>
+                    {t('inventory.hub.open')} <span aria-hidden>←</span>
                   </div>
                 </Link>
               );
@@ -134,8 +134,8 @@ export const InventoryPage: React.FC = () => {
                 <Sparkles size={18} className="text-white" />
               </div>
               <div>
-                <p className="font-semibold">نصائح إدارة المخازن</p>
-                <p className="text-sm text-white/80">راجع تنبيه المخزون يومياً، واستخدم التسويات لمعالجة فروقات الجرد، والتحويلات لنقل البضاعة بين المستودعات مع تتبع كامل.</p>
+                <p className="font-semibold">{t('inventory.hub.tipsTitle')}</p>
+                <p className="text-sm text-white/80">{t('inventory.hub.tipsDesc')}</p>
               </div>
             </div>
           </Card>

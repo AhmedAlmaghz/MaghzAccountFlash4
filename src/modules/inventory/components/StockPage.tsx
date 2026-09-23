@@ -166,7 +166,7 @@ export const StockPage: React.FC = () => {
         status: 'draft',
       });
       if (result.success) {
-        addToast('success', 'تم إنشاء التحويل بنجاح');
+        addToast('success', t('inventory.transfer.created'));
         closeModal();
       } else {
         addToast('error', result.error || t('common.error'));
@@ -178,14 +178,14 @@ export const StockPage: React.FC = () => {
 
   const handleCompleteTransfer = async (id: string) => {
     const result = await completeTransfer(id);
-    if (result.success) addToast('success', 'تم إكمال التحويل بنجاح');
+    if (result.success) addToast('success', t('inventory.transfer.completedToast'));
     else addToast('error', result.error || t('common.error'));
     setConfirmComplete(null);
   };
 
   const handleDeleteTransfer = async (id: string) => {
     const result = await removeTransfer(id);
-    if (result.success) addToast('success', 'تم حذف التحويل بنجاح');
+    if (result.success) addToast('success', t('inventory.transfer.deleted'));
     else addToast('error', result.error || t('common.error'));
     setConfirmDelete(null);
   };
@@ -403,9 +403,9 @@ export const StockPage: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">بنود المخزون</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.stock.items')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stockStats.totalItems}</p>
-              <p className="text-xs text-slate-500">{filteredStock.length} ظاهر</p>
+              <p className="text-xs text-slate-500">{filteredStock.length} {t('inventory.transactions.visible')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
               <Layers size={18} className="text-primary-600" />
@@ -413,9 +413,9 @@ export const StockPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">إجمالي الكمية</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.stock.totalQty')}</p>
               <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{stockStats.totalQty}</p>
-              <p className="text-xs text-slate-500">وحدة</p>
+              <p className="text-xs text-slate-500">{t('inventory.stock.unit')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
               <TrendingUp size={18} className="text-blue-600" />
@@ -423,9 +423,9 @@ export const StockPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">منخفض</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.low')}</p>
               <p className={`text-2xl font-bold tabular-nums ${stockStats.lowCount ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-slate-50'}`}>{stockStats.lowCount}</p>
-              <p className="text-xs text-slate-500">{stockStats.lowCount ? 'يحتاج طلب' : 'لا يوجد'}</p>
+              <p className="text-xs text-slate-500">{stockStats.lowCount ? t('inventory.stock.reorderNeeded') : t('inventory.stock.allGood')}</p>
             </div>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stockStats.lowCount ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-slate-100 dark:bg-slate-800'}`}>
               <AlertTriangle size={18} className={stockStats.lowCount ? 'text-amber-600' : 'text-slate-400'} />
@@ -433,9 +433,9 @@ export const StockPage: React.FC = () => {
           </Card>
           <Card className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">قيمة المخزون</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('inventory.stock.valueTitle')}</p>
               <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(stockStats.totalValue)}</p>
-              <p className="text-xs text-slate-500">تكلفة</p>
+              <p className="text-xs text-slate-500">{t('inventory.stock.costBasis')}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
               <Wallet size={18} className="text-emerald-600" />
@@ -452,7 +452,7 @@ export const StockPage: React.FC = () => {
               <input
                 value={stockSearch}
                 onChange={(e) => setStockSearch(e.target.value)}
-                placeholder={`${t('search')} — منتج / كود / مستودع`}
+                placeholder={`${t('search')} — ${t('inventory.stock.searchHint')}`}
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
               />
               {stockSearch && (
@@ -463,7 +463,7 @@ export const StockPage: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <select value={stockWarehouseFilter} onChange={(e) => setStockWarehouseFilter(e.target.value)} className="h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm">
-                <option value="">كل المستودعات</option>
+                <option value="">{t('reports.allWarehouses')}</option>
                 {uniqueWarehouses.map((w) => (
                   <option key={w.id} value={w.id}>{w.name}</option>
                 ))}
@@ -472,23 +472,23 @@ export const StockPage: React.FC = () => {
                 onClick={() => setShowLowOnly(!showLowOnly)}
                 className={`h-10 px-3 rounded-lg border text-sm font-medium transition ${showLowOnly ? 'bg-amber-600 text-white border-amber-600' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:bg-slate-50'}`}
               >
-                منخفض فقط
+                {t('inventory.stock.lowOnly')}
               </button>
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
-              <Button size="sm" variant="ghost" onClick={handleExportStockExcel} className="gap-1.5"><FileText size={14} className="text-emerald-600" /><span className="hidden sm:inline text-xs">Excel</span></Button>
-              <Button size="sm" variant="ghost" onClick={handleExportStockPdf} className="gap-1.5"><Receipt size={14} className="text-rose-600" /><span className="hidden sm:inline text-xs">PDF</span></Button>
+              <Button size="sm" variant="ghost" onClick={handleExportStockExcel} className="gap-1.5"><FileText size={14} className="text-emerald-600" /><span className="hidden sm:inline text-xs">{t('common.excel')}</span></Button>
+              <Button size="sm" variant="ghost" onClick={handleExportStockPdf} className="gap-1.5"><Receipt size={14} className="text-rose-600" /><span className="hidden sm:inline text-xs">{t('common.pdf')}</span></Button>
             </div>
           </div>
           {hasStockFilters && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
               <span>{filteredStock.length} من {stock.length} • {stockSearch ? `"${stockSearch}"` : ''}</span>
-              <button onClick={() => { setStockSearch(''); setStockWarehouseFilter(''); setShowLowOnly(false); }} className="text-primary-600 hover:underline font-medium">مسح الفلترة</button>
+              <button onClick={() => { setStockSearch(''); setStockWarehouseFilter(''); setShowLowOnly(false); }} className="text-primary-600 hover:underline font-medium">{t('sales.filter.clearFilters')}</button>
             </div>
           )}
         </div>
         {filteredStock.length === 0 && !isLoading ? (
           <div className="py-10">
-            <EmptyState icon={hasStockFilters ? 'search' : 'inbox'} title={hasStockFilters ? 'لا توجد نتائج' : t('inventory.empty.stock.title')} description={hasStockFilters ? 'جرّب تغيير البحث أو الفلترة' : t('inventory.empty.stock.description')} />
+            <EmptyState icon={hasStockFilters ? 'search' : 'inbox'} title={hasStockFilters ? t('common.noResults') : t('inventory.empty.stock.title')} description={hasStockFilters ? t('inventory.stock.tryDifferentSearch') : t('inventory.empty.stock.description')} />
           </div>
         ) : (
           <Table<StockItem> data={filteredStock} columns={stockColumns as never} keyExtractor={(row) => row.id} isLoading={isLoading} emptyMessage="" />
@@ -510,23 +510,23 @@ export const StockPage: React.FC = () => {
                   <input value={transferSearch} onChange={(e) => setTransferSearch(e.target.value)} placeholder={t('search')} className="h-9 pr-8 pl-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm w-40" />
                 </div>
                 <select value={transferStatusFilter} onChange={(e) => setTransferStatusFilter(e.target.value)} className="h-9 px-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm">
-                  <option value="">كل الحالات</option>
-                  <option value="draft">مسودة</option>
-                  <option value="completed">مكتمل</option>
-                  <option value="cancelled">ملغي</option>
+                  <option value="">{t('inventory.transfer.allStatuses')}</option>
+                  <option value="draft">{t('inventory.adjustment.draft')}</option>
+                  <option value="completed">{t('inventory.transfer.completed')}</option>
+                  <option value="cancelled">{t('inventory.transfer.cancelled')}</option>
                 </select>
               </div>
             </div>
             {hasTransferFilters && (
               <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                 <span>{filteredTransfers.length} من {transfers.length}</span>
-                <button onClick={() => { setTransferSearch(''); setTransferStatusFilter(''); }} className="text-primary-600 hover:underline">مسح</button>
+                <button onClick={() => { setTransferSearch(''); setTransferStatusFilter(''); }} className="text-primary-600 hover:underline">{t('inventory.transfer.clearShort')}</button>
               </div>
             )}
           </div>
           {filteredTransfers.length === 0 ? (
             <div className="py-8">
-              <EmptyState icon={hasTransferFilters ? 'search' : 'inbox'} title={hasTransferFilters ? 'لا توجد نتائج' : t('inventory.empty.transfers.title')} description={hasTransferFilters ? 'جرّب تغيير البحث' : t('inventory.empty.transfers.description')} />
+              <EmptyState icon={hasTransferFilters ? 'search' : 'inbox'} title={hasTransferFilters ? t('common.noResults') : t('inventory.empty.transfers.title')} description={hasTransferFilters ? t('inventory.transfer.tryDifferentSearch') : t('inventory.empty.transfers.description')} />
             </div>
           ) : (
             <Table<StockTransfer> data={filteredTransfers} columns={transferColumns as never} keyExtractor={(row) => row.id} />
@@ -538,7 +538,7 @@ export const StockPage: React.FC = () => {
         isOpen={isTransferOpen}
         onClose={closeModal}
         title={t('inventory.newTransfer')}
-        description="إنشاء تحويل مخزني بين مستودعين"
+        description={t('inventory.transfer.createDesc')}
         size="lg"
         footer={
           <div className="flex gap-2 ml-auto">
@@ -553,7 +553,7 @@ export const StockPage: React.FC = () => {
               <Hash size={16} className="text-primary-600" />
             </div>
             <div>
-              <p className="text-xs text-slate-500">رقم التحويل</p>
+              <p className="text-xs text-slate-500">{t('inventory.transfer.numberLabel')}</p>
               <p className="font-mono font-bold text-primary-700 dark:text-primary-300">{transferForm.transferNumber || t('inventory.autoGenerate')}</p>
             </div>
           </div>
@@ -585,15 +585,15 @@ export const StockPage: React.FC = () => {
             <Input label={`${t('inventory.quantity')} *`} type="number" min="0.01" step="0.01" value={transferForm.quantity} onChange={(e) => setTransferForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
             <Input label={`${t('inventory.date')} *`} type="date" value={transferForm.date} onChange={(e) => setTransferForm((prev) => ({ ...prev, date: e.target.value }))} required />
           </div>
-          <Input label={t('inventory.reference')} value={transferForm.reference} onChange={(e) => setTransferForm((prev) => ({ ...prev, reference: e.target.value }))} placeholder="مرجع اختياري" />
+          <Input label={t('inventory.reference')} value={transferForm.reference} onChange={(e) => setTransferForm((prev) => ({ ...prev, reference: e.target.value }))} placeholder={t('inventory.transactions.referencePlaceholder')} />
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.notes')}</label>
-            <textarea value={transferForm.notes} onChange={(e) => setTransferForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder="ملاحظات..." rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
+            <textarea value={transferForm.notes} onChange={(e) => setTransferForm((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t('inventory.transactions.notesPlaceholder')} rows={2} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 resize-none" />
           </div>
         </div>
       </Modal>
 
-      <ConfirmDialog isOpen={!!confirmComplete} onClose={() => setConfirmComplete(null)} onConfirm={() => confirmComplete && handleCompleteTransfer(confirmComplete)} title="إكمال التحويل" message="هل تريد إكمال هذا التحويل؟ سيتم تحديث المخزون في المستودعين." variant="info" />
+      <ConfirmDialog isOpen={!!confirmComplete} onClose={() => setConfirmComplete(null)} onConfirm={() => confirmComplete && handleCompleteTransfer(confirmComplete)} title={t('inventory.transfer.completeTitle')} message={t('inventory.transfer.completeMessage')} variant="info" />
       <ConfirmDialog isOpen={!!confirmDelete} onClose={() => setConfirmDelete(null)} onConfirm={() => confirmDelete && handleDeleteTransfer(confirmDelete)} title={t('delete')} message={t('inventory.deleteConfirm')} variant="danger" />
     </div>
   );

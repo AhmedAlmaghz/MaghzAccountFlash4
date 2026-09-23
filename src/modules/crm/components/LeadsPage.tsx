@@ -333,8 +333,8 @@ export const LeadsPage: React.FC = () => {
             className="text-violet-600 hover:text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/20"
             onClick={() => handleJevScore(row)}
             disabled={jevScoringId === row.id}
-            title="تقييم JEV"
-            aria-label="تقييم JEV"
+                title={t('crm.lead.jevScoreButton')}
+                aria-label={t('crm.lead.jevScoreButton')}
           >
             {jevScoringId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           </Button>
@@ -589,9 +589,9 @@ export const LeadsPage: React.FC = () => {
           </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={convertForm.createOpportunity} onChange={(e) => setConvertForm((p) => ({ ...p, createOpportunity: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600" />
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">إنشاء فرصة أولى</span>
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t('crm.lead.jevCreateOpportunity')}</span>
           </label>
-          <p className="text-xs text-slate-500">عند التفعيل سيتم إنشاء فرصة باسم &quot;فرصة {selectedLead?.name}&quot; بنفس القيمة التقديرية.</p>
+          <p className="text-xs text-slate-500">{t('crm.lead.jevCreateOppHint', { name: `فرصة ${selectedLead?.name ?? ''}` })}</p>
         </div>
       </Modal>
 
@@ -623,7 +623,7 @@ export const LeadsPage: React.FC = () => {
       <Modal
         isOpen={isJevModalOpen}
         onClose={() => setIsJevModalOpen(false)}
-        title="تقييم JEV — تأهيل العميل المحتمل"
+        title={t('crm.lead.jevModalTitle')}
         size="md"
         footer={
           <div className="flex items-center gap-2 justify-end w-full">
@@ -634,27 +634,27 @@ export const LeadsPage: React.FC = () => {
         {!jevResult ? (
           <div className="flex flex-col items-center justify-center py-8 gap-3">
             <Loader2 size={24} className="animate-spin text-violet-600" />
-            <p className="text-sm text-slate-500">جاري التقييم عبر JEV — 4 درجات متوازية (80–150ms)...</p>
+            <p className="text-sm text-slate-500">{t('crm.lead.jevEvaluating')}</p>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 p-4 flex items-center justify-between">
               <div>
-                <p className="text-xs text-violet-700 dark:text-violet-300">المركب</p>
+                <p className="text-xs text-violet-700 dark:text-violet-300">{t('crm.lead.jevComposite')}</p>
                 <p className="text-2xl font-bold text-violet-800 dark:text-violet-200 tabular-nums">{(jevResult.composite * 100).toFixed(0)}%</p>
-                <p className="text-xs text-slate-500">{jevResult.jevUsed ? `JEV — ثقة ${(jevResult.confidence * 100).toFixed(0)}%` : 'تقدير محلي (JEV غير متاح)'} · {jevResult.latencyMs}ms</p>
+                <p className="text-xs text-slate-500">{jevResult.jevUsed ? `${t('crm.lead.jevConfidence')} ${(jevResult.confidence * 100).toFixed(0)}%` : t('crm.lead.jevLocalFallback')} · {jevResult.latencyMs}ms</p>
               </div>
               <span className={`px-3 py-1 rounded-full text-sm font-semibold border ${jevResult.composite > 0.65 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : jevResult.composite > 0.40 ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                {jevResult.composite > 0.65 ? 'مؤهل' : jevResult.composite > 0.40 ? 'يحتاج متابعة' : 'غير مؤهل'}
+                {jevResult.composite > 0.65 ? t('crm.lead.jevQualified') : jevResult.composite > 0.40 ? t('crm.lead.jevFollowUp') : t('crm.lead.jevUnqualified')}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {jevResult.dimensions.map((d) => (
                 <div key={d.key} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 capitalize">{d.key === 'need' ? 'الحاجة' : d.key === 'budget' ? 'الميزانية' : d.key === 'authority' ? 'الصلاحية' : 'التوقيت'}</p>
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 capitalize">{d.key === 'need' ? t('crm.lead.jevNeed') : d.key === 'budget' ? t('crm.lead.jevBudget') : d.key === 'authority' ? t('crm.lead.jevAuthority') : t('crm.lead.jevTiming')}</p>
                   <div className="mt-1 flex items-baseline gap-2">
                     <span className="text-lg font-bold tabular-nums">{(d.normalized * 100).toFixed(0)}%</span>
-                    <span className="text-xs text-slate-500">ثقة {(d.confidence * 100).toFixed(0)}%</span>
+                    <span className="text-xs text-slate-500">{t('crm.lead.jevConfidenceShort')} {(d.confidence * 100).toFixed(0)}%</span>
                   </div>
                   <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                     <div className="h-full bg-violet-600 transition-all" style={{ width: `${d.normalized * 100}%` }} />
@@ -662,7 +662,7 @@ export const LeadsPage: React.FC = () => {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-slate-500 leading-relaxed">الأوزان: حاجة 30% + ميزانية 30% + صلاحية 25% + توقيت 15% — عدّلها في <code>jevScoring.ts:LEAD_WEIGHTS</code> دون لمس الـ prompt.</p>
+            <p className="text-xs text-slate-500 leading-relaxed">{t('crm.lead.jevWeightsBefore')} <code>jevScoring.ts:LEAD_WEIGHTS</code> {t('crm.lead.jevWeightsAfter')}</p>
           </div>
         )}
       </Modal>

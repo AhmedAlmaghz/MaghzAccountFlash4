@@ -429,7 +429,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       createdBy: order.createdBy,
       statusBadge: STATUS_LABELS[order.status] || order.status,
       statusTone: order.status === 'invoiced' ? 'success' : 'muted',
-    });
+    }, false, t);
   }, [activeCompany, t, currencySymbol, vatRate]);
 
   const columns = useMemo(() => [
@@ -870,7 +870,7 @@ export const PurchaseOrdersPage: React.FC = () => {
             )}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setViewModalOpen(false)}>{t('close')}</Button>
-              <Button variant="primary" leftIcon={<Printer size={16} />} onClick={() => handlePrint(selectedOrder)}>{t('print')}</Button>
+              <Button variant="primary" leftIcon={<Printer size={16} />} onClick={() => handlePrint(selectedOrder)}>{t('print.title')}</Button>
             </div>
           </div>
         )}

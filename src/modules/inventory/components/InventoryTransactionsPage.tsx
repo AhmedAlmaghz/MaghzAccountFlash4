@@ -223,14 +223,14 @@ export const InventoryTransactionsPage: React.FC = () => {
             { key: 'in', label: t('inventory.in') },
             { key: 'out', label: t('inventory.out') },
             { key: 'adjustment', label: t('inventory.transactions.typeAdjustment') },
-            { key: 'transfer', label: t('inventory.transfer') },
+            { key: 'transfer', label: t('inventory.transfer.title') },
           ]}
           activeFilter={typeFilter}
           onFilterChange={(key) => setTypeFilter(key)}
           actions={
             <>
               <Button variant="secondary" size="sm" leftIcon={<Printer size={14} />} onClick={handlePrint} className="gap-1.5">
-                {t('print')}
+                {t('print.title')}
               </Button>
               <Button variant="secondary" size="sm" leftIcon={<Download size={14} />} onClick={handleExportExcel} className="gap-1.5">
                 Excel

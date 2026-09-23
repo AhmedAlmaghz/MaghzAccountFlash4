@@ -142,8 +142,8 @@ export const ReceiptVouchersPage: React.FC = () => {
         checkDate: voucher.checkDate,
         createdBy: voucher.createdBy ? getUserName(voucher.createdBy) : undefined,
         statusBadge: STATUS_LABELS[voucher.status] || voucher.status,
-        statusTone: voucher.status === 'posted' ? 'success' : 'muted',
-      });
+      statusTone: voucher.status === 'posted' ? 'success' : 'muted',
+    }, false, t);
     },
     [t, activeCompany, currencySymbol, getUserName, settings?.vatRate],
   );

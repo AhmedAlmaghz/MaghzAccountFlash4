@@ -371,7 +371,7 @@ export const PosTerminalPage: React.FC = () => {
           creditAmount: receipt.data.creditAmount,
           change,
           fmtCurrency: formatCurrency,
-        });
+        }, t);
       }
     } else {
       addToast('error', result.error || t('pos.checkoutFailed'));
@@ -397,7 +397,7 @@ export const PosTerminalPage: React.FC = () => {
         creditAmount: receipt.data.creditAmount,
         change: 0,
         fmtCurrency: formatCurrency,
-      });
+      }, t);
     } else {
       addToast('error', receipt.error || t('pos.checkoutFailed'));
     }

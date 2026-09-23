@@ -480,7 +480,7 @@ export const QuotationsPage: React.FC = () => {
       createdBy: q.createdBy,
       statusBadge: STATUS_FLOW[q.status] || q.status,
       statusTone: q.status === 'converted' || q.status === 'accepted' ? 'success' : (isOverdue ? 'warning' : 'muted'),
-    });
+    }, false, t);
   };
 
   const handleExportExcel = () => {
@@ -909,7 +909,7 @@ export const QuotationsPage: React.FC = () => {
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setDetailOpen(false)}>{t('close')}</Button>
-              <Button variant="primary" onClick={() => handlePrint(viewing)} leftIcon={<Printer size={16} />}>{t('print')}</Button>
+              <Button variant="primary" onClick={() => handlePrint(viewing)} leftIcon={<Printer size={16} />}>{t('print.title')}</Button>
             </div>
           </div>
         )}

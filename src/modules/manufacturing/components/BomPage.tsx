@@ -346,7 +346,7 @@ export const BomPage: React.FC = () => {
             className="w-full pr-9 pl-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors"
           />
           {searchTerm && (
-            <button onClick={() => setSearchTerm('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="مسح"><Trash2 size={13} /></button>
+            <button onClick={() => setSearchTerm('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label={t('common.clear')}><Trash2 size={13} /></button>
           )}
         </div>
       </Card>

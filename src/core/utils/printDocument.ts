@@ -60,7 +60,23 @@ export interface PrintDocumentData {
   approvedBy?: string;
 }
 
-const typeTitles: Record<string, string> = {
+export type PrintT = (key: string, params?: Record<string, string | number>) => string;
+
+const typeTitleKeys: Record<string, string> = {
+  'sales-invoice': 'print.docSalesInvoice',
+  'purchase-invoice': 'print.docPurchaseInvoice',
+  'purchase-order': 'print.docPurchaseOrder',
+  'purchase-return': 'print.docPurchaseReturn',
+  'sales-return': 'print.docSalesReturn',
+  'quotation': 'print.docQuotation',
+  'receipt-voucher': 'print.docReceiptVoucher',
+  'payment-voucher': 'print.docPaymentVoucher',
+  'journal-entry': 'print.docJournalEntry',
+  'ledger': 'print.docLedger',
+  'statement': 'print.docStatement',
+};
+
+const typeTitleFallbacks: Record<string, string> = {
   'sales-invoice': 'فاتورة ضريبية',
   'purchase-invoice': 'فاتورة مشتريات',
   'purchase-order': 'أمر شراء',
@@ -104,9 +120,13 @@ function escapeLineBreaks(value: string): string {
   return escapeHtml(value).replaceAll('\n', '<br />');
 }
 
-function generateHtml(data: PrintDocumentData): string {
+function generateHtml(data: PrintDocumentData, t?: PrintT): string {
+  // Document labels follow the UI language when the caller passes its t();
+  // without it every label falls back to the Arabic original (unchanged output).
+  const T = (key: string, fallback: string): string =>
+    t ? t(key, { default: fallback }) : fallback;
   const color = typeColors[data.type];
-  const title = typeTitles[data.type];
+  const title = T(typeTitleKeys[data.type] || 'print.docStatement', typeTitleFallbacks[data.type] || data.type);
   const isInvoice = data.type === 'sales-invoice' || data.type === 'purchase-invoice' || data.type === 'purchase-order' || data.type === 'purchase-return' || data.type === 'sales-return' || data.type === 'quotation';
   const isVoucher = data.type === 'receipt-voucher' || data.type === 'payment-voucher';
   const isStatement = data.type === 'statement';
@@ -155,46 +175,46 @@ function generateHtml(data: PrintDocumentData): string {
   const totalsHtml = isInvoice ? `
     <div style="width:52%;margin-right:auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
       <div style="background:linear-gradient(135deg, ${color} 0%, ${color}dd 100%);color:white;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-weight:700;font-size:13px;letter-spacing:0.5px">ملخص الفاتورة</span>
-        <span style="font-size:11px;opacity:0.9;background:rgba(255,255,255,0.15);padding:3px 8px;border-radius:20px">${data.lines.length} صنف</span>
+        <span style="font-weight:700;font-size:13px;letter-spacing:0.5px">${T('print.invoiceSummary', 'ملخص الفاتورة')}</span>
+        <span style="font-size:11px;opacity:0.9;background:rgba(255,255,255,0.15);padding:3px 8px;border-radius:20px">${data.lines.length} ${T('print.itemsUnit', 'صنف')}</span>
       </div>
       <div style="padding:12px 14px">
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px">
-          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#e5e7eb;border-radius:50%;display:inline-block"></span> المجموع الفرعي</span>
+          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#e5e7eb;border-radius:50%;display:inline-block"></span> ${T('print.subtotal', 'المجموع الفرعي')}</span>
           <span style="font-weight:600;direction:ltr">${formatCurrency(data.subtotal, data.currency)}</span>
         </div>
         ${data.discountAmount != null && data.discountAmount > 0 ? `
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px;background:#fef3c7;margin:0 -14px;padding-left:14px;padding-right:14px">
-          <span style="color:#92400e;display:flex;align-items:center;gap:6px">٪ الخصم <span style="font-size:11px;background:#f59e0b;color:white;padding:1px 6px;border-radius:10px">${((data.discountAmount / (data.subtotal || 1)) * 100).toFixed(1)}%</span></span>
+          <span style="color:#92400e;display:flex;align-items:center;gap:6px">${T('print.discount', '٪ الخصم')} <span style="font-size:11px;background:#f59e0b;color:white;padding:1px 6px;border-radius:10px">${((data.discountAmount / (data.subtotal || 1)) * 100).toFixed(1)}%</span></span>
           <span style="font-weight:700;direction:ltr;color:#b45309">-${formatCurrency(data.discountAmount, data.currency)}</span>
         </div>
         ` : ''}
         <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px">
-          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#10b981;border-radius:50%;display:inline-block"></span> ضريبة القيمة المضافة <span style="font-size:11px;background:#ecfdf5;color:#047857;padding:1px 6px;border-radius:10px">${data.vatRate ?? 15}%</span></span>
+          <span style="color:#6b7280;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#10b981;border-radius:50%;display:inline-block"></span> ${T('print.vat', 'ضريبة القيمة المضافة')} <span style="font-size:11px;background:#ecfdf5;color:#047857;padding:1px 6px;border-radius:10px">${data.vatRate ?? 15}%</span></span>
           <span style="font-weight:600;direction:ltr;color:#047857">${formatCurrency(data.vatAmount, data.currency)}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin:8px -14px -12px;background:${color};color:white;border-radius:0 0 10px 10px">
-          <span style="font-weight:800;font-size:14px;letter-spacing:0.3px">الإجمالي النهائي</span>
+          <span style="font-weight:800;font-size:14px;letter-spacing:0.3px">${T('print.grandTotal', 'الإجمالي النهائي')}</span>
           <span style="font-weight:800;font-size:16px;direction:ltr;letter-spacing:0.5px">${formatCurrency(data.totalAmount, data.currency)}</span>
         </div>
       </div>
     </div>
   ` : isVoucher ? '' : `
     <div style="margin-top:20px;background:linear-gradient(135deg, ${color} 0%, ${color}dd 100%);border-radius:10px;padding:16px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 6px rgba(0,0,0,0.1)">
-      <span style="font-size:13px;font-weight:600;opacity:0.9">المبلغ الإجمالي</span>
+      <span style="font-size:13px;font-weight:600;opacity:0.9">${T('print.totalAmount', 'المبلغ الإجمالي')}</span>
       <span style="font-size:18px;font-weight:800;direction:ltr;letter-spacing:0.5px">${formatCurrency(data.totalAmount, data.currency)}</span>
     </div>
   `;
 
   const paymentInfoHtml = !isStatement && (data.cashBoxName || data.paymentMethod) ? `
     <div style="margin-top:16px">
-      <h4 style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid ${color};display:inline-block">معلومات الدفع</h4>
+      <h4 style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid ${color};display:inline-block">${T('print.paymentInfo', 'معلومات الدفع')}</h4>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:#4b5563;margin-top:8px">
-        ${data.paymentType ? `<div><span style="color:#6b7280">نوع الدفع:</span> ${escapeHtml(data.paymentType)}</div>` : ''}
-        ${data.paymentMethod ? `<div><span style="color:#6b7280">طريقة الدفع:</span> ${escapeHtml(data.paymentMethod)}</div>` : ''}
-        ${data.cashBoxName ? `<div><span style="color:#6b7280">الخزنة:</span> ${escapeHtml(data.cashBoxName)}</div>` : ''}
-        ${data.checkNumber ? `<div><span style="color:#6b7280">رقم الشيك:</span> ${escapeHtml(data.checkNumber)}</div>` : ''}
-        ${data.checkDate ? `<div><span style="color:#6b7280">تاريخ الشيك:</span> ${escapeHtml(data.checkDate)}</div>` : ''}
+        ${data.paymentType ? `<div><span style="color:#6b7280">${T('print.paymentType', 'نوع الدفع:')}</span> ${escapeHtml(data.paymentType)}</div>` : ''}
+        ${data.paymentMethod ? `<div><span style="color:#6b7280">${T('print.paymentMethod', 'طريقة الدفع:')}</span> ${escapeHtml(data.paymentMethod)}</div>` : ''}
+        ${data.cashBoxName ? `<div><span style="color:#6b7280">${T('print.cashBox', 'الخزنة:')}</span> ${escapeHtml(data.cashBoxName)}</div>` : ''}
+        ${data.checkNumber ? `<div><span style="color:#6b7280">${T('print.checkNumber', 'رقم الشيك:')}</span> ${escapeHtml(data.checkNumber)}</div>` : ''}
+        ${data.checkDate ? `<div><span style="color:#6b7280">${T('print.checkDate', 'تاريخ الشيك:')}</span> ${escapeHtml(data.checkDate)}</div>` : ''}
       </div>
     </div>
   ` : '';
@@ -579,13 +599,13 @@ function generateHtml(data: PrintDocumentData): string {
     <div class="page-inner">
       <div class="header">
         <div class="company-section">
-          <div class="company-name">${escapeHtml(data.companyName || 'الشركة')}</div>
+          <div class="company-name">${escapeHtml(data.companyName || T('print.companyFallback', 'الشركة'))}</div>
           <div class="company-details">
-            ${data.companyTaxNumber ? `<span>الرقم الضريبي: ${escapeHtml(data.companyTaxNumber)}</span>` : ''}
-            ${data.companyVatNumber ? `<span>رقم ضريبة القيمة المضافة: ${escapeHtml(data.companyVatNumber)}</span>` : ''}
+            ${data.companyTaxNumber ? `<span>${T('print.taxNumber', 'الرقم الضريبي:')} ${escapeHtml(data.companyTaxNumber)}</span>` : ''}
+            ${data.companyVatNumber ? `<span>${T('print.vatNumber', 'رقم ضريبة القيمة المضافة:')} ${escapeHtml(data.companyVatNumber)}</span>` : ''}
             ${data.companyAddress ? `<span>${escapeHtml(data.companyAddress)}</span>` : ''}
-            ${data.companyPhone ? `<span>هاتف: ${escapeHtml(data.companyPhone)}</span>` : ''}
-            ${data.companyEmail ? `<span>بريد إلكتروني: ${escapeHtml(data.companyEmail)}</span>` : ''}
+            ${data.companyPhone ? `<span>${T('print.phone', 'هاتف:')} ${escapeHtml(data.companyPhone)}</span>` : ''}
+            ${data.companyEmail ? `<span>${T('print.email', 'بريد إلكتروني:')} ${escapeHtml(data.companyEmail)}</span>` : ''}
           </div>
         </div>
         <div class="logo-center">
@@ -596,14 +616,14 @@ function generateHtml(data: PrintDocumentData): string {
         <div class="doc-side">
           <div class="doc-badge">
             <div class="badge">${escapeHtml(title)}</div>
-            <div class="number">رقم: ${escapeHtml(data.docNumber)}</div>
+            <div class="number">${T('print.docNumberShort', 'رقم:')} ${escapeHtml(data.docNumber)}</div>
           </div>
           <div class="doc-side-meta">
             <div class="side-row"><span class="side-label">${escapeHtml(data.partyLabel)}</span><span class="side-value">${escapeHtml(data.partyName)}</span></div>
-            ${data.partyTaxNumber ? `<div class="side-row"><span class="side-label">الرقم الضريبي</span><span class="side-value small">${escapeHtml(data.partyTaxNumber)}</span></div>` : ''}
+            ${data.partyTaxNumber ? `<div class="side-row"><span class="side-label">${T('print.partyTaxNumber', 'الرقم الضريبي')}</span><span class="side-value small">${escapeHtml(data.partyTaxNumber)}</span></div>` : ''}
             ${data.partyAddress ? `<div class="side-row"><span class="side-value small">${escapeHtml(data.partyAddress)}</span></div>` : ''}
-            <div class="side-row"><span class="side-label">التاريخ</span><span class="side-value">${formatDateValue(data.date)}</span></div>
-            ${data.dueDate ? `<div class="side-row"><span class="side-label">الاستحقاق</span><span class="side-value">${formatDateValue(data.dueDate)}</span></div>` : ''}
+            <div class="side-row"><span class="side-label">${T('print.date', 'التاريخ')}</span><span class="side-value">${formatDateValue(data.date)}</span></div>
+            ${data.dueDate ? `<div class="side-row"><span class="side-label">${T('print.dueDate', 'الاستحقاق')}</span><span class="side-value">${formatDateValue(data.dueDate)}</span></div>` : ''}
           </div>
         </div>
       </div>
@@ -617,22 +637,22 @@ function generateHtml(data: PrintDocumentData): string {
           <tr>
             ${isStatement ? `
             <th style="width:30px">#</th>
-            <th style="width:90px">التاريخ</th>
-            <th style="width:100px">رقم المستند</th>
-            <th style="text-align:right;min-width:200px">البيان</th>
-            <th style="width:100px">مدين</th>
-            <th style="width:100px">دائن</th>
-            <th style="width:110px">الرصيد</th>
+            <th style="width:90px">${T('print.date', 'التاريخ')}</th>
+            <th style="width:100px">${T('print.docNumber', 'رقم المستند')}</th>
+            <th style="text-align:right;min-width:200px">${T('print.description', 'البيان')}</th>
+            <th style="width:100px">${T('print.debit', 'مدين')}</th>
+            <th style="width:100px">${T('print.credit', 'دائن')}</th>
+            <th style="width:110px">${T('print.balance', 'الرصيد')}</th>
             ` : `
             <th style="width:30px">#</th>
-            <th style="text-align:right">البيان</th>
+            <th style="text-align:right">${T('print.description', 'البيان')}</th>
             ${isInvoice ? `
-            <th style="width:50px">الوحدة</th>
-            <th style="width:60px">الكمية</th>
-            <th style="width:80px">سعر الوحدة</th>
-            ${data.lines.some(l => l.discount != null && l.discount > 0) ? '<th style="width:70px">الخصم</th>' : ''}
+            <th style="width:50px">${T('print.unit', 'الوحدة')}</th>
+            <th style="width:60px">${T('print.quantity', 'الكمية')}</th>
+            <th style="width:80px">${T('print.unitPrice', 'سعر الوحدة')}</th>
+            ${data.lines.some(l => l.discount != null && l.discount > 0) ? `<th style="width:70px">${T('print.discountCol', 'الخصم')}</th>` : ''}
             ` : ''}
-            <th style="width:90px">الإجمالي</th>
+            <th style="width:90px">${T('print.total', 'الإجمالي')}</th>
             `}
           </tr>
         </thead>
@@ -640,7 +660,7 @@ function generateHtml(data: PrintDocumentData): string {
           ${linesHtml}
           ${data.lines.length === 0 ? `
           <tr>
-            <td colspan="${colCount}" style="padding:20px;text-align:center;color:#9ca3af;font-size:13px">لا توجد بنود</td>
+            <td colspan="${colCount}" style="padding:20px;text-align:center;color:#9ca3af;font-size:13px">${T('print.noLines', 'لا توجد بنود')}</td>
           </tr>
           ` : ''}
         </tbody>
@@ -650,15 +670,15 @@ function generateHtml(data: PrintDocumentData): string {
 
       ${paymentInfoHtml}
 
-      ${!isStatement && data.notes ? `<div class="notes-section"><strong>ملاحظات:</strong><br>${escapeLineBreaks(data.notes)}</div>` : ''}
+      ${!isStatement && data.notes ? `<div class="notes-section"><strong>${T('print.notes', 'ملاحظات:')}</strong><br>${escapeLineBreaks(data.notes)}</div>` : ''}
 
       ${isVoucher ? `
       <div style="margin:6px 0 4px;text-align:center;padding:22px 16px;border-radius:14px;background:linear-gradient(135deg, ${color} 0%, ${color}cc 100%);color:white;box-shadow:0 4px 10px rgba(0,0,0,0.15)">
-        <div style="font-size:12px;font-weight:600;opacity:0.9;margin-bottom:6px">المبلغ</div>
+        <div style="font-size:12px;font-weight:600;opacity:0.9;margin-bottom:6px">${T('print.voucherAmount', 'المبلغ')}</div>
         <div style="font-size:30px;font-weight:800;letter-spacing:0.5px;direction:ltr">${formatCurrency(data.totalAmount, data.currency)}</div>
       </div>
       <div class="notes-section" style="background:#f0fdf4;border-right-color:#16a34a">
-        <strong>بيان السند:</strong><br>
+        <strong>${T('print.voucherStatement', 'بيان السند:')}</strong><br>
         ${escapeHtml(data.notes || data.lines[0]?.description || '')}
       </div>
       ` : ''}
@@ -667,15 +687,15 @@ function generateHtml(data: PrintDocumentData): string {
       <div class="amount-words" style="background:#f0fdf4;border-color:#86efac">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <div class="label">الرصيد الختامي</div>
+            <div class="label">${T('print.closingBalance', 'الرصيد الختامي')}</div>
             <div class="text" style="color:#059669">${formatCurrency(closingBalance, data.currency)}</div>
           </div>
           <div style="text-align:left">
-            <div class="label">إجمالي المدين</div>
+            <div class="label">${T('print.totalDebit', 'إجمالي المدين')}</div>
             <div class="text" style="color:#059669">${formatCurrency(data.subtotal, data.currency)}</div>
           </div>
           <div style="text-align:left">
-            <div class="label">إجمالي الدائن</div>
+            <div class="label">${T('print.totalCredit', 'إجمالي الدائن')}</div>
             <div class="text" style="color:#dc2626">${formatCurrency(data.vatAmount, data.currency)}</div>
           </div>
         </div>
@@ -684,41 +704,41 @@ function generateHtml(data: PrintDocumentData): string {
 
       <div class="signatures">
         <div class="sig-item">
-          <div class="sig-line">توقيع المستلم</div>
+          <div class="sig-line">${T('print.recipientSign', 'توقيع المستلم')}</div>
         </div>
         <div class="sig-item">
-          <div class="sig-line">المدير المالي</div>
+          <div class="sig-line">${T('print.financeManager', 'المدير المالي')}</div>
         </div>
         <div class="sig-item">
-          <div class="sig-line">الختم الرسمي</div>
+          <div class="sig-line">${T('print.officialStamp', 'الختم الرسمي')}</div>
         </div>
       </div>
 
       <div class="footer">
-        تم إنشاء هذا المستند إلكترونياً بواسطة نظام MaghzAccount
+        ${T('print.footerGenerated', 'تم إنشاء هذا المستند إلكترونياً بواسطة نظام MaghzAccount')}
         <span class="divider">|</span>
-        مستند رقم ${escapeHtml(data.docNumber)}
-        ${data.createdBy ? `<span class="divider">|</span> أنشئ بواسطة ${escapeHtml(data.createdBy)}` : ''}
-        ${data.approvedBy ? `<span class="divider">|</span> اعتمد بواسطة ${escapeHtml(data.approvedBy)}` : ''}
+        ${T('print.footerDoc', 'مستند رقم')} ${escapeHtml(data.docNumber)}
+        ${data.createdBy ? `<span class="divider">|</span> ${T('print.footerCreatedBy', 'أنشئ بواسطة')} ${escapeHtml(data.createdBy)}` : ''}
+        ${data.approvedBy ? `<span class="divider">|</span> ${T('print.footerApprovedBy', 'اعتمد بواسطة')} ${escapeHtml(data.approvedBy)}` : ''}
       </div>
     </div>
   </div>
 
   <div class="print-btn">
-    <button onclick="window.print()">
-      🖨️ طباعة / حفظ PDF
-    </button>
+      <button onclick="window.print()">
+        ${T('print.printButton', '🖨️ طباعة / حفظ PDF')}
+      </button>
   </div>
 </body>
 </html>
   `;
 }
 
-export function printDocument(data: PrintDocumentData, autoPrint = false): void {
-  const html = generateHtml(data);
+export function printDocument(data: PrintDocumentData, autoPrint = false, t?: PrintT): void {
+  const html = generateHtml(data, t);
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
-    alert('يرجى السماح بفتح النوافذ المنبثقة للطباعة');
+    alert(t ? t('print.popupBlocked', { default: 'يرجى السماح بفتح النوافذ المنبثقة للطباعة' }) : 'يرجى السماح بفتح النوافذ المنبثقة للطباعة');
     return;
   }
   printWindow.document.open();

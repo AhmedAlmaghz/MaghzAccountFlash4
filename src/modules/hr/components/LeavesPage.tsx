@@ -246,8 +246,8 @@ export const LeavesPage: React.FC = () => {
           ))}
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <Button variant="ghost" onClick={handleExportExcel} title="Excel"><Download size={16} className="text-emerald-600" /></Button>
-          <Button variant="ghost" onClick={handleExportPDF} title="PDF"><Download size={16} className="text-rose-600" /></Button>
+<Button variant="ghost" onClick={handleExportExcel} title={t('common.excel')}><Download size={16} className="text-emerald-600" /></Button>
+            <Button variant="ghost" onClick={handleExportPDF} title={t('common.pdf')}><Download size={16} className="text-rose-600" /></Button>
           <Button variant="ghost" onClick={handlePrint} title={t('settings.common.print')}><Printer size={16} className="text-slate-600" /></Button>
         </div>
       </Card>
