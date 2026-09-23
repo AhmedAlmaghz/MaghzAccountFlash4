@@ -35,9 +35,9 @@
 - `scripts/jev-poc.ts:48` — PoC حقيقي بثلاث حالات ذهبية يمنية
 
 ### توثيق
-- `Docs2/JEV-Integration-Report.md` — تقرير فهم عميق
-- `Docs2/JEV-Implementation-Plan.md` — خطة 6 مراحل
-- `Docs2/JEV-Execution-Summary.md` — هذا الملف
+- `docs_dev/JEV Docs/JEV-Integration-Report.md` — تقرير فهم عميق
+- `docs_dev/JEV Docs/JEV-Implementation-Plan.md` — خطة 6 مراحل
+- `docs_dev/JEV Docs/JEV-Execution-Summary.md` — هذا الملف
 - `.agent/plans/elegant-doodling-ant-agent-a80fa41050c336957.md` — نسخة الخطة المعتمدة
 
 ---

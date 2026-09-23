@@ -1,6 +1,6 @@
-# Documentation Conventions — Docs2/en
+# Documentation Conventions — Docs/en
 
-This file defines the unified terminology and the approved template for every file inside `Docs2/en/`.
+This file defines the unified terminology and the approved template for every file inside `Docs/en/`.
 Purpose: guarantee full consistency across all parts of the English user guide.
 
 ---

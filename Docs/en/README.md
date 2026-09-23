@@ -1,6 +1,6 @@
 # Complete User Guide — MaghzAccountPro
 
-> The complete official guide to **MaghzAccountPro** (v0.21.1): an integrated ERP accounting system for small and medium businesses, with an Arabic-first interface, IFRS-compliant double-entry accounting, flexible VAT, multi-currency support, and the "Maghz" AI Assistant.
+> The complete official guide to **MaghzAccountPro** (v0.25.3): an integrated ERP accounting system for small and medium businesses, with an Arabic-first interface, IFRS-compliant double-entry accounting, flexible VAT, multi-currency support, and the "Maghz" AI Assistant.
 
 > 🌐 This guide is also available in Arabic: [الدليل بالعربية](../ar/README.md)
 
@@ -67,4 +67,4 @@
 
 ---
 
-*User Guide — MaghzAccountPro v0.21.1 · Generated from source-code review · Format: Markdown*
+*User Guide — MaghzAccountPro v0.25.3 · Generated from source-code review · Format: Markdown*

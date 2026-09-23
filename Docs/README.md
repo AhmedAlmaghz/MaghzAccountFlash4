@@ -17,7 +17,7 @@ Both guides mirror the same 17 sections + appendices, with 80 app screenshots in
 ## Structure / البنية
 
 ```
-Docs2/
+Docs/
 ├── README.md          ← this landing page / هذه الصفحة
 ├── ar/                ← Arabic guide (source) / الدليل العربي (المصدر)
 │   ├── CONVENTIONS.md
