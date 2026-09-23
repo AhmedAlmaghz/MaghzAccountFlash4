@@ -8,6 +8,7 @@ import { routeToolsForCycle } from './toolRouter';
 import { jevRouteToolsForCycle } from '../jev/jevToolRouter';
 import { recordJevMetric, recordJevRoute, estimateJevCost } from '../jev/jevMetrics';
 import { jevGuardCheck } from '../jev/jevGuard';
+import { jevSearchAll } from '../jev/jevSearch';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
@@ -442,7 +443,6 @@ class ChatEngine {
       let jevSearchHits: Array<{ type: string; id: string; name: string; score: number }> = [];
       let jevSearchUsed = false;
       try {
-        const { jevSearchAll } = await import('../jev/jevSearch');
         const [searchRes, guard] = await Promise.all([
           deadlineOr(
             jevSearchAll(this.ctx, userText).catch(() => null),
