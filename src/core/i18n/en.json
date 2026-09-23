@@ -2,6 +2,25 @@
   "appName": "Maghz Account Pro",
   "appSubtitle": "Integrated ERP Accounting System with AI Assistant",
   "appVersion": "Version {{version}}",
+  "update": {
+    "available": "Update available {{latest}} — you are on {{current}}",
+    "updateNow": "Update now",
+    "later": "Later",
+    "whatsNew": "What's new",
+    "checking": "Checking...",
+    "checkNow": "Check now",
+    "upToDate": "You are up to date",
+    "channel": "Update channel",
+    "channelStable": "Stable",
+    "channelBeta": "Beta",
+    "downloading": "Downloading... {{percent}}%",
+    "downloaded": "Downloaded — restart to install",
+    "restartNow": "Restart now",
+    "dismiss": "Dismiss",
+    "error": "Failed to check for updates",
+    "desktopDownloading": "Downloading update in background...",
+    "openReleases": "Open releases page"
+  },
   "palette": {
     "title": "Global Search",
     "searchPlaceholder": "Search pages, reports, customers, products...",
@@ -296,7 +315,15 @@
       "auditLogs": "Audit Log",
       "backup": "Backup",
       "reset": "Reset",
-      "ai": "AI"
+      "ai": "AI",
+      "about": {
+        "title": "About",
+        "subtitle": "App version and update channel",
+        "version": "Current version",
+        "links": "Links",
+        "channelHint": "Stable is for production; Beta includes early features that may be unstable.",
+        "betaRequiresEdit": "Requires settings.edit permission"
+      }
     },
     "hrPolicy": "HR Policies",
     "pos": {

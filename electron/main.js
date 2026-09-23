@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -92,7 +92,7 @@ process.on('unhandledRejection', (reason) => {
   appendMainLog(msg);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Register PostgreSQL IPC handlers (Drizzle ORM bridge)
   registerDatabaseHandlers();
   registerAuthHandlers();
@@ -102,6 +102,29 @@ app.whenReady().then(() => {
 
   // Register AI Harness IPC handlers (LLM proxy — key stays in main process)
   registerAiHandlers();
+
+  // ─── App version + updater IPC (must be before window) ──────────────────
+  ipcMain.handle('app:getVersion', () => app.getVersion());
+  ipcMain.handle('app:checkForUpdates', async () => {
+    try {
+      const { autoUpdater } = await import('electron-updater');
+      return await autoUpdater.checkForUpdates();
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  ipcMain.handle('app:quitAndInstall', () => {
+    import('electron-updater').then(({ autoUpdater }) => autoUpdater.quitAndInstall());
+  });
+  ipcMain.handle('app:setUpdateChannel', async (_e, channel) => {
+    try {
+      const { autoUpdater } = await import('electron-updater');
+      autoUpdater.allowPrerelease = channel === 'beta';
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   // Open the window FIRST. Migrations can take 15s+ on a machine without a
   // local PostgreSQL (connection timeout) — blocking the window behind them
@@ -117,6 +140,53 @@ app.whenReady().then(() => {
       appendMainLog(`migration failed: ${err.message}`);
       console.warn('[App] PostgreSQL unavailable — PGlite local database remains available.');
     });
+
+  // Auto-updater: check in background (not in dev), download in background,
+  // notify renderer via webContents.send — the UI shows the banner.
+  const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+  if (!isDev) {
+    try {
+      const { autoUpdater } = await import('electron-updater');
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = true;
+      // Default to stable; renderer can switch to beta via app:setUpdateChannel
+      try {
+        const raw = fs.readFileSync(path.join(app.getPath('userData'), 'update-channel.json'), 'utf8');
+        const parsed = JSON.parse(raw) as { channel?: string };
+        autoUpdater.allowPrerelease = parsed.channel === 'beta';
+      } catch { /* default stable */ }
+      autoUpdater.on('checking-for-update', () => {
+        mainWindow?.webContents.send('update:checking');
+      });
+      autoUpdater.on('update-available', (info) => {
+        mainWindow?.webContents.send('update:available', info);
+      });
+      autoUpdater.on('update-not-available', (info) => {
+        mainWindow?.webContents.send('update:not-available', info);
+      });
+      autoUpdater.on('download-progress', (p) => {
+        mainWindow?.webContents.send('update:progress', p);
+      });
+      autoUpdater.on('update-downloaded', (info) => {
+        mainWindow?.webContents.send('update:downloaded', info);
+      });
+      autoUpdater.on('error', (err) => {
+        mainWindow?.webContents.send('update:error', err?.message || String(err));
+      });
+      // Persist channel choice from renderer
+      ipcMain.on('app:updateChannelChanged', (_e, channel) => {
+        autoUpdater.allowPrerelease = channel === 'beta';
+        try {
+          fs.writeFileSync(path.join(app.getPath('userData'), 'update-channel.json'), JSON.stringify({ channel }));
+        } catch { /* ignore */ }
+      });
+      // First check after 8s, then every 6h
+      setTimeout(() => { autoUpdater.checkForUpdates().catch(() => { /* silent */ }); }, 8000);
+      setInterval(() => { autoUpdater.checkForUpdates().catch(() => { /* silent */ }); }, 6 * 60 * 60 * 1000);
+    } catch (err) {
+      console.warn('[App] autoUpdater unavailable:', err instanceof Error ? err.message : String(err));
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

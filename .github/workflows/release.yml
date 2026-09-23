@@ -41,17 +41,21 @@ jobs:
           $v = $env:GITHUB_REF_NAME -replace '^v', ''
           "RELEASE_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Build Electron (portable exe)
+      - name: Build Electron (nsis + portable + updater files)
         shell: pwsh
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --win portable --publish never "-c.extraMetadata.version=$env:RELEASE_VERSION"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis portable "-c.extraMetadata.version=$env:RELEASE_VERSION"
 
       - name: Upload Electron artifact
         uses: actions/upload-artifact@v4
         with:
           name: electron-windows
-          path: release/*.exe
+          path: |
+            release/*.exe
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: error
           retention-days: 7
 
@@ -156,6 +160,8 @@ jobs:
         with:
           files: |
             dist/*.exe
+            dist/*.yml
+            dist/*.blockmap
             dist/*.apk
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false

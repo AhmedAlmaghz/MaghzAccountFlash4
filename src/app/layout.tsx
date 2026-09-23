@@ -30,6 +30,7 @@ import {
 import { CommandPalette, type EntitySource } from '@/core/ui/components/command/CommandPalette';
 import { AppBrand } from '@/core/ui/components/AppBrand';
 import { UserMenu } from '@/modules/auth/components/UserMenu';
+import { UpdateBanner } from '@/core/update/UpdateBanner';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
 import { inventoryApi } from '@/modules/inventory/api';
@@ -254,6 +255,7 @@ const menuItems: MenuItem[] = [
       { labelKey: 'sidebar.settings.backup', path: '/settings/backup', group: 'system' as SettingsGroupId },
       { labelKey: 'sidebar.settings.reset', path: '/settings/reset', group: 'system' as SettingsGroupId },
       { labelKey: 'settings.menu.themes', path: '/settings/themes', group: 'system' as SettingsGroupId },
+      { labelKey: 'settings.about.title', path: '/settings/about', group: 'system' as SettingsGroupId },
       { labelKey: 'sidebar.settings.ai', path: '/settings/ai', permission: 'ai.settings' as Permission, group: 'system' as SettingsGroupId },
     ],
   },
@@ -905,6 +907,7 @@ export const AppLayout = () => {
       <Sidebar />
       <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        <UpdateBanner />
         <Header onOpenSearch={() => setPaletteOpen(true)} onOpenMenu={() => setDrawerOpen(true)} />
         <main
           className={

@@ -120,6 +120,7 @@ const CashBoxesPage = React.lazy(() => import('@/modules/settings/components/Cas
 const CostCentersPage = React.lazy(() => import('@/modules/settings/components/CostCentersPage'));
 const DatabaseSettingsPage = React.lazy(() => import('@/modules/settings/components/DatabaseSettingsPage'));
 const ThemeSettingsPage = React.lazy(() => import('@/modules/settings/components/ThemeSettingsPage'));
+const AboutPage = React.lazy(() => import('@/modules/settings/components/AboutPage'));
 
 const withSuspense = (Component: React.ComponentType) => (
   <React.Suspense fallback={<PageLoader />}>
@@ -307,6 +308,7 @@ export const AppRouter: React.FC = () => {
                 <Route path="cash-boxes" element={withSuspense(CashBoxesPage)} />
                 <Route path="cost-centers" element={withSuspense(CostCentersPage)} />
                 <Route path="database" element={withSuspense(DatabaseSettingsPage)} />
+                <Route path="about" element={withSuspense(AboutPage)} />
                 <Route path="users" element={<Navigate to="/users" replace />} />
                 <Route path="reset" element={withSuspense(ResetOnboardingPage)} />
               </Route>

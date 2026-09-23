@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 
 function appVersion(): string {
   try {
@@ -13,9 +13,23 @@ function appVersion(): string {
   return '0.0.0-dev';
 }
 
+function versionJsonPlugin() {
+  return {
+    name: 'version-json',
+    closeBundle() {
+      try {
+        const version = appVersion();
+        const out = path.resolve(__dirname, './dist/version.json');
+        mkdirSync(path.dirname(out), { recursive: true });
+        writeFileSync(out, JSON.stringify({ version, channel: version.includes('-') ? 'beta' : 'stable', builtAt: new Date().toISOString() }, null, 2));
+      } catch { /* ignore — dev mode has no dist */ }
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [react()],
+  plugins: [react(), versionJsonPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
   },

@@ -285,3 +285,19 @@ contextBridge.exposeInMainWorld('electronEnv', {
   isElectron: true,
   platform: process.platform,
 });
+
+// ─── App Updater (GitHub Releases — autoDownload + banner) ──────────────────
+// Renderer shows the banner (UpdateBanner) via GitHub API polling on web,
+// and via these IPC events on desktop (electron-updater). No auto-restart.
+contextBridge.exposeInMainWorld('electronUpdater', {
+  getVersion: () => ipcRenderer.invoke('app:getVersion'),
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  quitAndInstall: () => ipcRenderer.invoke('app:quitAndInstall'),
+  setChannel: (channel) => ipcRenderer.invoke('app:setUpdateChannel', channel),
+  onChecking: (cb) => { const fn = () => cb(); ipcRenderer.on('update:checking', fn); return () => ipcRenderer.removeListener('update:checking', fn); },
+  onAvailable: (cb) => { const fn = (_e, info) => cb(info); ipcRenderer.on('update:available', fn); return () => ipcRenderer.removeListener('update:available', fn); },
+  onNotAvailable: (cb) => { const fn = (_e, info) => cb(info); ipcRenderer.on('update:not-available', fn); return () => ipcRenderer.removeListener('update:not-available', fn); },
+  onProgress: (cb) => { const fn = (_e, p) => cb(p); ipcRenderer.on('update:progress', fn); return () => ipcRenderer.removeListener('update:progress', fn); },
+  onDownloaded: (cb) => { const fn = (_e, info) => cb(info); ipcRenderer.on('update:downloaded', fn); return () => ipcRenderer.removeListener('update:downloaded', fn); },
+  onError: (cb) => { const fn = (_e, msg) => cb(msg); ipcRenderer.on('update:error', fn); return () => ipcRenderer.removeListener('update:error', fn); },
+});
