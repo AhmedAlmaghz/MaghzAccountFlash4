@@ -1515,11 +1515,11 @@ class ChatEngine {
         jevIntent = String(jevRouted.intent);
         jevConfidence = jevRouted.confidence;
         const latencyMs = Date.now() - start;
-        // Estimate tokens: userText ~ 50 + questions ~ 200 tokens
-        const estTokens = 250;
+        // Cached hits cost zero tokens — record honestly (no phantom cost).
+        const estTokens = jevRouted.cached ? 0 : 250;
         recordJevMetric({
           at: Date.now(),
-          label: 'router',
+          label: jevRouted.cached ? 'router-cached' : 'router',
           latencyMs,
           inputTokens: estTokens,
           outputTokens: 0,

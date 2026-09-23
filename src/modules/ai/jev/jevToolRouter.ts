@@ -79,6 +79,46 @@ export interface JevRouteResult extends RoutedTools {
   confidence: number;
   /** Whether JEV was consulted (false = disabled / no key / timeout). */
   jevUsed: boolean;
+  /** True when this result came from the per-send cache (no new JEV call). */
+  cached?: boolean;
+}
+
+/**
+ * Per-send router cache: iterations 2..N of one send() share the same user
+ * text, so re-asking JEV every loop turn burns ~150ms × 9 for an identical
+ * answer. Key = normalized user text + sorted adaptive extras (expansion
+ * invalidates naturally). TTL 60s, capped — a new user message misses.
+ */
+const ROUTE_CACHE_TTL_MS = 60_000;
+const ROUTE_CACHE_MAX = 50;
+const routeCache = new Map<string, { at: number; result: JevRouteResult }>();
+
+function routeCacheKey(userText: string, extraToolNames: ReadonlySet<string>): string {
+  const norm = userText.trim().replace(/\s+/g, ' ').slice(0, 2000);
+  const extras = [...extraToolNames].sort().join(',');
+  return `${norm}‖${extras}`;
+}
+
+function getCachedRoute(key: string): JevRouteResult | null {
+  const entry = routeCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > ROUTE_CACHE_TTL_MS) {
+    routeCache.delete(key);
+    return null;
+  }
+  return { ...entry.result, cached: true };
+}
+
+function setCachedRoute(key: string, result: JevRouteResult): void {
+  if (routeCache.size >= ROUTE_CACHE_MAX) {
+    const oldest = routeCache.keys().next().value;
+    if (oldest !== undefined) routeCache.delete(oldest);
+  }
+  routeCache.set(key, { at: Date.now(), result: { ...result, cached: false } });
+}
+
+export function clearRouterCache(): void {
+  routeCache.clear();
 }
 
 function recentUserText(messages: LlmMessage[], lookback = 2): string {
@@ -130,6 +170,11 @@ export async function jevRouteToolsForCycle(
     return { ...legacy, intent: 'fallback', probabilities: null, confidence: 0, jevUsed: false };
   }
 
+  // Per-send cache hit → zero-cost reuse (adaptive extras are part of the key).
+  const cacheKey = routeCacheKey(userText, extraToolNames);
+  const cached = getCachedRoute(cacheKey);
+  if (cached) return cached;
+
   const result = await jevSystemOne(
     companyId,
     {
@@ -147,7 +192,9 @@ export async function jevRouteToolsForCycle(
 
   if (!result || !result.answers?.intent) {
     const legacy = legacyRouteToolsForCycle(messages, extraToolNames);
-    return { ...legacy, intent: 'fallback', probabilities: null, confidence: 0, jevUsed: false };
+    const out: JevRouteResult = { ...legacy, intent: 'fallback', probabilities: null, confidence: 0, jevUsed: false };
+    setCachedRoute(cacheKey, out);
+    return out;
   }
 
   const answer = result.answers.intent as { choice: string; confidence: number; probabilities: Record<string, number> };
@@ -158,7 +205,9 @@ export async function jevRouteToolsForCycle(
   // Low confidence → fall back to legacy router (don't guess intent)
   if (confidence < LOW_CONFIDENCE) {
     const legacy = legacyRouteToolsForCycle(messages, extraToolNames);
-    return { ...legacy, intent: winner, probabilities: probs, confidence, jevUsed: true };
+    const out: JevRouteResult = { ...legacy, intent: winner, probabilities: probs, confidence, jevUsed: true };
+    setCachedRoute(cacheKey, out);
+    return out;
   }
 
   // Build routed set from probabilities > threshold (multi-intent)
@@ -238,7 +287,7 @@ export async function jevRouteToolsForCycle(
   const capped = ordered.length > MAX_ADVERTISED_TOOLS ? ordered.slice(0, MAX_ADVERTISED_TOOLS) : ordered;
   const dropped = ordered.length - capped.length;
 
-  return {
+  const out: JevRouteResult = {
     tools: capped,
     dropped,
     routedByIntent: intentsToRoute.size > 0,
@@ -247,6 +296,8 @@ export async function jevRouteToolsForCycle(
     confidence,
     jevUsed: true,
   };
+  setCachedRoute(cacheKey, out);
+  return out;
 }
 
 /** Whether JEV routing is active for this company (for metrics/UI). */

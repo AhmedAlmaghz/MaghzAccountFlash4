@@ -63,6 +63,67 @@ describe('jevSearch', () => {
     expect(keywordGuessTypes('مرحبا كيف حالك', [...SEARCH_FAMILIES])).toEqual([]);
   });
 
+  it('normalizes Arabic variants on both sides (ة/ه، أ/ا، تشكيل)', () => {
+    // Query with teh-marbuta spelled with هـ still hits normalized keywords
+    expect(keywordGuessTypes('شركه الامل', [...SEARCH_FAMILIES])).toContain('customer');
+    expect(keywordGuessTypes('حساب المصروف', [...SEARCH_FAMILIES])).toContain('account');
+  });
+
+  it('rank stage orders ambiguous hits via Choice (entity linker wired)', async () => {
+    // customers tool returns 7 hits → triggers rank (RANK_MIN_HITS = 6)
+    const customersExecute = vi.mocked(getTool)('search.customers')?.execute as unknown as ReturnType<typeof vi.fn>;
+    vi.mocked(customersExecute).mockResolvedValueOnce({
+      matches: Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, name: `عميل ${i}`, score: 0.5 })),
+    });
+    vi.mocked(jevSystemOne).mockResolvedValue({
+      model: 'jev-1.13.0',
+      answers: {
+        is_customer: { type: 'noul', noul: 0.9 },
+        is_product: { type: 'noul', noul: 0.1 },
+        is_supplier: { type: 'noul', noul: 0.1 },
+        __dominant__: { type: 'choice', choice: 'customer', confidence: 0.9, probabilities: {} },
+        link_0: {
+          type: 'choice', choice: 'عميل 3 (عميل)', confidence: 0.88,
+          probabilities: { 'عميل 3 (عميل)': 0.88, 'عميل 0 (عميل)': 0.05, 'عميل 1 (عميل)': 0.07 },
+        },
+      },
+      usage: { input_tokens: 100, output_tokens: 0 },
+    } as unknown as Awaited<ReturnType<typeof jevSystemOne>>);
+
+    const res = await jevSearchAll(ctx, 'عميل');
+    expect(res.ranked).toBe(true);
+    expect(res.hits[0].id).toBe('c3');
+    expect(res.hits[0].score).toBeGreaterThanOrEqual(0.88);
+    expect(res.ambiguous).toBe(false);
+    // Route + rank = exactly 2 JEV calls (not one per family)
+    expect(vi.mocked(jevSystemOne)).toHaveBeenCalledTimes(2);
+  });
+
+  it('rank stage flags photo-finish ambiguity instead of guessing', async () => {
+    const customersExecute = vi.mocked(getTool)('search.customers')?.execute as unknown as ReturnType<typeof vi.fn>;
+    vi.mocked(customersExecute).mockResolvedValueOnce({
+      matches: Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, name: `عميل ${i}`, score: 0.5 })),
+    });
+    vi.mocked(jevSystemOne).mockResolvedValue({
+      model: 'jev-1.13.0',
+      answers: {
+        is_customer: { type: 'noul', noul: 0.9 },
+        is_product: { type: 'noul', noul: 0.1 },
+        is_supplier: { type: 'noul', noul: 0.1 },
+        __dominant__: { type: 'choice', choice: 'customer', confidence: 0.9, probabilities: {} },
+        link_0: {
+          type: 'choice', choice: 'عميل 2 (عميل)', confidence: 0.45,
+          probabilities: { 'عميل 2 (عميل)': 0.45, 'عميل 3 (عميل)': 0.40, 'عميل 0 (عميل)': 0.15 },
+        },
+      },
+      usage: { input_tokens: 100, output_tokens: 0 },
+    } as unknown as Awaited<ReturnType<typeof jevSystemOne>>);
+
+    const res = await jevSearchAll(ctx, 'عميل');
+    expect(res.ranked).toBe(true);
+    expect(res.ambiguous).toBe(true);
+  });
+
   it('route returns empty (not error) when JEV unavailable', async () => {
     vi.mocked(jevSystemOne).mockResolvedValue(null);
     const r = await jevRouteSearch('c1', 'شركة الأمل');

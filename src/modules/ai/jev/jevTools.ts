@@ -37,6 +37,11 @@ export const jevTools: ToolDefinition[] = [
         jevUsed: res.jevUsed,
         fallback: res.fallback,
         latencyMs: res.latencyMs,
+        ranked: res.ranked,
+        ambiguous: res.ambiguous,
+        ambiguousNote: res.ambiguous
+          ? 'نتيجتان متقاربتان — اعرضهما على المستخدم واسأله أيهما يقصد قبل المتابعة'
+          : undefined,
       };
     },
   },

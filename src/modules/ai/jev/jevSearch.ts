@@ -21,6 +21,7 @@ import { getTool, getVisibleTools } from '../tools/registry';
 import type { ToolContext } from '../types';
 import { jevSystemOne } from './jevClient';
 import { estimateJevCost, recordJevMetric } from './jevMetrics';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
 
 // ─── Entity-type table ───────────────────────────────────────────────────
 // Each family reuses its existing search.* tool verbatim (execute path).
@@ -101,15 +102,24 @@ export function visibleFamilies(): SearchFamily[] {
   return SEARCH_FAMILIES.filter((f) => visible.has(f.toolName));
 }
 
-/** Offline keyword fallback — zero-cost, zero-network. */
+/**
+ * Offline keyword fallback — zero-cost, zero-network.
+ * Both sides pass through normalizeArabic (alef/yeh/teh variants, diacritics,
+ * kashida) so "إشتراك" matches "اشتراك" and "للتجارة" matches "للتجاره".
+ * Keywords are normalized once at module load; the query per call.
+ */
+const NORMALIZED_KEYWORDS: ReadonlyMap<string, readonly string[]> = new Map(
+  SEARCH_FAMILIES.map((f) => [f.key, f.keywords.map((k) => normalizeArabic(k))]),
+);
+
 export function keywordGuessTypes(query: string, families: SearchFamily[] = visibleFamilies()): string[] {
-  const q = query.trim();
+  const q = normalizeArabic(query.trim());
   if (!q) return [];
   const scored = families
-    .map((f) => ({
-      key: f.key,
-      hit: f.keywords.some((k) => q.includes(k)),
-    }))
+    .map((f) => {
+      const norms = NORMALIZED_KEYWORDS.get(f.key) ?? [];
+      return { key: f.key, hit: norms.some((k) => k && q.includes(k)) };
+    })
     .filter((s) => s.hit)
     .map((s) => s.key);
   return scored.slice(0, SEARCH_MAX_FAMILIES);
@@ -220,7 +230,32 @@ export interface UnifiedSearchResult {
   jevUsed: boolean;
   fallback: boolean;
   latencyMs: number;
+  /** True when the Choice rank stage ran (top hit is JEV-ordered, not just family-ordered). */
+  ranked: boolean;
+  /** True when the top two candidates are within 0.1 — caller should ask the user. */
+  ambiguous: boolean;
 }
+
+/** Arabic labels for entity families (cards, badges, rank choices). */
+export const SEARCH_TYPE_LABELS_AR: Readonly<Record<string, string>> = {
+  customer: 'عميل', supplier: 'مورد', product: 'منتج', unit: 'وحدة',
+  account: 'حساب', sales_invoice: 'فاتورة بيع', purchase_invoice: 'فاتورة شراء',
+  quotation: 'عرض سعر', sales_return: 'مردود مبيعات', purchase_return: 'مردود مشتريات',
+  receipt_voucher: 'سند قبض', payment_voucher: 'سند صرف', journal: 'قيد يومي',
+  employee: 'موظف', warehouse: 'مستودع', bom: 'شجرة منتج', work_order: 'أمر تشغيل',
+  lead: 'عميل محتمل', opportunity: 'فرصة بيعية', cash_box: 'خزينة',
+};
+
+/**
+ * Rank only when it matters: many hits or cross-family ambiguity.
+ * Note extractHits caps each family at 5, so the single-family bar must sit
+ * at or below 5 — otherwise rank could never trigger for one family.
+ */
+export const RANK_MIN_HITS = 4;
+export const RANK_MIN_FAMILIES = 2;
+export const RANK_MIN_HITS_MULTI_FAMILY = 3;
+export const AMBIGUITY_GAP = 0.1;
+const RANK_SHORTLIST = 12;
 
 function extractHits(type: string, raw: unknown): UnifiedSearchHit[] {
   if (!raw || typeof raw !== 'object') return [];
@@ -247,7 +282,7 @@ export async function jevSearchAll(
   const start = Date.now();
   const maxFamilies = opts?.maxFamilies ?? SEARCH_MAX_FAMILIES;
   const q = query.trim();
-  if (!q) return { hits: [], routedTypes: [], dominant: null, jevUsed: false, fallback: false, latencyMs: 0 };
+  if (!q) return { hits: [], routedTypes: [], dominant: null, jevUsed: false, fallback: false, latencyMs: 0, ranked: false, ambiguous: false };
 
   const families = visibleFamilies();
   const byKey = new Map(families.map((f) => [f.key, f]));
@@ -270,7 +305,7 @@ export async function jevSearchAll(
     routedKeys = keywordGuessTypes(q, families);
     fallback = true;
     if (routedKeys.length === 0) {
-      return { hits: [], routedTypes: [], dominant: null, jevUsed: false, fallback: true, latencyMs: Date.now() - start };
+      return { hits: [], routedTypes: [], dominant: null, jevUsed: false, fallback: true, latencyMs: Date.now() - start, ranked: false, ambiguous: false };
     }
   }
   routedKeys = routedKeys.slice(0, maxFamilies);
@@ -292,7 +327,54 @@ export async function jevSearchAll(
   );
 
   // 3) Merge — family order (JEV probability) then in-family score
-  const hits = settled.flatMap((s) => s.hits);
+  let hits = settled.flatMap((s) => s.hits);
+
+  // 4) Rank stage (wires jevEntityLinker): one Choice over the shortlist when
+  // the result set is ambiguous — many hits or several families competing.
+  // The winner moves to front with JEV confidence; a photo-finish sets the
+  // ambiguous flag so the caller asks the user instead of guessing.
+  let ranked = false;
+  let ambiguous = false;
+  const familyCount = new Set(hits.map((h) => h.type)).size;
+  const needsRank =
+    jevUsed &&
+    hits.length > 1 &&
+    (hits.length > RANK_MIN_HITS || (familyCount >= RANK_MIN_FAMILIES && hits.length > RANK_MIN_HITS_MULTI_FAMILY));
+  if (needsRank) {
+    try {
+      const { jevLinkEntities } = await import('./jevEntityLinker');
+      const shortlist = hits.slice(0, RANK_SHORTLIST);
+      // jevLinkEntities returns the winning DISPLAY name (its documented
+      // contract) — match back on the exact string we constructed.
+      const displayName = (h: UnifiedSearchHit): string =>
+        `${h.name} (${SEARCH_TYPE_LABELS_AR[h.type] ?? h.type})`;
+      const links = await jevLinkEntities(
+        ctx.companyId,
+        [q],
+        shortlist.map((h) => ({ id: h.id, name: displayName(h) })),
+        'search-rank',
+      );
+      const link = links[0];
+      if (link && link.choice !== '__none__' && link.confidence > 0) {
+        const winnerIdx = shortlist.findIndex((h) => displayName(h) === link.choice);
+        if (winnerIdx > 0) {
+          const [winner] = shortlist.splice(winnerIdx, 1);
+          winner.score = Math.max(winner.score, link.confidence);
+          shortlist.unshift(winner);
+          hits = [...shortlist, ...hits.slice(RANK_SHORTLIST)];
+        } else if (winnerIdx === 0) {
+          shortlist[0].score = Math.max(shortlist[0].score, link.confidence);
+        }
+        // Photo-finish detection: runner-up within AMBIGUITY_GAP of the winner
+        const probs = Object.values(link.probabilities ?? {}).sort((a, b) => (b as number) - (a as number)) as number[];
+        if (probs.length > 1 && probs[0] - probs[1] < AMBIGUITY_GAP) ambiguous = true;
+        ranked = true;
+      }
+    } catch {
+      // Rank is enrichment — unranked merge is still correct
+    }
+  }
+
   const latencyMs = Date.now() - start;
   recordJevMetric({
     at: Date.now(), label: 'search-all', latencyMs,
@@ -300,5 +382,5 @@ export async function jevSearchAll(
     jevUsed,
   });
 
-  return { hits, routedTypes: routedKeys, dominant, jevUsed, fallback, latencyMs };
+  return { hits, routedTypes: routedKeys, dominant, jevUsed, fallback, latencyMs, ranked, ambiguous };
 }

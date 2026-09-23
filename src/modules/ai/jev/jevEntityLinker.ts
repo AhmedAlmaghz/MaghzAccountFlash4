@@ -6,6 +6,10 @@
  *
  * One JEV call with 1 Choice per token, each with shortlist 10 candidates.
  * Calibrated confidence decides auto-replace vs ask.
+ *
+ * Consumed by the jevSearchAll rank stage (jevSearch.ts step 4): merged hits
+ * are re-ordered through this Choice, so the linker is live — not standalone.
+ * It is also importable directly for single-token linking flows.
  */
 
 import { jevSystemOne } from './jevClient';

@@ -175,6 +175,11 @@ describe('AI tools contract gate (CI)', () => {
       'app.list_pages',      // navigation catalog (permission-filtered)
       'app.navigate',        // navigation (guard-checked target)
       'core.get_company_info', // own company metadata
+      // jev.search_all gates per-ENTITY at runtime (visibleFamilies() keeps
+      // only families whose search.* tool the caller may see) — the ai.use
+      // gate is the meta entry point, same pattern as reports.dashboard
+      // hybrids that gate per-block at runtime.
+      'jev.search_all',
     ]);
     const violations = tools
       .filter((t) => t.dangerLevel === 'read')

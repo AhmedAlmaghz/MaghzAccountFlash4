@@ -26,14 +26,17 @@ vi.mock('./jevClient', () => ({
   jevSystemOne: vi.fn().mockResolvedValue(null),
 }));
 
-import { jevRouteToolsForCycle } from './jevToolRouter';
+import { jevRouteToolsForCycle, clearRouterCache } from './jevToolRouter';
 
 function userMsg(text: string) {
   return { role: 'user' as const, content: text };
 }
 
 describe('jevToolRouter', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearRouterCache();
+  });
 
   it('falls back to legacy when JEV disabled', async () => {
     const routed = await jevRouteToolsForCycle('c1', [userMsg('مرحبا')]);
@@ -74,5 +77,29 @@ describe('jevToolRouter', () => {
     expect(routed.intent).toBe('sales');
     expect(routed.confidence).toBeGreaterThan(0.85);
     expect(routed.tools.some((t) => t.name.startsWith('sales.'))).toBe(true);
+  });
+
+  it('reuses the per-send cache on identical turns (zero second JEV call)', async () => {
+    const { getJevConfig } = await import('./jevConfig');
+    vi.mocked(getJevConfig).mockResolvedValue({
+      enabled: true, apiKey: 'ts_test', routerEnabled: true, guardEnabled: false, model: 'jev-latest', baseUrl: 'https://api.typesafe.ai',
+    });
+    const { jevSystemOne } = await import('./jevClient');
+    vi.mocked(jevSystemOne).mockResolvedValue({
+      model: 'jev-1.13.0',
+      answers: {
+        intent: { type: 'choice', choice: 'sales', confidence: 0.9, probabilities: { sales: 0.9, other: 0.1 } },
+      },
+      usage: { input_tokens: 100, output_tokens: 0 },
+    } as unknown as Awaited<ReturnType<typeof jevSystemOne>>);
+
+    const msgs = [userMsg('تقرير مبيعات الشهر')];
+    const first = await jevRouteToolsForCycle('c1', msgs);
+    const second = await jevRouteToolsForCycle('c1', msgs);
+    expect(first.jevUsed).toBe(true);
+    expect(first.cached).not.toBe(true);
+    expect(second.cached).toBe(true);
+    expect(vi.mocked(jevSystemOne)).toHaveBeenCalledTimes(1);
+    expect(second.tools.map((t) => t.name)).toEqual(first.tools.map((t) => t.name));
   });
 });
