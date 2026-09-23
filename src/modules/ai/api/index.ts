@@ -48,6 +48,18 @@ interface ElectronAI {
     temperature?: number;
     maxTokens?: number;
   }) => Promise<IpcResult<LlmCompletionData>>;
+  /**
+   * JEV System One via the main process (no renderer CORS). Optional for
+   * bridges that predate it (e2e stub, older preloads) — jevClient falls
+   * back to direct SDK fetch when absent.
+   */
+  jevSystemOne?: (payload: {
+    state: unknown;
+    questions: Record<string, unknown>;
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+  }) => Promise<IpcResult<{ model: string; answers: Record<string, unknown>; usage: { input_tokens: number; output_tokens: number } }>>;
   startStream: (payload: {
     companyId: string;
     messages: LlmMessage[];

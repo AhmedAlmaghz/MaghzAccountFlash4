@@ -30,10 +30,13 @@ export function resetJevClient(): void {
 }
 
 /**
- * Get or create the TypeSafe client for the current company.
- * Returns null when JEV is disabled or no key is configured (degraded).
+ * Resolved JEV credentials for a company (enabled-gated). The plaintext key
+ * is needed both by the direct SDK path (browser) and the main-process proxy
+ * path (Electron) — the main process cannot open the browser device-vault
+ * envelope, so the renderer supplies its own decrypted key per call (same
+ * trust precedent as the ai:test-connection typed-key path).
  */
-export async function getJevClient(companyId: string): Promise<TypeSafeClient | null> {
+export async function getJevResolvedConfig(companyId: string): Promise<{ apiKey: string; baseUrl: string; model: string } | null> {
   let config: JevConfig | null;
   try {
     config = await getJevConfig(companyId);
@@ -41,10 +44,24 @@ export async function getJevClient(companyId: string): Promise<TypeSafeClient | 
     return null;
   }
   if (!config.enabled || !config.apiKey) return null;
+  return {
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl || JEV_DEFAULT_BASE_URL,
+    model: config.model || JEV_DEFAULT_MODEL,
+  };
+}
 
-  const key = config.apiKey;
-  const baseUrl = config.baseUrl || JEV_DEFAULT_BASE_URL;
-  const model = config.model || JEV_DEFAULT_MODEL;
+/**
+ * Get or create the TypeSafe client for the current company.
+ * Returns null when JEV is disabled or no key is configured (degraded).
+ */
+export async function getJevClient(companyId: string): Promise<TypeSafeClient | null> {
+  const resolved = await getJevResolvedConfig(companyId);
+  if (!resolved) return null;
+
+  const key = resolved.apiKey;
+  const baseUrl = resolved.baseUrl;
+  const model = resolved.model;
 
   // Reuse if same key+baseUrl
   if (jevClient && jevClientKey === key && jevClientBaseUrl === baseUrl) return jevClient;
@@ -77,11 +94,46 @@ export async function jevSystemOne<Q extends Questions>(
   request: { state: unknown; questions: Q; model?: string },
   opts?: { timeoutMs?: number; label?: string },
 ): Promise<SystemOneResult<Q> | null> {
-  const client = await getJevClient(companyId);
-  if (!client) return null;
+  const resolved = await getJevResolvedConfig(companyId);
+  if (!resolved) return null;
 
   const timeoutMs = opts?.timeoutMs ?? 2000;
   const label = opts?.label ?? 'jev-systemOne';
+  const model = request.model ?? resolved.model;
+
+  // Path 1 — Electron main-process proxy (no renderer CORS). Preferred
+  // whenever the loaded preload exposes it; its verdict is final (a proxy
+  // failure would fail direct too, so no double-billing round-trip).
+  try {
+    const proxy = typeof window !== 'undefined' ? window.electronAI?.jevSystemOne : undefined;
+    if (typeof proxy === 'function') {
+      const inner = proxy({
+        state: request.state,
+        questions: request.questions as unknown as Record<string, unknown>,
+        model,
+        baseUrl: resolved.baseUrl,
+        apiKey: resolved.apiKey,
+      });
+      inner.catch((e) => recordJevError(label, e));
+      const result = await deadlineOr(inner, timeoutMs + 500, null, label);
+      if (!result) {
+        recordJevError(label, `لا رد خلال ${timeoutMs + 500}ms — تحقق من الشبكة والنموذج (${model})`);
+        return null;
+      }
+      if (!result.success || !result.data) {
+        recordJevError(label, result.error ?? 'JEV proxy returned no data');
+        return null;
+      }
+      return result.data as unknown as SystemOneResult<Q>;
+    }
+  } catch (e) {
+    recordJevError(label, e);
+    return null;
+  }
+
+  // Path 2 — direct SDK fetch (pure browser / PGlite-web, no main process).
+  const client = await getJevClient(companyId);
+  if (!client) return null;
 
   try {
     const inner = (async () => {

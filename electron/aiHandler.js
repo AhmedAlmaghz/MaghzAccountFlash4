@@ -46,6 +46,7 @@ const DEFAULT_PROVIDER_HOSTS = new Set([
   'api.groq.com',
   'api.together.xyz',
   'generativelanguage.googleapis.com',
+  'api.typesafe.ai',
   'localhost',
   '127.0.0.1',
   '::1',
@@ -235,6 +236,63 @@ function normalizeBaseUrl(url) {
     throw new Error('مزود الذكاء الاصطناعي غير مسموح به');
   }
   return parsed.toString().replace(/\/+$/, '');
+}
+
+const JEV_DEFAULT_BASE_URL = 'https://api.typesafe.ai';
+const JEV_DEFAULT_MODEL = 'jev-latest';
+const JEV_MAX_QUESTIONS = 40;
+
+/**
+ * TypeSafe JEV System One call from the MAIN process (Node fetch — no
+ * renderer CORS involved). The renderer cannot reach api.typesafe.ai
+ * directly ("Failed to fetch" in the desktop shell), so JEV traffic rides
+ * this proxy exactly like Gemini rides ai:complete.
+ */
+async function callSystemOne({ baseUrl, apiKey, model, state, questions, timeoutMs }) {
+  if (!state || typeof questions !== 'object' || questions === null) {
+    return { success: false, error: 'state and questions are required' };
+  }
+  const qids = Object.keys(questions);
+  if (qids.length === 0 || qids.length > JEV_MAX_QUESTIONS) {
+    return { success: false, error: `questions must list 1-${JEV_MAX_QUESTIONS} items` };
+  }
+  if (model !== undefined && (typeof model !== 'string' || model.length === 0 || model.length > 80)) {
+    return { success: false, error: 'invalid model' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${normalizeBaseUrl(baseUrl || JEV_DEFAULT_BASE_URL)}/v1/systemone`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ state, questions, model: model || JEV_DEFAULT_MODEL }),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
+    if (!res.ok) {
+      if (res.status === 429) {
+        return { success: false, error: 'انتهت حصة JEV مؤقتاً (429) — انتظر قليلاً ثم أعد المحاولة' };
+      }
+      const msg = data?.error?.message || data?.message || text?.slice(0, 300) || `HTTP ${res.status}`;
+      return { success: false, error: `JEV provider error (${res.status}): ${msg}` };
+    }
+    if (!data || typeof data !== 'object' || !data.answers) {
+      return { success: false, error: 'JEV returned an empty response' };
+    }
+    return { success: true, data };
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      return { success: false, error: 'انتهت مهلة الاتصال بـ JEV (timeout)' };
+    }
+    return { success: false, error: `تعذر الاتصال بـ JEV: ${err.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function callChatCompletion({ baseUrl, apiKey, model, messages, tools, temperature, maxTokens, timeoutMs }) {
@@ -866,6 +924,36 @@ export function registerAiHandlers() {
         return { success: true, data: { ...second.data, failoverFrom: host } };
       }
       return completion;
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // JEV System One via the main process (no renderer CORS). The renderer
+  // supplies its own decrypted JEV key (the main process cannot open the
+  // browser device-vault envelope) — same trust precedent as the ai:test-
+  // connection typed-key path. Identity + rate budget enforced here.
+  ipcMain.handle('ai:jev-systemone', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return { success: false, error: auth.error };
+      const { state, questions, model, baseUrl, apiKey } = payload;
+      const key = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : null;
+      if (!key) return { success: false, error: 'JEV API key required — أدخل المفتاح في إعدادات JEV' };
+      const settings = await readAiSettings(auth.session.user.companyId).catch(() => ({}));
+      if (isRateLimited(auth.session.user.id, settings)) {
+        return { success: false, error: rateLimitMessage() };
+      }
+      const result = await callSystemOne({
+        baseUrl: baseUrl || JEV_DEFAULT_BASE_URL,
+        apiKey: key,
+        model: model || JEV_DEFAULT_MODEL,
+        state,
+        questions,
+        timeoutMs: 20000,
+      });
+      if (result.success) recordProviderCall(auth.session.user.id);
+      return result;
     } catch (err) {
       return { success: false, error: err.message };
     }

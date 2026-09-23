@@ -238,6 +238,7 @@ contextBridge.exposeInMainWorld('electronAI', {
   saveConfig: (payload) => ipcRenderer.invoke('ai:save-config', { ...payload, sessionToken }),
   testConnection: (payload) => ipcRenderer.invoke('ai:test-connection', { ...payload, sessionToken }),
   complete: (payload) => ipcRenderer.invoke('ai:complete', { ...payload, sessionToken }),
+  jevSystemOne: (payload) => ipcRenderer.invoke('ai:jev-systemone', { ...payload, sessionToken }),
   // Push-based streaming — each stream gets a unique id and its own IPC
   // channels so a stale/abandoned stream can never deliver chunks into, or
   // wipe the listeners of, another one (stop-then-resend used to corrupt
