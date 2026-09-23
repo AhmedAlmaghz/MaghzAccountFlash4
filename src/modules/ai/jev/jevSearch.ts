@@ -376,9 +376,10 @@ export async function jevSearchAll(
   }
 
   const latencyMs = Date.now() - start;
+  // Honest accounting: fallback reads cost nothing on JEV (local DB only).
   recordJevMetric({
     at: Date.now(), label: 'search-all', latencyMs,
-    inputTokens: 120, outputTokens: 0, costUsd: estimateJevCost(120),
+    inputTokens: jevUsed ? 120 : 0, outputTokens: 0, costUsd: jevUsed ? estimateJevCost(120) : 0,
     jevUsed,
   });
 

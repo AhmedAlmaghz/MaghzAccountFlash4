@@ -17,6 +17,7 @@ import { TypeSafeClient } from '@typesafe-ai/sdk';
 import type { Questions, SystemOneResult } from '@typesafe-ai/sdk';
 import { deadlineOr } from '../engine/deadline';
 import { getJevConfig, JEV_DEFAULT_BASE_URL, JEV_DEFAULT_MODEL, type JevConfig } from './jevConfig';
+import { recordJevError } from './jevMetrics';
 
 let jevClient: TypeSafeClient | null = null;
 let jevClientKey: string | null = null;
@@ -83,26 +84,34 @@ export async function jevSystemOne<Q extends Questions>(
   const label = opts?.label ?? 'jev-systemOne';
 
   try {
+    const inner = (async () => {
+      const res = await client.systemOne(
+        {
+          // SDK EntryType = string | object | array | null — our Record<string,unknown> is object
+          state: request.state as unknown as string,
+          questions: request.questions,
+          ...(request.model ? { model: request.model } : {}),
+        } as Parameters<TypeSafeClient['systemOne']>[0],
+        { timeout: timeoutMs },
+      );
+      return res as SystemOneResult<Q>;
+    })();
+    // Error tap: deadlineOr swallows the loser's rejection, so tap it here
+    // to preserve the real cause (401/429/timeout) for diagnostics.
+    inner.catch((e) => recordJevError(label, e));
     const result = await deadlineOr<SystemOneResult<Q> | null>(
-      (async () => {
-        const res = await client.systemOne(
-          {
-            // SDK EntryType = string | object | array | null — our Record<string,unknown> is object
-            state: request.state as unknown as string,
-            questions: request.questions,
-            ...(request.model ? { model: request.model } : {}),
-          } as Parameters<TypeSafeClient['systemOne']>[0],
-          { timeout: timeoutMs },
-        );
-        return res as SystemOneResult<Q>;
-      })(),
+      inner,
       timeoutMs + 500,
       null,
       label,
     );
+    if (result === null) {
+      recordJevError(label, `لا رد خلال ${timeoutMs + 500}ms — تحقق من المفتاح والشبكة والنموذج (${request.model ?? 'jev-latest'})`);
+    }
     return result;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    recordJevError(label, e);
     // 401/403 → key misconfigured — log once, don't spam
     if (/401|403|authentication/i.test(msg)) {
       console.warn('[jev] authentication failed — check ai.jev_api_key', msg);

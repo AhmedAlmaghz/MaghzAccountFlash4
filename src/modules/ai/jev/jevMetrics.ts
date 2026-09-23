@@ -41,6 +41,25 @@ export function subscribeJevMetrics(fn: JevMetricsSubscriber): () => void {
   return () => { subscribers.delete(fn); };
 }
 
+/** Last JEV failure for the diagnostics button (null = none yet). */
+let lastError: { label: string; error: string; at: number } | null = null;
+
+export function recordJevError(label: string, error: unknown): void {
+  const msg = error instanceof Error ? error.message : String(error ?? '');
+  lastError = { label, error: msg.slice(0, 300), at: Date.now() };
+  for (const fn of subscribers) {
+    try { fn(); } catch { /* ignore */ }
+  }
+}
+
+export function getLastJevError(): { label: string; error: string; at: number } | null {
+  return lastError;
+}
+
+export function clearJevErrors(): void {
+  lastError = null;
+}
+
 /** Last JEV-routed intent for the diagnostics button (null = none yet). */
 let lastRoute: { intent: string; confidence: number; latencyMs: number; at: number } | null = null;
 

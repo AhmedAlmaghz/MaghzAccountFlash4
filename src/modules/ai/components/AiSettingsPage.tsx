@@ -9,7 +9,7 @@ import { PROVIDER_PRESETS } from '../api/providers';
 import type { AiPublicConfig } from '../types';
 import { getJevConfig, setJevSetting, JEV_DEFAULT_MODEL, JEV_SETTINGS_KEYS } from '../jev/jevConfig';
 import { jevHealthCheck } from '../jev/jevClient';
-import { getJevMetricsSummary, getLastJevRoute, subscribeJevMetrics } from '../jev/jevMetrics';
+import { getJevMetricsSummary, getLastJevRoute, getLastJevError, subscribeJevMetrics } from '../jev/jevMetrics';
 import { Button } from '@/core/ui/components/Button';
 import { Card, CardTitle, CardDescription } from '@/core/ui/components/Card';
 import { Input } from '@/core/ui/components/Input';
@@ -346,6 +346,7 @@ export default function AiSettingsPage() {
     try {
       const cfg = await getJevConfig(company.id);
       const last = getLastJevRoute();
+      const lastErr = getLastJevError();
       const s = getJevMetricsSummary();
       const lines: string[] = [];
       lines.push(cfg.enabled ? '✓ التفعيل: يعمل' : '✗ التفعيل: مطفأ (ai.jev_enabled)');
@@ -353,6 +354,7 @@ export default function AiSettingsPage() {
       lines.push(cfg.routerEnabled ? '✓ الموجّه: مفعّل' : '○ الموجّه: مطفأ — سيُستخدم مطابقة الكلمات');
       lines.push(cfg.guardEnabled ? '✓ الحراسة: مفعّلة' : '○ الحراسة: مطفأة');
       lines.push(`النموذج: ${cfg.model}`);
+      if (lastErr) lines.push(`❌ آخر خطأ JEV [${lastErr.label}]: ${lastErr.error}`);
       if (last) lines.push(`⚡ آخر توجيه: ${last.intent} · ثقة ${(last.confidence * 100).toFixed(0)}% · ${last.latencyMs}ms`);
       else lines.push('○ لم يوجَّه أي طلب عبر JEV بعد في هذه الجلسة — أرسل رسالة في الدردشة ثم أعد الفحص');
       lines.push(`المقاييس: ${s.totalCalls} استدعاء (JEV ${s.jevCalls} / احتياطي ${s.fallbackCalls}) · التكلفة $${s.totalCostUsd.toFixed(6)}`);
