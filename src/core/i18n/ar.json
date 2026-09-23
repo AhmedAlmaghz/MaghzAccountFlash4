@@ -36,10 +36,8 @@
   "print": "طباعة",
   "close": "إغلاق",
   "confirm": {
-    "title": "تأكيد",
     "message": "هل أنت متأكد من تنفيذ هذا الإجراء؟",
-    "confirmText": "تأكيد",
-    "cancelText": "إلغاء"
+    "confirmText": "تأكيد"
   },
   "back": "رجوع",
   "next": "التالي",
@@ -554,6 +552,15 @@
       "item_done": "تم",
       "item_failed": "فشل",
       "item_skipped": "تُخطّي"
+    },
+    "voiceBar": {
+      "placeholder": "اكتب رسالتك أو تحدث صوتياً...",
+      "unsupported": "المتصفح لا يدعم Web Speech API. يُرجى استخدام Google Chrome أو Edge.",
+      "listening": "جاري الاستماع...",
+      "stop": "إيقاف",
+      "speakHint": "تحدث الآن — سيُضاف كلامك إلى النص الحالي تلقائياً",
+      "enableTitle": "تفعيل الإملاء الصوتي والأوامر",
+      "dictate": "إملاء صوتي"
     }
   },
   "auth": {
@@ -1085,12 +1092,97 @@
     "chartOfAccountsSubtitle": "دليل الحسابات وشجرة الحسابات",
     "journalEntriesSubtitle": "القيود اليومية المرحلة والمسودات",
     "voucherNumberError": "تعذر إنشاء رقم السند",
-    "cashBox": "الصندوق"
+    "cashBox": "الصندوق",
+    "chart": {
+      "groups": "مجموعة",
+      "accountLabel": "حساب",
+      "codeDuplicate": "الرمز مكرر",
+      "fixFields": "يرجى تصحيح الحقول المطلوبة",
+      "nameEn": "Name EN",
+      "totalAccounts": "إجمالي الحسابات",
+      "activeAccounts": "النشطة",
+      "suspended": "موقوف",
+      "totalDebit": "إجمالي مدين",
+      "totalCredit": "إجمالي دائن",
+      "subAccounts": "حساب فرعي",
+      "searchHint": "كود / اسم عربي / إنجليزي",
+      "codeHeader": "الكود",
+      "accountHeader": "الحساب",
+      "typeHeader": "النوع",
+      "expandAll": "توسيع الكل",
+      "collapseAll": "طي الكل",
+      "visibleGroups": "مجموعة ظاهر",
+      "totalItems": "إجمالي",
+      "tryDifferentSearch": "جرّب تغيير البحث أو الفلترة",
+      "createHint": "أنشئ أول حساب في شجرة الحسابات",
+      "editDesc": "تعديل بيانات الحساب — يراعي التسلسل الهرمي",
+      "createDesc": "اختر الحساب الأب واكتب الاسم — الكود والنوع والطبيعة تُولَّد تلقائياً",
+      "requiredFields": "الحقول المميزة بـ * مطلوبة",
+      "sectionBasic": "البيانات الأساسية",
+      "nameArPlaceholder": "الصندوق",
+      "nameEnPlaceholder": "Cash on Hand",
+      "properties": "الخصائص",
+      "activeHint": "نشط ويمكن التعامل معه",
+      "inactiveHint": "موقوف مؤقتاً"
+    },
+    "voucher": {
+      "appliedExceeds": "المبلغ المطبق لا يمكن أن يتجاوز مبلغ السند",
+      "methodCash": "نقداً",
+      "methodBank": "تحويل بنكي",
+      "methodCheck": "شيك",
+      "fixFields": "يرجى تصحيح الحقول",
+      "postedLocked": "لا يمكن تعديل سند مرحّل",
+      "expenseAccount": "حساب مصروف",
+      "directExpense": "مصروف مباشر",
+      "linked": "مرتبط",
+      "paymentSubtitle": "سندات الصرف — مدفوعات الموردين والمصروفات",
+      "receiptSubtitle": "سندات القبض — تحصيلات العملاء نقداً / بنكاً / شيكات",
+      "unit": "سند",
+      "postedCash": "مرحّلة نقداً",
+      "postedBank": "مرحّلة بنكاً",
+      "draft": "مسودة",
+      "posted": "مرحّل",
+      "cancelled": "ملغى",
+      "tryDifferentSearch": "جرّب تغيير البحث أو الفلترة",
+      "paymentCreateHint": "أنشئ أول سند صرف",
+      "receiptCreateHint": "أنشئ أول سند قبض",
+      "paymentEditDesc": "تعديل سند الصرف — الحقول المرتبطة لا تُعدل بعد الترحيل",
+      "paymentCreateDesc": "إنشاء سند صرف جديد — اختر المورد أو حساب المصروف",
+      "receiptEditDesc": "تعديل سند القبض — لا يمكن تعديل الحقول المرتبطة بعد الترحيل",
+      "receiptCreateDesc": "إنشاء سند قبض جديد — اختر العميل وطريقة القبض",
+      "requiredFields": "الحقول المميزة بـ * مطلوبة",
+      "docSection": "بيانات السند",
+      "auto": "تلقائي",
+      "autoHint": "يُنشأ تلقائياً عند الحفظ",
+      "beneficiary": "المستفيد",
+      "supplierHint": "اختر مورداً أو حساب مصروف — أحدهما مطلوب",
+      "onAccountHint": "اختياري — دفعة على الحساب",
+      "receiptOnAccountHint": "اختياري — اتركه فارغاً لدفعة على الحساب",
+      "amountSection": "المبلغ والعملة",
+      "paymentMethodTitle": "طريقة الصرف",
+      "receiptMethodTitle": "طريقة القبض",
+      "receiptClientSection": "العميل والربط",
+      "checkNumberPlaceholder": "رقم الشيك",
+      "notesPlaceholder": "ملاحظات إضافية..."
+    }
   },
   "inventory": {
     "products": {
       "title": "المنتجات",
-      "notFound": "المنتج غير موجود"
+      "notFound": "المنتج غير موجود",
+      "totalProducts": "إجمالي المنتجات",
+      "inPage": "في الصفحة",
+      "categoriesLabel": "التصنيفات",
+      "typesLabel": "أنواع",
+      "avgCost": "متوسط التكلفة",
+      "searchHint": "كود / اسم / باركود",
+      "unit": "منتج",
+      "categoryPageFilter": "تصفية تصنيف (صفحة)",
+      "tryDifferentSearch": "جرّب تغيير البحث أو الفلترة",
+      "editDesc": "تعديل بيانات المنتج",
+      "createDesc": "إضافة منتج جديد — الحقول المميزة بـ * مطلوبة",
+      "requiredFields": "* حقول مطلوبة",
+      "mediaSection": "الصورة والباركود"
     },
     "warehouses": "المستودعات",
     "stock": {
@@ -1101,7 +1193,22 @@
     },
     "stockCount": "الجرد",
     "transfers": "التحويلات",
-    "transactions": "الحركات المخزنية",
+    "transactions": {
+      "title": "الحركات المخزنية",
+      "desc": "حركات وارد/صادر/تسوية",
+      "completeFields": "الرجاء اختيار المنتج والمستودع",
+      "total": "الإجمالي",
+      "visible": "ظاهر",
+      "typeIn": "وارد",
+      "typeOut": "صادر",
+      "typeAdjustment": "تسوية",
+      "typeTransfer": "تحويل",
+      "searchHint": "منتج / مستودع / مرجع",
+      "tryDifferentSearch": "جرّب تغيير البحث أو النوع",
+      "createDesc": "إضافة حركة مخزنية يدوية",
+      "referencePlaceholder": "مرجع اختياري",
+      "notesPlaceholder": "ملاحظات..."
+    },
     "adjustments": "تسويات المخزون",
     "lowStockAlert": "تنبيه المخزون",
     "stockMovement": "حركة المخزون",
@@ -1174,7 +1281,22 @@
       "created": "تم إنشاء التسوية بنجاح",
       "updated": "تم تحديث التسوية بنجاح",
       "deleted": "تم حذف التسوية بنجاح",
-      "posted": "تم ترحيل التسوية بنجاح"
+      "posted": "تم ترحيل التسوية بنجاح",
+      "selectProduct": "الرجاء اختيار المنتج",
+      "selectWarehouse": "الرجاء اختيار المستودع",
+      "approvedToast": "تم اعتماد التسوية بنجاح",
+      "approved": "معتمدة",
+      "draft": "مسودة",
+      "postedLabel": "مرحلة",
+      "zeroDiff": "لا يمكن ترحيل تسوية بفرق صفر",
+      "netDifference": "صافي الفرق",
+      "searchHint": "منتج / مستودع / سبب / رقم",
+      "tryDifferentSearch": "جرّب تغيير البحث أو الحالة",
+      "createDesc": "تسوية جردية — مقارنة كمية النظام بالفعلي",
+      "noDifference": "لا يوجد فرق",
+      "surplus": "زيادة",
+      "shortage": "عجز",
+      "reasonPlaceholder": "سبب التسوية..."
     },
     "fromWarehouse": "من المستودع",
     "toWarehouse": "إلى المستودع",
@@ -1312,7 +1434,16 @@
     "suspended": "موقوف",
     "low": "منخفض",
     "basicInfo": "البيانات الأساسية",
-    "tryDifferentSearch": "جرّب تغيير البحث"
+    "tryDifferentSearch": "جرّب تغيير البحث",
+    "menu": {
+      "productsDesc": "إدارة المنتجات والتصنيفات والأسعار",
+      "warehousesDesc": "المستودعات والفروع",
+      "stockDesc": "أرصدة المخزون والتحويلات",
+      "adjustmentsDesc": "تسويات الجرد والفروقات",
+      "lowStockDesc": "تنبيهات الحد الأدنى",
+      "movementDesc": "حركة الأصناف خلال فترة",
+      "valuationDesc": "تقييم المخزون بالقيمة"
+    }
   },
   "sales": {
     "invoices": "فواتير المبيعات",
@@ -1357,7 +1488,34 @@
       "noAgingDesc": "لا توجد فواتير مستحقة لهذا العميل",
       "created": "تم إنشاء العميل بنجاح",
       "updated": "تم تحديث العميل بنجاح",
-      "deleted": "تم حذف العميل"
+      "deleted": "تم حذف العميل",
+      "debit": "مدين",
+      "credit": "دائن",
+      "ofTotal": "من إجمالي",
+      "noResultsHint": "جرّب تغيير كلمات البحث أو الفلترة",
+      "editDesc": "تعديل بيانات العميل",
+      "createDesc": "إضافة عميل جديد — الحقول المميزة بـ * مطلوبة",
+      "requiredFields": "* حقول مطلوبة",
+      "sectionBasic": "البيانات الأساسية",
+      "codeAutoHint": "يُنشأ تلقائياً إن تُرك فارغاً",
+      "namePlaceholder": "مثال: شركة الأمل للتجارة",
+      "sectionContact": "التواصل",
+      "addressPlaceholder": "العنوان التفصيلي...",
+      "sectionFinancial": "البيانات المالية والحالة",
+      "taxNumberPlaceholder": "الرقم الضريبي",
+      "activeHint": "العميل نشط ويمكن التعامل معه",
+      "inactiveHint": "العميل موقوف مؤقتاً",
+      "debitBadge": "ذمة مدينة على العميل",
+      "creditBadge": "رصيد دائن للعميل",
+      "usage": "الاستهلاك",
+      "totalDebit": "إجمالي مدين",
+      "totalCredit": "إجمالي دائن",
+      "closingBalance": "الرصيد الختامي",
+      "bucket30": "0–30 يوم",
+      "bucket3160": "31–60 يوم",
+      "bucket6190": "61–90 يوم",
+      "bucket90": "> 90 يوم",
+      "overdueDesc": "إجمالي المستحق المتأخر"
     },
     "date": "التاريخ",
     "dueDate": "تاريخ الاستحقاق",
@@ -1440,7 +1598,11 @@
       "summary": "ملخص الفاتورة",
       "baseTotal": "بالأساسية",
       "numberError": "تعذر إنشاء الرقم التسلسلي",
-      "emptyDescription": "أنشئ فاتورتك الأولى للبدء"
+      "emptyDescription": "أنشئ فاتورتك الأولى للبدء",
+      "postedHint": "مرحل",
+      "totalHint": "إجمالي",
+      "collectedHint": "محصل",
+      "pendingHint": "بانتظار الترحيل"
     },
     "quotation": {
       "new": "عرض سعر جديد",
@@ -1469,7 +1631,11 @@
       "accepted": "مقبولة",
       "drafts": "المسودات",
       "convertedCount": "محوّلة",
-      "numberError": "تعذر إنشاء الرقم التسلسلي"
+      "numberError": "تعذر إنشاء الرقم التسلسلي",
+      "linesDesc": "أضف المنتجات — الأسعار تُملأ تلقائياً",
+      "notesPlaceholder": "ملاحظات العرض...",
+      "summary": "الملخص",
+      "itemUnit": "صنف"
     },
     "return": {
       "new": "مردود مبيعات جديد",
@@ -1499,7 +1665,10 @@
       "updated": "تم تحديث مردود المبيعات بنجاح",
       "deleted": "تم حذف مردود المبيعات",
       "posted": "تم ترحيل مردود المبيعات بنجاح",
-      "numberError": "تعذر إنشاء الرقم التسلسلي"
+      "numberError": "تعذر إنشاء الرقم التسلسلي",
+      "linesDesc": "حدد المنتجات المرتجعة — الأسعار تُملأ تلقائياً",
+      "reasonPlaceholder": "سبب الإرجاع...",
+      "notesPlaceholder": "ملاحظات إضافية..."
     },
     "filter": {
       "all": "الكل",
@@ -1511,7 +1680,24 @@
       "unit": "الوحدة",
       "baseEquivalent": "بالأساسية"
     },
-    "notesPlaceholder": "ملاحظات إضافية للفاتورة..."
+    "notesPlaceholder": "ملاحظات إضافية للفاتورة...",
+    "hub": {
+      "invoicesDesc": "فواتير المبيعات والضريبة والتحصيل",
+      "customersDesc": "بيانات العملاء وكشوف الحسابات والذمم",
+      "quotationsDesc": "عروض الأسعار والتحويل إلى فواتير",
+      "returnsDesc": "مردودات العملاء والأثر المخزني والمحاسبي",
+      "invoices": "الفواتير",
+      "invoicesTotal": "إجمالي فواتير المبيعات",
+      "customers": "العملاء",
+      "customersTotal": "قاعدة العملاء",
+      "quotations": "عروض الأسعار",
+      "activeQuotations": "عروض نشطة",
+      "returns": "المردودات",
+      "returnsTotal": "مردودات مسجلة",
+      "open": "فتح",
+      "tipsTitle": "نصائح المبيعات",
+      "tipsDesc": "تابع الفواتير المسودة يومياً، ورحّلها لإنشاء القيود تلقائياً، واستخدم عروض الأسعار لتحويلها إلى فواتير بضغطة واحدة، وراقب مردودات العملاء وأثرها المخزني."
+    }
   },
   "purchases": {
     "invoices": "فواتير المشتريات",
@@ -1726,6 +1912,19 @@
     "line": {
       "unit": "الوحدة",
       "baseEquivalent": "بالأساسية"
+    },
+    "hub": {
+      "invoicesDesc": "فواتير الموردين والضريبة والمدفوعات",
+      "ordersDesc": "أوامر الشراء والتحويل إلى فواتير",
+      "suppliersDesc": "بيانات الموردين وكشوف الحسابات والذمم",
+      "returnsDesc": "مردودات المشتريات والأثر المخزني والمحاسبي",
+      "invoicesTotal": "إجمالي فواتير المشتريات",
+      "activeOrders": "أوامر شراء نشطة",
+      "suppliersTotal": "قاعدة الموردين",
+      "returnsTotal": "مردودات مسجلة",
+      "open": "فتح",
+      "tipsTitle": "نصائح المشتريات",
+      "tipsDesc": "أنشئ أمر الشراء أولاً ثم حوّله إلى فاتورة عند الاستلام، وراقب فواتير المسودة ورحّلها لتوليد القيود تلقائياً، وتابع مردودات المشتريات وأثرها على المخزون وذمم الموردين."
     }
   },
   "manufacturing": {
@@ -4226,8 +4425,7 @@
   "documentNumber": "رقم المستند",
   "balance": "الرصيد",
   "empty": {
-    "description": "لم يتم العثور على أي سجلات في الوقت الحالي",
-    "title": "لا توجد بيانات"
+    "description": "لم يتم العثور على أي سجلات في الوقت الحالي"
   },
   "table": {
     "exportExcel": "تصدير Excel",

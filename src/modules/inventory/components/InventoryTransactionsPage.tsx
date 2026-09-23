@@ -135,14 +135,14 @@ export const InventoryTransactionsPage: React.FC = () => {
         { key: 'reference', header: t('inventory.reference') },
       ],
       `inventory-transactions-${new Date().toISOString().split('T')[0]}`,
-      { title: t('inventory.transactions'), subtitle: activeCompany?.name, rtl: true },
+      { title: t('inventory.transactions.title'), subtitle: activeCompany?.name, rtl: true },
     );
   };
 
   const handlePrint = () => {
-    const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${t('inventory.transactions')}</title>
+    const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>${t('inventory.transactions.title')}</title>
 <style>body{font-family:'Cairo',sans-serif;padding:24px;color:#1e293b}table{width:100%;border-collapse:collapse;font-size:13px}th{background:#4f46e5;color:#fff;padding:10px 12px;border:1px solid #4f46e5}td{border:1px solid #e2e8f0;padding:8px 12px}tr:nth-child(even){background:#f8fafc}.header{text-align:center;margin-bottom:16px}.header h1{font-size:18px;font-weight:700;color:#4f46e5}</style>
-</head><body><div class="header"><h1>${t('inventory.transactions')}</h1><p>${activeCompany?.name || ''}</p></div>
+</head><body><div class="header"><h1>${t('inventory.transactions.title')}</h1><p>${activeCompany?.name || ''}</p></div>
 <table><thead><tr><th>${t('inventory.date')}</th><th>${t('inventory.type')}</th><th>${t('inventory.productName')}</th><th>${t('inventory.warehouse.label')}</th><th>${t('inventory.quantity')}</th><th>${t('inventory.reference')}</th></tr></thead>
 <tbody>${filtered.map((tx) => `<tr><td>${tx.date}</td><td>${t(TYPE_CONFIG[tx.type]?.label || tx.type)}</td><td>${tx.productName || tx.productId}</td><td>${tx.warehouseName || tx.warehouseId}</td><td>${tx.quantity}</td><td>${tx.reference || '-'}</td></tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`;
     const w = window.open('', '_blank');
@@ -154,7 +154,7 @@ export const InventoryTransactionsPage: React.FC = () => {
       <div className="flex flex-col gap-4">
         <PageHeader
           icon={<ArrowRightLeft size={22} />}
-          title={t('inventory.transactions')}
+          title={t('inventory.transactions.title')}
           subtitle={t('inventory.page.subtitle')}
           actions={
             <Can action="create" module="inventory">

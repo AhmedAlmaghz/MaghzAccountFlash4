@@ -36,10 +36,8 @@
   "print": "Print",
   "close": "Close",
   "confirm": {
-    "title": "Confirm",
     "message": "Are you sure you want to proceed?",
-    "confirmText": "Confirm",
-    "cancelText": "Cancel"
+    "confirmText": "Confirm"
   },
   "back": "Back",
   "next": "Next",
@@ -554,6 +552,15 @@
       "item_done": "Done",
       "item_failed": "Failed",
       "item_skipped": "Skipped"
+    },
+    "voiceBar": {
+      "placeholder": "Type your message or speak...",
+      "unsupported": "This browser does not support the Web Speech API. Please use Google Chrome or Edge.",
+      "listening": "Listening...",
+      "stop": "Stop",
+      "speakHint": "Speak now — your words will be appended automatically",
+      "enableTitle": "Enable voice dictation and commands",
+      "dictate": "Dictate"
     }
   },
   "auth": {
@@ -1085,12 +1092,97 @@
     "chartOfAccountsSubtitle": "Chart of accounts tree",
     "journalEntriesSubtitle": "Posted and draft journal entries",
     "voucherNumberError": "Could not generate voucher number",
-    "cashBox": "Cash box"
+    "cashBox": "Cash box",
+    "chart": {
+      "groups": "Group",
+      "accountLabel": "Account",
+      "codeDuplicate": "Code already exists",
+      "fixFields": "Please fix the required fields",
+      "nameEn": "Name EN",
+      "totalAccounts": "Total accounts",
+      "activeAccounts": "Active",
+      "suspended": "Suspended",
+      "totalDebit": "Total debit",
+      "totalCredit": "Total credit",
+      "subAccounts": "Sub-account",
+      "searchHint": "Code / Arabic / English name",
+      "codeHeader": "Code",
+      "accountHeader": "Account",
+      "typeHeader": "Type",
+      "expandAll": "Expand all",
+      "collapseAll": "Collapse all",
+      "visibleGroups": "visible groups",
+      "totalItems": "Total",
+      "tryDifferentSearch": "Try changing search or filters",
+      "createHint": "Create the first account in the chart",
+      "editDesc": "Edit account details — respects the hierarchy",
+      "createDesc": "Pick the parent account and type the name — code, type and nature auto-generate",
+      "requiredFields": "Fields marked * are required",
+      "sectionBasic": "Basic info",
+      "nameArPlaceholder": "Cash box",
+      "nameEnPlaceholder": "Cash on Hand",
+      "properties": "Properties",
+      "activeHint": "Active and usable",
+      "inactiveHint": "Temporarily suspended"
+    },
+    "voucher": {
+      "appliedExceeds": "The applied amount cannot exceed the voucher amount",
+      "methodCash": "Cash",
+      "methodBank": "Bank transfer",
+      "methodCheck": "Cheque",
+      "fixFields": "Please fix the fields",
+      "postedLocked": "A posted voucher cannot be edited",
+      "expenseAccount": "Expense account",
+      "directExpense": "Direct expense",
+      "linked": "Linked",
+      "paymentSubtitle": "Payment vouchers — supplier payments & expenses",
+      "receiptSubtitle": "Receipt vouchers — customer collections (cash / bank / cheques)",
+      "unit": "Voucher",
+      "postedCash": "Posted in cash",
+      "postedBank": "Posted via bank",
+      "draft": "Draft",
+      "posted": "Posted",
+      "cancelled": "Cancelled",
+      "tryDifferentSearch": "Try changing search or filters",
+      "paymentCreateHint": "Create the first payment voucher",
+      "receiptCreateHint": "Create the first receipt voucher",
+      "paymentEditDesc": "Edit payment voucher — linked fields are locked after posting",
+      "paymentCreateDesc": "Create a new payment voucher — pick a supplier or expense account",
+      "receiptEditDesc": "Edit receipt voucher — linked fields cannot change after posting",
+      "receiptCreateDesc": "Create a new receipt voucher — pick a customer and receipt method",
+      "requiredFields": "Fields marked * are required",
+      "docSection": "Voucher details",
+      "auto": "Auto",
+      "autoHint": "Auto-generated on save",
+      "beneficiary": "Beneficiary",
+      "supplierHint": "Select a supplier or expense account — one is required",
+      "onAccountHint": "Optional — on-account payment",
+      "receiptOnAccountHint": "Optional — leave empty for an on-account payment",
+      "amountSection": "Amount & currency",
+      "paymentMethodTitle": "Payment method",
+      "receiptMethodTitle": "Receipt method",
+      "receiptClientSection": "Customer & linkage",
+      "checkNumberPlaceholder": "Cheque number",
+      "notesPlaceholder": "Additional notes…"
+    }
   },
   "inventory": {
     "products": {
       "title": "Products",
-      "notFound": "Product not found"
+      "notFound": "Product not found",
+      "totalProducts": "Total products",
+      "inPage": "on page",
+      "categoriesLabel": "Categories",
+      "typesLabel": "Types",
+      "avgCost": "Average cost",
+      "searchHint": "Code / name / barcode",
+      "unit": "Product",
+      "categoryPageFilter": "Category filter (page)",
+      "tryDifferentSearch": "Try changing search or filters",
+      "editDesc": "Edit product details",
+      "createDesc": "Add a new product — * fields are required",
+      "requiredFields": "* required fields",
+      "mediaSection": "Photo & barcode"
     },
     "warehouses": "Warehouses",
     "stock": {
@@ -1101,7 +1193,22 @@
     },
     "stockCount": "Stock Count",
     "transfers": "Transfers",
-    "transactions": "Inventory Transactions",
+    "transactions": {
+      "title": "Inventory Transactions",
+      "desc": "Inbound/outbound/adjustment movements",
+      "completeFields": "Please select product and warehouse",
+      "total": "Total",
+      "visible": "visible",
+      "typeIn": "Inbound",
+      "typeOut": "Outbound",
+      "typeAdjustment": "Adjustment",
+      "typeTransfer": "Transfer",
+      "searchHint": "Product / warehouse / reference",
+      "tryDifferentSearch": "Try changing search or type",
+      "createDesc": "Add a manual stock movement",
+      "referencePlaceholder": "Optional reference",
+      "notesPlaceholder": "Notes…"
+    },
     "adjustments": "Adjustments",
     "lowStockAlert": "Low Stock Alert",
     "stockMovement": "Stock Movement",
@@ -1174,7 +1281,22 @@
       "created": "Adjustment created successfully",
       "updated": "Adjustment updated successfully",
       "deleted": "Adjustment deleted successfully",
-      "posted": "Adjustment posted successfully"
+      "posted": "Adjustment posted successfully",
+      "selectProduct": "Please select a product",
+      "selectWarehouse": "Please select a warehouse",
+      "approvedToast": "Adjustment approved successfully",
+      "approved": "Approved",
+      "draft": "Draft",
+      "postedLabel": "Posted",
+      "zeroDiff": "Cannot post a zero-difference adjustment",
+      "netDifference": "Net difference",
+      "searchHint": "Product / warehouse / reason / number",
+      "tryDifferentSearch": "Try changing search or status",
+      "createDesc": "Stock count adjustment — system vs actual",
+      "noDifference": "No difference",
+      "surplus": "Surplus",
+      "shortage": "Shortage",
+      "reasonPlaceholder": "Adjustment reason…"
     },
     "fromWarehouse": "From Warehouse",
     "toWarehouse": "To Warehouse",
@@ -1312,7 +1434,16 @@
     "suspended": "Suspended",
     "low": "Low",
     "basicInfo": "Basic info",
-    "tryDifferentSearch": "Try changing search"
+    "tryDifferentSearch": "Try changing search",
+    "menu": {
+      "productsDesc": "Manage products, categories and prices",
+      "warehousesDesc": "Warehouses and branches",
+      "stockDesc": "Stock balances and transfers",
+      "adjustmentsDesc": "Count adjustments and variances",
+      "lowStockDesc": "Low-stock alerts",
+      "movementDesc": "Item movements over a period",
+      "valuationDesc": "Stock valuation"
+    }
   },
   "sales": {
     "invoices": "Sales Invoices",
@@ -1357,7 +1488,34 @@
       "noAgingDesc": "No overdue invoices for this customer",
       "created": "Customer created successfully",
       "updated": "Customer updated successfully",
-      "deleted": "Customer deleted"
+      "deleted": "Customer deleted",
+      "debit": "Debit",
+      "credit": "Credit",
+      "ofTotal": "of total",
+      "noResultsHint": "Try changing search or filters",
+      "editDesc": "Edit customer details",
+      "createDesc": "Add a new customer — * fields are required",
+      "requiredFields": "* required fields",
+      "sectionBasic": "Basic info",
+      "codeAutoHint": "Auto-generated if left empty",
+      "namePlaceholder": "e.g. Al-Amal Trading Co.",
+      "sectionContact": "Contact",
+      "addressPlaceholder": "Detailed address…",
+      "sectionFinancial": "Financial & status",
+      "taxNumberPlaceholder": "Tax number",
+      "activeHint": "Customer is active",
+      "inactiveHint": "Customer is suspended",
+      "debitBadge": "Receivable from customer",
+      "creditBadge": "Credit balance for customer",
+      "usage": "Usage",
+      "totalDebit": "Total debit",
+      "totalCredit": "Total credit",
+      "closingBalance": "Closing balance",
+      "bucket30": "0–30 days",
+      "bucket3160": "31–60 days",
+      "bucket6190": "61–90 days",
+      "bucket90": "> 90 days",
+      "overdueDesc": "Total overdue"
     },
     "date": "Date",
     "dueDate": "Due Date",
@@ -1440,7 +1598,11 @@
       "summary": "Invoice summary",
       "baseTotal": "In base",
       "numberError": "Could not generate sequence number",
-      "emptyDescription": "Create your first invoice to get started"
+      "emptyDescription": "Create your first invoice to get started",
+      "postedHint": "Posted",
+      "totalHint": "Total",
+      "collectedHint": "Collected",
+      "pendingHint": "Pending posting"
     },
     "quotation": {
       "new": "New Quotation",
@@ -1469,7 +1631,11 @@
       "accepted": "Accepted",
       "drafts": "Drafts",
       "convertedCount": "Converted",
-      "numberError": "Could not generate sequence number"
+      "numberError": "Could not generate sequence number",
+      "linesDesc": "Add products — prices auto-fill",
+      "notesPlaceholder": "Quotation notes...",
+      "summary": "Summary",
+      "itemUnit": "item"
     },
     "return": {
       "new": "New Sales Return",
@@ -1499,7 +1665,10 @@
       "updated": "Sales return updated successfully",
       "deleted": "Sales return deleted",
       "posted": "Sales return posted successfully",
-      "numberError": "Could not generate sequence number"
+      "numberError": "Could not generate sequence number",
+      "linesDesc": "Select returned products — prices auto-fill",
+      "reasonPlaceholder": "Return reason...",
+      "notesPlaceholder": "Additional notes..."
     },
     "filter": {
       "all": "All",
@@ -1511,7 +1680,24 @@
       "unit": "Unit",
       "baseEquivalent": "In base"
     },
-    "notesPlaceholder": "Extra invoice notes..."
+    "notesPlaceholder": "Extra invoice notes...",
+    "hub": {
+      "invoicesDesc": "Sales invoices, tax and collections",
+      "customersDesc": "Customer data, statements and balances",
+      "quotationsDesc": "Quotations and conversion to invoices",
+      "returnsDesc": "Customer returns with stock and accounting impact",
+      "invoices": "Invoices",
+      "invoicesTotal": "Total sales invoices",
+      "customers": "Customers",
+      "customersTotal": "Customer base",
+      "quotations": "Quotations",
+      "activeQuotations": "Active quotations",
+      "returns": "Returns",
+      "returnsTotal": "Recorded returns",
+      "open": "Open",
+      "tipsTitle": "Sales tips",
+      "tipsDesc": "Follow draft invoices daily, post them to auto-create entries, use quotations for one-click invoicing, and watch customer returns and their stock impact."
+    }
   },
   "purchases": {
     "invoices": "Purchase Invoices",
@@ -1726,6 +1912,19 @@
     "line": {
       "unit": "Unit",
       "baseEquivalent": "In base"
+    },
+    "hub": {
+      "invoicesDesc": "Supplier invoices, tax and payments",
+      "ordersDesc": "Purchase orders and conversion to invoices",
+      "suppliersDesc": "Supplier data, statements and balances",
+      "returnsDesc": "Purchase returns with stock and accounting impact",
+      "invoicesTotal": "Total purchase invoices",
+      "activeOrders": "Active purchase orders",
+      "suppliersTotal": "Supplier base",
+      "returnsTotal": "Recorded returns",
+      "open": "Open",
+      "tipsTitle": "Purchasing tips",
+      "tipsDesc": "Create the purchase order first, convert it on receipt, watch draft invoices and post them to generate entries automatically, and track purchase returns and their impact on stock and supplier balances."
     }
   },
   "manufacturing": {
@@ -4226,8 +4425,7 @@
   "documentNumber": "Document no.",
   "balance": "Balance",
   "empty": {
-    "description": "No records found at the moment",
-    "title": "No data"
+    "description": "No records found at the moment"
   },
   "table": {
     "exportExcel": "Export Excel",

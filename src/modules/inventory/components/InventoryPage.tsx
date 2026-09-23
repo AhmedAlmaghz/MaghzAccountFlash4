@@ -32,14 +32,14 @@ export const InventoryPage: React.FC = () => {
   }, [stock, totalProducts, warehouses, categories]);
 
   const inventoryMenu: Array<{ id: string; label: string; desc: string; icon: React.ElementType; path: string; color: string; bg: string; count: number | null }> = [
-    { id: 'products', label: t('inventory.products.title'), desc: 'إدارة المنتجات والتصنيفات والأسعار', icon: Package, path: '/inventory/products', color: 'from-primary-600 to-primary-700', bg: 'bg-primary-50 dark:bg-primary-900/20', count: stats.totalProducts },
-    { id: 'warehouses', label: t('inventory.warehouses'), desc: 'المستودعات والفروع', icon: Warehouse, path: '/inventory/warehouses', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: stats.warehouses },
-    { id: 'stock', label: t('inventory.stock.title'), desc: 'أرصدة المخزون والتحويلات', icon: Boxes, path: '/inventory/stock', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: stats.totalStockItems },
-    { id: 'transactions', label: t('inventory.transactions'), desc: 'حركات وارد/صادر/تسوية', icon: ArrowRightLeft, path: '/inventory/transactions', color: 'from-amber-500 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: stats.totalQty },
-    { id: 'adjustments', label: t('inventory.adjustments'), desc: 'تسويات الجرد والفروقات', icon: Scale, path: '/inventory/adjustments', color: 'from-orange-600 to-orange-700', bg: 'bg-orange-50 dark:bg-orange-900/20', count: null },
-    { id: 'low-stock', label: t('inventory.lowStockAlert'), desc: 'تنبيهات الحد الأدنى', icon: AlertTriangle, path: '/reports/low-stock-alert', color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', count: stats.lowCount },
-    { id: 'stock-movement', label: t('inventory.stockMovement'), desc: 'حركة الأصناف خلال فترة', icon: ArrowUpDown, path: '/reports/stock-movement', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: null },
-    { id: 'stock-valuation', label: t('inventory.stockValuation'), desc: 'تقييم المخزون بالقيمة', icon: Coins, path: '/reports/stock-valuation', color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', count: stats.totalValue },
+    { id: 'products', label: t('inventory.products.title'), desc: t('inventory.menu.productsDesc'), icon: Package, path: '/inventory/products', color: 'from-primary-600 to-primary-700', bg: 'bg-primary-50 dark:bg-primary-900/20', count: stats.totalProducts },
+    { id: 'warehouses', label: t('inventory.warehouses'), desc: t('inventory.menu.warehousesDesc'), icon: Warehouse, path: '/inventory/warehouses', color: 'from-blue-600 to-blue-700', bg: 'bg-blue-50 dark:bg-blue-900/20', count: stats.warehouses },
+    { id: 'stock', label: t('inventory.stock.title'), desc: t('inventory.menu.stockDesc'), icon: Boxes, path: '/inventory/stock', color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', count: stats.totalStockItems },
+    { id: 'transactions', label: t('inventory.transactions.title'), desc: t('inventory.transactions.desc'), icon: ArrowRightLeft, path: '/inventory/transactions', color: 'from-amber-500 to-orange-600', bg: 'bg-amber-50 dark:bg-amber-900/20', count: stats.totalQty },
+    { id: 'adjustments', label: t('inventory.adjustments'), desc: t('inventory.menu.adjustmentsDesc'), icon: Scale, path: '/inventory/adjustments', color: 'from-orange-600 to-orange-700', bg: 'bg-orange-50 dark:bg-orange-900/20', count: null },
+    { id: 'low-stock', label: t('inventory.lowStockAlert'), desc: t('inventory.menu.lowStockDesc'), icon: AlertTriangle, path: '/reports/low-stock-alert', color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', count: stats.lowCount },
+    { id: 'stock-movement', label: t('inventory.stockMovement'), desc: t('inventory.menu.movementDesc'), icon: ArrowUpDown, path: '/reports/stock-movement', color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', count: null },
+    { id: 'stock-valuation', label: t('inventory.stockValuation'), desc: t('inventory.menu.valuationDesc'), icon: Coins, path: '/reports/stock-valuation', color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', count: stats.totalValue },
   ];
 
   return (

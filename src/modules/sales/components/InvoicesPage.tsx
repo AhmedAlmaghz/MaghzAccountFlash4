@@ -785,10 +785,10 @@ export const InvoicesPage: React.FC = () => {
         <StatsGrid
           columns={4}
           items={[
-            { label: t('sales.invoice.totalInvoices'), value: String(total), hint: `${stats.postedCount} مرحل • ${stats.draftCount} مسودة`, icon: <FileText size={18} /> },
-            { label: t('sales.total'), value: formatCurrency(stats.total), hint: `${currencySymbol} • إجمالي`, icon: <Wallet size={18} />, tone: 'info' },
-            { label: t('sales.paid'), value: formatCurrency(stats.paid), hint: `${currencySymbol} • محصل`, icon: <CheckCircle2 size={18} />, tone: 'success' },
-            { label: t('sales.invoice.drafts'), value: String(stats.draftCount), hint: 'بانتظار الترحيل', icon: <Clock size={18} />, tone: 'warning' },
+            { label: t('sales.invoice.totalInvoices'), value: String(total), hint: `${stats.postedCount} ${t('sales.invoice.postedHint')} • ${stats.draftCount} ${t('sales.status.draft')}`, icon: <FileText size={18} /> },
+            { label: t('sales.total'), value: formatCurrency(stats.total), hint: `${currencySymbol} • ${t('sales.invoice.totalHint')}`, icon: <Wallet size={18} />, tone: 'info' },
+            { label: t('sales.paid'), value: formatCurrency(stats.paid), hint: `${currencySymbol} • ${t('sales.invoice.collectedHint')}`, icon: <CheckCircle2 size={18} />, tone: 'success' },
+            { label: t('sales.invoice.drafts'), value: String(stats.draftCount), hint: t('sales.invoice.pendingHint'), icon: <Clock size={18} />, tone: 'warning' },
           ]}
         />
 
@@ -809,7 +809,7 @@ export const InvoicesPage: React.FC = () => {
             actions={
               <>
                 <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5">
-                  <Download size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">Excel</span>
+                  <Download size={14} className="text-emerald-600" /> <span className="hidden sm:inline text-xs">{t('common.excel')}</span>
                 </Button>
                 <Button size="sm" variant="ghost" onClick={handleExportPDF} className="gap-1.5">
                   <Printer size={14} className="text-rose-600" /> <span className="hidden sm:inline text-xs">PDF</span>

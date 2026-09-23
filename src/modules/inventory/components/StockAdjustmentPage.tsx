@@ -310,7 +310,7 @@ export const StockAdjustmentPage: React.FC = () => {
           </Card>
           <Card className="p-3 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">{t('inventory.adjustment.posted')}</p>
+              <p className="text-xs font-semibold tracking-wider uppercase text-emerald-600">{t('inventory.adjustment.postedLabel')}</p>
               <p className="text-xl font-bold text-emerald-600 tabular-nums">{stats.posted}</p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
