@@ -24,6 +24,35 @@ const COST_PER_TOKEN = COST_PER_MTOK / 1_000_000;
 export function recordJevMetric(m: JevCallMetric): void {
   metrics.push(m);
   if (metrics.length > MAX_METRICS) metrics.shift();
+  for (const fn of subscribers) {
+    try { fn(); } catch { /* subscriber must never break recording */ }
+  }
+}
+
+type JevMetricsSubscriber = () => void;
+const subscribers = new Set<JevMetricsSubscriber>();
+
+/**
+ * Live subscription — settings page re-renders its metrics card on every
+ * recorded call instead of only after save. Returns unsubscribe.
+ */
+export function subscribeJevMetrics(fn: JevMetricsSubscriber): () => void {
+  subscribers.add(fn);
+  return () => { subscribers.delete(fn); };
+}
+
+/** Last JEV-routed intent for the diagnostics button (null = none yet). */
+let lastRoute: { intent: string; confidence: number; latencyMs: number; at: number } | null = null;
+
+export function recordJevRoute(intent: string, confidence: number, latencyMs: number): void {
+  lastRoute = { intent, confidence, latencyMs, at: Date.now() };
+  for (const fn of subscribers) {
+    try { fn(); } catch { /* ignore */ }
+  }
+}
+
+export function getLastJevRoute(): { intent: string; confidence: number; latencyMs: number; at: number } | null {
+  return lastRoute;
 }
 
 export function getJevMetrics(): JevCallMetric[] {

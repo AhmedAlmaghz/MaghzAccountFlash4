@@ -47,6 +47,9 @@ const ALWAYS_ON_TOOLS: readonly string[] = [
   'search.accounts',
   'search.employees',
   'search.journal_entries',
+  // JEV unified search — one call across all entity types (P1: jev.* tools
+  // were registered but never advertised, so the model could never call them)
+  'jev.search_all',
 ];
 
 interface DomainGroup {
@@ -74,7 +77,8 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     // read.* tools are the six in readTools.ts). Ghost prefixes are harmless
     // (visibleByName filters) but lie to the reader; domain prefixes alone
     // already route the whole family (see the reports group below).
-    prefixes: ['sales.'],
+    // P1 (JEV): jev.rank_customers_churn rides the sales intent.
+    prefixes: ['sales.', 'jev.rank_customers_churn'],
     keywords: [
       'بيع', 'مبيعات', 'فاتورة بيع', 'فواتير بيع', 'عميل', 'عملاء', 'عرض سعر', 'عروض أسعار',
       'مردود', 'مرتجع', 'تسعيرة', 'مردودات', 'أجل', 'مدين', 'ذمم', 'أرصدة العملاء',
@@ -89,7 +93,8 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
-    prefixes: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation'],
+    // P1 (JEV): jev.score_stock rides the inventory intent.
+    prefixes: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'jev.score_stock'],
     keywords: [
       'مخزن', 'مخازن', 'مخزون', 'منتج', 'منتجات', 'صنف', 'أصناف', 'مستودع', 'مستودعات',
       'جرد', 'تحويل مخزني', 'تسويات', 'كرتون', 'درزن', 'كميات', 'تالفة', 'راكد',
@@ -104,7 +109,8 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
-    prefixes: ['crm.', 'manufacturing.check_bom_availability'],
+    // P1 (JEV): jev.score_lead rides the CRM intent.
+    prefixes: ['crm.', 'manufacturing.check_bom_availability', 'jev.score_lead'],
     keywords: [
       'عميل محتمل', 'عملاء محتملين', 'فرصة', 'فرص', 'مرشح', 'مرشحين', 'قيادة', 'عملاء جدد',
       'متابعة', 'مهمة', 'مهام', 'نشاط', 'أنشطة', 'مكالمة', 'مسار البيع', 'قمع',
@@ -175,7 +181,7 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     // keywordOnly: a called sales.* tool mid-workflow must NOT pull all nine
     // domains in (continuity routes the tool's own narrow domain only).
     keywordOnly: true,
-    prefixes: ['sales.', 'purchases.', 'inventory.', 'hr.', 'crm.', 'manufacturing.', 'accounting.', 'reports.', 'read.'],
+    prefixes: ['sales.', 'purchases.', 'inventory.', 'hr.', 'crm.', 'manufacturing.', 'accounting.', 'reports.', 'read.', 'jev.'],
     keywords: [
       'تقرير', 'تقارير', 'تحليل', 'توليد', 'ملخص', 'أفضل', 'أعلى', 'أقل', 'قارن',
       'مقارنة', 'إحصائيات', 'رتب', 'ترتيب', 'نسب', 'معدل', 'متوسط', 'نمو',

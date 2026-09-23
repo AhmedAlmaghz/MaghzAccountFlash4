@@ -497,7 +497,16 @@
       "jevTestFailed": "JEV failed",
       "jevMetricsTitle": "JEV metrics",
       "jevMetricsHint": "Avg / p95 latency, cost & confidence — cleared on app restart",
-      "jevNoMetrics": "No metrics yet — send a message to activate JEV"
+      "jevNoMetrics": "No metrics yet — send a message to activate JEV",
+      "jevNoRoute": "No request routed via JEV yet in this session",
+      "jevDisabledHint": "JEV is off — enable \"Enable JEV\" above to start probabilistic routing",
+      "jevNoKeyHint": "No TypeSafe key stored — paste the key and save first",
+      "jevDiagnose": "Check JEV status",
+      "jevDiagnosing": "Checking...",
+      "jevDiagOn": "JEV is driving: last route",
+      "jevDiagOff": "JEV is not driving the chat right now",
+      "jevSearchLabel": "Unified search (JEV)",
+      "jevSearchHint": "Searches all entities (customers/suppliers/products/accounts/invoices/vouchers/journals/employees...) with a single decision call"
     },
     "errors": {
       "generic": "An error occurred while processing your request",

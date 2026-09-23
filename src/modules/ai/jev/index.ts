@@ -12,3 +12,4 @@ export * from './jevScoring';
 export * from './jevPostingGuard';
 export * from './jevMapReduce';
 export * from './jevEntityLinker';
+export * from './jevSearch';

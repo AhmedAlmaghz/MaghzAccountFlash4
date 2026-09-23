@@ -9,7 +9,7 @@ import { PROVIDER_PRESETS } from '../api/providers';
 import type { AiPublicConfig } from '../types';
 import { getJevConfig, setJevSetting, JEV_DEFAULT_MODEL, JEV_SETTINGS_KEYS } from '../jev/jevConfig';
 import { jevHealthCheck } from '../jev/jevClient';
-import { getJevMetricsSummary } from '../jev/jevMetrics';
+import { getJevMetricsSummary, getLastJevRoute, subscribeJevMetrics } from '../jev/jevMetrics';
 import { Button } from '@/core/ui/components/Button';
 import { Card, CardTitle, CardDescription } from '@/core/ui/components/Card';
 import { Input } from '@/core/ui/components/Input';
@@ -105,6 +105,10 @@ export default function AiSettingsPage() {
     load();
     return () => { cancelled = true; };
   }, [company?.id]);
+
+  // P0: live JEV metrics — re-render the card on every recorded call,
+  // not only after save. Subscription is module-local (in-memory metrics).
+  useEffect(() => subscribeJevMetrics(() => setJevMetricsTick((x) => x + 1)), []);
 
   const handleProviderChange = useCallback((id: string) => {
     setProvider(id);
@@ -332,6 +336,33 @@ export default function AiSettingsPage() {
       setJevMaskedKey(null);
     } else addToast('error', res.error || t('ai.settings.revokeFailed'));
   }, [company?.id, addToast, t]);
+
+  // P0 diagnostics: one click answers "is JEV actually driving the chat?"
+  // Reads live config + in-memory route evidence — no network call.
+  const [jevDiag, setJevDiag] = useState<string | null>(null);
+  const handleJevDiagnose = useCallback(async () => {
+    if (!company?.id) return;
+    setJevDiag(t('ai.settings.jevDiagnosing'));
+    try {
+      const cfg = await getJevConfig(company.id);
+      const last = getLastJevRoute();
+      const s = getJevMetricsSummary();
+      const lines: string[] = [];
+      lines.push(cfg.enabled ? '✓ التفعيل: يعمل' : '✗ التفعيل: مطفأ (ai.jev_enabled)');
+      lines.push(cfg.apiKey ? `✓ المفتاح: محفوظ (${cfg.apiKey.slice(0, 4)}****)` : '✗ المفتاح: غير موجود — الصقه واحفظ');
+      lines.push(cfg.routerEnabled ? '✓ الموجّه: مفعّل' : '○ الموجّه: مطفأ — سيُستخدم مطابقة الكلمات');
+      lines.push(cfg.guardEnabled ? '✓ الحراسة: مفعّلة' : '○ الحراسة: مطفأة');
+      lines.push(`النموذج: ${cfg.model}`);
+      if (last) lines.push(`⚡ آخر توجيه: ${last.intent} · ثقة ${(last.confidence * 100).toFixed(0)}% · ${last.latencyMs}ms`);
+      else lines.push('○ لم يوجَّه أي طلب عبر JEV بعد في هذه الجلسة — أرسل رسالة في الدردشة ثم أعد الفحص');
+      lines.push(`المقاييس: ${s.totalCalls} استدعاء (JEV ${s.jevCalls} / احتياطي ${s.fallbackCalls}) · التكلفة $${s.totalCostUsd.toFixed(6)}`);
+      const driving = cfg.enabled && !!cfg.apiKey && !!last;
+      lines.push(driving ? `✅ ${t('ai.settings.jevDiagOn')}` : `⚠️ ${t('ai.settings.jevDiagOff')}`);
+      setJevDiag(lines.join('\n'));
+    } catch (e) {
+      setJevDiag(e instanceof Error ? e.message : String(e));
+    }
+  }, [company?.id, t]);
 
   if (!canConfigure) {
     return (
@@ -639,14 +670,28 @@ export default function AiSettingsPage() {
             {(() => {
               void jevMetricsTick;
               const s = getJevMetricsSummary();
-              if (s.totalCalls === 0) return <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">{t('ai.settings.jevNoMetrics')}</p>;
+              const last = getLastJevRoute();
               return (
-                <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <div><span className="text-zinc-500">calls</span><div className="font-mono font-semibold">{s.totalCalls} (jev {s.jevCalls})</div></div>
-                  <div><span className="text-zinc-500">avg</span><div className="font-mono font-semibold">{s.avgLatencyMs != null ? `${s.avgLatencyMs.toFixed(0)}ms` : '—'}</div></div>
-                  <div><span className="text-zinc-500">p95</span><div className="font-mono font-semibold">{s.p95LatencyMs != null ? `${s.p95LatencyMs.toFixed(0)}ms` : '—'}</div></div>
-                  <div><span className="text-zinc-500">cost</span><div className="font-mono font-semibold">${s.totalCostUsd.toFixed(6)}</div></div>
-                </div>
+                <>
+                  {s.totalCalls === 0
+                    ? <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2">{t('ai.settings.jevNoMetrics')}</p>
+                    : (
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div><span className="text-zinc-500">calls</span><div className="font-mono font-semibold">{s.totalCalls} (jev {s.jevCalls})</div></div>
+                        <div><span className="text-zinc-500">avg</span><div className="font-mono font-semibold">{s.avgLatencyMs != null ? `${s.avgLatencyMs.toFixed(0)}ms` : '—'}</div></div>
+                        <div><span className="text-zinc-500">p95</span><div className="font-mono font-semibold">{s.p95LatencyMs != null ? `${s.p95LatencyMs.toFixed(0)}ms` : '—'}</div></div>
+                        <div><span className="text-zinc-500">cost</span><div className="font-mono font-semibold">${s.totalCostUsd.toFixed(6)}</div></div>
+                      </div>
+                    )}
+                  {/* P0 diagnostics: last routed intent — proves JEV is (or isn't) driving the chat */}
+                  <div className="mt-2 text-xs rounded-lg px-3 py-2 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+                    {last
+                      ? <span>⚡JEV <span className="font-mono font-semibold">{last.intent}</span> · ثقة <span className="font-mono font-semibold">{(last.confidence * 100).toFixed(0)}%</span> · <span className="font-mono">{last.latencyMs}ms</span></span>
+                      : <span className="text-zinc-500 dark:text-zinc-400">{t('ai.settings.jevNoRoute')}</span>}
+                    {!jevEnabled && <span className="block mt-1 text-amber-600 dark:text-amber-400">{t('ai.settings.jevDisabledHint')}</span>}
+                    {jevEnabled && !jevHasKey && <span className="block mt-1 text-amber-600 dark:text-amber-400">{t('ai.settings.jevNoKeyHint')}</span>}
+                  </div>
+                </>
               );
             })()}
           </div>
@@ -655,7 +700,13 @@ export default function AiSettingsPage() {
         <div className="flex flex-wrap items-center gap-3 mt-6 pt-4 border-t border-zinc-200/70 dark:border-zinc-800">
           <Button variant="primary" onClick={handleJevSave} isLoading={jevSaving} leftIcon={<Save size={16} />}>{t('ai.settings.save')}</Button>
           <Button variant="outline" onClick={handleJevTest} isLoading={jevTesting} leftIcon={jevTesting ? undefined : <Wifi size={16} />}>{jevTesting ? t('ai.settings.jevTesting') : t('ai.settings.jevTest')}</Button>
+          <Button variant="outline" onClick={handleJevDiagnose}>{t('ai.settings.jevDiagnose')}</Button>
         </div>
+        {jevDiag && (
+          <div className="mt-3 px-4 py-2.5 rounded-xl text-xs font-mono whitespace-pre-line leading-relaxed bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300">
+            {jevDiag}
+          </div>
+        )}
         {jevTestResult && (
           <div className={cn('mt-3 px-4 py-2.5 rounded-xl text-sm', jevTestResult.ok ? 'bg-success-50 dark:bg-success-900/20 text-success-700 dark:text-success-300 border border-success-200 dark:border-success-800' : 'bg-danger-50 dark:bg-danger-900/20 text-danger-700 dark:text-danger-300 border border-danger-200 dark:border-danger-800')}>
             {jevTestResult.ok ? <Wifi size={14} className="inline ms-1 -mt-0.5" /> : <WifiOff size={14} className="inline ms-1 -mt-0.5" />}{jevTestResult.message}

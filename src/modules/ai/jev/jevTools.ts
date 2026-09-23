@@ -11,8 +11,35 @@
 
 import type { ToolDefinition } from '../types';
 import { jevScoreLead, jevScoreStockItem } from './jevScoring';
+import { jevSearchAll } from './jevSearch';
 
 export const jevTools: ToolDefinition[] = [
+  {
+    name: 'jev.search_all',
+    descriptionAr: 'بحث موحد في كل الكيانات (عملاء/موردون/منتجات/وحدات/حسابات/فواتير/سندات/قيود/موظفون/مخازن/تصنيع/فرص...) بطلب قرار واحد — استخدمه بدل استدعاء عدة أدوات search.* عندما لا تعرف نوع الكيان',
+    labelAr: 'بحث موحد (JEV)',
+    permission: 'ai.use',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'نص البحث (اسم/رقم/كود)' },
+      },
+      required: ['query'],
+    },
+    summarizeArgs: (a) => `بحث موحد: ${String(a.query).slice(0, 40)}`,
+    execute: async (args, ctx) => {
+      const res = await jevSearchAll(ctx, String(args.query ?? ''));
+      return {
+        hits: res.hits.map((h) => ({ type: h.type, id: h.id, name: h.name, score: h.score })),
+        routedTypes: res.routedTypes,
+        dominant: res.dominant,
+        jevUsed: res.jevUsed,
+        fallback: res.fallback,
+        latencyMs: res.latencyMs,
+      };
+    },
+  },
   {
     name: 'jev.score_lead',
     descriptionAr: 'قيّم عميلاً محتملاً بأربع درجات متوازية (حاجة/ميزانية/صلاحية/توقيت) عبر JEV — يعيد درجات معايرة ومركباً بأوزان الكود',

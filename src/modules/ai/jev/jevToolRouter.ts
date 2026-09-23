@@ -40,17 +40,17 @@ export type JevIntent = keyof typeof JEV_INTENT_CRITERIA;
 
 // Domain → tool name prefixes (mirrors DOMAIN_GROUPS in toolRouter.ts)
 const INTENT_TO_PREFIXES: Record<JevIntent, readonly string[]> = {
-  sales: ['sales.'],
+  sales: ['sales.', 'jev.rank_customers_churn'],
   purchases: ['purchases.'],
-  inventory: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'search.boms', 'search.work_orders'],
+  inventory: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'search.boms', 'search.work_orders', 'jev.score_stock'],
   hr: ['hr.', 'read.attendance_summary', 'read.employee_payroll_history', 'read.end_of_service', 'read.hr_kpis', 'search.employees'],
-  crm: ['crm.', 'manufacturing.check_bom_availability'],
+  crm: ['crm.', 'manufacturing.check_bom_availability', 'jev.score_lead'],
   manufacturing: ['manufacturing.', 'search.boms', 'search.work_orders'],
   pos: ['pos.'],
   settings: ['settings.', 'search.cash_boxes', 'search.cost_centers', 'search.units', 'search.product_types', 'search.document_sequences', 'search.categories'],
   accounting: ['accounting.'],
   tax: ['tax.', 'accounting.'], // tax intent routes accounting close/depreciation too
-  reports: ['sales.', 'purchases.', 'inventory.', 'hr.', 'crm.', 'manufacturing.', 'accounting.', 'reports.', 'read.', 'diagnose.'],
+  reports: ['sales.', 'purchases.', 'inventory.', 'hr.', 'crm.', 'manufacturing.', 'accounting.', 'reports.', 'read.', 'diagnose.', 'jev.'],
   navigation: ['app.'],
   smalltalk: [],
   other: [],
@@ -62,6 +62,8 @@ const ALWAYS_ON = [
   'search.customers', 'search.suppliers', 'search.products',
   'search.sales_invoices', 'search.purchase_invoices', 'search.accounts',
   'search.employees', 'search.journal_entries',
+  // JEV unified search — one decision call across all entity types (P1)
+  'jev.search_all',
 ] as const;
 
 const PROB_THRESHOLD = 0.22; // multi-intent: "فاتورة مشتريات" → sales 0.48 + purchases 0.51

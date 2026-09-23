@@ -6,7 +6,7 @@ import { getVisibleTools, toLlmTools } from '../tools/registry';
 import { ensureToolsRegistered } from '../tools/index';
 import { routeToolsForCycle } from './toolRouter';
 import { jevRouteToolsForCycle } from '../jev/jevToolRouter';
-import { recordJevMetric, estimateJevCost } from '../jev/jevMetrics';
+import { recordJevMetric, recordJevRoute, estimateJevCost } from '../jev/jevMetrics';
 import { jevGuardCheck } from '../jev/jevGuard';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
@@ -433,58 +433,31 @@ class ChatEngine {
         // Dialect expansion is best-effort — never block the message
       }
 
+      // ── P3 unified fast-path: JEV search + guard run CONCURRENTLY ──────
+      // One JEV decision for search routing + one for guard Nouls, in
+      // parallel (~2.5s worst case combined, ~150ms typical). When JEV
+      // resolves entities with high confidence the legacy 19-table fan-out
+      // below is skipped entirely (it froze the second message on PGlite).
+      // Everything here is best-effort — legacy paths run when JEV misses.
+      let jevSearchHits: Array<{ type: string; id: string; name: string; score: number }> = [];
+      let jevSearchUsed = false;
       try {
-        // Deadline-guarded: a wedged entity/DB read must degrade to raw
-        // text, never hold the "thinking" spinner forever before the first
-        // provider byte.
-        const resolved = await deadlineOr(
-          resolveEntitiesInText(userText, this.ctx.companyId),
-          PRE_LLM_DEADLINE_MS,
-          null,
-          'entities',
-        );
-        if (!resolved) {
-          console.warn('[ai] entity resolution timed out — proceeding with raw text');
-        } else {
-          userText = resolved.text || userText;
-
-        if (resolved.corrections.length > 0 || dialectChanged.length > 0) {
-          // Build user-friendly correction summary
-          const lines: string[] = [];
-          if (dialectChanged.length > 0) {
-            lines.push(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
-          }
-          for (const c of resolved.corrections) {
-            const typeLabel: Record<string, string> = {
-              account: 'حساب', customer: 'عميل', supplier: 'مورد',
-              employee: 'موظف', product: 'منتج', cashBox: 'خزنة',
-              invoice: 'فاتورة مبيعات',
-              purchaseInvoice: 'فاتورة مشتريات', quotation: 'عرض سعر',
-              receiptVoucher: 'سند قبض', paymentVoucher: 'سند صرف',
-              workOrder: 'أمر تشغيل', bom: 'شجرة منتج',
-              lead: 'عميل محتمل', warehouse: 'مستودع',
-            };
-            const lbl = typeLabel[c.type] ?? c.type;
-            lines.push(`- **${lbl}**: "${c.original}" ← "${c.corrected}"`);
-          }
-          correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n${lines.join('\n')}\n\n_تم تحديث طلبك بالمصطلحات والأسماء الصحيحة._`;
-          }
-        }
-      } catch {
-        // Entity resolution is best-effort — never block the user's message
-      }
-      traceSend('entities-done');
-
-      // ── JEV Guard (J2) — prompt injection / PII check on user input ─────
-      // Speculative fan-out Nouls in one JEV call (~100ms). Block is rare
-      // (explicit injection), review is advisory. Never hangs — deadlineOr 2s.
-      try {
-        const guard = await deadlineOr(
-          jevGuardCheck(this.ctx.companyId, userText),
-          2000,
-          null,
-          'jev-guard-input',
-        );
+        const { jevSearchAll } = await import('../jev/jevSearch');
+        const [searchRes, guard] = await Promise.all([
+          deadlineOr(
+            jevSearchAll(this.ctx, userText).catch(() => null),
+            2500,
+            null,
+            'jev-search-fastpath',
+          ),
+          deadlineOr(
+            jevGuardCheck(this.ctx.companyId, userText),
+            2000,
+            null,
+            'jev-guard-input',
+          ),
+        ]);
+        // Guard first — block ends the turn before any DB-backed correction.
         if (guard?.jevUsed) {
           recordJevMetric({
             at: Date.now(), label: 'guard-input', latencyMs: 120, inputTokens: 180, outputTokens: 0,
@@ -505,7 +478,73 @@ class ChatEngine {
             });
           }
         }
-      } catch { /* guard best-effort */ }
+        if (searchRes && searchRes.jevUsed && searchRes.hits.length > 0) {
+          jevSearchHits = searchRes.hits;
+          jevSearchUsed = true;
+        }
+      } catch { /* fast-path best-effort */ }
+
+      if (jevSearchUsed && jevSearchHits.length > 0) {
+        // JEV resolved entities — inject IDs so the model needs no search
+        // turns, and SKIP the legacy fan-out (the PGlite freeze source).
+        const typeLabel: Record<string, string> = {
+          customer: 'عميل', supplier: 'مورد', product: 'منتج', unit: 'وحدة',
+          account: 'حساب', sales_invoice: 'فاتورة بيع', purchase_invoice: 'فاتورة شراء',
+          quotation: 'عرض سعر', receipt_voucher: 'سند قبض', payment_voucher: 'سند صرف',
+          journal: 'قيد', employee: 'موظف', warehouse: 'مستودع', bom: 'شجرة منتج',
+          work_order: 'أمر تشغيل', lead: 'عميل محتمل', opportunity: 'فرصة', cash_box: 'خزينة',
+        };
+        const resolvedLines = jevSearchHits.slice(0, 6).map(
+          (h) => `- **${typeLabel[h.type] ?? h.type}**: "${h.name}" (id: ${h.id})`,
+        );
+        if (dialectChanged.length > 0) {
+          resolvedLines.unshift(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
+        }
+        correctionMsg = `⚡ **حلّ JEV الكيانات تلقائياً:**\n${resolvedLines.join('\n')}\n\n_استخدم هذه المعرفات مباشرة — لا حاجة لاستدعاء أدوات بحث لها._`;
+        traceSend('entities-done');
+      } else {
+        try {
+          // Deadline-guarded: a wedged entity/DB read must degrade to raw
+          // text, never hold the "thinking" spinner forever before the first
+          // provider byte.
+          const resolved = await deadlineOr(
+            resolveEntitiesInText(userText, this.ctx.companyId),
+            PRE_LLM_DEADLINE_MS,
+            null,
+            'entities',
+          );
+          if (!resolved) {
+            console.warn('[ai] entity resolution timed out — proceeding with raw text');
+          } else {
+            userText = resolved.text || userText;
+
+            if (resolved.corrections.length > 0 || dialectChanged.length > 0) {
+              // Build user-friendly correction summary
+              const lines: string[] = [];
+              if (dialectChanged.length > 0) {
+                lines.push(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
+              }
+              for (const c of resolved.corrections) {
+                const typeLabel: Record<string, string> = {
+                  account: 'حساب', customer: 'عميل', supplier: 'مورد',
+                  employee: 'موظف', product: 'منتج', cashBox: 'خزنة',
+                  invoice: 'فاتورة مبيعات',
+                  purchaseInvoice: 'فاتورة مشتريات', quotation: 'عرض سعر',
+                  receiptVoucher: 'سند قبض', paymentVoucher: 'سند صرف',
+                  workOrder: 'أمر تشغيل', bom: 'شجرة منتج',
+                  lead: 'عميل محتمل', warehouse: 'مستودع',
+                };
+                const lbl = typeLabel[c.type] ?? c.type;
+                lines.push(`- **${lbl}**: "${c.original}" ← "${c.corrected}"`);
+              }
+              correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n${lines.join('\n')}\n\n_تم تحديث طلبك بالمصطلحات والأسماء الصحيحة._`;
+            }
+          }
+        } catch {
+          // Entity resolution is best-effort — never block the user's message
+        }
+        traceSend('entities-done');
+      }
 
       // Append the (possibly corrected) user turn to the LLM history. The UI
       // bubble was already stored optimistically at press time above.
@@ -1489,6 +1528,7 @@ class ChatEngine {
           intent: jevIntent,
           jevUsed: true,
         });
+        if (jevIntent) recordJevRoute(jevIntent, jevConfidence ?? 0, latencyMs);
         if (jevRouted.dropped > 0) {
           console.warn(
             `[ai][jev] router dropped ${jevRouted.dropped} tools ` +
