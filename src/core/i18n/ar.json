@@ -927,7 +927,8 @@
       "negative": "سلبي",
       "thisMonth": "هذا الشهر",
       "thisQuarter": "هذا الربع",
-      "thisYear": "هذه السنة"
+      "thisYear": "هذه السنة",
+      "distributionTitle": "توزيع التدفقات (بالقيمة المطلقة)"
     },
     "accountLedger": "دفتر الأستاذ",
     "accountCode": "رمز الحساب",
@@ -1872,7 +1873,9 @@
       "requiredFields": "* حقول مطلوبة",
       "sectionBasic": "البيانات الأساسية",
       "sectionContact": "التواصل",
-      "sectionFinancial": "البيانات المالية والحالة"
+      "sectionFinancial": "البيانات المالية والحالة",
+      "overdueTotal": "إجمالي المستحق",
+      "overdueDesc": "ذمم دائنة متأخرة"
     },
     "purchaseOrder": "أمر شراء",
     "invoiceNumber": "رقم الفاتورة",

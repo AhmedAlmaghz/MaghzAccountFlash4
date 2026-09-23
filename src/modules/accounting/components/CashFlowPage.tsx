@@ -261,7 +261,7 @@ export const CashFlowReport: React.FC = () => {
       {/* Chart */}
       {pieData.length > 0 && (
         <Card className="p-4">
-          <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2 flex items-center gap-2"><Wallet size={16} /> توزيع التدفقات (بالقيمة المطلقة)</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-2 flex items-center gap-2"><Wallet size={16} /> {t('accounting.cashFlow.distributionTitle')}</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>

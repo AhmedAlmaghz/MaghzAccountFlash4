@@ -927,7 +927,8 @@
       "negative": "Negative",
       "thisMonth": "This month",
       "thisQuarter": "This quarter",
-      "thisYear": "This year"
+      "thisYear": "This year",
+      "distributionTitle": "Flow distribution (absolute values)"
     },
     "accountLedger": "Account Ledger",
     "accountCode": "Account Code",
@@ -1872,7 +1873,9 @@
       "requiredFields": "* required fields",
       "sectionBasic": "Basic info",
       "sectionContact": "Contact",
-      "sectionFinancial": "Financial & status"
+      "sectionFinancial": "Financial & status",
+      "overdueTotal": "Total due",
+      "overdueDesc": "Overdue payables"
     },
     "purchaseOrder": "Purchase Order",
     "invoiceNumber": "Invoice Number",

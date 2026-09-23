@@ -324,8 +324,8 @@ export const WarehousesPage: React.FC = () => {
                 ))}
               </select>
               <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
-              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5"><FileText size={14} className="text-emerald-600" /><span className="hidden sm:inline text-xs">Excel</span></Button>
-              <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5"><Receipt size={14} className="text-rose-600" /><span className="hidden sm:inline text-xs">PDF</span></Button>
+              <Button size="sm" variant="ghost" onClick={handleExportExcel} className="gap-1.5"><FileText size={14} className="text-emerald-600" /><span className="hidden sm:inline text-xs">{t('common.excel')}</span></Button>
+              <Button size="sm" variant="ghost" onClick={handleExportPdf} className="gap-1.5"><Receipt size={14} className="text-rose-600" /><span className="hidden sm:inline text-xs">{t('common.pdf')}</span></Button>
             </div>
           </div>
           {hasFilters && (
