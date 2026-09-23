@@ -56,6 +56,35 @@ export function getLastJevError(): { label: string; error: string; at: number } 
   return lastError;
 }
 
+/** Transport of the last JEV attempt — tells diagnostics which path failed. */
+let lastTransport: { via: 'main-proxy' | 'direct'; at: number } | null = null;
+
+export function recordJevTransport(via: 'main-proxy' | 'direct'): void {
+  lastTransport = { via, at: Date.now() };
+}
+
+export function getLastJevTransport(): { via: 'main-proxy' | 'direct'; at: number } | null {
+  return lastTransport;
+}
+
+/** Whether the RUNNING app's preload exposes the JEV proxy (rebuild check). */
+export function isJevProxyAvailable(): boolean {
+  try {
+    return typeof window !== 'undefined' && typeof window.electronAI?.jevSystemOne === 'function';
+  } catch {
+    return false;
+  }
+}
+
+/** True when running inside Electron at all (vs pure browser web). */
+export function isElectronShell(): boolean {
+  try {
+    return typeof window !== 'undefined' && !!window.electronAI;
+  } catch {
+    return false;
+  }
+}
+
 export function clearJevErrors(): void {
   lastError = null;
 }

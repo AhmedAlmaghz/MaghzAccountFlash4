@@ -17,7 +17,7 @@ import { TypeSafeClient } from '@typesafe-ai/sdk';
 import type { Questions, SystemOneResult } from '@typesafe-ai/sdk';
 import { deadlineOr } from '../engine/deadline';
 import { getJevConfig, JEV_DEFAULT_BASE_URL, JEV_DEFAULT_MODEL, type JevConfig } from './jevConfig';
-import { recordJevError } from './jevMetrics';
+import { recordJevError, recordJevTransport } from './jevMetrics';
 
 let jevClient: TypeSafeClient | null = null;
 let jevClientKey: string | null = null;
@@ -92,9 +92,23 @@ export async function getJevClient(companyId: string): Promise<TypeSafeClient | 
 export async function jevSystemOne<Q extends Questions>(
   companyId: string,
   request: { state: unknown; questions: Q; model?: string },
-  opts?: { timeoutMs?: number; label?: string },
+  opts?: { timeoutMs?: number; label?: string; keyOverride?: string },
 ): Promise<SystemOneResult<Q> | null> {
-  const resolved = await getJevResolvedConfig(companyId);
+  // keyOverride (test-before-save button): use the typed key with stored
+  // baseUrl/model, bypassing the enabled gate — never persisted here.
+  let resolved: { apiKey: string; baseUrl: string; model: string } | null = null;
+  if (opts?.keyOverride?.trim()) {
+    let baseUrl = JEV_DEFAULT_BASE_URL;
+    let model = JEV_DEFAULT_MODEL;
+    try {
+      const cfg = await getJevConfig(companyId);
+      baseUrl = cfg.baseUrl || baseUrl;
+      model = cfg.model || model;
+    } catch { /* defaults stand */ }
+    resolved = { apiKey: opts.keyOverride.trim(), baseUrl, model };
+  } else {
+    resolved = await getJevResolvedConfig(companyId);
+  }
   if (!resolved) return null;
 
   const timeoutMs = opts?.timeoutMs ?? 2000;
@@ -107,6 +121,7 @@ export async function jevSystemOne<Q extends Questions>(
   try {
     const proxy = typeof window !== 'undefined' ? window.electronAI?.jevSystemOne : undefined;
     if (typeof proxy === 'function') {
+      recordJevTransport('main-proxy');
       const inner = proxy({
         state: request.state,
         questions: request.questions as unknown as Record<string, unknown>,
@@ -132,7 +147,12 @@ export async function jevSystemOne<Q extends Questions>(
   }
 
   // Path 2 — direct SDK fetch (pure browser / PGlite-web, no main process).
-  const client = await getJevClient(companyId);
+  recordJevTransport('direct');
+  // keyOverride (test button): transient client so the typed key is tested,
+  // never persisted and never poisoning the singleton.
+  const client = opts?.keyOverride?.trim()
+    ? new TypeSafeClient({ apiKey: opts.keyOverride.trim(), baseURL: resolved.baseUrl, defaultModel: model, timeout: timeoutMs, dangerouslyAllowBrowser: true, logLevel: 'warn' })
+    : await getJevClient(companyId);
   if (!client) return null;
 
   try {

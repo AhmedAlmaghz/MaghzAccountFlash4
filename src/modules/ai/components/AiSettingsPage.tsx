@@ -8,8 +8,7 @@ import { aiApi } from '../api';
 import { PROVIDER_PRESETS } from '../api/providers';
 import type { AiPublicConfig } from '../types';
 import { getJevConfig, setJevSetting, JEV_DEFAULT_MODEL, JEV_SETTINGS_KEYS } from '../jev/jevConfig';
-import { jevHealthCheck } from '../jev/jevClient';
-import { getJevMetricsSummary, getLastJevRoute, getLastJevError, subscribeJevMetrics } from '../jev/jevMetrics';
+import { getJevMetricsSummary, getLastJevRoute, getLastJevError, getLastJevTransport, isJevProxyAvailable, isElectronShell, subscribeJevMetrics } from '../jev/jevMetrics';
 import { Button } from '@/core/ui/components/Button';
 import { Card, CardTitle, CardDescription } from '@/core/ui/components/Card';
 import { Input } from '@/core/ui/components/Input';
@@ -302,23 +301,24 @@ export default function AiSettingsPage() {
     setJevTesting(true);
     setJevTestResult(null);
     try {
-      // If user typed a new key but didn't save yet, test with that key transiently
-      // by saving it temporarily? For now test with stored key.
-      if (jevApiKey.trim()) {
-        // Quick inline test with typed key without persisting
-        const { TypeSafeClient } = await import('@typesafe-ai/sdk');
-        const c = new TypeSafeClient({ apiKey: jevApiKey.trim(), timeout: 6000, dangerouslyAllowBrowser: true });
-        const start = Date.now();
-        const res = await c.systemOne({
-          state: 'ping',
-          questions: { ping: { type: 'noul', instructions: 'Is the state exactly "ping"?' } },
-        });
-        const ms = Date.now() - start;
-        setJevTestResult({ ok: true, message: `${t('ai.settings.jevTestSuccess')} — ${res.model} ${ms}ms` });
-      } else {
-        const res = await jevHealthCheck(company.id);
-        if (res.ok) setJevTestResult({ ok: true, message: `${t('ai.settings.jevTestSuccess')} — ${res.model} ${res.latencyMs}ms` });
-        else setJevTestResult({ ok: false, message: res.error || t('ai.settings.jevTestFailed') });
+      // Proxy-aware: jevSystemOne prefers the main-process proxy in Electron
+      // (no renderer CORS) and only falls back to direct fetch in browsers.
+      // A typed-but-unsaved key is tested transiently via keyOverride.
+      const { jevSystemOne } = await import('../jev/jevClient');
+      const { getLastJevTransport } = await import('../jev/jevMetrics');
+      const start = Date.now();
+      const res = await jevSystemOne(
+        company.id,
+        { state: 'ping', questions: { ping: { type: 'noul', instructions: 'Is the state exactly "ping"?' } } },
+        { timeoutMs: 6000, label: 'jev-health', keyOverride: jevApiKey.trim() || undefined },
+      );
+      const ms = Date.now() - start;
+      const via = getLastJevTransport()?.via === 'main-proxy' ? ' (main-proxy)' : ' (direct)';
+      if (res) setJevTestResult({ ok: true, message: `${t('ai.settings.jevTestSuccess')} — ${res.model} ${ms}ms${via}` });
+      else {
+        const { getLastJevError } = await import('../jev/jevMetrics');
+        const err = getLastJevError()?.error || t('ai.settings.jevTestFailed');
+        setJevTestResult({ ok: false, message: `${err}${via}` });
       }
     } catch (err) {
       setJevTestResult({ ok: false, message: err instanceof Error ? err.message : t('ai.settings.jevTestFailed') });
@@ -347,8 +347,12 @@ export default function AiSettingsPage() {
       const cfg = await getJevConfig(company.id);
       const last = getLastJevRoute();
       const lastErr = getLastJevError();
+      const transport = getLastJevTransport();
       const s = getJevMetricsSummary();
       const lines: string[] = [];
+      lines.push(isElectronShell() ? '✓ الغلاف: تطبيق سطح المكتب (Electron)' : '○ الغلاف: متصفح ويب (لا بروكسي — fetch مباشر)');
+      lines.push(isJevProxyAvailable() ? '✓ بروكسي JEV: متوفر في النسخة العاملة' : '✗ بروكسي JEV: غير متوفر — حدّث التطبيق لآخر main (قناة ai:jev-systemone)');
+      if (transport) lines.push(`○ آخر مسار نقل: ${transport.via === 'main-proxy' ? 'عبر العملية الرئيسية' : 'مباشر من الواجهة (معرض لـ CORS)'}`);
       lines.push(cfg.enabled ? '✓ التفعيل: يعمل' : '✗ التفعيل: مطفأ (ai.jev_enabled)');
       lines.push(cfg.apiKey ? `✓ المفتاح: محفوظ (${cfg.apiKey.slice(0, 4)}****)` : '✗ المفتاح: غير موجود — الصقه واحفظ');
       lines.push(cfg.routerEnabled ? '✓ الموجّه: مفعّل' : '○ الموجّه: مطفأ — سيُستخدم مطابقة الكلمات');
