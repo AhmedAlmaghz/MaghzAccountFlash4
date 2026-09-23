@@ -2,6 +2,13 @@
 
 > تاريخ التوثيق مقابل إصدارات التطبيق (`package.json`). القاعدة: كل إصدار تطبيق يغيّر سلوكاً ظاهراً للمستخدم يستلزم إدخالاً هنا وتحديث الختم في `ar/README.md` و`en/README.md`.
 
+## v0.25.6 — كشف التحديث وطلب التنزيل (ويب/سطح مكتب/موبايل) (2026-09-23)
+
+- **ويب/موبايل:** `useUpdateCheck` يفحص `GitHub Releases API` (قناة `stable`/`beta` خلف `settings.edit`) مع سقوط إلى `/version.json`، كل 6 ساعات + عند العودة + زر يدوي. `UpdateBanner` في `AppLayout` يعرض `يتوفر {{latest}} — أنت على {{current}}` مع `تحديث الآن` (`location.reload`) و`لاحقاً` و`ما الجديد`.
+- **سطح المكتب:** `electron-updater@^6` + `publish: {github: AhmedAlmaghz/MaghzAccountFlash4}` + `generateUpdatesFilesForAllChannels:true` + `electron/main.js` (`autoDownload` في الخلفية، `update:available/downloaded/progress`) + `preload` جسر `window.electronUpdater` + `release.yml` يبني `nsis + portable` مع `latest.yml/blockmap`. **بلا شهادة حالياً** (`CSC_IDENTITY_AUTO_DISCOVERY=false` — تحذير SmartScreen حتى تتوفر الشهادة).
+- **الإعدادات:** جديد `AboutPage` (`/settings/about`) يعرض `APP_VERSION_LABEL` وحالة التحديث و**قناة التحديث [مستقر/تجريبي]** خلف `settings.edit` فقط + زر `التحقق الآن`.
+- **البناء:** `vite.config.ts` يولّد `dist/version.json` `{version, channel, builtAt}`؛ `tsc 0`/`build` أخضر.
+
 ## v0.25.4 — إصلاحات الاتصال الشامل + استقرار الوكيل (2026-09-23)
 
 - **البذر المحلي**: `runPgliteMigrations` يعيد المحاولة بعد فشل عابر (قفل IndexedDB) عبر `resetPgliteMigrationsCache()` + بذر `seedDefault/demo` يعيد المحاولة تلقائياً عند `relation does not exist` — أغلق `companies does not exist` في الخطوة 4.
