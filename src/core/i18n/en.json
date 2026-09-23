@@ -316,14 +316,7 @@
       "backup": "Backup",
       "reset": "Reset",
       "ai": "AI",
-      "about": {
-        "title": "About",
-        "subtitle": "App version and update channel",
-        "version": "Current version",
-        "links": "Links",
-        "channelHint": "Stable is for production; Beta includes early features that may be unstable.",
-        "betaRequiresEdit": "Requires settings.edit permission"
-      }
+      "about": "About"
     },
     "hrPolicy": "HR Policies",
     "pos": {
@@ -3251,6 +3244,14 @@
       "database": "Database",
       "reset": "Reset",
       "themes": "Appearance & Themes"
+    },
+    "about": {
+      "title": "About",
+      "subtitle": "App version and update channel",
+      "version": "Current version",
+      "links": "Links",
+      "channelHint": "Stable is for production; Beta includes early features that may be unstable.",
+      "betaRequiresEdit": "Requires settings.edit permission"
     },
     "themes": {
       "title": "Appearance & Themes",

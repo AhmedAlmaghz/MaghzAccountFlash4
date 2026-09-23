@@ -152,7 +152,7 @@ app.whenReady().then(async () => {
       // Default to stable; renderer can switch to beta via app:setUpdateChannel
       try {
         const raw = fs.readFileSync(path.join(app.getPath('userData'), 'update-channel.json'), 'utf8');
-        const parsed = JSON.parse(raw) as { channel?: string };
+        const parsed = JSON.parse(raw);
         autoUpdater.allowPrerelease = parsed.channel === 'beta';
       } catch { /* default stable */ }
       autoUpdater.on('checking-for-update', () => {
