@@ -146,7 +146,48 @@ export async function jevSystemOne<Q extends Questions>(
     return null;
   }
 
-  // Path 2 — direct SDK fetch (pure browser / PGlite-web, no main process).
+  // Path 2 — same-origin relay (Vercel api/jev-systemone in prod, vite
+  // plugin in dev). Mandatory for browsers: upstream CORS preflight answers
+  // HTTP 400 with no ACAO header, so direct renderer fetch can never work.
+  // A static host without the function answers index.html → detected via
+  // content-type and skipped to the direct path below.
+  try {
+    const protocol: string = typeof window !== 'undefined' ? (window.location?.protocol ?? '') : '';
+    if (/^https?:$/.test(protocol)) {
+      recordJevTransport('relay');
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs + 500);
+      try {
+        const r = await fetch('/api/jev-systemone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            state: request.state,
+            questions: request.questions,
+            model,
+            apiKey: opts?.keyOverride?.trim() || resolved.apiKey,
+          }),
+          signal: ctrl.signal,
+        });
+        const ct = r.headers.get('content-type') ?? '';
+        if (r.ok && ct.includes('application/json')) {
+          const data: unknown = await r.json();
+          if (data && typeof data === 'object' && 'answers' in (data as Record<string, unknown>)) {
+            return data as unknown as SystemOneResult<Q>;
+          }
+        }
+        // Relay absent or rejected — fall through to direct below.
+      } catch (e) {
+        recordJevError(label, e);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  } catch { /* fall through to direct */ }
+
+  // Path 3 — direct SDK fetch (last resort: CORS-disabled shells, future
+  // upstream CORS support). Almost always fails in stock browsers — kept so
+  // exotic runtimes are not hard-blocked.
   recordJevTransport('direct');
   // keyOverride (test button): transient client so the typed key is tested,
   // never persisted and never poisoning the singleton.

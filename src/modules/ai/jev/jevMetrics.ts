@@ -57,14 +57,22 @@ export function getLastJevError(): { label: string; error: string; at: number } 
 }
 
 /** Transport of the last JEV attempt — tells diagnostics which path failed. */
-let lastTransport: { via: 'main-proxy' | 'direct'; at: number } | null = null;
+export type JevTransport = 'main-proxy' | 'relay' | 'direct';
+let lastTransport: { via: JevTransport; at: number } | null = null;
 
-export function recordJevTransport(via: 'main-proxy' | 'direct'): void {
+export function recordJevTransport(via: JevTransport): void {
   lastTransport = { via, at: Date.now() };
 }
 
-export function getLastJevTransport(): { via: 'main-proxy' | 'direct'; at: number } | null {
+export function getLastJevTransport(): { via: JevTransport; at: number } | null {
   return lastTransport;
+}
+
+/** Human Arabic label for a transport (diagnostics + test button). */
+export function jevTransportLabel(via: JevTransport): string {
+  if (via === 'main-proxy') return 'عبر العملية الرئيسية';
+  if (via === 'relay') return 'عبر مُرحّل نفس المصدر';
+  return 'مباشر من الواجهة (معرض لـ CORS)';
 }
 
 /** Whether the RUNNING app's preload exposes the JEV proxy (rebuild check). */

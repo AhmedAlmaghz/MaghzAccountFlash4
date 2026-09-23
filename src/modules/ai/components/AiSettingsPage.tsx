@@ -313,7 +313,8 @@ export default function AiSettingsPage() {
         { timeoutMs: 6000, label: 'jev-health', keyOverride: jevApiKey.trim() || undefined },
       );
       const ms = Date.now() - start;
-      const via = getLastJevTransport()?.via === 'main-proxy' ? ' (main-proxy)' : ' (direct)';
+      const { jevTransportLabel } = await import('../jev/jevMetrics');
+      const via = ` (${jevTransportLabel(getLastJevTransport()?.via ?? 'direct')})`;
       if (res) setJevTestResult({ ok: true, message: `${t('ai.settings.jevTestSuccess')} — ${res.model} ${ms}ms${via}` });
       else {
         const { getLastJevError } = await import('../jev/jevMetrics');
@@ -352,7 +353,10 @@ export default function AiSettingsPage() {
       const lines: string[] = [];
       lines.push(isElectronShell() ? '✓ الغلاف: تطبيق سطح المكتب (Electron)' : '○ الغلاف: متصفح ويب (لا بروكسي — fetch مباشر)');
       lines.push(isJevProxyAvailable() ? '✓ بروكسي JEV: متوفر في النسخة العاملة' : '✗ بروكسي JEV: غير متوفر — حدّث التطبيق لآخر main (قناة ai:jev-systemone)');
-      if (transport) lines.push(`○ آخر مسار نقل: ${transport.via === 'main-proxy' ? 'عبر العملية الرئيسية' : 'مباشر من الواجهة (معرض لـ CORS)'}`);
+      if (transport) {
+        const { jevTransportLabel } = await import('../jev/jevMetrics');
+        lines.push(`○ آخر مسار نقل: ${jevTransportLabel(transport.via)}`);
+      }
       lines.push(cfg.enabled ? '✓ التفعيل: يعمل' : '✗ التفعيل: مطفأ (ai.jev_enabled)');
       lines.push(cfg.apiKey ? `✓ المفتاح: محفوظ (${cfg.apiKey.slice(0, 4)}****)` : '✗ المفتاح: غير موجود — الصقه واحفظ');
       lines.push(cfg.routerEnabled ? '✓ الموجّه: مفعّل' : '○ الموجّه: مطفأ — سيُستخدم مطابقة الكلمات');

@@ -27,9 +27,67 @@ function versionJsonPlugin() {
   };
 }
 
+/**
+ * Dev-only twin of api/jev-systemone.ts (Vercel serverless relay).
+ * Browsers cannot call api.typesafe.ai directly (its CORS preflight answers
+ * HTTP 400 with no ACAO header), so dev traffic rides this same-origin relay
+ * exactly like production rides the serverless function. Same contract:
+ * POST /api/jev-systemone { state, questions, model?, apiKey } → upstream
+ * { model, answers, usage }. Dev-only: production uses api/jev-systemone.ts.
+ */
+function jevRelayPlugin() {
+  // Fixed upstream (dev-only twin of api/jev-systemone.ts) — no allowlist
+  // needed here; production enforces JEV_ALLOWED_HOSTS server-side.
+  return {
+    name: 'jev-relay-dev',
+    configureServer(server: { middlewares: { use: (fn: (req: never, res: never, next: () => void) => void) => void } }) {
+      server.middlewares.use(((req: never, res: never, next: () => void) => {
+        const r = req as unknown as { url?: string; method?: string; on: (ev: string, fn: (c?: Uint8Array) => void) => void };
+        const w = res as unknown as {
+          setHeader: (k: string, v: string) => void;
+          end: (b?: string) => void;
+          statusCode: number;
+        };
+        if (r.url !== '/api/jev-systemone' || r.method !== 'POST') return next();
+        const chunks: Uint8Array[] = [];
+        r.on('data', (c?: Uint8Array) => { if (c) chunks.push(c); });
+        r.on('end', () => {
+          void (async () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as {
+                state?: unknown; questions?: Record<string, unknown>; model?: string; apiKey?: string;
+              };
+              const qids = body.questions && typeof body.questions === 'object' ? Object.keys(body.questions) : [];
+              if (!body.state || qids.length === 0 || qids.length > 40 || !body.apiKey) {
+                w.statusCode = 400;
+                w.end(JSON.stringify({ success: false, error: 'state, 1-40 questions and apiKey required' }));
+                return;
+              }
+              const upstream = await fetch('https://api.typesafe.ai/v1/systemone', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${body.apiKey}` },
+                body: JSON.stringify({ state: body.state, questions: body.questions, model: body.model || 'jev-latest' }),
+                signal: AbortSignal.timeout(20000),
+              });
+              const text = await upstream.text();
+              w.statusCode = upstream.ok ? 200 : 502;
+              w.setHeader('Content-Type', 'application/json');
+              w.end(text || '{}');
+            } catch (e) {
+              w.statusCode = 504;
+              w.setHeader('Content-Type', 'application/json');
+              w.end(JSON.stringify({ success: false, error: e instanceof Error ? e.message : String(e) }));
+            }
+          })();
+        });
+      }) as (req: never, res: never, next: () => void) => void);
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [react(), versionJsonPlugin()],
+  plugins: [react(), versionJsonPlugin(), jevRelayPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
   },
