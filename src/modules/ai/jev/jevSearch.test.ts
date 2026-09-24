@@ -70,7 +70,7 @@ describe('jevSearch', () => {
   });
 
   it('rank stage orders ambiguous hits via Choice (entity linker wired)', async () => {
-    // customers tool returns 7 hits → triggers rank (RANK_MIN_HITS = 6)
+    // customers tool returns 7 hits → extractHits caps at 5 → triggers rank
     const customersExecute = vi.mocked(getTool)('search.customers')?.execute as unknown as ReturnType<typeof vi.fn>;
     vi.mocked(customersExecute).mockResolvedValueOnce({
       matches: Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, name: `عميل ${i}`, score: 0.5 })),
@@ -95,8 +95,45 @@ describe('jevSearch', () => {
     expect(res.hits[0].id).toBe('c3');
     expect(res.hits[0].score).toBeGreaterThanOrEqual(0.88);
     expect(res.ambiguous).toBe(false);
-    // Route + rank = exactly 2 JEV calls (not one per family)
+    // Gated winner is injectable (family 0.9 ≥ 0.6, link 0.88 ≥ 0.7)
+    expect(res.linked).toEqual([
+      { type: 'customer', id: 'c3', name: 'عميل 3', confidence: 0.88, familyProb: 0.9, injectable: true },
+    ]);
+    expect(res.familyProbs.customer).toBe(0.9);
+    // Route + link = exactly 2 JEV calls (not one per family)
     expect(vi.mocked(jevSystemOne)).toHaveBeenCalledTimes(2);
+  });
+
+  it('weak link winners are candidates, never injections', async () => {
+    // Route prob 0.55 clears the 0.5 bar but misses the 0.6 injection floor
+    const customersExecute = vi.mocked(getTool)('search.customers')?.execute as unknown as ReturnType<typeof vi.fn>;
+    vi.mocked(customersExecute).mockResolvedValueOnce({
+      matches: Array.from({ length: 5 }, (_, i) => ({ id: `c${i}`, name: `عميل ${i}`, score: 0.5 })),
+    });
+    vi.mocked(jevSystemOne).mockResolvedValue({
+      model: 'jev-1.13.0',
+      answers: {
+        is_customer: { type: 'noul', noul: 0.55 },
+        is_product: { type: 'noul', noul: 0.1 },
+        is_supplier: { type: 'noul', noul: 0.1 },
+        __dominant__: { type: 'choice', choice: 'customer', confidence: 0.6, probabilities: {} },
+        link_0: {
+          type: 'choice', choice: 'عميل 1 (عميل)', confidence: 0.9,
+          probabilities: { 'عميل 1 (عميل)': 0.9, 'عميل 0 (عميل)': 0.05 },
+        },
+      },
+      usage: { input_tokens: 100, output_tokens: 0 },
+    } as unknown as Awaited<ReturnType<typeof jevSystemOne>>);
+
+    const res = await jevSearchAll(ctx, 'عميل');
+    expect(res.ranked).toBe(true);
+    // High link confidence CANNOT rescue a weakly-routed family (the bank
+    // bug): the winner is recorded but flagged non-injectable...
+    expect(res.linked).toEqual([
+      { type: 'customer', id: 'c1', name: 'عميل 1', confidence: 0.9, familyProb: 0.55, injectable: false },
+    ]);
+    // ...but the winner still moves to front as a verifiable candidate
+    expect(res.hits[0].id).toBe('c1');
   });
 
   it('rank stage flags photo-finish ambiguity instead of guessing', async () => {

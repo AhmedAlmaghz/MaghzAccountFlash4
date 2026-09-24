@@ -29,7 +29,7 @@ import { compactToolResultForLlm, summarizeResult } from './resultCards';
 import { loadMemoryBlock } from '../tools/memoryTools';
 import { addUsage, checkBudget, emptyUsage, formatUsage, type TokenUsage } from './usageMeter';
 import { expandDialectText } from './dialectMap';
-import { resolveEntitiesInText } from '../entityResolver';
+import { resolveEntitiesInText, needsEntityResolution } from '../entityResolver';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, LlmTool, PendingToolCall, ToolContext } from '../types';
 import type { Skill } from '../skills/types';
@@ -440,16 +440,29 @@ class ChatEngine {
       // resolves entities with high confidence the legacy 19-table fan-out
       // below is skipped entirely (it froze the second message on PGlite).
       // Everything here is best-effort — legacy paths run when JEV misses.
-      let jevSearchHits: Array<{ type: string; id: string; name: string; score: number }> = [];
+      // Filler follow-ups ("استمر"، "شكراً") skip the SEARCH leg entirely
+      // (needsEntityResolution gate) — the guard leg still runs.
+      let jevLinked: Array<{ type: string; id: string; name: string; confidence: number }> = [];
+      let jevCandidates: Array<{ type: string; id: string; name: string; score: number }> = [];
       let jevSearchUsed = false;
+      // Filler follow-ups ("استمر"، "شكراً") skip the SEARCH leg entirely.
+      // Fail-open to true when the import is stubbed (unit-test mocks).
+      let wantsSearch = true;
+      try {
+        wantsSearch = needsEntityResolution(userText);
+      } catch {
+        wantsSearch = true;
+      }
       try {
         const [searchRes, guard] = await Promise.all([
-          deadlineOr(
-            jevSearchAll(this.ctx, userText).catch(() => null),
-            2500,
-            null,
-            'jev-search-fastpath',
-          ),
+          wantsSearch
+            ? deadlineOr(
+              jevSearchAll(this.ctx, userText).catch(() => null),
+              2500,
+              null,
+              'jev-search-fastpath',
+            )
+            : Promise.resolve(null),
           deadlineOr(
             jevGuardCheck(this.ctx.companyId, userText),
             2000,
@@ -478,29 +491,35 @@ class ChatEngine {
             });
           }
         }
-        if (searchRes && searchRes.jevUsed && searchRes.hits.length > 0) {
-          jevSearchHits = searchRes.hits;
+        if (searchRes && searchRes.jevUsed) {
           jevSearchUsed = true;
+          // Only gated winners auto-inject — weak matches stay candidates.
+          // (A top-1 hit from a weakly-routed family once injected an
+          // unrelated bank for a warehouse question — never again.)
+          jevLinked = searchRes.linked.filter((l) => l.injectable);
+          if (jevLinked.length === 0) {
+            jevCandidates = searchRes.hits.slice(0, 6);
+          }
         }
       } catch { /* fast-path best-effort */ }
 
-      if (jevSearchUsed && jevSearchHits.length > 0) {
-        // JEV resolved entities — inject IDs so the model needs no search
-        // turns, and SKIP the legacy fan-out (the PGlite freeze source).
-        const typeLabel: Record<string, string> = {
-          customer: 'عميل', supplier: 'مورد', product: 'منتج', unit: 'وحدة',
-          account: 'حساب', sales_invoice: 'فاتورة بيع', purchase_invoice: 'فاتورة شراء',
-          quotation: 'عرض سعر', receipt_voucher: 'سند قبض', payment_voucher: 'سند صرف',
-          journal: 'قيد', employee: 'موظف', warehouse: 'مستودع', bom: 'شجرة منتج',
-          work_order: 'أمر تشغيل', lead: 'عميل محتمل', opportunity: 'فرصة', cash_box: 'خزينة',
-        };
-        const resolvedLines = jevSearchHits.slice(0, 6).map(
-          (h) => `- **${typeLabel[h.type] ?? h.type}**: "${h.name}" (id: ${h.id})`,
-        );
+      if (jevSearchUsed && (jevLinked.length > 0 || jevCandidates.length > 0)) {
+        // JEV-resolved entities are AUTHORITATIVE for the model (rule 52):
+        // inject gated winners' IDs so no search turns are needed, and SKIP
+        // the legacy fan-out (the PGlite freeze source). Weak candidates are
+        // listed for verification, never commanded.
+        const { SEARCH_TYPE_LABELS_AR } = await import('../jev/jevSearch');
+        const lines: string[] = [];
         if (dialectChanged.length > 0) {
-          resolvedLines.unshift(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
+          lines.push(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
         }
-        correctionMsg = `⚡ **حلّ JEV الكيانات تلقائياً:**\n${resolvedLines.join('\n')}\n\n_استخدم هذه المعرفات مباشرة — لا حاجة لاستدعاء أدوات بحث لها._`;
+        for (const l of jevLinked.slice(0, 6)) {
+          lines.push(`- **${SEARCH_TYPE_LABELS_AR[l.type] ?? l.type}**: "${l.name}" (id: ${l.id}) — ثقة ${(l.confidence * 100).toFixed(0)}%`);
+        }
+        if (jevLinked.length === 0 && jevCandidates.length > 0) {
+          lines.push(`- **مرشحون (تحقق بأداة بحث واحدة فقط، ولا تنشئ كياناً جديداً قبل سؤال المستخدم):** ${jevCandidates.map((h) => `"${h.name}" (${SEARCH_TYPE_LABELS_AR[h.type] ?? h.type})`).join('، ')}`);
+        }
+        correctionMsg = `⚡ **حلّ JEV الكيانات تلقائياً:**\n${lines.join('\n')}\n\n_المعرفات أعلاه نهائية وملزمة — ممنوع استدعاء أي أداة search.* لها. ابحث فقط عن كيانات غير مذكورة أعلاه._`;
         traceSend('entities-done');
       } else {
         try {

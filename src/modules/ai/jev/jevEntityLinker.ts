@@ -33,44 +33,75 @@ export async function jevLinkEntities(
   candidates: LinkCandidate[],
   label = 'entity-link',
 ): Promise<LinkResult[]> {
-  if (tokens.length === 0 || candidates.length === 0) return [];
+  return jevLinkGroups(
+    companyId,
+    tokens.map((token) => ({ token, candidates })),
+    label,
+  );
+}
 
-  const candidateMap: Record<string, string> = {};
-  for (const c of candidates) candidateMap[c.name] = `العميل/المورد: ${c.name}`;
-  candidateMap['__none__'] = 'لا يطابق أياً مما سبق — اسم جديد';
+/**
+ * Batch linking — one JEV call, one Choice per group, each group with its OWN
+ * candidate list. This is the form jevSearchAll uses: one group per routed
+ * entity family (supplier candidates never compete with warehouse candidates,
+ * which is what produced wrong-family winners before).
+ */
+export interface LinkGroup {
+  token: string;
+  candidates: LinkCandidate[];
+}
+
+export async function jevLinkGroups(
+  companyId: string,
+  groups: LinkGroup[],
+  label = 'entity-link',
+): Promise<LinkResult[]> {
+  if (groups.length === 0) return [];
+  const live = groups.filter((g) => g.candidates.length > 0);
+  if (live.length === 0) {
+    return groups.map((g) => ({ token: g.token, choice: '__none__', confidence: 0, probabilities: {} }));
+  }
 
   const questions: Record<string, { type: 'choice'; instructions: string; criteria: Record<string, string> }> = {};
-  for (let i = 0; i < tokens.length; i++) {
+  live.forEach((g, i) => {
+    const candidateMap: Record<string, string> = {};
+    for (const c of g.candidates) candidateMap[c.name] = c.name;
+    candidateMap['__none__'] = 'لا يطابق أياً مما سبق — اسم جديد';
     questions[`link_${i}`] = {
       type: 'choice',
-      instructions: `أي كيان يقصده "${tokens[i]}"؟`,
+      instructions: `أي كيان يقصده "${g.token}"؟ أجب باسم المرشح حرفياً كما هو مكتوب.`,
       criteria: candidateMap,
     };
-  }
+  });
 
   const start = Date.now();
   const res = await jevSystemOne(
     companyId,
-    { state: { tokens, candidateCount: candidates.length }, questions },
+    { state: { groups: live.map((g) => g.token) }, questions },
     { timeoutMs: 2000, label },
   );
 
   if (!res?.answers) {
-    return tokens.map((t) => ({ token: t, choice: '__none__', confidence: 0, probabilities: {} }));
+    return groups.map((g) => ({ token: g.token, choice: '__none__', confidence: 0, probabilities: {} }));
   }
 
-  const out: LinkResult[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const ans = (res.answers as Record<string, { choice: string; confidence: number; probabilities: Record<string, number> }>)[`link_${i}`];
-    out.push({
-      token: tokens[i],
+  // Map live answers back onto the full groups array (empty groups → __none__).
+  let li = 0;
+  const out: LinkResult[] = groups.map((g) => {
+    if (g.candidates.length === 0) {
+      return { token: g.token, choice: '__none__', confidence: 0, probabilities: {} };
+    }
+    const ans = (res.answers as Record<string, { choice: string; confidence: number; probabilities: Record<string, number> }>)[`link_${li++}`];
+    return {
+      token: g.token,
       choice: ans?.choice ?? '__none__',
       confidence: ans?.confidence ?? 0,
       probabilities: ans?.probabilities ?? {},
-    });
-  }
+    };
+  });
 
-  recordJevMetric({ at: Date.now(), label, latencyMs: Date.now() - start, inputTokens: tokens.length * 40, outputTokens: 0, costUsd: estimateJevCost(tokens.length * 40), confidence: out[0]?.confidence ?? 0, jevUsed: true });
+  const best = Math.max(0, ...out.map((o) => o.confidence));
+  recordJevMetric({ at: Date.now(), label, latencyMs: Date.now() - start, inputTokens: live.length * 40, outputTokens: 0, costUsd: estimateJevCost(live.length * 40), confidence: best, jevUsed: true });
 
   return out;
 }
