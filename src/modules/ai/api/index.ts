@@ -107,6 +107,9 @@ interface ElectronAI {
   batchSetStatus: (payload: {
     companyId: string; userId: string; batchId: string; status: 'paused' | 'running' | 'cancelled';
   }) => Promise<IpcResult<{ status: string; skipped: number }>>;
+  batchClear: (payload: {
+    companyId: string; userId: string;
+  }) => Promise<IpcResult<{ cancelled: number; skipped: number; cleared: number }>>;
   batchRetryFailed: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<{ requeued: number }>>;
   batchRecover: (payload: { companyId: string; userId: string; batchId: string }) => Promise<IpcResult<{ recoveredFailed: number; recoveredSkipped: number; finalStatus: string | null }>>;
   /**
@@ -432,6 +435,14 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.batchSetStatus({ companyId, userId, batchId, status });
+  },
+
+  async batchClear(
+    companyId: string, userId: string,
+  ): Promise<IpcResult<{ cancelled: number; skipped: number; cleared: number }>> {
+    const b = await getEffectiveBridge();
+    if (!b) return { success: false, error: NOT_AVAILABLE };
+    return b.batchClear({ companyId, userId });
   },
 
   async batchRetryFailed(companyId: string, userId: string, batchId: string): Promise<IpcResult<{ requeued: number }>> {

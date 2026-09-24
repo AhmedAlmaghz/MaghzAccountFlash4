@@ -104,6 +104,13 @@ interface CreatedEntity {
   tool: string;
 }
 
+/**
+ * مفتاح عدم تكرار جلسي لعنصر دفعة مكتمل: `tool + stable-hash(args)`.
+ * يُحسب في طبقة الدفعات (batchQueue.buildIdempotencyKey) ويُمرَّر هنا
+ * كنص جاهز — هذا الملف لا يستورد batchQueue عمداً (اعتمادية دائرية:
+ * batchQueue يستورد extractLedgerEntity من هنا).
+ */
+
 function clip(s: string, max: number): string {
   if (s.length <= max) return s;
   // القوائم الطويلة: احتفظ بالبداية (التوجيهات) والنهاية (بنود متبقية) معاً —
@@ -121,6 +128,15 @@ export class TaskLedger {
   private requests: string[] = [];
   private outcomes: LedgerOutcome[] = [];
   private created = new Map<string, CreatedEntity>();
+  /**
+   * مفاتيح عناصر مكتملة (done) في هذه الجلسة — عدم تكرار عبر الدفعات.
+   * الجلسة 2026-09-24: نفس الفواتير أُنشئت مرتين في دفعتين مختلفتين
+   * (INV-000001/INV-000003، PINV-0001/PINV-0004…) لأن عدم التكرار كان
+   * داخل الدفعة الواحدة فقط (UNIQUE(batch_id, idempotency_key)).
+   * المستندات المكررة (فواتير/سندات) فساد مالي مباشر، لذا الحارس هنا
+   * يشمل المستندات لا الكيانات المرجعية فقط.
+   */
+  private completedKeys = new Set<string>();
   /** جدول المهام: حالة كل بند دفعة (منجز/فاشل/مُخطّى) — "ما تم وما بقي". */
   private taskEntries: TaskEntry[] = [];
 
@@ -168,14 +184,40 @@ export class TaskLedger {
     return this.created.get(normalizeEntityName(name)) ?? null;
   }
 
+  /** سجّل مفاتيح عناصر مكتملة (تُحسب في طبقة الدفعات). الأول يفوز. */
+  registerCompletedKeys(keys: Array<string | null | undefined>): void {
+    for (const k of keys) {
+      if (typeof k === 'string' && k) this.completedKeys.add(k);
+    }
+  }
+
+  /** هل نُفّذ عنصر بنفس المفتاح في هذه الجلسة؟ (منع التكرار عبر الدفعات) */
+  hasCompletedKey(key: string): boolean {
+    return this.completedKeys.has(key);
+  }
+
   get isEmpty(): boolean {
     return this.requests.length === 0 && this.outcomes.length === 0 && this.taskEntries.length === 0;
+  }
+
+  /** هل يوجد بند فاشل ما زال معلقاً؟ (ادعاء "كافة المهام" مع فاشل = كذب بالإغفال) */
+  hasFailures(): boolean {
+    return this.taskEntries.some((t) => t.status === 'failed');
+  }
+
+  /** أسماء البنود الفاشلة (لرسالة التصحيح — "ما الذي لم يُنجز فعلاً"). */
+  getFailedTaskNames(limit = 8): string[] {
+    return this.taskEntries
+      .filter((t) => t.status === 'failed')
+      .slice(0, Math.max(0, limit))
+      .map((t) => t.name);
   }
 
   clear(): void {
     this.requests = [];
     this.outcomes = [];
     this.created.clear();
+    this.completedKeys.clear();
     this.taskEntries = [];
   }
 

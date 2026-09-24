@@ -8,12 +8,14 @@ vi.mock('./index', () => ({
     batchSetStatus: vi.fn(),
     batchRetryFailed: vi.fn(),
     batchRecover: vi.fn(),
+    batchClear: vi.fn(),
   },
 }));
 
 import { aiApi } from './index';
 import {
   cancelBatch,
+  clearQueue,
   enqueueBatch,
   getBatch,
   findResumableBatches,
@@ -182,6 +184,24 @@ describe('getBatch / listBatches / findResumableBatches', () => {
   it('surfaces bridge errors from status transitions honestly', async () => {
     mockedApi.batchSetStatus.mockResolvedValue({ success: false, error: 'gone' });
     const res = await pauseBatch('b1');
+    expect(res.success).toBe(false);
+    expect(res.error).toBe('gone');
+  });
+
+  it('clearQueue forwards context and returns the zeroed counts', async () => {
+    mockedApi.batchClear.mockResolvedValue({
+      success: true, data: { cancelled: 2, skipped: 5, cleared: 1 },
+    });
+    const res = await clearQueue();
+    expect(res).toEqual({
+      success: true, data: { cancelled: 2, skipped: 5, cleared: 1 },
+    });
+    expect(mockedApi.batchClear).toHaveBeenCalledWith('c1', 'u1');
+  });
+
+  it('clearQueue surfaces bridge errors honestly', async () => {
+    mockedApi.batchClear.mockResolvedValue({ success: false, error: 'gone' });
+    const res = await clearQueue();
     expect(res.success).toBe(false);
     expect(res.error).toBe('gone');
   });

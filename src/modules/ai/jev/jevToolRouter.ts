@@ -38,17 +38,19 @@ export const JEV_INTENT_CRITERIA = {
 
 export type JevIntent = keyof typeof JEV_INTENT_CRITERIA;
 
-// Domain → tool name prefixes (mirrors DOMAIN_GROUPS in toolRouter.ts)
+// Domain → tool name prefixes (mirrors DOMAIN_GROUPS in toolRouter.ts).
+// Search unification (2026-09-24): each search.* family rides its domain so
+// verification stays one intent away; jev.search_all alone is always-on.
 const INTENT_TO_PREFIXES: Record<JevIntent, readonly string[]> = {
-  sales: ['sales.', 'jev.rank_customers_churn'],
-  purchases: ['purchases.'],
-  inventory: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'search.boms', 'search.work_orders', 'jev.score_stock'],
-  hr: ['hr.', 'read.attendance_summary', 'read.employee_payroll_history', 'read.end_of_service', 'read.hr_kpis', 'search.employees'],
-  crm: ['crm.', 'manufacturing.check_bom_availability', 'jev.score_lead'],
-  manufacturing: ['manufacturing.', 'search.boms', 'search.work_orders'],
+  sales: ['sales.', 'jev.rank_customers_churn', 'search.customers', 'search.sales_invoices', 'search.quotations', 'search.sales_returns'],
+  purchases: ['purchases.', 'search.suppliers', 'search.purchase_invoices', 'search.purchase_orders', 'search.purchase_returns'],
+  inventory: ['inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'search.boms', 'search.work_orders', 'jev.score_stock', 'search.products', 'search.product_units', 'search.units', 'search.warehouses', 'search.categories', 'search.stock_movements', 'search.stock_adjustments', 'search.stock_transfers'],
+  hr: ['hr.', 'read.attendance_summary', 'read.employee_payroll_history', 'read.end_of_service', 'read.hr_kpis', 'search.employees', 'search.attendance', 'search.leaves', 'search.payroll_runs', 'search.end_of_services'],
+  crm: ['crm.', 'manufacturing.check_bom_availability', 'jev.score_lead', 'search.leads', 'search.opportunities', 'search.tasks', 'search.activities'],
+  manufacturing: ['manufacturing.', 'search.boms', 'search.work_orders', 'search.products'],
   pos: ['pos.'],
   settings: ['settings.', 'search.cash_boxes', 'search.cost_centers', 'search.units', 'search.product_types', 'search.document_sequences', 'search.categories'],
-  accounting: ['accounting.'],
+  accounting: ['accounting.', 'search.accounts', 'search.cash_boxes', 'search.receipt_vouchers', 'search.payment_vouchers', 'search.journal_entries'],
   tax: ['tax.', 'accounting.'], // tax intent routes accounting close/depreciation too
   reports: ['sales.', 'purchases.', 'inventory.', 'hr.', 'crm.', 'manufacturing.', 'accounting.', 'reports.', 'read.', 'diagnose.', 'jev.'],
   navigation: ['app.'],
@@ -59,10 +61,9 @@ const INTENT_TO_PREFIXES: Record<JevIntent, readonly string[]> = {
 const ALWAYS_ON = [
   'app.list_pages', 'app.navigate', 'core.get_company_info',
   'ai.batch_status', 'ai.classify_document', 'ai.enqueue_batch', 'ai.resume_batch',
-  'search.customers', 'search.suppliers', 'search.products',
-  'search.sales_invoices', 'search.purchase_invoices', 'search.accounts',
-  'search.employees', 'search.journal_entries',
-  // JEV unified search — one decision call across all entity types (P1)
+  'ai.clear_queue',
+  // Unified search is the ONLY always-on search path (session 2026-09-24 —
+  // see toolRouter.ts). Individual search.* tools ride their intent below.
   'jev.search_all',
 ] as const;
 

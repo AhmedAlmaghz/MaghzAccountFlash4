@@ -267,6 +267,7 @@ contextBridge.exposeInMainWorld('electronAI', {
   batchItemDone: (payload) => ipcRenderer.invoke('ai:batch-item-done', { ...payload, sessionToken }),
   batchItemFail: (payload) => ipcRenderer.invoke('ai:batch-item-fail', { ...payload, sessionToken }),
   batchSetStatus: (payload) => ipcRenderer.invoke('ai:batch-set-status', { ...payload, sessionToken }),
+  batchClear: (payload) => ipcRenderer.invoke('ai:batch-clear', { ...payload, sessionToken }),
   batchRetryFailed: (payload) => ipcRenderer.invoke('ai:batch-retry-failed', { ...payload, sessionToken }),
   batchRecover: (payload) => ipcRenderer.invoke('ai:batch-recover', { ...payload, sessionToken }),
   batchRelease: (payload) => ipcRenderer.invoke('ai:batch-release', { ...payload, sessionToken }),

@@ -94,6 +94,40 @@ export function buildIdempotencyKey(tool: string, args: Record<string, unknown>)
 }
 
 /**
+ * مفاتيح العناصر المكتملة (done) في تفصيل دفعة — تُسجَّل في سجل المهمة
+ * لمنع إعادة تنفيذ نفس العنصر بحرفيته في دفعة لاحقة من نفس الجلسة
+ * (الجلسة 2026-09-24: فواتير مكررة عبر دفعتين). العناصر بمراجع {{ref}}/@ref
+ * تُستثنى: وسائطها وقت الإنشاء تختلف عن المنفَّذة بعد الاستبدال.
+ */
+export function completedKeysOf(detail: {
+  items?: Array<{ toolName?: string; args?: Record<string, unknown> | null; status?: string }>;
+} | null | undefined): string[] {
+  if (!detail || !Array.isArray(detail.items)) return [];
+  const out: string[] = [];
+  for (const i of detail.items) {
+    if (i?.status !== 'done') continue;
+    if (typeof i.toolName !== 'string' || !i.toolName) continue;
+    const args = i.args && typeof i.args === 'object' ? i.args : {};
+    if (containsRefPlaceholder(args)) continue;
+    try {
+      out.push(buildIdempotencyKey(i.toolName, args));
+    } catch {
+      // مفتاح واحد مكسور لا يُسقط التسجيل كله
+    }
+  }
+  return out;
+}
+
+function containsRefPlaceholder(v: unknown): boolean {
+  if (typeof v === 'string') return v.includes('{{') || v.startsWith('@');
+  if (Array.isArray(v)) return v.some(containsRefPlaceholder);
+  if (v && typeof v === 'object') {
+    return Object.values(v as Record<string, unknown>).some(containsRefPlaceholder);
+  }
+  return false;
+}
+
+/**
  * Assign seq numbers, resolve `after` refs and prove the graph is a DAG.
  * Pure — registry existence checks belong to the tool layer, not here.
  */
@@ -454,6 +488,65 @@ export function substituteRefs(
 export function summarizeBatchProgress(done: number, failed: number, skipped: number, total: number): string {
   const remaining = Math.max(0, total - done - failed - skipped);
   return `أُنجز ${done} — فشل ${failed} — تُخطّي ${skipped} — متبقٍ ${remaining} (من ${total})`;
+}
+
+/** Minimal batch shape for mission aggregation (structural — no DB import). */
+export interface MissionBatchLike {
+  title?: string | null;
+  status?: string;
+  doneCount?: number;
+  failedCount?: number;
+  skippedCount?: number;
+  totalCount?: number;
+}
+
+/**
+ * لوحة المهمة الموحدة — تجميع كل دفعات الجلسة في سطر واحد + أسماء المتعثر.
+ * الجلسة 2026-09-24: المستخدم والنموذج معاً ضائعان ("ما المنجز وما الباقي؟")
+ * لأن كل بطاقة تعرض دفعتها فقط. هذا الملخص يجيب "وين وصلنا؟" برقم واحد
+ * ويُعرض في ai.batch_status (بلا معرف) فيراه المستخدم والنموذج معاً.
+ */
+export function summarizeMission(batches: MissionBatchLike[]): string {
+  const list = Array.isArray(batches) ? batches : [];
+  if (list.length === 0) return 'لا توجد دفعات بعد';
+  let done = 0;
+  let failed = 0;
+  let skipped = 0;
+  let total = 0;
+  const troubled: string[] = [];
+  for (const b of list) {
+    done += Number(b.doneCount) || 0;
+    failed += Number(b.failedCount) || 0;
+    skipped += Number(b.skippedCount) || 0;
+    total += Number(b.totalCount) || 0;
+    const st = String(b.status ?? '');
+    if ((st === 'partial' || st === 'paused' || st === 'running') && (Number(b.failedCount) || 0) > 0) {
+      const title = String(b.title ?? '').trim() || 'دفعة بلا عنوان';
+      troubled.push(`${title} (فاشل: ${Number(b.failedCount) || 0})`);
+    }
+  }
+  const head = `المهمة: ${list.length} دفعات — ${summarizeBatchProgress(done, failed, skipped, total)}`;
+  if (troubled.length === 0) return head;
+  return `${head} — متعثر: ${troubled.slice(0, 5).join('؛ ')}${troubled.length > 5 ? ` و${troubled.length - 5} أخرى` : ''}`;
+}
+
+/**
+ * طبقة الاعتمادية لأداة دفعة — الترتيب التلقائي (كيانات ← مستندات ← ترحيل).
+ * 0 = كيانات مرجعية وسيدية (عميل/مورد/منتج/مستودع/موظف/حساب…) تُنشأ أولاً.
+ * 1 = مستندات (فواتير/سندات/قيود/تركيبات/أوامر…) — الافتراضي.
+ * 2 = ترحيل وتحولات حالة (post/pay/apply/transfer/convert/status…) — أخيراً.
+ * محافظ عمداً: الأنماط القوية فقط؛ أي أداة غير مصنفة تبقى في الوسط (1)
+ * فلا تُكسر تدفقات مخصصة.
+ */
+export function batchToolLayer(tool: string): number {
+  const t = String(tool || '');
+  if (/(^|\.)(post|pay|apply|transfer|approve|convert|qualify|process|complete|win)_/.test(t)) return 2;
+  if (/_status$/.test(t)) return 2;
+  // السندات (قبض/صرف/مصروف) حركة أموال — بعد المستندات التي تُبنى عليها
+  // (فاتورة تُنشأ في الطبقة 1 ثم سندها في الطبقة 2 حتى بلا ربط صريح).
+  if (/\.(create_(receipt_voucher|payment_voucher|expense_voucher))/.test(t)) return 2;
+  if (/\.(create_(warehouse|product_type|unit|cash_box|cost_center|categor|department|account|employee|lead|customer|supplier|product)|update_(customer|supplier|product|employee|warehouse))/.test(t)) return 0;
+  return 1;
 }
 
 /** شارة بشرية لعنصر دفعة: الـ label إن وجد، وإلا اسم الكيان من الوسائط، وإلا اسم الأداة. */

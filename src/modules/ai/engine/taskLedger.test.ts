@@ -215,4 +215,33 @@ describe('TaskLedger', () => {
     const block = ledger.render() ?? '';
     expect(block).not.toContain('جدول المهام');
   });
+
+  it('tracks completed item keys across batches (session 2026-09-24)', () => {
+    // Same invoice re-enqueued verbatim in a later batch must be recognized —
+    // per-batch UNIQUE(batch_id, idempotency_key) never sees across batches.
+    const ledger = new TaskLedger();
+    expect(ledger.hasCompletedKey('sales.create_invoice:abc')).toBe(false);
+    ledger.registerCompletedKeys(['sales.create_invoice:abc', null, undefined, '']);
+    expect(ledger.hasCompletedKey('sales.create_invoice:abc')).toBe(true);
+    expect(ledger.hasCompletedKey('sales.create_invoice:other')).toBe(false);
+    ledger.clear();
+    expect(ledger.hasCompletedKey('sales.create_invoice:abc')).toBe(false);
+  });
+
+  it('exposes failed task names for the global-completion guard', () => {
+    const ledger = new TaskLedger();
+    expect(ledger.hasFailures()).toBe(false);
+    expect(ledger.getFailedTaskNames()).toEqual([]);
+    ledger.recordBatchTaskTable('دفعة', [
+      { toolName: 'inventory.create_product', args: { nameAr: 'شوكلاتة صغير' }, status: 'failed' },
+      { toolName: 'sales.create_invoice', args: { total: 1 }, status: 'done' },
+    ]);
+    expect(ledger.hasFailures()).toBe(true);
+    expect(ledger.getFailedTaskNames()).toEqual(['شوكلاتة صغير']);
+    // Fixing the item clears the failure signal (status update, not duplicate).
+    ledger.recordBatchTaskTable('دفعة', [
+      { toolName: 'inventory.create_product', args: { nameAr: 'شوكلاتة صغير' }, status: 'done' },
+    ]);
+    expect(ledger.hasFailures()).toBe(false);
+  });
 });

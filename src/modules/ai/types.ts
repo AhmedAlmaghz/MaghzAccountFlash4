@@ -162,6 +162,13 @@ export interface LlmCompletionStreamData {
 export interface ToolLedgerView {
   /** Entity with the same normalized name created earlier in this session. */
   findDuplicateName(name: string): { display: string; tool: string } | null;
+  /**
+   * True when a batch item with this idempotency key (tool + stable args
+   * hash) already completed in this session — cross-batch duplicate guard
+   * for documents too (invoices/vouchers), not just master entities.
+   * Optional: older ledger fakes in tests may omit it.
+   */
+  hasCompletedKey?(key: string): boolean;
 }
 
 export interface ToolContext {

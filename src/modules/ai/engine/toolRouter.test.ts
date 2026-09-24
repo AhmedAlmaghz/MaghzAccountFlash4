@@ -30,15 +30,18 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
   });
 
   function seedRegistry() {
-    // Always-on core
+    // Always-on core (search unification 2026-09-24: jev.search_all is the
+    // ONLY always-on search path; search.* ride their domain groups)
     const core = [
       'app.list_pages', 'app.navigate', 'core.get_company_info',
       'ai.batch_status', 'ai.classify_document', 'ai.enqueue_batch', 'ai.resume_batch',
-      'search.customers', 'search.suppliers', 'search.products',
-      'search.sales_invoices', 'search.purchase_invoices', 'search.accounts',
-      'search.employees', 'search.journal_entries',
+      'ai.clear_queue',
+      'jev.search_all',
     ];
     for (const n of core) registerTool(makeTool(n, 'ai.use' as never));
+    // Verification search tools — routed by domain intent, NOT always-on
+    registerTool(makeTool('search.customers', 'sales.view'));
+    registerTool(makeTool('search.products', 'inventory.view'));
     // Domain tools — 20 sales + 20 hr (enough to overflow the cap when combined)
     for (let i = 0; i < 20; i++) registerTool(makeTool(`sales.tool_${i}`, 'sales.view'));
     for (let i = 0; i < 20; i++) registerTool(makeTool(`hr.tool_${i}`, 'hr.view'));
@@ -49,10 +52,20 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     seedRegistry();
     const routed = routeToolsForCycle([userMsg('مرحبا')]);
     expect(routed.routedByIntent).toBe(false);
-    // 'مرحبا' matches no keyword → only always-on (15 registered above)
-    expect(routed.tools.length).toBe(15);
+    // 'مرحبا' matches no keyword → only always-on (9 registered above);
+    // search.* verification tools stay out until an intent routes them
+    expect(routed.tools.length).toBe(9);
     expect(routed.dropped).toBe(0);
     expect(routed.tools.every((t) => getVisibleTools().some((v) => v.name === t.name))).toBe(true);
+  });
+
+  it('search unification: sales intent routes search.customers for verification, silence does not', () => {
+    seedRegistry();
+    const silent = routeToolsForCycle([userMsg('مرحبا')]);
+    expect(silent.tools.map((t) => t.name)).not.toContain('search.customers');
+    expect(silent.tools.map((t) => t.name)).toContain('jev.search_all');
+    const sales = routeToolsForCycle([userMsg('أنشئ فاتورة بيع لعميل')]);
+    expect(sales.tools.map((t) => t.name)).toContain('search.customers');
   });
 
   it('routes the sales domain on sales intent keywords', () => {
@@ -183,7 +196,7 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
         userMsg('تمام'),
       ]);
       expect(routed.routedByIntent).toBe(false);
-      expect(routed.tools.length).toBe(15);
+      expect(routed.tools.length).toBe(9);
     });
   });
 });

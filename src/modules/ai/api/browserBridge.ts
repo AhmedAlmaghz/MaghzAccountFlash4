@@ -1397,6 +1397,58 @@ export const browserAiBridge = {
     }
   },
 
+  /**
+   * Zero the whole queue — mirrors the ai:batch-clear IPC channel: cancel
+   * every live batch, park queued items as skipped, close stuck partials.
+   * History rows (done/failed) are preserved; only actionability ends.
+   */
+  async batchClear(payload: {
+    companyId: string; userId: string;
+  }): Promise<{ success: boolean; data?: { cancelled: number; skipped: number; cleared: number }; error?: string }> {
+    try {
+      const adapter = await getDbAdapter();
+      const cleared = await adapter.query<{ cancelled: string; skipped: string }>(
+        `WITH live AS (
+           UPDATE ai_job_batches SET status = 'cancelled', updated_at = NOW()
+           WHERE company_id = $1::uuid AND user_id = $2::uuid AND status IN ('pending', 'running', 'paused')
+           RETURNING id
+         ),
+         parked AS (
+           UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: صُفّر الطابور العام', updated_at = NOW()
+           WHERE batch_id IN (SELECT id FROM live) AND company_id = $1::uuid AND status = 'queued'
+           RETURNING batch_id
+         ),
+         bump AS (
+           UPDATE ai_job_batches b SET skipped_count = skipped_count + c.n, updated_at = NOW()
+           FROM (SELECT batch_id, COUNT(*) AS n FROM parked GROUP BY batch_id) c
+           WHERE b.id = c.batch_id
+           RETURNING b.id
+         )
+         SELECT (SELECT COUNT(*) FROM live) AS cancelled, (SELECT COUNT(*) FROM parked) AS skipped`,
+        [payload.companyId, payload.userId]
+      );
+      if (!cleared.success) return { success: false, error: cleared.error };
+      const stuck = await adapter.query(
+        `UPDATE ai_job_batches SET status = 'cancelled', updated_at = NOW()
+         WHERE company_id = $1::uuid AND user_id = $2::uuid AND status = 'partial'
+         RETURNING id`,
+        [payload.companyId, payload.userId]
+      );
+      if (!stuck.success) return { success: false, error: stuck.error };
+      return {
+        success: true,
+        data: {
+          cancelled: Number(cleared.rows?.[0]?.cancelled || 0),
+          skipped: Number(cleared.rows?.[0]?.skipped || 0),
+          cleared: stuck.rows ? stuck.rows.length : 0,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  },
+
   async batchRecover(payload: {
     companyId: string; userId: string; batchId: string;
   }): Promise<{ success: boolean; data?: { recoveredFailed: number; recoveredSkipped: number; finalStatus: string | null }; error?: string }> {

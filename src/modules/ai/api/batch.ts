@@ -198,6 +198,25 @@ export function cancelBatch(batchId: string, override?: BatchContextOverride) {
   return setStatus(batchId, 'cancelled', override);
 }
 
+/**
+ * تصفير الطابور العام: إلغاء كل الدفعات الحية (بانتظار/تنفيذ/إيقاف) مع
+ * ركن معلقها، وإغلاق الدفعات المتعثرة (partial). سجلات المنفذ/الفاشل تبقى
+ * للمراجعة — تنتهي فقط قابليتها للاستئناف.
+ */
+export async function clearQueue(
+  override?: BatchContextOverride,
+): Promise<{
+  success: boolean;
+  data?: { cancelled: number; skipped: number; cleared: number };
+  error?: string;
+}> {
+  const ctx = resolveContext(override);
+  if (!ctx) return { success: false, error: 'لا توجد شركة نشطة أو مستخدم مسجل' };
+  const res = await aiApi.batchClear(ctx.companyId, ctx.userId);
+  if (!res.success || !res.data) return { success: false, error: res.error || 'فشل تصفير الطابور' };
+  return { success: true, data: res.data };
+}
+
 /** Requeue failed items of a partial batch (attempts reset). */
 export async function retryFailedBatch(
   batchId: string,

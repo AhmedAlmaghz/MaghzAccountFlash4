@@ -1,7 +1,7 @@
 import type { ToolDefinition, ToolLedgerView } from '../types';
 import { aiApi } from '../api/index';
-import { enqueueBatch, getBatch, listBatches } from '../api/batch';
-import { planBatchResume, resolveBatchItems, summarizeBatchProgress, type BatchItemInput } from '../engine/batchQueue';
+import { enqueueBatch, getBatch, listBatches, clearQueue } from '../api/batch';
+import { planBatchResume, resolveBatchItems, summarizeBatchProgress, summarizeMission, buildIdempotencyKey, batchToolLayer, type BatchItemInput } from '../engine/batchQueue';
 import { BATCH_CREATE_CHUNK } from '../api/batchTypes';
 import { isBatchActive } from '../engine/batchRunner';
 import { getTool } from './registry';
@@ -37,8 +37,7 @@ const BATCH_ITEM_SCHEMA = {
 };
 
 /** هل تشير وسائط العنصر إلى مرجع عنصر مُسقَط؟ ({{ref}} / {{ref.field}} / @ref) */
-function argsReferenceRef(value: unknown, ref: string): boolean {
-  if (typeof value === 'string') {
+function argsReferenceRef(value: unknown, ref: string): boolean {  if (typeof value === 'string') {
     return value === `@${ref}` || value.includes(`{{${ref}}}`) || value.includes(`{{${ref}.`);
   }
   if (Array.isArray(value)) return value.some((v) => argsReferenceRef(v, ref));
@@ -63,7 +62,8 @@ function sanitizeBatchToolName(raw: string): string {
 
 /** الحقول المرجعية الشائعة التي يجب أن تكون UUID حقيقية (قاعدة 42). */
 const ID_FIELDS = [
-  'customerId', 'supplierId', 'productId', 'warehouseId', 'fromWarehouseId',
+  'customerId', 'supplierId', 'productId', 'materialId', 'invoiceId',
+  'warehouseId', 'fromWarehouseId',
   'toWarehouseId', 'cashBoxId', 'employeeId', 'accountId', 'unitId',
   'baseUnitId', 'productTypeId', 'categoryId', 'departmentId', 'leadId',
   'opportunityId', 'workOrderId', 'bomId', 'bomProductId', 'shiftId', 'payrollRunId',
@@ -82,8 +82,7 @@ export interface PreflightProblem {
  * المستخدم وقت التنفيذ (MISSING_ID بعد الموافقة = "عمليات ناقصة" وافق
  * عليها المستخدم دون علمه). المراجع {{ref}} و@ref تُتخطى — تُحل وقت التشغيل.
  */
-function preflightValidateItems(items: NormalizedBatchItem[]): PreflightProblem[] {
-  const problems: PreflightProblem[] = [];
+export function preflightValidateItems(items: NormalizedBatchItem[]): PreflightProblem[] {  const problems: PreflightProblem[] = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     if (!it.tool) {
@@ -109,6 +108,28 @@ function preflightValidateItems(items: NormalizedBatchItem[]): PreflightProblem[
           problem: `الحقل ${field} في ${it.tool} ليس UUID صالحاً ("${v.slice(0, 40)}") — استخدم معرفاً من أدوات البحث (search.*) ولا تمرر أسماء أو أكواداً حرفية`,
         });
       }
+    }
+    // الحقول المرجعية داخل السطور (lines[]/items[]): الجلسة 2026-09-24 سجلت
+    // 5 دفعات متتالية فاشلة بـ "productId مطلوب"/"materialId" لأن الفحص كان
+    // يرى المستوى الأعلى فقط — والسطور كانت تحمل أسماءً حرفية لا UUID.
+    const nestedLines = it.args.lines ?? it.args.items;
+    if (Array.isArray(nestedLines)) {
+      nestedLines.forEach((rawLine, li) => {
+        if (!rawLine || typeof rawLine !== 'object') return;
+        const line = rawLine as Record<string, unknown>;
+        for (const field of ID_FIELDS) {
+          const v = line[field];
+          if (v === undefined || v === null) continue;
+          if (typeof v !== 'string') continue;
+          if (v.includes('{{') || v.startsWith('@')) continue;
+          if (!UUID_RE.test(v.trim())) {
+            problems.push({
+              index: i,
+              problem: `العنصر ${i + 1} سطر ${li + 1}: الحقل ${field} ليس UUID صالحاً ("${v.slice(0, 40)}") — استخدم معرفاً من أدوات البحث (search.products/units…) ولا تمرر أسماء حرفية`,
+            });
+          }
+        }
+      });
     }
   }
   return problems;
@@ -141,7 +162,7 @@ export function normalizeBatchItems(rawItems: unknown): NormalizedBatchItem[] {
   // tools, never on a renamed key. Stray siblings (e.g. name) still
   // hoist into args below.
   const KNOWN_ITEM_KEYS = new Set(['tool', 'args', 'after', 'ref', 'label', 'type', 'data', 'action', 'payload']);
-  return list.map((it) => {
+  const normalized = list.map((it) => {
     const rawArgs = it.args ?? it.data ?? it.payload;
     const base = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {}) as Record<string, unknown>;
     const stray: Record<string, unknown> = {};
@@ -156,6 +177,45 @@ export function normalizeBatchItems(rawItems: unknown): NormalizedBatchItem[] {
       label: typeof it.label === 'string' && it.label.trim() ? it.label.trim().slice(0, 200) : undefined,
     };
   });
+  // الترتيب الاعتمادي التلقائي (الجلسة 2026-09-24): النموذج غالباً لا يربط
+  // بـ after، فسندٌ قبل قيد رأس المال يموت "الرصيد لا يكفي". الطبقات
+  // (كيانات ← مستندات ← ترحيل/سندات) تُطبق هنا فيشترك فيها الإنشاء والمعاينة.
+  return applyLayerOrder(normalized).items;
+}
+
+/**
+ * الترتيب الاعتمادي: فرز مستقر حسب طبقة الأداة (batchToolLayer) مع إعادة
+ * ترقيم after الرقمية. المراجع الاسمية لا تُمس (تُحل لاحقاً بالاسم).
+ * يُرجع عدد المواضع المتغيرة للإفصاح في ملخص الدفعة.
+ */
+export function applyLayerOrder(items: NormalizedBatchItem[]): { items: NormalizedBatchItem[]; moved: number } {
+  if (items.length < 2) return { items, moved: 0 };
+  const order = items.map((_, i) => i);
+  order.sort((a, b) => batchToolLayer(items[a].tool) - batchToolLayer(items[b].tool));
+  const newIndex = new Map<number, number>();
+  order.forEach((oldIdx, newIdx) => newIndex.set(oldIdx, newIdx));
+  const ordered = order.map((oldIdx) => items[oldIdx]);
+  for (const it of ordered) {
+    if (typeof it.after === 'number') {
+      const mapped = newIndex.get(it.after);
+      if (mapped !== undefined) it.after = mapped;
+    }
+  }
+  let moved = 0;
+  for (let ni = 0; ni < ordered.length; ni++) {
+    if (order[ni] !== ni) moved++;
+  }
+  return { items: ordered, moved };
+}
+
+/** هل تحوي الوسائط مرجعاً يُحل وقت التشغيل ({{ref}} / {{ref.field}} / @ref)؟ */
+function containsRefPlaceholder(value: unknown): boolean {
+  if (typeof value === 'string') return value.includes('{{') || value.startsWith('@');
+  if (Array.isArray(value)) return value.some(containsRefPlaceholder);
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some(containsRefPlaceholder);
+  }
+  return false;
 }
 
 /**
@@ -165,8 +225,10 @@ export function normalizeBatchItems(rawItems: unknown): NormalizedBatchItem[] {
  * after الرقمية، مع قائمة الإفصاح.
  * الجلسة الحقيقية 2026-09-14: نسيان المهمة أدى إلى دفعة أعادت إنشاء 5 كيانات
  * (موردين وعملاء) مكررين — الأرصدة الافتتاحية تضاعفت والبحث أعاد صفين لكل كيان.
+ * الجلسة 2026-09-24: نفس الفواتير أُنشئت مرتين في دفعتين مختلفتين — لذا
+ * الحارس الثاني (مفتاح عدم التكرار) يشمل المستندات أيضاً لا الكيانات فقط.
  */
-function filterSessionDuplicates(
+export function filterSessionDuplicates(
   items: NormalizedBatchItem[],
   ledger: ToolLedgerView | null,
 ): { effective: NormalizedBatchItem[]; skippedDuplicates: Array<{ name: string; existing: string; reason: string }> } {
@@ -176,26 +238,61 @@ function filterSessionDuplicates(
   const droppedIdx = new Set<number>();
   const droppedRefs = new Set<string>();
   const seenInBatch = new Map<string, string>(); // normName → أول ظهور
+  const seenKeysInBatch = new Set<string>(); // مفتاح عدم التكرار داخل الدفعة نفسها
 
   for (let i = 0; i < items.length; i++) {
     const entity = extractLedgerEntity(items[i]);
-    if (!entity) continue;
-    const norm = normalizeEntityName(entity.name);
-    if (!norm) continue;
-    const sessionDup = ledger.findDuplicateName(entity.name);
-    if (sessionDup) {
-      droppedIdx.add(i);
-      if (items[i].ref) droppedRefs.add(items[i].ref as string);
-      skippedDuplicates.push({ name: entity.name, existing: sessionDup.display, reason: 'أُنشئ سابقاً في هذه الجلسة' });
-      continue;
+    if (entity) {
+      const norm = normalizeEntityName(entity.name);
+      if (norm) {
+        const sessionDup = ledger.findDuplicateName(entity.name);
+        if (sessionDup) {
+          droppedIdx.add(i);
+          if (items[i].ref) droppedRefs.add(items[i].ref as string);
+          skippedDuplicates.push({ name: entity.name, existing: sessionDup.display, reason: 'أُنشئ سابقاً في هذه الجلسة' });
+          continue;
+        }
+        if (seenInBatch.has(norm)) {
+          droppedIdx.add(i);
+          if (items[i].ref) droppedRefs.add(items[i].ref as string);
+          skippedDuplicates.push({ name: entity.name, existing: seenInBatch.get(norm) as string, reason: 'مكرر داخل الدفعة نفسها' });
+          continue;
+        }
+        seenInBatch.set(norm, entity.name);
+      }
     }
-    if (seenInBatch.has(norm)) {
-      droppedIdx.add(i);
-      if (items[i].ref) droppedRefs.add(items[i].ref as string);
-      skippedDuplicates.push({ name: entity.name, existing: seenInBatch.get(norm) as string, reason: 'مكرر داخل الدفعة نفسها' });
-      continue;
+    // حارس المستندات عبر الدفعات: نفس الأداة بنفس الوسائط حرفياً أُنجزت
+    // سابقاً في هذه الجلسة (فاتورة/سند/قيد مكرر = فساد مالي مباشر).
+    // المراجع {{ref}}/@ref تُستثنى: تُحل وقت التشغيل فمفتاحها الآن يختلف
+    // عن المنفَّذ فعلاً — إسقاطها هنا كان سيمنع الدفعات المركبة الصحيحة.
+    if (!droppedIdx.has(i) && typeof ledger.hasCompletedKey === 'function') {
+      const args = items[i].args && typeof items[i].args === 'object' ? items[i].args : {};
+      if (!containsRefPlaceholder(args)) {
+        let key: string | null = null;
+        try {
+          key = buildIdempotencyKey(items[i].tool, args as Record<string, unknown>);
+        } catch {
+          key = null;
+        }
+        if (key && ledger.hasCompletedKey(key)) {
+          droppedIdx.add(i);
+          if (items[i].ref) droppedRefs.add(items[i].ref as string);
+          const label = items[i].label || entity?.name || items[i].tool;
+          skippedDuplicates.push({ name: label, existing: label, reason: 'نُفّذ بنفس البيانات سابقاً في هذه الجلسة' });
+          continue;
+        }
+        if (key) {
+          if (seenKeysInBatch.has(key)) {
+            droppedIdx.add(i);
+            if (items[i].ref) droppedRefs.add(items[i].ref as string);
+            const label = items[i].label || entity?.name || items[i].tool;
+            skippedDuplicates.push({ name: label, existing: label, reason: 'مكرر داخل الدفعة نفسها (نفس البيانات)' });
+            continue;
+          }
+          seenKeysInBatch.add(key);
+        }
+      }
     }
-    seenInBatch.set(norm, entity.name);
   }
 
   // تتابع الإسقاط: تابع عنصر مُسقَط (after رقمي/اسمي أو {{ref}} في الوسائط)
@@ -249,7 +346,7 @@ export const batchTools: ToolDefinition[] = [
     name: 'ai.enqueue_batch',
     labelAr: 'إنشاء دفعة عمليات',
     descriptionAr:
-      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من عمليتين كتابيتين (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة) فالموافقة واحدة بزر واحد. رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. شكل كل عنصر حصراً: {"tool": "<domain.verb>", "args": {...}, "after"?: رقم/اسم, "ref"?: "اسم", "label"?: "وصف"} — مثال: {"items": [{"tool": "sales.create_invoice", "args": {"customerId": "..."}}]}. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد. حارس التكرار: أي عنصر يعيد إنشاء كيان (مورد/عميل/منتج/مستودع/موظف…) أُنشئ سابقاً في نفس الجلسة يُسقط تلقائياً مع إفصاح في النتيجة — فلا تعِد إنشاء ما في "ما نُفّذ" بسجل المهمة؛ ابحث عنه بـsearch.* بدلاً من ذلك.',
+      'ينشئ دفعة عمليات مجمّعة تحت موافقة واحدة بدل بطاقة تأكيد لكل عملية — استخدمه لأي طلب يحوي أكثر من عمليتين كتابيتين (إدخال فواتير/سندات/منتجات/عملاء بالجملة، أو عمليات مركبة مرتبطة) فالموافقة واحدة بزر واحد. رتّب العناصر بحيث يسبق المُعتمَد عليه: المورّد قبل فواتيره، والفاتورة قبل سندها — واربطها عبر after (رقم تسلسلي أو ref دلالي). كشبكة أمان: النظام يعيد ترتيب العناصر تلقائياً حسب الاعتمادية (كيانات ← مستندات ← ترحيل/سندات) عندما تنسى الربط — وبطاقة الموافقة تعرض الترتيب الفعلي للتنفيذ. لتمرير مخرجات عنصر لاحق (معرف المورّد المنشأ مثلاً) استخدم {{ref.id}} أو {{ref.field}} داخل النصوص، أو @ref كقيمة كاملة — تُستبدل تلقائياً من المخرجات المحفوظة، والمرجع المجهول يُفشل العنصر بخطأ واضح. كل المعرفات (عميل/مورد/منتج/خزنة) يجب أن تكون UUID من أدوات البحث — لا تمرر أبداً كلمات حرفية مثل "bank" أو أسماء. شكل كل عنصر حصراً: {"tool": "<domain.verb>", "args": {...}, "after"?: رقم/اسم, "ref"?: "اسم", "label"?: "وصف"} — مثال: {"items": [{"tool": "sales.create_invoice", "args": {"customerId": "..."}}]}. كل عنصر يُنفَّذ بنفس صلاحياته وتدقيقه كالاستدعاء المفرد. حارس التكرار: أي عنصر يعيد إنشاء كيان (مورد/عميل/منتج/مستودع/موظف…) أُنشئ سابقاً في نفس الجلسة يُسقط تلقائياً مع إفصاح في النتيجة — فلا تعِد إنشاء ما في "ما نُفّذ" بسجل المهمة؛ ابحث عنه بـsearch.* بدلاً من ذلك.',
     permission: 'ai.use',
     dangerLevel: 'write',
     parameters: {
@@ -297,18 +394,36 @@ export const batchTools: ToolDefinition[] = [
         }
         return bits.length > 0 ? ` {${bits.join(', ')}}` : '';
       };
-      const shown = items.slice(0, MAX_PREVIEW).map((it, i) => {
+      // البطاقة تعرض ترتيب التنفيذ الفعلي (طبقات الاعتمادية) لا ترتيب
+      // الإرسال — وإلا وافق المستخدم على تسلسل ونُفّذ غيره.
+      const order = items.map((_, i) => i)
+        .sort((a, b) => batchToolLayer(toolOf(items[a])) - batchToolLayer(toolOf(items[b])));
+      const newIndex = new Map<number, number>();
+      order.forEach((oldIdx, newIdx) => newIndex.set(oldIdx, newIdx));
+      const ordered = order.map((oldIdx) => items[oldIdx]);
+      const wasReordered = order.some((oldIdx, newIdx) => oldIdx !== newIdx);
+      const reorderedNote = wasReordered
+        ? '\n(رُتبت تلقائياً حسب الاعتمادية: كيانات ← مستندات ← ترحيل/سندات)'
+        : '';
+      const shown = ordered.slice(0, MAX_PREVIEW).map((it, i) => {
         const tool = toolOf(it);
         const label = typeof it.label === 'string' && it.label.trim()
           ? ` — ${it.label.trim().slice(0, 60)}`
           : '';
-        const dep = it.after !== undefined && it.after !== null ? ` ← بعد #${typeof it.after === 'number' ? it.after + 1 : it.after}` : '';
+        // الاعتماد الرقمي يُعرض برقمه بعد إعادة الترتيب (نفس ما سينفَّذ).
+        const rawAfter = it.after as number | string | undefined;
+        const shownAfter = typeof rawAfter === 'number' && wasReordered
+          ? newIndex.get(rawAfter)
+          : rawAfter;
+        const dep = rawAfter !== undefined && rawAfter !== null
+          ? ` ← بعد #${typeof shownAfter === 'number' ? shownAfter + 1 : shownAfter}`
+          : '';
         return `${i + 1}. ${tool}${label}${argBit(it)}${dep}`;
       });
       const rest = items.length - shown.length;
       const tail = rest > 0 ? `\n… وعلاوة على ذلك ${rest} مهمة إضافية — اطلب القائمة الكاملة قبل الموافقة إن أردت` : '';
       const warn = items.length > 20 ? `\n⚠️ دفعة كبيرة (${items.length} عملية) برخصة واحدة — راجع كل سطر بعناية قبل الموافقة.` : '';
-      return items.length > 0 ? `${head}${warn}\nالمهام:\n${shown.join('\n')}${tail}` : head;
+      return items.length > 0 ? `${head}${warn}${reorderedNote}\nالمهام:\n${shown.join('\n')}${tail}` : head;
     },
     execute: async (args, ctx) => {
       const rawItems = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
@@ -513,7 +628,7 @@ export const batchTools: ToolDefinition[] = [
     name: 'ai.batch_status',
     labelAr: 'حالة دفعة',
     descriptionAr:
-      'يعرض تقدم دفعة (مُنجز/فاشل/مُتخطّى/متبقٍ) مع أول الأخطاء إن وجدت — أو يسرد أحدث الدفعات عند عدم تمرير batchId. استخدمه للإجابة عن "وين وصلت الدفعة؟" ولاحظ أن الفاشل يعرض سببه وإجراءه المقترح.',
+      'يعرض تقدم دفعة (مُنجز/فاشل/مُتخطّى/متبقٍ) مع أول الأخطاء إن وجدت — أو ملخص المهمة الكلي (كل الدفعات: ما أُنجز وما تبقى والمتعثر بأسمائه) عند عدم تمرير batchId. استخدمه للإجابة عن "وين وصلنا؟/ما المتبقي؟" واعرض حقل mission نصاً للمستخدم، ولاحظ أن الفاشل يعرض سببه وإجراءه المقترح.',
     permission: 'ai.use',
     dangerLevel: 'read',
     parameters: {
@@ -529,6 +644,9 @@ export const batchTools: ToolDefinition[] = [
         if (!list.success || !list.data) return { error: list.error || 'فشل جلب الدفعات' };
         if (list.data.length === 0) return { message: 'لا توجد دفعات بعد' };
         return {
+          // ملخص المهمة أولاً: سطر واحد يجيب "ما أُنجز وما تبقى" عبر كل
+          // الدفعات — النموذج يعرضه نصاً بدل تجميع البطاقات يدوياً.
+          mission: summarizeMission(list.data),
           batches: list.data.map((b) => ({
             batchId: b.id,
             title: b.title,
@@ -552,6 +670,35 @@ export const batchTools: ToolDefinition[] = [
         status: d.status,
         progress: summarizeBatchProgress(d.doneCount, d.failedCount, d.skippedCount, d.totalCount),
         errors,
+      };
+    },
+  },
+  {
+    name: 'ai.clear_queue',
+    labelAr: 'تصفير طابور الدفعات',
+    descriptionAr:
+      'يلغي كل الدفعات الحية (بانتظار/تنفيذ/إيقاف مؤقت) ويركن معلقها كمُتخطّى، ويغلق الدفعات المتعثرة (partial) — تصفير كامل لأي مهام معلقة. استخدمه عندما يقول المستخدم "امسح/صفّر الطابور/الدفعات" أو عندما تتراكم دفعات ميتة تخنق الجلسة. سجلات المنفذ/الفاشل تبقى للمراجعة لكنها تخرج من الاستئناف — الاستئناف بعد التصفير يتطلب دفعة جديدة.',
+    permission: 'ai.use',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    summarizeArgs: () => 'تصفير طابور الدفعات: إلغاء كل الحية وإغلاق المتعثرة (السجل محفوظ)',
+    execute: async (args, ctx) => {
+      void args;
+      const res = await clearQueue({ companyId: ctx.companyId, userId: ctx.userId });
+      if (!res.success || !res.data) return { error: res.error || 'فشل تصفير الطابور' };
+      const { cancelled, skipped, cleared } = res.data;
+      if (cancelled === 0 && cleared === 0) {
+        return { cleared: true, cancelled: 0, skipped: 0, clearedPartials: 0, summary: 'الطابور فارغ أصلاً — لا دفعات حية ولا متعثرة' };
+      }
+      return {
+        cleared: true,
+        cancelled,
+        skipped,
+        clearedPartials: cleared,
+        summary: `صُفّر الطابور: أُلغيت ${cancelled} دفعات حية ورُكن ${skipped} عنصراً معلقاً كمُتخطّى وأُغلقت ${cleared} دفعات متعثرة — السجل محفوظ للمراجعة ولا شيء قابل للاستئناف بعد الآن`,
       };
     },
   },

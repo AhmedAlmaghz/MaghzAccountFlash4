@@ -6,6 +6,7 @@ vi.mock('../api/index', () => ({
     batchGet: vi.fn(),
     batchRetryFailed: vi.fn(),
     batchSetStatus: vi.fn(),
+    batchClear: vi.fn(),
   },
 }));
 
@@ -25,10 +26,11 @@ const adminUser: User = { id: 'u1', username: 'admin', email: 'a@b.com', role: '
 const enqueue = batchTools.find((t) => t.name === 'ai.enqueue_batch')!;
 const resume = batchTools.find((t) => t.name === 'ai.resume_batch')!;
 const status = batchTools.find((t) => t.name === 'ai.batch_status')!;
+const clear = batchTools.find((t) => t.name === 'ai.clear_queue')!;
 
 describe('batchTools registration', () => {
-  it('exposes enqueue / preview / resume / status with summaries and ai.use gate', () => {
-    expect(batchTools).toHaveLength(4);
+  it('exposes enqueue / preview / resume / status / clear with summaries and ai.use gate', () => {
+    expect(batchTools).toHaveLength(5);
     for (const t of batchTools) {
       expect(t.permission).toBe('ai.use');
       expect(typeof t.summarizeArgs === 'function' || t.dangerLevel === 'read').toBe(true);
@@ -566,5 +568,242 @@ describe('ai.preview_batch (dry run)', () => {
     expect(out.verdict).toBe('ready');
     const plan = out.plan as Array<{ tool: string }>;
     expect(plan[0].tool).toBe('sales.create_invoice');
+  });
+});
+
+describe('ai.enqueue_batch dependency auto-order (session 2026-09-24)', () => {
+  // The model rarely links with `after` — a voucher before the capital
+  // entry dies "insufficient balance". Layers (entities ← documents ←
+  // postings/vouchers) apply automatically as a safety net.
+  const UUID = '11111111-1111-4111-8111-111111111111';
+
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+    for (const name of [
+      'sales.create_customer', 'sales.create_invoice', 'sales.post_invoice',
+      'accounting.create_receipt_voucher',
+    ]) {
+      registerTool({
+        name,
+        labelAr: 'أداة',
+        descriptionAr: 'وصف',
+        permission: 'sales.create',
+        dangerLevel: 'write',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({}),
+      });
+    }
+  });
+
+  it('executes entities before documents before postings/vouchers', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 3, inserted: 3 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'accounting.create_receipt_voucher', args: { customerId: UUID, amount: 100 } },
+        { tool: 'sales.post_invoice', args: { invoiceId: UUID } },
+        { tool: 'sales.create_customer', args: { name: 'عميل جديد' } },
+      ],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.batchId).toBe('b1');
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items;
+    expect(sent.map((s: { tool_name: string }) => s.tool_name)).toEqual([
+      'sales.create_customer',
+      'accounting.create_receipt_voucher',
+      'sales.post_invoice',
+    ]);
+  });
+
+  it('keeps stable order within one layer and remaps numeric after', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 3, inserted: 3 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'sales.create_invoice', args: { customerId: UUID } },
+        { tool: 'sales.create_customer', args: { name: 'ع' } },
+        { tool: 'sales.post_invoice', args: { invoiceId: UUID }, after: 0 },
+      ],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.batchId).toBe('b1');
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items;
+    // customer (layer 0) first, then invoice, then post — after remapped to the invoice's new seq
+    expect(sent.map((s: { tool_name: string }) => s.tool_name)).toEqual([
+      'sales.create_customer',
+      'sales.create_invoice',
+      'sales.post_invoice',
+    ]);
+    expect(sent[2].after_seq).toBe(1);
+  });
+
+  it('approval card shows execution order with a reorder note', () => {
+    const s = enqueue.summarizeArgs!({
+      items: [
+        { tool: 'sales.post_invoice', args: { invoiceId: UUID } },
+        { tool: 'sales.create_customer', args: { name: 'ع' } },
+      ],
+    });
+    // Head line lists tools in send order — the task list below follows
+    // execution order (entities first).
+    const tasks = s.split('المهام:')[1] ?? '';
+    const customerPos = tasks.indexOf('sales.create_customer');
+    const postPos = tasks.indexOf('sales.post_invoice');
+    expect(customerPos).toBeGreaterThan(-1);
+    expect(postPos).toBeGreaterThan(-1);
+    expect(customerPos).toBeLessThan(postPos);
+    expect(s).toContain('رُتبت تلقائياً');
+  });
+});
+
+describe('ai.enqueue_batch nested-line preflight (session 2026-09-24)', () => {
+  // Five consecutive batches died post-approval with "productId مطلوب" /
+  // "materialId" because the preflight saw only top-level args while the
+  // literal names hid inside lines[]. The check now descends one level.
+  const UUID = '11111111-1111-4111-8111-111111111111';
+
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+    registerTool({
+      name: 'manufacturing.create_bom',
+      labelAr: 'أداة',
+      descriptionAr: 'وصف',
+      permission: 'manufacturing.create',
+      dangerLevel: 'write',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({}),
+    });
+  });
+
+  it('rejects literal names inside lines[] BEFORE approval', async () => {
+    const out = (await enqueue.execute({
+      items: [{
+        tool: 'manufacturing.create_bom',
+        args: { productId: UUID, lines: [{ materialId: 'شوكلاتة خام', quantity: 6 }] },
+      }],
+    }, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchCreate).not.toHaveBeenCalled();
+    expect(String(out.error)).toContain('سطر 1');
+    expect(String(out.error)).toContain('materialId');
+    expect(String(out.error)).toContain('أدوات البحث');
+  });
+
+  it('passes UUIDs inside lines[] and skips {{ref}} placeholders', async () => {
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [{
+        tool: 'manufacturing.create_bom',
+        args: { productId: UUID, lines: [{ materialId: '{{mat1.id}}', quantity: 6 }] },
+      }],
+    }, ctx)) as Record<string, unknown>;
+    expect(out.error).toBeUndefined();
+    expect(out.batchId).toBe('b1');
+  });
+});
+
+describe('ai.enqueue_batch cross-batch document guard (session 2026-09-24)', () => {
+  // Same invoices were created twice in two different batches
+  // (INV-000001/INV-000003, PINV-0001/PINV-0004) because idempotency was
+  // per-batch only. Completed item keys now persist in the session ledger.
+  const UUID = '11111111-1111-4111-8111-111111111111';
+  const UUID2 = '22222222-2222-4222-8222-222222222222';
+
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+    registerTool({
+      name: 'sales.create_invoice',
+      labelAr: 'أداة',
+      descriptionAr: 'وصف',
+      permission: 'sales.create',
+      dangerLevel: 'write',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({}),
+    });
+  });
+
+  it('drops a verbatim re-enqueue of a completed document with disclosure', async () => {
+    const { buildIdempotencyKey } = await import('../engine/batchQueue');
+    const args = { customerId: UUID, total: 198000 };
+    const ledger = new TaskLedger();
+    ledger.registerCompletedKeys([buildIdempotencyKey('sales.create_invoice', args)]);
+    const dupCtx: ToolContext = { companyId: 'c1', userId: 'u1', ledger };
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b2', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [
+        { tool: 'sales.create_invoice', args },
+        { tool: 'sales.create_invoice', args: { customerId: UUID2, total: 100 } },
+      ],
+    }, dupCtx)) as Record<string, unknown>;
+    expect(out.batchId).toBe('b2');
+    const sent = mockedApi.batchCreate.mock.calls[0][0].items;
+    expect(sent).toHaveLength(1);
+    expect(out.skippedDuplicates).toEqual([
+      { name: 'sales.create_invoice', existing: 'sales.create_invoice', reason: 'نُفّذ بنفس البيانات سابقاً في هذه الجلسة' },
+    ]);
+  });
+
+  it('keeps working when the ledger lacks the new method (old fakes)', async () => {
+    // hasCompletedKey is optional on ToolLedgerView — legacy fakes exposing
+    // only findDuplicateName must not crash the guard.
+    const legacyLedger = { findDuplicateName: () => null };
+    const legacyCtx: ToolContext = { companyId: 'c1', userId: 'u1', ledger: legacyLedger };
+    mockedApi.batchCreate.mockResolvedValue({ success: true, data: { batchId: 'b1', total: 1, inserted: 1 } });
+    const out = (await enqueue.execute({
+      items: [{ tool: 'sales.create_invoice', args: { customerId: UUID, total: 5 } }],
+    }, legacyCtx)) as Record<string, unknown>;
+    expect(out.batchId).toBe('b1');
+  });
+});
+
+describe('ai.clear_queue execute', () => {
+  beforeEach(() => {
+    clearToolRegistry();
+    vi.clearAllMocks();
+    useAppStore.setState({ activeCompany: { id: 'c1', name: 'شركة', currency: 'YER' } });
+    useAuthStore.getState().login(adminUser);
+    for (const t of batchTools) registerTool(t);
+  });
+
+  it('is a write tool with a substance summary (confirmation card)', () => {
+    expect(clear.dangerLevel).toBe('write');
+    expect(clear.permission).toBe('ai.use');
+    expect(String(clear.summarizeArgs!({}))).toContain('تصفير');
+  });
+
+  it('reports cancelled / parked / closed counts honestly', async () => {
+    mockedApi.batchClear.mockResolvedValue({
+      success: true, data: { cancelled: 2, skipped: 5, cleared: 1 },
+    });
+    const out = (await clear.execute({}, ctx)) as Record<string, unknown>;
+    expect(mockedApi.batchClear).toHaveBeenCalledWith('c1', 'u1');
+    expect(out.cleared).toBe(true);
+    expect(out.cancelled).toBe(2);
+    expect(out.skipped).toBe(5);
+    expect(out.clearedPartials).toBe(1);
+    expect(String(out.summary)).toContain('2');
+    expect(String(out.summary)).toContain('5');
+  });
+
+  it('says the queue was already empty when nothing was cleared', async () => {
+    mockedApi.batchClear.mockResolvedValue({
+      success: true, data: { cancelled: 0, skipped: 0, cleared: 0 },
+    });
+    const out = (await clear.execute({}, ctx)) as Record<string, unknown>;
+    expect(out.cleared).toBe(true);
+    expect(String(out.summary)).toContain('فارغ');
+  });
+
+  it('surfaces transport failures as errors (no silent no-op)', async () => {
+    mockedApi.batchClear.mockResolvedValue({ success: false, error: 'gone' });
+    const out = (await clear.execute({}, ctx)) as Record<string, unknown>;
+    expect(String(out.error)).toContain('gone');
   });
 });

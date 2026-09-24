@@ -16,7 +16,7 @@ import { isBatchActive, isAnyBatchActive, runBatch, batchProgressLine } from './
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget, untrustedDataBlock } from './llmParts';
 import { extractiveDigest, digestMessage } from './summarizer';
 import { TaskLedger } from './taskLedger';
-import { summarizeBatchOutcomeForModel, batchItemLabel } from './batchQueue';
+import { summarizeBatchOutcomeForModel, batchItemLabel, completedKeysOf } from './batchQueue';
 import { getBatch } from '../api/batch';
 import { planBatchResume } from './batchQueue';
 import type { JobBatchDetail } from '../api/batchTypes';
@@ -24,7 +24,7 @@ import type { PreparedAttachment } from '../attachments/attachmentTypes';
 import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
 import { attachmentContextBlock } from './llmParts';
 import { resolveArgsForCard } from './cardResolvers';
-import { DOC_ANY_RE, NOUN_EN, claimsBusinessAction, extractClaimedEntities } from './claims';
+import { DOC_ANY_RE, NOUN_EN, claimsBusinessAction, claimsGlobalCompletion, extractClaimedEntities } from './claims';
 import { compactToolResultForLlm, summarizeResult } from './resultCards';
 import { loadMemoryBlock } from '../tools/memoryTools';
 import { addUsage, checkBudget, emptyUsage, formatUsage, type TokenUsage } from './usageMeter';
@@ -79,7 +79,7 @@ let engineInstance: ChatEngine | null = null;
 
 // Anti-fabrication claim detection lives in ./claims (D1-light extraction);
 // re-exported here so existing importers keep working untouched.
-export { claimsBusinessAction, extractClaimedEntities };
+export { claimsBusinessAction, claimsGlobalCompletion, extractClaimedEntities };
 
 export function getChatEngine(): ChatEngine {
   if (!engineInstance) engineInstance = new ChatEngine();
@@ -843,8 +843,11 @@ class ChatEngine {
       this.history.push({ role: 'assistant', content: finalContent });
       // سجل المهمة: الدفعة المنتهية (وحدها) تدخل الذاكرة مع كياناتها المنفَّذة
       // (status=done فقط) — فلا ينسى المساعد ما نُفّذ ولا يعيد إنشاء كياناته.
+      // ومفاتيح عدم التكرار: نفس العنصر بحرفيته لا يُعاد في دفعة لاحقة
+      // (الجلسة 2026-09-24: فواتير مكررة عبر دفعتين مختلفتين).
       try {
         this.ledger.recordFromBatchDetail(final);
+        this.ledger.registerCompletedKeys(completedKeysOf(final));
       } catch { /* الذاكرة خدمة إضافية — لا تُسقط الدورة أبداً */ }
       return final;
     } catch (e) {
@@ -928,6 +931,12 @@ class ChatEngine {
           .slice(0, 6)
           .map((i) => batchItemLabel(i));
         const msg = `لا جديد للاستئناف — الدفعة اكتملت جزئياً سابقاً (${batchProgressLine(detail)})${failedNamed.length > 0 ? ` — الفاشل: ${failedNamed.join('؛ ')}` : ''}. قل "أعد الفاشلة" إن أردت التصحيح.`;
+        // الجلسة 2026-09-24: "استمر" المتكرر على دفعة منتهية ولّد 5 رسائل
+        // متطابقة تلوث السياق — لا تدفع نفس الرسالة مرتين متتاليتين.
+        const lastContent = store.messages.length > 0
+          ? String(store.messages[store.messages.length - 1]?.content ?? '')
+          : '';
+        if (lastContent === msg) return { started: false, message: msg };
         store.addMessage({ role: 'assistant', kind: 'error', content: msg });
         this.history.push({ role: 'assistant', content: msg });
         return { started: false, message: msg };
@@ -1109,6 +1118,7 @@ class ChatEngine {
   private async correctFabricatedReply(
     streamingId: string | null,
     streamedContent: boolean,
+    extraContext?: string,
   ): Promise<void> {
     this.fabricationRetries++;
     this.touchProgress();
@@ -1131,7 +1141,8 @@ class ChatEngine {
     this.history.push({
       role: 'user',
       content:
-        '[تنبيه نظام — إلزامي]: ردّك الأخير ادّعى تنفيذ عملية (إنشاء/ترحيل مستند أو قيد) دون استدعاء أي أداة كتابة حقيقية، وهذا ممنوع تماماً ولن يُعرض على المستخدم. أكمل الآن بأحد أمرين فقط: (1) استدعِ الأداة المناسبة فعلياً بالمعطيات المتوفرة عبر function-calls، أو (2) أقرّ بوضوح أن العملية لم تُنفَّذ واذكر السبب.',
+        '[تنبيه نظام — إلزامي]: ردّك الأخير ادّعى تنفيذ عملية (إنشاء/ترحيل مستند أو قيد) دون استدعاء أي أداة كتابة حقيقية، وهذا ممنوع تماماً ولن يُعرض على المستخدم. أكمل الآن بأحد أمرين فقط: (1) استدعِ الأداة المناسبة فعلياً بالمعطيات المتوفرة عبر function-calls، أو (2) أقرّ بوضوح أن العملية لم تُنفَّذ واذكر السبب.' +
+        (extraContext ?? ''),
     });
 
     await this.runLoop();
@@ -1272,7 +1283,10 @@ class ChatEngine {
     for (const batchId of batchIds.slice(0, 10)) {
       try {
         const got = await getBatch(batchId, { companyId: this.ctx.companyId, userId: this.ctx.userId });
-        if (got.success && got.data) this.ledger.recordFromBatchDetail(got.data);
+        if (got.success && got.data) {
+          this.ledger.recordFromBatchDetail(got.data);
+          this.ledger.registerCompletedKeys(completedKeysOf(got.data));
+        }
       } catch { /* الذاكرة خدمة إضافية — لا تعيق الاستعادة أبداً */ }
     }
   }
@@ -1854,6 +1868,20 @@ class ChatEngine {
     if (this.successfulWritesThisSend.size === 0 && claimsBusinessAction(raw) && !this.claimMatchesExecutedWrite(raw)) {
       await this.correctFabricatedReply(streamingId, streamedContent);
       return;
+    }
+    // ── Global-completion guard (session 2026-09-24) ────────────────
+    // "تم إنجاز كافة المهام" مع بنود فاشلة في جدول السجل = كذب بالإغفال
+    // حتى لو بعض البنود نُفذت فعلاً (دليل جزئي لا يبرر "كافة"). يُصحح
+    // بذكر الفاشل بأسمائه ليعرضه النموذج ويقترح إصلاحه بدل دفنه.
+    if (this.successfulWritesThisSend.size === 0 && claimsGlobalCompletion(raw)) {
+      const failedNames = this.ledger.getFailedTaskNames(6);
+      if (failedNames.length > 0 || !this.claimMatchesExecutedWrite(raw)) {
+        const extra = failedNames.length > 0
+          ? ` بنود ما زالت فاشلة في هذه الجلسة (من جدول المهام): ${failedNames.join('؛ ')} — اذكرها صراحة واسأل المستخدم عن إصلاحها، ولا تدّعِ اكتمالها أبداً.`
+          : '';
+        await this.correctFabricatedReply(streamingId, streamedContent, extra);
+        return;
+      }
     }
     // Silent stripping of imitation blocks also hides failed attempts:
     // if the model emitted textual fake tool-calls, correct it too.

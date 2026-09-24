@@ -46,7 +46,7 @@ describe('preload parity gate (CI)', () => {
       'subscribeStream',
       'stopStream',
       'batchCreate', 'batchClaim', 'batchItemDone', 'batchItemFail',
-      'batchSetStatus', 'batchRetryFailed', 'batchRecover', 'batchRelease', 'batchGet', 'batchList',
+      'batchSetStatus', 'batchClear', 'batchRetryFailed', 'batchRecover', 'batchRelease', 'batchGet', 'batchList',
     ];
     for (const src of [cjs, js]) {
       const methods = exposedMethods(src);
@@ -82,7 +82,7 @@ describe('preload parity gate (CI)', () => {
       'subscribeStream',
       'stopStream',
       'batchCreate', 'batchClaim', 'batchItemDone', 'batchItemFail',
-      'batchSetStatus', 'batchRetryFailed', 'batchRecover', 'batchRelease', 'batchGet', 'batchList',
+      'batchSetStatus', 'batchClear', 'batchRetryFailed', 'batchRecover', 'batchRelease', 'batchGet', 'batchList',
     ];
     const missing = required.filter((r) => !new RegExp(`\\b${r}\\s*:`).test(stub));
     expect(missing, `e2e electronAI stub missing methods: ${missing.join(', ')}`).toEqual([]);

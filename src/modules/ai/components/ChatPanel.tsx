@@ -10,8 +10,9 @@ import { useNavigate } from 'react-router-dom';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { ProcessingStatus } from './ProcessingStatus';
-import { Bot, History, Play, Sparkles, X } from 'lucide-react';
-import { findResumableBatches } from '../api/batch';
+import { Bot, History, Play, Sparkles, Trash2, X } from 'lucide-react';
+import { findResumableBatches, clearQueue } from '../api/batch';
+import { useToastStore } from '@/core/store/toastStore';
 import { isBatchActive } from '../engine/batchRunner';
 import type { JobBatchSummary } from '../api/batchTypes';
 import { extractSuggestions, type Suggestion } from '../suggestions/suggestionEngine';
@@ -190,6 +191,49 @@ export function ChatPanel() {
     await engine.resumeBatchById(batchId);
   }, [engine]);
 
+  // ── Zero the queue ───────────────────────────────────────────────────
+  // Two-step confirm (no modal dependency): first click arms, second click
+  // fires. Cancels every live batch, parks their queued items and closes
+  // stuck partials — history rows stay for audit.
+  const addToast = useToastStore((s) => s.addToast);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (clearTimer.current) clearTimeout(clearTimer.current);
+  }, []);
+  const handleClearQueue = useCallback(async () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      clearTimer.current = setTimeout(() => setConfirmClear(false), 6000);
+      return;
+    }
+    if (clearTimer.current) {
+      clearTimeout(clearTimer.current);
+      clearTimer.current = null;
+    }
+    setConfirmClear(false);
+    setClearing(true);
+    try {
+      const res = await clearQueue();
+      if (res.success && res.data) {
+        setResumable([]);
+        addToast('success', t('ai.batch.cleared', {
+          cancelled: res.data.cancelled,
+          skipped: res.data.skipped,
+          cleared: res.data.cleared,
+        }));
+      } else {
+        addToast('error', t('ai.batch.clearError'));
+      }
+    } catch {
+      addToast('error', t('ai.batch.clearError'));
+    } finally {
+      setClearing(false);
+    }
+  }, [confirmClear, addToast, t]);
+
   // Suggestions for the last assistant message — interactive action chips
   const lastAssistantSuggestions = useMemo<Suggestion[]>(() => {
     if (lastAssistantIndex < 0 || isProcessing) return [];
@@ -323,6 +367,20 @@ export function ChatPanel() {
                   {t('ai.batch.resumeAction')}
                 </button>
               ))}
+              <button
+                onClick={() => void handleClearQueue()}
+                disabled={clearing}
+                className={cn(
+                  'inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-xl border transition-all active:scale-95 disabled:opacity-50',
+                  confirmClear
+                    ? 'border-danger-400 dark:border-danger-600 bg-danger-500 text-white hover:shadow-lift'
+                    : 'border-gold-300 dark:border-gold-800 text-gold-800 dark:text-gold-200 hover:bg-gold-100 dark:hover:bg-gold-900/40'
+                )}
+                title={confirmClear ? t('ai.batch.confirmClear') : t('ai.batch.clearQueue')}
+              >
+                <Trash2 size={11} />
+                {clearing ? t('ai.batch.clearing') : confirmClear ? t('ai.batch.confirmClear') : t('ai.batch.clearQueue')}
+              </button>
               <button
                 onClick={() => setResumeDismissed(true)}
                 className="p-1.5 rounded-xl text-gold-600 dark:text-gold-400 hover:bg-gold-100 dark:hover:bg-gold-900/40"

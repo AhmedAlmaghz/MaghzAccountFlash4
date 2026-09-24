@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { claimsBusinessAction, extractClaimedEntities } from './claims';
+import { claimsBusinessAction, claimsGlobalCompletion, extractClaimedEntities } from './claims';
 
 /**
  * P1-4 regression: DOC_NUMBER_RE only knew INV/PINV/QTN/RV/PV/JE/SRT/PRT —
@@ -75,5 +75,31 @@ describe('claimsBusinessAction — full document-number coverage', () => {
     // Entity extraction + AR↔EN bridge travel with the guard.
     expect(extractClaimedEntities('قمت بإنشاء العميل والمورد بنجاح')).toEqual(['عميل', 'مورد']);
     expect(extractClaimedEntities('سجّلت العملية')).toEqual([]);
+  });
+
+  it('NOW fires on إنجاز-family verbs (session 2026-09-24 blind spot)', () => {
+    // "تم إنجاز كافة المهام المطلوبة بنجاح" sailed past the guard: إنجاز
+    // was not a claim verb at all.
+    expect(claimsBusinessAction('تم إنجاز الفاتورة بنجاح')).toBe(true);
+    expect(claimsBusinessAction('أنجزت إنشاء المورد بنجاح')).toBe(true);
+    expect(claimsBusinessAction('أكملت ترحيل السندات')).toBe(true);
+  });
+});
+
+describe('claimsGlobalCompletion — global-completion claims (session 2026-09-24)', () => {
+  it('fires on global completion assertions', () => {
+    expect(claimsGlobalCompletion('تم إنجاز كافة المهام المطلوبة بنجاح')).toBe(true);
+    expect(claimsGlobalCompletion('أكملت كل المطلوب')).toBe(true);
+    expect(claimsGlobalCompletion('انتهيت من جميع العمليات')).toBe(true);
+  });
+
+  it('does NOT fire on read-only summaries, scoped claims or questions', () => {
+    // No global scope → honest read summaries pass untouched.
+    expect(claimsGlobalCompletion('انتهيت من البحث عن العملاء')).toBe(false);
+    expect(claimsGlobalCompletion('تم إنجاز الفاتورة بنجاح')).toBe(false);
+    // Interrogatives ask — they assert nothing.
+    expect(claimsGlobalCompletion('هل اكتملت كافة المهام؟')).toBe(false);
+    expect(claimsGlobalCompletion('شكراً لك')).toBe(false);
+    expect(claimsGlobalCompletion('')).toBe(false);
   });
 });

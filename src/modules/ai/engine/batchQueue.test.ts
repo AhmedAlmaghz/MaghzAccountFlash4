@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveBatchItems,
   buildIdempotencyKey,
+  completedKeysOf,
+  batchToolLayer,
+  summarizeMission,
   extractOutputScalars,
   resolveOutputId,
   stableStringify,
@@ -358,5 +361,82 @@ describe('summarizeBatchOutcomeForModel — الإصلاح الاستباقي', 
     expect(batchItemLabel({ toolName: 'purchases.create_supplier', args: { name: 'الشجاع للتجارة' } })).toBe('الشجاع للتجارة');
     expect(batchItemLabel({ label: 'شارة', toolName: 'sales.create_invoice', args: {} })).toBe('شارة');
     expect(batchItemLabel({ toolName: 'sales.create_invoice', args: {} })).toBe('sales.create_invoice');
+  });
+});
+
+describe('completedKeysOf — cross-batch duplicate guard (session 2026-09-24)', () => {  it('returns keys for done items only, skipping refs and non-done', () => {
+    const args = { customerId: 'c1', total: 198000 };
+    const keys = completedKeysOf({
+      items: [
+        { toolName: 'sales.create_invoice', args, status: 'done' },
+        { toolName: 'sales.create_invoice', args: { customerId: 'c2' }, status: 'failed' },
+        { toolName: 'sales.create_invoice', args: { customerId: '{{sup1.id}}' }, status: 'done' },
+        { toolName: 'sales.create_invoice', args: { customerId: '@sup1' }, status: 'done' },
+        { toolName: undefined, args, status: 'done' },
+      ],
+    });
+    expect(keys).toEqual([buildIdempotencyKey('sales.create_invoice', args)]);
+  });
+
+  it('returns [] for null/empty details', () => {
+    expect(completedKeysOf(null)).toEqual([]);
+    expect(completedKeysOf({ items: [] })).toEqual([]);
+  });
+});
+
+describe('summarizeMission — unified mission board (session 2026-09-24)', () => {
+  it('aggregates totals across batches with remaining count', () => {
+    const s = summarizeMission([
+      { title: 'كيانات', status: 'done', doneCount: 17, failedCount: 1, skippedCount: 0, totalCount: 18 },
+      { title: 'سندات', status: 'partial', doneCount: 3, failedCount: 3, skippedCount: 0, totalCount: 6 },
+    ]);
+    expect(s).toContain('2 دفعات');
+    expect(s).toContain('أُنجز 20');
+    expect(s).toContain('فشل 4');
+    expect(s).toContain('متبقٍ 0');
+    expect(s).toContain('من 24');
+  });
+
+  it('names troubled batches with their failure counts', () => {
+    const s = summarizeMission([
+      { title: 'تركيبات', status: 'partial', doneCount: 0, failedCount: 2, skippedCount: 1, totalCount: 3 },
+      { title: 'نظيفة', status: 'done', doneCount: 5, failedCount: 0, skippedCount: 0, totalCount: 5 },
+    ]);
+    expect(s).toContain('متعثر');
+    expect(s).toContain('تركيبات');
+    expect(s).not.toContain('نظيفة');
+  });
+
+  it('reports emptiness honestly', () => {
+    expect(summarizeMission([])).toBe('لا توجد دفعات بعد');
+    expect(summarizeMission(null as never)).toBe('لا توجد دفعات بعد');
+  });
+});
+
+describe('batchToolLayer — dependency auto-ordering (session 2026-09-24)', () => {
+  it('puts master entities first (layer 0)', () => {
+    expect(batchToolLayer('sales.create_customer')).toBe(0);
+    expect(batchToolLayer('purchases.create_supplier')).toBe(0);
+    expect(batchToolLayer('inventory.create_product')).toBe(0);
+    expect(batchToolLayer('inventory.create_warehouse')).toBe(0);
+    expect(batchToolLayer('hr.create_employee')).toBe(0);
+    expect(batchToolLayer('settings.create_cash_box')).toBe(0);
+  });
+
+  it('keeps documents in the middle (layer 1)', () => {
+    expect(batchToolLayer('sales.create_invoice')).toBe(1);
+    expect(batchToolLayer('manufacturing.create_bom')).toBe(1);
+    expect(batchToolLayer('manufacturing.create_work_order')).toBe(1);
+    expect(batchToolLayer('accounting.create_journal_entry')).toBe(1);
+    expect(batchToolLayer('sales.create_and_post_invoice')).toBe(1);
+  });
+
+  it('puts postings, transitions and vouchers last (layer 2)', () => {
+    expect(batchToolLayer('sales.post_invoice')).toBe(2);
+    expect(batchToolLayer('manufacturing.update_work_order_status')).toBe(2);
+    expect(batchToolLayer('accounting.create_receipt_voucher')).toBe(2);
+    expect(batchToolLayer('accounting.create_payment_voucher')).toBe(2);
+    expect(batchToolLayer('crm.convert_lead_to_customer')).toBe(2);
+    expect(batchToolLayer('hr.process_payroll_flow')).toBe(2);
   });
 });

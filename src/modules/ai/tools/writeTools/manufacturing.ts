@@ -2,12 +2,51 @@ import type { ToolDefinition } from '../../types';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
 import { manufacturingApi } from '@/modules/manufacturing/api';
+import { bestFuzzyMatch } from '@/core/utils/normalizeArabic';
+import type { Product } from '@/modules/inventory/types';
 import {
   num,
   str,
   round2,
   resolveBaseQty,
 } from './shared';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * حلّ معرف منتج من UUID أو اسم بشري — الجلسة 2026-09-24 سجلت 5 دفعات
+ * متتالية فاشلة لأن النموذج يمرر أسماء المنتجات ("شوكلاتة خام") في حقول
+ * المعرفات. بدل رفضها بعد الموافقة، تُحلّ داخلياً بمطابقة ضبابية على
+ * الأسماء العربية/الإنجليزية/الكود — والغامض يُرفض بخطأ يوجّه للبحث.
+ */
+async function resolveProductId(
+  companyId: string,
+  idCandidate: string | undefined,
+  nameCandidate: string | undefined,
+  productsCache: { list: Product[] | null },
+): Promise<{ id: string } | { error: string }> {
+  const raw = (idCandidate ?? '').trim() || (nameCandidate ?? '').trim();
+  if (!raw) return { error: 'productId مطلوب — مرر معرف المنتج من search.products أو اسمه نصاً في productName' };
+  if (UUID_RE.test(raw)) return { id: raw };
+  // اسم بشري — حلّه داخلياً بدل الفشل بعد الموافقة
+  try {
+    if (!productsCache.list) {
+      const all = await inventoryApi.getProducts(companyId);
+      if (!all.success || !all.data) return { error: 'تعذّر جلب المنتجات لحل الاسم — استخدم search.products للحصول على المعرف' };
+      productsCache.list = all.data;
+    }
+    const best = bestFuzzyMatch(
+      raw,
+      productsCache.list,
+      (p) => `${p.nameAr ?? ''} ${p.nameEn ?? ''} ${p.code ?? ''}`,
+      0.5,
+    );
+    if (!best) return { error: `لم يُعثر على منتج باسم "${raw.slice(0, 40)}" — استخدم search.products للحصول على معرفه` };
+    return { id: best.item.id };
+  } catch {
+    return { error: 'تعذّر حل اسم المنتج — استخدم search.products للحصول على المعرف' };
+  }
+}
 
 /**
  * WRITE tools — التصنيع (7 أداة).
@@ -21,13 +60,14 @@ export const manufacturingWriteTools: ToolDefinition[] = [
   {
     name: 'manufacturing.create_bom',
     labelAr: 'إنشاء تركيبة منتج (BOM)',
-    descriptionAr: 'ينشئ تركيبة منتج (Bill of Materials) تحدد المواد المكوّنة للمنتج وتكاليفها وتُحسب التكلفة تلقائياً. outputQuantity = كمية المنتج النهائي التي تنتجها دفعة واحدة من هذه التركيبة (افتراضي 1). استخدم search.products أولاً؛ تكلفة الوحدة تُجلب تلقائياُ من سعر تكلفة المنتج إذا لم تُحدد.',
+    descriptionAr: 'ينشئ تركيبة منتج (Bill of Materials) تحدد المواد المكوّنة للمنتج وتكاليفها وتُحسب التكلفة تلقائياً. outputQuantity = كمية المنتج النهائي التي تنتجها دفعة واحدة من هذه التركيبة (افتراضي 1). مرر معرفات UUID من search.products — أو الأسماء نصاً في productName/materialName وسيحلها النظام داخلياً؛ تكلفة الوحدة تُجلب تلقائياُ من سعر تكلفة المنتج إذا لم تُحدد.',
     permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        productId: { type: 'string', description: 'معرف المنتج النهائي (من search.products — يجب أن يكون نوعه منتج نهائي/تام الإنتاج)' },
+        productId: { type: 'string', description: 'معرف المنتج النهائي (من search.products — يجب أن يكون نوعه منتج نهائي/تام الإنتاج) أو اسمه نصاً' },
+        productName: { type: 'string', description: 'بديل بشري لـ productId: اسم المنتج النهائي نصاً (يُحل داخلياً)' },
         version: { type: 'string', description: 'إصدار التركيبة (افتراضي "1.0")' },
         outputQuantity: { type: 'number', description: 'كمية المنتج النهائي المنتجة من دفعة واحدة بهذه المواد (افتراضي 1)' },
         notes: { type: 'string' },
@@ -37,8 +77,9 @@ export const manufacturingWriteTools: ToolDefinition[] = [
           items: {
             type: 'object',
             properties: {
-              materialId: { type: 'string', description: 'معرف المادة الخام (من search.products — يقبل productId كبديل)' },
+              materialId: { type: 'string', description: 'معرف المادة الخام (من search.products — يقبل productId كبديل) أو اسمها نصاً' },
               productId: { type: 'string', description: 'بديل لـ materialId' },
+              materialName: { type: 'string', description: 'بديل بشري: اسم المادة الخام نصاً (يُحل داخلياً)' },
               quantity: { type: 'number', description: 'الكمية اللازمة لدفعة واحدة (بالوحدة المذكورة أو الأساسية)' },
               unitId: { type: 'string', description: 'معرف وحدة المادة (من search.product_units) — اختياري' },
               unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
@@ -48,16 +89,18 @@ export const manufacturingWriteTools: ToolDefinition[] = [
           },
         },
       },
-      required: ['productId', 'lines'],
+      required: ['lines'],
     },
     summarizeArgs: (a) => {
       const r = a as Record<string, unknown>;
       const arr = (Array.isArray(r.lines) ? r.lines : Array.isArray(r.items) ? r.items : []) as unknown[];
-      return `إنشاء تركيبة لمنتج: ${String(r.productId || '').slice(0, 8)}… بعدد مواد: ${arr.length}`;
+      return `إنشاء تركيبة لمنتج: ${String(r.productId ?? r.productName ?? '').slice(0, 8)}… بعدد مواد: ${arr.length}`;
     },
     execute: async (args, ctx) => {
-      const productId = str(args.productId);
-      if (!productId) return { error: 'productId مطلوب' };
+      const productsCache: { list: Product[] | null } = { list: null };
+      const headerResolved = await resolveProductId(ctx.companyId, str(args.productId), str(args.productName), productsCache);
+      if ('error' in headerResolved) return { error: headerResolved.error };
+      const productId = headerResolved.id;
       const rawInput = args.lines ?? args.items;
       const rawLines = Array.isArray(rawInput) ? rawInput : [];
       if (rawLines.length === 0) return { error: 'يجب تمرير مادة واحدة على الأقل في lines' };
@@ -77,10 +120,18 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       for (const item of rawLines) {
         const rec = item as Record<string, unknown>;
         // Same human-key alias as invoice lines: the model passes productId.
-        const materialId = str(rec.materialId) ?? str(rec.productId);
+        // Names resolve internally too (session 2026-09-24: literal names in
+        // id fields killed 5 consecutive batches after approval).
+        const materialResolved = await resolveProductId(
+          ctx.companyId,
+          str(rec.materialId) ?? str(rec.productId),
+          str(rec.materialName) ?? str(rec.productName),
+          productsCache,
+        );
+        if ('error' in materialResolved) return { error: materialResolved.error };
+        const materialId = materialResolved.id;
         const quantity = num(rec.quantity);
         let unitCost = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : undefined;
-        if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products للحصول عليه' };
         if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
         if (unitCost === undefined || unitCost < 0) unitCost = await getProductCost(materialId);
         // M4: bom_lines carries NO unit columns — quantities are BASE. A
@@ -123,13 +174,14 @@ export const manufacturingWriteTools: ToolDefinition[] = [
   {
     name: 'manufacturing.create_work_order',
     labelAr: 'إنشاء أمر تشغيل',
-    descriptionAr: 'ينشئ أمر تشغيل إنتاجي لتصنيع منتج. quantity = عدد دفعات الـ BOM (الإنتاج المتوقع = quantity × outputQuantity للتركيبة). إذا مررت bomId دون lines، تٌشتق المواد تلقائياُ من الشجرة مضروبة في عدد الدفعات. رقم الدفعة يُولَّد تلقائياُ بصيغة YYYYMMDD-NNN. استخدم search.products و search.boms أولاُ.',
+    descriptionAr: 'ينشئ أمر تشغيل إنتاجي لتصنيع منتج. quantity = عدد دفعات الـ BOM (الإنتاج المتوقع = quantity × outputQuantity للتركيبة). إذا مررت bomId دون lines، تٌشتق المواد تلقائياُ من الشجرة مضروبة في عدد الدفعات. رقم الدفعة يُولَّد تلقائياُ بصيغة YYYYMMDD-NNN. مرر معرفات UUID من search.products و search.boms — أو أسماء المنتجات نصاً (productName/materialName) وسيحلها النظام داخلياً.',
     permission: 'manufacturing.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        productId: { type: 'string', description: 'معرف المنتج المراد تصنيعه (من search.products — يُشتق تلقائياً من bomId عند غيابه)' },
+        productId: { type: 'string', description: 'معرف المنتج المراد تصنيعه (من search.products — يُشتق تلقائياً من bomId عند غيابه) أو اسمه نصاً' },
+        productName: { type: 'string', description: 'بديل بشري لـ productId: اسم المنتج نصاً (يُحل داخلياً)' },
         bomId: { type: 'string', description: 'معرف شجرة المنتج (اختياري — إن تٌرك فارغاُ يجب تمرير lines يدوياُ)' },
         quantity: { type: 'number', description: 'عدد دفعات الـ BOM المطلوب إنتاجها (افتراضي 1 — يقبل plannedQuantity كبديل)' },
         plannedQuantity: { type: 'number', description: 'بديل لـ quantity' },
@@ -159,7 +211,8 @@ export const manufacturingWriteTools: ToolDefinition[] = [
           items: {
             type: 'object',
             properties: {
-              materialId: { type: 'string', description: 'معرف المادة (من search.products)' },
+              materialId: { type: 'string', description: 'معرف المادة (من search.products) أو اسمها نصاً' },
+              materialName: { type: 'string', description: 'بديل بشري: اسم المادة نصاً (يُحل داخلياً)' },
               plannedQuantity: { type: 'number', description: 'الكمية المخطط استهلاكها (بالوحدة المذكورة أو الأساسية)' },
               unitId: { type: 'string', description: 'معرف وحدة المادة (من search.product_units) — اختياري' },
               unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
@@ -169,11 +222,11 @@ export const manufacturingWriteTools: ToolDefinition[] = [
           },
         },
       },
-      required: ['productId', 'quantity'],
+      required: ['quantity'],
     },
     summarizeArgs: (a) => {
       const r = a as Record<string, unknown>;
-      return `إنشاء أمر تشغيل لإنتاج ${r.quantity ?? r.plannedQuantity ?? ''} دفعة من ${String(r.productId || '').slice(0, 8)}…`;
+      return `إنشاء أمر تشغيل لإنتاج ${r.quantity ?? r.plannedQuantity ?? ''} دفعة من ${String(r.productId ?? r.productName ?? r.bomId ?? '').slice(0, 8)}…`;
     },
 
     execute: async (args, ctx) => {
@@ -181,12 +234,14 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       const quantity = num(args.quantity) || num(args.plannedQuantity);
       if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر (quantity أو plannedQuantity)' };
 
+      const productsCache: { list: Product[] | null } = { list: null };
       const bomId = str(args.bomId);
       let productId = str(args.productId);
+      const productNameAlias = str(args.productName);
       // Derive the product (and missing lines) from the BOM — the caller
       // often names only the tree, as in "أنتج بالشجرة رقم كذا".
       let rawLines = args.lines as unknown[] | undefined;
-      if (bomId && (!productId || !rawLines || rawLines.length === 0)) {
+      if (bomId && (!productId && !productNameAlias || !rawLines || rawLines.length === 0)) {
         const bomRes = await manufacturingApi.getBomById(bomId, ctx.companyId);
         if (!bomRes.success || !bomRes.data) return { error: bomRes.error || 'تعذر جلب الشجرة المحددة — تحقق من bomId' };
         if (!productId) productId = str((bomRes.data.bom as unknown as Record<string, unknown>).productId);
@@ -195,15 +250,26 @@ export const manufacturingWriteTools: ToolDefinition[] = [
           if (rawLines.length === 0) return { error: 'الشجرة المختارة بلا مواد — لا يمكن إنشاء أمر تشغيل' };
         }
       }
-      if (!productId) return { error: 'productId مطلوب — أو مرر bomId لاشتقاق المنتج والمواد معاً' };
+      if (!productId && !productNameAlias) return { error: 'productId مطلوب — أو مرر bomId لاشتقاق المنتج والمواد معاً، أو اسم المنتج في productName' };
+      // الأسماء البشرية تُحل داخلياً (الجلسة 2026-09-24) — والمعرف القادم
+      // من الشجرة UUID أصلاً فيمر مباشرة.
+      const resolved = await resolveProductId(ctx.companyId, productId, productNameAlias, productsCache);
+      if ('error' in resolved) return { error: resolved.error };
+      productId = resolved.id;
       if (!Array.isArray(rawLines) || rawLines.length === 0) return { error: 'يجب تمرير lines أو bomId صالح لاشتقاق المواد' };
       const lines: { materialId: string; plannedQuantity: number; unitCost: number }[] = [];
       for (const item of rawLines) {
         const rec = item as Record<string, unknown>;
-        const materialId = str(rec.materialId) ?? str(rec.productId);
+        const materialResolved = await resolveProductId(
+          ctx.companyId,
+          str(rec.materialId) ?? str(rec.productId),
+          str(rec.materialName) ?? str(rec.productName),
+          productsCache,
+        );
+        if ('error' in materialResolved) return { error: materialResolved.error };
+        const materialId = materialResolved.id;
         const pq = num(rec.plannedQuantity);
         const uc = (item as Record<string, unknown>).unitCost !== undefined ? num((item as Record<string, unknown>).unitCost) : 0;
-        if (!materialId) return { error: 'كل مادة تحتاج materialId — استخدم search.products' };
         if (pq <= 0) return { error: 'plannedQuantity يجب أن تكون أكبر من صفر' };
         // M4: consumptions carry NO unit columns — a named unit resolves +
         // converts here (cost ÷ factor keeps the base invariant, as in BOMs).

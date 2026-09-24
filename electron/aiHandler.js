@@ -1670,6 +1670,59 @@ export function registerAiHandlers() {
     }
   });
 
+  // Zero the whole queue: cancel every live batch (pending/running/paused),
+  // park their queued items as skipped, and close stuck partial batches.
+  // Failed/done item rows are preserved as history — only their actionability
+  // ends (no more resume banners, no orphan workers: the claim gate refuses
+  // cancelled batches and live loops exit on the header flip).
+  ipcMain.handle('ai:batch-clear', async (event, payload = {}) => {
+    try {
+      const auth = authenticateIpcSession(event, payload.sessionToken, { permission: 'ai.use' });
+      if (!auth.ok) return { success: false, error: auth.error };
+      const companyId = auth.session.user.companyId;
+      const userId = auth.session.user.id;
+      const pool = getPool();
+      if (!pool) return { success: false, error: 'Database not available' };
+      const cleared = await pool.query(
+        `WITH live AS (
+           UPDATE ai_job_batches SET status = 'cancelled', updated_at = NOW()
+           WHERE company_id = $1::uuid AND user_id = $2::uuid AND status IN ('pending', 'running', 'paused')
+           RETURNING id
+         ),
+         parked AS (
+           UPDATE ai_job_items SET status = 'skipped',
+             last_error = 'تخطي: صُفّر الطابور العام', updated_at = NOW()
+           WHERE batch_id IN (SELECT id FROM live) AND company_id = $1::uuid AND status = 'queued'
+           RETURNING batch_id
+         ),
+         bump AS (
+           UPDATE ai_job_batches b SET skipped_count = skipped_count + c.n, updated_at = NOW()
+           FROM (SELECT batch_id, COUNT(*) AS n FROM parked GROUP BY batch_id) c
+           WHERE b.id = c.batch_id
+           RETURNING b.id
+         )
+         SELECT (SELECT COUNT(*) FROM live) AS cancelled, (SELECT COUNT(*) FROM parked) AS skipped`,
+        [companyId, userId]
+      );
+      const stuck = await pool.query(
+        `UPDATE ai_job_batches SET status = 'cancelled', updated_at = NOW()
+         WHERE company_id = $1::uuid AND user_id = $2::uuid AND status = 'partial'
+         RETURNING id`,
+        [companyId, userId]
+      );
+      return {
+        success: true,
+        data: {
+          cancelled: Number(cleared.rows?.[0]?.cancelled || 0),
+          skipped: Number(cleared.rows?.[0]?.skipped || 0),
+          cleared: stuck.rows.length,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   // Requeue failed items of a partial batch (attempts reset) and reopen it.
   ipcMain.handle('ai:batch-retry-failed', async (event, payload = {}) => {
     try {
