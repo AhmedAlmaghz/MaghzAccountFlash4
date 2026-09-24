@@ -288,13 +288,18 @@ contextBridge.exposeInMainWorld('electronEnv', {
   platform: process.platform,
 });
 
-// ─── App Updater (GitHub Releases — autoDownload + banner) ──────────────────
+// ─── App Updater (GitHub Releases — silent background download + banner) ───
 // Renderer shows the banner (UpdateBanner) via GitHub API polling on web,
-// and via these IPC events on desktop (electron-updater). No auto-restart.
+// and via these IPC events on desktop (electron-updater). Restart is always
+// user-confirmed (quitAndInstall from the banner); quitting also installs
+// silently via autoInstallOnAppQuit.
 contextBridge.exposeInMainWorld('electronUpdater', {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  downloadUpdate: () => ipcRenderer.invoke('app:downloadUpdate'),
+  getUpdateCaps: () => ipcRenderer.invoke('app:updateCaps'),
   quitAndInstall: () => ipcRenderer.invoke('app:quitAndInstall'),
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   setChannel: (channel) => ipcRenderer.invoke('app:setUpdateChannel', channel),
   onChecking: (cb) => { const fn = () => cb(); ipcRenderer.on('update:checking', fn); return () => ipcRenderer.removeListener('update:checking', fn); },
   onAvailable: (cb) => { const fn = (_e, info) => cb(info); ipcRenderer.on('update:available', fn); return () => ipcRenderer.removeListener('update:available', fn); },

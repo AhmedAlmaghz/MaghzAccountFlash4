@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,6 +14,11 @@ const __dirname = path.dirname(__filename);
 config({ path: path.join(__dirname, '../.env.local') });
 
 let mainWindow;
+
+// Silent-download bookkeeping for app:downloadUpdate: electron-updater
+// rejects overlapping downloadUpdate() calls, so the main process — not the
+// renderer — owns the in-flight flag plus which version already landed.
+const updateDl = { downloading: false, downloadedVersion: null };
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -116,6 +121,46 @@ app.whenReady().then(async () => {
   ipcMain.handle('app:quitAndInstall', () => {
     import('electron-updater').then(({ autoUpdater }) => autoUpdater.quitAndInstall());
   });
+  // Silent background download on demand: the banner's download button calls
+  // this when no download is in flight yet (auto-download may have missed —
+  // check raced, error, portable fallback). Guarded against double-starts;
+  // progress/completion still flow through the update:* events below.
+  ipcMain.handle('app:downloadUpdate', async () => {
+    try {
+      const { autoUpdater } = await import('electron-updater');
+      if (updateDl.downloading) return { success: true, already: true };
+      if (updateDl.downloadedVersion) return { success: true, already: true, downloaded: true };
+      updateDl.downloading = true;
+      try {
+        await autoUpdater.downloadUpdate();
+        return { success: true };
+      } finally {
+        updateDl.downloading = false;
+      }
+    } catch (err) {
+      updateDl.downloading = false;
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  // Capability probe for the renderer: portable / store builds cannot be
+  // updated by electron-updater (no installed updater) — the UI then falls
+  // back to opening the releases page instead of a doomed silent download.
+  ipcMain.handle('app:updateCaps', () => {
+    const portable = !!process.env.PORTABLE_EXECUTABLE_DIR;
+    const store = !!process.windowsStore;
+    return { canAutoUpdate: !portable && !store };
+  });
+  // External links from the privileged renderer: window.open is denied by
+  // setWindowOpenHandler, so releases/whats-new links go through the shell
+  // with a strict allowlist (our own GitHub releases only).
+  ipcMain.handle('app:openExternal', (_e, url) => {
+    const target = String(url ?? '');
+    if (/^https:\/\/github\.com\/AhmedAlmaghz\/MaghzAccountFlash4\//.test(target)) {
+      void shell.openExternal(target);
+      return { success: true };
+    }
+    return { success: false, error: 'URL not allowed' };
+  });
   ipcMain.handle('app:setUpdateChannel', async (_e, channel) => {
     try {
       const { autoUpdater } = await import('electron-updater');
@@ -159,6 +204,7 @@ app.whenReady().then(async () => {
         mainWindow?.webContents.send('update:checking');
       });
       autoUpdater.on('update-available', (info) => {
+        updateDl.downloadedVersion = null;
         mainWindow?.webContents.send('update:available', info);
       });
       autoUpdater.on('update-not-available', (info) => {
@@ -168,9 +214,12 @@ app.whenReady().then(async () => {
         mainWindow?.webContents.send('update:progress', p);
       });
       autoUpdater.on('update-downloaded', (info) => {
+        updateDl.downloading = false;
+        updateDl.downloadedVersion = info?.version ?? 'unknown';
         mainWindow?.webContents.send('update:downloaded', info);
       });
       autoUpdater.on('error', (err) => {
+        updateDl.downloading = false;
         mainWindow?.webContents.send('update:error', err?.message || String(err));
       });
       // Persist channel choice from renderer
