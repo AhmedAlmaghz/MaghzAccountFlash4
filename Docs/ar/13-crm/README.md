@@ -1,3 +1,13 @@
+---
+title: "CRM — دليل الاستخدام"
+sidebarTitle: "CRM"
+slug: "ar/13-crm/README"
+group: "علاقات العملاء CRM"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # CRM — دليل الاستخدام
 
 > إدارة علاقات العملاء: من عميل محتمل إلى فرصة مكسوبة — قمع بيع صارم المراحل مع مهام وأنشطة وتقارير متابعة.

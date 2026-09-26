@@ -1,3 +1,13 @@
+---
+title: "نظرة عامة على النظام — MaghzAccountPro"
+sidebarTitle: "نظرة عامة على النظام"
+slug: "ar/01-introduction/README"
+group: "مقدمة النظام"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # نظرة عامة على النظام — MaghzAccountPro
 
 > نظام ERP محاسبي متكامل للمنشآت الصغيرة والمتوسطة في العالم العربي، يعمل على سطح المكتب بواجهة عربية أولاً.

@@ -1,3 +1,13 @@
+---
+title: "Value Added Tax (VAT) Settings — User Guide"
+sidebarTitle: "Value Added Tax (VAT) Settings"
+slug: "en/04-settings/03-vat"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Value Added Tax (VAT) Settings — User Guide
 
 > Manage tax types, their rates, and their accounting accounts, plus the options for showing tax and discount on invoices.

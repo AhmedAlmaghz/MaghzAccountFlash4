@@ -1,3 +1,13 @@
+---
+title: "Branches & Currencies — User Guide"
+sidebarTitle: "Branches & Currencies"
+slug: "en/04-settings/02-branches-currencies"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Branches & Currencies — User Guide
 
 > Define the organization's branches, and manage currencies, exchange rates, and the base currency.

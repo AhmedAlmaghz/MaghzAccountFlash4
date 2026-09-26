@@ -1,3 +1,13 @@
+---
+title: "POS Settings & Reports — User Guide"
+sidebarTitle: "POS Settings & Reports"
+slug: "en/10-pos/03-settings-reports"
+group: "Point of Sale (POS)"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # POS Settings & Reports — User Guide
 
 

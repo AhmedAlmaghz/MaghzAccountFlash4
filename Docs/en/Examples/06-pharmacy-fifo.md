@@ -1,3 +1,13 @@
+---
+title: "Example 06 — Al-Shifa Pharmacy (FIFO, return, shortage & payment)"
+sidebarTitle: "Example 06"
+slug: "en/Examples/06-pharmacy-fifo"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 06 — Al-Shifa Pharmacy (FIFO, return, shortage & payment)
 
 > Two purchase layers at two prices, two sales eating oldest first, a return at frozen cost, an approved shortage, and a linked supplier payment. Closing stock of 25 units × 1,200 = 30,000 ties to the layers.

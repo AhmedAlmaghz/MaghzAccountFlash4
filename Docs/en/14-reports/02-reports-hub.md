@@ -1,3 +1,13 @@
+---
+title: "Reports Hub — User Guide"
+sidebarTitle: "Reports Hub"
+slug: "en/14-reports/02-reports-hub"
+group: "Reports"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Reports Hub — User Guide
 
 > A unified gateway to every report in the system: a card grid that takes you straight to any report, with permission protection and unified export.

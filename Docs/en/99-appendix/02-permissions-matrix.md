@@ -1,3 +1,13 @@
+---
+title: "Permissions Matrix"
+sidebarTitle: "Permissions Matrix"
+slug: "en/99-appendix/02-permissions-matrix"
+group: "Appendices"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Permissions Matrix
 
 > A complete reference table: what each role can do in each module, with an explanation of the "own documents only" permission and the Reports, Settings, and AI assistant permissions.

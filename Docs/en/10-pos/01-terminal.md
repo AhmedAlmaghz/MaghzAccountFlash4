@@ -1,3 +1,13 @@
+---
+title: "Cashier Screen — User Guide"
+sidebarTitle: "Cashier Screen"
+slug: "en/10-pos/01-terminal"
+group: "Point of Sale (POS)"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Cashier Screen — User Guide
 
 > The main POS screen: touch grid + barcode + cart + atomic checkout + a thermal receipt, in full-screen view.

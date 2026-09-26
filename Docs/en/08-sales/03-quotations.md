@@ -1,3 +1,13 @@
+---
+title: "Quotations — User Guide"
+sidebarTitle: "Quotations"
+slug: "en/08-sales/03-quotations"
+group: "Sales"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Quotations — User Guide
 
 > A pre-sale negotiation document: lines with proposed prices and no tax, converting into a ready sales invoice with one click.

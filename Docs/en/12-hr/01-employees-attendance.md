@@ -1,3 +1,13 @@
+---
+title: "Employees, Attendance & Leave — User Guide"
+sidebarTitle: "Employees, Attendance & Leave"
+slug: "en/12-hr/01-employees-attendance"
+group: "Human Resources"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Employees, Attendance & Leave — User Guide
 
 > Employee records and departments, a daily attendance log with late-arrival and overtime inference, and leave management with balances.

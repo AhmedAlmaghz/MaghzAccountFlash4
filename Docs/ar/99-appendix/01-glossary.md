@@ -1,3 +1,13 @@
+---
+title: "قاموس المصطلحات"
+sidebarTitle: "قاموس المصطلحات"
+slug: "ar/99-appendix/01-glossary"
+group: "الملاحق"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # قاموس المصطلحات
 
 > مرجع سريع لكل مصطلح محاسبي وتشغيلي يستخدمه النظام — صياغة مبسطة لمستخدم عادي غير محاسب.

@@ -1,3 +1,13 @@
+---
+title: "Inventory Valuation Methods — User Guide"
+sidebarTitle: "Inventory Valuation Methods"
+slug: "en/07-inventory/04-valuation"
+group: "Inventory"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Inventory Valuation Methods — User Guide
 
 > Three company-level valuation methods (Moving Average, FIFO, Standard with price variance), and true cost of sales instead of estimates — per IAS 2.

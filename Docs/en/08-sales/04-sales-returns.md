@@ -1,3 +1,13 @@
+---
+title: "Sales Returns — User Guide"
+sidebarTitle: "Sales Returns"
+slug: "en/08-sales/04-sales-returns"
+group: "Sales"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Sales Returns — User Guide
 
 > A goods return from the customer against an original invoice: it reduces the customer balance, restores stock, and issues a sales return journal entry — atomically on posting.

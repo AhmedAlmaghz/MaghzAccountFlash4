@@ -1,3 +1,13 @@
+---
+title: "Purchase Invoices & Purchase Orders — User Guide"
+sidebarTitle: "Purchase Invoices & Purchase Orders"
+slug: "en/09-purchases/02-invoices-orders"
+group: "Purchases"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Purchase Invoices & Purchase Orders — User Guide
 
 > Receiving goods from suppliers: a purchase invoice as powerful as the sales invoice (units, discounts, VAT, currencies) plus purchase orders that convert into invoices, with atomic posting effects.

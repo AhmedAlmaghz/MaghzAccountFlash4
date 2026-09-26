@@ -1,3 +1,13 @@
+---
+title: "Tax Jurisdictions — User Guide"
+sidebarTitle: "Tax Jurisdictions"
+slug: "en/17-tax-jurisdictions/README"
+group: "Tax Jurisdictions"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Tax Jurisdictions — User Guide
 
 > One file per country (rates, thresholds, filing, e-invoicing), and the jurisdiction card in company profile is the single rate source — a law change = one file.

@@ -1,3 +1,13 @@
+---
+title: "Example 03 — Riyadh Trading (15% VAT & VAT return)"
+sidebarTitle: "Example 03"
+slug: "en/Examples/03-saudi-vat"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 03 — Riyadh Trading (15% VAT & VAT return)
 
 > Saudi company (`SA`): master data (box, customer, supplier, employee with advance, products, warehouse, lead), input `21302` split from output `21301`, linked collection and payment, and a leg-based return with a refundable balance.

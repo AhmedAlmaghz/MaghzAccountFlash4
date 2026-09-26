@@ -1,3 +1,13 @@
+---
+title: "Example 08 — Modern Construction (contracting & fixed assets)"
+sidebarTitle: "Example 08"
+slug: "en/Examples/08-contracting-assets"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 08 — Modern Construction (contracting & fixed assets)
 
 > Master data (project client, supplier and subcontractor, engineer and worker, materials, site warehouse, tender), a mixer bought with mandatory capitalization and two depreciation months, billings with full collection, cash materials, subcontractor paid — then close.

@@ -1,3 +1,13 @@
+---
+title: "Keyboard Shortcuts"
+sidebarTitle: "Keyboard Shortcuts"
+slug: "en/99-appendix/03-shortcuts"
+group: "Appendices"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Keyboard Shortcuts
 
 > A complete reference for the shortcuts available in the system — designed for fast keyboard-only work without the mouse, especially in POS.

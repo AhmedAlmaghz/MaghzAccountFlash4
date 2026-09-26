@@ -1,3 +1,13 @@
+---
+title: "Sales Invoices — User Guide"
+sidebarTitle: "Sales Invoices"
+slug: "en/08-sales/02-invoices"
+group: "Sales"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Sales Invoices — User Guide
 
 > The central document of the Sales module: create with multi-units, discounts, tax, and currencies; a duplicate guard; and an atomic post that journals, deducts stock, and increases receivables.

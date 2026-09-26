@@ -1,3 +1,13 @@
+---
+title: "Inventory — User Guide"
+sidebarTitle: "Inventory"
+slug: "en/07-inventory/README"
+group: "Inventory"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Inventory — User Guide
 
 > Complete management of the goods cycle: products and units, warehouses, balances, movements, transfers, and stock adjustments.

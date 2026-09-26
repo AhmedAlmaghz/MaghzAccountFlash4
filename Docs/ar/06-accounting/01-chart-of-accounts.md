@@ -1,3 +1,13 @@
+---
+title: "شجرة الحسابات — دليل الاستخدام"
+sidebarTitle: "شجرة الحسابات"
+slug: "ar/06-accounting/01-chart-of-accounts"
+group: "المحاسبة"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # شجرة الحسابات — دليل الاستخدام
 
 > الهيكل الهرمي لحسابات شركتك — الأساس الذي تُبنى عليه كل القيود والتقارير.

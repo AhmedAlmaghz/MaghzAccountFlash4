@@ -1,3 +1,13 @@
+---
+title: "Warehouses & Stock — User Guide"
+sidebarTitle: "Warehouses & Stock"
+slug: "en/07-inventory/02-warehouses-stock"
+group: "Inventory"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Warehouses & Stock — User Guide
 
 > Define warehouses and link them to branches, read balances in real time, and move goods between warehouses with fully tracked transfers.

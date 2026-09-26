@@ -1,3 +1,13 @@
+---
+title: "Manufacturing — User Guide"
+sidebarTitle: "Manufacturing"
+slug: "en/11-manufacturing/README"
+group: "Manufacturing"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Manufacturing — User Guide
 
 > From the Bill of Materials (BOM) to delivering the finished product: Work Orders with a strict state machine, Work In Progress (WIP) accounting, and Moving Weighted Average costing.

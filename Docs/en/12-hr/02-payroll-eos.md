@@ -1,3 +1,13 @@
+---
+title: "Payroll Runs & End of Service — User Guide"
+sidebarTitle: "Payroll Runs & End of Service"
+slug: "en/12-hr/02-payroll-eos"
+group: "Human Resources"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Payroll Runs & End of Service — User Guide
 
 > A monthly payroll computed entirely on the server from employee records, components, and attendance, plus end-of-service benefits with a progressive formula paid from a cash box.

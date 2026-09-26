@@ -1,3 +1,13 @@
+---
+title: "Example 07 — Al-Diwan Café POS (shifts, differences & custody)"
+sidebarTitle: "Example 07"
+slug: "en/Examples/07-cafe-pos"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 07 — Al-Diwan Café POS (shifts, differences & custody)
 
 > Three shifts: a short auto-posted (`POS-DIFF` debit `52901`), an exact one with no entry, and an over auto-posted (credit `41901`) — plus a credit purchase and its payment, and a cashier custody settled by expense plus cash return.

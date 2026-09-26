@@ -1,3 +1,13 @@
+---
+title: "Example 09 — Al-Mustaqbal Schools (payroll, EOS & purchases)"
+sidebarTitle: "Example 09"
+slug: "en/Examples/09-school-payroll"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 09 — Al-Mustaqbal Schools (payroll, EOS & purchases)
 
 > Payroll-heavy with a teacher advance and remitted deductions, an EOS accrual then partial payment, a leave provision, and credit stationery bought and paid — then close.

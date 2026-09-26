@@ -1,3 +1,13 @@
+---
+title: "Installation — User Guide"
+sidebarTitle: "Installation"
+slug: "en/02-getting-started/01-installation"
+group: "Getting Started"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Installation — User Guide
 
 > Installing MaghzAccountPro on the desktop (an Electron application for Windows) and reaching the first screen.

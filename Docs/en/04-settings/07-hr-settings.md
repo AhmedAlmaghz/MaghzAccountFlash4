@@ -1,3 +1,13 @@
+---
+title: "HR Settings — User Guide"
+sidebarTitle: "HR Settings"
+slug: "en/04-settings/07-hr-settings"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # HR Settings — User Guide
 
 > The digital HR policies (leaves, work, end of service) and the payroll components the payroll engine reads.

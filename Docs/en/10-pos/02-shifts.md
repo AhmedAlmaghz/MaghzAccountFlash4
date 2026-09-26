@@ -1,3 +1,13 @@
+---
+title: "Shifts — User Guide"
+sidebarTitle: "Shifts"
+slug: "en/10-pos/02-shifts"
+group: "Point of Sale (POS)"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Shifts — User Guide
 
 > Managing Cash Box shifts: opening, closing with a physical count, computing the difference, and the closing Z Report.

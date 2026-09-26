@@ -1,3 +1,13 @@
+---
+title: "Glossary"
+sidebarTitle: "Glossary"
+slug: "en/99-appendix/01-glossary"
+group: "Appendices"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Glossary
 
 > A quick reference for every accounting and operational term used by the system — plain-English explanations, with the Arabic label shown in the app UI kept verbatim.

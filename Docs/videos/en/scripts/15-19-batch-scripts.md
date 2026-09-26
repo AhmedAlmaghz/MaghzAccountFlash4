@@ -1,3 +1,13 @@
+---
+title: "Batch (A+B) Video Scripts — ready to record later"
+sidebarTitle: "Batch (A+B) Video Scripts"
+slug: "videos/en/scripts/15-19-batch-scripts"
+group: "Video Scripts & Changelog"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Batch (A+B) Video Scripts — ready to record later
 
 > Shooting scripts only (no video production). Each script: goal, shots, and the literal voice-over text. Target length 4–6 minutes per video.

@@ -1,3 +1,13 @@
+---
+title: "System Overview — MaghzAccountPro"
+sidebarTitle: "System Overview"
+slug: "en/01-introduction/README"
+group: "System Introduction"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # System Overview — MaghzAccountPro
 
 > A complete ERP accounting system for small and medium businesses in the Arab world, running on the desktop with an Arabic-first interface.

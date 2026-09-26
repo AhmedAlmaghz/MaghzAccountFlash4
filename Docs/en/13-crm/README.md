@@ -1,3 +1,13 @@
+---
+title: "CRM — User Guide"
+sidebarTitle: "CRM"
+slug: "en/13-crm/README"
+group: "CRM"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # CRM — User Guide
 
 > Customer relationship management: from lead to won deal — a strictly staged sales funnel with tasks, activities, and follow-up reports.

@@ -1,3 +1,13 @@
+---
+title: "Documentation Conventions — Docs/en"
+sidebarTitle: "Documentation Conventions"
+slug: "en/CONVENTIONS"
+group: "Complete User Guide"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Documentation Conventions — Docs/en
 
 This file defines the unified terminology and the approved template for every file inside `Docs/en/`.

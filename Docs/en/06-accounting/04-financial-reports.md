@@ -1,3 +1,13 @@
+---
+title: "Financial Reports — User Guide"
+sidebarTitle: "Financial Reports"
+slug: "en/06-accounting/04-financial-reports"
+group: "Accounting"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Financial Reports — User Guide
 
 > The four approved reports (Trial Balance, Balance Sheet, Income Statement, Cash Flow Statement) + the Account Ledger — all read from posted entries only.

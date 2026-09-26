@@ -1,3 +1,13 @@
+---
+title: "Chart of Accounts — User Guide"
+sidebarTitle: "Chart of Accounts"
+slug: "en/06-accounting/01-chart-of-accounts"
+group: "Accounting"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Chart of Accounts — User Guide
 
 > The hierarchical structure of your company's accounts — the foundation on which every entry and report is built.

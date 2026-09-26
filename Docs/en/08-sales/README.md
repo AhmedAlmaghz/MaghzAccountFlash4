@@ -1,3 +1,13 @@
+---
+title: "Sales — User Guide"
+sidebarTitle: "Sales"
+slug: "en/08-sales/README"
+group: "Sales"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Sales — User Guide
 
 > The complete selling cycle: from the customer and the quotation to the posted invoice and returns — with atomic accounting and inventory effects.

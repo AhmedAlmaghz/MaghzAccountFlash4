@@ -1,3 +1,13 @@
+---
+title: "Login — User Guide"
+sidebarTitle: "Login"
+slug: "en/02-getting-started/03-login"
+group: "Getting Started"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Login — User Guide
 
 > Signing in to the system with a username and password, and managing your password and session.

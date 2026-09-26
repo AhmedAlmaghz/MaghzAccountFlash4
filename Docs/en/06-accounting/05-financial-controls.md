@@ -1,3 +1,13 @@
+---
+title: "Financial Controls & Operation Restrictions — User Guide"
+sidebarTitle: "Financial Controls & Operation Restrictions"
+slug: "en/06-accounting/05-financial-controls"
+group: "Accounting"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Financial Controls & Operation Restrictions — User Guide
 
 > How the system prevents errors and abuse in financial operations: segregation of duties, atomic posting, posted-record finality, period locks, audit trail, and inventory/cash gates — following global best practices.

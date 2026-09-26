@@ -1,3 +1,13 @@
+---
+title: "Year-End Close, Fixed Assets & Reversal — User Guide"
+sidebarTitle: "Year-End Close, Fixed Assets & Reversal"
+slug: "en/06-accounting/06-year-end-assets"
+group: "Accounting"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Year-End Close, Fixed Assets & Reversal — User Guide
 
 > Close the year with a `CLS-YYYY` entry, track fixed assets with mandatory capitalization and monthly depreciation, and correct posted mistakes by true reversal — never by editing history.

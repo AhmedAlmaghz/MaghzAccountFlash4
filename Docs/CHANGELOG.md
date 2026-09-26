@@ -1,3 +1,13 @@
+---
+title: "سجل إصدارات الدليل — Changelog / Changelog"
+sidebarTitle: "سجل إصدارات الدليل"
+slug: "CHANGELOG"
+group: "سكربتات الفيديو وسجل الإصدارات"
+language: "ar,en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # سجل إصدارات الدليل — Changelog / Changelog
 
 > تاريخ التوثيق مقابل إصدارات التطبيق (`package.json`). القاعدة: كل إصدار تطبيق يغيّر سلوكاً ظاهراً للمستخدم يستلزم إدخالاً هنا وتحديث الختم في `ar/README.md` و`en/README.md`.

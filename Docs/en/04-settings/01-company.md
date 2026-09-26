@@ -1,3 +1,13 @@
+---
+title: "Company Information — User Guide"
+sidebarTitle: "Company Information"
+slug: "en/04-settings/01-company"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Company Information — User Guide
 
 > Your organization's identity card inside the system: logo, name, tax number, default currency, calendar, and display formats.

@@ -1,3 +1,13 @@
+---
+title: "Point of Sale (POS) — User Guide"
+sidebarTitle: "Point of Sale (POS)"
+slug: "en/10-pos/README"
+group: "Point of Sale (POS)"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Point of Sale (POS) — User Guide
 
 > A hybrid cashier screen (barcode + touch) that creates real sales invoices posted instantly, with a thermal receipt and Cash Box shifts.

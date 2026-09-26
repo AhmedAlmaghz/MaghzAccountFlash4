@@ -1,3 +1,13 @@
+---
+title: "Example 10 — Al-Nokhba Wholesale (credit, discounts, aging & advances)"
+sidebarTitle: "Example 10"
+slug: "en/Examples/10-wholesale-aging"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 10 — Al-Nokhba Wholesale (credit, discounts, aging & advances)
 
 > Two credit customers plus a third from a lead (no invoice), two collections, discount allowed, return, purchase return, supplier payment, a driver advance settled by fuel plus cash return — with aging tied to receivables, then close.

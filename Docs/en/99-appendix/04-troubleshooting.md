@@ -1,3 +1,13 @@
+---
+title: "Troubleshooting"
+sidebarTitle: "Troubleshooting"
+slug: "en/99-appendix/04-troubleshooting"
+group: "Appendices"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Troubleshooting
 
 > A reference table for the most common problems: the message or behavior as you see it, the likely cause, and the practical step-by-step fix.

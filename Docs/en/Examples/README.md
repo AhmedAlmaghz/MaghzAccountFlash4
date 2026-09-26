@@ -1,3 +1,13 @@
+---
+title: "Solved Training Examples — User Guide"
+sidebarTitle: "Solved Training Examples"
+slug: "en/Examples/README"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Solved Training Examples — User Guide
 
 > 10 complete examples for diverse companies: each with a company card, opening balance, and transactions, then the **full solution** (entries, trial balance, income, balance sheet, cash flow) plus a comparison checklist for finding errors.

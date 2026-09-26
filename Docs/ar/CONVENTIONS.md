@@ -1,3 +1,13 @@
+---
+title: "اتفاقيات التوثيق — Docs"
+sidebarTitle: "اتفاقيات التوثيق"
+slug: "ar/CONVENTIONS"
+group: "دليل المستخدم الشامل"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # اتفاقيات التوثيق — Docs
 
 هذا الملف يحدد المصطلحات الموحدة والقالب المعتمد لكتابة أي ملف داخل مجلد `Docs/`.

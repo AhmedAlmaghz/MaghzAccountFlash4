@@ -1,3 +1,13 @@
+---
+title: "Suppliers — User Guide"
+sidebarTitle: "Suppliers"
+slug: "en/09-purchases/01-suppliers"
+group: "Purchases"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Suppliers — User Guide
 
 > The complete supplier registry: data, a one-time posting credit opening balance, and a supplier card with two tabs (Statement and Accounts Payable Aging).

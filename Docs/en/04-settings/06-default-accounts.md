@@ -1,3 +1,13 @@
+---
+title: "Default Accounts — User Guide"
+sidebarTitle: "Default Accounts"
+slug: "en/04-settings/06-default-accounts"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Default Accounts — User Guide
 
 > Link system behaviors (sales, purchases, cash, inventory, payroll, ...) to accounts from the Chart of Accounts that the automatic posting engine uses.

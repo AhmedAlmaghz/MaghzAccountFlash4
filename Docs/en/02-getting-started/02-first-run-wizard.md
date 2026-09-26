@@ -1,3 +1,13 @@
+---
+title: "First-Run Setup Wizard — User Guide"
+sidebarTitle: "First-Run Setup Wizard"
+slug: "en/02-getting-started/02-first-run-wizard"
+group: "Getting Started"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # First-Run Setup Wizard — User Guide
 
 > Setting up the system in 5 steps: Welcome, Database, Company Information, Initial Data, then Finish.

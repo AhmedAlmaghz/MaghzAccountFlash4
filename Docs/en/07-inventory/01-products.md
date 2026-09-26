@@ -1,3 +1,13 @@
+---
+title: "Products — User Guide"
+sidebarTitle: "Products"
+slug: "en/07-inventory/01-products"
+group: "Inventory"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Products — User Guide
 
 > The complete product card: barcode and SKU, multi-units with conversion factors, prices, stock limits, and the opening balance.

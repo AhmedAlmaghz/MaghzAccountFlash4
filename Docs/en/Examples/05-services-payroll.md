@@ -1,3 +1,13 @@
+---
+title: "Example 05 — Afaq Consulting (services, payroll & provisions)"
+sidebarTitle: "Example 05"
+slug: "en/Examples/05-services-payroll"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 05 — Afaq Consulting (services, payroll & provisions)
 
 > A no-inventory services company: a lead converted to a customer, service invoices, an engineer advance, remitted deductions, a Gross-up run, and IAS 19 provisions — then close.

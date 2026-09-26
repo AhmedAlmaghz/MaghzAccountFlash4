@@ -1,3 +1,13 @@
+---
+title: "إعدادات POS وتقاريره — دليل الاستخدام"
+sidebarTitle: "إعدادات POS وتقاريره"
+slug: "ar/10-pos/03-settings-reports"
+group: "نقاط البيع POS"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # إعدادات POS وتقاريره — دليل الاستخدام
 
 

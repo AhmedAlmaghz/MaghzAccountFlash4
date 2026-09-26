@@ -1,3 +1,13 @@
+---
+title: "Tax Periods & VAT Return — User Guide"
+sidebarTitle: "Tax Periods & VAT Return"
+slug: "en/06-accounting/07-vat-periods"
+group: "Accounting"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Tax Periods & VAT Return — User Guide
 
 > Split input from output VAT, run periods through three statuses, and compute the VAT return from posted entry legs — never from invoice headers.

@@ -1,3 +1,13 @@
+---
+title: "Frequently Asked Questions"
+sidebarTitle: "Frequently Asked Questions"
+slug: "en/99-appendix/05-faq"
+group: "Appendices"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Frequently Asked Questions
 
 > Direct answers to the questions most often asked about the system's daily operation, with pointers to the detailed files.

@@ -1,3 +1,13 @@
+---
+title: "التصنيع — دليل الاستخدام"
+sidebarTitle: "التصنيع"
+slug: "ar/11-manufacturing/README"
+group: "التصنيع"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # التصنيع — دليل الاستخدام
 
 > من قائمة المواد (BOM) إلى توريد المنتج التام: أوامر تشغيل بآلة حالات صارمة، حساب WIP، وتكلفة بالمتوسط المرجحي.

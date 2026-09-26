@@ -1,3 +1,13 @@
+---
+title: "Settings — User Guide"
+sidebarTitle: "Settings"
+slug: "en/04-settings/README"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Settings — User Guide
 
 > Settings are the foundation every system module rests on: the company, currencies, tax, numbering, classifications, and default accounts.

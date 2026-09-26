@@ -1,3 +1,13 @@
+---
+title: "Purchase Returns — User Guide"
+sidebarTitle: "Purchase Returns"
+slug: "en/09-purchases/03-purchase-returns"
+group: "Purchases"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Purchase Returns — User Guide
 
 > Returning goods to the supplier: stock goes out, the supplier balance decreases, and a purchase-return Journal Entry is issued — atomically, upon posting.

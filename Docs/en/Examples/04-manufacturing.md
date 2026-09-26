@@ -1,3 +1,13 @@
+---
+title: "Example 04 — Al-Noor Juice Factory (work orders & production cost)"
+sidebarTitle: "Example 04"
+slug: "en/Examples/04-manufacturing"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 04 — Al-Noor Juice Factory (work orders & production cost)
 
 > Full cycle: master data (BOM `BOM-01`, materials and FG warehouses, production supervisor), materials purchase, issue to order, labor, completion with finished receipt, purchase return, linked supplier payment, finished sale — then close.

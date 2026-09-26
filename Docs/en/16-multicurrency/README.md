@@ -1,3 +1,13 @@
+---
+title: "Multi-Currency — User Guide"
+sidebarTitle: "Multi-Currency"
+slug: "en/16-multicurrency/README"
+group: "Multi-Currency"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Multi-Currency — User Guide
 
 > Working with more than one currency: defining them, their exchange rates, using them in invoices and vouchers, and reading them in reports.

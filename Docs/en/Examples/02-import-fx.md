@@ -1,3 +1,13 @@
+---
+title: "Example 02 — Al-Ofok Import (FX & differences)"
+sidebarTitle: "Example 02"
+slug: "en/Examples/02-import-fx"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 02 — Al-Ofok Import (FX & differences)
 
 > USD documents with a YER ledger: master data (two boxes, foreign customer/supplier, products, port warehouse), purchase return, inter-box transfer, realized and unrealized differences — then close.

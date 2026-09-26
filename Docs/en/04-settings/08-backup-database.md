@@ -1,3 +1,13 @@
+---
+title: "Backup, Database & Reset Setup — User Guide"
+sidebarTitle: "Backup, Database & Reset Setup"
+slug: "en/04-settings/08-backup-database"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Backup, Database & Reset Setup — User Guide
 
 > Protect your data: backup and restore, data source configuration (PostgreSQL), and re-running the initial setup.

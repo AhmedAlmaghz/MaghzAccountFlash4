@@ -1,3 +1,13 @@
+---
+title: "الفروع والعملات — دليل الاستخدام"
+sidebarTitle: "الفروع والعملات"
+slug: "ar/04-settings/02-branches-currencies"
+group: "الإعدادات"
+language: "ar"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # الفروع والعملات — دليل الاستخدام
 
 > تعريف فروع المنشأة، وإدارة العملات وأسعار الصرف والعملة الأساسية.

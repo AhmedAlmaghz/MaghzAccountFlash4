@@ -1,3 +1,13 @@
+---
+title: "Accounting Module — User Guide"
+sidebarTitle: "Accounting Module"
+slug: "en/06-accounting/README"
+group: "Accounting"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Accounting Module — User Guide
 
 > The heart of the accounting system: a double-entry-compliant Chart of Accounts, Journal Entries, Receipt and Payment Vouchers, and the four financial reports.

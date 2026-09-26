@@ -1,3 +1,13 @@
+---
+title: "Journal Entries — User Guide"
+sidebarTitle: "Journal Entries"
+slug: "en/06-accounting/02-journal-entries"
+group: "Accounting"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Journal Entries — User Guide
 
 > The manual entry editor with full double-entry accounting: balanced debit and credit lines, a live balance check, and safe atomic posting.

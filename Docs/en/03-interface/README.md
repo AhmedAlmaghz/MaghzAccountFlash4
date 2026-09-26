@@ -1,3 +1,13 @@
+---
+title: "General Interface — User Guide"
+sidebarTitle: "General Interface"
+slug: "en/03-interface/README"
+group: "The Interface"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # General Interface — User Guide
 
 > A tour of the screen structure: the sidebar, the header, the user menu, themes, and text direction.

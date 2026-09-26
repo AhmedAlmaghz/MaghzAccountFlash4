@@ -1,3 +1,13 @@
+---
+title: "MaghzAccountPro — User Documentation / توثيق المستخدم"
+sidebarTitle: "MaghzAccountPro"
+slug: "README"
+group: "الدليل / Guide"
+language: "ar,en"
+created: 2026-09-12
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # MaghzAccountPro — User Documentation / توثيق المستخدم
 
 > Official user guide for **MaghzAccountPro** — an integrated ERP accounting system for SMEs.

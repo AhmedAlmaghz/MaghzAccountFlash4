@@ -1,3 +1,13 @@
+---
+title: "Exchange Differences & Revaluation — User Guide"
+sidebarTitle: "Exchange Differences & Revaluation"
+slug: "en/16-multicurrency/02-fx-revaluation"
+group: "Multi-Currency"
+language: "en"
+created: 2026-09-20
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Exchange Differences & Revaluation — User Guide
 
 > Ledger always in base currency, invoices accrue at their own rate, differences go to a separate entry — with periodic revaluation anchored against duplication — per IAS 21.

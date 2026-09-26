@@ -1,3 +1,13 @@
+---
+title: "\"Maghz\" AI Assistant (مغزى) — Complete User Guide"
+sidebarTitle: "\"Maghz\" AI Assistant (مغزى)"
+slug: "en/15-ai-assistant/README"
+group: "\"Maghz\" AI Assistant"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # "Maghz" AI Assistant (مغزى) — Complete User Guide
 
 > An Arabic AI assistant built into the system: it searches, reads your reports, and executes operations (an invoice, a journal entry, a payroll run...) only after your explicit approval of every write.

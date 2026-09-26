@@ -1,3 +1,13 @@
+---
+title: "Users, Roles & Permissions — User Guide"
+sidebarTitle: "Users, Roles & Permissions"
+slug: "en/05-users-roles/README"
+group: "Users & Roles"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Users, Roles & Permissions — User Guide
 
 > Control who enters the system, what they see, and what they can do — with a full Audit Log of every sensitive action.

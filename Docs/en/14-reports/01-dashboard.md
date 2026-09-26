@@ -1,3 +1,13 @@
+---
+title: "Main Dashboard — User Guide"
+sidebarTitle: "Main Dashboard"
+slug: "en/14-reports/01-dashboard"
+group: "Reports"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Main Dashboard — User Guide
 
 > The system's landing screen: it gathers the key performance indicators (KPIs) and charts from all modules in one place, with period filters and comparison.

@@ -1,3 +1,13 @@
+---
+title: "Document Sequences — User Guide"
+sidebarTitle: "Document Sequences"
+slug: "en/04-settings/04-document-sequences"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Document Sequences — User Guide
 
 > Full control over the shape and order of every document's number: prefix, number, padding, step, and yearly reset.

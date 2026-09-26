@@ -1,3 +1,13 @@
+---
+title: "Customers — User Guide"
+sidebarTitle: "Customers"
+slug: "en/08-sales/01-customers"
+group: "Sales"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Customers — User Guide
 
 > The complete customer registry: data, credit limit, a one-time posting opening balance, and a customer card with three tabs (Details / Statement / Aging).

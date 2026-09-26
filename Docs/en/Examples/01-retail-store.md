@@ -1,3 +1,13 @@
+---
+title: "Example 01 — Al-Amana Store (full trading cycle)"
+sidebarTitle: "Example 01"
+slug: "en/Examples/01-retail-store"
+group: "Solved Training Examples"
+language: "en"
+created: 2026-09-21
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Example 01 — Al-Amana Store (full trading cycle)
 
 > Yemeni company (`YE` — no VAT): complete master data (cash box, customers, supplier, employee, products with units, warehouse), then credit purchase and its payment, cash and credit sales, collection, return, a fixed asset with depreciation, and expenses — then year-end close.

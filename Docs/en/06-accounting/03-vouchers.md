@@ -1,3 +1,13 @@
+---
+title: "Receipt Vouchers & Payment Vouchers — User Guide"
+sidebarTitle: "Receipt Vouchers & Payment Vouchers"
+slug: "en/06-accounting/03-vouchers"
+group: "Accounting"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Receipt Vouchers & Payment Vouchers — User Guide
 
 > Daily cash movement: a Receipt Voucher for money received from customers, and a Payment Voucher for money paid to suppliers and for expenses — each generates its journal entry when posted.

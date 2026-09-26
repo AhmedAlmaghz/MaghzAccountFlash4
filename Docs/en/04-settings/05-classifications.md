@@ -1,3 +1,13 @@
+---
+title: "Classifications — User Guide"
+sidebarTitle: "Classifications"
+slug: "en/04-settings/05-classifications"
+group: "Settings"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Classifications — User Guide
 
 > Product types, product categories, units of measure, cash boxes, and cost centers: the organizational layer you build inventory and cash handling on.

@@ -1,3 +1,13 @@
+---
+title: "Stock Adjustments (Stock Counts) — User Guide"
+sidebarTitle: "Stock Adjustments (Stock Counts)"
+slug: "en/07-inventory/03-adjustments"
+group: "Inventory"
+language: "en"
+created: 2026-09-13
+version: "0.26.0"
+author: "Ahmed Almaghz"
+---
 # Stock Adjustments (Stock Counts) — User Guide
 
 > Document the physical count differences between the book quantity and the actual quantity, with an approve-and-post cycle that generates the journal entry and corrects the balance.
