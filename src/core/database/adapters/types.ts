@@ -28,7 +28,17 @@ export interface DbAdapter {
 
   // Products
   getProducts(companyId: string): Promise<{ success: boolean; data?: any[]; error?: string }>;
-  createProduct(data: any): Promise<{ success: boolean; id?: string; error?: string }>;
+  /**
+   * `warning` = the row exists but a follow-up step did not land (m2m
+   * categories, base unit, opening stock). Additive and optional so existing
+   * callers keep their behaviour; a create that reports plain success while
+   * silently dropping a financial effect is a lie the UI cannot show.
+   *
+   * `openingStockPosted` is an explicit fact, not something derived from the
+   * request: it is true only when the opening-stock movement and its balanced
+   * journal entry were actually written.
+   */
+  createProduct(data: any): Promise<{ success: boolean; id?: string; error?: string; warning?: string; openingStockPosted?: boolean }>;
 
   // Contacts (Customers/Suppliers)
   getContacts(companyId: string, type?: string): Promise<{ success: boolean; data?: any[]; error?: string }>;

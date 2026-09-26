@@ -540,14 +540,20 @@ export const electronPgAdapter: DbAdapter = {
     });
     if (result.success && result.rows?.length && result.rows[0]) {
       const productId = String(result.rows[0].id);
-      // Fan out the m2m category rows via a second typed channel.
+      // Fan out the m2m category rows via a second typed channel. Its result was
+      // previously DISCARDED, so a rejected fan-out (bad id, permission) left
+      // the product with no categories and the caller reporting plain success.
+      let warning: string | undefined;
       if (Array.isArray(data.categoryIds) && data.categoryIds.length > 0) {
-        await getRPC().createProductCategories({
+        const cats = await getRPC().createProductCategories({
           productId,
           categoryIds: data.categoryIds,
         });
+        if (!cats.success) {
+          warning = `تم إنشاء المنتج لكن ربط التصنيفات فشل: ${cats.error || 'سبب غير معروف'}`;
+        }
       }
-      return { success: true, id: productId };
+      return warning ? { success: true, id: productId, warning } : { success: true, id: productId };
     }
     return { success: false, error: result.error };
   },

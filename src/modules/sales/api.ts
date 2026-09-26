@@ -244,7 +244,7 @@ export const salesApi = {
     }
   },
 
-  async createCustomer(data: Omit<Customer, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createCustomer(data: Omit<Customer, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string; warning?: string }> {
     try {
       const validation = validateInput(createCustomerSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
@@ -262,11 +262,17 @@ export const salesApi = {
         const result = await invokeSalesRpc('createCustomer', { ...customerData });
         if (!result.success) return { success: false, error: result.error };
         const customerId = firstId(result.rows);
-        // Opening balance: post a balanced JE (Dr AR / Cr Opening Equity)
+        // Opening balance: post a balanced JE (Dr AR / Cr Opening Equity).
+        // The posting result was DISCARDED — a failed opening entry left a
+        // customer whose statement balances and whose ledger does not, with
+        // the caller told everything worked. Reported as a warning instead.
         const opening = Number(customerData.openingBalance) || 0;
         if (customerId && opening > 0 && !customerData.openingBalancePosted) {
           const { postCustomerOpening } = await import('@/core/utils/openingBalance');
-          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
+          const posted = await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
+          if (posted && posted.success === false) {
+            return { success: true, id: customerId, warning: `تعذّر ترحيل الرصيد الافتتاحي: ${posted.error || 'سبب غير معروف'}` };
+          }
         }
         return { success: true, id: customerId };
       }
@@ -282,7 +288,10 @@ export const salesApi = {
         const opening = Number(customerData.openingBalance) || 0;
         if (opening > 0 && !customerData.openingBalancePosted) {
           const { postCustomerOpening } = await import('@/core/utils/openingBalance');
-          await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
+          const posted = await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
+          if (posted && posted.success === false) {
+            return { success: true, id: customerId, warning: `تعذّر ترحيل الرصيد الافتتاحي: ${posted.error || 'سبب غير معروف'}` };
+          }
         }
         return { success: true, id: customerId };
       }

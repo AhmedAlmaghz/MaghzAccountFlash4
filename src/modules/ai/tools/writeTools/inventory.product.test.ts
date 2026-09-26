@@ -108,6 +108,40 @@ describe('inventory.create_product — human-name aliases (transcript regression
     );
   });
 
+  it('never claims the opening stock was posted just because a warehouse was given', async () => {
+    // The fabrication this locks out: `openingPosted` was derived from
+    // `!!openingWarehouseId`, so the tool announced "المخزون الافتتاحي رُحّل
+    // تلقائياً" even when the movement and its journal entry never happened.
+    mockedApi.createProduct.mockResolvedValue({ success: true, id: 'prod-1' } as never);
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100, openingStockQty: 4, warehouseId: 'wh-9' },
+      ctx,
+    )) as { openingPosted?: boolean; note?: string };
+    expect(res.openingPosted, 'a warehouse id is not proof of a posting').toBe(false);
+    expect(String(res.note)).not.toContain('رُحّل تلقائياً');
+  });
+
+  it('reports the opening stock as posted only when the API confirms the write', async () => {
+    mockedApi.createProduct.mockResolvedValue({ success: true, id: 'prod-1', openingStockPosted: true } as never);
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100, openingStockQty: 4, warehouseId: 'wh-9' },
+      ctx,
+    )) as { openingPosted?: boolean; note?: string };
+    expect(res.openingPosted).toBe(true);
+    expect(String(res.note)).toContain('رُحّل فعلياً');
+  });
+
+  it('passes a partial-success warning to the model instead of hiding it', async () => {
+    mockedApi.createProduct.mockResolvedValue({
+      success: true, id: 'prod-1', warning: 'تعذّر ترحيل المخزون الافتتاحي: لا يوجد حساب مخزون',
+    } as never);
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'صنف', salePrice: 100, openingStockQty: 4, warehouseId: 'wh-9' },
+      ctx,
+    )) as { warning?: string };
+    expect(res.warning).toMatch(/لا يوجد حساب مخزون/);
+  });
+
   it('shows the real name on the approval card (never undefined)', () => {
     const s = findTool('inventory.create_product').summarizeArgs!({ name: 'شوكلاتة', salePrice: 100 });
     expect(s).toContain('شوكلاتة');

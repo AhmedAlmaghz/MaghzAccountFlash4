@@ -290,6 +290,13 @@ export async function resolveLineUnits(
       const retry = await inventoryApi.getProductUnits(productId, companyId);
       if (retry.success && retry.data) rows = retry.data as unknown as UnitRow[];
     }
+    if (rows.length === 0) {
+      // The self-heal can itself fail. Proceeding here would set factor=1 for
+      // every line of this product and write a WRONG base_quantity — silent
+      // inventory corruption. An unknown unit is already reported loudly
+      // (Phase 82); an EMPTY unit list must be just as loud.
+      return { error: `تعذّر تحديد وحدات المنتج (${productId}) — لا توجد وحدة أساسية. استخدم search.product_units أو inventory.create_product_unit لإضافتها قبل الإدخال` };
+    }
     cache.set(productId, rows);
     return rows;
   };

@@ -410,7 +410,7 @@ export const purchasesApi = {
     }
   },
 
-  async createSupplier(data: Omit<Supplier, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createSupplier(data: Omit<Supplier, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string; warning?: string }> {
     try {
       const validation = validateInput(createSupplierSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
@@ -446,11 +446,17 @@ export const purchasesApi = {
       }
       if (result.success && result.rows?.[0]) {
         const supplierId = String(result.rows[0].id);
-        // Opening balance: post a balanced JE (Dr Opening Equity / Cr AP)
+        // Opening balance: post a balanced JE (Dr Opening Equity / Cr AP).
+        // The posting result was DISCARDED — a failed opening entry left a
+        // supplier whose statement balances and whose ledger does not, with
+        // the caller told everything worked. Reported as a warning instead.
         const opening = Number(supplierData.openingBalance) || 0;
         if (opening > 0 && !supplierData.openingBalancePosted) {
           const { postSupplierOpening } = await import('@/core/utils/openingBalance');
-          await postSupplierOpening(data.companyId, { id: supplierId, name: supplierData.name, amount: opening, openingDate: supplierData.openingDate });
+          const posted = await postSupplierOpening(data.companyId, { id: supplierId, name: supplierData.name, amount: opening, openingDate: supplierData.openingDate });
+          if (posted && posted.success === false) {
+            return { success: true, id: supplierId, warning: `تعذّر ترحيل الرصيد الافتتاحي: ${posted.error || 'سبب غير معروف'}` };
+          }
         }
         return { success: true, id: supplierId };
       }

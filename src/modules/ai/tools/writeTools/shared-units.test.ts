@@ -94,6 +94,23 @@ describe('resolveLineUnits — self-heal (U5)', () => {
     ]);
     expect(vi.mocked(inventoryApi.ensureBaseProductUnit)).toHaveBeenCalledTimes(1);
   });
+
+  it('hard-errors when the self-heal leaves the product with NO units', async () => {
+    // The silent-corruption path this closes: heal attempted, still empty →
+    // `chosen` undefined → factor=1 → a WRONG base_quantity written to the
+    // line, and stock debited/credited by the wrong multiple. An unknown unit
+    // already errors loudly (Phase 82); an EMPTY unit list must too.
+    vi.mocked(inventoryApi.getProductUnits).mockResolvedValue({ success: true, data: [] } as never);
+    vi.mocked(inventoryApi.ensureBaseProductUnit).mockResolvedValue({ success: false, error: 'no product row' } as never);
+    const res = await resolveLineUnits(COMPANY_ID, 'sale', [
+      { productId: LEGACY_ID, quantity: 5, unitPrice: 100, discountPercent: 0 },
+    ]);
+    expect('error' in res, 'a product with no unit rows must not fall back to factor=1').toBe(true);
+    if ('error' in res) {
+      expect(res.error).toMatch(/create_product_unit|search\.product_units/);
+      expect(res.error).not.toMatch(/factor=1/);
+    }
+  });
 });
 
 describe('resolveLineUnits — price reconciliation (U3)', () => {

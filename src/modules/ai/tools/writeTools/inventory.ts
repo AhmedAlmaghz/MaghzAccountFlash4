@@ -234,12 +234,17 @@ export const inventoryWriteTools: ToolDefinition[] = [
         productId: res.id,
         code,
         nameAr,
+        // Honest facts only: the opening stock is "posted" because the write
+        // succeeded, never because a warehouse id happened to be supplied.
+        ...(res.warning ? { warning: res.warning } : {}),
         ...(openingQty > 0
           ? {
               openingStockQty: openingQty,
               openingValue: round2(openingQty * costPrice),
-              openingPosted: !!openingWarehouseId,
-              note: openingWarehouseId ? 'المخزون الافتتاحي رُحّل تلقائياً (مدين المخزون / دائن الأرصدة الافتتاحية)' : undefined,
+              openingPosted: res.openingStockPosted === true,
+              note: res.openingStockPosted === true
+                ? 'المخزون الافتتاحي رُحّل فعلياً (مدين المخزون / دائن الأرصدة الافتتاحية)'
+                : `تعذّر ترحيل المخزون الافتتاحي${res.warning ? `: ${res.warning}` : ''} — راجع المخزون والقيود`,
             }
           : {}),
       };

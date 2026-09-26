@@ -190,39 +190,60 @@ export const inventoryApi = {
     }
   },
 
-  async createProduct(data: Omit<Product, 'id'>, _createdBy?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createProduct(data: Omit<Product, 'id'>, _createdBy?: string): Promise<{ success: boolean; id?: string; error?: string; warning?: string; openingStockPosted?: boolean }> {
     try {
-      const validation = validateInput(createProductSchema, data);
-      if (!validation.success) return { success: false, error: validation.error };
-      const adapter = await getDbAdapter();
-      const payload = { ...data, createdBy: _createdBy ?? data.createdBy, updatedBy: _createdBy ?? data.updatedBy };
-      const created = await adapter.createProduct(payload);
-      if (!created.success || !created.id) return { success: false, error: created.error };
-      const productId = String(created.id);
-      // Phase 1: the typed-RPC create path has a fixed column list without
-      // standard_cost — persist it with a follow-up UPDATE on all transports.
-      if (data.standardCost !== undefined && data.standardCost !== null) {
-        await adapter.query(
-          `UPDATE products SET standard_cost = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
-          [data.standardCost, productId, data.companyId]
-        );
+    const validation = validateInput(createProductSchema, data);
+    if (!validation.success) return { success: false, error: validation.error };
+    const adapter = await getDbAdapter();
+    const payload = { ...data, createdBy: _createdBy ?? data.createdBy, updatedBy: _createdBy ?? data.updatedBy };
+    const created = await adapter.createProduct(payload);
+    if (!created.success || !created.id) return { success: false, error: created.error };
+    const productId = String(created.id);
+    // A created row is a fact; the follow-up steps are NOT. Each one used to
+    // fire-and-forget, so a failure in the m2m link, the standard cost, the
+    // base unit or — worst — the opening-stock journal entry disappeared while
+    // the caller was told everything worked. Partial success is now reported
+    // as `warning` (additive: callers that ignore it behave exactly as before).
+    const warnings: string[] = [];
+    if (created.warning) warnings.push(created.warning);
+    // Phase 1: the typed-RPC create path has a fixed column list without
+    // standard_cost — persist it with a follow-up UPDATE on all transports.
+    if (data.standardCost !== undefined && data.standardCost !== null) {
+      const costRes = await adapter.query(
+        `UPDATE products SET standard_cost = $1::numeric, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid`,
+        [data.standardCost, productId, data.companyId]
+      );
+      if (!costRes.success) warnings.push(`تعذّر حفظ التكلفة المعيارية: ${costRes.error || 'سبب غير معروف'}`);
+    }
+    // Every product owns at least its base unit row (migration 0021
+    // backfills history; this covers newly created products).
+    const baseUnit = await inventoryApi.ensureBaseProductUnit(productId, data.companyId);
+    if (!baseUnit.success) warnings.push(`تعذّر إنشاء الوحدة الأساسية: ${baseUnit.error || 'سبب غير معروف'}`);
+    // Opening stock: movement + stock row + balanced JE (Dr Inventory / Cr Opening Equity)
+    const openingQty = Number(data.openingStockQty) || 0;
+    let openingStockPosted = false;
+    if (productId && openingQty > 0 && !data.openingStockPosted) {
+      const { postProductStockOpening } = await import('@/core/utils/openingBalance');
+      const opened = await postProductStockOpening(data.companyId, {
+        productId,
+        productName: `${data.code} - ${data.nameAr}`,
+        quantity: openingQty,
+        warehouseId: data.openingWarehouseId || null,
+        costPrice: Number(data.costPrice) || 0,
+      });
+      // An explicit fact, not an assumption: callers must never claim the
+      // opening stock was posted because a warehouse id was merely supplied.
+      openingStockPosted = !!opened && opened.success === true;
+      if (!openingStockPosted) {
+        warnings.push(`تعذّر ترحيل المخزون الافتتاحي: ${(opened && opened.error) || 'لم يكتمل الترحيل'}`);
       }
-      // Every product owns at least its base unit row (migration 0021
-      // backfills history; this covers newly created products).
-      await inventoryApi.ensureBaseProductUnit(productId, data.companyId);
-      // Opening stock: movement + stock row + balanced JE (Dr Inventory / Cr Opening Equity)
-      const openingQty = Number(data.openingStockQty) || 0;
-      if (productId && openingQty > 0 && !data.openingStockPosted) {
-        const { postProductStockOpening } = await import('@/core/utils/openingBalance');
-        await postProductStockOpening(data.companyId, {
-          productId,
-          productName: `${data.code} - ${data.nameAr}`,
-          quantity: openingQty,
-          warehouseId: data.openingWarehouseId || null,
-          costPrice: Number(data.costPrice) || 0,
-        });
-      }
-      return { success: true, id: productId };
+    } else if (data.openingStockPosted === true) {
+      openingStockPosted = true; // the caller states it was already posted
+    }
+    if (warnings.length > 0) {
+      return { success: true, id: productId, warning: warnings.join(' | '), openingStockPosted };
+    }
+    return { success: true, id: productId, openingStockPosted };
     } catch (e) {
       return { success: false, error: String(e) };
     }

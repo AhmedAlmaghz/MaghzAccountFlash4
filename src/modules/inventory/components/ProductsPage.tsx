@@ -290,7 +290,11 @@ export const ProductsPage: React.FC = () => {
         const result = await create(payload);
         if (result.success) {
           await logAudit({ userId: user?.id || '', action: 'create', tableName: 'products', recordId: result.id || '', companyId: activeCompany.id });
-          addToast('success', t('inventory.product.created'));
+          // The product row exists, but a follow-up step may not have landed
+          // (categories / base unit / opening-stock journal entry). Saying
+          // "created" and hiding that is the failure this warning exists for.
+          if (result.warning) addToast('warning', result.warning);
+          else addToast('success', t('inventory.product.created'));
           closeModal();
         } else {
           addToast('error', result.error || t('common.error'));

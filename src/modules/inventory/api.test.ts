@@ -250,3 +250,56 @@ describe('inventoryApi.postStockAdjustment period gates (Phase 5)', () => {
     expect(res.error ?? '').not.toMatch(/مقفلة|الفترة الضريبية/);
   });
 });
+
+describe('inventoryApi.createProduct reports partial success (no silent steps)', () => {
+  const CODE = 'PRD-0001';
+
+  /** The adapter's own createProduct result is configurable per test. */
+  function adapter(createResult: Record<string, unknown>, queryResult?: Record<string, unknown>) {
+    const a = makeMockAdapter(async () => (queryResult || { success: true, rows: [] }) as never);
+    a.createProduct = vi.fn(async () => createResult as never);
+    vi.mocked(getDbAdapter).mockResolvedValue(a as never);
+    return a;
+  }
+
+  const base = () => ({
+    companyId: COMPANY_ID, code: CODE, nameAr: 'صنف', nameEn: 'Item',
+    unit: 'قطعة', barcode: '', sku: '', salePrice: 100, costPrice: 50, isActive: true,
+  } as never);
+
+  it('passes the adapter warning through (m2m categories failed on the typed path)', async () => {
+    adapter({ success: true, id: PRODUCT_ID, warning: 'تم إنشاء المنتج لكن ربط التصنيفات فشل: Permission denied' });
+    const res = await inventoryApi.createProduct({ ...(base() as object), categoryIds: [UNIT_ROW_ID] } as never);
+    expect(res.success).toBe(true);
+    expect(res.id).toBe(PRODUCT_ID);
+    expect(res.warning).toMatch(/ربط التصنيفات فشل/);
+  });
+
+  it('warns when the standard-cost follow-up UPDATE fails', async () => {
+    adapter({ success: true, id: PRODUCT_ID }, { success: false, error: 'deadlock detected' });
+    const res = await inventoryApi.createProduct({ ...(base() as object), standardCost: 42 } as never);
+    expect(res.success).toBe(true);
+    expect(res.warning).toMatch(/التكلفة المعيارية/);
+  });
+
+  it('does not claim the opening stock was posted when it was not', async () => {
+    // The regression: the tool derived `openingPosted` from whether a warehouse
+    // id was SUPPLIED, so it announced "posted automatically" even when the
+    // movement and its journal entry never happened.
+    adapter({ success: true, id: PRODUCT_ID });
+    const res = await inventoryApi.createProduct({
+      ...(base() as object), openingStockQty: 10, openingWarehouseId: UNIT_ROW_ID,
+    } as never);
+    // The mocked postProductStockOpening path cannot confirm a write, so the
+    // fact must be false and the warning present.
+    expect(res.openingStockPosted).toBe(false);
+    expect(res.warning).toMatch(/المخزون الافتتاحي/);
+  });
+
+  it('reports no warning when nothing failed', async () => {
+    adapter({ success: true, id: PRODUCT_ID });
+    const res = await inventoryApi.createProduct(base());
+    expect(res.success).toBe(true);
+    expect(res.warning).toBeUndefined();
+  });
+});

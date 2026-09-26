@@ -261,7 +261,7 @@ export const hrApi = {
     }
   },
 
-  async createEmployee(data: Omit<Employee, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createEmployee(data: Omit<Employee, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string; warning?: string }> {
     try {
       const validation = validateInput(createEmployeeSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
@@ -295,11 +295,17 @@ export const hrApi = {
         });
         if (result.success && result.rows?.[0]) {
           const employeeId = String(result.rows[0].id);
-          // Opening balance (employee advance): Dr Advances / Cr Opening Equity
+          // Opening balance (employee advance): Dr Advances / Cr Opening Equity.
+          // The posting result was DISCARDED — a failed advance entry left an
+          // employee whose card and the ledger disagree, with plain success
+          // reported. Reported as a warning instead.
           const opening = Number(employeeData.openingBalance) || 0;
           if (opening > 0 && !employeeData.openingBalancePosted) {
             const { postEmployeeOpening } = await import('@/core/utils/openingBalance');
-            await postEmployeeOpening(data.companyId, { id: employeeId, name: employeeData.fullName, amount: opening });
+            const posted = await postEmployeeOpening(data.companyId, { id: employeeId, name: employeeData.fullName, amount: opening });
+            if (posted && posted.success === false) {
+              return { success: true, id: employeeId, warning: `تعذّر ترحيل سلفة الموظف الافتتاحية: ${posted.error || 'سبب غير معروف'}` };
+            }
           }
           return { success: true, id: employeeId };
         }
@@ -317,7 +323,10 @@ export const hrApi = {
         const opening = Number(employeeData.openingBalance) || 0;
         if (opening > 0 && !employeeData.openingBalancePosted) {
           const { postEmployeeOpening } = await import('@/core/utils/openingBalance');
-          await postEmployeeOpening(data.companyId, { id: employeeId, name: employeeData.fullName, amount: opening });
+          const posted = await postEmployeeOpening(data.companyId, { id: employeeId, name: employeeData.fullName, amount: opening });
+          if (posted && posted.success === false) {
+            return { success: true, id: employeeId, warning: `تعذّر ترحيل سلفة الموظف الافتتاحية: ${posted.error || 'سبب غير معروف'}` };
+          }
         }
         return { success: true, id: employeeId };
       }
