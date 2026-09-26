@@ -303,3 +303,59 @@ describe('inventoryApi.createProduct reports partial success (no silent steps)',
     expect(res.warning).toBeUndefined();
   });
 });
+
+describe('inventoryApi.updateProduct — m2m replacement is honest and ordered', () => {
+  function tracked(failOn?: RegExp) {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (failOn?.test(sql)) return { success: false, error: 'fk violation' };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return seen;
+  }
+  const first = (seen: string[], re: RegExp) => seen.findIndex((s) => re.test(s));
+
+  it('writes the product row BEFORE swapping the category links', async () => {
+    const seen = tracked();
+    const res = await inventoryApi.updateProduct(PRODUCT_ID, COMPANY_ID, undefined, { categoryIds: [UNIT_ID] } as never);
+    expect(res.success).toBe(true);
+    expect(res.warning).toBeUndefined();
+    // The previous order deleted the links first, so a failed row update left
+    // the categories already swapped on a product whose edit "failed".
+    expect(first(seen, /UPDATE products SET/)).toBeLessThan(first(seen, /DELETE FROM product_product_categories/));
+  });
+
+  it('fails honestly when the product row itself is not saved', async () => {
+    tracked(/UPDATE products SET/);
+    const res = await inventoryApi.updateProduct(PRODUCT_ID, COMPANY_ID, undefined, { categoryIds: [UNIT_ID] } as never);
+    expect(res.success).toBe(false);
+    // and the categories were never touched
+  });
+
+  it('surfaces a failed category re-link as a warning instead of a silent wipe', async () => {
+    const seen = tracked(/INSERT INTO product_product_categories/);
+    const res = await inventoryApi.updateProduct(PRODUCT_ID, COMPANY_ID, undefined, { categoryIds: [UNIT_ID] } as never);
+    expect(res.success).toBe(true);
+    expect(res.warning).toMatch(/التصنيفات/);
+    expect(seen.some((s) => /DELETE FROM product_product_categories/.test(s))).toBe(true);
+  });
+
+  it('surfaces a failed base-unit price sync (card vs costing basis)', async () => {
+    tracked(/UPDATE product_units SET/);
+    const res = await inventoryApi.updateProduct(PRODUCT_ID, COMPANY_ID, undefined, { salePrice: 250 } as never);
+    expect(res.success).toBe(true);
+    expect(res.warning).toMatch(/الوحدة الأساسية/);
+  });
+
+  it('scopes the link deletion to the caller company', async () => {
+    const seen = tracked();
+    await inventoryApi.updateProduct(PRODUCT_ID, COMPANY_ID, undefined, { categoryIds: [UNIT_ID] } as never);
+    // The m2m table itself has no company column, so the guard must come from
+    // the sub-select — otherwise one tenant could unlink another's product.
+    const del = seen.find((s) => /DELETE FROM product_product_categories/.test(s))!;
+    expect(del).toMatch(/\$2 = \(SELECT company_id FROM products WHERE id = \$1\)/);
+    expect(seen.find((s) => /INSERT INTO product_product_categories/.test(s))!.match(/VALUES/)).toBeTruthy();
+  });
+});

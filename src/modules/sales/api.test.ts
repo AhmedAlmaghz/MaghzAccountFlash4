@@ -1690,6 +1690,74 @@ describe('salesApi line lookups scope the product join to the company (defense i
   });
 });
 
+describe('salesApi update paths — line replacement is atomic (Phase FIN)', () => {
+  const DRAFT_ROW = { status: 'draft', paid_amount: 0, paid_amount_base: 0 };
+
+  function updateAdapter(txOk: boolean) {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/SELECT status/.test(sql)) return { success: true, rows: [DRAFT_ROW] };
+      return { success: true, rows: [] };
+    });
+    // makeMockAdapter's transaction replays each statement through queryImpl;
+    // here we only need its call shape, and the failure case is the assertion.
+    if (!txOk) adapter.transaction.mockRejectedValueOnce(new Error('deadlock detected'));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return adapter;
+  }
+
+  const lines = [
+    { productId: '00000000-0000-0000-0000-000000000030', quantity: 2, unitPrice: 100, discountPercent: 0, vatPercent: 0, lineTotal: 200 },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (window as unknown as { electronDB?: unknown }).electronDB = undefined;
+  });
+
+  it('updateInvoice sends header + line delete + line insert in ONE transaction', async () => {
+    const adapter = updateAdapter(true);
+    const res = await salesApi.updateInvoice(INVOICE_ID, COMPANY_ID, { companyId: COMPANY_ID, lines } as never);
+    expect(res.success).toBe(true);
+    expect(adapter.transaction, 'the three writes must travel together').toHaveBeenCalledTimes(1);
+    const shipped = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+    expect(shipped).toHaveLength(3);
+    expect(shipped[0].sql).toMatch(/UPDATE sales_invoices SET/);
+    expect(shipped[1].sql).toMatch(/DELETE FROM sales_invoice_lines/);
+    expect(shipped[2].sql).toMatch(/INSERT INTO sales_invoice_lines/);
+  });
+
+  it('updateInvoice never reports a bare success when the batch fails', async () => {
+    updateAdapter(false);
+    const res = await salesApi.updateInvoice(INVOICE_ID, COMPANY_ID, { companyId: COMPANY_ID, lines } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toBeTruthy();
+  });
+
+  it('updateQuotation replaces header + lines atomically too', async () => {
+    const adapter = updateAdapter(true);
+    const res = await salesApi.updateQuotation('00000000-0000-0000-0000-000000000040', COMPANY_ID, { companyId: COMPANY_ID, lines } as never);
+    expect(res.success).toBe(true);
+    const shipped = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+    expect(shipped.map((s) => s.sql)).toEqual([
+      expect.stringMatching(/UPDATE quotations SET/),
+      expect.stringMatching(/DELETE FROM quotation_lines/),
+      expect.stringMatching(/INSERT INTO quotation_lines/),
+    ]);
+  });
+
+  it('updateReturn replaces header + lines atomically too', async () => {
+    const adapter = updateAdapter(true);
+    const res = await salesApi.updateReturn('00000000-0000-0000-0000-000000000050', COMPANY_ID, { companyId: COMPANY_ID, lines } as never);
+    expect(res.success).toBe(true);
+    const shipped = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+    expect(shipped.map((s) => s.sql)).toEqual([
+      expect.stringMatching(/UPDATE sales_returns SET/),
+      expect.stringMatching(/DELETE FROM sales_return_lines/),
+      expect.stringMatching(/INSERT INTO sales_return_lines/),
+    ]);
+  });
+});
+
 describe('salesApi.convertQuotationToInvoice (claim before create)', () => {
   const QUO_ID = '00000000-0000-0000-0000-000000000040';
 

@@ -825,13 +825,21 @@ export const salesApi = {
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
+      // Header + line replacement now travel in ONE transaction. They used to be
+      // three fire-and-forget statements followed by an unconditional
+      // `success: true`: a failed re-insert left the invoice with NO lines while
+      // the header kept its totals — a revenue document contradicting itself.
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
       if (fields.length > 0) {
         values.push(id);
         values.push(companyId);
-        await adapter.query(`UPDATE sales_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values);
+        tx.push({ sql: `UPDATE sales_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, params: values });
       }
       if (data.lines) {
-        await adapter.query('DELETE FROM sales_invoice_lines WHERE invoice_id = $1 AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1)', [id, companyId]);
+        tx.push({
+          sql: 'DELETE FROM sales_invoice_lines WHERE invoice_id = $1 AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1)',
+          params: [id, companyId],
+        });
         const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
           const off = i * 13;
           return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`;
@@ -847,10 +855,14 @@ export const salesApi = {
         // live from products — draft edits re-freeze the cost.
         lineParams.push(companyId);
         const costCidIdx = lineParams.length;
-        await adapter.query(
-          `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${costCidIdx}::uuid`,
-          lineParams
-        );
+        tx.push({
+          sql: `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${costCidIdx}::uuid`,
+          params: lineParams,
+        });
+      }
+      if (tx.length > 0) {
+        const txRes = await adapter.transaction(tx);
+        if (!txRes.success) return { success: false, error: txRes.error || 'تعذّر حفظ التعديلات' };
       }
       return { success: true };
     } catch (e) {
@@ -1397,9 +1409,16 @@ export const salesApi = {
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
-      if (fields.length > 0) { values.push(id); values.push(companyId); await adapter.query(`UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values); }
+      // Header + line replacement in ONE transaction (same reason as
+      // updateInvoice: three discarded statements ended in an unconditional
+      // success, so a failed re-insert left a document with no lines).
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      if (fields.length > 0) { values.push(id); values.push(companyId); tx.push({ sql: `UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, params: values }); }
       if (data.lines) {
-        await adapter.query('DELETE FROM quotation_lines WHERE quotation_id = $1::uuid AND $2::uuid = (SELECT company_id FROM quotations WHERE id = $1)', [id, companyId]);
+        tx.push({
+          sql: 'DELETE FROM quotation_lines WHERE quotation_id = $1::uuid AND $2::uuid = (SELECT company_id FROM quotations WHERE id = $1)',
+          params: [id, companyId],
+        });
         const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
           const off = i * 9;
           return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}::uuid, $${off + 8}, $${off + 9})`;
@@ -1408,7 +1427,11 @@ export const salesApi = {
           const usnap = snapshotLineUnit(line);
           return [id, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity];
         });
-        await adapter.query(`INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues}`, lineParams);
+        tx.push({ sql: `INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues}`, params: lineParams });
+      }
+      if (tx.length > 0) {
+        const txRes = await adapter.transaction(tx);
+        if (!txRes.success) return { success: false, error: txRes.error || 'تعذّر حفظ التعديلات' };
       }
       return { success: true };
     } catch (e) {
@@ -1720,9 +1743,16 @@ export const salesApi = {
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
-      if (fields.length > 0) { values.push(id); values.push(companyId); await adapter.query(`UPDATE sales_returns SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values); }
+      // Header + line replacement in ONE transaction (same reason as
+      // updateInvoice: a discarded DELETE + INSERT pair reported success even
+      // when the return ended up with no lines).
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      if (fields.length > 0) { values.push(id); values.push(companyId); tx.push({ sql: `UPDATE sales_returns SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, params: values }); }
       if (data.lines) {
-        await adapter.query('DELETE FROM sales_return_lines WHERE return_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_returns WHERE id = $1)', [id, companyId]);
+        tx.push({
+          sql: 'DELETE FROM sales_return_lines WHERE return_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_returns WHERE id = $1)',
+          params: [id, companyId],
+        });
         const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
           const off = i * 8;
           return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}::uuid, $${off + 7}, $${off + 8})`;
@@ -1731,7 +1761,11 @@ export const salesApi = {
           const usnap = snapshotLineUnit(line);
           return [id, line.productId, line.quantity, line.unitPrice, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity];
         });
-        await adapter.query(`INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues}`, lineParams);
+        tx.push({ sql: `INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues}`, params: lineParams });
+      }
+      if (tx.length > 0) {
+        const txRes = await adapter.transaction(tx);
+        if (!txRes.success) return { success: false, error: txRes.error || 'تعذّر حفظ التعديلات' };
       }
       return { success: true };
     } catch (e) {

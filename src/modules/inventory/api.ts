@@ -249,43 +249,65 @@ export const inventoryApi = {
     }
   },
 
-  async updateProduct(id: string, companyId: string, _updatedBy?: string, data: Partial<Product> = {}): Promise<{ success: boolean; error?: string }> {
+  async updateProduct(id: string, companyId: string, _updatedBy?: string, data: Partial<Product> = {}): Promise<{ success: boolean; error?: string; warning?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // The product row is written FIRST. The previous order replaced the m2m
+      // category links before this statement, and neither result was checked —
+      // so a failed edit (e.g. a duplicate code) left the product's categories
+      // already swapped, and a failed re-insert left it with NO categories,
+      // while the caller was told the plain outcome of the last statement.
+      const updated = await adapter.query(
+        `UPDATE products SET name_ar = $1, name_en = $2, code = $3, barcode = $4, sku = $5, unit = $6, cost_price = $7, sale_price = $8, is_active = $9, image = $10, min_stock = $11, max_stock = $12, reorder_point = $13, category_id = $14, product_type_id = $15, standard_cost = COALESCE($16::numeric, standard_cost), updated_by = $17, updated_at = NOW() WHERE id = $18 AND company_id = $19`,
+        [data.nameAr, data.nameEn, data.code, data.barcode, data.sku, data.unit, data.costPrice, data.salePrice, data.isActive, data.image, data.minStock, data.maxStock, data.reorderPoint, data.categoryId ?? null, data.productTypeId ?? null, data.standardCost ?? null, _updatedBy ?? data.updatedBy ?? null, id, companyId]
+      );
+      if (!updated.success) return { success: false, error: updated.error };
+
+      const warnings: string[] = [];
+
+      // Replace the m2m links only after the row is saved, and report a
+      // failure instead of losing the links silently.
       if (data.categoryIds !== undefined) {
-        await adapter.query('DELETE FROM product_product_categories WHERE product_id = $1 AND $2 = (SELECT company_id FROM products WHERE id = $1)', [id, companyId]);
-        if (data.categoryIds.length > 0) {
+        const del = await adapter.query(
+          'DELETE FROM product_product_categories WHERE product_id = $1 AND $2 = (SELECT company_id FROM products WHERE id = $1)',
+          [id, companyId]
+        );
+        if (!del.success) {
+          warnings.push(`تعذّر تحديث التصنيفات: ${del.error || 'سبب غير معروف'}`);
+        } else if (data.categoryIds.length > 0) {
           const catValues = data.categoryIds.map((_: string, i: number) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
           const catParams = data.categoryIds.flatMap((cid: string) => [id, cid]);
-          await adapter.query(
+          const ins = await adapter.query(
             `INSERT INTO product_product_categories (product_id, category_id) VALUES ${catValues} ON CONFLICT DO NOTHING`,
             catParams
           );
+          if (!ins.success) warnings.push(`تعذّر ربط التصنيفات: ${ins.error || 'سبب غير معروف'}`);
         }
       }
-      return adapter.query(
-        `UPDATE products SET name_ar = $1, name_en = $2, code = $3, barcode = $4, sku = $5, unit = $6, cost_price = $7, sale_price = $8, is_active = $9, image = $10, min_stock = $11, max_stock = $12, reorder_point = $13, category_id = $14, product_type_id = $15, standard_cost = COALESCE($16::numeric, standard_cost), updated_by = $17, updated_at = NOW() WHERE id = $18 AND company_id = $19`,
-        [data.nameAr, data.nameEn, data.code, data.barcode, data.sku, data.unit, data.costPrice, data.salePrice, data.isActive, data.image, data.minStock, data.maxStock, data.reorderPoint, data.categoryId ?? null, data.productTypeId ?? null, data.standardCost ?? null, _updatedBy ?? data.updatedBy ?? null, id, companyId]
-      ).then(async (res) => {
-        // The base unit row mirrors the product card prices by definition.
-        if (res.success && (data.costPrice !== undefined || data.salePrice !== undefined)) {
-          const syncFields: string[] = [];
-          const syncParams: unknown[] = [];
-          let sIdx = 1;
-          if (data.salePrice !== undefined) { syncFields.push(`sale_price = $${sIdx++}::numeric`); syncParams.push(data.salePrice); }
-          if (data.costPrice !== undefined) { syncFields.push(`purchase_price = $${sIdx++}::numeric`); syncParams.push(data.costPrice); }
-          syncFields.push('updated_at = NOW()');
-          syncParams.push(id);
-          syncParams.push(companyId);
-          await adapter.query(
-            `UPDATE product_units SET ${syncFields.join(', ')} WHERE product_id = $${sIdx++}::uuid AND company_id = $${sIdx}::uuid AND is_base`,
-            syncParams
-          );
-        }
-        return res;
-      });
+
+      // The base unit row mirrors the product card prices by definition.
+      if (data.costPrice !== undefined || data.salePrice !== undefined) {
+        const syncFields: string[] = [];
+        const syncParams: unknown[] = [];
+        let sIdx = 1;
+        if (data.salePrice !== undefined) { syncFields.push(`sale_price = $${sIdx++}::numeric`); syncParams.push(data.salePrice); }
+        if (data.costPrice !== undefined) { syncFields.push(`purchase_price = $${sIdx++}::numeric`); syncParams.push(data.costPrice); }
+        syncFields.push('updated_at = NOW()');
+        syncParams.push(id);
+        syncParams.push(companyId);
+        const sync = await adapter.query(
+          `UPDATE product_units SET ${syncFields.join(', ')} WHERE product_id = $${sIdx++}::uuid AND company_id = $${sIdx}::uuid AND is_base`,
+          syncParams
+        );
+        // A stale base-unit price means the card and the costing basis
+        // disagree — reported, not swallowed.
+        if (!sync.success) warnings.push(`تعذّر مزامنة أسعار الوحدة الأساسية: ${sync.error || 'سبب غير معروف'}`);
+      }
+
+      if (warnings.length > 0) return { success: true, warning: warnings.join(' | ') };
+      return { success: true };
     } catch (e) {
       return { success: false, error: String(e) };
     }
