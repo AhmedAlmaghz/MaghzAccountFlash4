@@ -496,6 +496,7 @@
         "openrouter": "OpenRouter",
         "groq": "Groq",
         "ollama": "Ollama (local)",
+        "typesafe": "JEV / TypeSafe",
         "custom": "Custom"
       },
       "noKey": "No key",
@@ -3997,6 +3998,12 @@
       "logout": "Logout"
     },
     "collapseSidebar": "Collapse sidebar"
+  },
+  "errors": {
+    "title": "An unexpected error occurred",
+    "description": "An unexpected error occurred. Please try again.",
+    "home": "Home",
+    "reload": "Reload"
   },
   "common": {
     "loading": "Loading...",

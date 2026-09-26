@@ -7,7 +7,7 @@ import { usePermission } from '@/modules/auth/hooks/usePermission';
 const reportModules = [
   {
     id: 'sales-analysis',
-    titleKey: 'reports.salesAnalysis',
+    titleKey: 'reports.salesAnalysis.title',
     descriptionKey: 'reports.hub.salesAnalysis.desc',
     icon: TrendingUp,
     color: 'from-blue-600 to-blue-700',
@@ -16,7 +16,7 @@ const reportModules = [
   },
   {
     id: 'inventory-analysis',
-    titleKey: 'reports.inventoryAnalysis',
+    titleKey: 'reports.inventoryAnalysis.title',
     descriptionKey: 'reports.hub.inventoryAnalysis.desc',
     icon: Package,
     color: 'from-amber-600 to-amber-700',
@@ -52,7 +52,7 @@ const reportModules = [
   },
   {
     id: 'customer-statement',
-    titleKey: 'reports.customerStatement',
+    titleKey: 'reports.customerStatement.title',
     descriptionKey: 'reports.hub.customerStatement.desc',
     icon: Users,
     color: 'from-emerald-600 to-emerald-700',
@@ -61,7 +61,7 @@ const reportModules = [
   },
   {
     id: 'supplier-statement',
-    titleKey: 'reports.supplierStatement',
+    titleKey: 'reports.supplierStatement.title',
     descriptionKey: 'reports.hub.supplierStatement.desc',
     icon: Truck,
     color: 'from-purple-600 to-purple-700',
@@ -70,7 +70,7 @@ const reportModules = [
   },
   {
     id: 'profit-analysis',
-    titleKey: 'reports.profitAnalysis',
+    titleKey: 'reports.profitAnalysis.title',
     descriptionKey: 'reports.hub.profitAnalysis.desc',
     icon: PieChart,
     color: 'from-rose-600 to-rose-700',
@@ -79,7 +79,7 @@ const reportModules = [
   },
   {
     id: 'custom-builder',
-    titleKey: 'reports.customReportBuilder',
+    titleKey: 'reports.customReportBuilder.title',
     descriptionKey: 'reports.hub.customReportBuilder.desc',
     icon: Settings,
     color: 'from-slate-600 to-slate-700',

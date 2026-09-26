@@ -496,6 +496,7 @@
         "openrouter": "OpenRouter",
         "groq": "Groq",
         "ollama": "Ollama (محلي)",
+        "typesafe": "JEV / TypeSafe",
         "custom": "مخصص"
       },
       "noKey": "بلا مفتاح",
@@ -3997,6 +3998,12 @@
       "logout": "تسجيل الخروج"
     },
     "collapseSidebar": "طي القائمة"
+  },
+  "errors": {
+    "title": "حدث خطأ غير متوقع",
+    "description": "حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.",
+    "home": "الصفحة الرئيسية",
+    "reload": "إعادة تحميل"
   },
   "common": {
     "loading": "جارٍ التحميل...",

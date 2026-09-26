@@ -306,7 +306,7 @@ export const manufacturingApi = {
       const bomRes = await adapter.query('SELECT * FROM boms WHERE id = $1 AND company_id = $2 LIMIT 1', [id, companyId]);
       if (!bomRes.success || !bomRes.rows?.[0]) return { success: false, error: bomRes.error || 'Not found' };
       const bom = mapBomRow(bomRes.rows[0] as Record<string, unknown>);
-      const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM bom_lines l LEFT JOIN products p ON l.material_id = p.id WHERE l.bom_id = $1', [id]);
+      const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM bom_lines l LEFT JOIN products p ON l.material_id = p.id AND p.company_id = $2::uuid WHERE l.bom_id = $1', [id, companyId]);
       const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapBomLineRow(r));
       return { success: true, data: { bom, lines } };
     } catch (e) {
@@ -476,7 +476,7 @@ export const manufacturingApi = {
       const res = await adapter.query(sql, [id, companyId]);
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
       const workOrder = mapWorkOrderRow(res.rows[0] as Record<string, unknown>);
-      const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM work_order_consumptions l LEFT JOIN products p ON l.material_id = p.id WHERE l.work_order_id = $1', [id]);
+      const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM work_order_consumptions l LEFT JOIN products p ON l.material_id = p.id AND p.company_id = $2::uuid WHERE l.work_order_id = $1', [id, companyId]);
       const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapWorkOrderLineRow(r));
       return { success: true, data: { workOrder, lines } };
     } catch (e) {

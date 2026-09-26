@@ -75,10 +75,10 @@ export class ErrorBoundary extends Component<Props, State> {
               <AlertTriangle size={32} className="text-rose-600 dark:text-rose-400" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 mb-2">
-              {te('error.title')}
+              {te('errors.title')}
             </h1>
             <p className="text-slate-600 dark:text-slate-400 mb-6">
-              {te('error.description')}
+              {te('errors.description')}
             </p>
             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 mb-6 text-right">
               <p className="text-xs font-mono text-slate-500 dark:text-slate-400 break-all">
@@ -90,10 +90,10 @@ export class ErrorBoundary extends Component<Props, State> {
                 {te('common.retry')}
               </Button>
               <Button variant="secondary" onClick={this.handleHome} leftIcon={<Home size={16} />}>
-                {te('error.home')}
+                {te('errors.home')}
               </Button>
               <Button variant="ghost" onClick={this.handleReload}>
-                {te('error.reload')}
+                {te('errors.reload')}
               </Button>
             </div>
           </div>

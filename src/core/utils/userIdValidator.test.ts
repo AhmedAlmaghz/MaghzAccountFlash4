@@ -60,22 +60,38 @@ describe('resolveExistingUserId', () => {
     expect(adapter.query).not.toHaveBeenCalled();
   });
 
-  it('returns the id when user exists', async () => {
+  it('scopes the lookup to the supplied company', async () => {
+    const companyId = '27ab12b2-a7f1-4465-ad47-db2ed461b731';
     const adapter = {
       query: vi.fn().mockResolvedValue({ success: true, rows: [{ '?column?': 1 }] }),
     };
-    expect(await resolveExistingUserId(adapter, VALID_UUID)).toBe(VALID_UUID);
+    expect(await resolveExistingUserId(adapter, VALID_UUID, companyId)).toBe(VALID_UUID);
     expect(adapter.query).toHaveBeenCalledWith(
-      'SELECT 1 FROM users WHERE id = $1::uuid AND is_active = true LIMIT 1',
-      [VALID_UUID]
+      'SELECT 1 FROM users WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true LIMIT 1',
+      [VALID_UUID, companyId]
     );
+  });
+
+  it('refuses without a company and never falls back to a global lookup', async () => {
+    const adapter = { query: vi.fn() };
+    // Fail-closed: an audit column says "this user belongs to THIS tenant".
+    // Without a company we cannot prove that, so the answer is null — and
+    // the unscoped `SELECT 1 FROM users` must not be reachable at all.
+    expect(await resolveExistingUserId(adapter, VALID_UUID)).toBeNull();
+    expect(adapter.query).not.toHaveBeenCalled();
+  });
+
+  it('refuses a non-UUID company instead of dropping the tenant predicate', async () => {
+    const adapter = { query: vi.fn() };
+    expect(await resolveExistingUserId(adapter, VALID_UUID, 'comp-1')).toBeNull();
+    expect(adapter.query).not.toHaveBeenCalled();
   });
 
   it('returns null when user does not exist (stale UUID from prior session)', async () => {
     const adapter = {
       query: vi.fn().mockResolvedValue({ success: true, rows: [] }),
     };
-    expect(await resolveExistingUserId(adapter, MISSING_UUID)).toBeNull();
+    expect(await resolveExistingUserId(adapter, MISSING_UUID, VALID_UUID)).toBeNull();
   });
 
   it('returns null when query fails', async () => {
@@ -89,9 +105,9 @@ describe('resolveExistingUserId', () => {
     const adapter = {
       query: vi.fn().mockResolvedValue({ success: true, rows: [{ '?column?': 1 }] }),
     };
-    await resolveExistingUserId(adapter, VALID_UUID);
-    await resolveExistingUserId(adapter, VALID_UUID);
-    await resolveExistingUserId(adapter, VALID_UUID);
+    await resolveExistingUserId(adapter, VALID_UUID, VALID_UUID);
+    await resolveExistingUserId(adapter, VALID_UUID, VALID_UUID);
+    await resolveExistingUserId(adapter, VALID_UUID, VALID_UUID);
     expect(adapter.query).toHaveBeenCalledTimes(1);
   });
 
@@ -99,8 +115,8 @@ describe('resolveExistingUserId', () => {
     const adapter = {
       query: vi.fn().mockResolvedValue({ success: true, rows: [] }),
     };
-    await resolveExistingUserId(adapter, MISSING_UUID);
-    await resolveExistingUserId(adapter, MISSING_UUID);
+    await resolveExistingUserId(adapter, MISSING_UUID, VALID_UUID);
+    await resolveExistingUserId(adapter, MISSING_UUID, VALID_UUID);
     expect(adapter.query).toHaveBeenCalledTimes(1);
   });
 

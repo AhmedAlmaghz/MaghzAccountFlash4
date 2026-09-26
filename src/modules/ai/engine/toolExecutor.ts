@@ -4,6 +4,7 @@ import { logAudit } from '@/core/utils/auditLogger';
 import { sanitizeToolArgs } from './argNormalizers';
 import { classifyToolError, type ToolErrorClassification } from './errorTaxonomy';
 import type { ToolContext, ToolDefinition } from '../types';
+import { checkJevPostingTool } from '../jev/jevPostingGuard';
 
 /**
  * Tool result cache — avoids redundant read queries within a session.
@@ -182,6 +183,19 @@ export async function executeToolCall(
   // free-form dates ("12-8", "15 أغسطس 2026") are normalized before any
   // tool sees them — present and future tools inherit this for free.
   const { args: cleanArgs } = sanitizeToolArgs(args);
+
+  if (!isTest && tool.dangerLevel === 'write') {
+    try {
+      const postingCheck = await checkJevPostingTool(ctx.companyId, name, tool, cleanArgs);
+      if (postingCheck.result.verdict === 'block') {
+        const error = `تم منع التنفيذ بواسطة JEV: ${postingCheck.result.reason}`;
+        return { ok: false, error, errorClass: classifyToolError(error) };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: `فشل فحص JEV: ${message}`, errorClass: classifyToolError(message) };
+    }
+  }
 
   if (!isTest && !allowCall(ctx, tool.dangerLevel)) {
     const error = 'تم تجاوز حد الاستدعاءات المسموح به — حاول مرة أخرى بعد قليل';

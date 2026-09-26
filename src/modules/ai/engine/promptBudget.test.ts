@@ -4,7 +4,6 @@ import { getVisibleTools, clearToolRegistry } from '../tools/registry';
 import { buildSystemPrompt } from './systemPrompt';
 import { selectActiveSkills } from '../skills/registry';
 import { useAuthStore } from '@/modules/auth/store';
-import type { Permission } from '@/modules/auth/types';
 
 /**
  * CI GATE — prompt budget (P0-1 class).
@@ -40,7 +39,7 @@ function grantAllPermissions(): void {
       companyId: '00000000-0000-0000-0000-000000000001',
       isActive: true,
     } as never,
-    permissions: ['*' as Permission],
+    permissions: [],
   });
 }
 

@@ -55,6 +55,60 @@ describe('preload parity gate (CI)', () => {
     }
   });
 
+  it('keeps the e2e electronDB typed surfaces at the top level', () => {
+    const plugin = readFileSync(resolve(ROOT, 'e2e/vite-e2e-plugin.ts'), 'utf-8');
+    const start = plugin.indexOf('accounting:{');
+    const end = plugin.indexOf('window.electronAI', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const dbSurface = plugin.slice(start, end);
+    expect(dbSurface).toMatch(/postTransaction:async/);
+    // Purchases is the AP mirror of the sales surface; its supplier-ledger
+    // reads are composed main-side exactly like the sales ones.
+    expect(dbSurface).toMatch(/getSupplierStatement:async/);
+    for (const surface of ['inventory', 'contacts', 'crm', 'manufacturing', 'hr', 'sales', 'purchases', 'pos', 'core']) {
+      expect(dbSurface, `e2e surface drifted: ${surface}`).toContain(`},${surface}:{`);
+    }
+  });
+
+  it('the e2e purchases surface mirrors every typed purchases channel', () => {
+    // A missing method here would only surface as
+    // `purchasesApi.getApAging → RPC unavailable` inside an e2e run, and
+    // silently as "no AP aging" in a report.
+    const plugin = readFileSync(resolve(ROOT, 'e2e/vite-e2e-plugin.ts'), 'utf-8');
+    const start = plugin.indexOf('},purchases:{');
+    expect(start).toBeGreaterThan(-1);
+    const end = plugin.indexOf('},pos:{', start);
+    expect(end).toBeGreaterThan(start);
+    const surface = plugin.slice(start, end);
+    for (const method of [
+      'getSuppliers', 'getSuppliersPaginated', 'getSupplierById',
+      'getSupplierStatement', 'getApAging', 'getApAgingTotal',
+      'getInvoices', 'getOutstandingInvoicesForSupplier', 'getInvoicesPaginated', 'getInvoiceById',
+      'getOrders', 'getOrdersPaginated', 'getOrderById',
+      'getReturns', 'getReturnsPaginated', 'getReturnById', 'getPurchasesKpis',
+      'createSupplier', 'updateSupplier', 'deleteSupplier',
+    ]) {
+      expect(surface, `e2e purchases surface missing: ${method}`).toContain(`${method}:async`);
+    }
+  });
+
+  it('never writes a backtick inside the e2e shim template', () => {
+    // A single stray backtick terminates the injected shim template: the whole
+    // `window.electronDB` surface silently disappears and every e2e spec
+    // fails with a DB-unavailable screen. Cheap gate for a fatal mistake.
+    const plugin = readFileSync(resolve(ROOT, 'e2e/vite-e2e-plugin.ts'), 'utf-8').replace(/\r\n/g, '\n');
+    const start = plugin.indexOf('const shimCode = `') + 'const shimCode = `'.length;
+    let raw = '';
+    for (let i = start; i < plugin.length; i += 1) {
+      if (plugin[i] === '\\') { raw += plugin[i] + plugin[i + 1]; i += 1; continue; }
+      if (plugin[i] === '`') break;
+      raw += plugin[i];
+    }
+    const stray = raw.match(/(?<!\\)`/g) || [];
+    expect(stray.length, 'unescaped backtick inside the e2e shim template').toBe(0);
+  });
+
   it('the e2e electronAI stub covers the same AI surface (no TypeError drift)', () => {
     // P2 fix: the e2e shim defined ~12 electronAI methods while the renderer
     // calls ~25 — any AI-adjacent e2e (purge-on-open, batch cards, resume

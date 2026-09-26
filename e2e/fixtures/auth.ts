@@ -27,6 +27,7 @@ export function addOnboardingBypass(context: { addInitScript: (fn: () => void) =
   return context.addInitScript((payload) => {
     try {
       window.localStorage.setItem('maghzaccount-onboarding', JSON.stringify(payload));
+      window.localStorage.setItem('maghzaccount-db-mode', 'pg');
     } catch {
       // ignore
     }

@@ -49,7 +49,7 @@ test.describe('AI settings hardening (budget + kill-switch + revoke)', () => {
     const keyInput = page.locator('input[type="password"]').first();
     await expect(keyInput).toBeVisible({ timeout: 15_000 });
     await keyInput.fill('sk-e2e-revoke-probe-12345');
-    await page.getByRole('button', { name: /حفظ الإعدادات/i }).click();
+    await page.getByRole('button', { name: /حفظ الإعدادات/i }).first().click();
     await page.waitForTimeout(2_000);
 
     // 2. Two-click revoke control must now be mounted.
@@ -71,11 +71,11 @@ test.describe('AI settings hardening (budget + kill-switch + revoke)', () => {
     await page.waitForLoadState('networkidle', { timeout: 15_000 });
 
     // Fallback card inputs follow the main card in DOM order; the fallback
-    // key field is the second password input on the page.
-    const fbKeyInput = page.locator('input[type="password"]').nth(1);
+    // key field is the third password input after the main and JEV keys.
+    const fbKeyInput = page.locator('input[type="password"]').nth(2);
     await expect(fbKeyInput).toBeVisible({ timeout: 15_000 });
     await fbKeyInput.fill('sk-e2e-fallback-probe-67890');
-    await page.getByRole('button', { name: /حفظ الإعدادات/i }).click();
+    await page.getByRole('button', { name: /حفظ الإعدادات/i }).first().click();
     await page.waitForTimeout(2_000);
 
     const revokeFb = page.getByRole('button', { name: /إلغاء مفتاح الاحتياطي/i });

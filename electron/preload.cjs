@@ -32,8 +32,8 @@ contextBridge.exposeInMainWorld('electronAuth', {
 });
 
 // ─── Secure PostgreSQL Interface (Business-Safe Operations Only) ─────────────
-// Security Note: Raw SQL execution is removed from renderer access.
-// Only predefined business operations are exposed through specific methods.
+// Typed RPC is the preferred surface. The legacy _exec methods remain only
+// for adapters not yet migrated and are guarded in the main process.
 contextBridge.exposeInMainWorld('electronDB', {
   ping: () => ipcRenderer.invoke('db:ping'),
   testConnection: (config) => ipcRenderer.invoke('db:test-connection', config, sessionToken),
@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('electronDB', {
     getAccounts: (payload) => ipcRenderer.invoke('db:rpc:accounting.getAccounts', { ...payload, sessionToken }),
     createAccount: (payload) => ipcRenderer.invoke('db:rpc:accounting.createAccount', { ...payload, sessionToken }),
     getTransactions: (payload) => ipcRenderer.invoke('db:rpc:accounting.getTransactions', { ...payload, sessionToken }),
+    postTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.postTransaction', { ...payload, sessionToken }),
     createTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.createTransaction', { ...payload, sessionToken }),
   },
   inventory: {
@@ -166,7 +167,8 @@ contextBridge.exposeInMainWorld('electronDB', {
   },
   // Phase 4 slice 10 — Sales typed RPC. Session-derived companyId + audit
   // userId; updateInvoice / updateQuotation / updateReturn are
-  // transaction-wrapped payloads ({ data }). Delete/post ops use guarded CTEs.
+  // transaction-wrapped payloads ({ data }). Posting stays on the unified
+  // adapter transaction path and is not exposed as a partial typed RPC.
   sales: {
     getCustomers: (payload) => ipcRenderer.invoke('db:rpc:sales.getCustomers', { ...payload, sessionToken }),
     getCustomersPaginated: (payload) => ipcRenderer.invoke('db:rpc:sales.getCustomersPaginated', { ...payload, sessionToken }),
@@ -184,12 +186,13 @@ contextBridge.exposeInMainWorld('electronDB', {
     createInvoice: (payload) => ipcRenderer.invoke('db:rpc:sales.createInvoice', { ...payload, sessionToken }),
     updateInvoice: (payload) => ipcRenderer.invoke('db:rpc:sales.updateInvoice', { ...payload, sessionToken }),
     deleteInvoice: (payload) => ipcRenderer.invoke('db:rpc:sales.deleteInvoice', { ...payload, sessionToken }),
-    postInvoice: (payload) => ipcRenderer.invoke('db:rpc:sales.postInvoice', { ...payload, sessionToken }),
     getQuotations: (payload) => ipcRenderer.invoke('db:rpc:sales.getQuotations', { ...payload, sessionToken }),
     getQuotationsPaginated: (payload) => ipcRenderer.invoke('db:rpc:sales.getQuotationsPaginated', { ...payload, sessionToken }),
     getQuotationById: (payload) => ipcRenderer.invoke('db:rpc:sales.getQuotationById', { ...payload, sessionToken }),
     createQuotation: (payload) => ipcRenderer.invoke('db:rpc:sales.createQuotation', { ...payload, sessionToken }),
     updateQuotation: (payload) => ipcRenderer.invoke('db:rpc:sales.updateQuotation', { ...payload, sessionToken }),
+  claimQuotation: (payload) => ipcRenderer.invoke('db:rpc:sales.claimQuotation', { ...payload, sessionToken }),
+  releaseQuotation: (payload) => ipcRenderer.invoke('db:rpc:sales.releaseQuotation', { ...payload, sessionToken }),
     deleteQuotation: (payload) => ipcRenderer.invoke('db:rpc:sales.deleteQuotation', { ...payload, sessionToken }),
     getReturns: (payload) => ipcRenderer.invoke('db:rpc:sales.getReturns', { ...payload, sessionToken }),
     getReturnsPaginated: (payload) => ipcRenderer.invoke('db:rpc:sales.getReturnsPaginated', { ...payload, sessionToken }),
@@ -197,7 +200,31 @@ contextBridge.exposeInMainWorld('electronDB', {
     createReturn: (payload) => ipcRenderer.invoke('db:rpc:sales.createReturn', { ...payload, sessionToken }),
     updateReturn: (payload) => ipcRenderer.invoke('db:rpc:sales.updateReturn', { ...payload, sessionToken }),
     deleteReturn: (payload) => ipcRenderer.invoke('db:rpc:sales.deleteReturn', { ...payload, sessionToken }),
-    postReturn: (payload) => ipcRenderer.invoke('db:rpc:sales.postReturn', { ...payload, sessionToken }),
+  },
+  // Purchases typed RPC (AP mirror of the sales slice). Session-derived
+  // companyId; the supplier ledger reads (balance / statement / aging) are
+  // composed main-side so the renderer never sends SQL for them.
+  purchases: {
+    getSuppliers: (payload) => ipcRenderer.invoke('db:rpc:purchases.getSuppliers', { ...payload, sessionToken }),
+    getSuppliersPaginated: (payload) => ipcRenderer.invoke('db:rpc:purchases.getSuppliersPaginated', { ...payload, sessionToken }),
+    getSupplierById: (payload) => ipcRenderer.invoke('db:rpc:purchases.getSupplierById', { ...payload, sessionToken }),
+    getSupplierStatement: (payload) => ipcRenderer.invoke('db:rpc:purchases.getSupplierStatement', { ...payload, sessionToken }),
+    getApAging: (payload) => ipcRenderer.invoke('db:rpc:purchases.getApAging', { ...payload, sessionToken }),
+    getApAgingTotal: (payload) => ipcRenderer.invoke('db:rpc:purchases.getApAgingTotal', { ...payload, sessionToken }),
+    getInvoices: (payload) => ipcRenderer.invoke('db:rpc:purchases.getInvoices', { ...payload, sessionToken }),
+    getOutstandingInvoicesForSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.getOutstandingInvoicesForSupplier', { ...payload, sessionToken }),
+    getInvoicesPaginated: (payload) => ipcRenderer.invoke('db:rpc:purchases.getInvoicesPaginated', { ...payload, sessionToken }),
+    getInvoiceById: (payload) => ipcRenderer.invoke('db:rpc:purchases.getInvoiceById', { ...payload, sessionToken }),
+    getOrders: (payload) => ipcRenderer.invoke('db:rpc:purchases.getOrders', { ...payload, sessionToken }),
+    getOrdersPaginated: (payload) => ipcRenderer.invoke('db:rpc:purchases.getOrdersPaginated', { ...payload, sessionToken }),
+    getOrderById: (payload) => ipcRenderer.invoke('db:rpc:purchases.getOrderById', { ...payload, sessionToken }),
+    getReturns: (payload) => ipcRenderer.invoke('db:rpc:purchases.getReturns', { ...payload, sessionToken }),
+    getReturnsPaginated: (payload) => ipcRenderer.invoke('db:rpc:purchases.getReturnsPaginated', { ...payload, sessionToken }),
+    getReturnById: (payload) => ipcRenderer.invoke('db:rpc:purchases.getReturnById', { ...payload, sessionToken }),
+    getPurchasesKpis: (payload) => ipcRenderer.invoke('db:rpc:purchases.getPurchasesKpis', { ...payload, sessionToken }),
+    createSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.createSupplier', { ...payload, sessionToken }),
+    updateSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.updateSupplier', { ...payload, sessionToken }),
+    deleteSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.deleteSupplier', { ...payload, sessionToken }),
   },
   // POS typed RPC (module 13). Session-derived companyId + cashier userId.
   // Checkout stays renderer-composed (journal machinery) and ships through

@@ -18,8 +18,8 @@
  *   3. Otherwise passes the value through after a format check
  *
  * To verify existence against DB (catches stale UUIDs from prior sessions),
- * use `resolveExistingUserId(adapter, userId, companyId)` which performs a
- * cached `SELECT 1 FROM users WHERE id = $1` lookup.
+ *   use `resolveExistingUserId(adapter, userId, companyId)` which performs a
+ *   cached, tenant-scoped `SELECT 1 FROM users` lookup.
  */
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,33 +44,46 @@ export function safeUserId(value: unknown): string | null {
 const userIdCache = new Map<string, boolean>();
 
 /**
- * Verify a userId is a valid UUID AND exists in the users table. Returns the
+ * Verify a userId is a valid UUID AND exists **in that company**. Returns the
  * id if valid, `null` otherwise. Caches results for the lifetime of the page.
  *
  * Use this for audit columns where the user may come from a stale source
  * (localStorage hydration, prior session, manual test).
+ *
+ * `companyId` is REQUIRED, and a missing one fails closed. The previous
+ * optional form degraded to a global `SELECT 1 FROM users` — answering "does
+ * this id exist somewhere" for a column that is about *this tenant's*
+ * membership. There were no callers, so the trap was latent; an existence
+ * check that silently loses its tenant predicate is the exact failure class
+ * this project keeps closing.
  */
 export async function resolveExistingUserId(
   adapter: { query: (sql: string, params: unknown[]) => Promise<{ success: boolean; rows?: Record<string, unknown>[] }> },
   userId: unknown,
-  _companyId?: string
+  companyId?: string
 ): Promise<string | null> {
   const valid = safeUserId(userId);
   if (!valid) return null;
+  const normalizedCompanyId = typeof companyId === 'string' && companyId.trim() ? companyId.trim().toLowerCase() : null;
+  // No company → cannot prove tenant membership → refuse (never fall back to a
+  // global lookup).
+  if (!isUuid(normalizedCompanyId)) return null;
+  const cacheKey = `${normalizedCompanyId}:${valid}`;
 
-  const cached = userIdCache.get(valid);
+  const cached = userIdCache.get(cacheKey);
   if (cached !== undefined) return cached ? valid : null;
 
   try {
+    // Always tenant-scoped — there is no unscoped branch left to reach.
     const result = await adapter.query(
-      'SELECT 1 FROM users WHERE id = $1::uuid AND is_active = true LIMIT 1',
-      [valid]
+      'SELECT 1 FROM users WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true LIMIT 1',
+      [valid, normalizedCompanyId]
     );
     const exists = !!(result.success && result.rows && result.rows.length > 0);
-    userIdCache.set(valid, exists);
+    userIdCache.set(cacheKey, exists);
     return exists ? valid : null;
   } catch {
-    userIdCache.set(valid, false);
+    userIdCache.set(cacheKey, false);
     return null;
   }
 }

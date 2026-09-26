@@ -69,7 +69,7 @@ describe('AI tools contract gate (CI)', () => {
   });
 
   it('every tool permission exists in the Permission union (no typos)', () => {
-    const valid = new Set<string>([...ALL_PERMISSIONS, '*']);
+    const valid = new Set<string>(ALL_PERMISSIONS);
     const violations = tools.filter((t) => !valid.has(t.permission));
     expect(
       violations.map((v) => `${v.name} -> ${v.permission}`),

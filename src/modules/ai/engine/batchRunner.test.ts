@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const jevMocks = vi.hoisted(() => ({
+  checkJevPostingTool: vi.fn(),
+}));
+
+vi.mock('../jev/jevPostingGuard', () => ({
+  checkJevPostingTool: jevMocks.checkJevPostingTool,
+}));
+
 vi.mock('../api/index', () => ({
   aiApi: {
     batchClaim: vi.fn(),
@@ -45,6 +53,19 @@ function detail(overrides = {}) {
 // red state of this file). Every test starts with zeroed call history.
 beforeEach(() => {
   vi.clearAllMocks();
+  jevMocks.checkJevPostingTool.mockResolvedValue({
+    applicable: false,
+    result: {
+      verdict: 'allow',
+      riskScore: 0,
+      periodClosedProb: 0,
+      vatOkProb: 1,
+      confidence: 0,
+      reason: 'JEV غير متاح',
+      jevUsed: false,
+      latencyMs: 0,
+    },
+  });
 });
 
 describe('runBatch', () => {
@@ -378,6 +399,121 @@ describe('ref substitution', () => {
     expect(mockedApi.batchItemFail).toHaveBeenCalledWith(
       'c1', 'u1', 'b1', 'i9', expect.stringMatching(/ghost/), 'UNRESOLVED_REF', false,
     );
+  });
+});
+
+describe('JEV enforcement', () => {
+  it('checks JEV before executing a posting batch item', async () => {
+    const { registerTool, clearToolRegistry } = await import('../tools/registry');
+    clearToolRegistry();
+    registerTool({
+      name: 'sales.post_invoice',
+      labelAr: 'ترحيل فاتورة',
+      descriptionAr: 'ترحيل فاتورة مبيعات',
+      permission: 'sales.post',
+      dangerLevel: 'write',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({}),
+    });
+    try {
+      jevMocks.checkJevPostingTool.mockResolvedValueOnce({
+        applicable: true,
+        result: {
+          verdict: 'block',
+          riskScore: 3,
+          periodClosedProb: 0.95,
+          vatOkProb: 1,
+          confidence: 0.95,
+          reason: 'الفترة مقفلة',
+          jevUsed: true,
+          latencyMs: 1,
+        },
+      });
+      mockedApi.batchClaim.mockResolvedValueOnce({
+        success: true,
+        data: [{ id: 'blocked-1', seq: 0, toolName: 'sales.post_invoice', args: {}, afterSeq: null, attempts: 1 }],
+      });
+      mockedApi.batchItemFail.mockResolvedValue({
+        success: true,
+        data: { retried: false, finalStatus: 'partial' },
+      });
+      mockedApi.batchGet
+        .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+        .mockResolvedValue({ success: true, data: detail({ status: 'partial', failedCount: 1 }) });
+
+      const final = await runBatch('c1', 'u1', 'b1');
+
+      expect(jevMocks.checkJevPostingTool).toHaveBeenCalledWith(
+        'c1',
+        'sales.post_invoice',
+        expect.objectContaining({ name: 'sales.post_invoice' }),
+        {},
+      );
+      expect(mockedExec).not.toHaveBeenCalled();
+      expect(mockedApi.batchItemFail).toHaveBeenCalledWith(
+        'c1', 'u1', 'b1', 'blocked-1', expect.stringContaining('JEV'), 'JEV_POSTING_BLOCKED', false,
+      );
+      expect(final?.status).toBe('partial');
+    } finally {
+      clearToolRegistry();
+    }
+  });
+
+  it('rechecks JEV after a rate-limit wait before retrying a posting item', async () => {
+    const allow = {
+      applicable: true,
+      result: {
+        verdict: 'allow' as const,
+        riskScore: 0,
+        periodClosedProb: 0,
+        vatOkProb: 1,
+        confidence: 0.8,
+        reason: 'سليم',
+        jevUsed: true,
+        latencyMs: 1,
+      },
+    };
+    const block = {
+      applicable: true,
+      result: {
+        verdict: 'block' as const,
+        riskScore: 3,
+        periodClosedProb: 0.95,
+        vatOkProb: 1,
+        confidence: 0.95,
+        reason: 'الفترة مقفلة',
+        jevUsed: true,
+        latencyMs: 1,
+      },
+    };
+    jevMocks.checkJevPostingTool
+      .mockResolvedValueOnce(allow)
+      .mockResolvedValueOnce(block);
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [{ id: 'recheck-1', seq: 0, toolName: 'sales.post_invoice', args: {}, afterSeq: null, attempts: 1 }],
+    });
+    mockedExec.mockResolvedValueOnce({
+      ok: false,
+      error: 'تجاوز حد الاستدعاءات — test path',
+      errorClass: { code: 'RATE_LIMIT', retryable: true },
+    } as never);
+    mockedApi.batchItemFail.mockResolvedValue({
+      success: true,
+      data: { retried: false, finalStatus: 'partial' },
+    });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'partial', failedCount: 1 }) });
+
+    const final = await runBatch('c1', 'u1', 'b1', { rateLimitWindowMs: 1 });
+
+    expect(jevMocks.checkJevPostingTool).toHaveBeenCalledTimes(2);
+    expect(mockedExec).toHaveBeenCalledTimes(1);
+    expect(mockedApi.batchItemFail).toHaveBeenCalledWith(
+      'c1', 'u1', 'b1', 'recheck-1', expect.stringContaining('JEV'), 'JEV_POSTING_BLOCKED', false,
+    );
+    expect(final?.status).toBe('partial');
   });
 });
 

@@ -155,6 +155,29 @@ describe('manufacturingApi', () => {
       const res = await manufacturingApi.getBomById(BOM_ID, COMPANY_ID);
       expect(res.success).toBe(false);
     });
+
+    it('scopes the material join in the lines query to the company (defense in depth)', async () => {
+      const captured: { sql: string; params: unknown[] }[] = [];
+      const adapter = makeMockAdapter(async (sql, params) => {
+        captured.push({ sql, params });
+        if (sql.includes('FROM boms') && sql.includes('LIMIT 1')) {
+          return {
+            success: true,
+            rows: [{ id: BOM_ID, company_id: COMPANY_ID, product_id: PRODUCT_ID, version: '1.0', is_active: true, total_cost: '5000', notes: 'ملاحظة' }],
+          };
+        }
+        if (sql.includes('FROM bom_lines')) {
+          return { success: true, rows: [] };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      await manufacturingApi.getBomById(BOM_ID, COMPANY_ID);
+      const linesQuery = captured.find((c) => c.sql.includes('FROM bom_lines'))!;
+      expect(linesQuery.sql).toContain('p.company_id = $2::uuid');
+      expect(linesQuery.params).toEqual([BOM_ID, COMPANY_ID]);
+    });
   });
 
   describe('createBom', () => {
@@ -263,6 +286,29 @@ describe('manufacturingApi', () => {
       expect(res.data?.workOrder.id).toBe(WO_ID);
       expect(res.data?.lines).toHaveLength(1);
       expect(res.data?.lines[0].actualUnitCost).toBe(110);
+    });
+
+    it('scopes the material join in the consumption query to the company (defense in depth)', async () => {
+      const captured: { sql: string; params: unknown[] }[] = [];
+      const adapter = makeMockAdapter(async (sql, params) => {
+        captured.push({ sql, params });
+        if (sql.includes('FROM work_orders') && sql.includes('LIMIT 1')) {
+          return {
+            success: true,
+            rows: [{ id: WO_ID, company_id: COMPANY_ID, order_number: 'WO-0001', product_id: PRODUCT_ID, product_name: 'منتج', quantity: '10', status: 'in_progress', total_cost: '5000' }],
+          };
+        }
+        if (sql.includes('FROM work_order_consumptions')) {
+          return { success: true, rows: [] };
+        }
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      await manufacturingApi.getWorkOrderById(WO_ID, COMPANY_ID);
+      const linesQuery = captured.find((c) => c.sql.includes('FROM work_order_consumptions'))!;
+      expect(linesQuery.sql).toContain('p.company_id = $2::uuid');
+      expect(linesQuery.params).toEqual([WO_ID, COMPANY_ID]);
     });
   });
 

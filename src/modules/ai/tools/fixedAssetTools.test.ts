@@ -129,7 +129,7 @@ describe('accounting.dispose_fixed_asset', () => {
 
 describe('fixed-asset tools contract', () => {
   it('uses valid permissions with write summaries on mutations', () => {
-    const valid = new Set<string>([...ALL_PERMISSIONS, '*']);
+    const valid = new Set<string>(ALL_PERMISSIONS);
     for (const t of fixedAssetTools) {
       expect(valid.has(t.permission), `${t.name} permission`).toBe(true);
       expect(t.name).toMatch(/^[a-z][a-z0-9]*\.[a-z0-9_]+$/);

@@ -135,7 +135,7 @@ export function useUpdateCheck(): UseUpdateCheckReturn {
       let source: 'github' | 'version.json' = 'github';
       try {
         latest = await fetchLatestFromGitHub(ch);
-      } catch (e) {
+      } catch {
         // GitHub failed (rate limit / offline) — fallback
         source = 'version.json';
         latest = null;

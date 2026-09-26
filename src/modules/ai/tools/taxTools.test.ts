@@ -168,7 +168,7 @@ describe('accounting.revalue_fx / hr.post_leave_provision', () => {
 
 describe('tax tools contract', () => {
   it('uses valid permissions, namespaced names and write summaries', () => {
-    const valid = new Set<string>([...ALL_PERMISSIONS, '*']);
+    const valid = new Set<string>(ALL_PERMISSIONS);
     for (const t of taxTools) {
       expect(valid.has(t.permission), `${t.name} permission`).toBe(true);
       expect(t.name).toMatch(/^[a-z][a-z0-9]*\.[a-z0-9_]+$/);

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   executeToolCall: vi.fn(),
   resolveTool: vi.fn(),
   ensureToolsRegistered: vi.fn(),
+  checkJevPostingTool: vi.fn(),
 }));
 
 vi.mock('../api', () => ({
@@ -28,6 +29,11 @@ vi.mock('./toolExecutor', () => ({
   executeToolCall: mocks.executeToolCall,
   resolveTool: mocks.resolveTool,
 }));
+
+vi.mock('../jev/jevPostingGuard', async () => {
+  const actual = await vi.importActual<typeof import('../jev/jevPostingGuard')>('../jev/jevPostingGuard');
+  return { ...actual, checkJevPostingTool: mocks.checkJevPostingTool };
+});
 
 vi.mock('./batchRunner', () => ({
   runBatch: vi.fn(async () => null),
@@ -52,6 +58,7 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import type { ToolDefinition } from '../types';
 import type { User } from '@/modules/auth/types';
+import { attachmentBlobStats, clearAttachmentBlobs, putAttachmentBlob } from '../attachments/attachmentBlobs';
 
 const user: User = {
   id: '00000000-0000-0000-0000-000000000002',
@@ -74,9 +81,31 @@ function tool(dangerLevel: 'read' | 'write'): ToolDefinition {
   };
 }
 
+function postingTool(): ToolDefinition {
+  return {
+    ...tool('write'),
+    name: 'sales.post_invoice',
+    permission: 'sales.post',
+    descriptionAr: 'ترحيل فاتورة مبيعات',
+  };
+}
+
 describe('ChatEngine', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.checkJevPostingTool.mockResolvedValue({
+      applicable: false,
+      result: {
+        verdict: 'allow',
+        riskScore: 0,
+        periodClosedProb: 0,
+        vatOkProb: 1,
+        confidence: 0,
+        reason: 'JEV غير متاح',
+        jevUsed: false,
+        latencyMs: 0,
+      },
+    });
     useAuthStore.getState().logout();
     useAuthStore.getState().login(user);
     useAppStore.setState({
@@ -87,6 +116,7 @@ describe('ChatEngine', () => {
       },
     });
     getChatEngine().reset();
+    clearAttachmentBlobs();
   });
 
   it('sends user text and stores the final assistant response', async () => {
@@ -199,6 +229,94 @@ describe('ChatEngine', () => {
     expect(mocks.executeToolCall).toHaveBeenCalledOnce();
     expect(messages[1].toolCall?.status).toBe('success');
     expect(messages[2].content).toBe('تم إنشاء المستند');
+  });
+
+  it('does not create an approvable card when JEV blocks a posting tool', async () => {
+    const posting = postingTool();
+    mocks.resolveTool.mockReturnValue(posting);
+    mocks.checkJevPostingTool.mockResolvedValueOnce({
+      applicable: true,
+      result: {
+        verdict: 'block',
+        riskScore: 3,
+        periodClosedProb: 0.95,
+        vatOkProb: 1,
+        confidence: 0.95,
+        reason: 'الفترة مقفلة',
+        jevUsed: true,
+        latencyMs: 1,
+      },
+    });
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: {
+        content: '',
+        toolCalls: [{ id: 'jev-block-1', name: posting.name, arguments: { invoiceId: 'inv-1' } }],
+        finishReason: 'tool_calls',
+        usage: null,
+      },
+    });
+
+    await getChatEngine().send('رحّل الفاتورة');
+
+    const card = useAiStore.getState().messages.find((m) => m.toolCall?.callId === 'jev-block-1')?.toolCall;
+    expect(card?.status).toBe('error');
+    expect(card?.resultSummary).toContain('JEV');
+    expect(mocks.executeToolCall).not.toHaveBeenCalled();
+  });
+
+  it('rechecks JEV at approval and refuses a block that arrived after the card', async () => {
+    const posting = postingTool();
+    mocks.resolveTool.mockReturnValue(posting);
+    mocks.checkJevPostingTool
+      .mockResolvedValueOnce({
+        applicable: true,
+        result: {
+          verdict: 'allow',
+          riskScore: 0,
+          periodClosedProb: 0,
+          vatOkProb: 1,
+          confidence: 0.8,
+          reason: 'سليم',
+          jevUsed: true,
+          latencyMs: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        applicable: true,
+        result: {
+          verdict: 'block',
+          riskScore: 3,
+          periodClosedProb: 0.95,
+          vatOkProb: 1,
+          confidence: 0.95,
+          reason: 'الفترة مقفلة',
+          jevUsed: true,
+          latencyMs: 1,
+        },
+      });
+    mocks.complete
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          content: '',
+          toolCalls: [{ id: 'jev-approval-1', name: posting.name, arguments: { invoiceId: 'inv-1' } }],
+          finishReason: 'tool_calls',
+          usage: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { content: 'لم يتم التنفيذ', toolCalls: [], finishReason: 'stop', usage: null },
+      });
+
+    const engine = getChatEngine();
+    await engine.send('رحّل الفاتورة');
+    await engine.resolveConfirmation('jev-approval-1', true);
+
+    const card = useAiStore.getState().messages.find((m) => m.toolCall?.callId === 'jev-approval-1')?.toolCall;
+    expect(card?.status).toBe('error');
+    expect(mocks.executeToolCall).not.toHaveBeenCalled();
   });
 
   it('P0-2: blocks a new send while a confirmation card is pending (no wire corruption)', async () => {
@@ -782,6 +900,15 @@ describe('ChatEngine', () => {
     expect(useAiStore.getState().messages).toHaveLength(2);
   });
 
+  it('disposeSession clears renderer transcript and attachment binaries', () => {
+    putAttachmentBlob('blob-1', 'data:application/octet-stream;base64,AA==', 12);
+    useAiStore.getState().addMessage({ role: 'user', kind: 'text', content: 'بيانات المستخدم السابق' });
+
+    getChatEngine().disposeSession();
+
+    expect(useAiStore.getState().messages).toEqual([]);
+    expect(attachmentBlobStats().count).toBe(0);
+  });
   it('preserves thought_signature (Gemini extras) on round-trip to LLM history', async () => {
     mocks.resolveTool.mockReturnValue(tool('read'));
     mocks.executeToolCall.mockResolvedValueOnce({ ok: true, result: { total: 99 } });

@@ -32,14 +32,16 @@ describe('web vault (device storage)', () => {
     await expect(saveRemoteConnection({ name: 'x', databaseUrl: 'nope' })).rejects.toThrow();
     expect(await listRemoteConnections()).toHaveLength(0);
   });
-  it('updates an existing entry by id', async () => {
+  it('does not replace an existing entry with an unsupported local provider on web', async () => {
     const first = await saveRemoteConnection({ name: 'A', databaseUrl: NEON_URL });
     const id = first.connection!.id;
-    await saveRemoteConnection({ id, name: 'B', databaseUrl: LOCAL_URL });
+    const updated = await saveRemoteConnection({ id, name: 'B', databaseUrl: LOCAL_URL });
+    expect(updated.success).toBe(false);
+    expect(updated.error).toBe('webTcpUnsupported');
     const list = await listRemoteConnections();
     expect(list).toHaveLength(1);
-    expect(list[0].name).toBe('B');
-    expect(list[0].provider).toBe('localhost');
+    expect(list[0].name).toBe('A');
+    expect(list[0].provider).toBe('neon');
   });
   it('deletes and clears a dangling active pointer', async () => {
     const saved = await saveRemoteConnection({ name: 'A', databaseUrl: NEON_URL });

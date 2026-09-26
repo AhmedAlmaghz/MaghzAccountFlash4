@@ -28,7 +28,7 @@ test.describe('POS Module - Critical Flows', () => {
     await page.goto('/pos');
     await expect(page.locator('text=نقطة البيع').first()).toBeVisible({ timeout: 15_000 });
     // Full-screen terminal renders OUTSIDE AppLayout — no sidebar brand block
-    await expect(page.locator('aside')).toHaveCount(0);
+    await expect(page.locator('aside').filter({ hasText: 'محاسبة المغز' })).toHaveCount(0);
   });
 
   test('full flow: open shift → sell → cash checkout → close shift', async ({ page }) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -39,6 +39,7 @@ import { crmApi } from '@/modules/crm/api';
 import { accountingApi } from '@/modules/accounting/api';
 import { normalizeQuery } from '@/core/ui/components/command/paletteSearch';
 import { useAppStore } from '@/core/store';
+import { disposeAiSession } from '@/modules/ai/engine/sessionBoundary';
 import { ToastContainer } from '@/core/ui/components/Toast';
 import { useAuthStore } from '@/modules/auth/store';
 import { useCanAccessModule } from '@/modules/auth/hooks/usePermission';
@@ -734,6 +735,19 @@ export const Header: React.FC<{ onOpenSearch?: () => void; onOpenMenu?: () => vo
 
 export const AppLayout = () => {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const activeCompanyId = useAppStore((state) => state.activeCompany?.id ?? null);
+  const previousUserId = useRef<string | null>(null);
+  const previousCompanyId = useRef<string | null>(null);
+  useEffect(() => {
+    const userChanged = previousUserId.current !== null && previousUserId.current !== userId;
+    const companyChanged = previousCompanyId.current !== null && previousCompanyId.current !== activeCompanyId;
+    if (userChanged || companyChanged) {
+      disposeAiSession();
+    }
+    previousUserId.current = userId;
+    previousCompanyId.current = activeCompanyId;
+  }, [userId, activeCompanyId]);
   const location = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -893,7 +907,6 @@ export const AppLayout = () => {
   }, [isMobile, drawerOpen]);
 
   // Silent daily auto-backup (OPFS) — fire-and-forget, never blocks UI.
-  const activeCompanyId = useAppStore((s) => s.activeCompany?.id);
   const activeCompanyName = useAppStore((s) => s.activeCompany?.name);
   useEffect(() => {
     if (!isAuthenticated || !activeCompanyId) return;

@@ -624,11 +624,11 @@ export const posApi = {
       if (!invRes.success || !invRes.rows?.[0]) return { success: false, error: invRes.error || 'Receipt not found' };
       const linesRes = await adapter.query(
         `SELECT p.name_ar, l.quantity, l.unit_price, l.line_total, p.unit
-           FROM sales_invoice_lines l
-           LEFT JOIN products p ON p.id = l.product_id
-          WHERE l.invoice_id = $1::uuid
-          ORDER BY l.id`,
-        [invoiceId]
+            FROM sales_invoice_lines l
+            LEFT JOIN products p ON p.id = l.product_id AND p.company_id = $2::uuid
+           WHERE l.invoice_id = $1::uuid
+           ORDER BY l.id`,
+        [invoiceId, companyId]
       );
       const payRes = await adapter.query(
         'SELECT method, amount FROM pos_payments WHERE company_id = $1 AND invoice_id = $2::uuid ORDER BY id',

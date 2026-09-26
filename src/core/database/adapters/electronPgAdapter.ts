@@ -14,8 +14,8 @@ export interface ElectronDB extends PreloadDB {
   seedDefault?(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   seedDemo?(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
   reset?(): Promise<{ success: boolean; error?: string }>;
-  backupCompany?(): Promise<{ success: boolean; tables?: Record<string, Record<string, unknown>[]>; warnings?: string[]; error?: string }>;
-  restoreCompany?(payload: { tables: Record<string, Record<string, unknown>[]> }): Promise<{ success: boolean; restored?: number; warnings?: string[]; error?: string }>;
+  backupCompany?(): Promise<{ success: boolean; tables?: Record<string, Record<string, unknown>[]>; manifest?: { version: number; companyId: string; generatedAt: string; counts: Record<string, number>; checksum: string }; warnings?: string[]; error?: string }>;
+  restoreCompany?(payload: { tables: Record<string, Record<string, unknown>[]>; manifest?: { version: number; companyId: string; generatedAt: string; counts: Record<string, number>; checksum: string } }): Promise<{ success: boolean; restored?: number; warnings?: string[]; error?: string }>;
 
   // Typed RPC surface (Phase 4) — preferred over `_exec` for new code.
   // Each method sends a structured payload to a fixed SQL statement in
@@ -24,6 +24,7 @@ export interface ElectronDB extends PreloadDB {
     getAccounts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createAccount(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; parentId?: string | null; type?: string; nature?: string; isGroup?: boolean; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getTransactions(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    postTransaction(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createTransaction(payload: { data: { companyId: string; date: string; reference?: string; description?: string; totalAmount: number; status?: string; entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> } }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
   inventory?: {
@@ -141,12 +142,19 @@ export interface ElectronDB extends PreloadDB {
     createInvoice(payload: { invoiceNumber: string; customerId: string; date?: string | null; dueDate?: string | null; subtotal?: number; discountAmount?: number; vatAmount?: number; totalAmount: number; paidAmount?: number; currencyCode?: string; exchangeRate?: number; baseCurrencyAmount?: number; baseCurrencyPaid?: number; status?: string; paymentType?: string; cashBoxId?: string | null; bankAccountId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; discountPercent?: number; vatPercent?: number; lineTotal?: number; currencyCode?: string | null; exchangeRate?: number | null; baseCurrencyLineTotal?: number | null }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateInvoice(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
     deleteInvoice(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    postInvoice(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getQuotations(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getQuotationsPaginated(payload: { page: number; pageSize: number; status?: string | null; customerId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getQuotationById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createQuotation(payload: { quotationNumber: string; customerId: string; date?: string | null; expiryDate?: string | null; totalAmount: number; status?: string; paymentType?: string; cashBoxId?: string | null; bankAccountId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; discountPercent?: number; lineTotal?: number }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateQuotation(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
+    /**
+     * Guarded quotation→invoice claim. `updateQuotation` cannot do this: it
+     * refuses any status but 'draft' and only edits draft rows, so routing a
+     * conversion through it silently failed on Electron.
+     */
+    claimQuotation(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    /** Compensating action: restore the pre-claim status if the invoice failed. */
+    releaseQuotation(payload: { id: string; previousStatus: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteQuotation(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getReturns(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getReturnsPaginated(payload: { page: number; pageSize: number; status?: string | null; customerId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -154,7 +162,30 @@ export interface ElectronDB extends PreloadDB {
     createReturn(payload: { returnNumber: string; customerId: string; invoiceId?: string | null; date?: string | null; subtotal?: number; vatAmount?: number; totalAmount: number; reason?: string | null; status?: string; paymentType?: string; cashBoxId?: string | null; bankAccountId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; lineTotal?: number }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateReturn(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
     deleteReturn(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    postReturn(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
+  // Purchases typed RPC (AP mirror of the sales surface). Supplier ledger
+  // reads (balance / statement / aging) are composed main-side.
+  purchases?: {
+    getSuppliers(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getSuppliersPaginated(payload: { page: number; pageSize: number; isActive?: boolean | null; search?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getSupplierById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getSupplierStatement(payload: { supplierId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getApAging(payload: { supplierId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getApAgingTotal(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getInvoices(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOutstandingInvoicesForSupplier(payload: { supplierId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getInvoicesPaginated(payload: { page: number; pageSize: number; status?: string | null; supplierId?: string | null; invoiceNumber?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getInvoiceById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOrders(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOrdersPaginated(payload: { page: number; pageSize: number; status?: string | null; supplierId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getOrderById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReturns(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReturnsPaginated(payload: { page: number; pageSize: number; status?: string | null; supplierId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReturnById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getPurchasesKpis(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createSupplier(payload: { code: string; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateSupplier(payload: { id: string; name?: string; code?: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteSupplier(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
   // POS typed RPC (module 13). Session-derived companyId + cashier userId.
   // checkout itself stays renderer-composed (journal machinery) and ships

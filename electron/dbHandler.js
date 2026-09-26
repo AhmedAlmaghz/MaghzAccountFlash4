@@ -1,6 +1,6 @@
 import { ipcMain, app, safeStorage } from 'electron';
 import pg from 'pg';
-import { randomBytes, pbkdf2Sync, timingSafeEqual } from 'crypto';
+import { randomBytes, pbkdf2Sync, timingSafeEqual, createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { seedComprehensiveDemoData } from './seedDemoData.js';
@@ -166,10 +166,40 @@ function hasPermission(session, permission) {
     if (restricted.includes(permission)) return false;
     return true;
   }
-  if (session.permissions.includes('*')) return true;
   if (session.permissions.includes(permission)) return true;
   const fallback = FALLBACK_PERMISSIONS[session.user.role];
   return !!fallback && fallback.includes(permission);
+}
+
+function hasAnyPermission(session, permissions) {
+  return permissions.some((permission) => hasPermission(session, permission));
+}
+
+function isOwnOnly(session, module) {
+  return hasPermission(session, `${module}.own`) && !hasPermission(session, `${module}.view`);
+}
+
+function canAccessOwnedRow(session, module, ownerId) {
+  return !isOwnOnly(session, module) || String(ownerId || '') === String(session.user.id);
+}
+
+const COMPANY_REFERENCE_TABLES = new Set([
+  'products', 'customers', 'suppliers', 'sales_invoices', 'boms', 'employees',
+  'cash_boxes', 'product_types', 'product_categories', 'units', 'departments', 'accounts', 'users',
+]);
+
+async function assertCompanyReferences(table, values, companyId, errorMessage) {
+  const ids = [...new Set((Array.isArray(values) ? values : [values])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))];
+  if (ids.length === 0) return;
+  if (!COMPANY_REFERENCE_TABLES.has(table)) throw new Error('Invalid company reference table');
+  const result = await execQuery(
+    pool,
+    `SELECT id FROM ${table} WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
+    [companyId, ids],
+  );
+  if ((result.rows || []).length !== ids.length) throw new Error(errorMessage);
 }
 
 function sessionPublicData(session) {
@@ -199,6 +229,71 @@ async function assertBranchBelongsToCompany(branchId, companyId) {
   if (!branchId) return true;
   const res = await pool.query('SELECT 1 FROM branches WHERE id = $1::uuid AND company_id = $2', [branchId, companyId]);
   return res.rows.length > 0;
+}
+
+async function assertPostingPeriodsOpen(session, date) {
+  const day = String(date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Posting date is required');
+  const result = await pool.query(
+    `SELECT 'tax' AS source, start_date, end_date, status
+       FROM tax_periods
+      WHERE company_id = $1::uuid AND $2::date BETWEEN start_date AND end_date
+        AND status IN ('closed', 'filed')
+     UNION ALL
+     SELECT 'accounting' AS source, start_date, end_date, status
+       FROM accounting_periods
+      WHERE company_id = $1::uuid AND $2::date BETWEEN start_date AND end_date
+        AND status = 'closed'
+      LIMIT 1`,
+    [session.user.companyId, day],
+  );
+  if (result.rows?.length) {
+    const row = result.rows[0];
+    throw new Error(`Posting period is closed (${row.source}: ${row.start_date} – ${row.end_date})`);
+  }
+}
+
+function postingDateOnly(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || '';
+}
+
+async function assertPostingPeriodsOpenOnClient(client, session, date) {
+  const day = postingDateOnly(date);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Posting date is required');
+  await execQuery(client, 'LOCK TABLE tax_periods, accounting_periods IN SHARE MODE', []);
+
+  const taxSql = `SELECT tp.start_date, tp.end_date, tp.status
+                    FROM tax_periods tp
+                   WHERE tp.company_id = $1::uuid
+                     AND $2::date BETWEEN tp.start_date AND tp.end_date
+                     AND tp.status IN ('closed', 'filed')
+                   FOR UPDATE`;
+  assertSqlAuthorized(session, taxSql, [session.user.companyId, day], { rawSql: true });
+  const taxResult = await execQuery(client, taxSql, [session.user.companyId, day]);
+  if (taxResult.rows?.length) {
+    const row = taxResult.rows[0];
+    throw new Error(`Posting period is closed (tax: ${row.start_date} – ${row.end_date})`);
+  }
+
+  const fiscalSql = `SELECT ap.start_date, ap.end_date, ap.status
+                       FROM accounting_periods ap
+                      WHERE ap.company_id = $1::uuid
+                        AND $2::date BETWEEN ap.start_date AND ap.end_date
+                        AND ap.status = 'closed'
+                      FOR UPDATE`;
+  assertSqlAuthorized(session, fiscalSql, [session.user.companyId, day], { rawSql: true });
+  const fiscalResult = await execQuery(client, fiscalSql, [session.user.companyId, day]);
+  if (fiscalResult.rows?.length) {
+    const row = fiscalResult.rows[0];
+    throw new Error(`Posting period is closed (accounting: ${row.start_date} – ${row.end_date})`);
+  }
 }
 
 function deleteSession(session) {
@@ -371,7 +466,7 @@ function loginAttemptDenied(event, username) {
 const SQL_MODULE_TABLE_RULES = [
   { module: 'settings', tables: ['roles'] },
   { module: 'settings', tables: ['audit_logs'], writeAny: true },
-  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true, writePermissions: ['settings.create', 'settings.edit', 'settings.post', 'pos.create', 'pos.edit', 'pos.post'] },
+  { module: 'settings', tables: ['settings', 'companies', 'branches', 'currencies', 'users', 'units', 'cash_boxes', 'vat_settings', 'default_accounts'], readAny: true, writePermissions: ['settings.create', 'settings.edit', 'settings.post'] },
   // Document numbering is consumed by every create flow (invoices, products,
   // employees, work orders, ...) — writers only need to hold ANY create right.
   {
@@ -384,7 +479,14 @@ const SQL_MODULE_TABLE_RULES = [
       'pos.create',
     ],
   },
-  { module: 'accounting', tables: ['accounts', 'cost_centers', 'receipt_vouchers', 'payment_vouchers', 'fixed_assets', 'accounting_periods'] },
+  { module: 'accounting', tables: ['accounts'], readAny: true },
+  { module: 'accounting', tables: ['cost_centers', 'receipt_vouchers', 'payment_vouchers', 'fixed_assets', 'accounting_periods'] },
+  {
+    module: 'accounting',
+    tables: ['tax_periods'],
+    readAny: true,
+    writePermissions: ['accounting.create', 'accounting.edit', 'accounting.post'],
+  },
   // GL tables are ALSO written by cross-module posting flows: HR payroll runs
   // (gross-up entry), end-of-service accrual/settlement and POS checkout
   // (mixed cash/credit sale entry) book through the same journal machinery.
@@ -393,9 +495,14 @@ const SQL_MODULE_TABLE_RULES = [
   {
     module: 'accounting',
     tables: ['transactions', 'journal_entries'],
+    readPermissions: ['accounting.view', 'accounting.own', 'reports.view'],
     writePermissions: [
       'accounting.create', 'accounting.edit', 'accounting.post',
       'hr.create', 'hr.edit',
+      'sales.create', 'sales.edit', 'sales.post',
+      'purchases.create', 'purchases.edit', 'purchases.post',
+      'inventory.create', 'inventory.edit', 'inventory.post',
+      'manufacturing.create', 'manufacturing.edit', 'manufacturing.post',
       'pos.create', 'pos.post',
     ],
   },
@@ -409,7 +516,7 @@ const SQL_MODULE_TABLE_RULES = [
   },
   // stock is touched by the POS checkout batch (ensure rows + decrement) —
   // same cross-module write precedent as stock_movements below.
-  { module: 'inventory', tables: ['stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines'], writePermissions: ['inventory.create', 'inventory.edit', 'inventory.post', 'pos.create', 'pos.post'] },
+  { module: 'inventory', tables: ['stock', 'stock_adjustments', 'warehouse_transfers', 'warehouse_transfer_lines', 'inventory_layers'], writePermissions: ['inventory.create', 'inventory.edit', 'inventory.post', 'manufacturing.create', 'manufacturing.edit', 'manufacturing.post', 'pos.create', 'pos.post'] },
   // Warehouses & stock movements are touched by cross-module posting flows:
   // completing a work order books material consumption (out) and finished
   // goods (in) against the first warehouse; POS checkout decrements stock
@@ -446,12 +553,58 @@ const SQL_MODULE_TABLE_RULES = [
 ];
 
 const TABLE_TARGET_PATTERN = /\b(?:from|join|into|update)\s+([a-z_][a-z0-9_]*)/gi;
+const WRITE_TARGET_PATTERN = /\b(?:insert\s+into|update|delete\s+from|merge\s+into)\s+([a-z_][a-z0-9_]*)/gi;
 const CTE_NAME_PATTERN = /\b(?:with|,)\s+([a-z_][a-z0-9_]*)\s+as\s*\(/gi;
 const SQL_NON_TABLE_TOKENS = new Set(['select', 'values', 'lateral', 'only', 'where', 'returning', 'set']);
+const RAW_SQL_FORBIDDEN_TABLES = new Set();
+const RAW_SQL_APPEND_ONLY_TABLES = new Set(['audit_logs']);
+const RAW_SQL_CHILD_TABLES = new Set([
+  'product_product_categories', 'warehouse_transfer_lines', 'quotation_lines',
+  'sales_invoice_lines', 'sales_return_lines', 'purchase_invoice_lines',
+  'purchase_order_lines', 'purchase_return_lines', 'bom_lines',
+  'work_order_consumptions', 'payroll_lines',
+]);
+const RAW_SQL_TENANT_TABLES = new Set(
+  SQL_MODULE_TABLE_RULES.flatMap((rule) => rule.tables).filter((table) => !RAW_SQL_CHILD_TABLES.has(table)),
+);
+const RAW_SQL_CHILD_PARENT_RULES = new Map([
+  ['product_product_categories', { parentTable: 'products', foreignKey: 'product_id' }],
+  ['warehouse_transfer_lines', { parentTable: 'warehouse_transfers', foreignKey: 'transfer_id' }],
+  ['quotation_lines', { parentTable: 'quotations', foreignKey: 'quotation_id' }],
+  ['sales_invoice_lines', { parentTable: 'sales_invoices', foreignKey: 'invoice_id' }],
+  ['sales_return_lines', { parentTable: 'sales_returns', foreignKey: 'return_id' }],
+  ['purchase_invoice_lines', { parentTable: 'purchase_invoices', foreignKey: 'invoice_id' }],
+  ['purchase_order_lines', { parentTable: 'purchase_orders', foreignKey: 'order_id' }],
+  ['purchase_return_lines', { parentTable: 'purchase_returns', foreignKey: 'return_id' }],
+  ['bom_lines', { parentTable: 'boms', foreignKey: 'bom_id' }],
+  ['work_order_consumptions', { parentTable: 'work_orders', foreignKey: 'work_order_id' }],
+  ['payroll_lines', { parentTable: 'payroll_runs', foreignKey: 'payroll_run_id' }],
+]);
+const RAW_SQL_FORBIDDEN_COLUMN_PATTERN = /\b(?:password_hash|secret|private_key|api_key)\b/i;
+const DELETE_AS_EDIT_TABLES = new Set([
+  'sales_invoice_lines', 'quotation_lines', 'sales_return_lines',
+  'purchase_invoice_lines', 'purchase_order_lines', 'purchase_return_lines',
+  'bom_lines', 'work_order_consumptions', 'payroll_lines',
+  'product_product_categories', 'warehouse_transfer_lines', 'pos_payments',
+]);
+const FINANCIAL_UPDATE_RULES = new Map([
+  ['sales_invoices', { permission: 'sales.post', fields: /\b(?:status|paid_amount|base_currency_paid|payment_type|subtotal|discount_amount|vat_amount|total_amount)\b/ }],
+  ['sales_invoice_lines', { permission: 'sales.post', fields: /\b(?:quantity|unit_price|line_total|base_currency_line_total|unit_cost)\b/ }],
+  ['sales_returns', { permission: 'sales.post', fields: /\b(?:status|total_amount|vat_amount|payment_type)\b/ }],
+  ['sales_return_lines', { permission: 'sales.post', fields: /\b(?:quantity|unit_price|line_total|base_quantity)\b/ }],
+  ['receipt_vouchers', { permission: 'accounting.post', fields: /\b(?:status|amount|amount_applied|base_currency_applied)\b/ }],
+  ['payment_vouchers', { permission: 'accounting.post', fields: /\b(?:status|amount|amount_applied|base_currency_applied)\b/ }],
+  ['transactions', { permission: 'accounting.post', fields: /\b(?:status|total_amount)\b/ }],
+  ['tax_periods', { permission: 'accounting.post', fields: /\bstatus\b/ }],
+  ['accounting_periods', { permission: 'accounting.post', fields: /\bstatus\b/ }],
+  ['pos_shifts', { permission: 'pos.post', fields: /\b(?:status|closing_amount|expected_amount|difference)\b/ }],
+  ['work_orders', { permission: 'manufacturing.post', fields: /\b(?:status|produced_quantity|total_cost)\b/ }],
+  ['stock_adjustments', { permission: 'inventory.post', fields: /\b(?:status|system_qty|actual_qty|difference)\b/ }],
+]);
 // Statement-level commands. Anchored at statement start so `UPDATE ... SET`
 // (legitimate everywhere) is not confused with the PG `SET` configuration
 // command — the previous unanchored /\bset\b/ silently blocked every UPDATE.
-const FORBIDDEN_STATEMENT_PATTERN = /^\s*(set|show|begin|commit|rollback|copy|listen|notify|vacuum|analyze|explain|prepare|execute|deallocate)\b/i;
+const FORBIDDEN_STATEMENT_PATTERN = /^\s*(set|show|begin|commit|rollback|copy|listen|notify|vacuum|analyze|explain|prepare|execute|deallocate|create|drop|alter|truncate|grant|revoke|merge|do|call|refresh|reindex|comment)\b/i;
 
 function extractTableNames(sql) {
   const normalized = String(sql || '').toLowerCase();
@@ -470,14 +623,144 @@ function moduleWritePermissions(module) {
   return [`${module}.create`, `${module}.edit`, `${module}.post`];
 }
 
-function assertSqlAuthorized(session, sql, params) {
+function rawTenantScopeIsValid(sql, params, companyId, tenantTables) {
+  if (tenantTables.length === 0) return true;
+  if (!params.some((value) => String(value || '') === String(companyId))) return false;
+
+  const normalized = String(sql || '').toLowerCase();
+  const isMutation = /\bupdate\b|\bdelete\s+from\b/.test(normalized);
+  const whereIndex = isMutation ? normalized.indexOf(' where ') : -1;
+  const predicateSql = whereIndex >= 0 ? normalized.slice(whereIndex + 1) : normalized;
+  if (isMutation && whereIndex < 0) return false;
+
+  if (tenantTables.length === 1 && tenantTables[0] === 'companies') {
+    const idPredicates = [...predicateSql.matchAll(/\b(?:companies\s*\.\s*)?id\s*=\s*\$(\d+)/gi)];
+    return idPredicates.length > 0 && idPredicates.every((match) => String(params[Number(match[1]) - 1] || '') === String(companyId));
+  }
+
+  const subqueryScopes = [...normalized.matchAll(/\$(\d+)(?:\s*::\s*[a-z_][a-z0-9_]*(?:\[\])?)?\s*=\s*\(\s*select\s+company_id\s+from\s+([a-z_][a-z0-9_]*)/gi)];
+  const subqueryTables = new Set(subqueryScopes.map((match) => match[2]));
+  const subqueryParamsValid = subqueryScopes.length === 0 || subqueryScopes.every((match) => String(params[Number(match[1]) - 1] || '') === String(companyId));
+  if (subqueryParamsValid && tenantTables.every((table) => subqueryTables.has(table))) return true;
+
+  const companyPredicates = [
+    ...predicateSql.matchAll(/\b(?:([a-z_][a-z0-9_]*)\s*\.\s*)?company_id\s*(?:=|\bin\s*\()\s*\$(\d+)/gi),
+    ...predicateSql.matchAll(/\b(?:([a-z_][a-z0-9_]*)\s*\.\s*)?company_id\s*=\s*any\s*\(\s*\$(\d+)/gi),
+  ];
+  if (companyPredicates.length > 0) {
+    const validParam = companyPredicates.every((match) => String(params[Number(match[2]) - 1] || '') === String(companyId));
+    if (!validParam || companyPredicates.length === 0) return false;
+
+    for (const table of tenantTables) {
+      const escapedTable = table.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+      const aliases = new Set([table]);
+      for (const match of normalized.matchAll(new RegExp(`\\b${escapedTable}\\b\\s+(?:as\\s+)?([a-z_][a-z0-9_]*)`, 'g'))) {
+        if (!['on', 'where', 'join', 'left', 'right', 'inner', 'outer', 'set', 'values', 'returning'].includes(match[1])) aliases.add(match[1]);
+      }
+      const scoped = companyPredicates.some((match) => {
+        if (!match[1]) return tenantTables.length === 1;
+        return aliases.has(match[1]);
+      }) || (subqueryParamsValid && subqueryTables.has(table));
+      if (!scoped) return false;
+    }
+    return true;
+  }
+
+  for (const table of tenantTables) {
+    const escapedTable = table.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+    const writeTarget = new RegExp(`\\b(?:insert\\s+into|update|delete\\s+from)\\s+${escapedTable}\\b`, 'i').test(normalized);
+    if (!writeTarget) return false;
+    const insertColumns = new RegExp(`\\binsert\\s+into\\s+${escapedTable}\\s*\\(([^)]*)\\)`, 'i').exec(normalized);
+    if (!insertColumns) return false;
+    const columns = insertColumns[1].split(',').map((column) => column.trim());
+    const companyColumnIndex = columns.indexOf('company_id');
+    if (companyColumnIndex < 0) return false;
+    const values = /values\s*\(([^)]*)\)/i.exec(normalized.slice(insertColumns.index + insertColumns[0].length));
+    if (!values) return false;
+    const valuePlaceholders = values[1].split(',').map((value) => value.trim());
+    const placeholder = valuePlaceholders[companyColumnIndex];
+    const match = placeholder?.match(/\$(\d+)/);
+    if (!match || String(params[Number(match[1]) - 1] || '') !== String(companyId)) return false;
+  }
+  return true;
+}
+
+function rawChildScopeIsValid(sql, params, companyId, childTables, scopedTables = []) {
+  if (childTables.length === 0) return true;
+  if (!params.some((value) => String(value || '') === String(companyId))) return false;
+
+  const normalized = String(sql || '').toLowerCase();
+  const alreadyScopedParents = new Set(scopedTables);
+  for (const childTable of childTables) {
+    const rule = RAW_SQL_CHILD_PARENT_RULES.get(childTable);
+    if (!rule) return false;
+    if (alreadyScopedParents.has(rule.parentTable)) continue;
+
+    const escapedParent = rule.parentTable.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+    if (!new RegExp(`\\b${escapedParent}\\b`, 'i').test(normalized)) return false;
+
+    const aliases = new Set([rule.parentTable]);
+    for (const match of normalized.matchAll(new RegExp(`\\b${escapedParent}\\b\\s+(?:as\\s+)?([a-z_][a-z0-9_]*)`, 'g'))) {
+      if (!['on', 'where', 'join', 'left', 'right', 'inner', 'outer', 'set', 'values', 'returning'].includes(match[1])) {
+        aliases.add(match[1]);
+      }
+    }
+
+    const scopedByPredicate = [...normalized.matchAll(/\b(?:([a-z_][a-z0-9_]*)\s*\.\s*)?company_id\s*(?:=|\bin\b)\s*\$(\d+)/gi)]
+      .some((match) => {
+        const validParam = String(params[Number(match[2]) - 1] || '') === String(companyId);
+        return validParam && (!match[1] || aliases.has(match[1]));
+      });
+    if (scopedByPredicate) continue;
+
+    const parentSubquery = new RegExp(
+      `\\$\\d+(?:\\s*::\\s*[a-z_][a-z0-9_]*(?:\\[\\])?)?\\s*=\\s*\\(\\s*select\\s+company_id\\s+from\\s+${escapedParent}\\b`,
+      'i',
+    );
+    if (parentSubquery.test(normalized)) continue;
+    return false;
+  }
+  return true;
+}
+
+function assertSqlAuthorized(session, sql, params, {
+  readOnlyTables = [],
+  allowFinancialUpdate = false,
+  rawSql = false,
+} = {}) {
   const normalized = String(sql || '').toLowerCase();
   if (!normalized.trim() || /;|--|\/\*|\*\//.test(normalized)) throw new Error('SQL operation not permitted');
   if (FORBIDDEN_STATEMENT_PATTERN.test(normalized)) {
     throw new Error('SQL operation not permitted');
   }
-  const write = /\b(insert|update|delete)\b/.test(normalized);
+  const write = /\b(insert|update|delete|merge)\b/.test(normalized);
+  const isUpdate = /\bupdate\b/.test(normalized);
+  const hasDelete = /\bdelete\s+from\b/.test(normalized);
+  const locks = /\bfor\s+update\b/.test(normalized);
+  const writeTargets = new Set([...normalized.matchAll(WRITE_TARGET_PATTERN)].map((match) => match[1]));
   const tables = extractTableNames(normalized);
+  if (rawSql) {
+    if (RAW_SQL_FORBIDDEN_COLUMN_PATTERN.test(normalized)) {
+      throw new Error('Sensitive columns are not available through the renderer SQL channel');
+    }
+    if ([...writeTargets].some((name) => RAW_SQL_FORBIDDEN_TABLES.has(name))) {
+      throw new Error('SQL operation not permitted');
+    }
+    if ([...writeTargets].some((name) => RAW_SQL_APPEND_ONLY_TABLES.has(name))) {
+      const auditInsertOnly = /^\s*insert\s+into\s+audit_logs\b/i.test(normalized)
+        && !/\b(?:update|delete\s+from|merge)\b/i.test(normalized)
+        && params.some((value) => String(value || '') === String(session.user.id));
+      if (!auditInsertOnly) throw new Error('Audit log writes are append-only');
+    }
+    const tenantTables = [...tables].filter((name) => RAW_SQL_TENANT_TABLES.has(name));
+    if (!rawTenantScopeIsValid(sql, params, session.user.companyId, tenantTables)) {
+      throw new Error('Cross-company access denied');
+    }
+    const childWriteTables = [...writeTargets].filter((name) => RAW_SQL_CHILD_TABLES.has(name));
+    if (write && !rawChildScopeIsValid(sql, params, session.user.companyId, childWriteTables, tenantTables)) {
+      throw new Error('Cross-company access denied');
+    }
+  }
   // SQL that touches no known business table at all is refused outright.
   if (tables.size === 0) throw new Error('SQL operation not permitted');
   for (const name of tables) {
@@ -485,20 +768,27 @@ function assertSqlAuthorized(session, sql, params) {
     if (name.startsWith('pg_') || name.startsWith('information_schema')) throw new Error('SQL operation not permitted');
     const rule = SQL_MODULE_TABLE_RULES.find((r) => r.tables.includes(name));
     if (!rule) throw new Error('SQL operation not permitted');
-    if (write) {
-      if (rule.writeAny) continue;
-      const required = rule.writePermissions || moduleWritePermissions(rule.module);
+    const readOnly = !locks && !writeTargets.has(name) && (readOnlyTables.includes(name) || write);
+    if (write && !readOnly) {
+      if (rule.writeAny && !hasDelete) continue;
+      const required = hasDelete
+        ? [DELETE_AS_EDIT_TABLES.has(name) ? `${rule.module}.edit` : `${rule.module}.delete`]
+        : (rule.writePermissions || moduleWritePermissions(rule.module));
       if (!required.some((p) => hasPermission(session, p))) throw new Error('Permission denied');
     } else if (!rule.readAny) {
-      // readPermissions mirrors writePermissions: cross-module readers
-      // (e.g. POS cashiers reading the product catalog) without holding
-      // the owning module's view/own right.
       const readers = rule.readPermissions || [`${rule.module}.view`, `${rule.module}.own`];
       if (!readers.some((p) => hasPermission(session, p))) throw new Error('Permission denied');
     }
   }
+  if (write && isUpdate && !hasDelete && !allowFinancialUpdate) {
+    for (const [name, rule] of FINANCIAL_UPDATE_RULES) {
+      if (writeTargets.has(name) && rule.fields.test(normalized) && !hasPermission(session, rule.permission)) {
+        throw new Error('Permission denied');
+      }
+    }
+  }
   // Every tenant-scoped request must be tied to the authenticated company.
-  if (normalized.includes('company_id') && !params.some((value) => value === session.user.companyId)) {
+  if (normalized.includes('company_id') && !params.some((value) => String(value || '') === String(session.user.companyId))) {
     throw new Error('Cross-company access denied');
   }
 }
@@ -822,6 +1112,8 @@ export function registerDatabaseHandlers() {
     /\bCREATE\b\s+(?:TABLE|INDEX|DATABASE|USER|ROLE|FUNCTION|PROCEDURE|TRIGGER|VIEW)\b/i,
     /\bINSERT\b\s+INTO\s+(?:pg_|information_schema)\./i,
     /\bDELETE\b\s+FROM\s+(?:pg_|information_schema)\./i,
+    /\b(?:call|merge)\b/i,
+    /\b(?:pg_sleep|pg_sleep_for|pg_read_file|pg_read_binary_file|pg_ls_dir|lo_import|lo_export|dblink|set_config|current_setting|nextval|setval|currval|pg_advisory_lock|pg_try_advisory_lock|pg_cancel_backend|pg_terminate_backend|pg_reload_conf)\s*\(/i,
   ];
 
   function isSqlAllowed(sql) {
@@ -841,7 +1133,7 @@ export function registerDatabaseHandlers() {
       if (!isSqlAllowed(sql)) {
         return { success: false, error: 'SQL operation not permitted' };
       }
-      assertSqlAuthorized(session, sql, params || []);
+      assertSqlAuthorized(session, sql, params || [], { rawSql: true });
       const result = await execQueryWithSelfHeal(pool, sql, params);
       return { success: true, rows: result.rows, rowCount: result.rowCount };
     } catch (err) {
@@ -867,7 +1159,7 @@ export function registerDatabaseHandlers() {
             await client.query('ROLLBACK');
             return { success: false, error: 'SQL operation not permitted in transaction' };
           }
-          assertSqlAuthorized(session, sql, params || []);
+          assertSqlAuthorized(session, sql, params || [], { rawSql: true });
           const res = await execQuery(client, sql, params);
           results.push({ rows: res.rows, rowCount: res.rowCount });
         }
@@ -904,13 +1196,18 @@ export function registerDatabaseHandlers() {
   // TypeScript) and the main process composes the SQL — so SQL strings
   // never travel the wire. All existing module/table authorization,
   // cross-company checks, and SQL-pattern guards apply automatically.
-  const registerRpc = (name, { compose, paramCount, validate, mapResult }) => {
+  const registerRpc = (name, { compose, paramCount, validate, mapResult, permission }) => {
     ipcMain.handle(`db:rpc:${name}`, async (event, payload = {}) => {
-      const session = getSession(event.sender.id, payload.sessionToken);
+      const request = payload && typeof payload === 'object' ? payload : {};
+      const session = getSession(event.sender.id, request.sessionToken);
       if (!session) return { success: false, error: 'Authentication required' };
+      if (request.companyId !== undefined && String(request.companyId) !== String(session.user.companyId)) {
+        return { success: false, error: 'Cross-company access denied' };
+      }
+      if (permission && !hasPermission(session, permission)) return { success: false, error: 'Permission denied' };
       try {
-        if (validate) validate(payload, session);
-        const { sql, params } = compose(payload, session);
+        if (validate) await validate(request, session);
+        const { sql, params } = compose(request, session);
         // paramCount === null → dynamic parameter count (e.g. partial
         // UPDATE SET clauses). The SQL is still composed entirely in the
         // main process; only scalar values travel from the renderer, so
@@ -954,10 +1251,14 @@ export function registerDatabaseHandlers() {
 
   // accounting.createAccount
   registerRpc('accounting.createAccount', {
+    permission: 'accounting.create',
     paramCount: 9,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!p.companyId) throw new Error('companyId required');
       if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
+      if (p.parentId !== undefined && p.parentId !== null) {
+        await assertCompanyReferences('accounts', [p.parentId], session.user.companyId, 'Parent account not found in company');
+      }
     },
     compose: (p) => ({
       sql: `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
@@ -1009,17 +1310,34 @@ export function registerDatabaseHandlers() {
       const entries = Array.isArray(data.entries) ? data.entries : [];
       if (entries.length === 0) return { success: false, error: 'No journal entries provided' };
       if (!data.companyId || !data.date) return { success: false, error: 'companyId and date required' };
+      if (String(data.companyId) !== String(session.user.companyId)) return { success: false, error: 'Cross-company access denied' };
+      const status = data.status === undefined ? 'draft' : String(data.status);
+      if (status !== 'draft' && status !== 'posted') return { success: false, error: 'Invalid transaction status' };
+      const requiredPermission = status === 'posted' ? 'accounting.post' : 'accounting.create';
+      if (!hasPermission(session, requiredPermission)) return { success: false, error: 'Permission denied' };
+      const debitTotal = entries.reduce((sum, entry) => sum + Number(entry.debit || 0), 0);
+      const creditTotal = entries.reduce((sum, entry) => sum + Number(entry.credit || 0), 0);
+      if (!Number.isFinite(debitTotal) || !Number.isFinite(creditTotal)) return { success: false, error: 'Journal entry amounts must be finite' };
+      if (Math.abs(debitTotal - creditTotal) > 0.01) return { success: false, error: 'Journal entry is not balanced' };
+      if (status === 'posted') await assertPostingPeriodsOpen(session, data.date);
 
-      // Build CTE + VALUES in the main process — typed, parameterized.
+      const companyId = session.user.companyId;
+      const accountIds = [...new Set(entries.map((entry) => String(entry.accountId || '')).filter(Boolean))];
+      if (entries.some((entry) => !entry.accountId)) return { success: false, error: 'accountId required' };
+      const accountSql = `SELECT id FROM accounts WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`;
+      assertSqlAuthorized(session, accountSql, [companyId, accountIds]);
+      const accountResult = await execQuery(pool, accountSql, [companyId, accountIds]);
+      if ((accountResult.rows || []).length !== accountIds.length) return { success: false, error: 'Journal account not found in company' };
+
       const params = [
-        data.companyId, data.date, data.reference ?? null, data.description ?? null,
-        Number(data.totalAmount || 0), data.status || 'posted',
+        companyId, data.date, data.reference ?? null, data.description ?? null,
+        Number(data.totalAmount || 0), status,
       ];
       const entryValues = [];
       let i = 7;
       for (const entry of entries) {
         entryValues.push(`((SELECT id FROM new_tx), $${i}, $${i + 1}, $${i + 2}, $${i + 3}, $${i + 4})`);
-        params.push(entry.accountId, Number(entry.debit || 0), Number(entry.credit || 0), entry.memo ?? null, data.companyId);
+        params.push(entry.accountId, Number(entry.debit || 0), Number(entry.credit || 0), entry.memo ?? null, companyId);
         i += 5;
       }
       const sql = `
@@ -1039,6 +1357,71 @@ export function registerDatabaseHandlers() {
       return { success: true, rows: result.rows, rowCount: result.rowCount };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('db:rpc:accounting.postTransaction', async (event, payload = {}) => {
+    const session = getSession(event.sender.id, payload?.sessionToken);
+    if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'accounting.post')) return { success: false, error: 'Permission denied' };
+    const id = String(payload?.id || '');
+    if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)) {
+      return { success: false, error: 'Invalid transaction id' };
+    }
+
+    const companyId = session.user.companyId;
+    let client;
+    let began = false;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      began = true;
+
+      const selectSql = `SELECT t.status, t.date,
+          COALESCE((SELECT SUM(je.debit) FROM journal_entries je WHERE je.transaction_id = t.id AND je.company_id = $2::uuid), 0) AS dr,
+          COALESCE((SELECT SUM(je.credit) FROM journal_entries je WHERE je.transaction_id = t.id AND je.company_id = $2::uuid), 0) AS cr,
+          (SELECT COUNT(*)::int FROM journal_entries je WHERE je.transaction_id = t.id AND je.company_id = $2::uuid) AS n
+        FROM transactions t
+       WHERE t.id = $1::uuid AND t.company_id = $2::uuid
+       FOR UPDATE`;
+      if (!isSqlAllowed(selectSql)) throw new Error('SQL operation not permitted');
+      assertSqlAuthorized(session, selectSql, [id, companyId], { rawSql: true });
+      const current = await execQuery(client, selectSql, [id, companyId]);
+      const row = current.rows?.[0];
+      if (!row) throw new Error('Transaction not found');
+      if (String(row.status) !== 'draft') {
+        throw new Error('Transaction is not in draft status (already posted or cancelled)');
+      }
+
+      await assertPostingPeriodsOpenOnClient(client, session, row.date);
+
+      const debit = Number(row.dr) || 0;
+      const credit = Number(row.cr) || 0;
+      if (Number(row.n) === 0 || Math.abs(debit - credit) > 0.01 || debit === 0) {
+        throw new Error(`Cannot post unbalanced transaction: debit=${debit}, credit=${credit}`);
+      }
+
+      const flipSql = `UPDATE transactions
+                         SET status = 'posted', updated_at = NOW(), updated_by = $1::uuid
+                       WHERE id = $2::uuid AND company_id = $3::uuid AND status = 'draft'
+                       RETURNING id`;
+      if (!isSqlAllowed(flipSql)) throw new Error('SQL operation not permitted');
+      assertSqlAuthorized(session, flipSql, [session.user.id, id, companyId], { rawSql: true });
+      const flipped = await execQuery(client, flipSql, [session.user.id, id, companyId]);
+      if (!flipped.rows?.length) {
+        throw new Error('Transaction is not in draft status (already posted or cancelled)');
+      }
+
+      await client.query('COMMIT');
+      began = false;
+      return { success: true, rows: flipped.rows, rowCount: flipped.rowCount };
+    } catch (err) {
+      if (began) {
+        try { await client.query('ROLLBACK'); } catch {}
+      }
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      client?.release();
     }
   });
 
@@ -1066,12 +1449,19 @@ export function registerDatabaseHandlers() {
   // fan-out (product_product_categories rows) is handled by the caller
   // since it's truly dynamic and needs `ON CONFLICT DO NOTHING`.
   registerRpc('inventory.createProduct', {
+    permission: 'inventory.create',
     paramCount: 14,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!p.companyId) throw new Error('companyId required');
       if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
+      if (p.categoryId !== undefined && p.categoryId !== null) {
+        await assertCompanyReferences('product_categories', [p.categoryId], session.user.companyId, 'Category not found in company');
+      }
+      if (p.productTypeId !== undefined && p.productTypeId !== null) {
+        await assertCompanyReferences('product_types', [p.productTypeId], session.user.companyId, 'Product type not found in company');
+      }
     },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
       params: [
@@ -1087,8 +1477,8 @@ export function registerDatabaseHandlers() {
         Number(p.costPrice || 0),
         Number(p.salePrice || 0),
         p.isActive === false ? false : true,
-        p.createdBy ?? null,
-        p.updatedBy ?? null,
+        session.user.id,
+        session.user.id,
       ],
     }),
   });
@@ -1098,11 +1488,21 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:inventory.createProductCategories', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasAnyPermission(session, ['inventory.create', 'inventory.edit'])) return { success: false, error: 'Permission denied' };
     try {
       const productId = String(payload.productId || '');
       const categoryIds = Array.isArray(payload.categoryIds) ? payload.categoryIds.map(String) : [];
       if (!productId) return { success: false, error: 'productId required' };
       if (categoryIds.length === 0) return { success: true, rows: [], rowCount: 0 };
+      const companyId = session.user.companyId;
+      const productSql = `SELECT id FROM products WHERE id = $1::uuid AND company_id = $2::uuid`;
+      assertSqlAuthorized(session, productSql, [productId, companyId]);
+      const productResult = await execQuery(pool, productSql, [productId, companyId]);
+      if (!productResult.rows?.length) return { success: false, error: 'Product not found in company' };
+      const categorySql = `SELECT id FROM product_categories WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`;
+      assertSqlAuthorized(session, categorySql, [companyId, categoryIds]);
+      const categoryResult = await execQuery(pool, categorySql, [companyId, categoryIds]);
+      if ((categoryResult.rows || []).length !== new Set(categoryIds).size) return { success: false, error: 'Category not found in company' };
       const placeholders = categoryIds.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
       const params = categoryIds.flatMap((cid) => [productId, cid]);
       const sql = `INSERT INTO product_product_categories (product_id, category_id) VALUES ${placeholders} ON CONFLICT DO NOTHING`;
@@ -1158,34 +1558,51 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:inventory.createProductUnit', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'inventory.create')) return { success: false, error: 'Permission denied' };
     const p = payload;
     if (!p.productId) return { success: false, error: 'productId required' };
     if (!p.unitId) return { success: false, error: 'unitId required' };
-    if (!(Number(p.factor) > 0)) return { success: false, error: 'factor must be positive' };
-    const cid = session.user.companyId;
-    const client = await pool.connect();
+    if (!Number.isFinite(Number(p.factor)) || !(Number(p.factor) > 0)) return { success: false, error: 'factor must be positive' };
+    const companyId = session.user.companyId;
+    const productId = String(p.productId);
+    const unitId = String(p.unitId);
     try {
-      await client.query('BEGIN');
-      if (p.isBase === true) {
-        await execQuery(client, `UPDATE product_units SET is_base = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [String(p.productId), cid]);
+      const scopeSql = `SELECT p.id, u.id
+                          FROM products p
+                          JOIN units u ON u.id = $2::uuid AND u.company_id = $3::uuid
+                         WHERE p.id = $1::uuid AND p.company_id = $3::uuid`;
+      assertSqlAuthorized(session, scopeSql, [productId, unitId, companyId]);
+      const scope = await execQuery(pool, scopeSql, [productId, unitId, companyId]);
+      if (!scope.rows?.length) return { success: false, error: 'Product or unit not found in company' };
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const flags = [
+          ['isBase', 'is_base'],
+          ['isDefaultSale', 'is_default_sale'],
+          ['isDefaultPurchase', 'is_default_purchase'],
+        ];
+        for (const [key, column] of flags) {
+          if (p[key] !== true) continue;
+          const clearSql = `UPDATE product_units SET ${column} = false WHERE product_id = $1::uuid AND company_id = $2::uuid`;
+          assertSqlAuthorized(session, clearSql, [productId, companyId]);
+          await execQuery(client, clearSql, [productId, companyId]);
+        }
+        const insSql = `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
+          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`;
+        const insParams = [companyId, productId, unitId, Number(p.factor), Number(p.salePrice) || 0, Number(p.purchasePrice) || 0, p.barcode ?? null, p.isBase === true, p.isDefaultSale === true, p.isDefaultPurchase === true];
+        assertSqlAuthorized(session, insSql, insParams);
+        const ins = await execQuery(client, insSql, insParams);
+        await client.query('COMMIT');
+        return { success: true, rows: ins.rows, rowCount: ins.rowCount };
+      } catch (e) {
+        try { await client.query('ROLLBACK'); } catch (rbErr) { void rbErr; }
+        return { success: false, error: e.message || String(e) };
+      } finally {
+        client.release();
       }
-      if (p.isDefaultSale === true) {
-        await execQuery(client, `UPDATE product_units SET is_default_sale = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [String(p.productId), cid]);
-      }
-      if (p.isDefaultPurchase === true) {
-        await execQuery(client, `UPDATE product_units SET is_default_purchase = false WHERE product_id = $1::uuid AND company_id = $2::uuid`, [String(p.productId), cid]);
-      }
-      const ins = await execQuery(client,
-        `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, barcode, is_base, is_default_sale, is_default_purchase)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10) RETURNING id`,
-        [cid, String(p.productId), String(p.unitId), Number(p.factor), Number(p.salePrice) || 0, Number(p.purchasePrice) || 0, p.barcode ?? null, p.isBase === true, p.isDefaultSale === true, p.isDefaultPurchase === true]);
-      await client.query('COMMIT');
-      return { success: true, rows: ins.rows, rowCount: ins.rowCount };
     } catch (e) {
-      try { await client.query('ROLLBACK'); } catch (rbErr) { void rbErr; }
       return { success: false, error: e.message || String(e) };
-    } finally {
-      client.release();
     }
   });
 
@@ -1194,22 +1611,42 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:inventory.updateProductUnit', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'inventory.edit')) return { success: false, error: 'Permission denied' };
     const d = payload.data || {};
     if (!d.id) return { success: false, error: 'id required' };
-    if (d.factor !== undefined && !(Number(d.factor) > 0)) return { success: false, error: 'factor must be positive' };
-    const cid = session.user.companyId;
+    if (d.factor !== undefined && (!Number.isFinite(Number(d.factor)) || !(Number(d.factor) > 0))) return { success: false, error: 'factor must be positive' };
+    const companyId = session.user.companyId;
+    const unitId = String(d.id);
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const targetSql = `SELECT id, product_id, unit_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, targetSql, [unitId, companyId]);
+      const target = await execQuery(client, targetSql, [unitId, companyId]);
+      if (!target.rows?.length) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Product unit not found in company' };
+      }
+      if (d.unitId !== undefined) {
+        const unitSql = `SELECT id FROM units WHERE id = $1::uuid AND company_id = $2::uuid`;
+        assertSqlAuthorized(session, unitSql, [String(d.unitId), companyId]);
+        const unit = await execQuery(client, unitSql, [String(d.unitId), companyId]);
+        if (!unit.rows?.length) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Unit not found in company' };
+        }
+      }
       const scope = `product_id = (SELECT product_id FROM product_units WHERE id = $1::uuid AND company_id = $2::uuid) AND company_id = $2::uuid AND id <> $1::uuid`;
-      if (d.isBase === true) {
-        await execQuery(client, `UPDATE product_units SET is_base = false WHERE ${scope}`, [String(d.id), cid]);
-      }
-      if (d.isDefaultSale === true) {
-        await execQuery(client, `UPDATE product_units SET is_default_sale = false WHERE ${scope}`, [String(d.id), cid]);
-      }
-      if (d.isDefaultPurchase === true) {
-        await execQuery(client, `UPDATE product_units SET is_default_purchase = false WHERE ${scope}`, [String(d.id), cid]);
+      const flags = [
+        ['isBase', 'is_base'],
+        ['isDefaultSale', 'is_default_sale'],
+        ['isDefaultPurchase', 'is_default_purchase'],
+      ];
+      for (const [key, column] of flags) {
+        if (d[key] !== true) continue;
+        const clearSql = `UPDATE product_units SET ${column} = false WHERE ${scope}`;
+        assertSqlAuthorized(session, clearSql, [unitId, companyId]);
+        await execQuery(client, clearSql, [unitId, companyId]);
       }
       const fields = [];
       const values = [];
@@ -1223,8 +1660,10 @@ export function registerDatabaseHandlers() {
       if (d.isDefaultSale !== undefined) { fields.push(`is_default_sale = $${idx++}`); values.push(d.isDefaultSale === true); }
       if (d.isDefaultPurchase !== undefined) { fields.push(`is_default_purchase = $${idx++}`); values.push(d.isDefaultPurchase === true); }
       fields.push('updated_at = NOW()');
-      values.push(String(d.id), cid);
-      await execQuery(client, `UPDATE product_units SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`, values);
+      values.push(unitId, companyId);
+      const updateSql = `UPDATE product_units SET ${fields.join(', ')} WHERE id = $${idx++}::uuid AND company_id = $${idx}::uuid`;
+      assertSqlAuthorized(session, updateSql, values);
+      await execQuery(client, updateSql, values);
       await client.query('COMMIT');
       return { success: true };
     } catch (e) {
@@ -1237,6 +1676,7 @@ export function registerDatabaseHandlers() {
 
   // inventory.deleteProductUnit — guarded: never delete the last unit row.
   registerRpc('inventory.deleteProductUnit', {
+    permission: 'inventory.delete',
     paramCount: 2,
     validate: (p) => { if (!p.id) throw new Error('id required'); },
     compose: (p, session) => ({
@@ -1337,6 +1777,7 @@ export function registerDatabaseHandlers() {
   // the WHERE clause uses the session company id (payload.id is ignored)
   // and `updated_by` is derived from the session (renderer value ignored).
   registerRpc('core.updateCompany', {
+    permission: 'settings.edit',
     paramCount: 14,
     validate: (p) => {
       if (!p.name) throw new Error('name required');
@@ -1389,6 +1830,7 @@ export function registerDatabaseHandlers() {
 
   // core.createCurrency
   registerRpc('core.createCurrency', {
+    permission: 'settings.edit',
     paramCount: 7,
     validate: (p) => {
       if (!p.code || !p.name) throw new Error('code and name required');
@@ -1410,6 +1852,7 @@ export function registerDatabaseHandlers() {
 
   // core.updateCurrency
   registerRpc('core.updateCurrency', {
+    permission: 'settings.edit',
     paramCount: 9,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
@@ -1441,6 +1884,7 @@ export function registerDatabaseHandlers() {
 
   // core.updateVatSettings
   registerRpc('core.updateVatSettings', {
+    permission: 'settings.edit',
     paramCount: 7,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
@@ -1470,6 +1914,7 @@ export function registerDatabaseHandlers() {
 
   // core.createBranch
   registerRpc('core.createBranch', {
+    permission: 'settings.edit',
     paramCount: 5,
     validate: (p) => {
       if (!p.name) throw new Error('name required');
@@ -1489,6 +1934,7 @@ export function registerDatabaseHandlers() {
 
   // core.updateBranch
   registerRpc('core.updateBranch', {
+    permission: 'settings.edit',
     paramCount: 7,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
@@ -1526,6 +1972,7 @@ export function registerDatabaseHandlers() {
 
   // core.setSetting
   registerRpc('core.setSetting', {
+    permission: 'settings.edit',
     paramCount: 4,
     validate: (p) => {
       if (!p.key) throw new Error('key required');
@@ -1662,6 +2109,7 @@ export function registerDatabaseHandlers() {
   // crm.deleteLead — protected: rejects when the lead still has opportunities,
   // tasks or activities referencing it (accidental history loss guard).
   registerRpc('crm.deleteLead', {
+    permission: 'crm.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: `WITH refs AS (
@@ -1888,6 +2336,7 @@ export function registerDatabaseHandlers() {
 
   // crm.deleteOpportunity
   registerRpc('crm.deleteOpportunity', {
+    permission: 'crm.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM opportunities WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -1985,6 +2434,7 @@ export function registerDatabaseHandlers() {
 
   // crm.deleteTask
   registerRpc('crm.deleteTask', {
+    permission: 'crm.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM tasks WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -2093,6 +2543,7 @@ export function registerDatabaseHandlers() {
 
   // crm.deleteActivity
   registerRpc('crm.deleteActivity', {
+    permission: 'crm.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM activities WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -2173,7 +2624,11 @@ export function registerDatabaseHandlers() {
   // id is composed in the main process from the structured payload.
   registerRpc('manufacturing.createBom', {
     paramCount: null,
-    validate: (p) => { if (!p.productId || !p.version) throw new Error('productId and version required'); },
+    validate: async (p, session) => {
+      if (!p.productId || !p.version) throw new Error('productId and version required');
+      await assertCompanyReferences('products', [p.productId], session.user.companyId, 'Product not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.materialId), session.user.companyId, 'Material not found in company');
+    },
     compose: (p, session) => {
       const lines = Array.isArray(p.lines) ? p.lines : [];
       const params = [
@@ -2213,6 +2668,7 @@ export function registerDatabaseHandlers() {
 
   // manufacturing.deleteBom — bom_lines cascade from boms, so one DELETE suffices
   registerRpc('manufacturing.deleteBom', {
+    permission: 'manufacturing.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM boms WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -2285,7 +2741,14 @@ export function registerDatabaseHandlers() {
   // batchNumber is generated in the API layer (shared by screens + AI agent).
   registerRpc('manufacturing.createWorkOrder', {
     paramCount: null,
-    validate: (p) => { if (!p.orderNumber || !p.productId) throw new Error('orderNumber and productId required'); },
+    validate: async (p, session) => {
+      if (!p.orderNumber || !p.productId) throw new Error('orderNumber and productId required');
+      if (p.status !== undefined && p.status !== 'planned') throw new Error('Work orders must be created as planned');
+      await assertCompanyReferences('products', [p.productId], session.user.companyId, 'Product not found in company');
+      if (p.bomId) await assertCompanyReferences('boms', [p.bomId], session.user.companyId, 'BOM not found in company');
+      if (p.supervisorId) await assertCompanyReferences('employees', [p.supervisorId], session.user.companyId, 'Supervisor not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.materialId), session.user.companyId, 'Material not found in company');
+    },
     compose: (p, session) => {
       const lines = Array.isArray(p.lines) ? p.lines : [];
       const params = [
@@ -2294,7 +2757,7 @@ export function registerDatabaseHandlers() {
         p.productId,
         UUID_FILTER(p.bomId),
         Number(p.quantity || 0),
-        WO_STATUSES.has(p.status) ? p.status : 'planned',
+        'planned',
         p.plannedStartDate || null,
         p.plannedEndDate || null,
         p.totalCost != null ? Number(p.totalCost) : null,
@@ -2329,6 +2792,7 @@ export function registerDatabaseHandlers() {
 
   // manufacturing.deleteWorkOrder — consumptions cascade from work_orders
   registerRpc('manufacturing.deleteWorkOrder', {
+    permission: 'manufacturing.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM work_orders WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -2411,11 +2875,21 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:manufacturing.updateBom', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'manufacturing.edit')) return { success: false, error: 'Permission denied' };
     const p = payload.data || {};
     if (!p.id) return { success: false, error: 'id required' };
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const targetSql = `SELECT id FROM boms WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, targetSql, [String(p.id), session.user.companyId]);
+      const target = await execQuery(client, targetSql, [String(p.id), session.user.companyId]);
+      if (!target.rows?.length) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'BOM not found' };
+      }
+      if (p.productId) await assertCompanyReferences('products', [p.productId], session.user.companyId, 'Product not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.materialId), session.user.companyId, 'Material not found in company');
       const fields = [];
       const values = [];
       let idx = 1;
@@ -2469,11 +2943,34 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:manufacturing.updateWorkOrder', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'manufacturing.edit')) return { success: false, error: 'Permission denied' };
     const p = payload.data || {};
     if (!p.id) return { success: false, error: 'id required' };
+    if (p.status !== undefined && p.status !== 'planned') return { success: false, error: 'Use the work-order lifecycle method to change status' };
+    if (['producedQuantity', 'actualStartDate', 'actualEndDate', 'totalCost'].some((key) => p[key] !== undefined)) {
+      return { success: false, error: 'Use the work-order lifecycle method to change production results' };
+    }
+    if (Array.isArray(p.lines) && p.lines.some((line) => line.actualQuantity !== undefined || line.actualUnitCost !== undefined)) {
+      return { success: false, error: 'Use the work-order lifecycle method to change actual consumption' };
+    }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const targetSql = `SELECT status FROM work_orders WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, targetSql, [String(p.id), session.user.companyId]);
+      const target = await execQuery(client, targetSql, [String(p.id), session.user.companyId]);
+      if (!target.rows?.length) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Work order not found' };
+      }
+      if (String(target.rows[0].status) !== 'planned') {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Only planned work orders can be edited here' };
+      }
+      if (p.productId) await assertCompanyReferences('products', [p.productId], session.user.companyId, 'Product not found in company');
+      if (p.bomId) await assertCompanyReferences('boms', [p.bomId], session.user.companyId, 'BOM not found in company');
+      if (p.supervisorId) await assertCompanyReferences('employees', [p.supervisorId], session.user.companyId, 'Supervisor not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.materialId), session.user.companyId, 'Material not found in company');
       const fields = [];
       const values = [];
       let idx = 1;
@@ -2481,13 +2978,8 @@ export function registerDatabaseHandlers() {
       if (p.productId !== undefined) { fields.push(`product_id = $${idx++}`); values.push(UUID_FILTER(p.productId)); }
       if (p.bomId !== undefined) { fields.push(`bom_id = $${idx++}`); values.push(UUID_FILTER(p.bomId)); }
       if (p.quantity !== undefined) { fields.push(`quantity = $${idx++}`); values.push(Number(p.quantity)); }
-      if (p.producedQuantity !== undefined) { fields.push(`produced_quantity = $${idx++}`); values.push(Number(p.producedQuantity)); }
-      if (p.status !== undefined) { fields.push(`status = $${idx++}`); values.push(WO_STATUSES.has(p.status) ? p.status : 'planned'); }
       if (p.plannedStartDate !== undefined) { fields.push(`planned_start_date = $${idx++}`); values.push(p.plannedStartDate || null); }
       if (p.plannedEndDate !== undefined) { fields.push(`planned_end_date = $${idx++}`); values.push(p.plannedEndDate || null); }
-      if (p.actualStartDate !== undefined) { fields.push(`actual_start_date = $${idx++}`); values.push(p.actualStartDate || null); }
-      if (p.actualEndDate !== undefined) { fields.push(`actual_end_date = $${idx++}`); values.push(p.actualEndDate || null); }
-      if (p.totalCost !== undefined) { fields.push(`total_cost = $${idx++}`); values.push(p.totalCost != null ? Number(p.totalCost) : null); }
       if (p.batchNumber !== undefined) { fields.push(`batch_number = $${idx++}`); values.push(p.batchNumber || null); }
       if (p.supervisorId !== undefined) { fields.push(`supervisor_id = $${idx++}`); values.push(UUID_FILTER(p.supervisorId)); }
       if (p.productionCosts !== undefined) { fields.push(`production_costs = $${idx++}::jsonb`); values.push(JSON.stringify(Array.isArray(p.productionCosts) ? p.productionCosts : [])); }
@@ -2603,9 +3095,10 @@ export function registerDatabaseHandlers() {
   // document_sequences flow, so it is required here.
   registerRpc('hr.createEmployee', {
     paramCount: 16,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!p.employeeNumber || !p.fullName) throw new Error('employeeNumber and fullName required');
       if (!p.hireDate) throw new Error('hireDate required');
+      if (p.departmentId) await assertCompanyReferences('departments', [p.departmentId], session.user.companyId, 'Department not found in company');
     },
     compose: (p, session) => ({
       sql: `INSERT INTO employees (company_id, employee_number, full_name, national_id, phone, email, address, department_id, position, grade, hire_date, termination_date, base_salary, is_active, photo_url, attachments, created_by, updated_by)
@@ -2637,7 +3130,10 @@ export function registerDatabaseHandlers() {
   // `updated_by` always applied (employees has both columns).
   registerRpc('hr.updateEmployee', {
     paramCount: null,
-    validate: (p) => { if (!p.id) throw new Error('id required'); },
+    validate: async (p, session) => {
+      if (!p.id) throw new Error('id required');
+      if (p.departmentId) await assertCompanyReferences('departments', [p.departmentId], session.user.companyId, 'Department not found in company');
+    },
     compose: (p, session) => {
       const fields = [];
       const values = [];
@@ -2671,6 +3167,7 @@ export function registerDatabaseHandlers() {
 
   // hr.deleteEmployee
   registerRpc('hr.deleteEmployee', {
+    permission: 'hr.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM employees WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -2698,11 +3195,24 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:hr.saveAttendance', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'hr.edit')) return { success: false, error: 'Permission denied' };
     const records = Array.isArray(payload.data?.records) ? payload.data.records : [];
     if (records.length === 0) return { success: true };
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const employeeIds = [...new Set(records.map((record) => String(record.employeeId || '')).filter(Boolean))];
+      if (employeeIds.length === 0) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'employeeId required' };
+      }
+      const employeeSql = `SELECT id FROM employees WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`;
+      assertSqlAuthorized(session, employeeSql, [session.user.companyId, employeeIds]);
+      const employeeResult = await execQuery(client, employeeSql, [session.user.companyId, employeeIds]);
+      if ((employeeResult.rows || []).length !== employeeIds.length) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Employee not found in company' };
+      }
       const tuples = records.map((_r, i) => `($${i * 2 + 1}::uuid, $${i * 2 + 2}::date)`).join(', ');
       const tupleParams = records.flatMap((r) => [String(r.employeeId), String(r.date)]);
       tupleParams.push(session.user.companyId);
@@ -2800,9 +3310,10 @@ export function registerDatabaseHandlers() {
   // resolved upstream via the guarded document_sequences flow.
   registerRpc('hr.createPayrollRun', {
     paramCount: null,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!Number.isFinite(Number(p.month)) || !Number.isFinite(Number(p.year))) throw new Error('month and year required');
       if (!Array.isArray(p.lines) || p.lines.length === 0) throw new Error('lines required');
+      await assertCompanyReferences('employees', p.lines.map((line) => line.employeeId), session.user.companyId, 'Employee not found in company');
     },
     compose: (p, session) => {
       const lines = Array.isArray(p.lines) ? p.lines : [];
@@ -2845,7 +3356,18 @@ export function registerDatabaseHandlers() {
 
   // hr.postPayrollRun — `payroll_runs` has no updated_at column; omitted.
   registerRpc('hr.postPayrollRun', {
+    permission: 'hr.edit',
     paramCount: 3,
+    validate: async (p, session) => {
+      if (!p.id) throw new Error('id required');
+      const run = await pool.query('SELECT month, year, status FROM payroll_runs WHERE id = $1::uuid AND company_id = $2::uuid', [String(p.id), session.user.companyId]);
+      if (!run.rows?.[0]) throw new Error('Payroll run not found in company');
+      if (String(run.rows[0].status) !== 'draft') throw new Error('Only draft payroll runs can be posted');
+      const year = Number(run.rows[0].year);
+      const month = Number(run.rows[0].month);
+      const lastDay = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      await assertPostingPeriodsOpen(session, lastDay);
+    },
     compose: (p, session) => ({
       sql: `UPDATE payroll_runs SET status = 'posted', updated_by = $1::uuid
             WHERE id = $2::uuid AND company_id = $3::uuid RETURNING id`,
@@ -2856,6 +3378,7 @@ export function registerDatabaseHandlers() {
   // hr.deletePayrollRun — draft-only delete (lines cascade via FK). Posted
   // runs are financial history and can never be removed.
   registerRpc('hr.deletePayrollRun', {
+    permission: 'hr.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: `DELETE FROM payroll_runs
@@ -2898,7 +3421,10 @@ export function registerDatabaseHandlers() {
   // hr.createLeave — 10 params
   registerRpc('hr.createLeave', {
     paramCount: 10,
-    validate: (p) => { if (!p.employeeId || !p.startDate || !p.endDate) throw new Error('employeeId, startDate and endDate required'); },
+    validate: async (p, session) => {
+      if (!p.employeeId || !p.startDate || !p.endDate) throw new Error('employeeId, startDate and endDate required');
+      await assertCompanyReferences('employees', [p.employeeId], session.user.companyId, 'Employee not found in company');
+    },
     compose: (p, session) => ({
       sql: `INSERT INTO leaves (company_id, employee_id, type, start_date, end_date, days, status, reason, created_by, updated_by)
             VALUES ($1::uuid, $2::uuid, $3, $4::date, $5::date, $6::numeric, $7, $8, $9::uuid, $9::uuid)
@@ -2920,7 +3446,10 @@ export function registerDatabaseHandlers() {
   // hr.updateLeaveStatus — `leaves` has no updated_at column; omitted.
   registerRpc('hr.updateLeaveStatus', {
     paramCount: 6,
-    validate: (p) => { if (!p.id || !LEAVE_STATUSES.has(p.status)) throw new Error('id and valid status required'); },
+    validate: async (p, session) => {
+      if (!p.id || !LEAVE_STATUSES.has(p.status)) throw new Error('id and valid status required');
+      if (p.approvedBy) await assertCompanyReferences('users', [p.approvedBy], session.user.companyId, 'Approver not found in company');
+    },
     compose: (p, session) => ({
       sql: `UPDATE leaves SET status = $1, approved_by = $2::uuid, approved_at = $3, updated_by = $4::uuid
             WHERE id = $5::uuid AND company_id = $6::uuid RETURNING id`,
@@ -2937,6 +3466,7 @@ export function registerDatabaseHandlers() {
 
   // hr.deleteLeave
   registerRpc('hr.deleteLeave', {
+    permission: 'hr.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM leaves WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -2977,7 +3507,10 @@ export function registerDatabaseHandlers() {
   // hr.createEndOfService — 11 params
   registerRpc('hr.createEndOfService', {
     paramCount: 11,
-    validate: (p) => { if (!p.employeeId || !p.terminationDate) throw new Error('employeeId and terminationDate required'); },
+    validate: async (p, session) => {
+      if (!p.employeeId || !p.terminationDate) throw new Error('employeeId and terminationDate required');
+      await assertCompanyReferences('employees', [p.employeeId], session.user.companyId, 'Employee not found in company');
+    },
     compose: (p, session) => ({
       sql: `INSERT INTO end_of_service (company_id, employee_id, termination_date, service_years, last_salary, eos_amount, reason, status, notes, created_by, updated_by)
             VALUES ($1::uuid, $2::uuid, $3::date, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10::uuid, $10::uuid)
@@ -3000,7 +3533,15 @@ export function registerDatabaseHandlers() {
   // hr.updateEndOfServiceStatus — end_of_service HAS updated_at; kept.
   registerRpc('hr.updateEndOfServiceStatus', {
     paramCount: 4,
-    validate: (p) => { if (!p.id || !EOS_STATUSES.has(p.status)) throw new Error('id and valid status required'); },
+    validate: async (p, session) => {
+      if (!p.id || !EOS_STATUSES.has(p.status)) throw new Error('id and valid status required');
+      const row = await pool.query('SELECT status, termination_date FROM end_of_service WHERE id = $1::uuid AND company_id = $2::uuid', [String(p.id), session.user.companyId]);
+      if (!row.rows?.[0]) throw new Error('End-of-service record not found in company');
+      const current = String(row.rows[0].status);
+      if (current === 'approved' && p.status !== 'cancelled') throw new Error('Approved end-of-service records cannot be edited');
+      if (current !== 'draft' && p.status !== 'cancelled') throw new Error('Invalid end-of-service status transition');
+      if (p.status === 'approved') await assertPostingPeriodsOpen(session, row.rows[0].termination_date);
+    },
     compose: (p, session) => ({
       sql: `UPDATE end_of_service SET status = $1, updated_by = $2::uuid, updated_at = NOW()
             WHERE id = $3::uuid AND company_id = $4::uuid RETURNING id`,
@@ -3010,6 +3551,7 @@ export function registerDatabaseHandlers() {
 
   // hr.deleteEndOfService
   registerRpc('hr.deleteEndOfService', {
+    permission: 'hr.delete',
     paramCount: 2,
     compose: (p, session) => ({
       sql: 'DELETE FROM end_of_service WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -3150,11 +3692,15 @@ export function registerDatabaseHandlers() {
 
   // sales.deleteCustomer
   registerRpc('sales.deleteCustomer', {
-    compose: (p, session) => ({
-      sql: `DELETE FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`,
-      params: [String(p.id), session.user.companyId],
-    }),
-    paramCount: 2,
+    permission: 'sales.delete',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH check_row AS (SELECT id FROM customers WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)), del AS (DELETE FROM customers WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid) RETURNING id) SELECT (SELECT id::text FROM check_row), (SELECT id::text FROM del)`,
+        params: [String(p.id), session.user.companyId, ownerId],
+      };
+    },
+    paramCount: 3,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
     },
@@ -3258,7 +3804,7 @@ export function registerDatabaseHandlers() {
       const cid = session.user.companyId;
       const uid = session.user.id;
       const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
-      const params = [cid, String(p.invoiceNumber || ''), String(p.customerId), p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      const params = [cid, String(p.invoiceNumber || ''), String(p.customerId), p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
       let sql = `WITH inv AS (INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, $15::varchar, $16, $17::uuid, $18, $19::uuid, $20::uuid) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
@@ -3278,11 +3824,15 @@ export function registerDatabaseHandlers() {
       return { sql, params };
     },
     paramCount: null,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!p.invoiceNumber) throw new Error('invoiceNumber required');
       if (!p.customerId) throw new Error('customerId required');
+      if (p.status !== undefined && p.status !== 'draft') throw new Error('Invoices must be created as drafts');
       if (p.paidAmount !== undefined && p.totalAmount !== undefined && Number(p.paidAmount) > Number(p.totalAmount)) throw new Error('Paid amount cannot exceed total amount.');
       if (p.exchangeRate !== undefined && Number(p.exchangeRate) <= 0) throw new Error('Exchange rate must be positive.');
+      await assertCompanyReferences('customers', [p.customerId], session.user.companyId, 'Customer not found in company');
+      if (p.cashBoxId) await assertCompanyReferences('cash_boxes', [p.cashBoxId], session.user.companyId, 'Cash box not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.productId), session.user.companyId, 'Product not found in company');
     },
   });
 
@@ -3290,27 +3840,52 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:sales.updateInvoice', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'sales.edit')) return { success: false, error: 'Permission denied' };
     const p = payload.data || {};
     if (!p.id) return { success: false, error: 'id required' };
+    if (p.status !== undefined && p.status !== 'draft') return { success: false, error: 'Use the invoice posting method to change status' };
+    if (p.exchangeRate !== undefined && (!Number.isFinite(Number(p.exchangeRate)) || Number(p.exchangeRate) <= 0)) return { success: false, error: 'Exchange rate must be positive' };
+    if (p.paidAmount !== undefined && (!Number.isFinite(Number(p.paidAmount)) || Number(p.paidAmount) < 0)) return { success: false, error: 'Paid amount must be non-negative' };
     const cid = session.user.companyId;
     const uid = session.user.id;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const check = await execQuery(client, `SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid`, [String(p.id), cid]);
-      if (!check.rows || !check.rows.length) {
+      const checkSql = `SELECT status, paid_amount, base_currency_paid, total_amount, created_by FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
+      const check = await execQuery(client, checkSql, [String(p.id), cid]);
+      if (!check.rows?.length || !canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Invoice not found' };
       }
       const status = String(check.rows[0].status || '');
       const currentPaid = Number(check.rows[0].paid_amount) || 0;
-      if (status !== 'draft' && p.lines !== undefined) {
+      const currentBasePaid = Number(check.rows[0].base_currency_paid) || 0;
+      const currentTotal = Number(check.rows[0].total_amount) || 0;
+      if (status !== 'draft') {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Cannot modify lines of posted invoice. Cancel it first.' };
+        return { success: false, error: 'Only draft invoices can be updated' };
       }
-      if (status !== 'draft' && p.paidAmount !== undefined && Number(p.paidAmount) < currentPaid) {
+      if (p.paidAmount !== undefined && Number(p.paidAmount) > (p.totalAmount !== undefined ? Number(p.totalAmount) : currentTotal)) {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Cannot reduce paid amount below current payments.' };
+        return { success: false, error: 'Paid amount cannot exceed total amount' };
+      }
+      if (p.paidAmount !== undefined && Number(p.paidAmount) !== currentPaid) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Use the payment workflow to change paid amount' };
+      }
+      if (p.baseCurrencyPaid !== undefined && Number(p.baseCurrencyPaid) !== currentBasePaid) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Use the payment workflow to change base paid amount' };
+      }
+      if (p.customerId !== undefined) {
+        const customerSql = `SELECT id FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`;
+        assertSqlAuthorized(session, customerSql, [String(p.customerId), cid]);
+        const customer = await execQuery(client, customerSql, [String(p.customerId), cid]);
+        if (!customer.rows?.length) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Customer not found in company' };
+        }
       }
       const fields = [];
       const values = [];
@@ -3322,25 +3897,25 @@ export function registerDatabaseHandlers() {
       if (p.discountAmount !== undefined) { fields.push(`discount_amount = $${idx++}::numeric`); values.push(p.discountAmount); }
       if (p.vatAmount !== undefined) { fields.push(`vat_amount = $${idx++}::numeric`); values.push(p.vatAmount); }
       if (p.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}::numeric`); values.push(p.totalAmount); }
-      if (p.paidAmount !== undefined) { fields.push(`paid_amount = $${idx++}::numeric`); values.push(p.paidAmount); }
       if (p.currencyCode !== undefined) { fields.push(`currency_code = $${idx++}::varchar`); values.push(p.currencyCode); }
       if (p.exchangeRate !== undefined) { fields.push(`exchange_rate = $${idx++}::numeric`); values.push(p.exchangeRate); }
       if (p.baseCurrencyAmount !== undefined) { fields.push(`base_currency_amount = $${idx++}::numeric`); values.push(p.baseCurrencyAmount); }
-      if (p.baseCurrencyPaid !== undefined) { fields.push(`base_currency_paid = $${idx++}::numeric`); values.push(p.baseCurrencyPaid); }
-      if (p.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(p.status); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
-      values.push(uid);
-      values.push(String(p.id), cid);
-      await execQuery(client, `UPDATE sales_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values);
+      values.push(uid, String(p.id), cid);
+      const updateSql = `UPDATE sales_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
+      assertSqlAuthorized(session, updateSql, values, { allowFinancialUpdate: true });
+      await execQuery(client, updateSql, values);
       if (p.lines !== undefined) {
         if (!Array.isArray(p.lines) || p.lines.length === 0) {
           await client.query('ROLLBACK');
           return { success: false, error: 'At least one line is required.' };
         }
-        await execQuery(client, `DELETE FROM sales_invoice_lines WHERE invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1)`, [String(p.id), cid]);
+        const deleteSql = `DELETE FROM sales_invoice_lines WHERE invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1)`;
+        assertSqlAuthorized(session, deleteSql, [String(p.id), cid]);
+        await execQuery(client, deleteSql, [String(p.id), cid]);
         const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
         const lineValues = [];
         const lineParams = [];
@@ -3352,9 +3927,11 @@ export function registerDatabaseHandlers() {
           lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`);
           lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        // Sale-time cost snapshot re-frozen on draft edits (mirrors fallback).
         lineParams.push(cid);
-        await execQuery(client, `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues.join(', ')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid`, lineParams);
+        const insertSql = `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues.join(', ')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid`;
+        assertSqlAuthorized(session, insertSql, lineParams, { readOnlyTables: ['products'] });
+        const inserted = await execQuery(client, insertSql, lineParams);
+        if (Number(inserted.rowCount) !== p.lines.length) throw new Error('Product not found in company');
       }
       await client.query('COMMIT');
       return { success: true };
@@ -3368,11 +3945,15 @@ export function registerDatabaseHandlers() {
 
   // sales.deleteInvoice (guarded CTE: draft + unpaid only)
   registerRpc('sales.deleteInvoice', {
-    compose: (p, session) => ({
-      sql: `WITH check_row AS (SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid), del AS (DELETE FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' AND paid_amount = 0 RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT paid_amount::numeric FROM check_row), (SELECT id::text FROM del)`,
-      params: [String(p.id), session.user.companyId],
-    }),
-    paramCount: 2,
+    permission: 'sales.delete',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH check_row AS (SELECT status, paid_amount, created_by FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)), del AS (DELETE FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' AND paid_amount = 0 AND ($3::uuid IS NULL OR created_by = $3::uuid) RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT paid_amount::numeric FROM check_row), (SELECT id::text FROM del)`,
+        params: [String(p.id), session.user.companyId, ownerId],
+      };
+    },
+    paramCount: 3,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
     },
@@ -3380,13 +3961,17 @@ export function registerDatabaseHandlers() {
 
   // sales.postInvoice (atomic: status/paid flip + customer balance, cash-aware)
   registerRpc('sales.postInvoice', {
-    compose: (p, session) => ({
-      sql: `WITH upd AS (UPDATE sales_invoices SET status = CASE WHEN payment_type = 'cash' THEN 'paid' ELSE 'posted' END, paid_amount = CASE WHEN payment_type = 'cash' THEN total_amount ELSE paid_amount END, base_currency_paid = CASE WHEN payment_type = 'cash' THEN base_currency_amount ELSE base_currency_paid END, updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' RETURNING customer_id, total_amount, paid_amount, payment_type, subtotal, vat_amount, invoice_number, date), bal AS (UPDATE customers SET balance = balance + (SELECT total_amount - paid_amount FROM upd), updated_by = $3::uuid, updated_at = NOW() WHERE id = (SELECT customer_id FROM upd) AND company_id = $2::uuid AND (SELECT total_amount - paid_amount FROM upd) <> 0) SELECT customer_id, total_amount, paid_amount, payment_type, subtotal, vat_amount, invoice_number, date FROM upd`,
-      params: [String(p.id), session.user.companyId, session.user.id],
-    }),
-    paramCount: 3,
-    validate: (p) => {
-      if (!p.id) throw new Error('id required');
+    permission: 'sales.post',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH upd AS (UPDATE sales_invoices SET status = CASE WHEN payment_type = 'cash' THEN 'paid' ELSE 'posted' END, paid_amount = CASE WHEN payment_type = 'cash' THEN total_amount ELSE paid_amount END, base_currency_paid = CASE WHEN payment_type = 'cash' THEN base_currency_amount ELSE base_currency_paid END, updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' AND ($4::uuid IS NULL OR created_by = $4::uuid) RETURNING customer_id, total_amount, paid_amount, payment_type, subtotal, vat_amount, invoice_number, date), bal AS (UPDATE customers SET balance = balance + (SELECT total_amount - paid_amount FROM upd), updated_by = $3::uuid, updated_at = NOW() WHERE id = (SELECT customer_id FROM upd) AND company_id = $2::uuid AND (SELECT total_amount - paid_amount FROM upd) <> 0) SELECT customer_id, total_amount, paid_amount, payment_type, subtotal, vat_amount, invoice_number, date FROM upd`,
+        params: [String(p.id), session.user.companyId, session.user.id, ownerId],
+      };
+    },
+    paramCount: 4,
+    validate: async () => {
+      throw new Error('Partial sales posting RPC is disabled; use the unified posting transaction');
     },
   });
 
@@ -3430,7 +4015,7 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => {
       const cid = session.user.companyId;
       const uid = session.user.id;
-      const params = [cid, String(p.quotationNumber || ''), String(p.customerId), p.date || null, p.expiryDate || null, Number(p.totalAmount) || 0, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      const params = [cid, String(p.quotationNumber || ''), String(p.customerId), p.date || null, p.expiryDate || null, Number(p.totalAmount) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
       let sql = `WITH quo AS (INSERT INTO quotations (company_id, quotation_number, customer_id, date, expiry_date, total_amount, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::varchar, $8, $9::uuid, $10, $11::uuid, $12::uuid) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
@@ -3446,25 +4031,46 @@ export function registerDatabaseHandlers() {
       return { sql, params };
     },
     paramCount: null,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!p.quotationNumber) throw new Error('quotationNumber required');
       if (!p.customerId) throw new Error('customerId required');
+      if (p.status !== undefined && p.status !== 'draft') throw new Error('Quotations must be created as drafts');
+      await assertCompanyReferences('customers', [p.customerId], session.user.companyId, 'Customer not found in company');
+      if (p.cashBoxId) await assertCompanyReferences('cash_boxes', [p.cashBoxId], session.user.companyId, 'Cash box not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.productId), session.user.companyId, 'Product not found in company');
     },
   });// sales.updateQuotation (transaction: dynamic header SET + line rebuild)
   ipcMain.handle('db:rpc:sales.updateQuotation', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'sales.edit')) return { success: false, error: 'Permission denied' };
     const p = payload.data || {};
     if (!p.id) return { success: false, error: 'id required' };
+    if (p.status !== undefined && p.status !== 'draft') return { success: false, error: 'Use the quotation workflow to change status' };
     const cid = session.user.companyId;
     const uid = session.user.id;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const check = await execQuery(client, `SELECT id FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid`, [String(p.id), cid]);
-      if (!check.rows || !check.rows.length) {
+      const checkSql = `SELECT id, status, created_by FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
+      const check = await execQuery(client, checkSql, [String(p.id), cid]);
+      if (!check.rows?.length || !canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Quotation not found' };
+      }
+      if (String(check.rows[0].status || '') !== 'draft') {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Only draft quotations can be updated' };
+      }
+      if (p.customerId !== undefined) {
+        const customerSql = `SELECT id FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`;
+        assertSqlAuthorized(session, customerSql, [String(p.customerId), cid]);
+        const customer = await execQuery(client, customerSql, [String(p.customerId), cid]);
+        if (!customer.rows?.length) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Customer not found in company' };
+        }
       }
       const fields = [];
       const values = [];
@@ -3473,29 +4079,38 @@ export function registerDatabaseHandlers() {
       if (p.date !== undefined) { fields.push(`date = $${idx++}::date`); values.push(p.date); }
       if (p.expiryDate !== undefined) { fields.push(`expiry_date = $${idx++}::date`); values.push(p.expiryDate); }
       if (p.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}::numeric`); values.push(p.totalAmount); }
-      if (p.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(p.status); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
-      values.push(uid);
-      values.push(String(p.id), cid);
-      await execQuery(client, `UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values);
+      values.push(uid, String(p.id), cid);
+       const updateSql = `UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
+       assertSqlAuthorized(session, updateSql, values);
+      await execQuery(client, updateSql, values);
       if (p.lines !== undefined) {
         if (!Array.isArray(p.lines) || p.lines.length === 0) {
           await client.query('ROLLBACK');
           return { success: false, error: 'At least one line is required.' };
         }
-        await execQuery(client, `DELETE FROM quotation_lines WHERE quotation_id = $1::uuid AND $2::uuid = (SELECT company_id FROM quotations WHERE id = $1)`, [String(p.id), cid]);
+        const deleteSql = `DELETE FROM quotation_lines WHERE quotation_id = $1::uuid AND $2::uuid = (SELECT company_id FROM quotations WHERE id = $1)`;
+        assertSqlAuthorized(session, deleteSql, [String(p.id), cid]);
+        await execQuery(client, deleteSql, [String(p.id), cid]);
         const lineValues = [];
         const lineParams = [];
         for (const line of p.lines) {
           const off = lineParams.length;
           const usnap = snapLineUnit(line);
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}::uuid, $${off + 8}, $${off + 9})`);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}::uuid, $${off + 7}, $${off + 8}, $${off + 9})`);
           lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.lineTotal) || 0, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        await execQuery(client, `INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues.join(', ')}`, lineParams);
+        lineParams.push(cid);
+        const insertSql = `INSERT INTO quotation_lines (quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity)
+          SELECT v.* FROM (VALUES ${lineValues.join(', ')}) v(quotation_id, product_id, quantity, unit_price, discount_percent, line_total, unit_id, unit_factor, base_quantity)
+          JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid
+          WHERE EXISTS (SELECT 1 FROM quotations q WHERE q.id = $1::uuid AND q.company_id = $${lineParams.length}::uuid)`;
+        assertSqlAuthorized(session, insertSql, lineParams, { readOnlyTables: ['products'] });
+        const inserted = await execQuery(client, insertSql, lineParams);
+        if (Number(inserted.rowCount) !== p.lines.length) throw new Error('Product not found in company');
       }
       await client.query('COMMIT');
       return { success: true };
@@ -3509,13 +4124,96 @@ export function registerDatabaseHandlers() {
 
   // sales.deleteQuotation (guarded CTE: not converted/accepted)
   registerRpc('sales.deleteQuotation', {
-    compose: (p, session) => ({
-      sql: `WITH check_row AS (SELECT status FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid), del AS (DELETE FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid AND status NOT IN ('converted', 'accepted') RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT id::text FROM del)`,
-      params: [String(p.id), session.user.companyId],
-    }),
-    paramCount: 2,
+    permission: 'sales.delete',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH check_row AS (SELECT status, created_by FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)), del AS (DELETE FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid AND status NOT IN ('converted', 'accepted') AND ($3::uuid IS NULL OR created_by = $3::uuid) RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT id::text FROM del)`,
+        params: [String(p.id), session.user.companyId, ownerId],
+      };
+    },
+    paramCount: 3,
     validate: (p) => {
       if (!p.id) throw new Error('id required');
+    },
+  });
+
+  // sales.claimQuotation — the guarded, row-locked transition that a
+  // quotation→invoice conversion claims BEFORE the invoice is created.
+  //
+  // Why this channel exists: `convertQuotationToInvoice` used to flip the
+  // status through `sales.updateQuotation`, which REFUSES any status other
+  // than 'draft' and only edits draft rows. So on Electron the flip always
+  // failed — and the caller never checked the result, so it reported success
+  // while the quotation stayed 'sent'. The same quotation could then be
+  // converted again, producing duplicate invoices. Silent, and desktop-only.
+  //
+  // The conditional UPDATE is the mutual exclusion: zero rows means the
+  // quotation was already converted (or is rejected/cancelled) and no invoice
+  // may be created. `previous_status` comes back so the caller can restore
+  // the original state if the invoice creation then fails.
+  registerRpc('sales.claimQuotation', {
+    permission: 'sales.edit',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH cur AS (
+                SELECT id, status
+                  FROM quotations
+                 WHERE id = $1::uuid AND company_id = $2::uuid
+                   AND status IN ('draft', 'sent', 'accepted')
+                   AND ($3::uuid IS NULL OR created_by = $3::uuid)
+                 FOR UPDATE
+              ),
+              upd AS (
+                UPDATE quotations q
+                   SET status = 'converted', updated_by = $4::uuid, updated_at = NOW()
+                  FROM cur
+                 WHERE q.id = cur.id AND q.company_id = $2::uuid
+                RETURNING q.id, cur.status AS previous_status
+              )
+              SELECT (SELECT id::text FROM upd) AS id,
+                     (SELECT status::text FROM cur) AS previous_status,
+                     (SELECT quotation_number FROM quotations WHERE id = $1::uuid) AS quotation_number`,
+        params: [String(p.id), session.user.companyId, ownerId, session.user.id],
+      };
+    },
+    paramCount: 4,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (!r || !r.id) {
+        const status = r && r.previous_status ? r.previous_status : 'غير متاح';
+        throw new Error(
+          `تعذّر حجز عرض السعر للتحويل (الحالة: ${status}) — قد يكون محوّلاً مسبقاً أو مرفوضاً.`
+        );
+      }
+      return rows;
+    },
+  });
+
+  // sales.releaseQuotation — compensating action when the invoice creation that
+  // followed a successful claim fails. NOT EXISTS keeps it from un-claiming a
+  // quotation behind a real invoice (the create may have committed even if the
+  // response was lost).
+  registerRpc('sales.releaseQuotation', {
+    permission: 'sales.edit',
+    compose: (p, session) => ({
+      sql: `UPDATE quotations
+              SET status = $3, updated_by = $4::uuid, updated_at = NOW()
+            WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'converted'
+              AND NOT EXISTS (SELECT 1 FROM sales_invoices WHERE quotation_id = $1::uuid AND company_id = $2::uuid)
+            RETURNING id`,
+      params: [String(p.id), session.user.companyId, String(p.previousStatus || 'sent'), session.user.id],
+    }),
+    paramCount: 4,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+      if (!['draft', 'sent', 'accepted'].includes(String(p.previousStatus))) {
+        throw new Error('previousStatus must be a convertible state');
+      }
     },
   });
 
@@ -3559,7 +4257,7 @@ export function registerDatabaseHandlers() {
     compose: (p, session) => {
       const cid = session.user.companyId;
       const uid = session.user.id;
-      const params = [cid, String(p.returnNumber || ''), p.invoiceId || null, String(p.customerId), p.date || null, Number(p.subtotal) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, p.reason || null, p.status || 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      const params = [cid, String(p.returnNumber || ''), p.invoiceId || null, String(p.customerId), p.date || null, Number(p.subtotal) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, p.reason || null, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
       let sql = `WITH ret AS (INSERT INTO sales_returns (company_id, return_number, invoice_id, customer_id, date, subtotal, vat_amount, total_amount, reason, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9, $10::varchar, $11, $12::uuid, $13, $14::uuid, $15::uuid) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
@@ -3575,9 +4273,14 @@ export function registerDatabaseHandlers() {
       return { sql, params };
     },
     paramCount: null,
-    validate: (p) => {
+    validate: async (p, session) => {
       if (!p.returnNumber) throw new Error('returnNumber required');
       if (!p.customerId) throw new Error('customerId required');
+      if (p.status !== undefined && p.status !== 'draft') throw new Error('Returns must be created as drafts');
+      await assertCompanyReferences('customers', [p.customerId], session.user.companyId, 'Customer not found in company');
+      if (p.invoiceId) await assertCompanyReferences('sales_invoices', [p.invoiceId], session.user.companyId, 'Invoice not found in company');
+      if (p.cashBoxId) await assertCompanyReferences('cash_boxes', [p.cashBoxId], session.user.companyId, 'Cash box not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.productId), session.user.companyId, 'Product not found in company');
     },
   });
 
@@ -3585,27 +4288,43 @@ export function registerDatabaseHandlers() {
   ipcMain.handle('db:rpc:sales.updateReturn', async (event, payload = {}) => {
     const session = getSession(event.sender.id, payload.sessionToken);
     if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'sales.edit')) return { success: false, error: 'Permission denied' };
     const p = payload.data || {};
     if (!p.id) return { success: false, error: 'id required' };
+    if (p.status !== undefined && p.status !== 'draft') return { success: false, error: 'Use the return posting method to change status' };
     const cid = session.user.companyId;
     const uid = session.user.id;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const check = await execQuery(client, `SELECT status FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid`, [String(p.id), cid]);
-      if (!check.rows || !check.rows.length) {
+      const checkSql = `SELECT status, created_by FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
+      const check = await execQuery(client, checkSql, [String(p.id), cid]);
+      if (!check.rows?.length || !canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Return not found' };
       }
-      // P2 fix: posted returns already moved stock + JE + party balance.
-      const retStatus = String(check.rows[0].status || '');
-      if (retStatus !== 'draft' && p.lines !== undefined) {
+      if (String(check.rows[0].status || '') !== 'draft') {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Cannot modify lines of a posted return.' };
+        return { success: false, error: 'Only draft returns can be updated' };
       }
-      if (retStatus !== 'draft' && p.status !== undefined) {
-        await client.query('ROLLBACK');
-        return { success: false, error: 'Cannot change status of a posted return.' };
+      if (p.invoiceId) {
+        const invoiceSql = `SELECT id FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid`;
+        assertSqlAuthorized(session, invoiceSql, [String(p.invoiceId), cid]);
+        const invoice = await execQuery(client, invoiceSql, [String(p.invoiceId), cid]);
+        if (!invoice.rows?.length) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Invoice not found in company' };
+        }
+      }
+      if (p.customerId !== undefined) {
+        const customerSql = `SELECT id FROM customers WHERE id = $1::uuid AND company_id = $2::uuid`;
+        assertSqlAuthorized(session, customerSql, [String(p.customerId), cid]);
+        const customer = await execQuery(client, customerSql, [String(p.customerId), cid]);
+        if (!customer.rows?.length) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Customer not found in company' };
+        }
       }
       const fields = [];
       const values = [];
@@ -3617,20 +4336,22 @@ export function registerDatabaseHandlers() {
       if (p.vatAmount !== undefined) { fields.push(`vat_amount = $${idx++}::numeric`); values.push(p.vatAmount); }
       if (p.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}::numeric`); values.push(p.totalAmount); }
       if (p.reason !== undefined) { fields.push(`reason = $${idx++}`); values.push(p.reason); }
-      if (p.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(p.status); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
-      values.push(uid);
-      values.push(String(p.id), cid);
-      await execQuery(client, `UPDATE sales_returns SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`, values);
+      values.push(uid, String(p.id), cid);
+      const updateSql = `UPDATE sales_returns SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
+      assertSqlAuthorized(session, updateSql, values, { allowFinancialUpdate: true });
+      await execQuery(client, updateSql, values);
       if (p.lines !== undefined) {
         if (!Array.isArray(p.lines) || p.lines.length === 0) {
           await client.query('ROLLBACK');
           return { success: false, error: 'At least one line is required.' };
         }
-        await execQuery(client, `DELETE FROM sales_return_lines WHERE return_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_returns WHERE id = $1)`, [String(p.id), cid]);
+        const deleteSql = `DELETE FROM sales_return_lines WHERE return_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_returns WHERE id = $1)`;
+        assertSqlAuthorized(session, deleteSql, [String(p.id), cid]);
+        await execQuery(client, deleteSql, [String(p.id), cid]);
         const lineValues = [];
         const lineParams = [];
         for (const line of p.lines) {
@@ -3639,7 +4360,14 @@ export function registerDatabaseHandlers() {
           lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}::uuid, $${off + 7}, $${off + 8})`);
           lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
-        await execQuery(client, `INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity) VALUES ${lineValues.join(', ')}`, lineParams);
+        lineParams.push(cid);
+        const insertSql = `INSERT INTO sales_return_lines (return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity)
+          SELECT v.* FROM (VALUES ${lineValues.join(', ')}) v(return_id, product_id, quantity, unit_price, line_total, unit_id, unit_factor, base_quantity)
+          JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid
+          WHERE EXISTS (SELECT 1 FROM sales_returns r WHERE r.id = $1::uuid AND r.company_id = $${lineParams.length}::uuid)`;
+        assertSqlAuthorized(session, insertSql, lineParams, { readOnlyTables: ['products'] });
+        const inserted = await execQuery(client, insertSql, lineParams);
+        if (Number(inserted.rowCount) !== p.lines.length) throw new Error('Product not found in company');
       }
       await client.query('COMMIT');
       return { success: true };
@@ -3653,8 +4381,93 @@ export function registerDatabaseHandlers() {
 
   // sales.deleteReturn (guarded CTE: draft only)
   registerRpc('sales.deleteReturn', {
+    permission: 'sales.delete',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH check_row AS (SELECT status, created_by FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)), del AS (DELETE FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' AND ($3::uuid IS NULL OR created_by = $3::uuid) RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT id::text FROM del)`,
+        params: [String(p.id), session.user.companyId, ownerId],
+      };
+    },
+    paramCount: 3,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  // sales.postReturn (atomic: status flip + customer balance decrement)
+  registerRpc('sales.postReturn', {
+    permission: 'sales.post',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'sales') ? session.user.id : null;
+      return {
+        sql: `WITH upd AS (UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' AND ($4::uuid IS NULL OR created_by = $4::uuid) RETURNING customer_id, total_amount, return_number, date), bal AS (UPDATE customers SET balance = balance - (SELECT total_amount FROM upd), updated_by = $3::uuid, updated_at = NOW() WHERE id = (SELECT customer_id FROM upd) AND company_id = $2::uuid AND (SELECT total_amount FROM upd) <> 0) SELECT u.customer_id, u.total_amount, u.return_number, u.date, c.name AS customer_name FROM upd u LEFT JOIN customers c ON u.customer_id = c.id`,
+        params: [String(p.id), session.user.companyId, session.user.id, ownerId],
+      };
+    },
+    paramCount: 4,
+    validate: async () => {
+      throw new Error('Partial sales return posting RPC is disabled; use the unified posting transaction');
+    },
+  });
+
+  // ── Purchases (المشتريات) ───────────────────────────────────────────
+  // The purchases module is the AP mirror of the sales module. SQL here is
+  // composed main-side from scalar payload values only; `company_id` and the
+  // audit `user_id` come from the authenticated session, never from payload.
+  // The SQL is kept byte-equivalent to the renderer fallback in
+  // `src/modules/purchases/api.ts` (and to the e2e shim) so a tenant sees
+  // the same balances/statement rows on every backend.
+
+  // Supplier list + per-supplier ledger balance. The `computed_balance`
+  // sub-selects mirror the statement formula (opening + credit invoices -
+  // posted payments - posted returns), so list cards, supplier cards and the
+  // statement can never disagree.
+  registerRpc('purchases.getSuppliers', {
     compose: (p, session) => ({
-      sql: `WITH check_row AS (SELECT status FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid), del AS (DELETE FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT id::text FROM del)`,
+      sql: `SELECT s.*,
+              (COALESCE(s.opening_balance,0)
+                + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
+               - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+               - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
+              ) AS computed_balance
+             FROM suppliers s WHERE s.company_id = $1::uuid AND s.is_active = true ORDER BY s.name`,
+      params: [session.user.companyId],
+    }),
+    paramCount: 1,
+  });
+
+  registerRpc('purchases.getSuppliersPaginated', {
+    compose: (p, session) => {
+      const page = Math.max(1, Number(p.page) || 1);
+      const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = (page - 1) * pageSize;
+      const isActive = p.isActive === undefined || p.isActive === null ? null : (p.isActive === true || p.isActive === 'true');
+      return {
+        sql: `SELECT s.*,
+                (COALESCE(s.opening_balance,0)
+                  + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
+                 - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+                 - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
+                ) AS computed_balance,
+                (COUNT(*) OVER())::int AS total_count
+               FROM suppliers s WHERE s.company_id = $1::uuid AND ($2::boolean IS NULL OR s.is_active = $2) AND ($3::text IS NULL OR s.name ILIKE $3)
+               ORDER BY s.name LIMIT $4 OFFSET $5`,
+        params: [session.user.companyId, isActive, TEXT_FILTER(p.search), pageSize, offset],
+      };
+    },
+    paramCount: 5,
+  });
+
+  registerRpc('purchases.getSupplierById', {
+    compose: (p, session) => ({
+      sql: `SELECT s.*,
+              (COALESCE(s.opening_balance,0)
+                + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
+               - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
+               - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
+              ) AS computed_balance
+             FROM suppliers s WHERE s.id = $1::uuid AND s.company_id = $2::uuid LIMIT 1`,
       params: [String(p.id), session.user.companyId],
     }),
     paramCount: 2,
@@ -3663,11 +4476,363 @@ export function registerDatabaseHandlers() {
     },
   });
 
-  // sales.postReturn (atomic: status flip + customer balance decrement)
-  registerRpc('sales.postReturn', {
+  // Unified statement (opening + invoices + payments + returns) in ONE query
+  // with a running balance — the last row's balance is the supplier's FULL
+  // balance. For suppliers, credit = we owe them (purchases), debit = we
+  // paid / returned, mirroring the supplier (AP) account nature.
+  registerRpc('purchases.getSupplierStatement', {
     compose: (p, session) => ({
-      sql: `WITH upd AS (UPDATE sales_returns SET status = 'posted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' RETURNING customer_id, total_amount, return_number, date), bal AS (UPDATE customers SET balance = balance - (SELECT total_amount FROM upd), updated_by = $3::uuid, updated_at = NOW() WHERE id = (SELECT customer_id FROM upd) AND company_id = $2::uuid AND (SELECT total_amount FROM upd) <> 0) SELECT u.customer_id, u.total_amount, u.return_number, u.date, c.name AS customer_name FROM upd u LEFT JOIN customers c ON u.customer_id = c.id`,
-      params: [String(p.id), session.user.companyId, session.user.id],
+      sql: `WITH entries AS (
+        SELECT gen_random_uuid() AS id, COALESCE(s.opening_date, DATE '1900-01-01') AS date,
+               'opening' AS type, 'OPENING' AS doc_number, 'رصيد افتتاحي' AS description,
+               CASE WHEN s.opening_balance < 0 THEN -s.opening_balance ELSE 0 END AS debit,
+               CASE WHEN s.opening_balance >= 0 THEN s.opening_balance ELSE 0 END AS credit,
+               0 AS sort_type
+        FROM suppliers s
+        WHERE s.id = $1::uuid AND s.company_id = $2::uuid AND s.opening_balance <> 0
+        UNION ALL
+        SELECT id, date, 'invoice' AS type, invoice_number AS doc_number, 'فاتورة مشتريات' AS description,
+               0::numeric AS debit, total_amount AS credit, 1 AS sort_type
+        FROM purchase_invoices
+        WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status != 'cancelled' AND COALESCE(payment_type, 'credit') <> 'cash'
+        UNION ALL
+        SELECT id, date, 'return' AS type, return_number AS doc_number, 'مردود مشتريات' AS description,
+               total_amount AS debit, 0::numeric AS credit, 1 AS sort_type
+        FROM purchase_returns
+        WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
+        UNION ALL
+        SELECT id, date, 'payment' AS type, voucher_number AS doc_number, 'سند صرف' AS description,
+               amount AS debit, 0::numeric AS credit, 2 AS sort_type
+        FROM payment_vouchers
+        WHERE supplier_id = $1::uuid AND company_id = $2::uuid AND status = 'posted'
+      )
+      SELECT id::text AS id, date, type, doc_number AS document_number, description, debit, credit,
+             SUM(credit - debit) OVER (ORDER BY date, sort_type, doc_number) AS balance
+      FROM entries
+      ORDER BY date, sort_type, doc_number`,
+      params: [String(p.supplierId), session.user.companyId],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.supplierId) throw new Error('supplierId required');
+    },
+  });
+
+  // Aging = opening + outstanding invoices - posted payments - posted returns.
+  // Bucketing stays in the renderer (date math against "today" belongs to the
+  // caller's clock), so the channel returns the same raw leg rows as the
+  // fallback query.
+  registerRpc('purchases.getApAging', {
+    compose: (p, session) => ({
+      sql: `SELECT COALESCE(due_date, date) AS aging_date, (total_amount - COALESCE(paid_amount,0)) AS due_amount
+            FROM purchase_invoices
+            WHERE supplier_id = $1 AND company_id = $2 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount,0)) > 0 AND COALESCE(payment_type, 'credit') <> 'cash'
+            UNION ALL
+            SELECT COALESCE(opening_date, DATE '1900-01-01') AS aging_date, opening_balance AS due_amount
+            FROM suppliers WHERE id = $1 AND company_id = $2 AND opening_balance > 0
+            UNION ALL
+            SELECT date AS aging_date, -amount AS due_amount
+            FROM payment_vouchers WHERE supplier_id = $1 AND company_id = $2 AND status = 'posted'
+            UNION ALL
+            SELECT date AS aging_date, -total_amount AS due_amount
+            FROM purchase_returns WHERE supplier_id = $1 AND company_id = $2 AND status = 'posted'`,
+      params: [String(p.supplierId), session.user.companyId],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.supplierId) throw new Error('supplierId required');
+    },
+  });
+
+  // Full AP = opening + outstanding invoices - posted payments - posted returns.
+  // Four aggregate legs (one row each); the renderer sums them, exactly like
+  // the fallback path, so both backends produce the same total.
+  registerRpc('purchases.getApAgingTotal', {
+    compose: (p, session) => ({
+      sql: `SELECT COALESCE(SUM(total_amount - COALESCE(paid_amount, 0)), 0) AS outstanding FROM purchase_invoices WHERE company_id = $1 AND status IN ('posted', 'partially_paid') AND (total_amount - COALESCE(paid_amount, 0)) > 0 AND COALESCE(payment_type, 'credit') <> 'cash'
+             UNION ALL SELECT COALESCE(SUM(opening_balance),0) FROM suppliers WHERE company_id = $1 AND opening_balance > 0
+             UNION ALL SELECT -COALESCE(SUM(amount),0) FROM payment_vouchers WHERE company_id = $1 AND status = 'posted'
+             UNION ALL SELECT -COALESCE(SUM(total_amount),0) FROM purchase_returns WHERE company_id = $1 AND status = 'posted'`,
+      params: [session.user.companyId, session.user.companyId, session.user.companyId, session.user.companyId],
+    }),
+    paramCount: 4,
+  });
+
+  // ── Purchases documents (Phase 0 slice A2) ────────────────────────────
+  // Invoice / order / return reads. The three `*ById` channels fold the line
+  // rows into one `lines` json array (same columns the renderer fallback
+  // selected with `l.*` + the product display fields) so a document and its
+  // lines cost ONE round-trip instead of two.
+  //
+  // NOTE (permission model, unchanged by this slice): these statements read
+  // `products` (inventory module rule), so a role holding ONLY
+  // `purchases.view` is refused — exactly as the raw renderer path already
+  // refused it, because both go through the same assertSqlAuthorized. Every
+  // default role that carries `purchases.view` also carries `inventory.view`.
+  const purchaseLineJson = (parentCol) => `COALESCE(json_agg(json_build_object(
+      'id', l.id, '${parentCol}', l.${parentCol}, 'product_id', l.product_id,
+      'product_name', p.name_ar, 'product_code', p.code, 'barcode', p.barcode,
+      'sku', p.sku, 'unit', p.unit, 'quantity', l.quantity, 'unit_price', l.unit_price,
+      'discount_percent', l.discount_percent, 'vat_percent', l.vat_percent,
+      'line_total', l.line_total, 'unit_id', l.unit_id, 'unit_factor', l.unit_factor,
+      'base_quantity', l.base_quantity, 'description', l.description,
+      'currency_code', l.currency_code, 'exchange_rate', l.exchange_rate,
+      'base_currency_line_total', l.base_currency_line_total
+    )) FILTER (WHERE l.id IS NOT NULL), '[]'::json) AS lines`;
+
+  registerRpc('purchases.getInvoices', {
+    compose: (p, session) => ({
+      sql: `SELECT i.*, s.name as supplier_name, s.id as supplier_id
+            FROM purchase_invoices i
+            LEFT JOIN suppliers s ON i.supplier_id = s.id
+            WHERE i.company_id = $1::uuid
+            ORDER BY i.date DESC`,
+      params: [session.user.companyId],
+    }),
+    paramCount: 1,
+  });
+
+  // Outstanding AP per supplier — the payment-allocation picker.
+  registerRpc('purchases.getOutstandingInvoicesForSupplier', {
+    compose: (p, session) => ({
+      sql: `SELECT i.*, s.name as supplier_name
+            FROM purchase_invoices i
+            LEFT JOIN suppliers s ON i.supplier_id = s.id
+            WHERE i.company_id = $1::uuid
+              AND i.supplier_id = $2::uuid
+              AND i.status IN ('posted', 'partially_paid')
+              AND (i.total_amount - COALESCE(i.paid_amount, 0)) > 0
+            ORDER BY i.date ASC`,
+      params: [session.user.companyId, String(p.supplierId)],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.supplierId) throw new Error('supplierId required');
+    },
+  });
+
+  registerRpc('purchases.getInvoicesPaginated', {
+    compose: (p, session) => {
+      const page = Math.max(1, Number(p.page) || 1);
+      const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = (page - 1) * pageSize;
+      const status = typeof p.status === 'string' && p.status !== '' ? p.status : null;
+      const supplierId = typeof p.supplierId === 'string' && /^[0-9a-fA-F]{8}-/.test(p.supplierId) ? p.supplierId : null;
+      const invoiceNumber = typeof p.invoiceNumber === 'string' && p.invoiceNumber.trim() !== '' ? p.invoiceNumber.trim() : null;
+      return {
+        // Document-number search stays server-side and exact (ASCII codes need
+        // no Arabic normalization) — mirrors the renderer fallback.
+        sql: `SELECT i.*, s.name as supplier_name, s.id as supplier_id, (COUNT(*) OVER())::int AS total_count
+              FROM purchase_invoices i
+              LEFT JOIN suppliers s ON i.supplier_id = s.id
+              WHERE i.company_id = $1::uuid
+                AND ($2::text IS NULL OR i.status = $2)
+                AND ($3::uuid IS NULL OR i.supplier_id = $3)
+                AND ($4::text IS NULL OR i.invoice_number ILIKE '%' || $4 || '%')
+              ORDER BY i.date DESC LIMIT $5 OFFSET $6`,
+        params: [session.user.companyId, status, supplierId, invoiceNumber, pageSize, offset],
+      };
+    },
+    paramCount: 6,
+  });
+
+  registerRpc('purchases.getInvoiceById', {
+    compose: (p, session) => ({
+      sql: `SELECT i.*, s.name as supplier_name, ${purchaseLineJson('invoice_id')}
+            FROM purchase_invoices i
+            LEFT JOIN suppliers s ON i.supplier_id = s.id
+            LEFT JOIN purchase_invoice_lines l ON l.invoice_id = i.id
+            LEFT JOIN products p ON l.product_id = p.id
+            WHERE i.id = $1::uuid AND i.company_id = $2::uuid
+            GROUP BY i.id, s.name LIMIT 1`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  registerRpc('purchases.getOrders', {
+    compose: (p, session) => ({
+      sql: `SELECT po.*, s.name as supplier_name, s.id as supplier_id
+            FROM purchase_orders po
+            LEFT JOIN suppliers s ON po.supplier_id = s.id
+            WHERE po.company_id = $1::uuid
+            ORDER BY po.date DESC`,
+      params: [session.user.companyId],
+    }),
+    paramCount: 1,
+  });
+
+  registerRpc('purchases.getOrdersPaginated', {
+    compose: (p, session) => {
+      const page = Math.max(1, Number(p.page) || 1);
+      const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = (page - 1) * pageSize;
+      const status = typeof p.status === 'string' && p.status !== '' ? p.status : null;
+      const supplierId = typeof p.supplierId === 'string' && /^[0-9a-fA-F]{8}-/.test(p.supplierId) ? p.supplierId : null;
+      return {
+        sql: `SELECT po.*, s.name as supplier_name, s.id as supplier_id, (COUNT(*) OVER())::int AS total_count
+              FROM purchase_orders po
+              LEFT JOIN suppliers s ON po.supplier_id = s.id
+              WHERE po.company_id = $1::uuid
+                AND ($2::text IS NULL OR po.status = $2)
+                AND ($3::uuid IS NULL OR po.supplier_id = $3)
+              ORDER BY po.date DESC LIMIT $4 OFFSET $5`,
+        params: [session.user.companyId, status, supplierId, pageSize, offset],
+      };
+    },
+    paramCount: 5,
+  });
+
+  registerRpc('purchases.getOrderById', {
+    compose: (p, session) => ({
+      sql: `SELECT po.*, s.name as supplier_name, ${purchaseLineJson('order_id')}
+            FROM purchase_orders po
+            LEFT JOIN suppliers s ON po.supplier_id = s.id
+            LEFT JOIN purchase_order_lines l ON l.order_id = po.id
+            LEFT JOIN products p ON l.product_id = p.id
+            WHERE po.id = $1::uuid AND po.company_id = $2::uuid
+            GROUP BY po.id, s.name LIMIT 1`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  registerRpc('purchases.getReturns', {
+    compose: (p, session) => ({
+      sql: `SELECT r.*, s.name as supplier_name, s.id as supplier_id
+            FROM purchase_returns r
+            LEFT JOIN suppliers s ON r.supplier_id = s.id
+            WHERE r.company_id = $1::uuid
+            ORDER BY r.date DESC`,
+      params: [session.user.companyId],
+    }),
+    paramCount: 1,
+  });
+
+  registerRpc('purchases.getReturnsPaginated', {
+    compose: (p, session) => {
+      const page = Math.max(1, Number(p.page) || 1);
+      const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = (page - 1) * pageSize;
+      const status = typeof p.status === 'string' && p.status !== '' ? p.status : null;
+      const supplierId = typeof p.supplierId === 'string' && /^[0-9a-fA-F]{8}-/.test(p.supplierId) ? p.supplierId : null;
+      return {
+        sql: `SELECT r.*, s.name as supplier_name, s.id as supplier_id, (COUNT(*) OVER())::int AS total_count
+              FROM purchase_returns r
+              LEFT JOIN suppliers s ON r.supplier_id = s.id
+              WHERE r.company_id = $1::uuid
+                AND ($2::text IS NULL OR r.status = $2)
+                AND ($3::uuid IS NULL OR r.supplier_id = $3)
+              ORDER BY r.date DESC LIMIT $4 OFFSET $5`,
+        params: [session.user.companyId, status, supplierId, pageSize, offset],
+      };
+    },
+    paramCount: 5,
+  });
+
+  registerRpc('purchases.getReturnById', {
+    compose: (p, session) => ({
+      sql: `SELECT r.*, s.name as supplier_name, ${purchaseLineJson('return_id')}
+            FROM purchase_returns r
+            LEFT JOIN suppliers s ON r.supplier_id = s.id
+            LEFT JOIN purchase_return_lines l ON l.return_id = r.id
+            LEFT JOIN products p ON l.product_id = p.id
+            WHERE r.id = $1::uuid AND r.company_id = $2::uuid
+            GROUP BY r.id, s.name LIMIT 1`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    paramCount: 2,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  // Dashboard KPIs in ONE row (the fallback issues four parallel aggregates;
+  // both paths must produce the same four numbers).
+  registerRpc('purchases.getPurchasesKpis', {
+    compose: (p, session) => ({
+      sql: `SELECT
+              (SELECT COUNT(*)::int FROM purchase_orders WHERE company_id = $1::uuid) AS total_orders,
+              (SELECT COUNT(*)::int FROM purchase_orders WHERE company_id = $1::uuid AND status IN ('draft', 'confirmed')) AS pending_orders,
+              (SELECT COALESCE(SUM(total_amount), 0) FROM purchase_invoices WHERE company_id = $1::uuid AND status != 'cancelled') AS total_invoices_value,
+              (SELECT COALESCE(SUM(total_amount - paid_amount), 0) FROM purchase_invoices WHERE company_id = $1::uuid AND status IN ('posted', 'partially_paid')) AS ap_outstanding`,
+      params: [session.user.companyId],
+    }),
+    paramCount: 1,
+  });
+
+  // ── Purchases writes (Phase 0 slice B) ────────────────────────────────
+  // Write gate stays the module table rule (purchases.create/edit/post), the
+  // same set the raw renderer path enforced — this slice removes SQL from the
+  // wire, it does not change who may write.
+  //
+  // Scope note: the typed channel performs the INSERT only. Document-number
+  // generation (document_sequences) and the opening-balance journal entry stay
+  // in the renderer so the money logic keeps exactly one implementation.
+
+  registerRpc('purchases.createSupplier', {
+    compose: (p, session) => ({
+      sql: `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance, is_active, created_by, updated_by)
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $10::uuid) RETURNING id`,
+      params: [
+        session.user.companyId,
+        String(p.code || ''),
+        String(p.name || ''),
+        p.phone ?? null,
+        p.email ?? null,
+        p.address ?? null,
+        p.taxNumber ?? null,
+        Number(p.balance) || 0,
+        p.isActive !== false,
+        session.user.id,
+      ],
+    }),
+    paramCount: 10,
+    validate: (p) => {
+      if (!p.code) throw new Error('code required');
+      if (!p.name) throw new Error('name required');
+    },
+  });
+
+  registerRpc('purchases.updateSupplier', {
+    compose: (p, session) => {
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (p.name !== undefined) { fields.push(`name = $${idx++}`); values.push(p.name); }
+      if (p.code !== undefined) { fields.push(`code = $${idx++}`); values.push(p.code); }
+      if (p.phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(p.phone || null); }
+      if (p.email !== undefined) { fields.push(`email = $${idx++}`); values.push(p.email || null); }
+      if (p.address !== undefined) { fields.push(`address = $${idx++}`); values.push(p.address || null); }
+      if (p.taxNumber !== undefined) { fields.push(`tax_number = $${idx++}`); values.push(p.taxNumber || null); }
+      if (p.balance !== undefined) { fields.push(`balance = $${idx++}::numeric`); values.push(Number(p.balance) || 0); }
+      if (p.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(p.isActive === true || p.isActive === 'true'); }
+      fields.push(`updated_by = $${idx++}::uuid`, 'updated_at = NOW()');
+      values.push(session.user.id, String(p.id), session.user.companyId);
+      return {
+        sql: `UPDATE suppliers SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`,
+        params: values,
+      };
+    },
+    paramCount: null,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
+  // Soft delete: suppliers keep their documents, so deactivation (never a
+  // destructive DELETE) is the only removal a tenant may perform.
+  registerRpc('purchases.deleteSupplier', {
+    compose: (p, session) => ({
+      sql: `UPDATE suppliers SET is_active = false, updated_by = $1::uuid, updated_at = NOW()
+            WHERE id = $2::uuid AND company_id = $3::uuid RETURNING id`,
+      params: [session.user.id, String(p.id), session.user.companyId],
     }),
     paramCount: 3,
     validate: (p) => {
@@ -3738,6 +4903,7 @@ export function registerDatabaseHandlers() {
 
   // pos.openShift — one open shift per cashier (partial unique index backstop)
   registerRpc('pos.openShift', {
+    permission: 'pos.create',
     compose: (p, session) => ({
       sql: `INSERT INTO pos_shifts (company_id, cash_box_id, user_id, opening_amount, status, opened_at, created_by)
             SELECT $1::uuid, $2::uuid, $3::uuid, $4::numeric, 'open', NOW(), $3::uuid
@@ -3762,6 +4928,7 @@ export function registerDatabaseHandlers() {
 
   // pos.closeShift — computes expected = opening + cash payments, stores both
   registerRpc('pos.closeShift', {
+    permission: 'pos.post',
     compose: (p, session) => ({
       sql: `WITH sums AS (
               SELECT ps.opening_amount,
@@ -4069,7 +5236,7 @@ export function registerAuthHandlers() {
       );
       if (result.rows.length) {
         // Deactivating a user must cut off their live sessions immediately.
-        if (data?.isActive === false) revokeUserSessions(id);
+        if (data?.isActive === false || data?.role !== undefined) revokeUserSessions(id);
         return { success: true };
       }
       return { success: false, error: 'User not found' };
@@ -4265,6 +5432,98 @@ export function registerAuthHandlers() {
   ];
 
   const SAFE_IDENT = /^[a-z][a-z0-9_]{0,63}$/;
+  const SENSITIVE_BACKUP_COLUMNS = Object.freeze({ users: Object.freeze(['password_hash']) });
+
+  function stripSensitiveBackupFields(table, rows) {
+    if (!Array.isArray(rows)) return [];
+    const sensitive = SENSITIVE_BACKUP_COLUMNS[table] || [];
+    if (sensitive.length === 0) return rows;
+    return rows.map((row) => {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+      const copy = { ...row };
+      for (const column of sensitive) delete copy[column];
+      return copy;
+    });
+  }
+
+  function backupRowsContainUserCredentials(rows) {
+    return Array.isArray(rows) && rows.some((row) => row && typeof row === 'object' && !Array.isArray(row) && Object.prototype.hasOwnProperty.call(row, 'password_hash'));
+  }
+
+  function assertNoSensitiveBackupFields(table, row) {
+    const sensitive = SENSITIVE_BACKUP_COLUMNS[table] || [];
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return;
+    for (const column of sensitive) {
+      if (Object.prototype.hasOwnProperty.call(row, column)) {
+        throw new Error(`Sensitive backup field is not allowed: ${table}.${column}`);
+      }
+    }
+  }
+
+  function backupChecksum(tables) {
+    return createHash('sha256').update(JSON.stringify(tables)).digest('hex');
+  }
+
+  function validateBackupManifest(manifest, tables, companyId) {
+    if (manifest === undefined || manifest === null) return 'Backup manifest is missing; legacy restore accepted.';
+    if (typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('Invalid backup manifest');
+    if (manifest.version !== 1) throw new Error('Unsupported backup manifest version');
+    if (!sameId(manifest.companyId, companyId)) throw new Error('Cross-company backup manifest rejected');
+    if (typeof manifest.checksum !== 'string' || manifest.checksum !== backupChecksum(tables)) {
+      throw new Error('Backup checksum mismatch');
+    }
+    if (manifest.counts && typeof manifest.counts === 'object') {
+      for (const [table, count] of Object.entries(manifest.counts)) {
+        if (!BACKUP_PLAN.some((entry) => entry.table === table)) throw new Error(`Unknown table in backup manifest: ${table}`);
+        const actual = Array.isArray(tables[table]) ? tables[table].length : 0;
+        if (Number(count) !== actual) throw new Error(`Backup row count mismatch: ${table}`);
+      }
+    }
+    return null;
+  }
+  function sameId(left, right) {
+    return String(left || '').toLowerCase() === String(right || '').toLowerCase();
+  }
+
+  async function validateBackupRows(tables, companyId, client) {
+    const planByTable = new Map(BACKUP_PLAN.map((entry) => [entry.table, entry]));
+    for (const [table, rows] of Object.entries(tables)) {
+      const entry = planByTable.get(table);
+      if (!entry) continue;
+      if (!Array.isArray(rows)) throw new Error(`Invalid backup rows: ${table}`);
+      const parentRows = entry.scope.type === 'children' && Array.isArray(tables[entry.scope.parent])
+        ? tables[entry.scope.parent]
+        : null;
+      const parentIds = new Set();
+      for (const row of rows) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error(`Invalid backup row: ${table}`);
+        assertNoSensitiveBackupFields(table, row);
+        if (entry.scope.type === 'company' && !sameId(row.company_id, companyId)) {
+          throw new Error(`Cross-company row rejected: ${table}`);
+        }
+        if (entry.scope.type === 'single' && !sameId(row[entry.scope.idColumn], companyId)) {
+          throw new Error(`Cross-company row rejected: ${table}`);
+        }
+        if (entry.scope.type === 'children') {
+          const parentId = row[entry.scope.fk];
+          if (!parentId) throw new Error(`Missing parent reference: ${table}`);
+          parentIds.add(String(parentId));
+          if (row.company_id !== undefined && !sameId(row.company_id, companyId)) {
+            throw new Error(`Cross-company row rejected: ${table}`);
+          }
+          if (parentRows?.some((parent) => parent && sameId(parent.id, parentId))) continue;
+          if (!SAFE_IDENT.test(entry.scope.parent)) throw new Error('Unsafe parent reference');
+          const ids = [...parentIds];
+          const result = await client.query(
+            `SELECT id FROM ${entry.scope.parent} WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
+            [companyId, ids],
+          );
+          if ((result.rows || []).length !== ids.length) throw new Error(`Cross-company parent reference: ${table}`);
+        }
+      }
+    }
+  }
+
   function backupSelectSql(entry) {
     const { table, scope } = entry;
     if (!SAFE_IDENT.test(table)) throw new Error(`Unsafe table: ${table}`);
@@ -4286,31 +5545,49 @@ export function registerAuthHandlers() {
       for (const entry of BACKUP_PLAN) {
         try {
           const result = await pool.query(backupSelectSql(entry), [session.user.companyId]);
-          tables[entry.table] = result.rows;
+          const scopedRows = Array.isArray(result.rows)
+            ? result.rows.filter((row) => entry.scope.type !== 'company' || sameId(row.company_id, session.user.companyId))
+            : [];
+          tables[entry.table] = stripSensitiveBackupFields(entry.table, scopedRows);
         } catch (err) {
           warnings.push(`${entry.table}: ${err.message}`);
         }
       }
-      return { success: true, tables, warnings };
+      const manifest = {
+        version: 1,
+        companyId: session.user.companyId,
+        generatedAt: new Date().toISOString(),
+        counts: Object.fromEntries(Object.entries(tables).map(([table, rows]) => [table, Array.isArray(rows) ? rows.length : 0])),
+        checksum: backupChecksum(tables),
+      };
+      return { success: true, tables, manifest, warnings };
     } catch (err) {
       return { success: false, error: err.message };
     }
   });
 
-  ipcMain.handle('db:restore-company', async (event, { sessionToken, tables } = {}) => {
-    const client = await pool.connect();
+  ipcMain.handle('db:restore-company', async (event, { sessionToken, tables, manifest } = {}) => {
+    let client;
     try {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
-      if (!tables || typeof tables !== 'object') return { success: false, error: 'Invalid backup payload' };
+      if (!tables || typeof tables !== 'object' || Array.isArray(tables)) return { success: false, error: 'Invalid backup payload' };
       const companyId = session.user.companyId;
       const warnings = [];
+      const manifestWarning = validateBackupManifest(manifest, tables, companyId);
+      if (manifestWarning) warnings.push(manifestWarning);
+      client = await pool.connect();
+      await validateBackupRows(tables, companyId, client);
       let restored = 0;
       await client.query('BEGIN');
       try {
         // DELETEs in FK-safe order (children → documents → masters → company).
         for (const entry of BACKUP_PLAN) {
           if (!(entry.table in tables)) continue;
+          if (entry.table === 'users' && !backupRowsContainUserCredentials(tables.users)) {
+            warnings.push('users: password hashes are intentionally excluded; existing users were preserved');
+            continue;
+          }
           const { scope } = entry;
           if (scope.type === 'company') {
             await client.query(`DELETE FROM ${entry.table} WHERE company_id = $1`, [companyId]);
@@ -4330,8 +5607,13 @@ export function registerAuthHandlers() {
           if (!entry) throw new Error(`BACKUP_INSERT_ORDER references unplanned table: ${table}`);
           const rows = tables[table];
           if (!Array.isArray(rows) || rows.length === 0) continue;
+          if (entry.table === 'users' && !backupRowsContainUserCredentials(rows)) {
+            warnings.push('users: password hashes are intentionally excluded; existing users were preserved');
+            continue;
+          }
+          const sensitive = SENSITIVE_BACKUP_COLUMNS[entry.table] || [];
           const columns = Array.from(
-            new Set(rows.flatMap((r) => Object.keys(r || {})).filter((c) => SAFE_IDENT.test(c)))
+            new Set(rows.flatMap((r) => Object.keys(r || {})).filter((c) => SAFE_IDENT.test(c) && !sensitive.includes(c)))
           );
           if (columns.length === 0) {
             warnings.push(`${entry.table}: no safe columns, skipped`);
@@ -4369,7 +5651,7 @@ export function registerAuthHandlers() {
     } catch (err) {
       return { success: false, error: err.message };
     } finally {
-      client.release();
+      client?.release();
     }
   });
 
@@ -4444,7 +5726,7 @@ export function registerAuthHandlers() {
     try {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
-      const current = await pool.query('SELECT is_system FROM roles WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+      const current = await pool.query('SELECT name, is_system FROM roles WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
       if (current.rows.length === 0) return { success: false, error: 'Role not found' };
       if (current.rows[0].is_system) return { success: false, error: 'Cannot modify system role' };
       const perms = data.permissions !== undefined && Array.isArray(data.permissions)
@@ -4456,7 +5738,10 @@ export function registerAuthHandlers() {
            updated_at = NOW() WHERE id = $5::uuid AND company_id = $6 RETURNING id`,
         [data?.name ?? null, data?.description ?? null, perms ?? null, data?.isSystem ?? null, id, session.user.companyId]
       );
-      return result.rows.length ? { success: true } : { success: false, error: 'Role not found' };
+      if (!result.rows.length) return { success: false, error: 'Role not found' };
+      const affected = await pool.query('SELECT id FROM users WHERE company_id = $1::uuid AND role = $2', [session.user.companyId, current.rows[0].name]);
+      for (const row of affected.rows || []) revokeUserSessions(row.id);
+      return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -4466,10 +5751,12 @@ export function registerAuthHandlers() {
     try {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
-      const current = await pool.query('SELECT is_system FROM roles WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+      const current = await pool.query('SELECT name, is_system FROM roles WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
       if (current.rows.length === 0) return { success: false, error: 'Role not found' };
       if (current.rows[0].is_system) return { success: false, error: 'Cannot delete system role' };
+      const affected = await pool.query('SELECT id FROM users WHERE company_id = $1::uuid AND role = $2', [session.user.companyId, current.rows[0].name]);
       await pool.query('DELETE FROM roles WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
+      for (const row of affected.rows || []) revokeUserSessions(row.id);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };

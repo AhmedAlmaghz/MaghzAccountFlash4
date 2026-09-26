@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { User, Permission } from '@/modules/auth/types';
 import { AuditLogger } from '@/core/audit';
+import { disposeAiSession } from '@/modules/ai/engine/sessionBoundary';
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -137,7 +138,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   permissions: [],
   lastActivityAt: null,
 
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setUser: (user) => {
+    const previous = get().user;
+    if (previous?.id && user?.id && previous.id !== user.id) disposeAiSession();
+    set({ user, isAuthenticated: !!user });
+  },
 
   // Profile/self-service updates: refresh in-memory state AND the persisted
   // envelope, otherwise a reload would restore the stale pre-edit user.
@@ -167,6 +172,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     void window.electronAuth?.logout();
     set({ user: null, isAuthenticated: false, isLoading: false, permissions: [], lastActivityAt: null });
     clearPersistedAuth();
+    disposeAiSession();
     if (user) {
       void AuditLogger.logLogout();
     }
@@ -188,7 +194,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     if (permissions.length > 0) {
-      if (permissions.includes('*')) return true;
       return permissions.includes(permission as Permission);
     }
 
@@ -244,6 +249,7 @@ export async function initAuth(): Promise<void> {
 
   if (!persistedUser) {
     clearPersistedAuth();
+    disposeAiSession();
     storeApi.setLoading(false);
     return;
   }
@@ -285,8 +291,8 @@ export async function initAuth(): Promise<void> {
     const { getDbAdapter } = await import('@/core/database/adapters');
     const adapter = await getDbAdapter();
     const check = await adapter.query(
-      'SELECT 1 FROM users WHERE id = $1::uuid AND is_active = true LIMIT 1',
-      [persistedUser.id],
+      'SELECT 1 FROM users WHERE id = $1::uuid AND company_id = $2::uuid AND is_active = true LIMIT 1',
+      [persistedUser.id, persistedUser.companyId],
     );
     const exists = !!(check && check.success && check.rows && (check.rows as unknown[]).length > 0);
     if (!exists) {
@@ -330,6 +336,7 @@ export async function initAuth(): Promise<void> {
     });
   } catch {
     clearPersistedAuth();
+    disposeAiSession();
   }
 
   storeApi.setLoading(false);

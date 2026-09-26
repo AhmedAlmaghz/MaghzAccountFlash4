@@ -1037,6 +1037,19 @@ export const inventoryApi = {
       // toDateString (never String()): raw pg DATE values are Date objects
       // whose locale format PG rejects as ::date (Phase 45 trap).
       const adjDate = toDateString(adj.date) || new Date().toISOString().split('T')[0];
+      // Phase 5: an adjustment books a JE (Dr/Cr inventory vs variance), so it
+      // is a posting path too — closed fiscal year / filed tax period must
+      // reject it before any write. Previously it had NO period gate at all.
+      const { assertPeriodOpen: assertAdjTaxPeriod } = await import('@/modules/tax/engine');
+      const adjTaxGate = await assertAdjTaxPeriod(companyId, adjDate, adapter);
+      if (!adjTaxGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${adjTaxGate.period.startDate} – ${adjTaxGate.period.endDate}) — لا يمكن ترحيل التسوية بتاريخ داخلها` };
+      }
+      const { assertAccountingPeriodOpen: assertAdjFiscal } = await import('@/modules/accounting/yearEnd');
+      const adjFiscalGate = await assertAdjFiscal(companyId, adjDate, adapter);
+      if (!adjFiscalGate.open) {
+        return { success: false, error: `السنة المالية ${adjFiscalGate.period.year} مقفلة — لا يمكن ترحيل التسوية بتاريخ داخلها` };
+      }
       const tx: Array<{ sql: string; params?: unknown[] }> = [];
       // Ensure stock row exists
       tx.push({

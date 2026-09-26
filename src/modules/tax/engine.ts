@@ -90,11 +90,25 @@ export async function assertPeriodOpen(
   companyId: string,
   date: string,
   db?: Queryable
-): Promise<{ open: true } | { open: false; period: TaxPeriod }> {
+): Promise<{ open: true } | { open: false; period: TaxPeriod; error?: string }> {
+  const day = String(date || '').slice(0, 10);
+  const blocked = (error: string) => ({
+    open: false as const,
+    period: {
+      id: '',
+      companyId,
+      countryCode: '',
+      periodType: '',
+      startDate: day,
+      endDate: day,
+      status: 'closed' as const,
+      filedAt: null,
+    },
+    error,
+  });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return blocked('Posting date is required');
   try {
     const adapter = db || ((await getDbAdapter()) as Queryable);
-    const day = String(date || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { open: true };
     const res = await adapter.query(
       `SELECT id, company_id, country_code, period_type, start_date, end_date, status, filed_at
          FROM tax_periods
@@ -102,10 +116,12 @@ export async function assertPeriodOpen(
         ORDER BY end_date DESC LIMIT 1`,
       [companyId, day]
     );
-    if (!res.success) return { open: true };
+    if (!res.success) return blocked(res.error || 'Tax period lookup failed');
     const row = (res.rows || [])[0] as Record<string, unknown> | undefined;
     if (!row) return { open: true };
-    const status = String(row.status || 'open');
+    if (row.company_id !== undefined && String(row.company_id) !== String(companyId)) return blocked('Tax period tenant mismatch');
+    if (row.status === undefined || row.status === null || row.status === '') return blocked('Tax period status is missing');
+    const status = String(row.status);
     if (status === 'closed' || status === 'filed') {
       return {
         open: false,
@@ -116,14 +132,15 @@ export async function assertPeriodOpen(
           periodType: String(row.period_type || ''),
           startDate: toDateString(row.start_date) || '',
           endDate: toDateString(row.end_date) || '',
-          status: status as TaxPeriod['status'],
+          status,
           filedAt: row.filed_at ? String(row.filed_at) : null,
         },
       };
     }
+    if (status !== 'open') return blocked('Unknown tax period status');
     return { open: true };
-  } catch {
-    return { open: true };
+  } catch (error) {
+    return blocked(error instanceof Error ? error.message : 'Tax period lookup failed');
   }
 }
 

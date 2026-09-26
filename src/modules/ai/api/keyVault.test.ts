@@ -3,6 +3,7 @@ import { webcrypto } from 'node:crypto';
 import {
   decryptApiKey,
   encryptApiKey,
+  getDefaultStore,
   isEncryptedEnvelope,
   memoryKeyStore,
 } from './keyVault';
@@ -53,6 +54,10 @@ describe('keyVault (browser API-key encryption)', () => {
     await expect(decryptApiKey('enc:v1:garbage', opts)).resolves.toBeNull();
     await expect(decryptApiKey(null, opts)).resolves.toBeNull();
     await expect(decryptApiKey(undefined, opts)).resolves.toBeNull();
+  });
+
+  it('keeps the default store process-wide', () => {
+    expect(getDefaultStore()).toBe(getDefaultStore());
   });
 
   it('detects legacy plaintext rows for upgrade-on-save', () => {

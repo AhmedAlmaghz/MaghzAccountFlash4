@@ -86,23 +86,31 @@ function snapshotFingerprint(sessionId: string | null, messages: ChatMessage[]):
   ].join('|');
 }
 
+interface PersistenceSnapshot {
+  messages: ChatMessage[];
+  sessionId: string | null;
+  companyId: string;
+  userId: string;
+  generation: number;
+}
+
 let lastSavedFingerprint: string | null = null;
 let saveInFlight: Promise<boolean> | null = null;
 let saveRequestedWhileInFlight = false;
+let persistenceGeneration = 0;
 /** Snapshot captured synchronously by the newest saveCurrentSession call. */
-let pendingSnapshot: { messages: ChatMessage[]; sessionId: string | null } | null = null;
+let pendingSnapshot: PersistenceSnapshot | null = null;
 
-async function runSave(snapshot?: { messages: ChatMessage[]; sessionId: string | null }): Promise<boolean> {
-  const ctx = currentContext();
-  if (!ctx) return false;
-  // P2 fix: use the snapshot captured SYNCHRONOUSLY at request time when
-  // provided. The old code re-read the store at execution time, so a
-  // session-switch (reset + loadSession) landing between request and
-  // execution made the queued re-run persist the WRONG conversation
-  // (empty → old chat never saved; or the newly-loaded session rewritten).
+async function runSave(snapshot?: PersistenceSnapshot): Promise<boolean> {
+  const liveContext = currentContext();
+  if (!liveContext) return false;
   const store = useAiStore.getState();
   const messages = snapshot?.messages ?? store.messages;
   const sessionId = snapshot ? snapshot.sessionId : store.sessionId;
+  const ctx = snapshot
+    ? { companyId: snapshot.companyId, userId: snapshot.userId }
+    : liveContext;
+  if (snapshot && snapshot.generation !== persistenceGeneration) return false;
   const setSessionId = store.setSessionId;
   if (messages.length === 0) return false;
 
@@ -125,6 +133,7 @@ async function runSave(snapshot?: { messages: ChatMessage[]; sessionId: string |
     return false;
   }
   if (res.data?.sessionId) {
+    if (snapshot && snapshot.generation !== persistenceGeneration) return false;
     // Stamp the id ONLY if the store still holds the conversation we saved.
     // handleNewChat/handleSelectSession fire-and-forget a save and switch
     // immediately; stamping afterwards would attach the OLD session id to the
@@ -136,6 +145,14 @@ async function runSave(snapshot?: { messages: ChatMessage[]; sessionId: string |
     }
   }
   return true;
+}
+
+function invalidatePendingSaves(): void {
+  persistenceGeneration++;
+  pendingSnapshot = null;
+  saveRequestedWhileInFlight = false;
+  lastSavedFingerprint = null;
+  saveInFlight = null;
 }
 
 export const aiPersistence = {
@@ -150,11 +167,20 @@ export const aiPersistence = {
     // Snapshot SYNCHRONOUSLY — a session switch (reset/load) between this
     // call and the actual save must not change what gets persisted.
     const store = useAiStore.getState();
-    pendingSnapshot = { messages: store.messages, sessionId: store.sessionId };
+    const ctx = currentContext();
+    if (!ctx) return false;
+    pendingSnapshot = {
+      messages: store.messages,
+      sessionId: store.sessionId,
+      companyId: ctx.companyId,
+      userId: ctx.userId,
+      generation: persistenceGeneration,
+    };
     if (saveInFlight) {
       saveRequestedWhileInFlight = true;
       return saveInFlight;
     }
+    const runGeneration = persistenceGeneration;
     const run = (async (): Promise<boolean> => {
       let ok = true;
       try {
@@ -170,11 +196,15 @@ export const aiPersistence = {
         }
         return ok;
       } finally {
-        saveInFlight = null;
+        if (runGeneration === persistenceGeneration) saveInFlight = null;
       }
     })();
     saveInFlight = run;
     return run;
+  },
+
+  dispose(): void {
+    invalidatePendingSaves();
   },
 
   async listSessions(): Promise<AiChatSessionSummary[]> {
@@ -190,6 +220,7 @@ export const aiPersistence = {
     if (!ctx) return false;
     const res = await aiApi.getSessionMessages(ctx.companyId, sessionId);
     if (!res.success || !res.data) return false;
+    invalidatePendingSaves();
     useAiStore.getState().loadSession(sessionId, normalizeLoadedMessages(res.data));
     // Different conversation in the store now — the saved fingerprint (if any)
     // belongs to the previous one.
@@ -217,6 +248,7 @@ export const aiPersistence = {
   async deleteSession(sessionId: string): Promise<boolean> {
     const ctx = currentContext();
     if (!ctx) return false;
+    invalidatePendingSaves();
     const res = await aiApi.deleteSession(ctx.companyId, ctx.userId, sessionId);
     return res.success;
   },

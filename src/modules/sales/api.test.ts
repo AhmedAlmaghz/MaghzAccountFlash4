@@ -49,17 +49,24 @@ vi.mock('@/core/utils/pagination', () => ({
 // lets these tests verify the full atomic batch end-to-end.
 
 import { salesApi } from './api';
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { clearUserIdCache } from '@/core/utils/userIdValidator';
 
 function makeMockAdapter(queryImpl: (sql: string, params: unknown[]) => Promise<{ success: boolean; rows?: unknown[]; error?: string }>) {
+  const wrappedQuery = async (sql: string, params: unknown[]) => {
+    const result = await queryImpl(sql, params);
+    if (/FROM sales_invoices|FROM sales_returns/.test(sql) && result.rows) {
+      result.rows = result.rows.map((row) => (row && typeof row === 'object' ? { date: '2026-01-01', ...row } : row));
+    }
+    return result;
+  };
   return {
-    query: vi.fn(queryImpl),
+    query: vi.fn(wrappedQuery),
     // The transaction mock runs each query through queryImpl so tests see the
     // same behavior (the actual PGlite transaction wraps each in BEGIN/COMMIT).
     transaction: vi.fn(async (queries: { sql: string; params?: unknown[] }[]) => {
       for (const q of queries) {
-        await queryImpl(q.sql, (q.params || []) as unknown[]);
+        await wrappedQuery(q.sql, (q.params || []) as unknown[]);
       }
       return { success: true, results: [] };
     }),
@@ -510,6 +517,23 @@ describe('salesApi.createInvoice protection', () => {
     expect(res.error).toMatch(/paid amount/i);
   });
 
+  it('rejects creating an invoice directly in a posted state', async () => {
+    const res = await salesApi.createInvoice({
+      companyId: '00000000-0000-0000-0000-000000000001',
+      invoiceNumber: 'INV-POSTED-CREATE',
+      customerId: '00000000-0000-0000-0000-000000000010',
+      date: '2026-06-01',
+      subtotal: 1000,
+      totalAmount: 1000,
+      paidAmount: 0,
+      exchangeRate: 1,
+      status: 'posted',
+      lines: [],
+    } as never);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/draft/i);
+  });
+
   it('rejects non-positive exchange rate', async () => {
     const res = await salesApi.createInvoice({
       companyId: '00000000-0000-0000-0000-000000000001',
@@ -696,11 +720,17 @@ describe('salesApi.postInvoice customer balance tracking', () => {
     // subtotal 1000 (net of lines) + line discount 50 + header 100 = 150;
     // VAT 15% on net 900 = 135; total 1035; gross 1050.
     const adapter = makeMockAdapter(async (sql, p) => {
-      if (sql.includes('FROM sales_invoices')) {
-        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1035, paid_amount: 0, subtotal: 1000, discount_amount: 150, vat_amount: 135, payment_type: 'credit', cash_box_id: null }] };
+      if (sql.includes('WITH backfill')) {
+        return { success: true, rows: [{ line_disc: 50, cogs: 0, zero_lines: 0 }] };
+      }
+      if (sql.includes('FROM sales_invoice_lines') && sql.includes('SUM(quantity')) {
+        return { success: true, rows: [{ line_disc: 50 }] };
       }
       if (sql.includes('FROM sales_invoice_lines')) {
-        return { success: true, rows: [{ line_disc: 50, cogs: 0, zero_lines: 0 }] };
+        return { success: true, rows: [] };
+      }
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1035, paid_amount: 0, subtotal: 1000, discount_amount: 150, vat_amount: 135, payment_type: 'credit', cash_box_id: null }] };
       }
       if (sql.includes('default_accounts')) {
         return { success: true, rows: [{ account_id: 'acc-' + String(p[1]) }] };
@@ -803,11 +833,14 @@ describe('salesApi perpetual COGS (IAS 2)', () => {
 
   it('postInvoice backfills cost snapshots and books Dr COGS / Cr Inventory', async () => {
     const adapter = makeMockAdapter(async (sql, p) => {
-      if (sql.includes('FROM sales_invoices')) {
-        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-901', date: '2026-01-01', payment_type: 'credit', cash_box_id: null }] };
+      if (sql.includes('WITH backfill')) {
+        return { success: true, rows: [{ cogs: 0, zero_lines: 0, line_disc: 0 }] };
       }
       if (sql.includes('FROM sales_invoice_lines') && sql.includes('COALESCE')) {
         return { success: true, rows: [{ product_id: 'p1', bq: 10 }] };
+      }
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-901', date: '2026-01-01', payment_type: 'credit', cash_box_id: null }] };
       }
       if (sql.includes('FROM settings') && sql.includes('inventory.valuation_method')) {
         return { success: true, rows: [{ value: 'moving_average' }] };
@@ -1283,8 +1316,8 @@ describe('salesApi.postInvoice perpetual COGS (Phase 1)', () => {
 
   function cogsAdapter(method: string, products: Array<{ id: string; cost: number }>, layers: Array<{ id: string; pid: string; qty: number; cost: number }>) {
     return makeMockAdapter(async (sql, p) => {
-      if (sql.includes('FROM sales_invoices')) {
-        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-COGS', date: '2026-09-01', payment_type: 'credit', cash_box_id: null }] };
+      if (sql.includes('WITH backfill')) {
+        return { success: true, rows: [{ cogs: 0, zero_lines: 0, line_disc: 0 }] };
       }
       if (sql.includes('FROM sales_invoice_lines')) {
         return {
@@ -1294,6 +1327,9 @@ describe('salesApi.postInvoice perpetual COGS (Phase 1)', () => {
             { product_id: 'p2', bq: 3 },
           ],
         };
+      }
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1150, paid_amount: 0, subtotal: 1000, vat_amount: 150, invoice_number: 'INV-COGS', date: '2026-09-01', payment_type: 'credit', cash_box_id: null }] };
       }
       if (sql.includes('FROM settings')) {
         return { success: true, rows: [{ value: method }] };
@@ -1463,11 +1499,14 @@ describe('salesApi Phase 4 guardrails (negative stock + credit limit)', () => {
     customer?: { balance: number; limit: number };
   }) {
     return makeMockAdapter(async (sql, p) => {
-      if (sql.includes('FROM sales_invoices')) {
-        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0, subtotal: 1000, vat_amount: 0, invoice_number: 'INV-P', date: '2026-09-01', payment_type: 'credit', cash_box_id: null }] };
+      if (sql.includes('WITH backfill')) {
+        return { success: true, rows: [{ cogs: 0, zero_lines: 0, line_disc: 0 }] };
       }
       if (sql.includes('FROM sales_invoice_lines')) {
         return { success: true, rows: (opts.lines || []).map((l) => ({ product_id: l.pid, bq: l.bq })) };
+      }
+      if (sql.includes('FROM sales_invoices')) {
+        return { success: true, rows: [{ customer_id: 'c1', total_amount: 1000, paid_amount: 0, subtotal: 1000, vat_amount: 0, invoice_number: 'INV-P', date: '2026-09-01', payment_type: 'credit', cash_box_id: null }] };
       }
       // No settings rows → fail-closed defaults (block negatives, block overlimit).
       if (sql.includes('FROM settings')) {
@@ -1598,5 +1637,164 @@ describe('salesApi.mapReturnRow — NULL invoice link (Phase 0)', () => {
     expect(res.data).toHaveLength(1);
     expect(res.data![0].invoiceId).toBeUndefined();
     expect(res.data![0].invoice).toBeUndefined();
+  });
+});
+
+describe('salesApi line lookups scope the product join to the company (defense in depth)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function servedAdapter(headerFrom: string) {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      captured.push({ sql, params });
+      if (sql.includes(headerFrom)) {
+        return {
+          success: true,
+          rows: [{
+            id: INVOICE_ID, company_id: COMPANY_ID, customer_id: CUSTOMER_ID,
+            date: '2026-09-01', subtotal: 1000, vat_amount: 150, total_amount: 1150,
+            status: 'draft', payment_type: 'credit',
+          }],
+        };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return captured;
+  }
+
+  it('getInvoiceById passes the company to the lines query', async () => {
+    const captured = servedAdapter('FROM sales_invoices');
+    await salesApi.getInvoiceById(INVOICE_ID, COMPANY_ID);
+    const q = captured.find((c) => c.sql.includes('FROM sales_invoice_lines'))!;
+    expect(q.sql).toContain('p.company_id = $2::uuid');
+    expect(q.params).toEqual([INVOICE_ID, COMPANY_ID]);
+  });
+
+  it('getQuotationById passes the company to the lines query', async () => {
+    const captured = servedAdapter('FROM quotations');
+    await salesApi.getQuotationById(INVOICE_ID, COMPANY_ID);
+    const q = captured.find((c) => c.sql.includes('FROM quotation_lines'))!;
+    expect(q.sql).toContain('p.company_id = $2::uuid');
+    expect(q.params).toEqual([INVOICE_ID, COMPANY_ID]);
+  });
+
+  it('getReturnById passes the company to the lines query', async () => {
+    const captured = servedAdapter('FROM sales_returns');
+    await salesApi.getReturnById(INVOICE_ID, COMPANY_ID);
+    const q = captured.find((c) => c.sql.includes('FROM sales_return_lines'))!;
+    expect(q.sql).toContain('p.company_id = $2::uuid');
+    expect(q.params).toEqual([INVOICE_ID, COMPANY_ID]);
+  });
+});
+
+describe('salesApi.convertQuotationToInvoice (claim before create)', () => {
+  const QUO_ID = '00000000-0000-0000-0000-000000000040';
+
+  function installAdapter(claimRows: Array<{ id: string }>, priorStatus = 'converted') {
+    const sqls: string[] = [];
+    const adapter = makeMockAdapter(async (sql, _params) => {
+      sqls.push(sql);
+      if (/UPDATE quotations SET status = 'converted'/i.test(sql)) return { success: true, rows: claimRows };
+      if (/SELECT status FROM quotations/i.test(sql)) return { success: true, rows: [{ status: priorStatus }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return sqls;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (window as unknown as { electronDB?: unknown }).electronDB = undefined;
+  });
+
+  it('claims the quotation BEFORE creating the invoice', async () => {
+    const sqls = installAdapter([{ id: QUO_ID }]);
+    const create = vi.spyOn(salesApi, 'createInvoice').mockResolvedValue({ success: true, id: 'inv-77' } as never);
+
+    const res = await salesApi.convertQuotationToInvoice(QUO_ID, COMPANY_ID, { companyId: COMPANY_ID } as never);
+
+    expect(res).toEqual({ success: true, id: 'inv-77' });
+    // The claim must be a conditional, row-reporting UPDATE that precedes the
+    // invoice insert — otherwise a second conversion duplicates the invoice.
+    const claimIdx = sqls.findIndex((s) => /UPDATE quotations SET status = 'converted'/i.test(s));
+    expect(claimIdx).toBeGreaterThanOrEqual(0);
+    expect(sqls[claimIdx]).toMatch(/status = ANY\(\$4::text\[\]\)/);
+    expect(sqls[claimIdx]).toMatch(/RETURNING id/);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts WITHOUT creating an invoice when the claim is lost (no duplicate invoice)', async () => {
+    installAdapter([]); // zero rows: already converted / rejected / cancelled
+    const create = vi.spyOn(salesApi, 'createInvoice');
+
+    const res = await salesApi.convertQuotationToInvoice(QUO_ID, COMPANY_ID, { companyId: COMPANY_ID } as never);
+
+    expect(res.success).toBe(false);
+    expect(create, 'a lost claim must never produce an invoice').not.toHaveBeenCalled();
+  });
+
+  it('releases the claim to the ORIGINAL status when the invoice fails', async () => {
+    const sqls = installAdapter([{ id: QUO_ID }], 'accepted');
+    vi.spyOn(salesApi, 'createInvoice').mockResolvedValue({ success: false, error: 'لا يوجد حساب' } as never);
+
+    const res = await salesApi.convertQuotationToInvoice(QUO_ID, COMPANY_ID, { companyId: COMPANY_ID } as never);
+
+    expect(res.success).toBe(false);
+    const release = sqls.find((s) => /NOT EXISTS/i.test(s));
+    expect(release, 'the claim is released').toBeTruthy();
+    expect(release).toMatch(/SET status = \$3/);
+    expect(release).toMatch(/NOT EXISTS \(SELECT 1 FROM sales_invoices WHERE quotation_id/);
+  });
+
+  it('Electron path uses the dedicated claim channel and CHECKS its result', async () => {
+    // The regression: the old code flipped through `updateQuotation`, which
+    // refuses any status but 'draft', and never inspected the reply — so
+    // Electron created the invoice, left the quotation 'sent', and reported
+    // success. Silent duplicate invoices, desktop only.
+    const calls: string[] = [];
+    (window as unknown as { electronDB: unknown }).electronDB = {
+      sales: {
+        claimQuotation: async () => {
+          calls.push('claimQuotation');
+          return { success: true, rows: [{ id: QUO_ID, previous_status: 'sent', quotation_number: 'QOT-1' }] };
+        },
+        releaseQuotation: async () => {
+          calls.push('releaseQuotation');
+          return { success: true, rows: [{ id: QUO_ID }] };
+        },
+        updateQuotation: async () => {
+          calls.push('updateQuotation');
+          return { success: false, error: 'Use the quotation workflow to change status' };
+        },
+      },
+    };
+    vi.mocked(isElectronPg).mockReturnValue(true);
+    const create = vi.spyOn(salesApi, 'createInvoice').mockResolvedValue({ success: true, id: 'inv-88' } as never);
+
+    const res = await salesApi.convertQuotationToInvoice(QUO_ID, COMPANY_ID, { companyId: COMPANY_ID } as never);
+
+    expect(res).toEqual({ success: true, id: 'inv-88' });
+    expect(calls, 'the conversion must claim through the dedicated channel').toEqual(['claimQuotation']);
+    expect(calls, 'updateQuotation cannot set a status and must not be used').not.toContain('updateQuotation');
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('Electron path surfaces a rejected claim instead of creating an invoice', async () => {
+    (window as unknown as { electronDB: unknown }).electronDB = {
+      sales: {
+        claimQuotation: async () => ({ success: false, error: 'Quotation not convertible' }),
+      },
+    };
+    vi.mocked(isElectronPg).mockReturnValue(true);
+    const create = vi.spyOn(salesApi, 'createInvoice');
+
+    const res = await salesApi.convertQuotationToInvoice(QUO_ID, COMPANY_ID, { companyId: COMPANY_ID } as never);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
   });
 });

@@ -444,13 +444,13 @@ export const accountingWriteTools: ToolDefinition[] = [
         reference = seq.number;
       }
 
-      const res = await accountingApi.createTransaction({
+      const res = await accountingApi.createAndPostTransaction({
         companyId: ctx.companyId,
         date: str(args.date) || today(),
         reference,
         description,
         totalAmount,
-        status: 'posted',
+        status: 'draft',
         entries: entries.map((e) => ({
           id: crypto.randomUUID(),
           transactionId: '',

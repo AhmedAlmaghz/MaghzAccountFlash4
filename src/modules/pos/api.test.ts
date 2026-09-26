@@ -769,3 +769,31 @@ describe('runTransaction contract (posApi dependency)', () => {
     expect(res.success).toBe(false);
   });
 });
+
+describe('posApi.getReceipt scopes the product join to the company (defense in depth)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes the company to the receipt lines query', async () => {
+    const captured: { sql: string; params: unknown[] }[] = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      captured.push({ sql, params });
+      if (sql.includes('FROM sales_invoices si')) {
+        return {
+          success: true,
+          rows: [{ invoice_number: 'POS-000001', date: '2026-09-01', subtotal: 100, discount_amount: 0, vat_amount: 15, total_amount: 115 }],
+        };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    await posApi.getReceipt(COMPANY_ID, SHIFT_ID);
+    const q = captured.find((c) => c.sql.includes('FROM sales_invoice_lines'))!;
+    // The product display columns must never come from another tenant, even if
+    // a line ever pointed at a foreign product (broken FK discipline).
+    expect(q.sql).toContain('p.company_id = $2::uuid');
+    expect(q.params).toEqual([SHIFT_ID, COMPANY_ID]);
+  });
+});

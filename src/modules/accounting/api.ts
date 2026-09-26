@@ -1,4 +1,4 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { runTransaction } from '@/core/database/tx';
 import { buildReceiptVoucherStatements, buildPaymentVoucherStatements, buildFxDifferenceStatements, resolvePostingAccounts } from '@/core/utils/journalEntryGenerator';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
@@ -11,6 +11,19 @@ import type { Account, Transaction, JournalEntry, TrialBalanceRow, LedgerRow, Re
 
 /** LOCAL calendar day — a UTC date is yesterday for GMT+3 between 00:00–03:00. */
 const localToday = (): string => toDateString(new Date()) ?? '';
+
+type AccountingRpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokePostTransactionRpc(id: string): Promise<AccountingRpcEnvelope | null> {
+  if (!isElectronPg()) return null;
+  const fn = typeof window !== 'undefined' ? window.electronDB?.accounting?.postTransaction : undefined;
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    return await fn({ id });
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 export const accountingApi = {
   // ─── Chart of Accounts ────────────────────────────────────────────────────
@@ -332,6 +345,18 @@ export const accountingApi = {
       const validation = validateInput(createTransactionSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
 
+      // Phase 2 (#5): the generic create path is DRAFT-ONLY. Posting is a
+      // state transition with its own gates (row lock, period locks, balance
+      // verification, session audit id), so it lives in exactly one place —
+      // postTransaction / createAndPostTransaction. A caller that wants the
+      // entry live in the books must compose, never overload `status`.
+      if (data.status && data.status !== 'draft') {
+        return {
+          success: false,
+          error: `A transaction can only be created as a draft (got "${data.status}"). Use createAndPostTransaction() to create and post in one step.`,
+        };
+      }
+
       // Convert to service DTO format
       const entries = (data.entries as JournalEntry[]).map(entry => ({
         accountId: entry.accountId,
@@ -344,52 +369,38 @@ export const accountingApi = {
       }));
       const date = toDateString(data.date) || new Date().toISOString().split('T')[0];
 
-      // Phase 0 fix: honor the requested status. Drafts are inert (no GL
-      // effect until posted) and go through the adapter path which supports
-      // a status column on every backend (Electron RPC / PGlite / e2e shim).
-      // Previously EVERYTHING posted immediately, so the whole draft → post
-      // flow (UI + AI wizard) was dead and postTransaction() could never
-      // find a draft.
-      if (data.status === 'draft') {
-        // Drafts are inert — the period guard applies at posting time.
-        const adapter = await getDbAdapter();
-        const draft = await adapter.createTransaction({
-          companyId: data.companyId,
-          date,
-          reference: data.reference,
-          description: data.description || '',
-          totalAmount: data.totalAmount,
-          status: 'draft',
-          entries,
-        });
-        if (!draft.success) return { success: false, error: draft.error };
-        return { success: true, id: draft.id };
-      }
-
-      // Phase 3: immediate postings respect closed tax periods too.
-      const { assertPeriodOpen } = await import('@/modules/tax/engine');
-      const createGate = await assertPeriodOpen(data.companyId, date);
-      if (!createGate.open) {
-        return { success: false, error: `الفترة الضريبية مغلقة (${createGate.period.startDate} – ${createGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
-      }
-      // Phase 5: a closed fiscal year locks its dates for every posting path.
-      const { assertAccountingPeriodOpen: assertFiscalCreate } = await import('@/modules/accounting/yearEnd');
-      const fiscalCreateGate = await assertFiscalCreate(data.companyId, date);
-      if (!fiscalCreateGate.open) {
-        return { success: false, error: `السنة المالية ${fiscalCreateGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
-      }
-      const result = await accountingService.postTransaction({
+      const adapter = await getDbAdapter();
+      const draft = await adapter.createTransaction({
+        companyId: data.companyId,
         date,
-        description: data.description || '',
-        entries,
         reference: data.reference,
+        description: data.description || '',
+        totalAmount: data.totalAmount,
+        status: 'draft',
+        entries,
       });
-
-      if (!result.success) return { success: false, error: (result as { error?: string }).error };
-      return { success: true, id: (result as { transactionId?: string }).transactionId };
+      if (!draft.success) return { success: false, error: draft.error };
+      return { success: true, id: draft.id };
     } catch (e) {
       return { success: false, error: String(e) };
     }
+  },
+
+  /**
+   * The one sanctioned "create and post" flow: a draft first, then the
+   * dedicated posting transition. Every caller that wants the entry live in
+   * the books composes through here so the guards, the row lock and the audit
+   * id can never be bypassed by a `status: 'posted'` payload.
+   *
+   * If posting fails the draft is NOT deleted — it stays as a reviewable
+   * draft, exactly like a manual draft→post in the UI.
+   */
+  async createAndPostTransaction(data: Omit<Transaction, 'id'>, _userId: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    const draft = await accountingApi.createTransaction({ ...data, status: 'draft' } as Omit<Transaction, 'id'>, _userId);
+    if (!draft.success || !draft.id) return { success: false, error: draft.error || 'Failed to create the draft entry' };
+    const posted = await accountingApi.postTransaction(draft.id, data.companyId, _userId);
+    if (!posted.success) return { success: false, error: posted.error || 'Entry created as draft but could not be posted' };
+    return { success: true, id: draft.id };
   },
 
   async updateTransaction(id: string, companyId: string, userId: string, data: Partial<Transaction>): Promise<{ success: boolean; error?: string }> {
@@ -408,7 +419,6 @@ export const accountingApi = {
       if (!cur.success) return { success: false, error: cur.error };
       const curRow = (cur.rows?.[0] || {}) as { status: string; date: string };
       const curStatus = String(curRow.status ?? '');
-      const curDate = toDateString(curRow.date) || '';
       if (!curStatus) return { success: false, error: 'Transaction not found' };
       if (curStatus !== 'draft') {
         return { success: false, error: 'لا يمكن تعديل قيد مرحّل — أنشئ قيداً عكسياً بدلاً من التعديل' };
@@ -433,35 +443,16 @@ export const accountingApi = {
         }
       }
       if (nextStatus === 'posted') {
-        // Phase 3: posting through an edit respects closed tax periods too
-        // (new date wins, else the stored draft date).
-        const { assertPeriodOpen: assertEditPeriod } = await import('@/modules/tax/engine');
-        const editGate = await assertEditPeriod(companyId, toDateString(data.date) || curDate, adapter);
-        if (!editGate.open) {
-          return { success: false, error: `الفترة الضريبية مغلقة (${editGate.period.startDate} – ${editGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
-        }
-        // Phase 5: a closed fiscal year locks its dates for every posting path.
-        const { assertAccountingPeriodOpen: assertFiscalEdit } = await import('@/modules/accounting/yearEnd');
-        const fiscalEditGate = await assertFiscalEdit(companyId, toDateString(data.date) || curDate, adapter);
-        if (!fiscalEditGate.open) {
-          return { success: false, error: `السنة المالية ${fiscalEditGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
-        }
-        // Posting through an edit: the resulting entry must balance. When
-        // the caller ships replacement lines they were just validated above;
-        // otherwise the stored draft lines must balance on their own.
-        if (!data.entries || data.entries.length === 0) {
-          const sums = await adapter.query<{ dr: number; cr: number; n: number }>(
-            `SELECT COALESCE(SUM(debit),0) AS dr, COALESCE(SUM(credit),0) AS cr, COUNT(*)::int AS n FROM journal_entries WHERE transaction_id = $1 AND company_id = $2`,
-            [id, companyId]
-          );
-          if (!sums.success) return { success: false, error: sums.error };
-          const s = sums.rows?.[0] as { dr: number; cr: number; n: number } | undefined;
-          const dr = Number(s?.dr) || 0;
-          const cr = Number(s?.cr) || 0;
-          if (!s || Number(s.n) === 0 || Math.abs(dr - cr) > 0.01 || dr === 0) {
-            return { success: false, error: `Cannot post unbalanced draft: debit=${dr}, credit=${cr}` };
-          }
-        }
+        // Phase 2 (#5): posting is a transition, not a field. A generic edit
+        // must never be able to flip a draft into the books — it has no row
+        // lock, no period re-check on the stored date and no audit identity
+        // guarantee. Call postTransaction(id) instead: that path locks the row,
+        // verifies the stored lines balance, honours the tax/fiscal period
+        // gates and derives the audit user from the session.
+        return {
+          success: false,
+          error: 'Posting is not a field update. Use postTransaction(id) so the row lock, balance and period gates apply.',
+        };
       }
       // Dynamic SET: only provided fields are touched. The previous code
       // unconditionally overwrote date/reference/description/total with
@@ -505,6 +496,8 @@ export const accountingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      const rpcResult = await invokePostTransactionRpc(id);
+      if (rpcResult) return { success: rpcResult.success, error: rpcResult.error };
       const adapter = await getDbAdapter();
       // Phase 0 fix: posting is draft → posted ONLY, and only when the
       // stored lines balance. Previously ANY transaction (including an
@@ -527,13 +520,13 @@ export const accountingApi = {
       }
       // Phase 3: posting into a closed/filing tax period is rejected.
       const { assertPeriodOpen: assertPostPeriod } = await import('@/modules/tax/engine');
-      const postGate = await assertPostPeriod(companyId, String(row.date || ''), adapter);
+       const postGate = await assertPostPeriod(companyId, toDateString(row.date) || '', adapter);
       if (!postGate.open) {
         return { success: false, error: `الفترة الضريبية مغلقة (${postGate.period.startDate} – ${postGate.period.endDate}) — لا يمكن الترحيل بتاريخ داخلها` };
       }
       // Phase 5: a closed fiscal year locks its dates for every posting path.
       const { assertAccountingPeriodOpen: assertFiscalPost } = await import('@/modules/accounting/yearEnd');
-      const fiscalPostGate = await assertFiscalPost(companyId, String(row.date || ''), adapter);
+       const fiscalPostGate = await assertFiscalPost(companyId, toDateString(row.date) || '', adapter);
       if (!fiscalPostGate.open) {
         return { success: false, error: `السنة المالية ${fiscalPostGate.period.year} مقفلة — لا يمكن الترحيل بتاريخ داخلها` };
       }
@@ -1488,6 +1481,19 @@ export const accountingApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
       const revalDate = toDateString(date) || new Date().toISOString().split('T')[0];
+      // Phase 5: FX revaluation writes ONE JE, so it is a posting path like
+      // any other — a closed fiscal year or a filed tax period must reject it
+      // BEFORE any read, exactly as postVoucher/postTransaction do.
+      const { assertPeriodOpen: assertRevalTaxPeriod } = await import('@/modules/tax/engine');
+      const revalTaxGate = await assertRevalTaxPeriod(companyId, revalDate, adapter);
+      if (!revalTaxGate.open) {
+        return { success: false, error: `الفترة الضريبية مغلقة (${revalTaxGate.period.startDate} – ${revalTaxGate.period.endDate}) — لا يمكن إعادة التقييم بتاريخ داخلها` };
+      }
+      const { assertAccountingPeriodOpen: assertRevalFiscal } = await import('@/modules/accounting/yearEnd');
+      const revalFiscalGate = await assertRevalFiscal(companyId, revalDate, adapter);
+      if (!revalFiscalGate.open) {
+        return { success: false, error: `السنة المالية ${revalFiscalGate.period.year} مقفلة — لا يمكن إعادة التقييم بتاريخ داخلها` };
+      }
 
       // Current rates + base currency resolution.
       const curRes = await adapter.query<{ code: string; exchange_rate: number; is_default: boolean }>(

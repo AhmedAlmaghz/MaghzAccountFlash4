@@ -80,9 +80,9 @@ describe('context', () => {
       expect(hasPermission(ctx, 'core.edit')).toBe(false);
     });
 
-    it('returns true when permissions include wildcard', () => {
+    it('does not treat a legacy wildcard as a permission grant', () => {
       const wildcardCtx: ServiceContext = { ...ctx, role: 'custom', permissions: ['*'] };
-      expect(hasPermission(wildcardCtx, 'anything')).toBe(true);
+      expect(hasPermission(wildcardCtx, 'anything')).toBe(false);
     });
 
     it('returns true when permission is in list', () => {

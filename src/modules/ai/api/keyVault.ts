@@ -65,10 +65,15 @@ export function memoryKeyStore(): KeyStore {
  * would honestly report "no key" forever. In real browsers this resolves to
  * the persistent IndexedDB vault.
  */
-let defaultStore: KeyStore | null = null;
+const DEFAULT_STORE_KEY = '__maghzaccount_ai_key_store__';
+type GlobalWithAiKeyStore = typeof globalThis & {
+  __maghzaccount_ai_key_store__?: KeyStore;
+};
+
 export function getDefaultStore(): KeyStore {
-  if (!defaultStore) defaultStore = indexedDbKeyStore();
-  return defaultStore;
+  const globalState = globalThis as GlobalWithAiKeyStore;
+  if (!globalState[DEFAULT_STORE_KEY]) globalState[DEFAULT_STORE_KEY] = indexedDbKeyStore();
+  return globalState[DEFAULT_STORE_KEY];
 }
 
 function indexedDbAvailable(): boolean {
@@ -116,7 +121,7 @@ export function indexedDbKeyStore(): KeyStore {
           req.onsuccess = () => resolve((req.result as CryptoKey | undefined) ?? null);
           req.onerror = () => reject(req.error ?? new Error('IndexedDB read failed'));
         });
-        return val;
+        return val ?? memory.load();
       } catch {
         return memory.load();
       }

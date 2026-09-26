@@ -674,9 +674,9 @@ export const salesApi = {
       const invoice = mapInvoiceRow(invResult.rows[0]);
       const linesResult = await adapter.query(
         `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit
-         FROM sales_invoice_lines l
-         LEFT JOIN products p ON l.product_id = p.id
-         WHERE l.invoice_id = $1`, [id]
+          FROM sales_invoice_lines l
+          LEFT JOIN products p ON l.product_id = p.id AND p.company_id = $2::uuid
+          WHERE l.invoice_id = $1`, [id, companyId]
       );
       invoice.lines = (linesResult.rows || []).map((r: Record<string, unknown>) => mapInvoiceLineRow(r));
       return { success: true, data: invoice };
@@ -689,6 +689,9 @@ export const salesApi = {
     try {
       const validation = validateInput(createInvoiceSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (data.status && data.status !== 'draft') {
+        return { success: false, error: 'Invoices must be created as drafts.' };
+      }
       if ((data.paidAmount ?? 0) > data.totalAmount) {
         return { success: false, error: 'Paid amount cannot exceed total amount.' };
       }
@@ -937,13 +940,13 @@ export const salesApi = {
         `WITH backfill AS (
            UPDATE sales_invoice_lines sil SET unit_cost = COALESCE(p.cost_price, 0)
              FROM products p
-            WHERE sil.invoice_id = $1::uuid AND sil.unit_cost = 0
-              AND p.id = sil.product_id AND p.company_id = $2::uuid
+             WHERE sil.invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1::uuid) AND sil.unit_cost = 0
+               AND p.id = sil.product_id AND p.company_id = $2::uuid
             RETURNING sil.id
          )
          SELECT COALESCE(SUM(COALESCE(NULLIF(sil.base_quantity, 0), sil.quantity) * sil.unit_cost), 0) AS cogs,
                 COUNT(*) FILTER (WHERE sil.unit_cost = 0) AS zero_lines
-           FROM sales_invoice_lines sil WHERE sil.invoice_id = $1::uuid`,
+           FROM sales_invoice_lines sil WHERE sil.invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1::uuid)`,
         [id, companyId]
       );
       if (!cogsRes.success) return { success: false, error: cogsRes.error };
@@ -961,8 +964,8 @@ export const salesApi = {
       const discountAmount = Math.round((Number(inv.discount_amount) || 0) * 100) / 100;
       const lineDiscRes = await adapter.query(
         `SELECT COALESCE(SUM(quantity * unit_price * COALESCE(discount_percent, 0) / 100), 0) AS line_disc
-           FROM sales_invoice_lines WHERE invoice_id = $1::uuid`,
-        [id]
+           FROM sales_invoice_lines WHERE invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1::uuid)`,
+        [id, companyId]
       );
       if (!lineDiscRes.success) return { success: false, error: lineDiscRes.error };
       const lineDiscRow = (lineDiscRes.rows?.[0] || {}) as Record<string, unknown>;
@@ -974,8 +977,8 @@ export const salesApi = {
       // same atomic batch as the revenue JE.
       const saleLinesRes = await adapter.query(
         `SELECT product_id, COALESCE(NULLIF(base_quantity, 0), quantity) AS bq
-           FROM sales_invoice_lines WHERE invoice_id = $1`,
-        [id]
+           FROM sales_invoice_lines WHERE invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1::uuid)`,
+        [id, companyId]
       );
       if (!saleLinesRes.success) return { success: false, error: saleLinesRes.error };
       const saleItems = ((saleLinesRes.rows || []) as Record<string, unknown>[]).map((r) => ({
@@ -1176,9 +1179,10 @@ export const salesApi = {
           costRows.push(`($${ci++}::uuid, $${ci++}::numeric)`);
           costParams.push(pid, cost);
         }
-        costParams.push(id);
+        const invoiceParam = ci;
+        costParams.push(id, companyId);
         txQueries.push({
-          sql: `UPDATE sales_invoice_lines AS l SET unit_cost = v.cost FROM (VALUES ${costRows.join(', ')}) AS v(pid, cost) WHERE l.invoice_id = $${ci}::uuid AND l.product_id = v.pid::uuid`,
+          sql: `UPDATE sales_invoice_lines AS l SET unit_cost = v.cost FROM (VALUES ${costRows.join(', ')}) AS v(pid, cost) WHERE l.invoice_id = $${invoiceParam}::uuid AND $${invoiceParam + 1}::uuid = (SELECT company_id FROM sales_invoices WHERE id = $${invoiceParam}::uuid) AND l.product_id = v.pid::uuid`,
           params: costParams,
         });
       }
@@ -1315,7 +1319,7 @@ export const salesApi = {
       const res = await adapter.query(`SELECT q.*, c.name as customer_name FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.id = $1 AND q.company_id = $2 LIMIT 1`, [id, companyId]);
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
       const q = mapQuotationRow(res.rows[0]);
-      const linesRes = await adapter.query(`SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM quotation_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.quotation_id = $1`, [id]);
+      const linesRes = await adapter.query(`SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM quotation_lines l LEFT JOIN products p ON l.product_id = p.id AND p.company_id = $2::uuid WHERE l.quotation_id = $1`, [id, companyId]);
       q.lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapQuotationLineRow(r));
       return { success: true, data: q };
     } catch (e) {
@@ -1327,6 +1331,9 @@ export const salesApi = {
     try {
       const validation = validateInput(createQuotationSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (data.status && data.status !== 'draft') {
+        return { success: false, error: 'Quotations must be created as drafts.' };
+      }
       if (isElectronPg()) {
         const result = await invokeSalesRpc('createQuotation', { ...data });
         return result.success
@@ -1438,13 +1445,61 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+
+      // Claim BEFORE creating the invoice. The previous implementation created
+      // the invoice first and flipped the status afterwards through
+      // `sales.updateQuotation` — which REFUSES any status but 'draft', so on
+      // Electron the flip always failed and the result was never checked. The
+      // quotation stayed 'sent', the UI reported success, and the same
+      // quotation could be converted again: duplicate invoices, silently.
+      const CONVERTIBLE: ReadonlyArray<Quotation['status']> = ['draft', 'sent', 'accepted'];
+      let previousStatus: Quotation['status'] = 'sent';
+      if (isElectronPg()) {
+        const claim = await invokeSalesRpc('claimQuotation', { id });
+        if (!claim.success) return { success: false, error: claim.error || 'تعذّر حجز عرض السعر' };
+        const row = claim.rows?.[0];
+        if (!row || !row.id) {
+          return { success: false, error: 'تعذّر حجز عرض السعر للتحويل — قد يكون محوّلاً مسبقاً أو مرفوضاً.' };
+        }
+        const st = String(row.previous_status || 'sent') as Quotation['status'];
+        previousStatus = CONVERTIBLE.includes(st) ? st : 'sent';
+      } else {
+        const adapter = await getDbAdapter();
+        const claim = await adapter.query<{ id: string }>(
+          `UPDATE quotations SET status = 'converted', updated_by = $3::uuid, updated_at = NOW()
+            WHERE id = $1::uuid AND company_id = $2::uuid AND status = ANY($4::text[])
+            RETURNING id`,
+          [id, companyId, safeUserId(_userId), [...CONVERTIBLE]]
+        );
+        if (!claim.success) return { success: false, error: claim.error };
+        if (!claim.rows || claim.rows.length === 0) {
+          return { success: false, error: 'تعذّر حجز عرض السعر للتحويل — قد يكون محوّلاً مسبقاً أو مرفوضاً.' };
+        }
+        // Re-read the pre-claim state so a failed invoice restores exactly
+        // what the row had, not a guessed value.
+        const prior = await adapter.query<{ status: string }>(
+          `SELECT status FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [id, companyId]
+        );
+        const st = String(prior.rows?.[0]?.status || 'sent') as Quotation['status'];
+        previousStatus = CONVERTIBLE.includes(st) ? st : 'sent';
+      }
+
       const createRes = await this.createInvoice(invoiceData, _userId);
-      if (createRes.success) {
+      if (!createRes.success) {
+        // Release the claim so the operator can retry — NOT EXISTS protects a
+        // quotation that already got a real invoice (the create may have
+        // committed even if its response was lost).
         if (isElectronPg()) {
-          await invokeSalesRpc('updateQuotation', { data: { id, status: 'converted' } });
+          await invokeSalesRpc('releaseQuotation', { id, previousStatus });
         } else {
           const adapter = await getDbAdapter();
-          await adapter.query(`UPDATE quotations SET status = 'converted', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [id, companyId, safeUserId(_userId)]);
+          await adapter.query(
+            `UPDATE quotations SET status = $3, updated_at = NOW()
+              WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'converted'
+                AND NOT EXISTS (SELECT 1 FROM sales_invoices WHERE quotation_id = $1::uuid AND company_id = $2::uuid)`,
+            [id, companyId, previousStatus]
+          );
         }
       }
       return createRes;
@@ -1563,7 +1618,7 @@ export const salesApi = {
       );
       if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Not found' };
       const ret = mapReturnRow(res.rows[0]);
-      const linesRes = await adapter.query(`SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM sales_return_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.return_id = $1`, [id]);
+      const linesRes = await adapter.query(`SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM sales_return_lines l LEFT JOIN products p ON l.product_id = p.id AND p.company_id = $2::uuid WHERE l.return_id = $1`, [id, companyId]);
       ret.lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapReturnLineRow(r));
       return { success: true, data: ret };
     } catch (e) {
@@ -1575,6 +1630,9 @@ export const salesApi = {
     try {
       const validation = validateInput(createSalesReturnSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (data.status && data.status !== 'draft') {
+        return { success: false, error: 'Returns must be created as drafts.' };
+      }
       if (isElectronPg()) {
         const result = await invokeSalesRpc('createReturn', { ...data });
         return result.success

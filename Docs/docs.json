@@ -1,0 +1,294 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "MaghzAccountPro",
+  "description": "الدليل الرسمي لنظام MaghzAccountPro — نظام ERP محاسبي متكامل للمنشآت الصغيرة والمتوسطة | Official user guide for MaghzAccountPro — integrated ERP accounting system for SMEs (v0.26.0)",
+  "colors": {
+    "primary": "#0B7A5E",
+    "light": "#0B7A5E",
+    "dark": "#0B7A5E"
+  },
+  "favicon": "/favicon.svg",
+  "icons": {
+    "library": "lucide"
+  },
+  "languages": [
+    {
+      "locale": "ar",
+      "name": "العربية",
+      "default": true
+    },
+    {
+      "locale": "en",
+      "name": "English"
+    }
+  ],
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "العربية",
+        "groups": [
+          {
+            "group": "ابدأ هنا",
+            "pages": [
+              "ar/README",
+              "ar/CONVENTIONS",
+              "ar/01-introduction/README",
+              "ar/02-getting-started/01-installation",
+              "ar/02-getting-started/02-first-run-wizard",
+              "ar/02-getting-started/03-login",
+              "ar/02-getting-started/04-quick-start",
+              "ar/03-interface/README"
+            ]
+          },
+          {
+            "group": "الإعدادات والمستخدمون",
+            "pages": [
+              "ar/04-settings/README",
+              "ar/04-settings/01-company",
+              "ar/04-settings/02-branches-currencies",
+              "ar/04-settings/03-vat",
+              "ar/04-settings/04-document-sequences",
+              "ar/04-settings/05-classifications",
+              "ar/04-settings/06-default-accounts",
+              "ar/04-settings/07-hr-settings",
+              "ar/04-settings/08-backup-database",
+              "ar/05-users-roles/README"
+            ]
+          },
+          {
+            "group": "المحاسبة والمالية",
+            "pages": [
+              "ar/06-accounting/README",
+              "ar/06-accounting/01-chart-of-accounts",
+              "ar/06-accounting/02-journal-entries",
+              "ar/06-accounting/03-vouchers",
+              "ar/06-accounting/04-financial-reports",
+              "ar/06-accounting/05-financial-controls",
+              "ar/06-accounting/06-year-end-assets",
+              "ar/06-accounting/07-vat-periods"
+            ]
+          },
+          {
+            "group": "المخازن والمبيعات والمشتريات",
+            "pages": [
+              "ar/07-inventory/README",
+              "ar/07-inventory/01-products",
+              "ar/07-inventory/02-warehouses-stock",
+              "ar/07-inventory/03-adjustments",
+              "ar/07-inventory/04-valuation",
+              "ar/08-sales/README",
+              "ar/08-sales/01-customers",
+              "ar/08-sales/02-invoices",
+              "ar/08-sales/03-quotations",
+              "ar/08-sales/04-sales-returns",
+              "ar/09-purchases/01-suppliers",
+              "ar/09-purchases/02-invoices-orders",
+              "ar/09-purchases/03-purchase-returns"
+            ]
+          },
+          {
+            "group": "نقاط البيع والتصنيع",
+            "pages": [
+              "ar/10-pos/README",
+              "ar/10-pos/01-terminal",
+              "ar/10-pos/02-shifts",
+              "ar/10-pos/03-settings-reports",
+              "ar/11-manufacturing/README"
+            ]
+          },
+          {
+            "group": "الموارد والعلاقات والتقارير",
+            "pages": [
+              "ar/12-hr/01-employees-attendance",
+              "ar/12-hr/02-payroll-eos",
+              "ar/13-crm/README",
+              "ar/14-reports/01-dashboard",
+              "ar/14-reports/02-reports-hub",
+              "ar/15-ai-assistant/README"
+            ]
+          },
+          {
+            "group": "العملات والضرائب",
+            "pages": [
+              "ar/16-multicurrency/README",
+              "ar/16-multicurrency/02-fx-revaluation",
+              "ar/17-tax-jurisdictions/README"
+            ]
+          },
+          {
+            "group": "أمثلة تدريبية محلولة",
+            "pages": [
+              "ar/Examples/README",
+              "ar/Examples/01-retail-store",
+              "ar/Examples/02-import-fx",
+              "ar/Examples/03-saudi-vat",
+              "ar/Examples/04-manufacturing",
+              "ar/Examples/05-services-payroll",
+              "ar/Examples/06-pharmacy-fifo",
+              "ar/Examples/07-cafe-pos",
+              "ar/Examples/08-contracting-assets",
+              "ar/Examples/09-school-payroll",
+              "ar/Examples/10-wholesale-aging"
+            ]
+          },
+          {
+            "group": "الملاحق وسكربتات الفيديو",
+            "pages": [
+              "ar/99-appendix/01-glossary",
+              "ar/99-appendix/02-permissions-matrix",
+              "ar/99-appendix/03-shortcuts",
+              "ar/99-appendix/04-troubleshooting",
+              "ar/99-appendix/05-faq",
+              "videos/ar/scripts/15-19-batch-scripts",
+              "CHANGELOG"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "English",
+        "groups": [
+          {
+            "group": "Start Here",
+            "pages": [
+              "en/README",
+              "en/CONVENTIONS",
+              "en/01-introduction/README",
+              "en/02-getting-started/01-installation",
+              "en/02-getting-started/02-first-run-wizard",
+              "en/02-getting-started/03-login",
+              "en/02-getting-started/04-quick-start",
+              "en/03-interface/README"
+            ]
+          },
+          {
+            "group": "Settings & Users",
+            "pages": [
+              "en/04-settings/README",
+              "en/04-settings/01-company",
+              "en/04-settings/02-branches-currencies",
+              "en/04-settings/03-vat",
+              "en/04-settings/04-document-sequences",
+              "en/04-settings/05-classifications",
+              "en/04-settings/06-default-accounts",
+              "en/04-settings/07-hr-settings",
+              "en/04-settings/08-backup-database",
+              "en/05-users-roles/README"
+            ]
+          },
+          {
+            "group": "Accounting & Finance",
+            "pages": [
+              "en/06-accounting/README",
+              "en/06-accounting/01-chart-of-accounts",
+              "en/06-accounting/02-journal-entries",
+              "en/06-accounting/03-vouchers",
+              "en/06-accounting/04-financial-reports",
+              "en/06-accounting/05-financial-controls",
+              "en/06-accounting/06-year-end-assets",
+              "en/06-accounting/07-vat-periods"
+            ]
+          },
+          {
+            "group": "Inventory, Sales & Purchases",
+            "pages": [
+              "en/07-inventory/README",
+              "en/07-inventory/01-products",
+              "en/07-inventory/02-warehouses-stock",
+              "en/07-inventory/03-adjustments",
+              "en/07-inventory/04-valuation",
+              "en/08-sales/README",
+              "en/08-sales/01-customers",
+              "en/08-sales/02-invoices",
+              "en/08-sales/03-quotations",
+              "en/08-sales/04-sales-returns",
+              "en/09-purchases/01-suppliers",
+              "en/09-purchases/02-invoices-orders",
+              "en/09-purchases/03-purchase-returns"
+            ]
+          },
+          {
+            "group": "POS & Manufacturing",
+            "pages": [
+              "en/10-pos/README",
+              "en/10-pos/01-terminal",
+              "en/10-pos/02-shifts",
+              "en/10-pos/03-settings-reports",
+              "en/11-manufacturing/README"
+            ]
+          },
+          {
+            "group": "HR, CRM & Reports",
+            "pages": [
+              "en/12-hr/01-employees-attendance",
+              "en/12-hr/02-payroll-eos",
+              "en/13-crm/README",
+              "en/14-reports/01-dashboard",
+              "en/14-reports/02-reports-hub",
+              "en/15-ai-assistant/README"
+            ]
+          },
+          {
+            "group": "Multi-Currency & Tax",
+            "pages": [
+              "en/16-multicurrency/README",
+              "en/16-multicurrency/02-fx-revaluation",
+              "en/17-tax-jurisdictions/README"
+            ]
+          },
+          {
+            "group": "Solved Training Examples",
+            "pages": [
+              "en/Examples/README",
+              "en/Examples/01-retail-store",
+              "en/Examples/02-import-fx",
+              "en/Examples/03-saudi-vat",
+              "en/Examples/04-manufacturing",
+              "en/Examples/05-services-payroll",
+              "en/Examples/06-pharmacy-fifo",
+              "en/Examples/07-cafe-pos",
+              "en/Examples/08-contracting-assets",
+              "en/Examples/09-school-payroll",
+              "en/Examples/10-wholesale-aging"
+            ]
+          },
+          {
+            "group": "Appendices & Video Scripts",
+            "pages": [
+              "en/99-appendix/01-glossary",
+              "en/99-appendix/02-permissions-matrix",
+              "en/99-appendix/03-shortcuts",
+              "en/99-appendix/04-troubleshooting",
+              "en/99-appendix/05-faq",
+              "videos/en/scripts/15-19-batch-scripts",
+              "CHANGELOG"
+            ]
+          }
+        ]
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "التطبيق الحي",
+        "href": "https://maghz-account.vercel.app",
+        "icon": "globe"
+      },
+      {
+        "anchor": "GitHub",
+        "href": "https://github.com/maghzaccount/maghzaccountflash4",
+        "icon": "github"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/maghzaccount/maghzaccountflash4",
+      "website": "https://maghz-account.vercel.app"
+    }
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true
+  }
+}

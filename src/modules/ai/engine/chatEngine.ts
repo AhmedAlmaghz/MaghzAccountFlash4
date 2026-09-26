@@ -1,6 +1,7 @@
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { aiApi } from '../api';
+import { aiPersistence } from '../api/persistence';
 import { useAiStore } from '../store';
 import { getVisibleTools, toLlmTools } from '../tools/registry';
 import { ensureToolsRegistered } from '../tools/index';
@@ -9,6 +10,7 @@ import { jevRouteToolsForCycle } from '../jev/jevToolRouter';
 import { recordJevMetric, recordJevRoute, estimateJevCost } from '../jev/jevMetrics';
 import { jevGuardCheck } from '../jev/jevGuard';
 import { jevSearchAll } from '../jev/jevSearch';
+import { checkJevPostingTool, isPostingGuardBlocked, postingBadge } from '../jev/jevPostingGuard';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
 import { executeToolCall, resolveTool } from './toolExecutor';
@@ -29,6 +31,8 @@ import { compactToolResultForLlm, summarizeResult } from './resultCards';
 import { loadMemoryBlock } from '../tools/memoryTools';
 import { addUsage, checkBudget, emptyUsage, formatUsage, type TokenUsage } from './usageMeter';
 import { expandDialectText } from './dialectMap';
+import { clearAttachmentBlobs } from '../attachments/attachmentBlobs';
+import { registerAiSessionDisposer } from './sessionBoundary';
 import { resolveEntitiesInText, needsEntityResolution } from '../entityResolver';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, LlmTool, PendingToolCall, ToolContext } from '../types';
@@ -82,7 +86,10 @@ let engineInstance: ChatEngine | null = null;
 export { claimsBusinessAction, claimsGlobalCompletion, extractClaimedEntities };
 
 export function getChatEngine(): ChatEngine {
-  if (!engineInstance) engineInstance = new ChatEngine();
+  if (!engineInstance) {
+    engineInstance = new ChatEngine();
+    registerAiSessionDisposer(() => engineInstance?.disposeSession());
+  }
   return engineInstance;
 }
 
@@ -703,6 +710,42 @@ class ChatEngine {
     this.touchProgress();
 
     try {
+      if (approved) {
+        const postingCheck = await checkJevPostingTool(
+          this.ctx.companyId,
+          pending.toolName,
+          resolveTool(pending.toolName),
+          pending.args,
+        );
+        if (isPostingGuardBlocked(postingCheck.result)) {
+          const reason = `تم منع التنفيذ بواسطة JEV: ${postingCheck.result.reason}`;
+          const badge = postingBadge(postingCheck.result);
+          const currentSummary = store.messages.find((m) => m.id === messageId)?.toolCall?.argsSummary ?? pending.argsSummary;
+          store.updateToolCall(messageId, {
+            status: 'error',
+            argsSummary: [currentSummary, badge || reason].filter(Boolean).join(' — '),
+            resultSummary: reason,
+          });
+          const key = ChatEngine.writeAttemptKey(pending.toolName, pending.args);
+          this.failedWriteAttempts.set(key, (this.failedWriteAttempts.get(key) ?? 0) + 1);
+          this.pushToolResultAfterPartner(callId, `خطأ: ${reason}`);
+          if (this.pendingWriteCalls.length === 0) {
+            this.iterationCount = 0;
+            await this.runLoop();
+          }
+          return;
+        }
+        const badge = postingBadge(postingCheck.result);
+        if (badge) {
+          const currentSummary = store.messages.find((m) => m.id === messageId)?.toolCall?.argsSummary ?? pending.argsSummary;
+          if (!currentSummary?.includes(badge)) {
+            store.updateToolCall(messageId, {
+              argsSummary: [currentSummary, badge].filter(Boolean).join(' — '),
+            });
+          }
+        }
+      }
+
       store.updateToolCall(messageId, { status: 'executing' });
 
       if (approved) {
@@ -792,6 +835,7 @@ class ChatEngine {
    * stays resumable.
    */
   private async startBatchRun(batchId: string, messageId: string): Promise<JobBatchDetail | null> {
+    const runGeneration = this.recoveryCount;
     const store = this.store();
     // Pin the batch to its card so MessageBubble renders the live progress
     // card (persisted inside tool_call JSONB — survives reloads). Resume
@@ -806,9 +850,11 @@ class ChatEngine {
       const final = await runBatch(this.ctx.companyId, this.ctx.userId, batchId, {
         shouldStop: () => this.abortRequested,
         onProgress: (detail) => {
+          if (runGeneration !== this.recoveryCount) return;
           this.reportBatchProgress(messageId, 'executing', batchProgressLine(detail));
         },
       });
+      if (runGeneration !== this.recoveryCount) return null;
       if (!final) {
         store.updateToolCall(messageId, { status: 'error', resultSummary: 'تعذّر قراءة حالة الدفعة' });
         return null;
@@ -851,6 +897,7 @@ class ChatEngine {
       } catch { /* الذاكرة خدمة إضافية — لا تُسقط الدورة أبداً */ }
       return final;
     } catch (e) {
+      if (runGeneration !== this.recoveryCount) return null;
       const errorText = e instanceof Error ? e.message : String(e);
       this.reportBatchProgress(messageId, 'error', errorText);
       this.history.push({ role: 'assistant', content: errorText });
@@ -991,6 +1038,15 @@ class ChatEngine {
     } finally {
       store.setProcessing(false);
     }
+  }
+
+  /** Dispose all renderer-side state at an authentication boundary. */
+  disposeSession(): void {
+    this.requestStop();
+    this.recoveryCount++;
+    this.reset();
+    aiPersistence.dispose();
+    clearAttachmentBlobs();
   }
 
   /** Start a fresh conversation. */
@@ -2087,14 +2143,50 @@ class ChatEngine {
         return false;
       }
 
+      const postingChecks = new Map<string, Awaited<ReturnType<typeof checkJevPostingTool>>>();
+      await Promise.all(confirmable.map(async (tc) => {
+        const tool = resolveTool(tc.name);
+        postingChecks.set(
+          tc.id,
+          await checkJevPostingTool(this.ctx.companyId, tc.name, tool, tc.arguments),
+        );
+      }));
+
       for (const tc of confirmable) {
         const tool = resolveTool(tc.name);
+        const postingCheck = postingChecks.get(tc.id);
+        const baseSummary = tool?.summarizeArgs?.(tc.arguments);
+        if (postingCheck && isPostingGuardBlocked(postingCheck.result)) {
+          const reason = `تم منع التنفيذ بواسطة JEV: ${postingCheck.result.reason}`;
+          const badge = postingBadge(postingCheck.result);
+          this.pushToolResultAfterPartner(tc.id, `خطأ: ${reason}`);
+          this.store().addMessage({
+            role: 'assistant',
+            kind: 'tool',
+            content: '',
+            toolCall: {
+              callId: tc.id,
+              toolName: tc.name,
+              label: tool?.labelAr ?? tc.name,
+              args: tc.arguments,
+              argsSummary: [baseSummary, badge || reason].filter(Boolean).join(' — '),
+              status: 'error',
+              dangerLevel: 'write',
+              resultSummary: reason,
+            },
+          });
+          const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
+          this.failedWriteAttempts.set(key, (this.failedWriteAttempts.get(key) ?? 0) + 1);
+          continue;
+        }
+
+        const badge = postingCheck ? postingBadge(postingCheck.result) : '';
         const pending: PendingToolCall = {
           callId: tc.id,
           toolName: tc.name,
           label: tool?.labelAr ?? tc.name,
           args: tc.arguments,
-          argsSummary: tool?.summarizeArgs?.(tc.arguments),
+          argsSummary: [baseSummary, badge].filter(Boolean).join(' — '),
           status: 'pending-confirmation',
           dangerLevel: 'write',
         };
@@ -2107,40 +2199,12 @@ class ChatEngine {
           toolCall: pending,
         });
 
-        // Enrich the confirmation card asynchronously: resolve raw UUID
-        // args (customerId/productId…) into human names/numbers so the user
-        // approves SUBSTANCE, not "المعرف: 3f2a1b9c…". Best-effort — the
-        // card stays fully functional with the plain summary alone.
         void resolveArgsForCard(tc.arguments, this.ctx).then((labels) => {
           if (labels.length === 0) return;
           this.store().updateToolCall(messageId, {
             argsSummary: [pending.argsSummary, ...labels].filter(Boolean).join(' — '),
           });
         }).catch(() => { /* best-effort enrichment */ });
-
-        // J4 — Posting guard enrichment (fire-and-forget, never blocks card)
-        // For high-stakes docs (invoice/voucher/payroll/stock) JEV evaluates
-        // posting risk in ~120ms and appends a badge to the card.
-        const postingTools = new Set([
-          'sales.create_invoice', 'sales.create_and_post_invoice', 'sales.post_invoice',
-          'purchases.create_invoice', 'purchases.create_and_post_invoice', 'purchases.post_invoice',
-          'accounting.create_receipt_voucher', 'accounting.create_payment_voucher',
-          'accounting.create_journal_entry', 'hr.create_payroll_run', 'hr.post_payroll_run',
-        ]);
-        if (postingTools.has(tc.name)) {
-          void import('../jev/jevPostingGuard').then(({ jevPostingGuard, postingBadge }) =>
-            jevPostingGuard(this.ctx.companyId, {
-              docType: tc.name, amount: (tc.arguments as Record<string, unknown>).amount as number | undefined,
-              notes: (tc.arguments as Record<string, unknown>).notes as string | undefined,
-            }).then((g) => {
-              if (!g.jevUsed) return;
-              const badge = postingBadge(g);
-              if (!badge) return;
-              const current = this.store().messages.find((m) => m.id === messageId)?.toolCall?.argsSummary ?? pending.argsSummary ?? '';
-              this.store().updateToolCall(messageId, { argsSummary: [current, badge].filter(Boolean).join(' — ') });
-            }).catch(() => { /* best-effort */ }),
-          );
-        }
       }
 
       // Stop loop — waiting for user confirmation

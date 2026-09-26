@@ -185,3 +185,68 @@ describe('inventoryApi.deleteProductUnit', () => {
     expect(calls.some((s) => s.startsWith('DELETE FROM product_units'))).toBe(true);
   });
 });
+
+describe('inventoryApi.postStockAdjustment period gates (Phase 5)', () => {
+  const ADJ_ID = '55555555-5555-4555-8555-555555555555';
+  const WAREHOUSE_ID = '66666666-6666-4666-8666-666666666666';
+
+  function adjAdapter(closed: { fiscal?: boolean; tax?: boolean }) {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.includes('FROM stock_adjustments')) {
+        return {
+          success: true,
+          rows: [{
+            product_id: PRODUCT_ID,
+            warehouse_id: WAREHOUSE_ID,
+            system_qty: 100,
+            actual_qty: 98,
+            difference: -2,
+            reason: 'جرد',
+            date: '2026-03-10',
+            unit_cost: 10,
+            product_name: 'صنف',
+            cost_price: 10,
+          }],
+        };
+      }
+      if (sql.includes('FROM accounting_periods')) {
+        return closed.fiscal
+          ? { success: true, rows: [{ id: 'p1', company_id: COMPANY_ID, year: 2026, start_date: '2026-01-01', end_date: '2026-12-31', status: 'closed', closed_at: '2027-01-01' }] }
+          : { success: true, rows: [{ id: 'p1', company_id: COMPANY_ID, year: 2026, start_date: '2026-01-01', end_date: '2026-12-31', status: 'open', closed_at: null }] };
+      }
+      if (sql.includes('FROM tax_periods')) {
+        return closed.tax
+          ? { success: true, rows: [{ id: 't1', company_id: COMPANY_ID, country_code: 'YE', period_type: 'quarterly', start_date: '2026-01-01', end_date: '2026-03-31', status: 'filed', filed_at: '2026-04-05' }] }
+          : { success: true, rows: [] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return adapter;
+  }
+
+  it('refuses a closed fiscal year and books nothing', async () => {
+    const adapter = adjAdapter({ fiscal: true });
+    const res = await inventoryApi.postStockAdjustment(ADJ_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/2026/);
+    expect(res.error).toMatch(/مقفلة/);
+    expect(adapter.transaction, 'no stock/JE write into a closed year').not.toHaveBeenCalled();
+  });
+
+  it('refuses a filed tax period and books nothing', async () => {
+    const adapter = adjAdapter({ tax: true });
+    const res = await inventoryApi.postStockAdjustment(ADJ_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/الفترة الضريبية مغلقة/);
+    expect(adapter.transaction).not.toHaveBeenCalled();
+  });
+
+  it('an open period does not trip the gate (posting proceeds past it)', async () => {
+    adjAdapter({});
+    const res = await inventoryApi.postStockAdjustment(ADJ_ID, COMPANY_ID);
+    // Whatever the rest of the posting contract needs, the period gate must
+    // no longer be what stops it.
+    expect(res.error ?? '').not.toMatch(/مقفلة|الفترة الضريبية/);
+  });
+});

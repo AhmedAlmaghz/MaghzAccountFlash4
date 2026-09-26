@@ -114,9 +114,16 @@ export function useTransactions(companyId: string) {
   const create = useCallback(async (data: Omit<Transaction, 'id'>) => {
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { success: false, error: 'User not authenticated' };
-    const result = await accountingApi.createTransaction(data, userId);
+    // The API refuses `status: 'posted'` (Phase 2 #5) — compose the sanctioned
+    // draft → post flow here so the UI can keep sending its intent.
+    const wantsPost = data.status === 'posted';
+    const payload = wantsPost ? { ...data, status: 'draft' as const } : data;
+    const result = wantsPost
+      ? await accountingApi.createAndPostTransaction(payload, userId)
+      : await accountingApi.createTransaction(payload, userId);
     if (result.success && result.id) {
-      setTransactions(prev => [{ ...data, id: result.id! }, ...prev]);
+      const created = { ...payload, id: result.id, status: wantsPost ? 'posted' : payload.status };
+      setTransactions(prev => [created, ...prev]);
     }
     return result;
   }, []);
@@ -124,10 +131,19 @@ export function useTransactions(companyId: string) {
   const update = useCallback(async (id: string, data: Partial<Transaction>) => {
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { success: false, error: 'User not authenticated' };
-    const result = await accountingApi.updateTransaction(id, companyId, userId, data);
-    if (result.success) {
-      setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+    // Editing a draft and then posting it = update the fields, then take the
+    // dedicated transition. Never smuggle `status: 'posted'` through the edit.
+    const wantsPost = data.status === 'posted';
+    const patch = wantsPost ? { ...data, status: undefined } : data;
+    const result = await accountingApi.updateTransaction(id, companyId, userId, patch);
+    if (!result.success) return result;
+    if (wantsPost) {
+      const posted = await accountingApi.postTransaction(id, companyId, userId);
+      if (!posted.success) return posted;
+      setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...patch, status: 'posted' } : t));
+      return posted;
     }
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t));
     return result;
   }, [companyId]);
 
@@ -166,7 +182,11 @@ export function useTransactionsPaginated(companyId: string, filters?: Transactio
   const create = useCallback(async (data: Omit<Transaction, 'id'>) => {
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { success: false, error: 'User not authenticated' };
-    const result = await accountingApi.createTransaction(data, userId);
+    const wantsPost = data.status === 'posted';
+    const payload = wantsPost ? { ...data, status: 'draft' as const } : data;
+    const result = wantsPost
+      ? await accountingApi.createAndPostTransaction(payload, userId)
+      : await accountingApi.createTransaction(payload, userId);
     if (result.success) await reloadList();
     return result;
   }, [reloadList]);
@@ -174,8 +194,15 @@ export function useTransactionsPaginated(companyId: string, filters?: Transactio
   const update = useCallback(async (id: string, data: Partial<Transaction>) => {
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { success: false, error: 'User not authenticated' };
-    const result = await accountingApi.updateTransaction(id, companyId, userId, data);
-    if (result.success) await reloadList();
+    const wantsPost = data.status === 'posted';
+    const patch = wantsPost ? { ...data, status: undefined } : data;
+    const result = await accountingApi.updateTransaction(id, companyId, userId, patch);
+    if (!result.success) return result;
+    if (wantsPost) {
+      const posted = await accountingApi.postTransaction(id, companyId, userId);
+      if (!posted.success) return posted;
+    }
+    await reloadList();
     return result;
   }, [reloadList, companyId]);
 

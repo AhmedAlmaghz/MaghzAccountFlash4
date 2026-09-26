@@ -86,9 +86,11 @@ describe('assertAccountingPeriodOpen', () => {
     expect(await assertAccountingPeriodOpen(COMPANY_ID, '2025-06-01')).toEqual({ open: true });
   });
 
-  it('allows malformed dates (fail-open like the tax guard)', async () => {
+  it('fails closed for malformed dates', async () => {
     const { adapter } = mockDb(async () => ({ success: true, rows: [] }));
-    expect(await assertAccountingPeriodOpen(COMPANY_ID, 'not-a-date')).toEqual({ open: true });
+    const result = await assertAccountingPeriodOpen(COMPANY_ID, 'not-a-date');
+    expect(result.open).toBe(false);
+    if (!result.open) expect(result.error).toBe('Posting date is required');
     expect(adapter.query).not.toHaveBeenCalled();
   });
 });

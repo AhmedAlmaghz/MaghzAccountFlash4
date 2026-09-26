@@ -25,7 +25,23 @@ export interface AccountingPeriod {
   closedAt: string | null;
 }
 
-type GateResult = { open: true } | { open: false; period: AccountingPeriod };
+type GateResult = { open: true } | { open: false; period: AccountingPeriod; error?: string };
+
+function blockedPeriod(companyId: string, day: string, error: string): GateResult {
+  return {
+    open: false,
+    period: {
+      id: '',
+      companyId,
+      year: 0,
+      startDate: day,
+      endDate: day,
+      status: 'closed',
+      closedAt: null,
+    },
+    error,
+  };
+}
 
 function mapPeriodRow(r: Record<string, unknown>): AccountingPeriod {
   return {
@@ -82,7 +98,7 @@ export async function assertAccountingPeriodOpen(
   try {
     const db = adapter || (await getDbAdapter());
     const day = String(date || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { open: true };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return blockedPeriod(companyId, day, 'Posting date is required');
     const res = await db.query(
       `SELECT id, company_id, year, start_date, end_date, status, closed_at
          FROM accounting_periods
@@ -90,12 +106,12 @@ export async function assertAccountingPeriodOpen(
         ORDER BY end_date DESC LIMIT 1`,
       [companyId, day]
     );
-    if (!res.success) return { open: true };
+    if (!res.success) return blockedPeriod(companyId, day, 'Accounting period lookup failed');
     const row = (res.rows || [])[0] as Record<string, unknown> | undefined;
     if (!row || String(row.status) !== 'closed') return { open: true };
     return { open: false, period: mapPeriodRow(row) };
-  } catch {
-    return { open: true };
+  } catch (error) {
+    return blockedPeriod(companyId, String(date || '').slice(0, 10), error instanceof Error ? error.message : 'Accounting period lookup failed');
   }
 }
 

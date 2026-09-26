@@ -40,7 +40,7 @@ const SYSTEM_ROLE: Role = {
   id: 'role-admin',
   name: 'مدير النظام',
   description: 'دور نظامي',
-  permissions: ['*'],
+  permissions: ['settings.edit'],
   isSystem: true,
   companyId: 'c-1',
 };

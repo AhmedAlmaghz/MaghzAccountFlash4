@@ -88,6 +88,7 @@ export default function AiSettingsPage() {
         setFbBaseUrl(res.data.fallbackBaseUrl || '');
         setFbModel(res.data.fallbackModel || '');
       }
+      setLoading(false);
       // JEV config — per-company
       try {
         const jev = await getJevConfig(company.id);
@@ -99,7 +100,6 @@ export default function AiSettingsPage() {
         setJevHasKey(!!jev.apiKey);
         setJevMaskedKey(jev.apiKey ? `${jev.apiKey.slice(0, 6)}****${jev.apiKey.slice(-4)}` : null);
       } catch { /* ignore */ }
-      setLoading(false);
     }
     load();
     return () => { cancelled = true; };

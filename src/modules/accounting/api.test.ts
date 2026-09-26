@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { isElectronPg } from '@/core/database/adapters';
 
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
+  isElectronPg: vi.fn(() => false),
 }));
 
 vi.mock('@/core/utils/validation', () => {
@@ -985,25 +987,125 @@ describe('accountingApi.createTransaction — draft/posted routing (Phase 0)', (
     expect(vi.mocked(accountingService.postTransaction)).not.toHaveBeenCalled();
   });
 
-  it('posts immediately through the balance-validated service and normalizes its id', async () => {
-    vi.mocked(accountingService.postTransaction).mockResolvedValue({ success: true, transactionId: 'tx-9' } as never);
-    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
-    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
-
-    const res = await accountingApi.createTransaction({ ...baseData, status: 'posted' } as never, 'user-1');
-    expect(res.success).toBe(true);
-    expect(res.id).toBe('tx-9');
-    expect(vi.mocked(accountingService.postTransaction)).toHaveBeenCalledTimes(1);
-  });
-
-  it('surfaces service failures instead of a false success', async () => {
-    vi.mocked(accountingService.postTransaction).mockResolvedValue({ success: false, error: 'unbalanced' } as never);
-    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+  it('REFUSES status: posted on the generic create path (Phase 2 #5)', async () => {
+    const createTransaction = vi.fn(async () => ({ success: true, id: 'draft-1' }));
+    const adapter = { query: vi.fn(), transaction: vi.fn(), createTransaction };
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await accountingApi.createTransaction({ ...baseData, status: 'posted' } as never, 'user-1');
     expect(res.success).toBe(false);
-    expect(res.error).toBe('unbalanced');
+    // The message must name the sanctioned path — a bare refusal strands callers.
+    expect(String(res.error)).toMatch(/draft/i);
+    expect(String(res.error)).toMatch(/createAndPostTransaction/);
+    // Nothing may reach the database, and the service must not post behind our back.
+    expect(createTransaction).not.toHaveBeenCalled();
+    expect(vi.mocked(accountingService.postTransaction)).not.toHaveBeenCalled();
+  });
+
+  it('rejects any non-draft status (cancelled included) on create', async () => {
+    const createTransaction = vi.fn(async () => ({ success: true, id: 'draft-1' }));
+    vi.mocked(getDbAdapter).mockResolvedValue({ query: vi.fn(), transaction: vi.fn(), createTransaction } as never);
+    const res = await accountingApi.createTransaction({ ...baseData, status: 'cancelled' } as never, 'user-1');
+    expect(res.success).toBe(false);
+    expect(createTransaction).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The one sanctioned "create and post" flow (Phase 2 #5). It composes the
+ * draft insert with the dedicated posting transition so the row lock, the
+ * period gates and the session audit id can never be bypassed by a payload.
+ */
+describe('accountingApi.createAndPostTransaction', () => {
+  // postTransaction validates its id through the zod uuid schema, so the
+  // composition test must use real UUIDs — fake ids fail before any SQL runs.
+  const CAP = '00000000-0000-4000-8000-0000000000a7';
+  const CAR = '00000000-0000-4000-8000-0000000000a8';
+  const CO_UUID = '00000000-0000-4000-8000-0000000000a1';
+  const baseData = {
+    companyId: 'comp-1',
+    date: '2026-09-01',
+    reference: 'JV-1',
+    description: 'test',
+    totalAmount: 1000,
+    entries: [
+      { accountId: 'acc-1', debit: 1000, credit: 0 },
+      { accountId: 'acc-2', debit: 0, credit: 1000 },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Hermetic: an earlier describe in this file flips isElectronPg to true and
+    // installs a window.electronDB stub, and clearAllMocks does NOT restore
+    // implementations. This suite exercises the non-Electron composition.
+    vi.mocked(isElectronPg).mockReturnValue(false);
+    (window as unknown as { electronDB?: unknown }).electronDB = undefined;
+  });
+
+  it('creates a DRAFT first, then posts it, and returns the same id', async () => {
+    const order: string[] = [];
+    const createTransaction = vi.fn(async () => { order.push('create-draft'); return { success: true, id: CAP }; });
+    const adapter = {
+      query: vi.fn(async (sql: string) => {
+        order.push(sql.trim().split(/\s+/)[0]);
+        // postTransaction needs the stored header AND the stored line sums
+        if (/^SELECT t\.status/i.test(sql.trim())) {
+          return { success: true, rows: [{ status: 'draft', dr: 1000, cr: 1000, n: 2, date: '2026-09-01' }] };
+        }
+        // The posting UPDATE is verified by rows.length (FIN-0: no rowCount in
+        // the DbAdapter), so it must return the flipped row.
+        if (/^UPDATE transactions/i.test(sql.trim())) {
+          return { success: true, rows: [{ id: CAP }] };
+        }
+        if (/^SELECT status/i.test(sql.trim())) return { success: true, rows: [{ status: 'draft' }] };
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(),
+      createTransaction,
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.createAndPostTransaction({ ...baseData, status: 'draft', companyId: CO_UUID } as never, 'user-1');
+    expect(res).toEqual({ success: true, id: CAP });
+    // The draft is written with status 'draft' — never 'posted'.
+    expect((createTransaction.mock.calls as unknown[][])[0]?.[0] as Record<string, unknown>).toMatchObject({ status: 'draft' });
+    expect(order[0]).toBe('create-draft');
+    expect(order).toContain('UPDATE');
+  });
+
+  it('does NOT post when the draft insert fails', async () => {
+    const createTransaction = vi.fn(async () => ({ success: false, error: 'insert failed' }));
+    const adapter = { query: vi.fn(), transaction: vi.fn(), createTransaction };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.createAndPostTransaction({ ...baseData, companyId: CO_UUID } as never, 'user-1');
+    expect(res.success).toBe(false);
+    expect(adapter.query, 'a failed draft must not be followed by a post attempt').not.toHaveBeenCalled();
+  });
+
+  it('keeps the draft when posting is refused (reviewable, never silently deleted)', async () => {
+    const createTransaction = vi.fn(async () => ({ success: true, id: CAR }));
+    const adapter = {
+      query: vi.fn(async (sql: string) => {
+        if (/^SELECT t\.status/i.test(sql.trim())) {
+          return { success: true, rows: [{ status: 'draft', dr: 1000, cr: 1000, n: 2, date: '2026-09-01' }] };
+        }
+        if (/^SELECT status/i.test(sql.trim())) return { success: true, rows: [{ status: 'draft' }] };
+        // the posting UPDATE reports zero affected rows (already posted / race)
+        if (/^UPDATE transactions/i.test(sql.trim())) return { success: true, rows: [] };
+        return { success: true, rows: [] };
+      }),
+      transaction: vi.fn(),
+      createTransaction,
+    };
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.createAndPostTransaction({ ...baseData, companyId: CO_UUID } as never, 'user-1');
+    expect(res.success).toBe(false);
+    expect(createTransaction).toHaveBeenCalledTimes(1);
+    const deleteCalls = (adapter.query as ReturnType<typeof vi.fn>).mock.calls.filter((c) => /DELETE/i.test(String(c[0])));
+    expect(deleteCalls, 'the draft must survive a failed post').toHaveLength(0);
   });
 });
 
@@ -1055,6 +1157,21 @@ describe('accountingApi.updateTransaction — posted guard + balance check (Phas
     expect(queries.some(q => q.startsWith('DELETE FROM journal_entries'))).toBe(false);
   });
 
+  it('rejects posting through an edit and points at postTransaction (Phase 2 #5)', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (sql.startsWith('SELECT')) return { success: true, rows: [{ status: 'draft' }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.updateTransaction(TX, CO, 'user-1', { status: 'posted' } as never);
+    expect(res.success).toBe(false);
+    expect(String(res.error)).toMatch(/postTransaction/);
+    // A refused posting must not touch the header or the lines.
+    expect(adapter.query).not.toHaveBeenCalledWith(expect.stringMatching(/^UPDATE transactions/), expect.anything());
+    expect(adapter.query).not.toHaveBeenCalledWith(expect.stringMatching(/^DELETE FROM journal_entries/), expect.anything());
+  });
+
   it('allows balanced draft edits with a dynamic header (no NULL wipe)', async () => {
     const queries: Array<{ sql: string; params: unknown[] }> = [];
     const adapter = makeMockAdapter(async (sql, params) => {
@@ -1089,6 +1206,24 @@ describe('accountingApi.postTransaction — draft-only + balance gate (Phase 0)'
   const TX = '00000000-0000-0000-0000-000000000001';
   const CO = '00000000-0000-0000-0000-000000000001';
 
+  it('routes Electron posting through typed RPC with only the transaction id', async () => {
+    const postTransaction = vi.fn().mockResolvedValue({ success: true, rows: [{ id: TX }] });
+    vi.mocked(isElectronPg).mockReturnValue(true);
+    Object.defineProperty(window, 'electronDB', {
+      configurable: true,
+      value: { accounting: { postTransaction } },
+    });
+    try {
+      const res = await accountingApi.postTransaction(TX, CO, 'user-1');
+      expect(res).toEqual({ success: true, error: undefined });
+      expect(postTransaction).toHaveBeenCalledWith({ id: TX });
+      expect(getDbAdapter).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, 'electronDB');
+      vi.mocked(isElectronPg).mockReturnValue(false);
+    }
+  });
+
   it('rejects posting an already-POSTED transaction (no silent re-post)', async () => {
     const queries: string[] = [];
     const adapter = makeMockAdapter(async (sql) => {
@@ -1109,7 +1244,10 @@ describe('accountingApi.postTransaction — draft-only + balance gate (Phase 0)'
   it('rejects posting an unbalanced draft', async () => {
     const adapter = makeMockAdapter(async (sql) => {
       if (/FROM transactions t WHERE/.test(sql)) {
-        return { success: true, rows: [{ status: 'draft', dr: 1000, cr: 900, n: 2 }] };
+        return { success: true, rows: [{ status: 'draft', date: '2026-01-01', dr: 1000, cr: 900, n: 2 }] };
+      }
+      if (/FROM tax_periods|FROM accounting_periods/.test(sql)) {
+        return { success: true, rows: [] };
       }
       return { success: true, rows: [{ id: TX }] };
     });
@@ -1125,7 +1263,10 @@ describe('accountingApi.postTransaction — draft-only + balance gate (Phase 0)'
     const adapter = makeMockAdapter(async (sql) => {
       queries.push(sql);
       if (/FROM transactions t WHERE/.test(sql)) {
-        return { success: true, rows: [{ status: 'draft', dr: 1000, cr: 1000, n: 2 }] };
+        return { success: true, rows: [{ status: 'draft', date: '2026-01-01', dr: 1000, cr: 1000, n: 2 }] };
+      }
+      if (/FROM tax_periods|FROM accounting_periods/.test(sql)) {
+        return { success: true, rows: [] };
       }
       return { success: true, rows: [{ id: TX }] };
     });
@@ -1136,6 +1277,25 @@ describe('accountingApi.postTransaction — draft-only + balance gate (Phase 0)'
     const flip = queries.find(q => q.startsWith('UPDATE transactions'))!;
     expect(flip).toMatch(/AND status = 'draft'/);
     expect(flip).toMatch(/RETURNING id/);
+  });
+
+  it('normalizes a Date-valued transaction date before period checks', async () => {
+    const periodDates: string[] = [];
+    const adapter = makeMockAdapter(async (sql, params) => {
+      if (/FROM transactions t WHERE/.test(sql)) {
+        return { success: true, rows: [{ status: 'draft', date: new Date(2026, 0, 1), dr: 1000, cr: 1000, n: 2 }] };
+      }
+      if (/FROM tax_periods|FROM accounting_periods/.test(sql)) {
+        periodDates.push(String((params as unknown[])[1]));
+        return { success: true, rows: [] };
+      }
+      return { success: true, rows: [{ id: TX }] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.postTransaction(TX, CO, 'user-1');
+    expect(res.success).toBe(true);
+    expect(periodDates).toEqual(['2026-01-01', '2026-01-01']);
   });
 });
 
@@ -1435,6 +1595,57 @@ describe('Phase 2 (IAS 21) — period-end revaluation', () => {
     };
     return { adapter, tx };
   }
+
+  it('refuses to revalue into a closed fiscal year (Phase 5 gate)', async () => {
+    const { adapter, tx } = revalAdapter([], []);
+    const base = (adapter.query as ReturnType<typeof vi.fn>).getMockImplementation();
+    (adapter.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM accounting_periods')) {
+        return {
+          success: true,
+          rows: [{
+            id: 'per-1', company_id: 'comp-1', year: 2025,
+            start_date: '2025-01-01', end_date: '2025-12-31',
+            status: 'closed', closed_at: '2026-01-05',
+          }],
+        };
+      }
+      return base ? base(sql) : { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.revalueForeignBalances('comp-1', 'user-1', '2025-06-30');
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/2025/);
+    expect(res.error).toMatch(/مقفلة/);
+    expect(tx, 'no JE is booked into a closed year').toHaveLength(0);
+  });
+
+  it('refuses to revalue into a filed tax period (Phase 3 gate)', async () => {
+    const { adapter, tx } = revalAdapter([], []);
+    const base = (adapter.query as ReturnType<typeof vi.fn>).getMockImplementation();
+    (adapter.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM tax_periods')) {
+        return {
+          success: true,
+          rows: [{
+            id: 'tp-1', company_id: 'comp-1', country_code: 'YE', period_type: 'quarterly',
+            start_date: '2026-07-01', end_date: '2026-09-30',
+            status: 'filed', filed_at: '2026-10-05',
+          }],
+        };
+      }
+      return base ? base(sql) : { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+    const res = await accountingApi.revalueForeignBalances('comp-1', 'user-1', '2026-09-30');
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/الفترة الضريبية مغلقة/);
+    expect(tx, 'no JE is booked into a filed period').toHaveLength(0);
+  });
 
   it('books incremental gains/losses and stamps last_reval_rate', async () => {
     const { adapter, tx } = revalAdapter(

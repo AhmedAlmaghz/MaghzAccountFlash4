@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createSupplierSchema, createPurchaseInvoiceSchema, createPurchaseOrderSchema, createPurchaseReturnSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
@@ -19,6 +19,83 @@ import type {
   SupplierStatementItem,
   ApAgingBucket,
 } from './types';
+
+// Typed RPC bridge for Purchases (AP mirror of the sales slice). In Electron
+// the renderer sends a structured payload and the main process derives
+// `company_id` from the authenticated session — the renderer can never touch
+// another company's supplier ledger. The fallback path (PGlite / e2e) still
+// uses `adapter.query` with explicit `company_id = $N` filters, and both
+// paths issue byte-equivalent SQL so a tenant reads the same balances.
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+async function invokePurchasesRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
+  const purchases = (typeof window !== 'undefined' && window.electronDB?.purchases) as
+    | Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined>
+    | undefined;
+  const fn = purchases?.[method];
+  if (!fn) return { success: false, error: 'RPC unavailable' };
+  try {
+    // `call(purchases, ...)` preserves the surface object as `this` so the e2e
+    // shim handlers (which call `this._cid()`) resolve the company id.
+    return await fn.call(purchases, payload);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+function mapSupplierRows(rows: Record<string, unknown>[] | undefined): Supplier[] {
+  return (rows || []).map((r) => {
+    const mapped = mapSupplier(r);
+    if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
+    return mapped;
+  });
+}
+
+// The typed channels fold a document's lines into one `lines` json array (one
+// round-trip instead of two). node-postgres may hand it back parsed or as a
+// string depending on the driver path, so accept both.
+function parseJsonLines(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value as Record<string, unknown>[];
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+// Aging bucketing lives here (not in the SQL) because the bucket boundaries
+// depend on "today" in the caller's clock. Both backends hand the same leg
+// rows to it — invoice dues, opening balance, posted payments, posted returns
+// — so a bucket never depends on which backend answered the query.
+function bucketAgingLegs(rows: Record<string, unknown>[]): ApAgingBucket[] {
+  const buckets: Record<string, number> = { '0-30': 0, '31-60': 0, '61-90': 0, '91+': 0 };
+  const now = new Date();
+
+  for (const row of rows) {
+    const dueRaw = (row.aging_date as string) || (row.due_date as string) || (row.date as string);
+    if (!dueRaw) continue;
+    const due = new Date(dueRaw as string);
+    if (isNaN(due.getTime())) continue;
+    const remaining = Number((row.due_amount as number) ?? 0);
+    if (remaining === 0) continue;
+    const diffDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+    // Negative credits (payments/returns) reduce the bucket they fall in.
+    if (diffDays <= 30) buckets['0-30'] += remaining;
+    else if (diffDays <= 60) buckets['31-60'] += remaining;
+    else if (diffDays <= 90) buckets['61-90'] += remaining;
+    else buckets['91+'] += remaining;
+  }
+
+  return Object.entries(buckets).map(([bucket, amount]) => ({
+    bucket,
+    amount,
+    count: amount > 0 ? 1 : 0,
+  }));
+}
 
 function toNum(v: unknown): number {
   const n = Number(v);
@@ -196,6 +273,12 @@ export const purchasesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getSuppliers', { companyId });
+        return result.success
+          ? { success: true, data: mapSupplierRows(result.rows) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT s.*,
@@ -231,6 +314,19 @@ export const purchasesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getSuppliersPaginated', {
+          companyId,
+          page: p,
+          pageSize: ps,
+          isActive: filters?.isActive ?? null,
+          search: filters?.search ?? null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count ?? 0);
+        return { success: true, data: paginatedResult(mapSupplierRows(rows), total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['company_id = $1'];
@@ -283,6 +379,15 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getSupplierById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Supplier not found' };
+        const mapped = mapSupplier(row);
+        if (row.computed_balance !== undefined) mapped.balance = Number(row.computed_balance) || 0;
+        return { success: true, data: mapped };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT s.*,
@@ -309,9 +414,8 @@ export const purchasesApi = {
     try {
       const validation = validateInput(createSupplierSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
-      const adapter = await getDbAdapter();
-      
-      // توليد رقم تلقائي إذا لم يتم تمريره
+      // Document-number generation stays here (document_sequences) so the main
+      // process never owns the sequence table — one implementation only.
       let supplierData = data;
       if (!data.code) {
         const seq = await getNextDocumentNumber(data.companyId, 'supplier');
@@ -319,12 +423,27 @@ export const purchasesApi = {
           supplierData = { ...data, code: seq.number };
         }
       }
-      
-      const result = await adapter.query(
-        `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance, is_active, created_by, updated_by)
-        VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::uuid) RETURNING id`,
-        [supplierData.companyId, supplierData.code, supplierData.name, supplierData.phone, supplierData.email, supplierData.address, supplierData.taxNumber, supplierData.balance, supplierData.isActive, safeUserId(_userId), safeUserId(_userId)]
-      );
+      let result;
+      if (isElectronPg()) {
+        const rpc = await invokePurchasesRpc('createSupplier', {
+          code: String(supplierData.code || ''),
+          name: String(supplierData.name || ''),
+          phone: supplierData.phone ?? null,
+          email: supplierData.email ?? null,
+          address: supplierData.address ?? null,
+          taxNumber: supplierData.taxNumber ?? null,
+          balance: Number(supplierData.balance) || 0,
+          isActive: supplierData.isActive,
+        });
+        result = { success: rpc.success, rows: rpc.rows, error: rpc.error };
+      } else {
+        const adapter = await getDbAdapter();
+        result = await adapter.query(
+          `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance, is_active, created_by, updated_by)
+          VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::uuid) RETURNING id`,
+          [supplierData.companyId, supplierData.code, supplierData.name, supplierData.phone, supplierData.email, supplierData.address, supplierData.taxNumber, supplierData.balance, supplierData.isActive, safeUserId(_userId), safeUserId(_userId)]
+        );
+      }
       if (result.success && result.rows?.[0]) {
         const supplierId = String(result.rows[0].id);
         // Opening balance: post a balanced JE (Dr Opening Equity / Cr AP)
@@ -345,6 +464,10 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const rpc = await invokePurchasesRpc('updateSupplier', { id, ...data });
+        return { success: rpc.success, error: rpc.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -381,6 +504,10 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const rpc = await invokePurchasesRpc('deleteSupplier', { id });
+        return { success: rpc.success, error: rpc.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         'UPDATE suppliers SET is_active = false, updated_by = $1::uuid, updated_at = NOW() WHERE id = $2::uuid AND company_id = $3::uuid',
@@ -396,6 +523,21 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(z.object({ supplierId: uuidSchema, companyId: companyIdSchema }), { supplierId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const rpc = await invokePurchasesRpc('getSupplierStatement', { supplierId });
+        if (!rpc.success) return { success: false, error: rpc.error };
+        const items: SupplierStatementItem[] = (rpc.rows || []).map((row) => ({
+          id: String(row.id),
+          date: toDateString(row.date) || String(row.date),
+          type: (row.type === 'opening' || row.type === 'invoice' || row.type === 'payment' || row.type === 'return' ? row.type : 'invoice') as SupplierStatementItem['type'],
+          documentNumber: String(row.document_number || ''),
+          description: String(row.description || ''),
+          debit: Number(row.debit) || 0,
+          credit: Number(row.credit) || 0,
+          balance: Number(row.balance) || 0,
+        }));
+        return { success: true, data: items };
+      }
       const adapter = await getDbAdapter();
       // Unified statement (opening + invoices + payments) in ONE query with a
       // running balance — the last row's balance is the supplier's FULL
@@ -458,6 +600,11 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(z.object({ supplierId: uuidSchema, companyId: companyIdSchema }), { supplierId, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const rpc = await invokePurchasesRpc('getApAging', { supplierId });
+        if (!rpc.success) return { success: false, error: rpc.error };
+        return { success: true, data: bucketAgingLegs(rpc.rows || []) };
+      }
       const adapter = await getDbAdapter();
       // Aging = opening + outstanding invoices - posted payments - posted returns.
       const result = await adapter.query(
@@ -477,31 +624,7 @@ export const purchasesApi = {
       );
       if (!result.success) return { success: false, error: result.error };
 
-      const buckets: Record<string, number> = { '0-30': 0, '31-60': 0, '61-90': 0, '91+': 0 };
-      const now = new Date();
-
-      for (const row of result.rows || []) {
-        const dueRaw = (row.aging_date as string) || (row.due_date as string) || (row.date as string);
-        if (!dueRaw) continue;
-        const due = new Date(dueRaw as string);
-        if (isNaN(due.getTime())) continue;
-        const remaining = Number((row.due_amount as number) ?? 0);
-        if (remaining === 0) continue;
-        const diffDays = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
-        // Negative credits (payments/returns) reduce the bucket they fall in.
-        if (diffDays <= 30) buckets['0-30'] += remaining;
-        else if (diffDays <= 60) buckets['31-60'] += remaining;
-        else if (diffDays <= 90) buckets['61-90'] += remaining;
-        else buckets['91+'] += remaining;
-      }
-
-      const data: ApAgingBucket[] = Object.entries(buckets).map(([bucket, amount]) => ({
-        bucket,
-        amount,
-        count: amount > 0 ? 1 : 0,
-      }));
-
-      return { success: true, data };
+      return { success: true, data: bucketAgingLegs((result.rows || []) as Record<string, unknown>[]) };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -511,6 +634,12 @@ export const purchasesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const rpc = await invokePurchasesRpc('getApAgingTotal', { companyId });
+        if (!rpc.success) return { success: false, error: rpc.error };
+        const total = (rpc.rows || []).reduce((s: number, r) => s + Number(Object.values(r)[0] || 0), 0);
+        return { success: true, total: Math.max(0, total) };
+      }
       const adapter = await getDbAdapter();
       // Full AP = opening + outstanding invoices - posted payments - posted returns.
       const result = await adapter.query(
@@ -533,6 +662,12 @@ export const purchasesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getInvoices', { companyId });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r) => mapInvoice(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT i.*, s.name as supplier_name, s.id as supplier_id
@@ -557,6 +692,12 @@ export const purchasesApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const suValidation = validateInput(uuidSchema, supplierId);
       if (!suValidation.success) return { success: false, error: suValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getOutstandingInvoicesForSupplier', { supplierId });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r) => mapInvoice(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT i.*, s.name as supplier_name
@@ -587,6 +728,20 @@ export const purchasesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getInvoicesPaginated', {
+          companyId,
+          page: p,
+          pageSize: ps,
+          status: filters?.status || null,
+          supplierId: filters?.supplierId || null,
+          invoiceNumber: filters?.invoiceNumber || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count ?? 0);
+        return { success: true, data: paginatedResult(rows.map((r) => mapInvoice(r)), total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['i.company_id = $1'];
@@ -640,6 +795,14 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getInvoiceById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        const invoice = mapInvoice(result.rows[0]);
+        invoice.lines = parseJsonLines(result.rows[0].lines).map((r) => mapInvoiceLine(r));
+        return { success: true, data: invoice };
+      }
       const adapter = await getDbAdapter();
       const inv = await adapter.query(
         `SELECT i.*, s.name as supplier_name FROM purchase_invoices i
@@ -649,8 +812,8 @@ export const purchasesApi = {
       if (!inv.success || !inv.rows?.[0]) return { success: false, error: inv.error || 'Not found' };
 
       const lines = await adapter.query(
-        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM purchase_invoice_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.invoice_id = $1`,
-        [id]
+        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM purchase_invoice_lines l LEFT JOIN products p ON l.product_id = p.id AND p.company_id = $2::uuid WHERE l.invoice_id = $1`,
+        [id, companyId]
       );
 
       const invoice = mapInvoice(inv.rows[0]);
@@ -665,6 +828,9 @@ export const purchasesApi = {
     try {
       const validation = validateInput(createPurchaseInvoiceSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (data.status && data.status !== 'draft') {
+        return { success: false, error: 'Purchase invoices must be created as drafts.' };
+      }
       // Phase 0 fix: parity with sales.createInvoice — overpayment and
       // non-positive rates are rejected up front instead of entering the books.
       if ((data.paidAmount ?? 0) > data.totalAmount) {
@@ -1073,6 +1239,12 @@ export const purchasesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getOrders', { companyId });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r) => mapOrder(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT po.*, s.name as supplier_name, s.id as supplier_id
@@ -1101,6 +1273,19 @@ export const purchasesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getOrdersPaginated', {
+          companyId,
+          page: p,
+          pageSize: ps,
+          status: filters?.status || null,
+          supplierId: filters?.supplierId || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count ?? 0);
+        return { success: true, data: paginatedResult(rows.map((r) => mapOrder(r)), total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['po.company_id = $1'];
@@ -1148,6 +1333,14 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getOrderById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        const order = mapOrder(result.rows[0]);
+        order.lines = parseJsonLines(result.rows[0].lines).map((r) => mapOrderLine(r));
+        return { success: true, data: order };
+      }
       const adapter = await getDbAdapter();
       const order = await adapter.query(
         `SELECT po.*, s.name as supplier_name FROM purchase_orders po
@@ -1157,8 +1350,8 @@ export const purchasesApi = {
       if (!order.success || !order.rows?.[0]) return { success: false, error: order.error || 'Not found' };
 
       const lines = await adapter.query(
-        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM purchase_order_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.order_id = $1::uuid`,
-        [id]
+        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM purchase_order_lines l LEFT JOIN products p ON l.product_id = p.id AND p.company_id = $2::uuid WHERE l.order_id = $1::uuid`,
+        [id, companyId]
       );
 
       const mapped = mapOrder(order.rows[0]);
@@ -1173,6 +1366,9 @@ export const purchasesApi = {
     try {
       const validation = validateInput(createPurchaseOrderSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (data.status && data.status !== 'draft') {
+        return { success: false, error: 'Purchase orders must be created as drafts.' };
+      }
       const adapter = await getDbAdapter();
       const orderId = crypto.randomUUID();
       const params: unknown[] = [orderId, data.companyId, data.orderNumber, data.supplierId, data.date, data.expectedDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
@@ -1252,6 +1448,28 @@ export const purchasesApi = {
       const adapter = await getDbAdapter();
       const order = await purchasesApi.getOrderById(orderId, companyId);
       if (!order.success || !order.data) return { success: false, error: 'Order not found' };
+      // An order may only become an invoice while it is still open. Before,
+      // ANY status converted — a cancelled order produced a live payable, and
+      // an already-invoiced one produced a second invoice (double payable +
+      // double stock once posted), each burning a document number.
+      const CONVERTIBLE: ReadonlyArray<PurchaseOrder['status']> = ['draft', 'sent', 'partially_received', 'received'];
+      if (!CONVERTIBLE.includes(order.data.status)) {
+        return { success: false, error: `أمر الشراء ${order.data.orderNumber} في حالة «${order.data.status}» — لا يمكن تحويله إلى فاتورة` };
+      }
+      const previousStatus = order.data.status;
+
+      // Claim the order BEFORE consuming a document number. The conditional
+      // UPDATE ... RETURNING is the mutual exclusion: a second conversion
+      // finds status='invoiced' and gets zero rows.
+      const claim = await adapter.query<{ id: string }>(
+        `UPDATE purchase_orders SET status = 'invoiced', updated_by = $3::uuid, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND status = ANY($4::text[])
+          RETURNING id`,
+        [orderId, companyId, safeUserId(_userId), [...CONVERTIBLE]]
+      );
+      if (!claim.success || !claim.rows || claim.rows.length === 0) {
+        return { success: false, error: `تعذّر حجز أمر الشراء ${order.data.orderNumber} — قد يكون محوّلاً بالفعل أو معدّلاً بالتزامن` };
+      }
 
       const today = new Date().toISOString().split('T')[0];
       const seq = await getNextDocumentNumber(companyId, 'purchase_invoice');
@@ -1289,8 +1507,17 @@ export const purchasesApi = {
       };
 
       const createResult = await purchasesApi.createInvoice(invData, _userId);
-      if (createResult.success) {
-        await adapter.query(`UPDATE purchase_orders SET status = 'invoiced', updated_by = $3::uuid, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`, [orderId, companyId, safeUserId(_userId)]);
+      if (!createResult.success) {
+        // Release the claim so the operator can retry. The ORIGINAL status is
+        // restored (not a guessed one), and NOT EXISTS makes the rollback safe
+        // when the create actually committed but timed out on the way back —
+        // an order is never un-claimed behind a real invoice.
+        await adapter.query(
+          `UPDATE purchase_orders SET status = $3, updated_at = NOW()
+            WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'invoiced'
+              AND NOT EXISTS (SELECT 1 FROM purchase_invoices WHERE purchase_order_id = $1::uuid AND company_id = $2::uuid)`,
+          [orderId, companyId, previousStatus]
+        );
       }
       return createResult;
     } catch (e) {
@@ -1303,6 +1530,12 @@ export const purchasesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getReturns', { companyId });
+        return result.success
+          ? { success: true, data: (result.rows || []).map((r) => mapReturn(r)) }
+          : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT r.*, s.name as supplier_name, s.id as supplier_id
@@ -1331,6 +1564,19 @@ export const purchasesApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getReturnsPaginated', {
+          companyId,
+          page: p,
+          pageSize: ps,
+          status: filters?.status || null,
+          supplierId: filters?.supplierId || null,
+        });
+        if (!result.success) return { success: false, error: result.error };
+        const rows = result.rows || [];
+        const total = Number(rows[0]?.total_count ?? 0);
+        return { success: true, data: paginatedResult(rows.map((r) => mapReturn(r)), total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['r.company_id = $1'];
@@ -1378,6 +1624,14 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getReturnById', { id });
+        if (!result.success) return { success: false, error: result.error };
+        if (!result.rows?.[0]) return { success: false, error: 'Not found' };
+        const purchaseReturn = mapReturn(result.rows[0]);
+        purchaseReturn.lines = parseJsonLines(result.rows[0].lines).map((r) => mapReturnLine(r));
+        return { success: true, data: purchaseReturn };
+      }
       const adapter = await getDbAdapter();
       const ret = await adapter.query(
         `SELECT r.*, s.name as supplier_name FROM purchase_returns r
@@ -1387,8 +1641,8 @@ export const purchasesApi = {
       if (!ret.success || !ret.rows?.[0]) return { success: false, error: ret.error || 'Not found' };
 
       const lines = await adapter.query(
-        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM purchase_return_lines l LEFT JOIN products p ON l.product_id = p.id WHERE l.return_id = $1`,
-        [id]
+        `SELECT l.*, p.name_ar as product_name, p.code as product_code, p.barcode, p.sku, p.unit FROM purchase_return_lines l LEFT JOIN products p ON l.product_id = p.id AND p.company_id = $2::uuid WHERE l.return_id = $1`,
+        [id, companyId]
       );
 
       const mapped = mapReturn(ret.rows[0]);
@@ -1403,6 +1657,9 @@ export const purchasesApi = {
     try {
       const validation = validateInput(createPurchaseReturnSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      if (data.status && data.status !== 'draft') {
+        return { success: false, error: 'Purchase returns must be created as drafts.' };
+      }
       const adapter = await getDbAdapter();
       const returnId = crypto.randomUUID();
       const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId || null, data.supplierId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, data.reason, safeUserId(_userId), safeUserId(_userId)];
@@ -1680,6 +1937,20 @@ export const purchasesApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('getPurchasesKpis', { companyId });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0] || {};
+        return {
+          success: true,
+          data: {
+            totalOrders: toNum(row.total_orders),
+            pendingOrders: toNum(row.pending_orders),
+            totalInvoicesValue: toNum(row.total_invoices_value),
+            apOutstanding: toNum(row.ap_outstanding),
+          },
+        };
+      }
       const adapter = await getDbAdapter();
       const [ordersResult, pendingResult, invoicesResult, apResult] = await Promise.all([
         adapter.query<{ cnt: string | number }>(

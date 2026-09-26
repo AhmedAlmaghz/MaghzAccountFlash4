@@ -584,6 +584,12 @@ const SEQUENCES: Array<{ type: string; prefix: string; start: number; current: n
   { type: 'customer', prefix: 'CUS-', start: 1, current: 0, pad: 5 },
   { type: 'supplier', prefix: 'SUP-', start: 1, current: 0, pad: 4 },
   { type: 'employee', prefix: 'EMP-', start: 1, current: 0, pad: 4 },
+  // Accounting: fixed assets are numbered by the SAME renderer helper as every
+  // other document (core/api.ts getNextDocumentNumber → 'fixed_asset'). Missing
+  // here meant a browser/PGlite company could never create a fixed asset:
+  // "Sequence not found: fixed_asset". The demo seed and the signup backfill
+  // both have it — the three engines must agree (gated by documentSequenceGate).
+  { type: 'fixed_asset', prefix: 'FA-', start: 1, current: 0, pad: 4 },
 ];
 
 // System roles seeded for every company. Permission lists mirror

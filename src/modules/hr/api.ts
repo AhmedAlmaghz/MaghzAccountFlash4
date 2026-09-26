@@ -550,8 +550,8 @@ export const hrApi = {
       if (runs.length > 0) {
         const runIds = runs.map((r) => r.id);
         const linesRes = await adapter.query(
-          `SELECT pl.*, e.full_name as employee_name FROM payroll_lines pl LEFT JOIN employees e ON pl.employee_id = e.id WHERE pl.payroll_run_id = ANY($1)`,
-          [runIds]
+          `SELECT pl.*, e.full_name as employee_name FROM payroll_lines pl LEFT JOIN employees e ON pl.employee_id = e.id AND e.company_id = $2::uuid WHERE pl.payroll_run_id = ANY($1)`,
+          [runIds, companyId]
         );
         const linesByRun = new Map<string, PayrollLine[]>();
         for (const lr of (linesRes.rows || []) as Record<string, unknown>[]) {
@@ -625,8 +625,8 @@ export const hrApi = {
       if (runs.length > 0) {
         const runIds = runs.map((r) => r.id);
         const linesRes = await adapter.query(
-          `SELECT pl.*, e.full_name as employee_name FROM payroll_lines pl LEFT JOIN employees e ON pl.employee_id = e.id WHERE pl.payroll_run_id = ANY($1)`,
-          [runIds]
+          `SELECT pl.*, e.full_name as employee_name FROM payroll_lines pl LEFT JOIN employees e ON pl.employee_id = e.id AND e.company_id = $2::uuid WHERE pl.payroll_run_id = ANY($1)`,
+          [runIds, companyId]
         );
         const linesByRun = new Map<string, PayrollLine[]>();
         for (const lr of (linesRes.rows || []) as Record<string, unknown>[]) {

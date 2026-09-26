@@ -137,6 +137,42 @@ describe('period guard', () => {
     const res = await assertPeriodOpen('comp-1', '2026-09-15');
     expect(res.open).toBe(true);
   });
+
+  it('fails closed when the period lookup returns an error', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(
+      stubDb(async () => ({ success: false, error: 'permission denied' })) as never
+    );
+    const res = await assertPeriodOpen('comp-1', '2026-09-15');
+    expect(res.open).toBe(false);
+    if (!res.open) {
+      expect(res.error).toBe('permission denied');
+      expect(res.period.status).toBe('closed');
+    }
+  });
+
+  it('fails closed when the period lookup throws', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(
+      stubDb(async () => { throw new Error('database unavailable'); }) as never
+    );
+    const res = await assertPeriodOpen('comp-1', '2026-09-15');
+    expect(res.open).toBe(false);
+    if (!res.open) expect(res.error).toContain('database unavailable');
+  });
+
+  it('fails closed for a missing posting date', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(stubDb(async () => ({ success: true, rows: [] })) as never);
+    const res = await assertPeriodOpen('comp-1', '');
+    expect(res.open).toBe(false);
+    if (!res.open) expect(res.error).toBe('Posting date is required');
+  });
+
+  it('fails closed when a covering period has no status', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(
+      stubDb(async () => ({ success: true, rows: [{ id: 'p1', company_id: 'comp-1' }] })) as never
+    );
+    const res = await assertPeriodOpen('comp-1', '2026-09-15');
+    expect(res.open).toBe(false);
+  });
 });
 
 describe('period lifecycle + VAT return', () => {

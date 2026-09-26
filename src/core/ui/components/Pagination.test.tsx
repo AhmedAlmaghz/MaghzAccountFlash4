@@ -18,18 +18,18 @@ describe('Pagination', () => {
 
   it('disables previous buttons on first page', () => {
     render(<Pagination {...defaultProps} page={1} />);
-    const firstButton = screen.getByRole('button', { name: /first page/i });
-    const prevButton = screen.getByRole('button', { name: /previous page/i });
+    const firstButton = screen.getByRole('button', { name: /الأولى/ });
+    const prevButton = screen.getByRole('button', { name: /السابقة/ });
     expect(firstButton).toBeDisabled();
     expect(prevButton).toBeDisabled();
   });
 
   it('enables navigation buttons on middle page', () => {
     render(<Pagination {...defaultProps} page={5} />);
-    const firstButton = screen.getByRole('button', { name: /first page/i });
-    const prevButton = screen.getByRole('button', { name: /previous page/i });
-    const nextButton = screen.getByRole('button', { name: /next page/i });
-    const lastButton = screen.getByRole('button', { name: /last page/i });
+    const firstButton = screen.getByRole('button', { name: /الأولى/ });
+    const prevButton = screen.getByRole('button', { name: /السابقة/ });
+    const nextButton = screen.getByRole('button', { name: /التالية/ });
+    const lastButton = screen.getByRole('button', { name: /الأخيرة/ });
     expect(firstButton).toBeEnabled();
     expect(prevButton).toBeEnabled();
     expect(nextButton).toBeEnabled();
@@ -38,8 +38,8 @@ describe('Pagination', () => {
 
   it('disables next buttons on last page', () => {
     render(<Pagination {...defaultProps} page={10} />);
-    const nextButton = screen.getByRole('button', { name: /next page/i });
-    const lastButton = screen.getByRole('button', { name: /last page/i });
+    const nextButton = screen.getByRole('button', { name: /التالية/ });
+    const lastButton = screen.getByRole('button', { name: /الأخيرة/ });
     expect(nextButton).toBeDisabled();
     expect(lastButton).toBeDisabled();
   });
@@ -47,7 +47,7 @@ describe('Pagination', () => {
   it('calls onPageChange when clicking next', () => {
     const onPageChange = vi.fn();
     render(<Pagination {...defaultProps} page={1} onPageChange={onPageChange} />);
-    const nextButton = screen.getByRole('button', { name: /next page/i });
+    const nextButton = screen.getByRole('button', { name: /التالية/ });
     fireEvent.click(nextButton);
     expect(onPageChange).toHaveBeenCalledWith(2);
   });
@@ -55,7 +55,7 @@ describe('Pagination', () => {
   it('calls onPageChange when clicking previous', () => {
     const onPageChange = vi.fn();
     render(<Pagination {...defaultProps} page={5} onPageChange={onPageChange} />);
-    const prevButton = screen.getByRole('button', { name: /previous page/i });
+    const prevButton = screen.getByRole('button', { name: /السابقة/ });
     fireEvent.click(prevButton);
     expect(onPageChange).toHaveBeenCalledWith(4);
   });
@@ -63,7 +63,7 @@ describe('Pagination', () => {
   it('calls onPageChange when clicking first', () => {
     const onPageChange = vi.fn();
     render(<Pagination {...defaultProps} page={5} onPageChange={onPageChange} />);
-    const firstButton = screen.getByRole('button', { name: /first page/i });
+    const firstButton = screen.getByRole('button', { name: /الأولى/ });
     fireEvent.click(firstButton);
     expect(onPageChange).toHaveBeenCalledWith(1);
   });
@@ -71,7 +71,7 @@ describe('Pagination', () => {
   it('calls onPageChange when clicking last', () => {
     const onPageChange = vi.fn();
     render(<Pagination {...defaultProps} page={5} onPageChange={onPageChange} />);
-    const lastButton = screen.getByRole('button', { name: /last page/i });
+    const lastButton = screen.getByRole('button', { name: /الأخيرة/ });
     fireEvent.click(lastButton);
     expect(onPageChange).toHaveBeenCalledWith(10);
   });
@@ -79,14 +79,14 @@ describe('Pagination', () => {
   it('shows page size selector when enabled', () => {
     const onPageSizeChange = vi.fn();
     render(<Pagination {...defaultProps} onPageSizeChange={onPageSizeChange} showSizeChanger={true} />);
-    const select = screen.getByRole('combobox', { name: /page size/i });
+    const select = screen.getByRole('combobox', { name: /حجم الصفحة/ });
     expect(select).toBeInTheDocument();
   });
 
   it('calls onPageSizeChange when changing page size', () => {
     const onPageSizeChange = vi.fn();
     render(<Pagination {...defaultProps} onPageSizeChange={onPageSizeChange} showSizeChanger={true} />);
-    const select = screen.getByRole('combobox', { name: /page size/i });
+    const select = screen.getByRole('combobox', { name: /حجم الصفحة/ });
     fireEvent.change(select, { target: { value: '25' } });
     expect(onPageSizeChange).toHaveBeenCalledWith(25);
   });
@@ -94,7 +94,7 @@ describe('Pagination', () => {
   it('hides page size selector when showSizeChanger is false', () => {
     const onPageSizeChange = vi.fn();
     render(<Pagination {...defaultProps} onPageSizeChange={onPageSizeChange} showSizeChanger={false} />);
-    const select = screen.queryByRole('combobox', { name: /page size/i });
+    const select = screen.queryByRole('combobox', { name: /حجم الصفحة/ });
     expect(select).not.toBeInTheDocument();
   });
 

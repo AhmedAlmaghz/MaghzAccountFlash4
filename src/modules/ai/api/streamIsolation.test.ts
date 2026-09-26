@@ -1,4 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('@/core/database/adapters', () => ({
+  getDbMode: vi.fn(() => 'pg'),
+}));
+
 import { aiApi } from './index';
 import type { LlmMessage } from '../types';
 

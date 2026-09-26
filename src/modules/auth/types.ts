@@ -44,8 +44,6 @@ export interface AuditLog {
 }
 
 export type Permission =
-  // Wildcard
-  | '*'
   // Core
   | 'core.view' | 'core.edit'
   // Accounting

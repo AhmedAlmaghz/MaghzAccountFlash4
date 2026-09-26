@@ -63,7 +63,6 @@ export function hasPermission(ctx: ServiceContext, permission: string): boolean 
     const restricted: string[] = ['core.edit'];
     return !restricted.includes(permission);
   }
-  if (ctx.permissions.includes('*')) return true;
   return ctx.permissions.includes(permission);
 }
 

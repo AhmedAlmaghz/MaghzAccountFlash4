@@ -39,6 +39,21 @@ describe('aiPersistence.saveCurrentSession — session separation', () => {
     expect(useAiStore.getState().sessionId).toBe('NEW-SID');
   });
 
+  it('does not let a queued save from a disposed auth context stamp the next session', async () => {
+    useAiStore.getState().addMessage({ role: 'user', kind: 'text', content: 'سياقة قديمة' });
+    let resolveSave!: (v: { success: true; data: { sessionId: string } }) => void;
+    mocks.saveSession.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+
+    const pending = aiPersistence.saveCurrentSession();
+    aiPersistence.dispose();
+    useAiStore.getState().clearMessages();
+    useAiStore.getState().addMessage({ role: 'user', kind: 'text', content: 'مستخدم جديد' });
+    resolveSave({ success: true, data: { sessionId: 'OLD-SID' } });
+    await pending;
+
+    expect(useAiStore.getState().sessionId).toBeNull();
+    expect(useAiStore.getState().messages[0]?.content).toBe('مستخدم جديد');
+  });
   it('does NOT stamp a stale session id when the user switched conversations mid-save', async () => {
     // Old conversation, never saved (sessionId null):
     useAiStore.getState().addMessage({ role: 'user', kind: 'text', content: 'سؤال قديم' });

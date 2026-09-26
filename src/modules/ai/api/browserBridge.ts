@@ -109,6 +109,7 @@ const DEFAULT_PROVIDER_HOSTS = new Set([
   'api.groq.com',
   'api.together.xyz',
   'generativelanguage.googleapis.com',
+  'api.typesafe.ai',
   'localhost',
   '127.0.0.1',
   '::1',
@@ -1128,8 +1129,8 @@ export const browserAiBridge = {
       // collisions silently drop duplicates while the header kept the
       // pre-dedupe count (phantom "remaining" on done batches).
       await adapter.query(
-        `UPDATE ai_job_batches SET total_count = $2, updated_at = NOW() WHERE id = $1::uuid`,
-        [batchId, inserted]
+        `UPDATE ai_job_batches SET total_count = $3, updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [batchId, companyId, inserted]
       );
       return { success: true, data: { batchId, total: inserted, inserted } };
     } catch (err) {

@@ -11,6 +11,7 @@ import {
 } from './batchQueue';
 import type { JobBatchDetail, JobBatchSummary } from '../api/batchTypes';
 import { BATCH_CLAIM_LIMIT } from '../api/batchTypes';
+import { checkJevPostingTool } from '../jev/jevPostingGuard';
 
 /**
  * Batch worker — runs in the renderer, state lives in Postgres.
@@ -264,6 +265,29 @@ async function runBatchInner(
   // only fails EXPIRED (dead-worker) rows, never our in-flight items.
   const workerId = newWorkerId();
 
+  const executeGuardedItem = async (
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<{
+    blocked: boolean;
+    outcome: Awaited<ReturnType<typeof executeToolCall>>;
+  }> => {
+    const postingCheck = await checkJevPostingTool(companyId, toolName, getTool(toolName), args);
+    if (postingCheck.result.verdict === 'block') {
+      return {
+        blocked: true,
+        outcome: {
+          ok: false,
+          error: `تم منع التنفيذ بواسطة JEV: ${postingCheck.result.reason}`,
+        },
+      };
+    }
+    return {
+      blocked: false,
+      outcome: await executeToolCall(toolName, args, { companyId, userId }),
+    };
+  };
+
   while (!isTerminalBatchStatus(detail.status)) {
     if (callbacks.shouldStop?.()) {
       // Loop-top stop (no live chunk in hand — any previous chunk was fully
@@ -357,8 +381,8 @@ async function runBatchInner(
         // stays claimed (30-min lease), no fail call, no attempt burned
         // beyond the claim itself, no dependent cascade. Bounded: a second
         // consecutive RATE_LIMIT falls through to the normal fail path.
-        let outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
-        if (outcome.errorClass?.code === 'RATE_LIMIT') {
+        let execution = await executeGuardedItem(item.toolName, sub.args);
+        if (!execution.blocked && execution.outcome.errorClass?.code === 'RATE_LIMIT') {
           const waited = await sleepRateLimitWindow(callbacks.shouldStop, callbacks.rateLimitWindowMs);
           if (!waited) {
             // Stopped during the cooldown — release the rest of the chunk
@@ -367,8 +391,9 @@ async function runBatchInner(
             detail = (await refresh(companyId, userId, batchId)) ?? detail;
             return detail;
           }
-          outcome = await executeToolCall(item.toolName, sub.args, { companyId, userId });
+          execution = await executeGuardedItem(item.toolName, sub.args);
         }
+        const outcome = execution.outcome;
         if (outcome.ok) {
           const scalars = extractOutputScalars(outcome.result);
           rememberOutput(item, scalars);
@@ -400,16 +425,20 @@ async function runBatchInner(
           // so re-running the item would create a duplicate financial
           // document. Mark it permanently failed instead of retrying; the
           // honest result_data record + audit trail keep the truth.
-          const isTimeout = outcome.errorClass?.code === 'TIMEOUT';
+          const isTimeout = !execution.blocked && outcome.errorClass?.code === 'TIMEOUT';
           const toolDef = getTool(item.toolName);
           const isWrite = toolDef?.dangerLevel === 'write';
-          const retryable = isTimeout && isWrite
+          const retryable = execution.blocked
             ? false
-            : outcome.errorClass ? outcome.errorClass.retryable : true;
+            : isTimeout && isWrite
+              ? false
+              : outcome.errorClass ? outcome.errorClass.retryable : true;
           const failed = await aiApi.batchItemFail(
             companyId, userId, batchId, item.id,
             outcome.error ?? 'خطأ غير معروف',
-            outcome.errorClass?.code ?? (isTimeout && isWrite ? 'TIMEOUT_WRITE' : null),
+            execution.blocked
+              ? 'JEV_POSTING_BLOCKED'
+              : outcome.errorClass?.code ?? (isTimeout && isWrite ? 'TIMEOUT_WRITE' : null),
             retryable,
           );
           if (failed.success && failed.data?.retried) {
