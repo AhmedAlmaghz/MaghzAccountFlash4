@@ -1,7 +1,7 @@
 ---
 title: "Settings — User Guide"
 sidebarTitle: "Settings"
-slug: "en/04-settings/README"
+slug: "en/04-settings/index"
 group: "Settings"
 language: "en"
 created: 2026-09-13
@@ -105,6 +105,6 @@ After completing the seven steps, create the users and roles, then start enterin
 - Start with the default accounts template that fits your business, then adjust what is needed — faster than manual linking row by row.
 - Use the **Preview** button in Document Sequences before issuing invoices to confirm the final number format.
 - Take a backup immediately after completing the initial setup; that gives you a "safe point" you can return to.
-- Review `16-multicurrency/README.md` before dealing in any currency other than the Yemeni Rial — the exchange rate rule and the conversion formula are documented there with examples.
+- Review `16-multicurrency/index.md` before dealing in any currency other than the Yemeni Rial — the exchange rate rule and the conversion formula are documented there with examples.
 - Every page above has its own guide file in this folder containing field tables, numeric examples, and common errors — never start a sensitive change before reading it.
 - When in doubt about the effect of any setting, try it on a demo company first, then apply it to production data.

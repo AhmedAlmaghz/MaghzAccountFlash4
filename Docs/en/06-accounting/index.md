@@ -1,7 +1,7 @@
 ---
 title: "Accounting Module — User Guide"
 sidebarTitle: "Accounting Module"
-slug: "en/06-accounting/README"
+slug: "en/06-accounting/index"
 group: "Accounting"
 language: "en"
 created: 2026-09-13

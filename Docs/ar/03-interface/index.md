@@ -1,7 +1,7 @@
 ---
 title: "الواجهة العامة — دليل الاستخدام"
 sidebarTitle: "الواجهة العامة"
-slug: "ar/03-interface/README"
+slug: "ar/03-interface/index"
 group: "الواجهة العامة"
 language: "ar"
 created: 2026-09-12

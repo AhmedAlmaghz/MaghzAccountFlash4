@@ -115,7 +115,7 @@ What you see after logging in depends on your role:
 | `sales_rep` | Only its own sales, POS, and data (`sales.own`) |
 | `viewer` | Read-only, with no adding or editing |
 
-> **Note:** hiding menus by permission is a user-experience measure, but the real protection is that every route in the system is guarded — even if someone tries to type the URL directly, the page is refused. See `03-interface/README.md`.
+> **Note:** hiding menus by permission is a user-experience measure, but the real protection is that every route in the system is guarded — even if someone tries to type the URL directly, the page is refused. See `03-interface/index.md`.
 
 ## Common Errors & Fixes
 

@@ -1,7 +1,7 @@
 ---
 title: "نقاط البيع (POS) — دليل الاستخدام"
 sidebarTitle: "نقاط البيع (POS)"
-slug: "ar/10-pos/README"
+slug: "ar/10-pos/index"
 group: "نقاط البيع POS"
 language: "ar"
 created: 2026-09-12

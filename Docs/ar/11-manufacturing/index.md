@@ -1,7 +1,7 @@
 ---
 title: "التصنيع — دليل الاستخدام"
 sidebarTitle: "التصنيع"
-slug: "ar/11-manufacturing/README"
+slug: "ar/11-manufacturing/index"
 group: "التصنيع"
 language: "ar"
 created: 2026-09-12

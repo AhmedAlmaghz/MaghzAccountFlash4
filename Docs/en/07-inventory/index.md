@@ -1,7 +1,7 @@
 ---
 title: "Inventory — User Guide"
 sidebarTitle: "Inventory"
-slug: "en/07-inventory/README"
+slug: "en/07-inventory/index"
 group: "Inventory"
 language: "en"
 created: 2026-09-13

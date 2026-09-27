@@ -1,7 +1,7 @@
 ---
 title: "CRM — دليل الاستخدام"
 sidebarTitle: "CRM"
-slug: "ar/13-crm/README"
+slug: "ar/13-crm/index"
 group: "علاقات العملاء CRM"
 language: "ar"
 created: 2026-09-12

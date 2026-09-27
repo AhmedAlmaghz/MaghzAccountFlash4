@@ -1,7 +1,7 @@
 ---
 title: "Multi-Currency — User Guide"
 sidebarTitle: "Multi-Currency"
-slug: "en/16-multicurrency/README"
+slug: "en/16-multicurrency/index"
 group: "Multi-Currency"
 language: "en"
 created: 2026-09-13

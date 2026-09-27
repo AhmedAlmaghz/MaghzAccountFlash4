@@ -1,7 +1,7 @@
 ---
 title: "Users, Roles & Permissions — User Guide"
 sidebarTitle: "Users, Roles & Permissions"
-slug: "en/05-users-roles/README"
+slug: "en/05-users-roles/index"
 group: "Users & Roles"
 language: "en"
 created: 2026-09-13

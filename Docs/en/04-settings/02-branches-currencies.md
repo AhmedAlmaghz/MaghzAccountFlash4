@@ -14,7 +14,7 @@ author: "Ahmed Almaghz"
 
 ## Overview
 
-This page documents two sections of the settings: **Branches** (the organization's operating locations) and **Currencies** (the base currency plus the working currencies with their exchange rates). Currencies are the backbone of any multi-currency handling in invoices, vouchers, and reports — see also `16-multicurrency/README.md`.
+This page documents two sections of the settings: **Branches** (the organization's operating locations) and **Currencies** (the base currency plus the working currencies with their exchange rates). Currencies are the backbone of any multi-currency handling in invoices, vouchers, and reports — see also `16-multicurrency/index.md`.
 
 ---
 

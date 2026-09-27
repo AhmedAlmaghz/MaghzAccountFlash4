@@ -1,7 +1,7 @@
 ---
 title: "CRM — User Guide"
 sidebarTitle: "CRM"
-slug: "en/13-crm/README"
+slug: "en/13-crm/index"
 group: "CRM"
 language: "en"
 created: 2026-09-13

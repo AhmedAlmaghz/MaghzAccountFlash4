@@ -1,7 +1,7 @@
 ---
 title: "نظرة عامة على النظام — MaghzAccountPro"
 sidebarTitle: "نظرة عامة على النظام"
-slug: "ar/01-introduction/README"
+slug: "ar/01-introduction/index"
 group: "مقدمة النظام"
 language: "ar"
 created: 2026-09-12

@@ -1,7 +1,7 @@
 ---
 title: "General Interface — User Guide"
 sidebarTitle: "General Interface"
-slug: "en/03-interface/README"
+slug: "en/03-interface/index"
 group: "The Interface"
 language: "en"
 created: 2026-09-13

@@ -1,7 +1,7 @@
 ---
 title: "المخازن — دليل الاستخدام"
 sidebarTitle: "المخازن"
-slug: "ar/07-inventory/README"
+slug: "ar/07-inventory/index"
 group: "المخازن"
 language: "ar"
 created: 2026-09-12

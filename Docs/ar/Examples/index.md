@@ -1,7 +1,7 @@
 ---
 title: "أمثلة تدريبية محلولة — دليل الاستخدام"
 sidebarTitle: "أمثلة تدريبية محلولة"
-slug: "ar/Examples/README"
+slug: "ar/Examples/index"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21

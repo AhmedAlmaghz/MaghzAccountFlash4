@@ -1,7 +1,7 @@
 ---
 title: "Tax Jurisdictions — User Guide"
 sidebarTitle: "Tax Jurisdictions"
-slug: "en/17-tax-jurisdictions/README"
+slug: "en/17-tax-jurisdictions/index"
 group: "Tax Jurisdictions"
 language: "en"
 created: 2026-09-20

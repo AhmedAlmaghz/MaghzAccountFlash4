@@ -1,7 +1,7 @@
 ---
 title: "العملات المتعددة — دليل الاستخدام"
 sidebarTitle: "العملات المتعددة"
-slug: "ar/16-multicurrency/README"
+slug: "ar/16-multicurrency/index"
 group: "العملات المتعددة"
 language: "ar"
 created: 2026-09-12

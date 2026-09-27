@@ -1,7 +1,7 @@
 ---
 title: "وحدة المحاسبة — دليل الاستخدام"
 sidebarTitle: "وحدة المحاسبة"
-slug: "ar/06-accounting/README"
+slug: "ar/06-accounting/index"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-12

@@ -1,7 +1,7 @@
 ---
 title: "المستخدمون والأدوار والصلاحيات — دليل الاستخدام"
 sidebarTitle: "المستخدمون والأدوار والصلاحيات"
-slug: "ar/05-users-roles/README"
+slug: "ar/05-users-roles/index"
 group: "المستخدمون والأدوار"
 language: "ar"
 created: 2026-09-12

@@ -1,7 +1,7 @@
 ---
 title: "Manufacturing — User Guide"
 sidebarTitle: "Manufacturing"
-slug: "en/11-manufacturing/README"
+slug: "en/11-manufacturing/index"
 group: "Manufacturing"
 language: "en"
 created: 2026-09-13

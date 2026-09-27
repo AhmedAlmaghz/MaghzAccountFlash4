@@ -1,7 +1,7 @@
 ---
 title: "Point of Sale (POS) — User Guide"
 sidebarTitle: "Point of Sale (POS)"
-slug: "en/10-pos/README"
+slug: "en/10-pos/index"
 group: "Point of Sale (POS)"
 language: "en"
 created: 2026-09-13

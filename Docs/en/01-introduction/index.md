@@ -1,7 +1,7 @@
 ---
 title: "System Overview — MaghzAccountPro"
 sidebarTitle: "System Overview"
-slug: "en/01-introduction/README"
+slug: "en/01-introduction/index"
 group: "System Introduction"
 language: "en"
 created: 2026-09-13

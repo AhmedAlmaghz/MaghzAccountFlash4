@@ -1,7 +1,7 @@
 ---
 title: "الوكيل الذكي «مغزى» — دليل الاستخدام الشامل"
 sidebarTitle: "الوكيل الذكي «مغزى»"
-slug: "ar/15-ai-assistant/README"
+slug: "ar/15-ai-assistant/index"
 group: "الوكيل الذكي «مغزى»"
 language: "ar"
 created: 2026-09-12

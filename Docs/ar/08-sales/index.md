@@ -1,7 +1,7 @@
 ---
 title: "المبيعات — دليل الاستخدام"
 sidebarTitle: "المبيعات"
-slug: "ar/08-sales/README"
+slug: "ar/08-sales/index"
 group: "المبيعات"
 language: "ar"
 created: 2026-09-12

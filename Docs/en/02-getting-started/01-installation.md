@@ -126,7 +126,7 @@ If this is not the first run and you have previous data, the session resumes aut
 | Completing the First-Run Setup Wizard (5 steps) | `02-first-run-wizard.md` |
 | Logging in and the password policy | `03-login.md` |
 | Running your first complete sales cycle with the numeric example | `04-quick-start.md` |
-| Getting familiar with the sidebar, header, and themes | `../03-interface/README.md` |
+| Getting familiar with the sidebar, header, and themes | `../03-interface/index.md` |
 
 ## Tips
 

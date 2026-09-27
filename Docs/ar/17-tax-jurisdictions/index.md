@@ -1,7 +1,7 @@
 ---
 title: "الولايات الضريبية — دليل الاستخدام"
 sidebarTitle: "الولايات الضريبية"
-slug: "ar/17-tax-jurisdictions/README"
+slug: "ar/17-tax-jurisdictions/index"
 group: "الولايات الضريبية"
 language: "ar"
 created: 2026-09-20

@@ -1,7 +1,7 @@
 ---
 title: "Sales — User Guide"
 sidebarTitle: "Sales"
-slug: "en/08-sales/README"
+slug: "en/08-sales/index"
 group: "Sales"
 language: "en"
 created: 2026-09-13

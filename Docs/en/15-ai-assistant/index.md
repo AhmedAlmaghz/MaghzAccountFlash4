@@ -1,7 +1,7 @@
 ---
 title: "\"Maghz\" AI Assistant (مغزى) — Complete User Guide"
 sidebarTitle: "\"Maghz\" AI Assistant (مغزى)"
-slug: "en/15-ai-assistant/README"
+slug: "en/15-ai-assistant/index"
 group: "\"Maghz\" AI Assistant"
 language: "en"
 created: 2026-09-13
