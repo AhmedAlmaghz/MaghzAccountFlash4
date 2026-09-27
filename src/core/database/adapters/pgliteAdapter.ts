@@ -121,6 +121,7 @@ import vatSplitPeriods from '@root/drizzle/0034_vat_split_periods.sql?raw';
 import phase5CloseAssetsPeriods from '@root/drizzle/0035_phase5_close_assets_periods.sql?raw';
 import leaveProvisionAccount from '@root/drizzle/0036_leave_provision_account.sql?raw';
 import treasuryBoxAccounts from '@root/drizzle/0037_treasury_box_accounts.sql?raw';
+import lineProductFks from '@root/drizzle/0038_line_product_fks.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -161,6 +162,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0035_phase5_close_assets_periods', sql: phase5CloseAssetsPeriods },
   { name: '0036_leave_provision_account', sql: leaveProvisionAccount },
   { name: '0037_treasury_box_accounts', sql: treasuryBoxAccounts },
+  { name: '0038_line_product_fks', sql: lineProductFks },
 ];
 
 /**

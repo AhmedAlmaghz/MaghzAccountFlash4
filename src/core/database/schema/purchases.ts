@@ -57,7 +57,7 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
 export const purchaseInvoiceLines = pgTable('purchase_invoice_lines', {
   id: uuid('id').defaultRandom().primaryKey(),
   invoiceId: uuid('invoice_id').notNull().references(() => purchaseInvoices.id, { onDelete: 'cascade' }),
-  productId: uuid('product_id'),
+  productId: uuid('product_id').references(() => products.id, { onDelete: 'cascade' }),
   description: text('description'),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
   unitId: uuid('unit_id'),

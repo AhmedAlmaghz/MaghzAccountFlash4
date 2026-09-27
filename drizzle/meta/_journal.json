@@ -267,6 +267,13 @@
       "when": 1798700000000,
       "tag": "0037_treasury_box_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1798700000000,
+      "tag": "0038_line_product_fks",
+      "breakpoints": true
     }
   ]
 }

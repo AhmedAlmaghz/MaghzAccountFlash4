@@ -861,6 +861,15 @@ tsc -b
 
 ## 13. سجل التغيير
 
+- **2026-09-24 (Migration 0038 — FK منتجات على جدولَي سطور الفواتير، `ON DELETE CASCADE` بقرار المالك):**
+  - **الفجوة**: `sales_invoice_lines.product_id` و`purchase_invoice_lines.product_id` **بلا FK إطلاقاً**، بينما الإخوة الخمسة declare القيد في `0000_init`: `quotation_lines` / `sales_return_lines` / `purchase_order_lines` / `purchase_return_lines` (+ `product_product_categories`) ⇒ حذف منتج كان يترك **سطوراً يتيمة** على مستندات إيراد مرحّلة.
+  - **القرار**: `ON DELETE CASCADE` (قرار المالك). **الأثر المدرك**: لحاله كان سيمسح سطور فواتير مرحّلة بينما تروستاتها تحتفظ بإجمالياتها ⇒ **`deleteProduct` صار يرفض** حذف صنف يشير إليه أي مستند (استعلام واحد يجمع العدّاد لكل مصدر ويميّزها بالاسم: «sales_invoice_lines: 3، quotation_lines: 1») ويوجّه للعزل بدل الحذف — نفس قاعدة «لا تحذف حساباً له قيود» و«لا تحذف موظفاً له تاريخ».
+  - **لا حذف لبيانات مالية**: إن وُجدت سطور يتيمة فالـconstraint يُضاف **`NOT VALID`** (السجلات الجديدة تُفحص من الآن، التاريخ يُترك لمشغّل) —⇒ **الـmigration تنطبق دائماً** ولا تمسّ سطراً واحداً. `FOREACH` ليست في PL/pgSQL القياسي ⇒ استُخدم `FOR v_i IN 1..array_length(...)`.
+  - **إثبات حي على PGlite (خطوات متتالية)**: تُطبَّق · **idempotent** (القيد الموجود يُتخطّى) · سطر يتيم **مرفوض** · سطر سليم **مقبول** · `confdeltype='c'` (cascade) · فرع `NOT VALID`: `convalidated=false` + **التاريخ محفوظ** + اليتيم الجديد **مرفوض**. السكربتات حُذفت بعد الإثبات.
+  - **تطابق**: `db:check` نظيف (Drizzle ↔ SQL) · `pgliteAdapter.MIGRATIONS` (قائمة يدوية) · `_journal.json` idx=38 · 6 اختبارات migration + 3 لحارس `deleteProduct` + 2 تكامل حي.
+  - **التحقق**: `tsc` صفر · `eslint` صفر · `vitest` كامل **226 ملفاً** · `src/test + drizzle` **333** · `build` 12.78s.
+  - **قرار تالٍ لك**: إن أردت أن تحمل قاعدة البيانات الحماية بدل الـAPI، فالتبديل إلى `RESTRICT` (كنمط الإخوة الخمسة) هجرة من سطرين — أخبرني وأعملها.
+
 - **2026-09-24 (محرك حقيقي كشف P0 لم تكن الـ mocks تراه — صبّ `VALUES` مفقود):**
   - **الاكتشاف**: اختبار تكامل جديد على PGlite (`src/modules/sales/documentAtomicity.integration.test.ts`) — يثبت على محرّك فعلي أن إعادة كتابة المستند **ترجع بالكامل** عند فشل الإدراج (وأنها تنجح عند النجاح). أول تشغيل رفض: `column "quantity" is of type numeric but expression is of type text`.
   - **الجذر**: مسارات `sales.updateInvoice` / `updateQuotation` / `updateReturn` كانت تبني صفوف `VALUES` بمعاملات **بلا صبّ** للأعمدة الرقمية، بينما `createInvoice` في **الملف نفسه** يحمل الصبّ كاملاً (Phase 42). ⇒ على محرّك الويب (PGlite) **كل تعديل سطور لمسودة يفشل**، بينما مسار Electron (RPC يؤلّف SQL في في العملية الرئيسية) يعمل. **الـ mocks لا ترى ذلك أبداً** لأنها لا تنفّذ SQL.

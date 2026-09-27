@@ -1538,3 +1538,63 @@ describe('Migration 0037: treasury box accounts (Phase 6)', () => {
   });
 });
 
+describe('Migration 0038: product FK on the invoice-line tables', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0038_line_product_fks.sql'), 'utf-8');
+
+  it('covers exactly the two tables that had no product foreign key', () => {
+    expect(migrationSql).toContain(`'sales_invoice_lines'`);
+    expect(migrationSql).toContain(`'purchase_invoice_lines'`);
+    // the five sibling line tables already declared theirs in 0000_init
+    const init = readFileSync(join(MIGRATIONS_DIR, '0000_init.sql'), 'utf-8');
+    for (const t of ['quotation_lines', 'sales_return_lines', 'purchase_order_lines', 'purchase_return_lines']) {
+      expect(init).toContain(`${t}_product_id_products_id_fk`);
+    }
+  });
+
+  it('uses ON DELETE CASCADE as decided', () => {
+    // the executable body only — the header comment names the sibling tables,
+    // which are RESTRICT, and must not be mistaken for this constraint
+    const body = migrationSql.replace(/^--.*$/gm, '');
+    expect(body).toMatch(/ON DELETE CASCADE/);
+    expect(body).not.toMatch(/ON DELETE RESTRICT/i);
+    expect(body.match(/ON DELETE CASCADE/g)).toHaveLength(2);
+  });
+
+  it('never deletes financial history: orphans downgrade the constraint to NOT VALID', () => {
+    expect(migrationSql).toMatch(/NOT EXISTS \(SELECT 1 FROM products p WHERE p\.id = l\.product_id\)/);
+    expect(migrationSql).toMatch(/ON DELETE CASCADE NOT VALID/);
+    expect(migrationSql).toMatch(/RAISE NOTICE/);
+    expect(migrationSql).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(migrationSql).not.toMatch(/\bDROP\b/i);
+  });
+
+  it('is idempotent (skips a constraint that already exists)', () => {
+    expect(migrationSql).toMatch(/pg_constraint/);
+    expect(migrationSql).toMatch(/IF v_exists THEN\s*\n\s*CONTINUE/);
+    // standard PL/pgSQL only — FOREACH is not core
+    expect(migrationSql).not.toMatch(/FOREACH/);
+    expect(migrationSql).toMatch(/FOR v_i IN 1\.\.array_length/);
+  });
+
+  it('journal registers 0038 and the count mirrors the sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0038_line_product_fks')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0038 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0038_line_product_fks\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0038_line_product_fks', sql: lineProductFks \}/);
+  });
+
+  it('Drizzle schema mirrors the new constraints (no SQL drift)', () => {
+    const sales = readFileSync(join(process.cwd(), 'src/core/database/schema/sales.ts'), 'utf-8');
+    const purchases = readFileSync(join(process.cwd(), 'src/core/database/schema/purchases.ts'), 'utf-8');
+    const invoiceLines = /export const salesInvoiceLines = pgTable\([\s\S]*?\n\}\);/.exec(sales)?.[0] ?? '';
+    const purchaseLines = /export const purchaseInvoiceLines = pgTable\([\s\S]*?\n\}\);/.exec(purchases)?.[0] ?? '';
+    expect(invoiceLines).toMatch(/productId: uuid\('product_id'\)\.notNull\(\)\.references\(\(\) => products\.id, \{ onDelete: 'cascade' \}\)/);
+    expect(purchaseLines).toMatch(/productId: uuid\('product_id'\)\.references\(\(\) => products\.id, \{ onDelete: 'cascade' \}\)/);
+  });
+});
+

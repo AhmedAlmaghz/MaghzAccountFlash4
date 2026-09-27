@@ -318,6 +318,31 @@ export const inventoryApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // The product FKs on the document-line tables are ON DELETE CASCADE (owner
+      // decision), so without this guard deleting a product would silently strip
+      // its lines out of invoices whose headers keep the old totals. Refuse and
+      // point at deactivation instead — the same rule the project applies to
+      // accounts with journal entries and employees with history.
+      const refs = await adapter.query<{ source: string; count: number }>(
+        `SELECT source, count(*)::int AS count FROM (
+           SELECT 'sales_invoice_lines' AS source FROM sales_invoice_lines WHERE product_id = $1::uuid
+           UNION ALL SELECT 'quotation_lines' FROM quotation_lines WHERE product_id = $1::uuid
+           UNION ALL SELECT 'sales_return_lines' FROM sales_return_lines WHERE product_id = $1::uuid
+           UNION ALL SELECT 'purchase_invoice_lines' FROM purchase_invoice_lines WHERE product_id = $1::uuid
+           UNION ALL SELECT 'purchase_order_lines' FROM purchase_order_lines WHERE product_id = $1::uuid
+           UNION ALL SELECT 'purchase_return_lines' FROM purchase_return_lines WHERE product_id = $1::uuid
+         ) t GROUP BY source HAVING count(*) > 0 ORDER BY source`,
+        [id]
+      );
+      if (!refs.success) return { success: false, error: refs.error };
+      const rows = refs.rows ?? [];
+      if (rows.length > 0) {
+        const detail = rows.map((r) => `${r.source}: ${r.count}`).join('، ');
+        return {
+          success: false,
+          error: `لا يمكن حذف الصنف لأنه مستخدم في مستندات قائمة (${detail}). عطّل الصنف بدلاً من حذفه.`,
+        };
+      }
       return adapter.query('DELETE FROM products WHERE id = $1 AND company_id = $2', [id, companyId]);
     } catch (e) {
       return { success: false, error: String(e) };

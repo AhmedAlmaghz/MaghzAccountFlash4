@@ -119,6 +119,30 @@ describe('document rewrite atomicity on a real engine (PGlite)', () => {
     expect(after.lines.every((l) => l.product_id !== productA || Number(l.quantity) === 1)).toBe(true);
   }, 60_000);
 
+  it('migration 0038 installed the product FK as CASCADE on this real engine', async () => {
+    const r = await query(
+      `SELECT c.conrelid::regclass::text AS tbl, c.confdeltype, c.convalidated
+       FROM pg_constraint c
+       WHERE c.contype = 'f'
+         AND c.conname IN ('sales_invoice_lines_product_id_products_id_fk', 'purchase_invoice_lines_product_id_products_id_fk')
+       ORDER BY c.conname`,
+    );
+    expect(r.rows).toHaveLength(2);
+    for (const row of r.rows!) {
+      expect(row.confdeltype, `${row.tbl} must cascade`).toBe('c');
+    }
+  }, 60_000);
+
+  it('a line pointing at a non-existent product is rejected by the engine', async () => {
+    const bad = await query(
+      `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, line_total)
+       VALUES ($1::uuid, gen_random_uuid(), 1, 1, 1)`,
+      [invoiceId],
+    );
+    expect(bad.success).toBe(false);
+    expect(String(bad.error)).toMatch(/foreign key/i);
+  }, 60_000);
+
   it('a failed re-insert leaves the previous header AND lines untouched', async () => {
     const before = await snapshot();
     expect(before.lines).toHaveLength(2);

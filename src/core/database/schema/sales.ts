@@ -64,7 +64,7 @@ export const salesInvoices = pgTable('sales_invoices', {
 export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   id: uuid('id').defaultRandom().primaryKey(),
   invoiceId: uuid('invoice_id').notNull().references(() => salesInvoices.id, { onDelete: 'cascade' }),
-  productId: uuid('product_id').notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
   // Multi-unit snapshot: chosen unit + frozen factor + qty in base unit.
   // Stock postings consume baseQuantity only (COALESCE fallback = quantity).

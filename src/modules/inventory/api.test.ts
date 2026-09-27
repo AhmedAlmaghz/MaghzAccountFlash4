@@ -369,6 +369,52 @@ describe('inventoryApi.updateProduct — m2m replacement is honest and ordered',
   });
 });
 
+describe('inventoryApi.deleteProduct — referenced-product guard (FK is CASCADE)', () => {
+  it('refuses and names the documents instead of cascading their lines away', async () => {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (/SELECT source, count\(\*\)/.test(sql)) {
+        return { success: true, rows: [{ source: 'sales_invoice_lines', count: 3 }, { source: 'quotation_lines', count: 1 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await inventoryApi.deleteProduct(PRODUCT_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/sales_invoice_lines: 3/);
+    expect(res.error).toMatch(/عطّل الصنف/);
+    // and the DELETE must never have been sent
+    expect(seen.some((s) => /^DELETE FROM products/.test(s))).toBe(false);
+  });
+
+  it('deletes when no document references the product', async () => {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (/SELECT source, count\(\*\)/.test(sql)) return { success: true, rows: [] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await inventoryApi.deleteProduct(PRODUCT_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(seen.some((s) => /^DELETE FROM products/.test(s))).toBe(true);
+  });
+
+  it('probes every document-line table, company-scoped delete at the end', async () => {
+    let guardSql = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/SELECT source/.test(sql)) { guardSql = sql; return { success: true, rows: [] }; }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    await inventoryApi.deleteProduct(PRODUCT_ID, COMPANY_ID);
+    for (const t of ['sales_invoice_lines', 'quotation_lines', 'sales_return_lines', 'purchase_invoice_lines', 'purchase_order_lines', 'purchase_return_lines']) {
+      expect(guardSql).toContain(t);
+    }
+  });
+});
+
 describe('inventoryApi product units — flag clearing is atomic (Phase 82c on the raw path)', () => {
   function unitAdapter(txOk: boolean) {
     const seen: string[] = [];
