@@ -5,7 +5,7 @@ slug: "ar/06-accounting/06-year-end-assets"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-20
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # الإقفال السنوي والأصول الثابتة والعكس — دليل الاستخدام

@@ -5,7 +5,7 @@ slug: "en/99-appendix/04-troubleshooting"
 group: "Appendices"
 language: "en"
 created: 2026-09-13
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Troubleshooting

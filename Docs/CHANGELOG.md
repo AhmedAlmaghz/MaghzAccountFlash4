@@ -5,7 +5,7 @@ slug: "CHANGELOG"
 group: "سكربتات الفيديو وسجل الإصدارات"
 language: "ar,en"
 created: 2026-09-20
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # سجل إصدارات الدليل — Changelog / Changelog

@@ -5,7 +5,7 @@ slug: "ar/04-settings/03-vat"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # إعدادات ضريبة القيمة المضافة (VAT) — دليل الاستخدام

@@ -5,7 +5,7 @@ slug: "en/06-accounting/04-financial-reports"
 group: "Accounting"
 language: "en"
 created: 2026-09-13
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Financial Reports — User Guide

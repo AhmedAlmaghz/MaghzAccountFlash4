@@ -5,7 +5,7 @@ slug: "en/04-settings/index"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Settings — User Guide

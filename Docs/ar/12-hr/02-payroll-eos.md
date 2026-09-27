@@ -5,7 +5,7 @@ slug: "ar/12-hr/02-payroll-eos"
 group: "الموظفون"
 language: "ar"
 created: 2026-09-12
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # مسيرات الرواتب ونهاية الخدمة — دليل الاستخدام

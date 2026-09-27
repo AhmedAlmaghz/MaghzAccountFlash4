@@ -5,7 +5,7 @@ slug: "ar/Examples/06-pharmacy-fifo"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # مثال 06 — صيدلية الشفاء (FIFO ومردود وعجز وسداد)

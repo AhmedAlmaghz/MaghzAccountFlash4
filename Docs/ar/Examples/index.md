@@ -5,7 +5,7 @@ slug: "ar/Examples/index"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # أمثلة تدريبية محلولة — دليل الاستخدام

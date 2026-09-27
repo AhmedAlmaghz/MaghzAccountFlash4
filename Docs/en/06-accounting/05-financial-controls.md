@@ -5,7 +5,7 @@ slug: "en/06-accounting/05-financial-controls"
 group: "Accounting"
 language: "en"
 created: 2026-09-20
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Financial Controls & Operation Restrictions — User Guide

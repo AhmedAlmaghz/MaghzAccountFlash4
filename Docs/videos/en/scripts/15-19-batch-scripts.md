@@ -5,7 +5,7 @@ slug: "videos/en/scripts/15-19-batch-scripts"
 group: "Video Scripts & Changelog"
 language: "en"
 created: 2026-09-20
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Batch (A+B) Video Scripts — ready to record later

@@ -5,7 +5,7 @@ slug: "en/10-pos/index"
 group: "Point of Sale (POS)"
 language: "en"
 created: 2026-09-13
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Point of Sale (POS) — User Guide

@@ -5,7 +5,7 @@ slug: "en/17-tax-jurisdictions/index"
 group: "Tax Jurisdictions"
 language: "en"
 created: 2026-09-20
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # Tax Jurisdictions — User Guide

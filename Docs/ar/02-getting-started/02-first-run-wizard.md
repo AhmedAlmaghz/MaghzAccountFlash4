@@ -5,7 +5,7 @@ slug: "ar/02-getting-started/02-first-run-wizard"
 group: "البدء السريع"
 language: "ar"
 created: 2026-09-12
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # معالج الإعداد الأول — دليل الاستخدام

@@ -5,7 +5,7 @@ slug: "ar/04-settings/08-backup-database"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # النسخ الاحتياطي وقاعدة البيانات وإعادة الإعداد — دليل الاستخدام

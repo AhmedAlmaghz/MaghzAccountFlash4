@@ -5,7 +5,7 @@ slug: "ar/04-settings/07-hr-settings"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.0"
+version: "0.26.1"
 author: "Ahmed Almaghz"
 ---
 # إعدادات الموظفين — دليل الاستخدام
