@@ -21,7 +21,11 @@ vi.mock('@/modules/inventory/api', () => ({ inventoryApi: {} }));
 vi.mock('@/modules/crm/api', () => ({ crmApi: {} }));
 vi.mock('@/modules/hr/api', () => ({ hrApi: {} }));
 vi.mock('@/modules/manufacturing/api', () => ({ manufacturingApi: {} }));
-vi.mock('@/core/database/adapters', () => ({ getDbAdapter: vi.fn() }));
+vi.mock('@/core/database/adapters', () => ({
+  getDbAdapter: vi.fn(),
+  // Transport selection: these tests drive the adapter fallback.
+  isElectronPg: vi.fn(() => false),
+}));
 
 import { writeTools } from './writeTools';
 import {

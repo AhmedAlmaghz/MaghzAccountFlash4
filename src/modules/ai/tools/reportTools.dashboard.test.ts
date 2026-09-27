@@ -28,6 +28,9 @@ vi.mock('@/modules/auth/store', () => ({
   useAuthStore: { getState: () => ({ hasPermission: mocks.hasPermission }) },
 }));
 vi.mock('@/core/database/adapters', () => ({
+  // The adapter module also exports isElectronPg (transport selection).
+  // These tests drive the adapter fallback, so it answers false.
+  isElectronPg: vi.fn(() => false),
   getDbAdapter: vi.fn(async () => ({ query: mocks.adapterQuery })),
 }));
 

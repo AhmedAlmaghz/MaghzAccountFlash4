@@ -191,6 +191,18 @@ export interface ElectronDB extends PreloadDB {
   // checkout itself stays renderer-composed (journal machinery) and ships
   // through the guarded transaction channel; these cover products, shifts
   // and Z-report reads/writes.
+  // Tax engine. Reads and period writes; the company id never leaves the
+  // session, and the main process validates the settings keys against the
+  // tax namespace so this surface cannot become a generic settings read.
+  tax?: {
+    getContext(payload: { keys: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    setContext(payload: { entries: { key: string; value: string }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    findPeriod(payload: { date: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    openPeriod(payload: { countryCode: string; periodType: string; startDate: string; endDate: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    setPeriodStatus(payload: { periodId: string; status: 'open' | 'closed' | 'filed' }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    listPeriods(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    vatLegs(payload: { outputAccountId: string; inputAccountId: string; startDate: string; endDate: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
   pos?: {
     getProducts(payload?: { search?: string; limit?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getActiveShift(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -219,6 +231,8 @@ export interface ElectronDB extends PreloadDB {
     createBranch(payload: { name: string; code?: string | null; address?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateBranch(payload: { id: string; name?: string | null; code?: string | null; address?: string | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getSettings(payload?: { category?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getDefaultAccountId(payload: { functionKey: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    findAccountByCode(payload: { code: string; namePatterns?: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     setSetting(payload: { key: string; value?: string | null; category?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
 }
@@ -294,6 +308,8 @@ type ElectronRpcSurface = NonNullable<Required<ElectronDB>['accounting']>
   & NonNullable<Required<ElectronDB>['hr']>
   & NonNullable<Required<ElectronDB>['sales']>
   & NonNullable<Required<ElectronDB>['pos']>
+  & NonNullable<Required<ElectronDB>['tax']>
+  & NonNullable<Required<ElectronDB>['purchases']>
   & NonNullable<Required<ElectronDB>['core']>;
 
 function getRPC(): ElectronRpcSurface {
@@ -307,9 +323,11 @@ function getRPC(): ElectronRpcSurface {
     const hr = db.hr;
     const sales = db.sales;
     const pos = db.pos;
+    const tax = db.tax;
+    const purchases = db.purchases;
     const core = db.core;
-    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !core) {
-      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/core)');
+    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !tax || !purchases || !core) {
+      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/tax/purchases/core)');
     }
     return {
       ...acc,
@@ -320,6 +338,8 @@ function getRPC(): ElectronRpcSurface {
       ...hr,
       ...sales,
       ...pos,
+      ...tax,
+      ...purchases,
       ...core,
     } as ElectronRpcSurface;
   }

@@ -28,6 +28,9 @@ vi.mock('@/modules/core/api', () => ({
   coreApi: { getVatSettings: vi.fn(async () => ({ success: true, data: { vatRate: 15 } })) },
 }));
 vi.mock('@/core/database/adapters', () => ({
+  // The adapter module also exports isElectronPg (transport selection).
+  // These tests drive the adapter fallback, so it answers false.
+  isElectronPg: vi.fn(() => false),
   getDbAdapter: vi.fn(async () => ({ query: vi.fn(async () => ({ success: true, rows: [] })) })),
   isElectronPg: vi.fn(() => false),
 }));

@@ -19,6 +19,9 @@ import type { User } from '@/modules/auth/types';
 
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(async () => ({
+  // The adapter module also exports isElectronPg (transport selection).
+  // These tests drive the adapter fallback, so it answers false.
+  isElectronPg: vi.fn(() => false),
     query: vi.fn(async () => ({ success: true, rows: [] })),
     transaction: vi.fn(async () => ({ success: true })),
   })),

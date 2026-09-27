@@ -13,6 +13,10 @@ import {
 
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
+  // The engine picks its transport at call time: typed RPC on desktop, the
+  // adapter fallback on PGlite/e2e. The tests drive the fallback, so the
+  // predicate must answer false rather than throw.
+  isElectronPg: vi.fn(() => false),
 }));
 
 import { getDbAdapter } from '@/core/database/adapters';
@@ -217,10 +221,18 @@ describe('period lifecycle + VAT return', () => {
             return { success: true, rows: [{ account_id: key === 'default_vat_output' ? 'ACC-OUT' : 'ACC-IN' }] };
           }
           if (sql.includes('FROM journal_entries')) {
-            const acc = String(params[1]);
+            // One grouped statement for both accounts, so the rows come back
+            // keyed by account_id rather than one aggregate per query.
+            const out = String(params[1]);
+            const input = String(params[2]);
             // output account: Cr 1500 − Dr 150 (return reversal) = 1350 net
-            if (acc === 'ACC-OUT') return { success: true, rows: [{ cr: 1500, dr: 150 }] };
-            return { success: true, rows: [{ dr: 400, cr: 0 }] };
+            return {
+              success: true,
+              rows: [
+                { account_id: out, cr: 1500, dr: 150 },
+                { account_id: input, dr: 400, cr: 0 },
+              ],
+            };
           }
           return { success: true, rows: [] };
         }),

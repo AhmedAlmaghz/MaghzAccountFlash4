@@ -32,6 +32,9 @@ vi.mock('./batchRunner', () => ({
 }));
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(async () => ({
+  // The adapter module also exports isElectronPg (transport selection).
+  // These tests drive the adapter fallback, so it answers false.
+  isElectronPg: vi.fn(() => false),
     query: vi.fn(async () => ({ success: true, rows: [] })),
   })),
   isElectronPg: vi.fn(() => false),

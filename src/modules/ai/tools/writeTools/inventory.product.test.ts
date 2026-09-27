@@ -13,6 +13,9 @@ vi.mock('@/core/api', () => ({
 }));
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
+  // The adapter module also exports isElectronPg (transport selection).
+  // These tests drive the adapter fallback, so it answers false.
+  isElectronPg: vi.fn(() => false),
 }));
 
 import { inventoryWriteTools } from './inventory';

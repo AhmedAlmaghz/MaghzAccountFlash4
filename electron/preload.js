@@ -224,6 +224,15 @@ contextBridge.exposeInMainWorld('electronDB', {
   // POS typed RPC (module 13). Session-derived companyId + cashier userId.
   // Checkout stays renderer-composed (journal machinery) and ships through
   // the guarded transaction channel; these cover products, shifts, Z-report.
+  tax: {
+    getContext: (payload) => ipcRenderer.invoke('db:rpc:tax.getContext', { ...payload, sessionToken }),
+    setContext: (payload) => ipcRenderer.invoke('db:rpc:tax.setContext', { ...payload, sessionToken }),
+    findPeriod: (payload) => ipcRenderer.invoke('db:rpc:tax.findPeriod', { ...payload, sessionToken }),
+    openPeriod: (payload) => ipcRenderer.invoke('db:rpc:tax.openPeriod', { ...payload, sessionToken }),
+    setPeriodStatus: (payload) => ipcRenderer.invoke('db:rpc:tax.setPeriodStatus', { ...payload, sessionToken }),
+    listPeriods: (payload = {}) => ipcRenderer.invoke('db:rpc:tax.listPeriods', { ...payload, sessionToken }),
+    vatLegs: (payload) => ipcRenderer.invoke('db:rpc:tax.vatLegs', { ...payload, sessionToken }),
+  },
   pos: {
     getProducts: (payload = {}) => ipcRenderer.invoke('db:rpc:pos.getProducts', { ...payload, sessionToken }),
     getActiveShift: (payload = {}) => ipcRenderer.invoke('db:rpc:pos.getActiveShift', { ...payload, sessionToken }),
@@ -248,7 +257,9 @@ contextBridge.exposeInMainWorld('electronDB', {
     createBranch: (payload) => ipcRenderer.invoke('db:rpc:core.createBranch', { ...payload, sessionToken }),
     updateBranch: (payload) => ipcRenderer.invoke('db:rpc:core.updateBranch', { ...payload, sessionToken }),
     getSettings: (payload = {}) => ipcRenderer.invoke('db:rpc:core.getSettings', { ...payload, sessionToken }),
+    findAccountByCode: (payload) => ipcRenderer.invoke('db:rpc:core.findAccountByCode', { ...payload, sessionToken }),
     setSetting: (payload) => ipcRenderer.invoke('db:rpc:core.setSetting', { ...payload, sessionToken }),
+    getDefaultAccountId: (payload) => ipcRenderer.invoke('db:rpc:core.getDefaultAccountId', { ...payload, sessionToken }),
   },
 });
 

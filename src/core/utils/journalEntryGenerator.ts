@@ -1,4 +1,4 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { runTransaction, buildJournalEntryStatement, type TxStatement } from '@/core/database/tx';
 import { toDateString } from '@/core/utils/mapPgRow';
 /**
@@ -71,38 +71,50 @@ const ACC = {
   RETAINED: '32101',       // الأرباح المبقاة (Phase 5)
 };
 
+/** Account-name patterns per hardcoded code (legacy compatibility). */
+const ACCOUNT_NAME_PATTERNS: Record<string, string> = {
+  '11101': '%صندوق%',
+  '11102': '%بنك%',
+  '11201': '%مدينون%',
+  '11301': '%مخزون%|%بضاعة%',
+  '21101': '%دائنون%',
+  '21301': '%ضريبة%',
+  '21302': '%مدخلات%',
+  '41101': '%مبيعات المنتجات%',
+  '41102': '%مبيعات الخدمات%',
+  '41103': '%مردودات%',
+  '51101': '%تكلفة بضاعة%',
+  '41201': '%خصم مسموح%',
+  '42101': '%خصم مكتسب%',
+  '52101': '%رواتب%',
+  '51901': '%فروق%',
+  '52901': '%عجز%',
+  '41901': '%فائض%',
+  '12101': '%أصول ثابتة%',
+  '12102': '%مجمع%|%إهلاك%',
+  '52601': '%إهلاك%',
+  '32101': '%مبقاة%',
+};
+
 async function findAccountByCode(companyId: string, code: string): Promise<string | null> {
+  const pattern = ACCOUNT_NAME_PATTERNS[code];
+  // Desktop: one round trip covers the exact code and the legacy name
+  // patterns, with the company id taken from the session. Returning null
+  // here is deliberate — falling through would put the raw renderer
+  // channel back on the posting path.
+  if (isElectronPg()) {
+    const core = (typeof window !== 'undefined' && window.electronDB?.core) || undefined;
+    if (!core) return null;
+    const res = await core.findAccountByCode({ code, namePatterns: pattern ? [pattern] : [] });
+    const id = res.success ? res.rows?.[0]?.id : null;
+    return id ? String(id) : null;
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
     `SELECT id FROM accounts WHERE company_id = $1 AND code = $2`,
     [companyId, code]
   );
   if (result.rows?.[0]?.id) return result.rows[0].id;
-  // Fallback: search by name pattern for backwards compatibility
-  const nameMap: Record<string, string> = {
-    '11101': '%صندوق%',
-    '11102': '%بنك%',
-    '11201': '%مدينون%',
-    '11301': '%مخزون%|%بضاعة%',
-    '21101': '%دائنون%',
-    '21301': '%ضريبة%',
-    '21302': '%مدخلات%',
-    '41101': '%مبيعات المنتجات%',
-    '41102': '%مبيعات الخدمات%',
-    '41103': '%مردودات%',
-    '51101': '%تكلفة بضاعة%',
-    '41201': '%خصم مسموح%',
-    '42101': '%خصم مكتسب%',
-    '52101': '%رواتب%',
-    '51901': '%فروق%',
-    '52901': '%عجز%',
-    '41901': '%فائض%',
-    '12101': '%أصول ثابتة%',
-    '12102': '%مجمع%|%إهلاك%',
-    '52601': '%إهلاك%',
-    '32101': '%مبقاة%',
-  };
-  const pattern = nameMap[code];
   if (pattern) {
     const fallback = await adapter.query<{ id: string }>(
       `SELECT id FROM accounts WHERE company_id = $1 AND name_ar SIMILAR TO $2 LIMIT 1`,
@@ -115,6 +127,17 @@ async function findAccountByCode(companyId: string, code: string): Promise<strin
 
 /** Resolve a default_accounts entry to a GL account id (with hardcoded-code fallback). Exported for AI voucher tools. */
 export async function getDefaultAccountId(companyId: string, functionKey: string): Promise<string | null> {
+  // Typed RPC on desktop: the company id comes from the authenticated
+  // session, so a renderer can no longer name a foreign company when it
+  // resolves a posting account. 36 call sites in ten files funnel through
+  // here, so this single branch retires the whole dependency for them.
+  if (isElectronPg()) {
+    const core = (typeof window !== 'undefined' && window.electronDB?.core) || undefined;
+    if (!core) return null;
+    const res = await core.getDefaultAccountId({ functionKey });
+    const id = res.success ? res.rows?.[0]?.account_id : null;
+    if (id) return String(id);
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ account_id: string }>(
     `SELECT account_id FROM default_accounts WHERE company_id = $1 AND function_key = $2`,

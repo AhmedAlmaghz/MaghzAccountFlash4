@@ -17,6 +17,10 @@ import {
 // Mock the database adapter
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
+  // Account resolution picks its transport at call time: typed RPC on desktop,
+  // the adapter fallback on PGlite. These tests drive the fallback, so the
+  // predicate answers false rather than throwing on a missing export.
+  isElectronPg: vi.fn(() => false),
 }));
 
 import { getDbAdapter } from '@/core/database/adapters';

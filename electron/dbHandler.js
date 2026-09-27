@@ -1196,7 +1196,9 @@ export function registerDatabaseHandlers() {
   // TypeScript) and the main process composes the SQL — so SQL strings
   // never travel the wire. All existing module/table authorization,
   // cross-company checks, and SQL-pattern guards apply automatically.
-  const registerRpc = (name, { compose, paramCount, validate, mapResult, permission }) => {
+  const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+const registerRpc = (name, { compose, paramCount, validate, mapResult, permission }) => {
     ipcMain.handle(`db:rpc:${name}`, async (event, payload = {}) => {
       const request = payload && typeof payload === 'object' ? payload : {};
       const session = getSession(event.sender.id, request.sessionToken);
@@ -1763,6 +1765,204 @@ export function registerDatabaseHandlers() {
   // not from the renderer payload — closing the cross-tenant read/update
   // gap of the legacy `SELECT * FROM companies LIMIT 1` / `WHERE id = $1`
   // statements. The renderer can never reference another company's row.
+
+  // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
+  // The tax engine is a posting guard: assertPeriodOpen runs inside eight
+  // posting paths, so on desktop it was reaching PostgreSQL through the raw
+  // renderer channel. These channels move the SQL here, where the company id
+  // comes from the session and the table rules above are the only authority.
+  //
+  // No explicit `permission` on any of them, on purpose. Each statement lands
+  // on a table whose rule already names the rights that fit: settings and
+  // tax_periods are readAny, tax_periods writes take accounting.create/edit/post,
+  // and journal legs read under accounting.view|own|reports.view. Naming a
+  // permission here would be a *second*, narrower source of truth that drifts.
+
+  // tax.getContext — the country's tax settings. Keys arrive from the renderer
+  // (single source of truth stays in tax/engine.ts) but are constrained to the
+  // tax namespace, so the channel can never be used as a generic settings read.
+  registerRpc('tax.getContext', {
+    paramCount: 1,
+    compose: (p, session) => {
+      const keys = (Array.isArray(p.keys) ? p.keys : []).map((k) => String(k));
+      return {
+        sql: `SELECT key, value FROM settings
+               WHERE company_id = $1::uuid AND key = ANY($2::text[])`,
+        params: [session.user.companyId, keys],
+      };
+    },
+    validate: (p) => {
+      const keys = Array.isArray(p.keys) ? p.keys : [];
+      if (keys.length === 0 || keys.length > 8) throw new Error('keys must be a non-empty list of at most 8 settings keys');
+      for (const k of keys) {
+        if (!/^tax\.[a-z][a-z0-9_]*$/.test(String(k))) throw new Error(`Unsupported tax setting key: ${k}`);
+      }
+    },
+  });
+
+  // tax.setContext — one atomic statement for every key. The renderer used to
+  // loop over two INSERTs, so a failure on the second left a half-written
+  // country/timezone pair; unnest makes the pair a single round trip.
+  registerRpc('tax.setContext', {
+    paramCount: 2,
+    compose: (p, session) => {
+      const entries = (Array.isArray(p.entries) ? p.entries : []).map((e) => ({
+        key: String(e && e.key),
+        value: String((e && e.value) || ''),
+      }));
+      return {
+        sql: `INSERT INTO settings (company_id, key, value, category)
+              SELECT $1::uuid, u.key, u.value, 'tax'
+                FROM unnest($2::text[], $3::text[]) AS u(key, value)
+              ON CONFLICT (company_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        params: [session.user.companyId, entries.map((e) => e.key), entries.map((e) => e.value)],
+      };
+    },
+    validate: (p) => {
+      const entries = Array.isArray(p.entries) ? p.entries : [];
+      if (entries.length === 0 || entries.length > 8) throw new Error('entries must be a non-empty list of at most 8 settings');
+      for (const e of entries) {
+        if (!e || !/^tax\.[a-z][a-z0-9_]*$/.test(String(e.key))) throw new Error(`Unsupported tax setting key: ${e && e.key}`);
+      }
+    },
+  });
+
+  // tax.findPeriod — the period covering a posting date, or none (open).
+  registerRpc('tax.findPeriod', {
+    paramCount: 1,
+    compose: (p, session) => ({
+      sql: `SELECT id, company_id, country_code, period_type, start_date, end_date, status, filed_at
+               FROM tax_periods
+              WHERE company_id = $1::uuid AND start_date <= $2::date AND end_date >= $2::date
+              ORDER BY end_date DESC LIMIT 1`,
+      params: [session.user.companyId, String(p.date || '').slice(0, 10)],
+    }),
+    validate: (p) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '').slice(0, 10))) throw new Error('date must be YYYY-MM-DD');
+    },
+  });
+
+  // tax.openPeriod — idempotent per company + range.
+  registerRpc('tax.openPeriod', {
+    paramCount: 4,
+    compose: (p, session) => ({
+      sql: `INSERT INTO tax_periods (company_id, country_code, period_type, start_date, end_date, status)
+            VALUES ($1::uuid, $2, $3, $4::date, $5::date, 'open')
+            ON CONFLICT (company_id, start_date, end_date) DO UPDATE SET updated_at = NOW()
+            RETURNING id`,
+      params: [
+        session.user.companyId,
+        String(p.countryCode || ''),
+        String(p.periodType || ''),
+        String(p.startDate || '').slice(0, 10),
+        String(p.endDate || '').slice(0, 10),
+      ],
+    }),
+    validate: (p) => {
+      for (const f of ['startDate', 'endDate']) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p[f] || '').slice(0, 10))) throw new Error(`${f} must be YYYY-MM-DD`);
+      }
+      if (!p.countryCode || !p.periodType) throw new Error('countryCode and periodType are required');
+    },
+  });
+
+  // tax.setPeriodStatus — close / reopen / mark filed. The filed_at stamp is
+  // set by the same UPDATE, so a filed period always carries its filing date.
+  registerRpc('tax.setPeriodStatus', {
+    paramCount: 1,
+    compose: (p, session) => ({
+      sql: `UPDATE tax_periods
+               SET status = $1::varchar,
+                   filed_at = CASE WHEN $1::varchar = 'filed' THEN NOW() ELSE filed_at END,
+                   updated_at = NOW()
+             WHERE id = $2::uuid AND company_id = $3::uuid`,
+      params: [String(p.status || ''), String(p.periodId || ''), session.user.companyId],
+    }),
+    validate: (p) => {
+      if (!['open', 'closed', 'filed'].includes(String(p.status))) throw new Error('status must be open, closed or filed');
+      if (!UUID_RE.test(String(p.periodId || ''))) throw new Error('periodId must be a uuid');
+    },
+  });
+
+  // tax.listPeriods — newest first.
+  registerRpc('tax.listPeriods', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: `SELECT id, company_id, country_code, period_type, start_date, end_date, status, filed_at
+               FROM tax_periods WHERE company_id = $1::uuid ORDER BY end_date DESC`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  // tax.vatLegs — output and input VAT for a period, from POSTED journal legs.
+  // One statement for both accounts (the renderer issued two), grouped by
+  // account so the caller can tell the two apart.
+  registerRpc('tax.vatLegs', {
+    paramCount: 5,
+    compose: (p, session) => ({
+      sql: `SELECT je.account_id, COALESCE(SUM(je.debit), 0) AS dr, COALESCE(SUM(je.credit), 0) AS cr
+               FROM journal_entries je
+               JOIN transactions t ON t.id = je.transaction_id
+              WHERE je.company_id = $1::uuid AND je.account_id IN ($2::uuid, $3::uuid)
+                AND t.status = 'posted' AND t.date >= $4::date AND t.date <= $5::date
+              GROUP BY je.account_id`,
+      params: [
+        session.user.companyId,
+        String(p.outputAccountId || ''),
+        String(p.inputAccountId || ''),
+        String(p.startDate || '').slice(0, 10),
+        String(p.endDate || '').slice(0, 10),
+      ],
+    }),
+    validate: (p) => {
+      for (const f of ['outputAccountId', 'inputAccountId']) {
+        if (!UUID_RE.test(String(p[f] || ''))) throw new Error(`${f} must be a uuid`);
+      }
+      for (const f of ['startDate', 'endDate']) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p[f] || '').slice(0, 10))) throw new Error(`${f} must be YYYY-MM-DD`);
+      }
+    },
+  });
+
+  // core.getDefaultAccountId — resolve a posting account for the session company.
+  // 36 call sites across ten files funnel through this one function, so the
+  // single raw SELECT here was the whole dependency for every posting path.
+  // Read-only, and default_accounts is readAny, so no explicit permission.
+  registerRpc('core.getDefaultAccountId', {
+    paramCount: 1,
+    compose: (p, session) => ({
+      sql: `SELECT account_id FROM default_accounts WHERE company_id = $1::uuid AND function_key = $2`,
+      params: [session.user.companyId, String(p.functionKey || '')],
+    }),
+    validate: (p) => {
+      if (!/^default_[a-z][a-z0-9_]*$/.test(String(p.functionKey || ''))) throw new Error('functionKey must be a default_* key');
+    },
+  });
+
+  // core.findAccountByCode — the account behind a hardcoded code, with the
+  // legacy name-pattern fallback. The patterns travel from the renderer
+  // (journalEntryGenerator owns that map) so there is no second copy to drift;
+  // main only executes. An exact code match outranks a name match.
+  registerRpc('core.findAccountByCode', {
+    paramCount: 2,
+    compose: (p, session) => ({
+      sql: `SELECT id FROM accounts
+             WHERE company_id = $1::uuid
+               AND (code = $2 OR name_ar SIMILAR TO ANY($3::text[]) OR name_en SIMILAR TO ANY($3::text[]))
+             ORDER BY (code = $2) DESC
+             LIMIT 1`,
+      params: [
+        session.user.companyId,
+        String(p.code || ''),
+        (Array.isArray(p.namePatterns) ? p.namePatterns : []).map((x) => String(x)),
+      ],
+    }),
+    validate: (p) => {
+      if (!p.code) throw new Error('code is required');
+      const patterns = Array.isArray(p.namePatterns) ? p.namePatterns : [];
+      if (patterns.length > 6) throw new Error('at most 6 name patterns');
+    },
+  });
 
   // core.getCompany — zero-param; id comes from the session.
   registerRpc('core.getCompany', {

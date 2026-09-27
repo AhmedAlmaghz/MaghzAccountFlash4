@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@/core/database/adapters', () => ({
   getDbMode: vi.fn(() => 'pg'),
+  // The adapter module also exports isElectronPg (transport selection).
+  // These tests drive the adapter fallback, so it answers false.
+  isElectronPg: vi.fn(() => false),
 }));
 
 import { aiApi } from './index';
