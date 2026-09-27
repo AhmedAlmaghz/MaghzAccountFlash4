@@ -1,12 +1,13 @@
 import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, jsonb } from 'drizzle-orm/pg-core';
 import { companies } from './core';
+import { products } from './inventory';
 import { employees } from './hr';
 
 // ─── Bills of Materials (BOM) ─────────────────────────────────────────────────
 export const boms = pgTable('boms', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
-  productId: uuid('product_id').notNull(), // finished product
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'restrict' }), // finished product
   version: varchar('version', { length: 20 }).default('1.0'),
   isActive: boolean('is_active').notNull().default(true),
   // How many finished-product units one BOM batch yields (work-order
@@ -35,7 +36,7 @@ export const workOrders = pgTable('work_orders', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   orderNumber: varchar('order_number', { length: 50 }).notNull(),
-  productId: uuid('product_id').notNull(),
+  productId: uuid('product_id').notNull().references(() => products.id, { onDelete: 'restrict' }),
   bomId: uuid('bom_id'),
   quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull(),
   producedQuantity: numeric('produced_quantity', { precision: 18, scale: 4 }).default('0'),

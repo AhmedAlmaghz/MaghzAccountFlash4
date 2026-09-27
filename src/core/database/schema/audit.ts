@@ -1,5 +1,5 @@
 import { pgTable, uuid, varchar, timestamp, jsonb } from 'drizzle-orm/pg-core';
-import { companies } from './core';
+import { companies, users } from './core';
 import { sql } from 'drizzle-orm';
 
 // ─── Audit Logs (سجل التدقيق) ────────────────────────────────────────────────
@@ -8,7 +8,9 @@ import { sql } from 'drizzle-orm';
 // AI tool-name identifiers like `sales.create_customer`.
 export const auditLogs = pgTable('audit_logs', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull(),
+  // 0041: nullable + SET NULL — deleting a user must keep the audit trail and
+  // only lose the actor. NOT NULL here would make every user delete fail.
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
   action: varchar('action', { length: 20 }).notNull(),
   tableName: varchar('table_name', { length: 100 }).notNull(),
   recordId: varchar('record_id', { length: 100 }).notNull(),

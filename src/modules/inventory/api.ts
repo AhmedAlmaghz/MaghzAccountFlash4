@@ -331,8 +331,9 @@ export const inventoryApi = {
            UNION ALL SELECT 'purchase_invoice_lines' FROM purchase_invoice_lines WHERE product_id = $1::uuid
            UNION ALL SELECT 'purchase_order_lines' FROM purchase_order_lines WHERE product_id = $1::uuid
            UNION ALL SELECT 'purchase_return_lines' FROM purchase_return_lines WHERE product_id = $1::uuid
+           UNION ALL SELECT 'work_orders' FROM work_orders WHERE product_id = $1::uuid AND company_id = $2::uuid
          ) t GROUP BY source HAVING count(*) > 0 ORDER BY source`,
-        [id]
+        [id, companyId]
       );      if (!refs.success) return { success: false, error: refs.error };
       const rows = refs.rows ?? [];
       if (rows.length > 0) {

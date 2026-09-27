@@ -288,6 +288,13 @@
       "when": 1798700000000,
       "tag": "0040_warehouse_fks",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1798700000000,
+      "tag": "0041_workorder_product_audit_fks",
+      "breakpoints": true
     }
   ]
 }

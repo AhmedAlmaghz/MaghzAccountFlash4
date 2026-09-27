@@ -413,6 +413,19 @@ describe('inventoryApi.deleteProduct — referenced-product guard (FK is CASCADE
       expect(guardSql).toContain(t);
     }
   });
+
+  it('also blocks a product that has a work order (0041)', async () => {
+    let guardSql = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/SELECT source/.test(sql)) { guardSql = sql; return { success: true, rows: [{ source: 'work_orders', count: 2 }] }; }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await inventoryApi.deleteProduct(PRODUCT_ID, COMPANY_ID);
+    expect(guardSql).toContain('work_orders');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/work_orders: 2/);
+  });
 });
 
 describe('inventoryApi.deleteWarehouse — refuses before orphaning stock (0040)', () => {

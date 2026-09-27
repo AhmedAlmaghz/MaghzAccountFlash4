@@ -1718,3 +1718,67 @@ describe('Migration 0040: warehouse foreign keys', () => {
   });
 });
 
+describe('Migration 0041: work-order / BOM product and audit-user keys', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0041_workorder_product_audit_fks.sql'), 'utf-8');
+  const body = migrationSql.replace(/^--.*$/gm, '');
+
+  it('both product references were NOT NULL with no foreign key', () => {
+    const init = readFileSync(join(MIGRATIONS_DIR, '0000_init.sql'), 'utf-8');
+    for (const t of ['work_orders', 'boms']) {
+      const block = new RegExp('CREATE TABLE "' + t + '" \\(([\\s\\S]*?)\\n\\);').exec(init)?.[1] ?? '';
+      expect(block, `${t} table exists`).not.toBe('');
+      // 0000_init does declare product FKs for OTHER tables (bom_lines, stock…),
+      // so the assertion has to be scoped to these two tables' own blocks.
+      expect(new RegExp('CONSTRAINT "' + t + '_product_id').test(init)).toBe(false);
+    }
+    expect(init).not.toMatch(/CONSTRAINT "work_orders_product_id/);
+    expect(init).not.toMatch(/CONSTRAINT "boms_product_id/);
+  });
+
+  it('production references are RESTRICT, the audit actor is SET NULL', () => {
+    for (const spec of ['work_orders|product_id|products|restrict', 'boms|product_id|products|restrict']) {
+      expect(body).toContain(`'${spec}'`);
+    }
+    expect(body).toContain(`'audit_logs|user_id|users|set null'`);
+    expect(body).toMatch(/ALTER COLUMN %I DROP NOT NULL/);
+    // the SET NULL target sits inside a format() call, so the target is %I
+    expect(body).toMatch(/REFERENCES %I\(id\) ON DELETE SET NULL/);
+    expect(body).toMatch(/REFERENCES %I\(id\) ON DELETE RESTRICT/);
+  });
+
+  it('never deletes history: orphans land NOT VALID, and only the NOT NULL column is relaxed', () => {
+    expect(body).toMatch(/ON DELETE RESTRICT NOT VALID/);
+    expect(body).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(body).not.toMatch(/\bDROP\s+(TABLE|COLUMN|CONSTRAINT)\b/i);
+    // the DROP NOT NULL must be scoped to the SET NULL branch, not blanket
+    expect(body.match(/ALTER COLUMN %I DROP NOT NULL/g)).toHaveLength(1);
+  });
+
+  it('is idempotent and guarded', () => {
+    expect(body).toMatch(/pg_constraint/);
+    expect(body).toMatch(/IF v_exists THEN\s*\n\s*CONTINUE/);
+    expect(body).toMatch(/to_regclass\(v_table\) IS NULL OR to_regclass\(v_parts\[3\]\) IS NULL/);
+    expect(body).not.toMatch(/FOREACH/);
+  });
+
+  it('journal registers 0041 and the count mirrors the sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0041_workorder_product_audit_fks')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0041 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0041_workorder_product_audit_fks\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0041_workorder_product_audit_fks', sql: workorderProductAuditFks \}/);
+  });
+
+  it('Drizzle mirrors the new references', () => {
+    const mfg = readFileSync(join(process.cwd(), 'src/core/database/schema/manufacturing.ts'), 'utf-8');
+    const audit = readFileSync(join(process.cwd(), 'src/core/database/schema/audit.ts'), 'utf-8');
+    expect((mfg.match(/productId: uuid\('product_id'\)\.notNull\(\)\.references\(\(\) => products\.id, \{ onDelete: 'restrict' \}\)/g) || []).length).toBe(2);
+    expect(audit).toMatch(/userId: uuid\('user_id'\)\.references\(\(\) => users\.id, \{ onDelete: 'set null' \}\)/);
+    expect(audit).not.toMatch(/userId: uuid\('user_id'\)\.notNull\(\)/);
+  });
+});
+
