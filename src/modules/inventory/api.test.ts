@@ -415,6 +415,51 @@ describe('inventoryApi.deleteProduct — referenced-product guard (FK is CASCADE
   });
 });
 
+describe('inventoryApi.deleteWarehouse — refuses before orphaning stock (0040)', () => {
+  function adapterReturning(rows: Array<{ source: string; count: number }>) {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (/SELECT source, count\(\*\)/.test(sql)) return { success: true, rows };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return seen;
+  }
+
+  it('names the ledger that blocks the delete', async () => {
+    const seen = adapterReturning([{ source: 'stock', count: 12 }, { source: 'stock_movements', count: 40 }]);
+    const res = await inventoryApi.deleteWarehouse('11111111-1111-4111-8111-111111111111', COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/stock: 12/);
+    expect(res.error).toMatch(/عطّل المستودع/);
+    expect(seen.some((s) => /^DELETE FROM warehouses/.test(s))).toBe(false);
+  });
+
+  it('probes stock, movements, adjustments and both transfer directions', async () => {
+    let guard = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/SELECT source/.test(sql)) { guard = sql; return { success: true, rows: [] }; }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    await inventoryApi.deleteWarehouse('11111111-1111-4111-8111-111111111111', COMPANY_ID);
+    expect(guard).toMatch(/FROM stock WHERE warehouse_id/);
+    expect(guard).toMatch(/FROM stock_movements WHERE warehouse_id/);
+    expect(guard).toMatch(/FROM stock_adjustments WHERE warehouse_id/);
+    expect(guard).toMatch(/from_warehouse_id = \$1::uuid OR to_warehouse_id = \$1::uuid/);
+    // every branch is tenant-scoped (the cross-tenant gate enforces this)
+    expect(guard.match(/company_id = \$2::uuid/g)?.length).toBe(4);
+  });
+
+  it('deletes an empty warehouse', async () => {
+    const seen = adapterReturning([]);
+    const res = await inventoryApi.deleteWarehouse('11111111-1111-4111-8111-111111111111', COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(seen.some((s) => /^DELETE FROM warehouses/.test(s))).toBe(true);
+  });
+});
+
 describe('inventoryApi product units — flag clearing is atomic (Phase 82c on the raw path)', () => {
   function unitAdapter(txOk: boolean) {
     const seen: string[] = [];

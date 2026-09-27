@@ -583,6 +583,28 @@ export const inventoryApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Stock rows carry a NOT NULL warehouse_id and the column had no foreign
+      // key, so deleting a warehouse holding inventory left stock pointing at a
+      // warehouse that no longer resolves from any screen. Migration 0040 makes
+      // the database refuse it too; this reports which ledger blocks it.
+      const refs = await adapter.query<{ source: string; count: number }>(
+        `SELECT source, count(*)::int AS count FROM (
+           SELECT 'stock' AS source FROM stock WHERE warehouse_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'stock_movements' FROM stock_movements WHERE warehouse_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'stock_adjustments' FROM stock_adjustments WHERE warehouse_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'warehouse_transfers' FROM warehouse_transfers
+             WHERE (from_warehouse_id = $1::uuid OR to_warehouse_id = $1::uuid) AND company_id = $2::uuid
+         ) t GROUP BY source HAVING count(*) > 0 ORDER BY source`,
+        [id, companyId]
+      );
+      if (!refs.success) return { success: false, error: refs.error };
+      const rows = refs.rows ?? [];
+      if (rows.length > 0) {
+        return {
+          success: false,
+          error: `لا يمكن حذف المستودع لوجود حركات أو أرصدة مرتبطة به (${rows.map((r) => `${r.source}: ${r.count}`).join('، ')}). عطّل المستودع بدلاً من حذفه.`,
+        };
+      }
       return adapter.query('DELETE FROM warehouses WHERE id = $1 AND company_id = $2', [id, companyId]);
     } catch (e) {
       return { success: false, error: String(e) };

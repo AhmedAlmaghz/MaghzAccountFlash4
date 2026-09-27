@@ -1661,3 +1661,60 @@ describe('Migration 0039: party links and audit attribution foreign keys', () =>
   });
 });
 
+describe('Migration 0040: warehouse foreign keys', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0040_warehouse_fks.sql'), 'utf-8');
+  const body = migrationSql.replace(/^--.*$/gm, '');
+
+  it('no warehouse_id column had a foreign key before this', () => {
+    const init = readFileSync(join(MIGRATIONS_DIR, '0000_init.sql'), 'utf-8');
+    for (const t of ['stock', 'stock_movements', 'stock_adjustments', 'warehouse_transfers']) {
+      expect(init).toContain(`CREATE TABLE "${t}"`);
+    }
+    expect(init).not.toMatch(/FOREIGN KEY \("warehouse_id"\) REFERENCES "public"\."warehouses"/);
+    expect(init).not.toMatch(/FOREIGN KEY \("(from|to)_warehouse_id"\) REFERENCES "public"\."warehouses"/);
+  });
+
+  it('covers the five columns that resolve a warehouse', () => {
+    for (const spec of [
+      'stock|warehouse_id',
+      'stock_movements|warehouse_id',
+      'stock_adjustments|warehouse_id',
+      'warehouse_transfers|from_warehouse_id',
+      'warehouse_transfers|to_warehouse_id',
+    ]) {
+      expect(body).toContain(`'${spec}'`);
+    }
+  });
+
+  it('is RESTRICT — a warehouse holding inventory is never cascaded away', () => {
+    expect(body).toMatch(/ON DELETE RESTRICT/);
+    expect(body).not.toMatch(/ON DELETE CASCADE/i);
+  });
+
+  it('never deletes inventory history: orphans downgrade the constraint to NOT VALID', () => {
+    expect(body).toMatch(/ON DELETE RESTRICT NOT VALID/);
+    expect(body).toMatch(/RAISE NOTICE/);
+    expect(body).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(body).not.toMatch(/\bDROP\b/i);
+  });
+
+  it('is idempotent, guarded and standard PL/pgSQL', () => {
+    expect(body).toMatch(/pg_constraint/);
+    expect(body).toMatch(/IF v_exists THEN\s*\n\s*CONTINUE/);
+    expect(body).toMatch(/to_regclass\(v_table\) IS NULL OR to_regclass\('warehouses'\) IS NULL/);
+    expect(body).not.toMatch(/FOREACH/);
+  });
+
+  it('journal registers 0040 and the count mirrors the sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0040_warehouse_fks')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0040 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0040_warehouse_fks\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0040_warehouse_fks', sql: warehouseFks \}/);
+  });
+});
+
