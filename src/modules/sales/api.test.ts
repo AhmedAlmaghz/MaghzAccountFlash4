@@ -1866,3 +1866,63 @@ describe('salesApi.convertQuotationToInvoice (claim before create)', () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+describe('salesApi.deleteCustomer — refuses before touching the row (0039)', () => {
+  beforeEach(() => {
+    // Two later tests in this file flip isElectronPg to true and vi does not
+    // restore it, so the raw path has to be re-asserted here explicitly.
+    vi.mocked(isElectronPg).mockReturnValue(false);
+    (window as unknown as { electronDB?: unknown }).electronDB = undefined;
+  });
+
+  function adapterReturning(rows: Array<{ source: string; count: number }>) {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (/SELECT source, count\(\*\)/.test(sql)) return { success: true, rows };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return seen;
+  }
+
+  it('names the blocking documents instead of relying on a constraint violation', async () => {
+    const seen = adapterReturning([{ source: 'sales_invoices', count: 4 }, { source: 'receipt_vouchers', count: 1 }]);
+    const res = await salesApi.deleteCustomer(CUSTOMER_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/sales_invoices: 4/);
+    expect(res.error).toMatch(/عطّل العميل/);
+    expect(seen.some((s) => /^DELETE FROM customers/.test(s))).toBe(false);
+  });
+
+  it('probes every document source, not just invoices', async () => {
+    let guard = '';
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/SELECT source/.test(sql)) { guard = sql; return { success: true, rows: [] }; }
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    await salesApi.deleteCustomer(CUSTOMER_ID, COMPANY_ID);
+    for (const t of ['sales_invoices', 'quotations', 'sales_returns', 'receipt_vouchers', 'pos_payments']) {
+      expect(guard).toContain(t);
+    }
+  });
+
+  it('deletes when the customer owns no documents', async () => {
+    const seen = adapterReturning([]);
+    const res = await salesApi.deleteCustomer(CUSTOMER_ID, COMPANY_ID);
+    expect(res.success, res.error).toBe(true);
+    expect(seen.some((s) => /^DELETE FROM customers/.test(s))).toBe(true);
+  });
+
+  it('fails closed when the reference check itself fails', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/SELECT source/.test(sql)) return { success: false, error: 'db down' };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await salesApi.deleteCustomer(CUSTOMER_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toBeTruthy();
+  });
+});

@@ -337,6 +337,30 @@ export const salesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      // Check the references explicitly instead of waiting for a constraint to
+      // be violated: the error message below was previously unreachable because
+      // nothing pointed at customers. Migration 0039 adds the FKs, but an
+      // explicit count gives the operator the same answer with no dependency on
+      // which engine ran the statement.
+      const adapter = await getDbAdapter();
+      const refs = await adapter.query<{ source: string; count: number }>(
+        `SELECT source, count(*)::int AS count FROM (
+           SELECT 'sales_invoices' AS source FROM sales_invoices WHERE customer_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'quotations' FROM quotations WHERE customer_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'sales_returns' FROM sales_returns WHERE customer_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'receipt_vouchers' FROM receipt_vouchers WHERE customer_id = $1::uuid AND company_id = $2::uuid
+           UNION ALL SELECT 'pos_payments' FROM pos_payments WHERE customer_id = $1::uuid AND company_id = $2::uuid
+         ) t GROUP BY source HAVING count(*) > 0 ORDER BY source`,
+        [id, companyId]
+      );
+      if (!refs.success) return { success: false, error: refs.error };
+      const rows = refs.rows ?? [];
+      if (rows.length > 0) {
+        return {
+          success: false,
+          error: `لا يمكن حذف العميل لوجود مستندات مسجّلة باسمه (${rows.map((r) => `${r.source}: ${r.count}`).join('، ')}). عطّل العميل بدلاً من حذفه.`,
+        };
+      }
       if (isElectronPg()) {
         const result = await invokeSalesRpc('deleteCustomer', { id });
         if (result.success) return { success: true };
@@ -346,7 +370,6 @@ export const salesApi = {
         }
         return { success: false, error: result.error };
       }
-      const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM customers WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
       if (!result.success) {
         const msg = result.error || '';

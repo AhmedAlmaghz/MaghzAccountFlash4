@@ -582,7 +582,7 @@ Backup يعيد `users.password_hash`، وrestore يقبل raw rows دون manif
 - ✅ **أدوات فحص دائمة أُضيفت لهذه الفئة**: فحص تشغيل فعلي للـ shim في بيئة معزولة (يفحص `Object.keys(window.electronDB)` + installability كل دالة purchases الـ 17 + عدم تداخل أسطح + سلامة sales/pos)، وبوابة `preloadParity` ترفض أي backtick غير مُهرَّب داخل قالب الـ shim (الدرس من A1: backtick واحد يُسقط السطح كاملاً).
 - ✅ **التحقق النهائي بعد A2:** `vitest run` كامل = **`2799/2799`** في `217` ملف؛ purchases `42/42` (+8 جديدة: توجيه القائمة، عدّاد النافذة، `lines` بصيغة parsed وstring، لا سطر شبح، Not found، أوامر/مردودات، KPI رقمية لا NaN)، parity `6/6`. و`npm run lint` نظيف، `npx tsc -b --force` صفر، `npm run build` ✓ (9.3s)، `node --check` للـ main وكلا الـ preloads، `npm run db:check` نظيف. E2E: `06-suppliers`+`12-reports` `13/13`، و`23-purchases` **`4/4`**.
 - ✅ **tranche typed-RPC للمشتريات (B — كتابة الموردين):** 3 قنوات `purchases.createSupplier` / `updateSupplier` / `deleteSupplier` ⇒ **20 قناة purchases**. `company_id` و`updated_by`/`created_by` من الـ session دائماً، و`updateSupplier` بـ `paramCount: null` (partial SET)، و`deleteSupplier` **تعطيل ناعم** (`is_active=false`) لا DELETE (المورد يحمل مستنداته).
-  - **تقسيم مقصود**: القناة تؤدّي الـ INSERT فقط؛ **توليد رقم المستند** (`document_sequences`) و**قيد الرصيد الافتتاحي** يبقيان في الـ renderer — لأن منطق المال له تنفيذ واحد فقط. الاختبارات تثبت الانقسام: لا `document_sequences` في العملية الرئيسية، ولا `companyId` في الـ payload.
+  — **تقسيم مقصود**: القناة تؤدّي الـ INSERT فقط؛ **توليد رقم المستند** (`document_sequences`) و**قيد الرصيد الافتتاحي** يبقيان في الـ renderer — لأن منطق المال له تنفيذ واحد فقط. الاختبارات تثبت الانقسام: لا `document_sequences` في العملية الرئيسية، ولا `companyId` في الـ payload.
   - **بوابة الكتابة لم تتغيّر**: بلا `permission` صريح لأن قاعدة الجدول (`purchases`) تفرض `create|edit|post` — نفس المجموعة التي كان يفرضها المسار raw. هذا tranche يزيل SQL من السلك، لا يغيّر من يكتب.
 - 🧪 **e2e `06-suppliers` صار يمارس قناة الكتابة فعلاً**: الاختبار ينشئ مورداً من الواجهة وينتظر ظهوره في الجدول — أي INSERT حقيقي على PostgreSQL عبر القناة الجديدة (كان يمرّ على raw). نجح 5/5 مع `23-purchases`.
 - ✅ **التحقق النهائي بعد tranche B:** `vitest run` كامل = **`2804/2804`** في `217` ملف؛ purchases **`48/48`** (+6: INSERT عبر القناة بلا SQL خام، رقم المستند المولَّد يُرسل في payload، رفض القناة، patch جزئي بلا companyId، تعطيل ناعم، رفض مُرَّر). و`lint` نظيف، `tsc -b --force` صفر، `build` ✓ (9.25s)، `node --check` ×3، `db:check` نظيف. E2E: **`5/5`** (`06-suppliers` + `23-purchases`).
@@ -860,6 +860,21 @@ tsc -b
 6. لا يدّعي اكتمال 100% قبل tests وstaging evidence.
 
 ## 13. سجل التغيير
+
+- **2026-09-24 (Migration 0039 — قيود FK للأطراف + أعمدة التدقيق؛ P0 مكتشف بالجرد):**
+  - **الاكتشاف (جرد شامل)**: كاشف على `0000_init` + كل الـ39 هجرة ⇒ **34 فجوة مالية**. الأخطر: **`customers` و`suppliers` لا يملكان أي FK قادم من أي جدول إطلاقاً** — أي أن `deleteCustomer` كان **يحذف عميلاً له فواتير بنجاح**، والرسالة «Cannot delete customer with existing invoices… Deactivate instead» كانت **كاذبة تماماً**: لم يكن هناك قيد يُخالفه فلا تُشغَّل أبداً (وقد أكّد الفحص أن لا raw ولا RPC فيه أي فحص).
+  - **القرار (0039)**: روابط الأطراف بـ **`ON DELETE RESTRICT`** (عميل له مستندات = يُرفض حذفه، **لا يُحذف بالسلاسل** — الاتجاه الوحيد المعقول لربط طرف). أعمدة التدقيق (`created_by`/`updated_by`/`approved_by`) بـ **`ON DELETE SET NULL`** عبر **كل** الجداول التي تحويها (حذف مستخدم لا يحذف مستنداته، يمسح فقط نسبة الفعل) — وهو ما ينصّ عليه التصميم في التوثيق. `journal_entries.account_id` وروابط المنتجات/المخزون/التصنيع إما `RESTRICT`.
+  - **بدون حذف لبيانات**: اليتامي ⇒ `NOT VALID` (الجديد يُفحص، التاريخ يُترك) ⇒ الـmigration تنطبق دائماً.
+  - **الـAPI صار صريحاً لا انتظاراً لخطأ**: `deleteCustomer` (و`deleteProduct` من 0038) يفحص المراجع باستعلام مُجمَّع يعدّ لكل مصدر ويميّزه بالاسم، ويفشل مغلقاً إذا فشل الفحص.
+  - **دروس هندسية (3) من هجرة واحدة**:
+    1. **صيغة المواصفات**: `table.column:target:ondelete` ⇒ `string_to_array(':')` يعطي **3** أجزاء لا 4 ⇒ **كل قيود الأطراف سقطت بصمت** والـmigration «نجحت». استُبدلت بفاصل `|` (لأن اسم الجدول نفسه فيه نقطة) — والاختبار يمنع العودة. **درس: عدّ الأجزاء قبل الاعتماد على split — صامت**.
+    2. **`FOR v_i IN 1..coalesce(array_length(v_cols,1),0)`** — النطاق `1..0` ينفَّذ **هبطاً** فيزور `v_cols[0]` ⇒ خطأ. استُبدل بـ `FOR ... IN (SELECT)` مباشر.
+    3. **`users`/الجداول الاعتيادية قد لا تكون موجودة**: حرس `to_regclass` لكل جدول/عمود مقصود، وحارس `to_regclass('users')` لكتلة التدقيق (fixture بدون `users` كشف ذلك).
+    - ⇒ **كل هذا التقطه PGlite حيّ، لا mocks** (3 تشغيلات: تطبيق/idempotent/فرع يتام).
+  - **إثبات حي (PGlite)**: تُطبَّق · **idempotent** · `del=r` للأطراف (حذف عميل له فاتورة **مرفوض**) · `del=n` للتدقيق (حذف المستخدم **يُبقي** الفاتورة ويمسح النسبة) · فرع اليتامي: `NOT VALID` + **التاريخ محفوظ** + اليتيم الجديد مرفوض. السكربتات حُذفت.
+  - **البوابةTenantScope التقطت استعلامي الجديد** (فحص المراجع بـ `customer_id` بلا `company_id`) ⇒ أُضيف النطاق الصريح لكل فرع (وكل ذلك قبل الاعتماد).
+  - **الاختبارات**: 9 لـ0039 (متنوعة: «لا FK لـcustomers/suppliers في 0000_init» · RESTRICT · SET NULL · NOT VALID · idempotent · `no FOREACH` · صيغة `|` · journal · pglite) + 4 `deleteCustomer` + 3 `deleteProduct` = 16 اختباراً جديداً.
+  - **دروس مُضافة**: **جرد القيود قبل إضافة أي قيد** (الكشف أن صنفاً كاملاً بلا تغطية — `deleteCustomer` رسالة كاذبة). **فشل صامت في migration = indicator على split/format خاطئ** — اختبر على PGlite. **`mockReturnValue` لا يُعاد بين الأوصاف** — بعض اختباراتي تتطلب `beforeEach` إعادة التصريح.
 
 - **2026-09-24 (Migration 0038 — FK منتجات على جدولَي سطور الفواتير، `ON DELETE CASCADE` بقرار المالك):**
   - **الفجوة**: `sales_invoice_lines.product_id` و`purchase_invoice_lines.product_id` **بلا FK إطلاقاً**، بينما الإخوة الخمسة declare القيد في `0000_init`: `quotation_lines` / `sales_return_lines` / `purchase_order_lines` / `purchase_return_lines` (+ `product_product_categories`) ⇒ حذف منتج كان يترك **سطوراً يتيمة** على مستندات إيراد مرحّلة.

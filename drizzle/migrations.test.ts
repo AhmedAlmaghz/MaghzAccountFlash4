@@ -1598,3 +1598,66 @@ describe('Migration 0038: product FK on the invoice-line tables', () => {
   });
 });
 
+describe('Migration 0039: party links and audit attribution foreign keys', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0039_party_and_audit_fks.sql'), 'utf-8');
+  const body = migrationSql.replace(/^--.*$/gm, '');
+
+  it('the schema had NO incoming foreign key to customers or suppliers before this', () => {
+    const init = readFileSync(join(MIGRATIONS_DIR, '0000_init.sql'), 'utf-8');
+    expect(init).not.toMatch(/FOREIGN KEY \("customer_id"\) REFERENCES "public"\."customers"/);
+    expect(init).not.toMatch(/FOREIGN KEY \("supplier_id"\) REFERENCES "public"\."suppliers"/);
+  });
+
+  it('party links are RESTRICT — a party that owns documents is never cascaded away', () => {
+    for (const spec of [
+      'sales_invoices|customer_id|customers|restrict',
+      'purchase_invoices|supplier_id|suppliers|restrict',
+      'receipt_vouchers|customer_id|customers|restrict',
+      'payment_vouchers|supplier_id|suppliers|restrict',
+    ]) {
+      expect(body).toContain(`'${spec}'`);
+    }
+    expect(body).not.toMatch(/ON DELETE CASCADE/i);
+  });
+
+  it('audit attribution is SET NULL across every table that has it', () => {
+    expect(body).toMatch(/column_name IN \('created_by', 'updated_by', 'approved_by'\)/);
+    expect(body).toMatch(/REFERENCES users\(id\) ON DELETE SET NULL/);
+  });
+
+  it('never deletes financial history: orphans downgrade the constraint to NOT VALID', () => {
+    expect(body).toMatch(/NOT EXISTS \(SELECT 1 FROM %I p WHERE p\.id = t\.%I\)|NOT EXISTS \(SELECT 1 FROM products p/);
+    expect(body).toMatch(/ON DELETE RESTRICT NOT VALID/);
+    expect(body).toMatch(/RAISE NOTICE/);
+    expect(body).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(body).not.toMatch(/\bDROP\b/i);
+  });
+
+  it('is idempotent and tolerant of retired tables (standard PL/pgSQL only)', () => {
+    expect(body).toMatch(/pg_constraint/);
+    expect(body).toMatch(/IF v_exists THEN\s*\n\s*CONTINUE/);
+    expect(body).toMatch(/to_regclass\(v_table\) IS NULL/);
+    expect(body).toMatch(/to_regclass\('users'\) IS NOT NULL/);
+    // FOREACH is not core PL/pgSQL — it failed silently on a real engine
+    expect(body).not.toMatch(/FOREACH/);
+    expect(body).toMatch(/FOR v_i IN 1\.\.array_length/);
+  });
+
+  it('the spec format uses a pipe, because the table reference contains a dot', () => {
+    expect(body).toMatch(/string_to_array\(v_specs\[v_i\], '\|'\)/);
+    expect(body).not.toMatch(/string_to_array\(v_specs\[v_i\], ':'\)/);
+  });
+
+  it('journal registers 0039 and the count mirrors the sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0039_party_and_audit_fks')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0039 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0039_party_and_audit_fks\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0039_party_and_audit_fks', sql: partyAndAuditFks \}/);
+  });
+});
+

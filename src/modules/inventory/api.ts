@@ -333,8 +333,7 @@ export const inventoryApi = {
            UNION ALL SELECT 'purchase_return_lines' FROM purchase_return_lines WHERE product_id = $1::uuid
          ) t GROUP BY source HAVING count(*) > 0 ORDER BY source`,
         [id]
-      );
-      if (!refs.success) return { success: false, error: refs.error };
+      );      if (!refs.success) return { success: false, error: refs.error };
       const rows = refs.rows ?? [];
       if (rows.length > 0) {
         const detail = rows.map((r) => `${r.source}: ${r.count}`).join('، ');
