@@ -125,6 +125,7 @@ import lineProductFks from '@root/drizzle/0038_line_product_fks.sql?raw';
 import partyAndAuditFks from '@root/drizzle/0039_party_and_audit_fks.sql?raw';
 import warehouseFks from '@root/drizzle/0040_warehouse_fks.sql?raw';
 import workorderProductAuditFks from '@root/drizzle/0041_workorder_product_audit_fks.sql?raw';
+import treeFks from '@root/drizzle/0042_tree_fks.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -169,6 +170,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0039_party_and_audit_fks', sql: partyAndAuditFks },
   { name: '0040_warehouse_fks', sql: warehouseFks },
   { name: '0041_workorder_product_audit_fks', sql: workorderProductAuditFks },
+  { name: '0042_tree_fks', sql: treeFks },
 ];
 
 /**

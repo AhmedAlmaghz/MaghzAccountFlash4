@@ -1895,3 +1895,58 @@ describe('accountingApi.getCashFlow — IAS 7 indirect (Phase 5)', () => {
     expect(res.data.unexplained).toBe(0);
   });
 });
+
+describe('accountingApi.deleteAccount — the hierarchy guard (0042)', () => {
+  const ACCOUNT_ID = '33333333-3333-3333-3333-333333333333';
+  const COMPANY_ID = '22222222-2222-2222-2222-222222222222';
+
+  function adapter(childCount: number) {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (/FROM accounts WHERE parent_id/.test(sql)) return { success: true, rows: [{ count: childCount }] };
+      if (/FROM journal_entries/.test(sql)) return { success: true, rows: [{ count: 0 }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return seen;
+  }
+
+  it('refuses a parent with children and names the count', async () => {
+    const seen = adapter(3);
+    const res = await accountingApi.deleteAccount(ACCOUNT_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/3/);
+    // the journal check and the delete must not even be reached
+    expect(seen.some((s) => /^DELETE FROM accounts/.test(s))).toBe(false);
+  });
+
+  it('still refuses an account that has journal entries', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/FROM accounts WHERE parent_id/.test(sql)) return { success: true, rows: [{ count: 0 }] };
+      if (/FROM journal_entries/.test(sql)) return { success: true, rows: [{ count: 5 }] };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await accountingApi.deleteAccount(ACCOUNT_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/قيود/);
+  });
+
+  it('deletes a childless, entry-free account', async () => {
+    const seen = adapter(0);
+    const res = await accountingApi.deleteAccount(ACCOUNT_ID, COMPANY_ID);
+    expect(res.success).toBe(true);
+    expect(seen.some((s) => /^DELETE FROM accounts/.test(s))).toBe(true);
+  });
+
+  it('fails closed when the hierarchy check itself fails', async () => {
+    const adapter = makeMockAdapter(async (sql) => {
+      if (/FROM accounts WHERE parent_id/.test(sql)) return { success: false, error: 'db down' };
+      return { success: true, rows: [] };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await accountingApi.deleteAccount(ACCOUNT_ID, COMPANY_ID);
+    expect(res.success).toBe(false);
+  });
+});

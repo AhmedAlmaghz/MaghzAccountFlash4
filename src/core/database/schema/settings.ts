@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, integer } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, integer, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 import { accounts } from './accounting';
 
@@ -83,7 +83,7 @@ export const costCenters = pgTable('cost_centers', {
   nameAr: varchar('name_ar', { length: 100 }).notNull(),
   nameEn: varchar('name_en', { length: 100 }),
   code: varchar('code', { length: 20 }),
-  parentId: uuid('parent_id'),
+  parentId: uuid('parent_id').references((): AnyPgColumn => costCenters.id, { onDelete: 'cascade' }),
   type: varchar('type', { length: 20 }).notNull().default('branch'), // branch, department, project, product_line
   budgetAmount: numeric('budget_amount', { precision: 18, scale: 4 }).default('0'),
   isActive: boolean('is_active').notNull().default(true),

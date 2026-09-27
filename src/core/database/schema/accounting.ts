@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, integer } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, integer, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 
 // ─── Accounts (Chart of Accounts) ─────────────────────────────────────────────
@@ -8,7 +8,7 @@ export const accounts = pgTable('accounts', {
   code: varchar('code', { length: 20 }).notNull(),
   nameAr: varchar('name_ar', { length: 255 }).notNull(),
   nameEn: varchar('name_en', { length: 255 }),
-  parentId: uuid('parent_id'),
+  parentId: uuid('parent_id').references((): AnyPgColumn => accounts.id, { onDelete: 'cascade' }),
   type: varchar('type', { length: 20 }).notNull(), // asset, liability, equity, revenue, expense
   nature: varchar('nature', { length: 10 }).notNull(), // debit, credit
   isGroup: boolean('is_group').notNull().default(false),

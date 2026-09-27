@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, primaryKey, uniqueIndex, index, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { companies } from './core';
 import { productTypes, units } from './settings';
@@ -8,7 +8,7 @@ export const productCategories = pgTable('product_categories', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 100 }).notNull(),
-  parentId: uuid('parent_id'),
+  parentId: uuid('parent_id').references((): AnyPgColumn => productCategories.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

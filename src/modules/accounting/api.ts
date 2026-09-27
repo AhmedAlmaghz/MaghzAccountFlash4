@@ -195,6 +195,18 @@ export const accountingApi = {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      // Child accounts first: accounts.parent_id has no foreign key, so deleting a
+      // parent left the subtree pointing at a row that no longer exists, and the
+      // chart of accounts then rendered half a tree.
+      const children = await adapter.query<{ count: number }>(
+        `SELECT COUNT(*)::int as count FROM accounts WHERE parent_id = $1::uuid AND company_id = $2::uuid`,
+        [id, companyId]
+      );
+      if (!children.success) return { success: false, error: children.error };
+      const childCount = Number(children.rows?.[0]?.count) || 0;
+      if (childCount > 0) {
+        return { success: false, error: `لا يمكن حذف الحساب لوجود ${childCount} حساب فرعي مرتبط به. انقلها أولاً.` };
+      }
       const checkResult = await adapter.query<{ count: number }>(
         `SELECT COUNT(*) as count FROM journal_entries WHERE account_id = $1 AND company_id = $2`,
         [id, companyId]

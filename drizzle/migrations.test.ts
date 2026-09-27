@@ -1782,3 +1782,62 @@ describe('Migration 0041: work-order / BOM product and audit-user keys', () => {
   });
 });
 
+describe('Migration 0042: self-referencing hierarchy keys', () => {
+  const migrationSql = readFileSync(join(MIGRATIONS_DIR, '0042_tree_fks.sql'), 'utf-8');
+  const body = migrationSql.replace(/^--.*$/gm, '');
+
+  it('covers the three hierarchy tables', () => {
+    expect(body).toContain(`v_specs := ARRAY['accounts', 'product_categories', 'cost_centers']`);
+  });
+
+  it('is CASCADE — a subtree has no meaning without its root', () => {
+    expect(body).toMatch(/REFERENCES %I\(id\) ON DELETE CASCADE/);
+    expect(body).not.toMatch(/ON DELETE (RESTRICT|SET NULL)/i);
+  });
+
+  it('documents the columns that stay FK-free on purpose', () => {
+    // Phase 62 and the classification columns: a documented decision must not be
+    // "fixed" by the next census.
+    for (const note of ['cash_boxes.branch_id', 'warehouses.branch_id', 'products.category_id', 'vat_settings.account_id']) {
+      expect(migrationSql).toContain(note);
+    }
+    expect(migrationSql).toMatch(/receipt_vouchers\.cash_box_id/);
+  });
+
+  it('never deletes history: orphans land NOT VALID', () => {
+    expect(body).toMatch(/ON DELETE CASCADE NOT VALID/);
+    expect(body).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(body).not.toMatch(/\bDROP\b/i);
+  });
+
+  it('is idempotent and guarded', () => {
+    expect(body).toMatch(/pg_constraint/);
+    expect(body).toMatch(/IF v_exists THEN\s*\n\s*CONTINUE/);
+    expect(body).toMatch(/to_regclass\(v_table\) IS NULL/);
+    expect(body).not.toMatch(/FOREACH/);
+  });
+
+  it('journal registers 0042 and the count mirrors the sql files', () => {
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf-8'));
+    expect(journal.entries.some((e: { tag: string }) => e.tag === '0042_tree_fks')).toBe(true);
+    expect(journal.entries.length).toBe(readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).length);
+  });
+
+  it('pgliteAdapter registers 0042 in its hand-maintained MIGRATIONS list', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf-8');
+    expect(pglite).toMatch(/0042_tree_fks\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0042_tree_fks', sql: treeFks \}/);
+  });
+
+  it('Drizzle mirrors the three cascade self-references', () => {
+    const files = {
+      'src/core/database/schema/accounting.ts': /parentId: uuid\('parent_id'\)\.references\(\(\): AnyPgColumn => accounts\.id, \{ onDelete: 'cascade' \}\)/,
+      'src/core/database/schema/inventory.ts': /parentId: uuid\('parent_id'\)\.references\(\(\): AnyPgColumn => productCategories\.id, \{ onDelete: 'cascade' \}\)/,
+      'src/core/database/schema/settings.ts': /parentId: uuid\('parent_id'\)\.references\(\(\): AnyPgColumn => costCenters\.id, \{ onDelete: 'cascade' \}\)/,
+    };
+    for (const [file, re] of Object.entries(files)) {
+      expect(readFileSync(join(process.cwd(), file), 'utf-8'), file).toMatch(re);
+    }
+  });
+});
+
