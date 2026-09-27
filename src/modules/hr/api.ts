@@ -763,7 +763,9 @@ export const hrApi = {
       const runId = crypto.randomUUID();
       const lineValues = lines.map((_, i: number) => {
         const off = i * 8;
-        return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8})`;
+        // numeric casts required: a bare $N in VALUES is text and PG rejects it
+        // for base_salary/allowances/deductions/overtime/overtime_hours/net_salary.
+        return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::numeric)`;
       }).join(', ');
       const lineParams = lines.flatMap((line) => [runId, line.employeeId, line.baseSalary, line.allowances, line.deductions, line.overtime, line.overtimeHours, line.netSalary]);
       const stmts: Array<{ sql: string; params?: unknown[] }> = [

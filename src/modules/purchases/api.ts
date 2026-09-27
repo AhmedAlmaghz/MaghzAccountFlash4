@@ -861,7 +861,7 @@ export const purchasesApi = {
           const lb = line.baseCurrencyLineTotal ?? (line.lineTotal * lr);
           const usnap = snapshotLineUnit(line);
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::numeric,$${off + 8},$${off + 9}::numeric,$${off + 10}::numeric,$${off + 11}::uuid,$${off + 12}::numeric,$${off + 13}::numeric)`);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::numeric,$${off + 8}::varchar,$${off + 9}::numeric,$${off + 10}::numeric,$${off + 11}::uuid,$${off + 12}::numeric,$${off + 13}::numeric)`);
           params.push(
             invoiceId,
             line.productId,
@@ -1680,7 +1680,7 @@ export const purchasesApi = {
         for (const line of data.lines) {
           const off = params.length;
           const usnap = snapshotLineUnit(line);
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3},$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::uuid,$${off + 8}::numeric,$${off + 9}::numeric)`);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::varchar,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::uuid,$${off + 8}::numeric,$${off + 9}::numeric)`);
           params.push(returnId, line.productId, line.description ?? null, line.quantity, line.unitPrice, line.lineTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
         sql += `,lines_ins AS (INSERT INTO purchase_return_lines (return_id,product_id,description,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity) SELECT v.return_id,v.product_id,v.description,v.quantity,v.unit_price,v.line_total,v.unit_id,v.unit_factor,v.base_quantity FROM ret JOIN (VALUES ${lineValues.join(',')}) v(return_id,product_id,description,quantity,unit_price,line_total,unit_id,unit_factor,base_quantity) ON true)`;

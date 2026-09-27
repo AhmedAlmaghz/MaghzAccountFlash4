@@ -842,7 +842,12 @@ export const salesApi = {
         });
         const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
           const off = i * 13;
-          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`;
+          // Every parameter needs its cast: a bare $N in a VALUES list is typed
+          // as text, and PG rejects it for numeric columns ("column \"quantity\"
+          // is of type numeric but expression is of type text"). createInvoice
+          // already carried these casts; the update path did not, which made
+          // every draft line edit fail on the web engine.
+          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::varchar, $${off + 9}::numeric, $${off + 10}::numeric, $${off + 11}::uuid, $${off + 12}::numeric, $${off + 13}::numeric)`;
         }).join(', ');
         const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => {
           const lineCurrencyCode = line.currencyCode || data.currencyCode || YER_CODE;
@@ -1421,7 +1426,7 @@ export const salesApi = {
         });
         const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
           const off = i * 9;
-          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}::uuid, $${off + 8}, $${off + 9})`;
+          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::uuid, $${off + 8}::numeric, $${off + 9}::numeric)`;
         }).join(', ');
         const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => {
           const usnap = snapshotLineUnit(line);
@@ -1763,7 +1768,7 @@ export const salesApi = {
         });
         const lineValues = data.lines.map((_: typeof data.lines[0], i: number) => {
           const off = i * 8;
-          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}::uuid, $${off + 7}, $${off + 8})`;
+          return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::uuid, $${off + 7}::numeric, $${off + 8}::numeric)`;
         }).join(', ');
         const lineParams = data.lines.flatMap((line: typeof data.lines[0]) => {
           const usnap = snapshotLineUnit(line);
