@@ -1042,6 +1042,90 @@ describe('manufacturingApi', () => {
     });
   });
 
+  describe('atomic child rewrites (Phase FIN)', () => {
+    const mat = (n: number) => ({
+      materialId: `00000000-0000-4000-8000-00000000000${n}`,
+      quantity: 2,
+      unitCost: 10,
+    });
+
+    it('updateBom ships header + material delete + re-insert in ONE transaction', async () => {
+      const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+      const res = await manufacturingApi.updateBom(BOM_ID, COMPANY_ID, undefined, { version: 'v2', lines: [mat(1), mat(2)] } as never);
+      expect(res.success).toBe(true);
+      const batch = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+      expect(batch.map((s) => s.sql)).toEqual([
+        expect.stringMatching(/UPDATE boms SET/),
+        expect.stringMatching(/DELETE FROM bom_lines/),
+        expect.stringMatching(/INSERT INTO bom_lines/),
+      ]);
+    });
+
+    it('updateBom reports failure instead of claiming success when the batch fails', async () => {
+      const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+      adapter.transaction.mockRejectedValueOnce(new Error('deadlock detected'));
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+      const res = await manufacturingApi.updateBom(BOM_ID, COMPANY_ID, undefined, { lines: [mat(1)] } as never);
+      expect(res.success).toBe(false);
+    });
+
+    it('updateWorkOrder ships header + consumption delete + re-insert in ONE transaction', async () => {
+      const adapter = makeMockAdapter(async (sql) => {
+        if (/SELECT status/.test(sql)) return { success: true, rows: [{ status: 'planned' }] };
+        return { success: true, rows: [] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+      const res = await manufacturingApi.updateWorkOrder(WO_ID, COMPANY_ID, undefined, {
+        notes: 'x',
+        lines: [{ materialId: mat(1).materialId, plannedQuantity: 5, unitCost: 3 }],
+      } as never);
+      expect(res.success).toBe(true);
+      const batch = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+      expect(batch.map((s) => s.sql)).toEqual([
+        expect.stringMatching(/UPDATE work_orders SET/),
+        expect.stringMatching(/DELETE FROM work_order_consumptions/),
+        expect.stringMatching(/INSERT INTO work_order_consumptions/),
+      ]);
+    });
+
+    it('reopen resets the actuals in the same transaction and scopes them to the company', async () => {
+      const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+      const res = await manufacturingApi.updateWorkOrderStatus(WO_ID, COMPANY_ID, 'planned');
+      expect(res.success).toBe(true);
+      const batch = adapter.transaction.mock.calls[0][0] as Array<{ sql: string; params: unknown[] }>;
+      expect(batch).toHaveLength(2);
+      expect(batch[0].sql).toMatch(/UPDATE work_orders SET status/);
+      expect(batch[1].sql).toMatch(/UPDATE work_order_consumptions SET actual_quantity = 0/);
+      // company-scoped: a stale-actual reset must never cross tenants
+      expect(batch[1].sql).toMatch(/company_id/);
+      expect(batch[1].params).toEqual([WO_ID, COMPANY_ID]);
+    });
+
+    it('deleteWorkOrder deletes the parent only (consumptions cascade)', async () => {
+      const seen: string[] = [];
+      const adapter = makeMockAdapter(async (sql) => { seen.push(sql); return { success: true, rows: [] }; });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+      const res = await manufacturingApi.deleteWorkOrder(WO_ID, COMPANY_ID);
+      expect(res.success).toBe(true);
+      // The removed child DELETE destroyed the material plan even when the
+      // work order itself survived the delete.
+      expect(seen.filter((s) => /DELETE FROM/.test(s))).toHaveLength(1);
+      expect(seen[0]).toMatch(/DELETE FROM work_orders/);
+    });
+
+    it('deleteBom deletes the parent only (materials cascade)', async () => {
+      const seen: string[] = [];
+      const adapter = makeMockAdapter(async (sql) => { seen.push(sql); return { success: true, rows: [] }; });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+      const res = await manufacturingApi.deleteBom(BOM_ID, COMPANY_ID);
+      expect(res.success).toBe(true);
+      expect(seen.filter((s) => /DELETE FROM/.test(s))).toHaveLength(1);
+      expect(seen[0]).toMatch(/DELETE FROM boms/);
+    });
+  });
+
   describe('getManufacturingKpis', () => {
     it('returns aggregated KPIs scoped to company', async () => {
       const adapter = makeMockAdapter(async (sql, params) => {

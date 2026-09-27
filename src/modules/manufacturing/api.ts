@@ -394,12 +394,25 @@ export const manufacturingApi = {
       fields.push(`updated_by = $${idx++}`);
       values.push(_userId ?? null);
 
-      if (fields.length > 0) { values.push(id); values.push(companyId); await adapter.query(`UPDATE boms SET ${fields.join(', ')} WHERE id = $${idx} AND company_id = $${idx + 1}`, values); }
+      // Header + materials travel in ONE transaction. They used to be three
+      // fire-and-forget statements ending in an unconditional `success: true`:
+      // a failed header left the old materials deleted, and a failed re-insert
+      // left a BOM with NO materials — which the availability calculator then
+      // reads as "nothing to consume".
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      if (fields.length > 0) { values.push(id); values.push(companyId); tx.push({ sql: `UPDATE boms SET ${fields.join(', ')} WHERE id = $${idx} AND company_id = $${idx + 1}`, params: values }); }
       if (data.lines) {
-        await adapter.query('DELETE FROM bom_lines WHERE bom_id = $1 AND $2 = (SELECT company_id FROM boms WHERE id = $1)', [id, companyId]);
-        await batchInsertLines(adapter, 'bom_lines', ['bom_id', 'material_id', 'quantity', 'unit_cost', 'total_cost'],
-          data.lines.map(l => [id, l.materialId, l.quantity, l.unitCost, (l.quantity || 0) * (l.unitCost || 0)])
-        );
+        tx.push({
+          sql: 'DELETE FROM bom_lines WHERE bom_id = $1 AND $2 = (SELECT company_id FROM boms WHERE id = $1)',
+          params: [id, companyId],
+        });
+        const ins = buildInsertStatement('bom_lines', ['bom_id', 'material_id', 'quantity', 'unit_cost', 'total_cost'],
+          data.lines.map(l => [id, l.materialId, l.quantity, l.unitCost, (l.quantity || 0) * (l.unitCost || 0)]));
+        if (ins) tx.push(ins);
+      }
+      if (tx.length > 0) {
+        const txRes = await adapter.transaction(tx);
+        if (!txRes.success) return { success: false, error: txRes.error || 'تعذّر حفظ بيانات قائمة المواد' };
       }
       return { success: true };
     } catch (e) {
@@ -416,7 +429,9 @@ export const manufacturingApi = {
         return { success: result.success, error: result.error };
       }
       const adapter = await getDbAdapter();
-      await adapter.query('DELETE FROM bom_lines WHERE bom_id = $1 AND $2 = (SELECT company_id FROM boms WHERE id = $1)', [id, companyId]);
+      // bom_lines.bom_id carries ON DELETE CASCADE, so the parent delete is the
+      // only statement needed. The explicit child delete that used to precede it
+      // destroyed the BOM's materials even when the parent delete failed.
       const result = await adapter.query('DELETE FROM boms WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
     } catch (e) {
@@ -717,12 +732,23 @@ export const manufacturingApi = {
       fields.push(`updated_by = $${idx++}`);
       values.push(_userId ?? null);
 
-      if (fields.length > 0) { values.push(id); values.push(companyId); await adapter.query(`UPDATE work_orders SET ${fields.join(', ')} WHERE id = $${idx} AND company_id = $${idx + 1}`, values); }
+      // Header + material plan in ONE transaction (same reason as updateBom:
+      // three discarded statements let a failed edit leave the work order with
+      // no materials, or with a new header over the old plan).
+      const tx: Array<{ sql: string; params?: unknown[] }> = [];
+      if (fields.length > 0) { values.push(id); values.push(companyId); tx.push({ sql: `UPDATE work_orders SET ${fields.join(', ')} WHERE id = $${idx} AND company_id = $${idx + 1}`, params: values }); }
       if (data.lines) {
-        await adapter.query('DELETE FROM work_order_consumptions WHERE work_order_id = $1 AND $2 = (SELECT company_id FROM work_orders WHERE id = $1)', [id, companyId]);
-        await batchInsertLines(adapter, 'work_order_consumptions', ['work_order_id', 'material_id', 'planned_quantity', 'actual_quantity', 'unit_cost', 'actual_unit_cost'],
-          data.lines.map(l => [id, l.materialId, l.plannedQuantity, l.actualQuantity, l.unitCost, l.actualUnitCost])
-        );
+        tx.push({
+          sql: 'DELETE FROM work_order_consumptions WHERE work_order_id = $1 AND $2 = (SELECT company_id FROM work_orders WHERE id = $1)',
+          params: [id, companyId],
+        });
+        const ins = buildInsertStatement('work_order_consumptions', ['work_order_id', 'material_id', 'planned_quantity', 'actual_quantity', 'unit_cost', 'actual_unit_cost'],
+          data.lines.map(l => [id, l.materialId, l.plannedQuantity, l.actualQuantity, l.unitCost, l.actualUnitCost]));
+        if (ins) tx.push(ins);
+      }
+      if (tx.length > 0) {
+        const txRes = await adapter.transaction(tx);
+        if (!txRes.success) return { success: false, error: txRes.error || 'تعذّر حفظ بيانات أمر التشغيل' };
       }
       return { success: true };
     } catch (e) {
@@ -739,7 +765,9 @@ export const manufacturingApi = {
         return { success: result.success, error: result.error };
       }
       const adapter = await getDbAdapter();
-      await adapter.query('DELETE FROM work_order_consumptions WHERE work_order_id = $1 AND $2 = (SELECT company_id FROM work_orders WHERE id = $1)', [id, companyId]);
+      // work_order_consumptions.work_order_id carries ON DELETE CASCADE — the
+      // parent delete is sufficient, and the removed child delete used to wipe
+      // the material plan even when the work order itself survived.
       const result = await adapter.query('DELETE FROM work_orders WHERE id = $1 AND company_id = $2', [id, companyId]);
       return { success: result.success, error: result.error };
     } catch (e) {
@@ -1549,17 +1577,23 @@ export const manufacturingApi = {
       // belong to the cancelled run, not the new one.
       {
         const adapter = await getDbAdapter();
-        const result = await adapter.query(
-          `UPDATE work_orders SET status = $1, actual_start_date = NULL, actual_end_date = NULL, wip_materials_cost = 0, updated_at = NOW()${_userId ? ', updated_by = $2' : ''} WHERE id = $${_userId ? 3 : 2} AND company_id = $${_userId ? 4 : 3}`,
-          _userId ? [status, _userId, id, companyId] : [status, id, companyId]
-        );
-        if (result.success) {
-          await adapter.query(
-            `UPDATE work_order_consumptions SET actual_quantity = 0, actual_unit_cost = 0 WHERE work_order_id = $1::uuid`,
-            [id]
-          );
-        }
-        return { success: result.success, error: result.error };
+        // Header + actuals reset in ONE transaction, and the child statement is
+        // company-scoped. It used to be a discarded follow-up: a reopened order
+        // could keep the previous run's actual quantities, which the variance
+        // report then reads as this run's consumption.
+        // Separate statement ⇒ its own numbering: always $1 / $2.
+        const tx: Array<{ sql: string; params?: unknown[] }> = [
+          {
+            sql: `UPDATE work_orders SET status = $1, actual_start_date = NULL, actual_end_date = NULL, wip_materials_cost = 0, updated_at = NOW()${_userId ? ', updated_by = $2' : ''} WHERE id = $${_userId ? 3 : 2} AND company_id = $${_userId ? 4 : 3}`,
+            params: _userId ? [status, _userId, id, companyId] : [status, id, companyId],
+          },
+          {
+            sql: 'UPDATE work_order_consumptions SET actual_quantity = 0, actual_unit_cost = 0 WHERE work_order_id = $1::uuid AND $2::uuid = (SELECT company_id FROM work_orders WHERE id = $1)',
+            params: [id, companyId],
+          },
+        ];
+        const txRes = await adapter.transaction(tx);
+        return { success: txRes.success, error: txRes.error };
       }
     } catch (e) {
       return { success: false, error: String(e) };
@@ -1778,15 +1812,18 @@ export const manufacturingApi = {
   },
 };
 
-async function batchInsertLines(adapter: Awaited<ReturnType<typeof getDbAdapter>>, table: string, columns: string[], rows: unknown[][]): Promise<void> {
-  if (rows.length === 0) return;
+/**
+ * Compose a multi-row INSERT as a statement so callers that need atomicity can
+ * ship it inside adapter.transaction() instead of firing it on its own.
+ */
+function buildInsertStatement(table: string, columns: string[], rows: unknown[][]): { sql: string; params: unknown[] } | null {
+  if (rows.length === 0) return null;
   const colCount = columns.length;
   const placeholders = rows.map((_, ri) => {
     const base = ri * colCount;
     return `(${Array.from({ length: colCount }, (_, ci) => `$${base + ci + 1}`).join(',')})`;
   }).join(',');
-  const values = rows.flat();
-  await adapter.query(`INSERT INTO ${table} (${columns.join(',')}) VALUES ${placeholders}`, values);
+  return { sql: `INSERT INTO ${table} (${columns.join(',')}) VALUES ${placeholders}`, params: rows.flat() };
 }
 
 /**

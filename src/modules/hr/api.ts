@@ -754,25 +754,30 @@ export const hrApi = {
         return { success: false, error: result.error };
       }
 
-      const tx = await adapter.transaction([
-        { sql: `INSERT INTO payroll_runs (company_id, month, year, total_amount, status, run_number, notes, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, params: [data.companyId, data.month, data.year, totalAmount, data.status, runNumber || null, data.notes ?? null, safeUserId(_userId), safeUserId(_userId)] },
-      ]);
-      if (tx.success && tx.results?.[0]?.rows?.[0]) {
-        const runId = tx.results[0].rows[0].id as string;
-        if (lines.length > 0) {
-          const lineValues = lines.map((_, i: number) => {
-            const off = i * 8;
-            return `($${off + 1}, $${off + 2}, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8})`;
-          }).join(', ');
-          const lineParams = lines.flatMap((line) => [runId, line.employeeId, line.baseSalary, line.allowances, line.deductions, line.overtime, line.overtimeHours, line.netSalary]);
-          await adapter.query(
-            `INSERT INTO payroll_lines (payroll_run_id, employee_id, base_salary, allowances, deductions, overtime, overtime_hours, net_salary) VALUES ${lineValues}`,
-            lineParams
-          );
-        }
-        return { success: true, id: runId };
+      // The run id is minted in JS so the header and its lines can share ONE
+      // transaction. Previously the header committed alone and the lines were a
+      // discarded follow-up: a failed insert left a run with no employees —
+      // whose total_amount was already set — AND that orphan run occupies the
+      // period (partial unique index on draft/posted), so the next payroll for
+      // the same month is rejected outright.
+      const runId = crypto.randomUUID();
+      const lineValues = lines.map((_, i: number) => {
+        const off = i * 8;
+        return `($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8})`;
+      }).join(', ');
+      const lineParams = lines.flatMap((line) => [runId, line.employeeId, line.baseSalary, line.allowances, line.deductions, line.overtime, line.overtimeHours, line.netSalary]);
+      const stmts: Array<{ sql: string; params?: unknown[] }> = [
+        { sql: `INSERT INTO payroll_runs (id, company_id, month, year, total_amount, status, run_number, notes, created_by, updated_by) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, params: [runId, data.companyId, data.month, data.year, totalAmount, data.status, runNumber || null, data.notes ?? null, safeUserId(_userId), safeUserId(_userId)] },
+      ];
+      if (lines.length > 0) {
+        stmts.push({
+          sql: `INSERT INTO payroll_lines (payroll_run_id, employee_id, base_salary, allowances, deductions, overtime, overtime_hours, net_salary) VALUES ${lineValues}`,
+          params: lineParams,
+        });
       }
-      return { success: false, error: tx.error };
+      const tx = await adapter.transaction(stmts);
+      if (!tx.success) return { success: false, error: tx.error };
+      return { success: true, id: runId };
     } catch (e) {
       return { success: false, error: String(e) };
     }

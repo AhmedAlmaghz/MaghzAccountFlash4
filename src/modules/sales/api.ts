@@ -1521,17 +1521,25 @@ export const salesApi = {
       if (!createRes.success) {
         // Release the claim so the operator can retry — NOT EXISTS protects a
         // quotation that already got a real invoice (the create may have
-        // committed even if its response was lost).
+        // committed even if its response was lost). A failed release is NOT
+        // swallowed: the row would stay 'converted' with no invoice behind it,
+        // which reads as a completed conversion and can never be retried.
+        let released: boolean | null = null;
         if (isElectronPg()) {
-          await invokeSalesRpc('releaseQuotation', { id, previousStatus });
+          const rel = await invokeSalesRpc('releaseQuotation', { id, previousStatus });
+          released = rel.success;
         } else {
           const adapter = await getDbAdapter();
-          await adapter.query(
+          const rel = await adapter.query(
             `UPDATE quotations SET status = $3, updated_at = NOW()
               WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'converted'
                 AND NOT EXISTS (SELECT 1 FROM sales_invoices WHERE quotation_id = $1::uuid AND company_id = $2::uuid)`,
             [id, companyId, previousStatus]
           );
+          released = rel.success;
+        }
+        if (released === false) {
+          return { success: false, error: `${createRes.error || 'تعذّر إنشاء الفاتورة'} — تعذّر تحرير عرض السعر من حالة «محوّل»؛ راجع حالته يدوياً قبل إعادة المحاولة.` };
         }
       }
       return createRes;

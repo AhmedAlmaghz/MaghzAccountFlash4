@@ -13,7 +13,13 @@ function makeMockAdapter(
 ) {
   return {
     query: vi.fn(queryImpl),
-    transaction: vi.fn(async () => ({ success: true, results: [] })),
+    // Replays each statement so tests observe the same SQL the real engines run
+    // (the actual PGlite transaction wraps them in BEGIN/COMMIT).
+    transaction: vi.fn(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      const results = [];
+      for (const q of queries) results.push(await queryImpl(q.sql, q.params ?? []));
+      return { success: true, results };
+    }),
     getProducts: vi.fn(async () => ({ success: true, data: [] })),
     createProduct: vi.fn(async () => ({ success: true, id: 'prod-1' })),
   };
@@ -113,7 +119,7 @@ describe('inventoryApi.createProductUnit', () => {
 });
 
 describe('inventoryApi uniqueness handover (uq_product_units_*)', () => {
-  it('create clears sibling default flags before INSERT', async () => {
+  it('create clears sibling default flags in the same transaction as the INSERT', async () => {
     const calls: string[] = [];
     const adapter = makeMockAdapter(async (sql) => {
       calls.push(sql);
@@ -129,9 +135,11 @@ describe('inventoryApi uniqueness handover (uq_product_units_*)', () => {
     expect(calls.length).toBe(2);
     expect(calls[0]).toMatch(/UPDATE product_units SET is_default_sale = false WHERE product_id/);
     expect(calls[1]).toMatch(/INSERT INTO product_units/);
+    // one transaction, so the flag handover cannot race the partial unique index
+    expect(adapter.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('update clears sibling default flags before the SET', async () => {
+  it('update clears sibling default flags in the same transaction as the SET', async () => {
     const calls: string[] = [];
     const adapter = makeMockAdapter(async (sql) => {
       calls.push(sql);
@@ -143,6 +151,7 @@ describe('inventoryApi uniqueness handover (uq_product_units_*)', () => {
     expect(calls.length).toBe(2);
     expect(calls[0]).toMatch(/UPDATE product_units SET is_default_purchase = false WHERE product_id = \(SELECT/);
     expect(calls[1]).toMatch(/UPDATE product_units SET .* WHERE id = .* AND company_id = /);
+    expect(adapter.transaction).toHaveBeenCalledTimes(1);
   });
 
   it('update without flags issues a single statement', async () => {
@@ -357,5 +366,63 @@ describe('inventoryApi.updateProduct — m2m replacement is honest and ordered',
     const del = seen.find((s) => /DELETE FROM product_product_categories/.test(s))!;
     expect(del).toMatch(/\$2 = \(SELECT company_id FROM products WHERE id = \$1\)/);
     expect(seen.find((s) => /INSERT INTO product_product_categories/.test(s))!.match(/VALUES/)).toBeTruthy();
+  });
+});
+
+describe('inventoryApi product units — flag clearing is atomic (Phase 82c on the raw path)', () => {
+  function unitAdapter(txOk: boolean) {
+    const seen: string[] = [];
+    const adapter = makeMockAdapter(async (sql) => {
+      seen.push(sql);
+      if (/INSERT INTO product_units/.test(sql)) return { success: true, rows: [{ id: UNIT_ROW_ID }] };
+      return { success: true, rows: [] };
+    });
+    if (!txOk) adapter.transaction.mockRejectedValueOnce(new Error('unique violation'));
+    else adapter.transaction.mockImplementation(async (queries: Array<{ sql: string; params?: unknown[] }>) => {
+      const results = [];
+      for (const q of queries) results.push(await adapter.query(q.sql, q.params ?? []));
+      return { success: true, results };
+    });
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return { adapter, seen };
+  }
+
+  const flags = { isBase: true, isDefaultSale: true, isDefaultPurchase: true };
+
+  it('createProductUnit clears the sibling flags inside the insert transaction', async () => {
+    const { adapter } = unitAdapter(true);
+    const res = await inventoryApi.createProductUnit({
+      companyId: COMPANY_ID, productId: PRODUCT_ID, unitId: UNIT_ID,
+      factor: 12, salePrice: 100, purchasePrice: 80, ...flags,
+    } as never);
+    expect(res.success).toBe(true);
+    expect(res.id).toBe(UNIT_ROW_ID);
+    const batch = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+    // Phase 82c: clear-then-write as separate statements raced the partial
+    // unique index, and a failed insert left the product with no default unit.
+    expect(batch).toHaveLength(4);
+    expect(batch[0].sql).toMatch(/SET is_base = false/);
+    expect(batch[1].sql).toMatch(/SET is_default_sale = false/);
+    expect(batch[2].sql).toMatch(/SET is_default_purchase = false/);
+    expect(batch[3].sql).toMatch(/INSERT INTO product_units/);
+  });
+
+  it('createProductUnit reports the failure instead of a phantom unit', async () => {
+    unitAdapter(false);
+    const res = await inventoryApi.createProductUnit({
+      companyId: COMPANY_ID, productId: PRODUCT_ID, unitId: UNIT_ID,
+      factor: 12, salePrice: 100, purchasePrice: 80, ...flags,
+    } as never);
+    expect(res.success).toBe(false);
+  });
+
+  it('updateProductUnit ships the flag clears with the row update', async () => {
+    const { adapter } = unitAdapter(true);
+    const res = await inventoryApi.updateProductUnit(UNIT_ROW_ID, COMPANY_ID, { isDefaultSale: true, factor: 6 } as never);
+    expect(res.success).toBe(true);
+    const batch = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+    expect(batch).toHaveLength(2);
+    expect(batch[0].sql).toMatch(/SET is_default_sale = false/);
+    expect(batch[1].sql).toMatch(/UPDATE product_units SET .*factor/);
   });
 });

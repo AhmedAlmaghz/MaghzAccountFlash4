@@ -653,6 +653,24 @@ describe('hrApi.createPayrollRun — server-side recomputation + period guard', 
     expect(lineParams).not.toContain(999);
   });
 
+  it('ships the run header and its lines in ONE transaction (no orphan run)', async () => {
+    const adapter = payrollAdapter();
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await hrApi.createPayrollRun({
+      companyId: COMPANY_ID, month: 9, year: 2026, totalAmount: 0, status: 'draft',
+      lines: [{ employeeId: 'e1', employeeName: 'Ahmed', baseSalary: 1, allowances: 0, deductions: 0, overtime: 0, netSalary: 1 }],
+    } as never);
+    expect(res.success).toBe(true);
+    const batch = adapter.transaction.mock.calls[0][0] as Array<{ sql: string }>;
+    expect(batch).toHaveLength(2);
+    expect(batch[0].sql).toMatch(/INSERT INTO payroll_runs/);
+    expect(batch[1].sql).toMatch(/INSERT INTO payroll_lines/);
+    // A header-only commit would leave a run whose total_amount is set with no
+    // employees behind it — and it would hold the period (partial unique index),
+    // so the next payroll for the same month would be rejected outright.
+    expect(res.id).toBeTruthy();
+  });
+
   it('rejects empty lines', async () => {
     const adapter = payrollAdapter();
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);

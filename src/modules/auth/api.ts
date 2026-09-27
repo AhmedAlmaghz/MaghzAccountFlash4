@@ -244,10 +244,13 @@ export const authApi = {
         };
 
         if (row.id && row.company_id) {
-          await adapter.query(
+          // Best-effort, but never silent: a dropped last_login_at means the
+          // audit trail of who used the system quietly stops recording.
+          const touch = await adapter.query(
             'UPDATE users SET last_login_at = NOW() WHERE id = $1 AND company_id = $2',
             [String(row.id), String(row.company_id)]
           );
+          if (!touch.success) console.warn('[auth] last_login_at not recorded:', touch.error);
         }
 
         if (credentials.rememberMe) {

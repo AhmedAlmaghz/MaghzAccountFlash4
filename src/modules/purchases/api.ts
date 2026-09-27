@@ -1517,13 +1517,18 @@ export const purchasesApi = {
         // Release the claim so the operator can retry. The ORIGINAL status is
         // restored (not a guessed one), and NOT EXISTS makes the rollback safe
         // when the create actually committed but timed out on the way back —
-        // an order is never un-claimed behind a real invoice.
-        await adapter.query(
+        // an order is never un-claimed behind a real invoice. A failed release
+        // is reported, never swallowed: the order would stay 'invoiced' with no
+        // invoice behind it and could never be converted again.
+        const rel = await adapter.query(
           `UPDATE purchase_orders SET status = $3, updated_at = NOW()
             WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'invoiced'
               AND NOT EXISTS (SELECT 1 FROM purchase_invoices WHERE purchase_order_id = $1::uuid AND company_id = $2::uuid)`,
           [orderId, companyId, previousStatus]
         );
+        if (!rel.success) {
+          return { success: false, error: `${createResult.error || 'تعذّر إنشاء فاتورة الشراء'} — تعذّر تحرير أمر الشراء من حالة «محوّل»؛ راجع حالته يدوياً قبل إعادة المحاولة.` };
+        }
       }
       return createResult;
     } catch (e) {
