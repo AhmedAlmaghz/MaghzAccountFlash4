@@ -29,33 +29,18 @@
         "tab": "العربية",
         "groups": [
           {
-            "group": "دليل المستخدم الشامل",
-            "root": "ar/index",
-            "pages": [
-              "ar/CONVENTIONS"
-            ]
-          },
-          {
-            "group": "مقدمة النظام",
-            "pages": [
-              "ar/01-introduction/index"
-            ]
-          },
-          {
             "group": "البدء السريع",
             "pages": [
+              "ar/index",
+              "ar/03-interface/index"
+              "ar/01-introduction/index"
               "ar/02-getting-started/01-installation",
               "ar/02-getting-started/02-first-run-wizard",
               "ar/02-getting-started/03-login",
               "ar/02-getting-started/04-quick-start"
             ]
           },
-          {
-            "group": "الواجهة العامة",
-            "pages": [
-              "ar/03-interface/index"
-            ]
-          },
+         
           {
             "group": "الإعدادات",
             "root": "ar/04-settings/index",
@@ -189,21 +174,17 @@
           },
           {
             "group": "الملاحق",
-            "pages": [
+              "pages": [
+              "ar/CONVENTIONS"
               "ar/99-appendix/01-glossary",
               "ar/99-appendix/02-permissions-matrix",
               "ar/99-appendix/03-shortcuts",
               "ar/99-appendix/04-troubleshooting",
               "ar/99-appendix/05-faq"
+              "./CHANGELOG"
             ]
           },
-          {
-            "group": "سكربتات الفيديو وسجل الإصدارات",
-            "pages": [
-              "videos/ar/scripts/15-19-batch-scripts",
-              "CHANGELOG"
-            ]
-          }
+          
         ]
       },
       {
