@@ -25,6 +25,40 @@ type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?:
  * does not check whether its own compensation succeeded. That window is a
  * separate decision, not a side effect of moving SQL.
  */
+type TxStep = { sql: string; params?: unknown[] };
+
+/**
+ * Undo a half-applied posting, and report whether the undo actually happened.
+ *
+ * The compensation is itself a database operation, so it can fail for reasons
+ * unrelated to the journal entry: a dropped connection, a timeout, a lock.
+ * Ignoring its result is what turns a failed posting into a silently corrupt
+ * ledger - the document stays posted with a moved balance and no journal entry,
+ * while the caller returns a clean error that implies nothing changed.
+ *
+ * Eight call sites previously discarded this result. They now share one helper so
+ * they cannot drift apart again, and a failed undo is reported as the distinct
+ * condition it is: the document needs a human.
+ *
+ * The success path is unchanged; only an invisible failure becomes visible.
+ */
+async function compensate(
+  adapter: Awaited<ReturnType<typeof getDbAdapter>>,
+  steps: TxStep[],
+  context: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const res = await adapter.transaction(steps);
+    if (res && res.success) return { ok: true };
+    const reason = (res && res.error) || 'تعذّر تنفيذ معاملة التراجع';
+    logger.error(reason, context);
+    return { ok: false, reason };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.error(reason, context);
+    return { ok: false, reason };
+  }
+}
 function accountingRpc() {
   return (typeof window !== 'undefined' && window.electronDB?.accounting) || null;
 }
@@ -110,7 +144,7 @@ export async function postSalesInvoiceAtomic(
     if (!jeResult.success) {
       // Rollback: revert status and balance
       logger.error(jeResult.error || 'journal entry failed', 'postSalesInvoiceAtomic.je');
-      await adapter.transaction([
+      const undo = await compensate(adapter, [
         {
           sql: `UPDATE sales_invoices SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
           params: [input.id, ctx.companyId],
@@ -121,13 +155,20 @@ export async function postSalesInvoiceAtomic(
               params: [outstanding, customerId, ctx.companyId],
             }]
           : []),
-      ]);
+      ], "postSalesInvoiceAtomic.undo");
+      if (!undo.ok) {
+
+        return fail(
+          'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+          'EXTERNAL_ERROR',
+        );
+      }
       return fail(`فشل إنشاء القيد المحاسبي: ${jeResult.error}`);
     }
   } catch (err) {
     logger.error(String(err), 'postSalesInvoiceAtomic.je.exception');
     // Rollback
-    await adapter.transaction([
+    const undo = await compensate(adapter, [
       {
         sql: `UPDATE sales_invoices SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: [input.id, ctx.companyId],
@@ -138,7 +179,14 @@ export async function postSalesInvoiceAtomic(
             params: [outstanding, customerId, ctx.companyId],
           }]
         : []),
-    ]);
+    ], "postSalesInvoiceAtomic.undo");
+    if (!undo.ok) {
+
+      return fail(
+        'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+        'EXTERNAL_ERROR',
+      );
+    }
     return fail(`استثناء أثناء إنشاء القيد المحاسبي: ${String(err)}`);
   }
 
@@ -221,7 +269,7 @@ export async function postSalesReturnAtomic(
     if (!jeResult.success) {
       logger.error(jeResult.error || 'journal entry failed', 'postSalesReturnAtomic.je');
       // Rollback
-      await adapter.transaction([
+      const undo = await compensate(adapter, [
         {
           sql: `UPDATE sales_returns SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
           params: [input.id, ctx.companyId],
@@ -232,12 +280,19 @@ export async function postSalesReturnAtomic(
               params: [totalAmount, customerId, ctx.companyId],
             }]
           : []),
-      ]);
+      ], "postSalesReturnAtomic.undo");
+      if (!undo.ok) {
+
+        return fail(
+          'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+          'EXTERNAL_ERROR',
+        );
+      }
       return fail(`فشل إنشاء القيد المحاسبي: ${jeResult.error}`);
     }
   } catch (err) {
     logger.error(String(err), 'postSalesReturnAtomic.je.exception');
-    await adapter.transaction([
+    const undo = await compensate(adapter, [
       {
         sql: `UPDATE sales_returns SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: [input.id, ctx.companyId],
@@ -248,7 +303,14 @@ export async function postSalesReturnAtomic(
             params: [totalAmount, customerId, ctx.companyId],
           }]
         : []),
-    ]);
+    ], "postSalesReturnAtomic.undo");
+    if (!undo.ok) {
+
+      return fail(
+        'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+        'EXTERNAL_ERROR',
+      );
+    }
     return fail(`استثناء أثناء إنشاء القيد المحاسبي: ${String(err)}`);
   }
 
@@ -331,7 +393,7 @@ export async function postPurchaseInvoiceAtomic(
     });
     if (!jeResult.success) {
       logger.error(jeResult.error || 'journal entry failed', 'postPurchaseInvoiceAtomic.je');
-      await adapter.transaction([
+      const undo = await compensate(adapter, [
         {
           sql: `UPDATE purchase_invoices SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
           params: [input.id, ctx.companyId],
@@ -342,12 +404,19 @@ export async function postPurchaseInvoiceAtomic(
               params: [outstanding, supplierId, ctx.companyId],
             }]
           : []),
-      ]);
+      ], "postPurchaseInvoiceAtomic.undo");
+      if (!undo.ok) {
+
+        return fail(
+          'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+          'EXTERNAL_ERROR',
+        );
+      }
       return fail(`فشل إنشاء القيد المحاسبي: ${jeResult.error}`);
     }
   } catch (err) {
     logger.error(String(err), 'postPurchaseInvoiceAtomic.je.exception');
-    await adapter.transaction([
+    const undo = await compensate(adapter, [
       {
         sql: `UPDATE purchase_invoices SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: [input.id, ctx.companyId],
@@ -358,7 +427,14 @@ export async function postPurchaseInvoiceAtomic(
             params: [outstanding, supplierId, ctx.companyId],
           }]
         : []),
-    ]);
+    ], "postPurchaseInvoiceAtomic.undo");
+    if (!undo.ok) {
+
+      return fail(
+        'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+        'EXTERNAL_ERROR',
+      );
+    }
     return fail(`استثناء أثناء إنشاء القيد المحاسبي: ${String(err)}`);
   }
 
@@ -438,7 +514,7 @@ export async function postPurchaseReturnAtomic(
     });
     if (!jeResult.success) {
       logger.error(jeResult.error || 'journal entry failed', 'postPurchaseReturnAtomic.je');
-      await adapter.transaction([
+      const undo = await compensate(adapter, [
         {
           sql: `UPDATE purchase_returns SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
           params: [input.id, ctx.companyId],
@@ -449,12 +525,19 @@ export async function postPurchaseReturnAtomic(
               params: [totalAmount, supplierId, ctx.companyId],
             }]
           : []),
-      ]);
+      ], "postPurchaseReturnAtomic.undo");
+      if (!undo.ok) {
+
+        return fail(
+          'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+          'EXTERNAL_ERROR',
+        );
+      }
       return fail(`فشل إنشاء القيد المحاسبي: ${jeResult.error}`);
     }
   } catch (err) {
     logger.error(String(err), 'postPurchaseReturnAtomic.je.exception');
-    await adapter.transaction([
+    const undo = await compensate(adapter, [
       {
         sql: `UPDATE purchase_returns SET status = 'draft', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
         params: [input.id, ctx.companyId],
@@ -465,7 +548,14 @@ export async function postPurchaseReturnAtomic(
             params: [totalAmount, supplierId, ctx.companyId],
           }]
         : []),
-    ]);
+    ], "postPurchaseReturnAtomic.undo");
+    if (!undo.ok) {
+
+      return fail(
+        'فشل القيد المحاسبي وفشل التراجع عنه — المستند ما زال مُرحَّلاً برصيد معدَّل وبلا قيد. راجعه يدوياً فوراً.',
+        'EXTERNAL_ERROR',
+      );
+    }
     return fail(`استثناء أثناء إنشاء القيد المحاسبي: ${String(err)}`);
   }
 

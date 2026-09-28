@@ -37,7 +37,7 @@ const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-resu
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
 
 /** measured 2026-09-25, tranche 7a (reference reads) */
-const CEILING = 419;
+const CEILING = 412;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -67,8 +67,8 @@ const BASELINE: Record<string, number> = {
   'src/modules/manufacturing/api.ts': 34,
   'src/modules/purchases/api.ts': 24,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
-  'src/core/services/postingService.ts': 17,
   'src/modules/sales/api.ts': 14,
+  'src/core/services/postingService.ts': 10,
   'src/modules/accounting/assets.ts': 10,
   'src/modules/pos/api.ts': 10,
   'src/core/utils/valuation.ts': 9,

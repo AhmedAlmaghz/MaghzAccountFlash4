@@ -28,7 +28,7 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
 
 /** per-module ceilings, measured 2026-09-24 (see AI_AUDIT_AND_FIX_PLAN.md) */
 const CEILINGS: Record<string, number> = {
-  core: 106,
+  core: 99,
   accounting: 76,
   hr: 68,
   manufacturing: 58,
@@ -43,7 +43,7 @@ const CEILINGS: Record<string, number> = {
   auth: 19,
   tax: 7,
 };
-const TOTAL_CEILING = 673;
+const TOTAL_CEILING = 666;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
