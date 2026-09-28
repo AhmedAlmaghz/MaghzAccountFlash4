@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAuth', {
     return result;
   },
   listUsers: () => ipcRenderer.invoke('auth:list-users', { sessionToken }),
+  getUserById: (id) => ipcRenderer.invoke('auth:get-user-by-id', { sessionToken, id }),
   createUser: (data) => ipcRenderer.invoke('auth:create-user', { sessionToken, data }),
   updateUser: (id, data) => ipcRenderer.invoke('auth:update-user', { sessionToken, id, data }),
   resetPassword: (id, password) => ipcRenderer.invoke('auth:reset-password', { sessionToken, id, password }),

@@ -35,10 +35,25 @@ import { join, relative } from 'node:path';
 const ROOT = process.cwd();
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-results', 'playwright-report']);
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
-const GUARD = /isElectronPg\s*\(\s*\)/;
 
-/** measured 2026-09-25, tranche 5 (document sequences) */
-const CEILING = 197;
+/** measured 2026-09-25, tranche 6 (auth bridge) */
+const CEILING = 180;
+
+/**
+ * Guard idioms, each paired with the test that proves the guard actually holds.
+ * A guard is only a guard if control flow cannot reach the statement past it,
+ * and that is not something a counter can establish:
+ *  - `isElectronPg()` is a plain branch; every migration using it also returns
+ *    inside it, and the tax-engine assertion in rawSqlRatchetGate pins that.
+ *  - `mainAuthBridge()` is non-null only when the preload bridge exists AND the
+ *    db mode is server-PG, so the raw fallback underneath is unreachable on the
+ *    desktop. That one is proven by BEHAVIOUR in
+ *    `src/modules/auth/api.bridgeGuard.test.ts`, which installs a bridge and
+ *    asserts no auth method touches the adapter - four different valid shapes
+ *    of the same guard exist, so a regex for "the guard string" would have
+ *    passed a method whose guard had been broken.
+ */
+const GUARDS = [/isElectronPg\s*\(\s*\)/, /mainAuthBridge\s*\(\s*\)/];
 
 /**
  * Per-file counts at CEILING. A total alone lets a new file hide inside a
@@ -48,7 +63,6 @@ const CEILING = 197;
 const BASELINE: Record<string, number> = {
   'src/core/api.ts': 23,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
-  'src/modules/auth/api.ts': 17,
   'src/core/services/postingService.ts': 16,
   'src/modules/accounting/assets.ts': 10,
   'src/core/utils/valuation.ts': 9,
@@ -117,7 +131,7 @@ function reachableIn(text: string): number {
   for (let i = 0; i < heads.length; i++) {
     const body = text.slice(heads[i].start, i + 1 < heads.length ? heads[i + 1].start : text.length);
     const n = (body.match(RAW) || []).length;
-    if (n && !GUARD.test(body)) total += n;
+    if (n && !GUARDS.some((g) => g.test(body))) total += n;
   }
   // Statements at module scope are not covered by any function guard.
   const inFunctions = heads.length
@@ -194,5 +208,28 @@ describe('desktop-reachable raw SQL is a ratchet', () => {
     for (const ch of ['core.getNextDocumentNumber', 'core.peekNextDocumentNumber', 'core.getDocumentSequences', 'core.updateDocumentSequence']) {
       expect(db).toContain("registerRpc('" + ch + "'");
     }
+  });
+
+  it('every method the auth gate excuses has a main-process counterpart', () => {
+    // auth/api.ts is excused from the count because mainAuthBridge() guards it,
+    // which is only true while each method routes through the bridge. This pins
+    // the wiring so adding a raw method there without a handler fails here
+    // rather than silently rejoining the desktop-reachable set.
+    const api = readFileSync(join(ROOT, 'src', 'modules', 'auth', 'api.ts'), 'utf8');
+    const preload = readFileSync(join(ROOT, 'electron', 'preload.cjs'), 'utf8');
+    const main = readFileSync(join(ROOT, 'electron', 'dbHandler.js'), 'utf8');
+
+    expect(api, 'getUserById must consult the bridge before its raw fallback')
+      .toContain('mainAuth.getUserById(id)');
+    for (const twin of ['electron/preload.cjs', 'electron/preload.js']) {
+      const p = readFileSync(join(ROOT, twin), 'utf8');
+      expect(p, twin + ' must expose auth:get-user-by-id').toContain("'auth:get-user-by-id'");
+    }
+    expect(preload).toContain('getUserById');
+    expect(main).toContain("'auth:get-user-by-id'");
+    // company_id must come from the session, never the payload
+    const handler = main.slice(main.indexOf("'auth:get-user-by-id'"), main.indexOf("'auth:create-user'"));
+    expect(handler).toContain('session.user.companyId');
+    expect(handler).not.toMatch(/company_id\s*=\s*\$\d+::uuid[^\n]*\n[\s\S]{0,200}p\./);
   });
 });

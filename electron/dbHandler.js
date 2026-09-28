@@ -5556,6 +5556,27 @@ export function registerAuthHandlers() {
     }
   });
 
+  // getUserById had no main-process counterpart, so authApi.getUserById was the
+  // one auth method still reaching the desktop with raw SQL over the legacy
+  // channel. Company comes from the session, never from the payload: passing a
+  // companyId here would let a caller read a user row from another tenant.
+  ipcMain.handle('auth:get-user-by-id', async (event, { sessionToken, id } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session || !hasPermission(session, 'settings.view')) return { success: false, error: 'Permission denied' };
+      if (typeof id !== 'string' || !UUID_RE.test(id)) return { success: false, error: 'Invalid id' };
+      const result = await pool.query(
+        `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, last_login_at, created_at, updated_at
+           FROM users WHERE id = $1::uuid AND company_id = $2::uuid`,
+        [id, session.user.companyId]
+      );
+      if (result.rows.length === 0) return { success: false, error: 'User not found' };
+      return { success: true, data: result.rows[0] };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('auth:create-user', async (event, { sessionToken, data } = {}) => {
     try {
       const session = getSession(event.sender.id, sessionToken);

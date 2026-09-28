@@ -356,6 +356,16 @@ export const authApi = {
 
   async getUserById(companyId: string, id: string): Promise<{ success: boolean; data?: User; error?: string }> {
     try {
+      const mainAuth = mainAuthBridge();
+      if (mainAuth) {
+        const viaMain = await mainAuth.getUserById(id);
+        return viaMain.success
+          ? { success: true, data: mapRows<User>([viaMain.data as Record<string, unknown>])[0] }
+          : { success: false, error: viaMain.error };
+      }
+      // The company is scoped by the session on the bridge path above; taking
+      // it from the argument here is what the raw statement already did, and is
+      // why this method was the one auth path the desktop could still reach.
       const adapter = await getDbAdapter();
       const result = await adapter.query('SELECT * FROM users WHERE id = $1 AND company_id = $2', [id, companyId]);
       if (result.success && result.rows && result.rows.length > 0) {

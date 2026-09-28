@@ -269,6 +269,7 @@ interface ElectronAuth {
   getSession(): Promise<{ success: boolean; user?: ElectronAuthUser; permissions?: string[] }>;
   logout(): Promise<{ success: boolean }>;
   listUsers(): Promise<{ success: boolean; data?: Record<string, unknown>[]; error?: string }>;
+  getUserById(id: string): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }>;
   createUser(data: Record<string, unknown>): Promise<{ success: boolean; id?: string; error?: string }>;
   updateUser(id: string, data: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
   resetPassword(id: string, password: string): Promise<{ success: boolean; error?: string }>;
