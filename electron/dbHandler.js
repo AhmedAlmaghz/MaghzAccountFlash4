@@ -2271,6 +2271,60 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Posting pre-flight reads (Phase 0 tranche 8a) ──────────────────────────
+  // Read-only. The status check that gates every posting path is the one part
+  // of postingService with no accounting effect, so it moves on its own; the
+  // transactions stay put until the compensation gap below is settled.
+  registerRpc('accounting.getSalesInvoiceForPosting', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, status
+              FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid`,
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('accounting.getSalesReturnForPosting', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `SELECT sr.customer_id, sr.total_amount, sr.return_number, sr.date, sr.status, c.name as customer_name
+              FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id
+             WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid`,
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('accounting.getPurchaseInvoiceForPosting', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, status
+              FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid`,
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('accounting.getPurchaseReturnForPosting', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `SELECT pr.supplier_id, pr.total_amount, pr.return_number, pr.date, pr.status, s.name as supplier_name
+              FROM purchase_returns pr LEFT JOIN suppliers s ON pr.supplier_id = s.id
+             WHERE pr.id = $1::uuid AND pr.company_id = $2::uuid`,
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

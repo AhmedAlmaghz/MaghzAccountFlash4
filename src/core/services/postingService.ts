@@ -9,12 +9,25 @@
  * failure rolls back the status change and balance update.
  */
 
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { resolveExistingUserId } from '@/core/utils/userIdValidator';
 import { postSalesInvoice, postSalesReturn, postPurchaseInvoice, postPurchaseReturn } from '@/core/utils/journalEntryGenerator';
 import { logAudit } from '@/core/utils/auditLogger';
 import { ok, fail, type ServiceResult } from './errors';
 import type { ServiceContext } from './context';
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+/**
+ * The accounting typed-RPC surface on the Electron bridge, or null off-desktop.
+ *
+ * Only the pre-flight read is routed here. The transactions deliberately are
+ * not: the service compensates by hand when the journal entry fails, and it
+ * does not check whether its own compensation succeeded. That window is a
+ * separate decision, not a side effect of moving SQL.
+ */
+function accountingRpc() {
+  return (typeof window !== 'undefined' && window.electronDB?.accounting) || null;
+}
 import { logger } from './logger';
 
 export interface PostInvoiceInput {
@@ -43,7 +56,9 @@ export async function postSalesInvoiceAtomic(
   const adapter = await getDbAdapter();
 
   // 1. Fetch invoice details (read-only, outside transaction is fine)
-  const check = await adapter.query(
+  const check = isElectronPg() && accountingRpc()
+    ? (await accountingRpc()!.getSalesInvoiceForPosting({ id: input.id })) as RpcEnvelope
+    : await adapter.query(
     'SELECT customer_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, status FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
     [input.id, ctx.companyId]
   );
@@ -158,7 +173,9 @@ export async function postSalesReturnAtomic(
 
   const adapter = await getDbAdapter();
 
-  const check = await adapter.query(
+  const check = isElectronPg() && accountingRpc()
+    ? (await accountingRpc()!.getSalesReturnForPosting({ id: input.id })) as RpcEnvelope
+    : await adapter.query(
     'SELECT sr.customer_id, sr.total_amount, sr.return_number, sr.date, sr.status, c.name as customer_name FROM sales_returns sr LEFT JOIN customers c ON sr.customer_id = c.id WHERE sr.id = $1::uuid AND sr.company_id = $2::uuid',
     [input.id, ctx.companyId]
   );
@@ -265,7 +282,9 @@ export async function postPurchaseInvoiceAtomic(
 
   const adapter = await getDbAdapter();
 
-  const check = await adapter.query(
+  const check = isElectronPg() && accountingRpc()
+    ? (await accountingRpc()!.getPurchaseInvoiceForPosting({ id: input.id })) as RpcEnvelope
+    : await adapter.query(
     'SELECT supplier_id, total_amount, paid_amount, subtotal, vat_amount, invoice_number, date, status FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
     [input.id, ctx.companyId]
   );
@@ -373,7 +392,9 @@ export async function postPurchaseReturnAtomic(
 
   const adapter = await getDbAdapter();
 
-  const check = await adapter.query(
+  const check = isElectronPg() && accountingRpc()
+    ? (await accountingRpc()!.getPurchaseReturnForPosting({ id: input.id })) as RpcEnvelope
+    : await adapter.query(
     'SELECT pr.supplier_id, pr.total_amount, pr.return_number, pr.date, pr.status, s.name as supplier_name FROM purchase_returns pr LEFT JOIN suppliers s ON pr.supplier_id = s.id WHERE pr.id = $1::uuid AND pr.company_id = $2::uuid',
     [input.id, ctx.companyId]
   );

@@ -66,6 +66,10 @@ contextBridge.exposeInMainWorld('electronDB', {
     getTransactions: (payload) => ipcRenderer.invoke('db:rpc:accounting.getTransactions', { ...payload, sessionToken }),
     postTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.postTransaction', { ...payload, sessionToken }),
     createTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.createTransaction', { ...payload, sessionToken }),
+    getSalesInvoiceForPosting: (payload) => ipcRenderer.invoke('db:rpc:accounting.getSalesInvoiceForPosting', { ...payload, sessionToken }),
+    getSalesReturnForPosting: (payload) => ipcRenderer.invoke('db:rpc:accounting.getSalesReturnForPosting', { ...payload, sessionToken }),
+    getPurchaseInvoiceForPosting: (payload) => ipcRenderer.invoke('db:rpc:accounting.getPurchaseInvoiceForPosting', { ...payload, sessionToken }),
+    getPurchaseReturnForPosting: (payload) => ipcRenderer.invoke('db:rpc:accounting.getPurchaseReturnForPosting', { ...payload, sessionToken }),
   },
   inventory: {
     getProducts: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProducts', { ...payload, sessionToken }),

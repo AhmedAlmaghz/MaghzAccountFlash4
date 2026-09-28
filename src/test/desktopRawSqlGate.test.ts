@@ -37,7 +37,7 @@ const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-resu
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
 
 /** measured 2026-09-25, tranche 7a (reference reads) */
-const CEILING = 159;
+const CEILING = 419;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -53,7 +53,7 @@ const CEILING = 159;
  *    of the same guard exist, so a regex for "the guard string" would have
  *    passed a method whose guard had been broken.
  */
-const GUARDS = [/isElectronPg\s*\(\s*\)/, /mainAuthBridge\s*\(\s*\)/];
+const GUARD_RE = /(isElectronPg\s*\(\s*\)|mainAuthBridge\s*\(\s*\))/;
 
 /**
  * Per-file counts at CEILING. A total alone lets a new file hide inside a
@@ -61,43 +61,65 @@ const GUARDS = [/isElectronPg\s*\(\s*\)/, /mainAuthBridge\s*\(\s*\)/];
  * somewhere and deleting one elsewhere still fails both tests.
  */
 const BASELINE: Record<string, number> = {
-  // applyDefaultTemplate composes several statements against several tables, so
-  // it stays here until it is migrated as one transaction rather than split into
-  // independent writes. The rest of core/api.ts reached zero.
-  'src/core/api.ts': 2,
+  'src/modules/accounting/api.ts': 50,
+  'src/modules/inventory/api.ts': 47,
+  'src/modules/hr/api.ts': 44,
+  'src/modules/manufacturing/api.ts': 34,
+  'src/modules/purchases/api.ts': 24,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
-  'src/core/services/postingService.ts': 16,
+  'src/core/services/postingService.ts': 17,
+  'src/modules/sales/api.ts': 14,
   'src/modules/accounting/assets.ts': 10,
+  'src/modules/pos/api.ts': 10,
   'src/core/utils/valuation.ts': 9,
   'src/modules/accounting/reversal.ts': 9,
+  'src/modules/crm/api.ts': 9,
   'src/modules/reports/ProfitAnalysisReport.tsx': 9,
-  'src/modules/manufacturing/api.ts': 8,
   'src/core/utils/useSettings.ts': 7,
   'src/modules/tax/engine.ts': 7,
   'src/modules/accounting/yearEnd.ts': 6,
+  'src/modules/settings/components/CurrenciesPage.tsx': 6,
+  'src/modules/settings/components/VatSettingsPage.tsx': 6,
   'src/core/utils/stockPolicy.ts': 5,
+  'src/core/api.ts': 4,
   'src/core/backup/backupService.ts': 4,
   'src/core/database/adapters/remoteSchema.ts': 4,
   'src/core/utils/openingBalance.ts': 4,
-  'src/modules/pos/api.ts': 4,
   'src/modules/reports/LeadConversionReport.tsx': 4,
   'src/modules/reports/StockValuationReport.tsx': 4,
+  'src/modules/settings/components/BranchesPage.tsx': 4,
   'src/modules/settings/components/CompanySetupPage.tsx': 4,
   'src/core/hooks/useDefaultPaymentAccounts.ts': 3,
-  'src/modules/hr/api.ts': 3,
+  'src/core/utils/journalEntryGenerator.ts': 3,
   'src/modules/manufacturing/components/ProductionCostReport.tsx': 3,
   'src/modules/reports/StockMovementReport.tsx': 3,
-  'src/core/utils/journalEntryGenerator.ts': 2,
+  'src/core/services/BaseService.ts': 2,
   'src/modules/ai/tools/wizardTools.ts': 2,
+  'src/modules/manufacturing/components/VarianceAnalysisReport.tsx': 2,
+  'src/modules/pos/components/PosSettingsPage.tsx': 2,
+  'src/modules/reports/LowStockAlertReport.tsx': 2,
+  'src/modules/reports/OpportunityPipelineReport.tsx': 2,
+  'src/modules/settings/components/HrSettingsPage.tsx': 2,
   'src/core/api/company.ts': 1,
+  'src/core/audit/auditLogger.ts': 1,
+  'src/core/database/adapters/types.ts': 1,
   'src/core/database/tx.ts': 1,
   'src/core/utils/useCurrencyDisplay.ts': 1,
   'src/core/utils/userIdValidator.ts': 1,
   'src/modules/ai/engine/chatEngine.ts': 1,
   'src/modules/ai/jev/jevConfig.ts': 1,
+  'src/modules/ai/jev/jevTools.ts': 1,
   'src/modules/ai/tools/readTools.ts': 1,
   'src/modules/ai/tools/reportCommon.ts': 1,
+  'src/modules/auth/components/UsersPage.tsx': 1,
   'src/modules/auth/store.ts': 1,
+  'src/modules/pos/components/PosReportsPage.tsx': 1,
+  'src/modules/pos/components/PosTerminalPage.tsx': 1,
+  'src/modules/reports/components/CustomReportBuilder.tsx': 1,
+  'src/modules/reports/CustomerStatementReport.tsx': 1,
+  'src/modules/reports/InventoryAnalysisReport.tsx': 1,
+  'src/modules/reports/SalesAnalysisReport.tsx': 1,
+  'src/modules/reports/SupplierStatementReport.tsx': 1,
 };
 
 /**
@@ -121,27 +143,64 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 }
 
 /**
- * Split a module into function bodies by declaration, then ask each one
- * separately whether it guards its own statements.
+ * Split a module into function bodies, then ask each one separately whether it
+ * guards its own statements.
+ *
+ * Four declaration shapes have to be recognised, and missing one silently
+ * reassigns work to the wrong owner. A version that handled only `function` and
+ * `const` absorbed every method of an exported object literal into whichever
+ * function happened to be declared last, so a two-query helper was credited
+ * with 65 calls and the file was reported as 3 instead of 68. The direction of
+ * that error is the dangerous one: it under-counts the debt.
+ *   - export async function name(
+ *   - async function name(
+ *   - export const name = ... / const name = ...
+ *   - `  name: async (...)` / `  name(...)`   <- object-literal methods
  */
-function reachableIn(text: string): number {
-  const heads: Array<{ name: string; start: number }> = [];
-  const re = /^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/gm;
+function heads(text: string): Array<{ start: number }> {
+  const re = new RegExp(
+    [
+      '^(?:export\\s+)?(?:async\\s+)?function\\s+\\w+',
+      '^(?:export\\s+)?const\\s+\\w+\\s*=\\s*(?:async\\s*)?\\(',
+      '^\\s{2}(?:async\\s+)?\\w+\\s*:\\s*(?:async\\s*)?function\\s*\\(',
+      '^\\s{2}(?:async\\s+)?\\w+\\s*\\(',
+    ].join('|'),
+    'gm',
+  );
+  const out: Array<{ start: number }> = [];
   let m;
-  while ((m = re.exec(text))) heads.push({ name: m[1] || m[2], start: m.index });
+  while ((m = re.exec(text))) out.push({ start: m.index });
+  return out;
+}
 
+/**
+ * A guard only covers the statements it actually diverts. Require it to appear
+ * BEFORE the first raw call, and for a `return` to sit between them; otherwise
+ * the raw call shares the expression or the path and stays reachable.
+ *
+ * Conservative on purpose: an unrecognised guard shape is counted as reachable,
+ * never excused. Over-counting shows up as work to do; under-counting hides it.
+ */
+function isGuarded(body: string): boolean {
+  const firstRaw = body.search(RAW);
+  if (firstRaw < 0) return false;
+  const g = GUARD_RE.exec(body.slice(0, firstRaw));
+  if (!g) return false;
+  return /\breturn\b/.test(body.slice(g.index + g[0].length, firstRaw));
+}
+
+function reachableIn(text: string): number {
+  const found = heads(text);
   let total = 0;
-  for (let i = 0; i < heads.length; i++) {
-    const body = text.slice(heads[i].start, i + 1 < heads.length ? heads[i + 1].start : text.length);
+  for (let i = 0; i < found.length; i++) {
+    const body = text.slice(found[i].start, i + 1 < found.length ? found[i + 1].start : text.length);
     const n = (body.match(RAW) || []).length;
-    if (n && !GUARDS.some((g) => g.test(body))) total += n;
+    if (n && !isGuarded(body)) total += n;
   }
-  // Statements at module scope are not covered by any function guard.
-  const inFunctions = heads.length
-    ? text.slice(0, heads[0].start) + heads.map((h, i) =>
-        text.slice(h.start, i + 1 < heads.length ? heads[i + 1].start : text.length)).reverse().join('')
-    : text;
-  const moduleScope = (text.match(RAW) || []).length - (inFunctions.match(RAW) || []).length;
+  const inside = found.length
+    ? found.map((h, i) => text.slice(h.start, i + 1 < found.length ? found[i + 1].start : text.length)).join('')
+    : '';
+  const moduleScope = (text.match(RAW) || []).length - (inside.match(RAW) || []).length;
   return total + Math.max(0, moduleScope);
 }
 
