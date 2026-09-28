@@ -21,7 +21,7 @@ export interface ElectronDB extends PreloadDB {
   // Each method sends a structured payload to a fixed SQL statement in
   // the main process; the renderer never composes SQL.
   accounting?: {
-    getAccounts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getAccounts(payload?: { ownedByUserId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createAccount(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; parentId?: string | null; type?: string; nature?: string; isGroup?: boolean; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getTransactions(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     postTransaction(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -464,10 +464,11 @@ export const electronPgAdapter: DbAdapter = {
     return result.success ? { success: true } : { success: false, error: result.error };
   },
 
-  async getAccounts(companyId) {
-    // Typed RPC (Phase 4): renderer sends { companyId }, main process
-    // composes the SQL and runs the auth/RBAC checks.
-    const result = await getRPC().getAccounts({ companyId });
+  async getAccounts(_companyId) {
+    // Typed RPC: the company comes from the session, so the caller's
+    // companyId is no longer forwarded — naming a different company is
+    // impossible rather than merely rejected.
+    const result = await getRPC().getAccounts({});
     return { success: result.success, data: result.rows, error: result.error };
   },
 

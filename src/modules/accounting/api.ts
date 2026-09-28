@@ -31,6 +31,27 @@ export const accountingApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+
+      const withStringCode = (rows: Account[]) =>
+        rows.map((a) => ({
+          ...a,
+          code: String(a.code ?? ''),
+          balance: (a as Account & { runningBalance?: number }).runningBalance !== undefined
+            ? Number((a as Account & { runningBalance?: number }).runningBalance) || 0
+            : Number(a.balance) || 0,
+        }));
+
+      // Typed RPC on desktop: the company comes from the session and the tree
+      // shape is built in the main process, so the renderer never assembles it.
+      // The fallback below runs the same statement for PGlite/e2e.
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getAccounts({ ownedByUserId })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: withStringCode(mapRows<Account>(res.rows || [])) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.getAccounts(companyId);
 
@@ -42,14 +63,6 @@ export const accountingApi = {
         // Financial balance comes from `running_balance` (SUM of ALL posted
         // JEs — opening included, see AGENTS.md Phase 72); `balance` stays as
         // the legacy display column for consumers that haven't migrated yet.
-        const withStringCode = (rows: Account[]) =>
-          rows.map((a) => ({
-            ...a,
-            code: String(a.code ?? ''),
-            balance: (a as Account & { runningBalance?: number }).runningBalance !== undefined
-              ? Number((a as Account & { runningBalance?: number }).runningBalance) || 0
-              : Number(a.balance) || 0,
-          }));
         let accounts = withStringCode(mapRows<Account>(result.data));
 
         if (ownedByUserId) {

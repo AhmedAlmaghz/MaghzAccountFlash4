@@ -140,6 +140,29 @@ describe('typed RPC surfaces are wired everywhere', () => {
     expect(missing, 'a channel missing from the shim sends e2e down the RPC path and fails there').toEqual([]);
   });
 
+  it('the shim does not send a company id to session-derived channels', () => {
+    // The production channels for these methods derive the company from the
+    // session. The shim is single-tenant and trusted, so reading p.companyId
+    // there is harmless today — but the shim is what developers copy from, and
+    // a shape that reads the company from the payload is the shape that
+    // reopened the audit hole once already. Rather than rewrite eight working
+    // shim methods on a single-line file — an attempt at it corrupted the
+    // surface twice — the divergence is pinned by count, so it stays a visible
+    // decision and a ninth occurrence fails.
+    const KNOWN_DIVERGENT = 8;
+    // Counting, not naming. A name-based scan has to guess which method owns a
+    // given occurrence, and it got that wrong twice — once missing a channel,
+    // once attributing an occurrence to the _cid helper. A count cannot be
+    // wrong in that direction, and it still fails the moment a ninth one
+    // appears, which is the thing worth catching.
+    const code = evaluatedShim();
+    const occurrences = (code.match(/p\.companyId/g) || []).length;
+    expect(
+      occurrences,
+      'a shim channel now reads a company id from the payload — resolve it like the other surfaces, or raise this number with a reason'
+    ).toBe(KNOWN_DIVERGENT);
+  });
+
   it('the shim keeps a company-id resolver on every shim surface', () => {
     // A shim method that forgets `_cid` throws "undefined is not a function"
     // and takes the whole run down.

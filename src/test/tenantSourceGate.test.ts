@@ -150,4 +150,66 @@ describe('company values in renderer writes are session-derived', () => {
     const block = db.slice(i, db.indexOf('});', i));
     expect(block, 'reading the trail must not accept a company id from the payload').not.toMatch(/p\.companyId/);
   });
+
+  it('no main-process channel binds the company id from the payload', () => {
+    // The renderer-facing guard rejects a mismatching companyId before the
+    // handler runs, so a channel that still binds p.companyId is a hole the
+    // moment that guard is ever relaxed, and it is the exact shape the audit
+    // finding had. Counting rather than naming: a name scan has to guess which
+    // channel owns an occurrence, and it guesses wrong.
+    const db = readFileSync(join(ROOT, 'electron', 'dbHandler.js'), 'utf8');
+    const bindings = [...db.matchAll(/params:\s*\[[^\]]*\bp\.companyId\b/g)];
+    expect(
+      bindings.map((m) => db.slice(Math.max(0, m.index - 3000), m.index).match(/registerRpc\('([\w.]+)'/g)?.pop()),
+      'a channel binds the company from the payload — take it from session.user.companyId'
+    ).toEqual([]);
+  });
+
+  it('every channel signature that reaches for the session declares it', () => {
+    // Found by accident: rebinding eight channels from p.companyId to
+    // session.user.companyId left two validate() bodies referencing a session
+    // their signature never declared. node --check passes on that — it is a
+    // runtime ReferenceError on the first call, and only for those two
+    // channels. So the signatures are checked, by brace matching per channel
+    // rather than by a loose scan over the whole file.
+    const db = readFileSync(join(ROOT, 'electron', 'dbHandler.js'), 'utf8');
+    const problems: string[] = [];
+    let channels = 0;
+    for (const m of db.matchAll(/registerRpc\('([\w.]+)',\s*\{/g)) {
+      const name = m[1];
+      const open = db.indexOf('{', m.index + m[0].length - 1);
+      let d = 0;
+      let end = -1;
+      for (let k = open; k < db.length; k++) {
+        if (db[k] === '{') d++;
+        else if (db[k] === '}') { d--; if (d === 0) { end = k; break; } }
+      }
+      if (end < 0) { problems.push(`${name}: unterminated channel`); continue; }
+      const block = db.slice(m.index, end + 1);
+      channels++;
+      // match each declaration and read its own body, so a compose with a
+      // session parameter is not confused with a validate that has none
+      const decls: { name: string; at: number; params: string[] }[] = [];
+      const v = /validate:\s*(?:async\s*)?\(\s*([^)]*)\)/.exec(block);
+      if (v) {
+        decls.push({ name: 'validate', at: block.indexOf(v[0]) + v[0].length, params: v[1].split(',').map((x) => x.trim()).filter(Boolean) });
+      }
+      const c = /compose:\s*\(\s*([a-zA-Z_$][\w$]*)\s*(?:,\s*([a-zA-Z_$][\w$]*))?\s*\)\s*=>\s*(?:\{|\()/.exec(block);
+      if (c) {
+        const params = [c[1], c[2]].filter(Boolean) as string[];
+        decls.push({ name: 'compose', at: block.indexOf(c[0]) + c[0].length, params });
+      }
+      for (const decl of decls) {
+        // the body runs until the next top-level declaration or the end
+        const rest = block.slice(decl.at);
+        const nextDecl = rest.search(/\n\s{4}(?:validate|compose|paramCount|permission|mapResult):/);
+        const body = nextDecl > 0 ? rest.slice(0, nextDecl) : rest;
+        if (/session\./.test(body) && !decl.params.includes('session')) {
+          problems.push(`${name}: ${decl.name}(${decl.params.join(',')}) uses session without declaring it`);
+        }
+      }
+    }
+    expect(channels, 'the scan found no channels — has the registration shape changed?').toBeGreaterThan(100);
+    expect(problems).toEqual([]);
+  });
 });

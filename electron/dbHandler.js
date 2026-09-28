@@ -1239,15 +1239,24 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // single source of truth. `balance` stays as the legacy display column so
   // existing consumers keep working, but every UI that shows a financial
   // balance must read running_balance.
+  // accounting.getAccounts — the chart of accounts with the real balance
+  // (SUM of all posted legs, opening included) rather than the legacy column.
+  // The company comes from the session: the earlier version took companyId
+  // from the payload, which is a tenant hole wearing an allow-list.
   registerRpc('accounting.getAccounts', {
     paramCount: 1,
-    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
-    compose: (p) => ({
+    validate: (p) => {
+      if (p.ownedByUserId && !UUID_RE.test(String(p.ownedByUserId))) throw new Error('ownedByUserId must be a uuid');
+    },
+    compose: (p, session) => ({
       sql: `SELECT a.*, COALESCE((SELECT SUM(je.debit - je.credit)
               FROM journal_entries je JOIN transactions t ON je.transaction_id = t.id
               WHERE je.account_id = a.id AND t.company_id = a.company_id AND t.status = 'posted'), 0) AS running_balance
-            FROM accounts a WHERE a.company_id = $1 ORDER BY a.code`,
-      params: [p.companyId],
+            FROM accounts a
+           WHERE a.company_id = $1::uuid
+             AND ($2::uuid IS NULL OR a.created_by = $2::uuid OR a.created_by IS NULL)
+           ORDER BY a.code`,
+      params: [session.user.companyId, p.ownedByUserId ? String(p.ownedByUserId) : null],
     }),
   });
 
@@ -1256,17 +1265,16 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     permission: 'accounting.create',
     paramCount: 9,
     validate: async (p, session) => {
-      if (!p.companyId) throw new Error('companyId required');
       if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
       if (p.parentId !== undefined && p.parentId !== null) {
         await assertCompanyReferences('accounts', [p.parentId], session.user.companyId, 'Parent account not found in company');
       }
     },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
       params: [
-        p.companyId,
+        session.user.companyId,
         String(p.code || ''),
         String(p.nameAr || ''),
         String(p.nameEn || ''),
@@ -1283,8 +1291,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // needs a second round-trip to fetch journal entries.
   registerRpc('accounting.getTransactions', {
     paramCount: 1,
-    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `SELECT t.*, COALESCE(json_agg(json_build_object(
               'id', je.id, 'transaction_id', je.transaction_id,
               'account_id', je.account_id, 'debit', je.debit, 'credit', je.credit,
@@ -1296,7 +1303,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
             WHERE t.company_id = $1
             GROUP BY t.id
             ORDER BY t.date DESC`,
-      params: [p.companyId],
+      params: [session.user.companyId],
     }),
   });
 
@@ -1433,8 +1440,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // renderer doesn't need a second round-trip.
   registerRpc('inventory.getProducts', {
     paramCount: 1,
-    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `SELECT p.*, COALESCE(
               (SELECT json_agg(ppc.category_id)
                FROM product_product_categories ppc
@@ -1443,7 +1449,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
             FROM products p
             WHERE p.company_id = $1
             ORDER BY p.name_ar`,
-      params: [p.companyId],
+      params: [session.user.companyId],
     }),
   });
 
@@ -1454,7 +1460,6 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     permission: 'inventory.create',
     paramCount: 14,
     validate: async (p, session) => {
-      if (!p.companyId) throw new Error('companyId required');
       if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
       if (p.categoryId !== undefined && p.categoryId !== null) {
         await assertCompanyReferences('product_categories', [p.categoryId], session.user.companyId, 'Category not found in company');
@@ -1467,7 +1472,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       sql: `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
       params: [
-        p.companyId,
+        session.user.companyId,
         String(p.code || ''),
         String(p.nameAr || ''),
         String(p.nameEn || ''),
@@ -1693,24 +1698,22 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // contacts.getCustomers
   registerRpc('contacts.getCustomers', {
     paramCount: 1,
-    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `SELECT id, company_id, 'customer' AS type, name, phone, email, address,
             tax_number, balance, is_active, created_at, updated_at
             FROM customers WHERE company_id = $1 ORDER BY name`,
-      params: [p.companyId],
+            params: [session.user.companyId],
     }),
   });
 
   // contacts.getSuppliers
   registerRpc('contacts.getSuppliers', {
     paramCount: 1,
-    validate: (p) => { if (!p.companyId) throw new Error('companyId required'); },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `SELECT id, company_id, 'supplier' AS type, name, phone, email, address,
             tax_number, balance, is_active, created_at, updated_at
             FROM suppliers WHERE company_id = $1 ORDER BY name`,
-      params: [p.companyId],
+      params: [session.user.companyId],
     }),
   });
 
@@ -1718,14 +1721,13 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   registerRpc('contacts.createCustomer', {
     paramCount: 8,
     validate: (p) => {
-      if (!p.companyId) throw new Error('companyId required');
       if (!p.name) throw new Error('name required');
     },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, balance)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       params: [
-        p.companyId,
+        session.user.companyId,
         p.code ?? null,
         String(p.name || ''),
         p.phone ?? null,
@@ -1740,15 +1742,14 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // contacts.createSupplier
   registerRpc('contacts.createSupplier', {
     paramCount: 8,
-    validate: (p) => {
-      if (!p.companyId) throw new Error('companyId required');
+    validate: (p, session) => {
       if (!p.name) throw new Error('name required');
     },
-    compose: (p) => ({
+    compose: (p, session) => ({
       sql: `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
       params: [
-        p.companyId,
+        session.user.companyId,
         p.code ?? null,
         String(p.name || ''),
         p.phone ?? null,
