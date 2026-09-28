@@ -194,6 +194,13 @@ export interface ElectronDB extends PreloadDB {
   // Tax engine. Reads and period writes; the company id never leaves the
   // session, and the main process validates the settings keys against the
   // tax namespace so this surface cannot become a generic settings read.
+  // The audit trail. Both directions take the company from the session —
+  // the write used to accept one from the payload, so any authenticated
+  // caller could file an entry against another company.
+  audit?: {
+    log(payload: { action: string; tableName: string; recordId: string; oldValues?: Record<string, unknown> | null; newValues?: Record<string, unknown> | null; ipAddress?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    list(payload?: { userId?: string; tableName?: string; action?: string; fromDate?: string; toDate?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+  };
   tax?: {
     getContext(payload: { keys: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     setContext(payload: { entries: { key: string; value: string }[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -309,6 +316,7 @@ type ElectronRpcSurface = NonNullable<Required<ElectronDB>['accounting']>
   & NonNullable<Required<ElectronDB>['sales']>
   & NonNullable<Required<ElectronDB>['pos']>
   & NonNullable<Required<ElectronDB>['tax']>
+  & NonNullable<Required<ElectronDB>['audit']>
   & NonNullable<Required<ElectronDB>['purchases']>
   & NonNullable<Required<ElectronDB>['core']>;
 
@@ -324,10 +332,11 @@ function getRPC(): ElectronRpcSurface {
     const sales = db.sales;
     const pos = db.pos;
     const tax = db.tax;
+    const audit = db.audit;
     const purchases = db.purchases;
     const core = db.core;
-    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !tax || !purchases || !core) {
-      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/tax/purchases/core)');
+    if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !tax || !purchases || !audit || !core) {
+      throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/tax/purchases/audit/core)');
     }
     return {
       ...acc,
@@ -340,6 +349,7 @@ function getRPC(): ElectronRpcSurface {
       ...pos,
       ...tax,
       ...purchases,
+      ...audit,
       ...core,
     } as ElectronRpcSurface;
   }

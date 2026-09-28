@@ -1766,6 +1766,73 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // gap of the legacy `SELECT * FROM companies LIMIT 1` / `WHERE id = $1`
   // statements. The renderer can never reference another company's row.
 
+  // audit.log — the audit trail write, with the company id from the session.
+  //
+  // This one was a cross-tenant hole: the renderer inserted with a company id
+  // from its own payload, and 71 call sites across 30 files supply it. An audit
+  // entry is a claim about who did what in which company, so filing one against
+  // another company is exactly the kind of record that must not be forgeable.
+  // No company id in the payload — the session decides, and the user id comes
+  // from it too rather than from the caller.
+  registerRpc('audit.log', {
+    paramCount: 8,
+    compose: (p, session) => ({
+      sql: `INSERT INTO audit_logs (id, user_id, action, table_name, record_id, old_values, new_values, ip_address, company_id, created_at)
+            VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::jsonb, $7::jsonb, $8::varchar, $9::uuid, NOW())`,
+      params: [
+        crypto.randomUUID(),
+        session.user.id,
+        String(p.action || ''),
+        String(p.tableName || ''),
+        String(p.recordId || ''),
+        p.oldValues ? JSON.stringify(p.oldValues) : null,
+        p.newValues ? JSON.stringify(p.newValues) : null,
+        p.ipAddress || null,
+        session.user.companyId,
+      ],
+    }),
+    validate: (p) => {
+      if (!/^[a-z_]+$/.test(String(p.action || ''))) throw new Error('action must be a known audit action');
+      if (!p.tableName || !p.recordId) throw new Error('tableName and recordId are required');
+      for (const f of ['oldValues', 'newValues']) {
+        const v = p[f];
+        if (v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v))) {
+          throw new Error(`${f} must be an object`);
+        }
+      }
+    },
+  });
+
+  // audit.list — the read side, same session-derived scope. Reading the trail
+  // is an accounting-view affair; the table rule is the authority, so no
+  // explicit permission is named here.
+  registerRpc('audit.list', {
+    // dynamic: the filter count varies, so the parameter count is not fixed
+    paramCount: null,
+    compose: (p, session) => {
+      const conditions = ['company_id = $1::uuid'];
+      const params = [session.user.companyId];
+      const add = (clause, value) => {
+        params.push(value);
+        conditions.push(clause.replace('$N', '$' + params.length));
+      };
+      if (p.userId) add('user_id = $N::uuid', String(p.userId));
+      if (p.tableName) add('table_name = $N::varchar', String(p.tableName));
+      if (p.action) add('action = $N::varchar', String(p.action));
+      if (p.fromDate) add('created_at >= $N::timestamptz', String(p.fromDate));
+      if (p.toDate) add('created_at <= $N::timestamptz', String(p.toDate));
+      return {
+        sql: `SELECT * FROM audit_logs WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT 1000`,
+        params,
+      };
+    },
+    validate: (p) => {
+      for (const f of ['fromDate', 'toDate']) {
+        if (p[f] && !/^\d{4}-\d{2}-\d{2}/.test(String(p[f]))) throw new Error(`${f} must be YYYY-MM-DD`);
+      }
+    },
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

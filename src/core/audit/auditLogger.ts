@@ -1,4 +1,4 @@
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { useAuthStore } from '@/modules/auth/store';
 
 export type AuditAction = 'create' | 'update' | 'delete' | 'post' | 'cancel' | 'reverse' | 'login' | 'logout' | 'export' | 'import';
@@ -30,18 +30,36 @@ export class AuditLogger {
     try {
       const authState = useAuthStore.getState();
       const user = authState.user;
-      
+
       if (!user) {
         return { success: false, error: 'No authenticated user' };
       }
 
-      const companyId = entry.companyId || user.companyId;
+      // On desktop the write goes through the typed audit channel, where the
+      // company AND the user id come from the authenticated session. This copy
+      // of the logger used to prefer `entry.companyId` over the session, which
+      // is the same cross-tenant hole the other logger had: an audit entry is a
+      // claim about who did what in which company, and the caller must not pick
+      // the company.
+      if (isElectronPg() && typeof window !== 'undefined' && window.electronDB?.audit) {
+        const res = (await window.electronDB.audit.log({
+          action: entry.action,
+          tableName: entry.tableName,
+          recordId: entry.recordId,
+          oldValues: entry.oldValues || null,
+          newValues: entry.newValues || null,
+          ipAddress: null,
+        })) as { success: boolean; error?: string };
+        return res.success ? { success: true } : { success: false, error: res.error };
+      }
+
+      const companyId = user.companyId;
       if (!companyId) {
         return { success: false, error: 'No company context' };
       }
 
       const adapter = await getDbAdapter();
-      
+
       const result = await adapter.query(
         `INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values, company_id)
          VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid)`,

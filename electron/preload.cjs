@@ -229,6 +229,10 @@ contextBridge.exposeInMainWorld('electronDB', {
   // POS typed RPC (module 13). Session-derived companyId + cashier userId.
   // Checkout stays renderer-composed (journal machinery) and ships through
   // the guarded transaction channel; these cover products, shifts, Z-report.
+  audit: {
+    log: (payload) => ipcRenderer.invoke('db:rpc:audit.log', { ...payload, sessionToken }),
+    list: (payload = {}) => ipcRenderer.invoke('db:rpc:audit.list', { ...payload, sessionToken }),
+  },
   tax: {
     getContext: (payload) => ipcRenderer.invoke('db:rpc:tax.getContext', { ...payload, sessionToken }),
     setContext: (payload) => ipcRenderer.invoke('db:rpc:tax.setContext', { ...payload, sessionToken }),
