@@ -1,16 +1,38 @@
-﻿import { getDbAdapter } from '@/core/database/adapters';
+﻿import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { mapRows } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import type { DocumentSequence, ProductType, Unit, CashBox, CostCenter, PayrollComponent, DefaultAccount } from './types';
 
+type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
+
+/**
+ * The `core` typed-RPC surface on the Electron bridge, or null off-desktop.
+ * Every document number in the app flows through getNextDocumentNumber, and the
+ * main-process handler owns the table/number-column maps so no identifier
+ * reaches a statement from here.
+ */
+function coreRpc() {
+  return (typeof window !== 'undefined' && window.electronDB?.core) || null;
+}
+
 // â”€â”€â”€ Document Sequences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getDocumentSequences(companyId: string): Promise<{ success: boolean; data?: DocumentSequence[]; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getDocumentSequences({})) as RpcEnvelope;
+    return res.success
+      ? { success: true, data: mapRows<DocumentSequence>(res.rows || []) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM document_sequences WHERE company_id = $1 ORDER BY document_type', [companyId]);
   return result.success ? { success: true, data: mapRows<DocumentSequence>(result.rows) } : { success: false, error: result.error };
 }
 
 export async function updateDocumentSequence(id: string, data: Partial<DocumentSequence>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updateDocumentSequence({ ...data, id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query(
     'UPDATE document_sequences SET prefix = $1, suffix = $2, starting_number = $3, current_number = $4, increment_step = $5, padding_length = $6, year_reset = $7, is_active = $8, updated_by = $9, updated_at = NOW() WHERE id = $10 AND company_id = $11',
@@ -34,6 +56,32 @@ function formatSequenceNumber(seq: DocumentSequence): string {
 }
 
 export async function getNextDocumentNumber(companyId: string, documentType: string, _userId?: string): Promise<{ success: boolean; number?: string; error?: string }> {
+  // Desktop: the increment and the collision check both live in the main
+  // process, which also owns the table/number-column maps for documentType.
+  // Format stays here — padding/prefix/year substitution is presentation.
+  if (isElectronPg() && coreRpc()) {
+    const rpc = coreRpc()!;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const res = (await rpc.peekNextDocumentNumber({ documentType })) as RpcEnvelope;
+      if (!res.success || !res.rows?.[0]) {
+        return { success: false, error: `Sequence not found: ${documentType}` };
+      }
+      const rawSeq = res.rows[0];
+      const candidate = formatSequenceNumber({
+        ...mapRows<DocumentSequence>([rawSeq])[0],
+        currentNumber: Number(rawSeq.current_number),
+      });
+      const bump = (await rpc.getNextDocumentNumber({ documentType, candidateNumber: candidate })) as RpcEnvelope;
+      if (!bump.success) {
+        return { success: false, error: bump.error || `Sequence not found: ${documentType}` };
+      }
+      if (bump.rows?.[0]?.available === true) {
+        return { success: true, number: candidate };
+      }
+      // Collision: the number is already taken, loop with the next value.
+    }
+    return { success: false, error: 'Could not generate unique document number after 10 attempts' };
+  }
   const adapter = await getDbAdapter();
   // Try up to 10 times to handle the case where the sequence is behind
   // (e.g., after seed reset or manual inserts that didn't update the sequence)
@@ -142,6 +190,13 @@ function getNumberColumnForDocumentType(documentType: string): string {
 }
 
 export async function peekNextDocumentNumber(companyId: string, documentType: string): Promise<{ success: boolean; number?: string; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.peekNextDocumentNumber({ documentType })) as RpcEnvelope;
+    if (!res.success || !res.rows?.[0]) return { success: false, error: res.error || 'Sequence not found' };
+    const seq = mapRows<DocumentSequence>(res.rows)[0];
+    const previewSeq = { ...seq, currentNumber: seq.currentNumber + (seq.incrementStep || 1) };
+    return { success: true, number: formatSequenceNumber(previewSeq) };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM document_sequences WHERE company_id = $1 AND document_type = $2 AND is_active = true', [companyId, documentType]);
   if (!result.success || !result.rows?.[0]) return { success: false, error: 'Sequence not found' };
@@ -400,3 +455,4 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
   }
   return { success: true };
 }
+

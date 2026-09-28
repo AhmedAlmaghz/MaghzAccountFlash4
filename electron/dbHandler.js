@@ -1848,6 +1848,140 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Document sequences (Phase 0 tranche 5) ──────────────────────────────────
+  // The numbering path is the most load-bearing raw SQL left in the app: every
+  // invoice, voucher, receipt and product code passes through
+  // getNextDocumentNumber, and it interpolates a table name chosen from a map.
+  // Those two maps move here so the renderer never contributes an identifier to
+  // a statement at all - a map lookup cannot be injected, but a payload string
+  // in an interpolated position can.
+  const DOC_TYPE_TO_TABLE = {
+    sales_invoice: 'sales_invoices',
+    sales_return: 'sales_returns',
+    quotation: 'quotations',
+    pos_receipt: 'sales_invoices',
+    purchase_order: 'purchase_orders',
+    purchase_invoice: 'purchase_invoices',
+    purchase_return: 'purchase_returns',
+    journal_voucher: 'transactions',
+    receipt_voucher: 'receipt_vouchers',
+    payment_voucher: 'payment_vouchers',
+    fixed_asset: 'fixed_assets',
+    work_order: 'work_orders',
+    payroll_run: 'payroll_runs',
+    product: 'products',
+    stock_adjustment: 'stock_adjustments',
+    inventory_transfer: 'warehouse_transfers',
+    customer: 'customers',
+    supplier: 'suppliers',
+    employee: 'employees',
+  };
+  const DOC_TYPE_TO_NUMBER_COLUMN = {
+    sales_invoice: 'invoice_number',
+    sales_return: 'return_number',
+    quotation: 'quotation_number',
+    pos_receipt: 'invoice_number',
+    purchase_order: 'order_number',
+    purchase_invoice: 'invoice_number',
+    purchase_return: 'return_number',
+    journal_voucher: 'reference',
+    receipt_voucher: 'voucher_number',
+    payment_voucher: 'voucher_number',
+    fixed_asset: 'code',
+    work_order: 'order_number',
+    payroll_run: 'run_number',
+    product: 'code',
+    stock_adjustment: 'adjustment_number',
+    inventory_transfer: 'transfer_number',
+    customer: 'code',
+    supplier: 'code',
+    employee: 'employee_number',
+  };
+  const KNOWN_DOC_TYPES = new Set(Object.keys(DOC_TYPE_TO_TABLE));
+
+  registerRpc('core.getDocumentSequences', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: `SELECT * FROM document_sequences WHERE company_id = $1::uuid ORDER BY document_type`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.updateDocumentSequence', {
+    permission: 'settings.edit',
+    paramCount: 11,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE document_sequences
+              SET prefix = $1, suffix = $2, starting_number = $3, current_number = $4,
+                  increment_step = $5, padding_length = $6, year_reset = $7, is_active = $8,
+                  updated_by = $9::uuid, updated_at = NOW()
+            WHERE id = $10::uuid AND company_id = $11::uuid`,
+      params: [
+        p.prefix ?? null,
+        p.suffix ?? null,
+        p.startingNumber ?? null,
+        p.currentNumber ?? null,
+        p.incrementStep ?? null,
+        p.paddingLength ?? null,
+        p.yearReset ?? null,
+        p.isActive ?? null,
+        session.user.id,
+        String(p.id),
+        session.user.companyId,
+      ],
+    }),
+  });
+
+  // peek — read-only, no increment. Used by the UI to preview a number.
+  registerRpc('core.peekNextDocumentNumber', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!KNOWN_DOC_TYPES.has(String(p.documentType || ''))) throw new Error('unknown documentType');
+    },
+    compose: (p, session) => ({
+      sql: `SELECT * FROM document_sequences
+             WHERE company_id = $1::uuid AND document_type = $2 AND is_active = true`,
+      params: [session.user.companyId, String(p.documentType)],
+    }),
+  });
+
+  // next — the atomic increment. The increment and the collision check are two
+  // statements here for the same reason they were two in the renderer: the
+  // increment must be atomic on its own, and the check may fail and loop.
+  registerRpc('core.getNextDocumentNumber', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!KNOWN_DOC_TYPES.has(String(p.documentType || ''))) throw new Error('unknown documentType');
+    },
+    compose: (p, session) => {
+      const table = DOC_TYPE_TO_TABLE[String(p.documentType)];
+      const column = DOC_TYPE_TO_NUMBER_COLUMN[String(p.documentType)] || 'number';
+      return {
+        sql: `WITH bumped AS (
+                UPDATE document_sequences
+                   SET current_number = current_number + increment_step, updated_by = $3::uuid, updated_at = NOW()
+                 WHERE company_id = $1::uuid AND document_type = $2 AND is_active = true
+                RETURNING *
+              )
+              SELECT (SELECT row_to_json(bumped) FROM bumped) AS sequence,
+                     (SELECT NOT EXISTS (SELECT 1 FROM ${table} t
+                                         WHERE t.company_id = $1::uuid AND t.${column} = $4)) AS available
+                FROM (SELECT 1) AS one`,
+        params: [
+          session.user.companyId,
+          String(p.documentType),
+          session.user.id,
+          // $4 is the formatted number, computed by the caller: formatting is
+          // presentation, and the sequence row decides how it is padded
+          String(p.candidateNumber || ''),
+        ],
+      };
+    },
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

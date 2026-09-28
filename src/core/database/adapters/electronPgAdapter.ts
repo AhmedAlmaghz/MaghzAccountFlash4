@@ -242,6 +242,14 @@ export interface ElectronDB extends PreloadDB {
     findAccountByCode(payload: { code: string; namePatterns?: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     setSetting(payload: { key: string; value?: string | null; category?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteSetting(payload: { key: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // Document sequences (Phase 0 tranche 5). The numbering path is the most
+    // load-bearing raw SQL left: every invoice/voucher/receipt runs through it,
+    // and the main process owns the table + number-column maps so no identifier
+    // is interpolated from a renderer payload.
+    getDocumentSequences(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateDocumentSequence(payload: { id: string; prefix?: string | null; suffix?: string | null; startingNumber?: number | null; currentNumber?: number | null; incrementStep?: number | null; paddingLength?: number | null; yearReset?: boolean | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    peekNextDocumentNumber(payload: { documentType: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getNextDocumentNumber(payload: { documentType: string; candidateNumber: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
 }
 

@@ -270,6 +270,10 @@ contextBridge.exposeInMainWorld('electronDB', {
     setSetting: (payload) => ipcRenderer.invoke('db:rpc:core.setSetting', { ...payload, sessionToken }),
     deleteSetting: (payload) => ipcRenderer.invoke('db:rpc:core.deleteSetting', { ...payload, sessionToken }),
     getDefaultAccountId: (payload) => ipcRenderer.invoke('db:rpc:core.getDefaultAccountId', { ...payload, sessionToken }),
+    getDocumentSequences: (payload) => ipcRenderer.invoke('db:rpc:core.getDocumentSequences', { ...payload, sessionToken }),
+    updateDocumentSequence: (payload) => ipcRenderer.invoke('db:rpc:core.updateDocumentSequence', { ...payload, sessionToken }),
+    peekNextDocumentNumber: (payload) => ipcRenderer.invoke('db:rpc:core.peekNextDocumentNumber', { ...payload, sessionToken }),
+    getNextDocumentNumber: (payload) => ipcRenderer.invoke('db:rpc:core.getNextDocumentNumber', { ...payload, sessionToken }),
   },
 });
 
