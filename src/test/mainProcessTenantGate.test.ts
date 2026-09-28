@@ -23,7 +23,55 @@ import { join } from 'node:path';
  * braces mis-attributes channels (it "found" 256 and credited permissions to
  * the wrong ones).
  */
-const SRC = readFileSync(join(process.cwd(), 'electron', 'dbHandler.js'), 'utf8');
+/**
+ * Comments are blanked before the scan, with newlines preserved.
+ *
+ * Without this, a comment that mentions a channel call site by name is parsed as
+ * a real channel: the scan then matches inside the comment, and because the
+ * comment's quoting confuses the literal-skipping below, the paren walk runs
+ * hundreds of thousands of characters and every later channel disappears. The
+ * self-check below catches the symptom (count collapses), but the fix belongs
+ * here - a documentation note must not be able to switch off the audit.
+ *
+ * Preserving newlines keeps every reported offset meaningful.
+ */
+function stripComments(src: string): string {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') { out += ' '; i++; }
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+        out += src[i] === '\n' ? '\n' : ' ';
+        i++;
+      }
+      out += '  ';
+      i += 2;
+      continue;
+    }
+    // Do not treat a comment marker inside a string as a comment.
+    if (c === "'" || c === '"' || c === '`') {
+      const quote = c;
+      out += c; i++;
+      while (i < src.length) {
+        if (src[i] === '\\') { out += src.slice(i, i + 2); i += 2; continue; }
+        out += src[i];
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+const SRC = stripComments(readFileSync(join(process.cwd(), 'electron', 'dbHandler.js'), 'utf8'));
 
 interface Channel {
   channel: string;

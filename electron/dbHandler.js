@@ -1982,6 +1982,68 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // ── Reference data reads (Phase 0 tranche 7a) ──────────────────────────────
+  // No `permission` here on purpose. The raw path this replaces ran through
+  // `assertSqlAuthorized` too, so the SQL_MODULE_TABLE_RULES already decided
+  // access: units/cash_boxes/default_accounts are readAny, product_types needs
+  // inventory.*, cost_centers needs accounting.*, payroll_components needs
+  // hr.*. Adding an explicit permission would not restore the old behaviour, it
+  // would change it. Authorization is identical before and after this move.
+  //
+  // Registered one by one, never in a loop over a table of names: the CI gate
+
+  // that checks preload wiring for every channel discovers them by matching the
+  // call plus a quoted literal, so a loop would keep this file DRY while
+  // erasing the names from the source and silently switching that check off.
+  // Verbose source, verified wiring.
+  registerRpc('core.getProductTypes', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM product_types WHERE company_id = $1::uuid ORDER BY name_ar',
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.getUnits', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM units WHERE company_id = $1::uuid AND is_active = true ORDER BY name_ar',
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.getCashBoxes', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM cash_boxes WHERE company_id = $1::uuid AND is_active = true ORDER BY name',
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.getCostCenters', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM cost_centers WHERE company_id = $1::uuid AND is_active = true ORDER BY name_ar',
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.getPayrollComponents', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM payroll_components WHERE company_id = $1::uuid AND is_active = true ORDER BY type, name_ar',
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.getDefaultAccounts', {
+    paramCount: 0,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM default_accounts WHERE company_id = $1::uuid ORDER BY function_key',
+      params: [session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

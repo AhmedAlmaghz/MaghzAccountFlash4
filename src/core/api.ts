@@ -208,10 +208,18 @@ export async function peekNextDocumentNumber(companyId: string, documentType: st
 
 // â”€â”€â”€ Product Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getProductTypes(companyId: string): Promise<{ success: boolean; data?: ProductType[]; error?: string }> {
-  const adapter = await getDbAdapter();
-  const result = await adapter.query('SELECT * FROM product_types WHERE company_id = $1 ORDER BY name_ar', [companyId]);
-  if (!result.success) return { success: false, error: result.error };
-  const rows = mapRows<ProductType>(result.rows);
+  let raw: Record<string, unknown>[];
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getProductTypes({})) as RpcEnvelope;
+    if (!res.success) return { success: false, error: res.error };
+    raw = res.rows || [];
+  } else {
+    const adapter = await getDbAdapter();
+    const result = await adapter.query('SELECT * FROM product_types WHERE company_id = $1 ORDER BY name_ar', [companyId]);
+    if (!result.success) return { success: false, error: result.error };
+    raw = result.rows as Record<string, unknown>[];
+  }
+  const rows = mapRows<ProductType>(raw);
   // snakeToCamel turns `has_bom` into `hasBom`, but the ProductType contract
   // (and every consumer) uses `hasBOM`. Normalize the key here — the single
   // read path shared by Electron and PGlite.
@@ -251,6 +259,12 @@ export async function deleteProductType(id: string, companyId: string): Promise<
 
 // â”€â”€â”€ Units â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getUnits(companyId: string): Promise<{ success: boolean; data?: Unit[]; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getUnits({})) as RpcEnvelope;
+    return res.success
+      ? { success: true, data: mapRows<Unit>(res.rows || []) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM units WHERE company_id = $1 AND is_active = true ORDER BY name_ar', [companyId]);
   return result.success ? { success: true, data: mapRows<Unit>(result.rows) } : { success: false, error: result.error };
@@ -282,6 +296,12 @@ export async function deleteUnit(id: string, companyId: string): Promise<{ succe
 
 // â”€â”€â”€ Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getCashBoxes(companyId: string): Promise<{ success: boolean; data?: CashBox[]; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getCashBoxes({})) as RpcEnvelope;
+    return res.success
+      ? { success: true, data: mapRows<CashBox>(res.rows || []) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM cash_boxes WHERE company_id = $1 AND is_active = true ORDER BY name', [companyId]);
   return result.success ? { success: true, data: mapRows<CashBox>(result.rows) } : { success: false, error: result.error };
@@ -314,6 +334,12 @@ export async function deleteCashBox(id: string, companyId: string): Promise<{ su
 
 // â”€â”€â”€ Cost Centers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getCostCenters(companyId: string): Promise<{ success: boolean; data?: CostCenter[]; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getCostCenters({})) as RpcEnvelope;
+    return res.success
+      ? { success: true, data: mapRows<CostCenter>(res.rows || []) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM cost_centers WHERE company_id = $1 AND is_active = true ORDER BY name_ar', [companyId]);
   return result.success ? { success: true, data: mapRows<CostCenter>(result.rows) } : { success: false, error: result.error };
@@ -345,6 +371,12 @@ export async function deleteCostCenter(id: string, companyId: string): Promise<{
 
 // â”€â”€â”€ Payroll Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getPayrollComponents(companyId: string): Promise<{ success: boolean; data?: PayrollComponent[]; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getPayrollComponents({})) as RpcEnvelope;
+    return res.success
+      ? { success: true, data: mapRows<PayrollComponent>(res.rows || []) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM payroll_components WHERE company_id = $1 AND is_active = true ORDER BY type, name_ar', [companyId]);
   return result.success ? { success: true, data: mapRows<PayrollComponent>(result.rows) } : { success: false, error: result.error };
@@ -371,6 +403,12 @@ export async function updatePayrollComponent(id: string, data: Partial<PayrollCo
 
 // â”€â”€â”€ Default Accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function getDefaultAccounts(companyId: string): Promise<{ success: boolean; data?: DefaultAccount[]; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.getDefaultAccounts({})) as RpcEnvelope;
+    return res.success
+      ? { success: true, data: mapRows<DefaultAccount>(res.rows || []) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('SELECT * FROM default_accounts WHERE company_id = $1 ORDER BY function_key', [companyId]);
   return result.success ? { success: true, data: mapRows<DefaultAccount>(result.rows) } : { success: false, error: result.error };

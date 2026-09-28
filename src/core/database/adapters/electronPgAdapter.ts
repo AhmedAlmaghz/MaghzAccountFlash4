@@ -250,6 +250,15 @@ export interface ElectronDB extends PreloadDB {
     updateDocumentSequence(payload: { id: string; prefix?: string | null; suffix?: string | null; startingNumber?: number | null; currentNumber?: number | null; incrementStep?: number | null; paddingLength?: number | null; yearReset?: boolean | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     peekNextDocumentNumber(payload: { documentType: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getNextDocumentNumber(payload: { documentType: string; candidateNumber: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // Reference data (Phase 0 tranche 7a). Read-only, company from the session,
+    // and deliberately without an explicit permission: assertSqlAuthorized
+    // already governs these tables exactly as it governed the raw statements.
+    getProductTypes(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getUnits(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getCashBoxes(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getCostCenters(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getPayrollComponents(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getDefaultAccounts(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
 }
 

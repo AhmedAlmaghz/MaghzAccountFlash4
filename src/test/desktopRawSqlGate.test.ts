@@ -36,8 +36,8 @@ const ROOT = process.cwd();
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-results', 'playwright-report']);
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
 
-/** measured 2026-09-25, tranche 6 (auth bridge) */
-const CEILING = 180;
+/** measured 2026-09-25, tranche 7a (reference reads) */
+const CEILING = 174;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -61,7 +61,7 @@ const GUARDS = [/isElectronPg\s*\(\s*\)/, /mainAuthBridge\s*\(\s*\)/];
  * somewhere and deleting one elsewhere still fails both tests.
  */
 const BASELINE: Record<string, number> = {
-  'src/core/api.ts': 23,
+  'src/core/api.ts': 17,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
   'src/core/services/postingService.ts': 16,
   'src/modules/accounting/assets.ts': 10,
@@ -208,6 +208,62 @@ describe('desktop-reachable raw SQL is a ratchet', () => {
     for (const ch of ['core.getNextDocumentNumber', 'core.peekNextDocumentNumber', 'core.getDocumentSequences', 'core.updateDocumentSequence']) {
       expect(db).toContain("registerRpc('" + ch + "'");
     }
+  });
+
+  it('the reference reads agree across renderer, main process and e2e shim', () => {
+    // A migrated read exists in three places. If any one of them drifts on the
+    // table, the is_active filter or the ordering, the browser and the desktop
+    // quietly show different reference rows in the same dropdown - a defect no
+    // unit test sees, because unit tests only ever run one of the three.
+    const api = readFileSync(join(ROOT, 'src', 'core', 'api.ts'), 'utf8');
+    const db = readFileSync(join(ROOT, 'electron', 'dbHandler.js'), 'utf8');
+    const shim = readFileSync(join(ROOT, 'e2e', 'vite-e2e-plugin.ts'), 'utf8');
+    const norm = (s: string) => s.replace(/\s+/g, ' ').replace(/::uuid/g, '').trim();
+    const tailOf = (stmt: string) => norm(/WHERE company_id = \$1\s*(.*)$/.exec(stmt)?.[1] ?? stmt);
+
+    const reads: Array<[string, string]> = [
+      ['getProductTypes', 'product_types'],
+      ['getUnits', 'units'],
+      ['getCashBoxes', 'cash_boxes'],
+      ['getCostCenters', 'cost_centers'],
+      ['getPayrollComponents', 'payroll_components'],
+      ['getDefaultAccounts', 'default_accounts'],
+    ];
+
+    for (const [method, table] of reads) {
+      const fnStart = api.indexOf('export async function ' + method + '(');
+      expect(fnStart, method + ' is missing from core/api.ts').toBeGreaterThan(0);
+      const seg = api.slice(fnStart, fnStart + 1200);
+      const m = /SELECT \* FROM (\w+) WHERE company_id = \$1(.*?)'/.exec(seg);
+      expect(m, method + ' fallback statement not found').not.toBeNull();
+      expect(m![1], method + ' fallback table').toBe(table);
+      const apiTail = tailOf('WHERE company_id = $1' + m![2]);
+
+      const chIdx = db.indexOf("registerRpc('core." + method + "'");
+      expect(chIdx, method + ' has no channel in the main process').toBeGreaterThan(0);
+      const dm = /sql: 'SELECT \* FROM (\w+) WHERE company_id = \$1::uuid(.*?)'/.exec(db.slice(chIdx, chIdx + 400));
+      expect(dm, method + ' main statement not found').not.toBeNull();
+      expect(dm![1], method + ' main table drifted').toBe(table);
+      expect(tailOf('WHERE company_id = $1' + dm![2]), method + ' main filter/order drifted').toBe(apiTail);
+
+      const sIdx = shim.indexOf(method + ':async');
+      expect(sIdx, method + ' is missing from the e2e shim').toBeGreaterThan(0);
+      const sm = /post\("SELECT \* FROM (\w+) WHERE company_id = \$1::uuid (.*?)"/.exec(shim.slice(sIdx, sIdx + 400));
+      expect(sm, method + ' shim statement not found').not.toBeNull();
+      expect(sm![1], method + ' shim table drifted').toBe(table);
+      expect(tailOf('WHERE company_id = $1 ' + sm![2]), method + ' shim filter/order drifted').toBe(apiTail);
+    }
+  });
+
+  it('registers channels literally, never in a loop over a name table', () => {
+    // typedRpcSurfaceGate discovers channels by grepping `registerRpc('name'`.
+    // A loop over an array of names keeps the code DRY and silently removes
+    // those names from the source, so the gate stops checking their preload
+    // wiring and a missing bridge method ships unnoticed. Verbose source,
+    // verified wiring.
+    const db = readFileSync(join(ROOT, 'electron', 'dbHandler.js'), 'utf8');
+    expect(db, 'channels must be registered one by one so the gate can see them')
+      .not.toMatch(/for\s*\([^)]*\)\s*\{[^}]*registerRpc\(\s*[a-zA-Z_$][\w$]*\s*,/);
   });
 
   it('every method the auth gate excuses has a main-process counterpart', () => {
