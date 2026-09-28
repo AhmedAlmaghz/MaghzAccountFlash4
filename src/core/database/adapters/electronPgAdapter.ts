@@ -241,6 +241,7 @@ export interface ElectronDB extends PreloadDB {
     getDefaultAccountId(payload: { functionKey: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     findAccountByCode(payload: { code: string; namePatterns?: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     setSetting(payload: { key: string; value?: string | null; category?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteSetting(payload: { key: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
 }
 

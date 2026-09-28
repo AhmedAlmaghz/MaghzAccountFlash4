@@ -263,6 +263,7 @@ contextBridge.exposeInMainWorld('electronDB', {
     getSettings: (payload = {}) => ipcRenderer.invoke('db:rpc:core.getSettings', { ...payload, sessionToken }),
     findAccountByCode: (payload) => ipcRenderer.invoke('db:rpc:core.findAccountByCode', { ...payload, sessionToken }),
     setSetting: (payload) => ipcRenderer.invoke('db:rpc:core.setSetting', { ...payload, sessionToken }),
+    deleteSetting: (payload) => ipcRenderer.invoke('db:rpc:core.deleteSetting', { ...payload, sessionToken }),
     getDefaultAccountId: (payload) => ipcRenderer.invoke('db:rpc:core.getDefaultAccountId', { ...payload, sessionToken }),
   },
 });

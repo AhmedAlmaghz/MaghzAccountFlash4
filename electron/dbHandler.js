@@ -1833,6 +1833,20 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // core.deleteSetting — the DELETE half of setSetting, for keys that are
+  // cleared rather than set to an empty value. Same session-derived scoping.
+  registerRpc('core.deleteSetting', {
+    permission: 'settings.edit',
+    paramCount: 1,
+    validate: (p) => {
+      if (!p.key) throw new Error('key required');
+    },
+    compose: (p, session) => ({
+      sql: `DELETE FROM settings WHERE company_id = $1::uuid AND key = $2`,
+      params: [session.user.companyId, String(p.key)],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

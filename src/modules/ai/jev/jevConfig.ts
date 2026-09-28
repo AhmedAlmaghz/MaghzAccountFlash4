@@ -16,7 +16,7 @@
  * is honoured when no DB key exists — useful for local dev without company context.
  */
 
-import { getDbAdapter } from '@/core/database/adapters';
+import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 
 export const JEV_DEFAULT_MODEL = 'jev-latest';
 export const JEV_DEFAULT_BASE_URL = 'https://api.typesafe.ai';
@@ -127,7 +127,12 @@ export function isJevGuardEnabledSync(config: JevConfig | null | undefined): boo
 }
 
 /**
- * Persist a single JEV setting for a company (upsert).
+ * Persist a single JEV setting for the current company.
+ *
+ * `companyId` is no longer used for the write: on desktop the typed channel
+ * takes the company from the authenticated session, so a caller cannot aim the
+ * JEV api key at another company. It stays in the signature so the PGlite
+ * fallback and the existing call sites keep working unchanged.
  */
 export async function setJevSetting(
   companyId: string,
@@ -135,20 +140,32 @@ export async function setJevSetting(
   value: string | null,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const adapter = await getDbAdapter();
-    if (value == null || value === '') {
-      const res = await adapter.query(`DELETE FROM settings WHERE company_id = $1 AND key = $2`, [companyId, key]);
-      return { success: !!res.success };
-    }
     // Encrypt apiKey before storing in browser mode
     let storedValue = value;
-    if (key === JEV_SETTINGS_KEYS.apiKey && !value.startsWith('enc:v1:')) {
+    if (value && key === JEV_SETTINGS_KEYS.apiKey && !value.startsWith('enc:v1:')) {
       try {
         const { encryptApiKey } = await import('../api/keyVault');
         storedValue = await encryptApiKey(value);
       } catch {
         // fall back to plaintext if vault unavailable (tests)
       }
+    }
+
+    if (isElectronPg() && typeof window !== 'undefined' && window.electronDB?.core) {
+      const core = window.electronDB.core;
+      const res = (value == null || value === ''
+        ? await core.deleteSetting({ key })
+        : await core.setSetting({ key, value: storedValue ?? null, category: 'ai' })) as {
+          success: boolean;
+          error?: string;
+        };
+      return { success: res.success, error: res.success ? undefined : res.error };
+    }
+
+    const adapter = await getDbAdapter();
+    if (value == null || value === '') {
+      const res = await adapter.query(`DELETE FROM settings WHERE company_id = $1 AND key = $2`, [companyId, key]);
+      return { success: !!res.success };
     }
     const res = await adapter.query(
       `INSERT INTO settings (company_id, key, value, category) VALUES ($1, $2, $3, 'ai')
