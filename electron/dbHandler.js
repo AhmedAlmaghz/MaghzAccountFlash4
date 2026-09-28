@@ -2044,6 +2044,233 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Reference data writes (Phase 0 tranche 7b) ─────────────────────────────
+  // Same reasoning as the reads: no explicit `permission`, because the raw
+  // statements they replace already passed through assertSqlAuthorized and its
+  // per-table write permissions. company_id and the audit user come from the
+  // session, so a payload cannot name a tenant - registerRpc additionally
+  // refuses a companyId that disagrees with the session.
+  registerRpc('core.createProductType', {
+    paramCount: 17,
+    compose: (p, session) => ({
+      sql: `INSERT INTO product_types (company_id, name_ar, name_en, code, usage, appears_in_sales, appears_in_purchases, appears_in_inventory, appears_in_manufacturing, has_stock_tracking, has_bom, default_sales_account_id, default_cogs_account_id, default_inventory_account_id, is_active, created_by, updated_by)
+            VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::uuid,$17::uuid) RETURNING id`,
+      params: [
+        session.user.companyId,
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null, p.usage || 'other',
+        p.appearsInSales ?? null, p.appearsInPurchases ?? null, p.appearsInInventory ?? null,
+        p.appearsInManufacturing ?? null, p.hasStockTracking ?? null, p.hasBOM ?? null,
+        p.defaultSalesAccountId ?? null, p.defaultCOGSAccountId ?? null,
+        p.defaultInventoryAccountId ?? null, p.isActive ?? null,
+        session.user.id, session.user.id,
+      ],
+    }),
+  });
+
+  registerRpc('core.updateProductType', {
+    paramCount: 17,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE product_types SET name_ar = $1, name_en = $2, code = $3, usage = $4, appears_in_sales = $5, appears_in_purchases = $6, appears_in_inventory = $7, appears_in_manufacturing = $8, has_stock_tracking = $9, has_bom = $10, default_sales_account_id = $11, default_cogs_account_id = $12, default_inventory_account_id = $13, is_active = $14, updated_by = $15::uuid, updated_at = NOW()
+            WHERE id = $16::uuid AND company_id = $17::uuid`,
+      params: [
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null, p.usage || 'other',
+        p.appearsInSales ?? null, p.appearsInPurchases ?? null, p.appearsInInventory ?? null,
+        p.appearsInManufacturing ?? null, p.hasStockTracking ?? null, p.hasBOM ?? null,
+        p.defaultSalesAccountId ?? null, p.defaultCOGSAccountId ?? null,
+        p.defaultInventoryAccountId ?? null, p.isActive ?? null,
+        session.user.id,
+        String(p.id), session.user.companyId,
+      ],
+    }),
+  });
+
+  registerRpc('core.deleteProductType', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM product_types WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.createUnit', {
+    paramCount: 7,
+    compose: (p, session) => ({
+      sql: `INSERT INTO units (company_id, name_ar, name_en, code, conversion_factor, base_unit_id, is_active)
+            VALUES ($1::uuid,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      params: [
+        session.user.companyId,
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null,
+        p.conversionFactor ?? null, p.baseUnitId ?? null, p.isActive ?? null,
+      ],
+    }),
+  });
+
+  registerRpc('core.updateUnit', {
+    paramCount: 8,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE units SET name_ar = $1, name_en = $2, code = $3, conversion_factor = $4, base_unit_id = $5, is_active = $6
+            WHERE id = $7::uuid AND company_id = $8::uuid`,
+      params: [
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null,
+        p.conversionFactor ?? null, p.baseUnitId ?? null, p.isActive ?? null,
+        String(p.id), session.user.companyId,
+      ],
+    }),
+  });
+
+  registerRpc('core.deleteUnit', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM units WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.createCashBox', {
+    paramCount: 10,
+    compose: (p, session) => ({
+      sql: `INSERT INTO cash_boxes (company_id, name, code, account_id, branch_id, responsible_user_id, is_active, current_balance, created_by, updated_by)
+            VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::uuid) RETURNING id`,
+      params: [
+        session.user.companyId,
+        p.name ?? null, p.code ?? null, p.accountId ?? null, p.branchId ?? null,
+        p.responsibleUserId ?? null, p.isActive ?? null, p.currentBalance ?? null,
+        session.user.id, session.user.id,
+      ],
+    }),
+  });
+
+  registerRpc('core.updateCashBox', {
+    paramCount: 10,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE cash_boxes SET name = $1, code = $2, account_id = $3, branch_id = $4, responsible_user_id = $5, is_active = $6, current_balance = $7, updated_by = $8::uuid, updated_at = NOW()
+            WHERE id = $9::uuid AND company_id = $10::uuid`,
+      params: [
+        p.name ?? null, p.code ?? null, p.accountId ?? null, p.branchId ?? null,
+        p.responsibleUserId ?? null, p.isActive ?? null, p.currentBalance ?? null,
+        session.user.id,
+        String(p.id), session.user.companyId,
+      ],
+    }),
+  });
+
+  registerRpc('core.deleteCashBox', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM cash_boxes WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.createCostCenter', {
+    paramCount: 8,
+    compose: (p, session) => ({
+      sql: `INSERT INTO cost_centers (company_id, name_ar, name_en, code, parent_id, type, budget_amount, is_active)
+            VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      params: [
+        session.user.companyId,
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null, p.parentId ?? null,
+        p.type ?? null, p.budgetAmount ?? null, p.isActive ?? null,
+      ],
+    }),
+  });
+
+  registerRpc('core.updateCostCenter', {
+    paramCount: 9,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE cost_centers SET name_ar = $1, name_en = $2, code = $3, parent_id = $4, type = $5, budget_amount = $6, is_active = $7
+            WHERE id = $8::uuid AND company_id = $9::uuid`,
+      params: [
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null, p.parentId ?? null,
+        p.type ?? null, p.budgetAmount ?? null, p.isActive ?? null,
+        String(p.id), session.user.companyId,
+      ],
+    }),
+  });
+
+  registerRpc('core.deleteCostCenter', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM cost_centers WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  registerRpc('core.createPayrollComponent', {
+    paramCount: 14,
+    compose: (p, session) => ({
+      sql: `INSERT INTO payroll_components (company_id, name_ar, name_en, code, type, calculation_method, default_amount, affects_gross_salary, affects_tax, affects_social_insurance, default_account_id, is_active, created_by, updated_by)
+            VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::uuid,$14::uuid) RETURNING id`,
+      params: [
+        session.user.companyId,
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null, p.type ?? null,
+        p.calculationMethod ?? null, p.defaultAmount ?? null,
+        p.affectsGrossSalary ?? null, p.affectsTax ?? null, p.affectsSocialInsurance ?? null,
+        p.defaultAccountId ?? null, p.isActive ?? null,
+        session.user.id, session.user.id,
+      ],
+    }),
+  });
+
+  registerRpc('core.updatePayrollComponent', {
+    paramCount: 14,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE payroll_components SET name_ar = $1, name_en = $2, code = $3, type = $4, calculation_method = $5, default_amount = $6, affects_gross_salary = $7, affects_tax = $8, affects_social_insurance = $9, default_account_id = $10, is_active = $11, updated_by = $12::uuid, updated_at = NOW()
+            WHERE id = $13::uuid AND company_id = $14::uuid`,
+      params: [
+        p.nameAr ?? null, p.nameEn ?? null, p.code ?? null, p.type ?? null,
+        p.calculationMethod ?? null, p.defaultAmount ?? null,
+        p.affectsGrossSalary ?? null, p.affectsTax ?? null, p.affectsSocialInsurance ?? null,
+        p.defaultAccountId ?? null, p.isActive ?? null,
+        session.user.id,
+        String(p.id), session.user.companyId,
+      ],
+    }),
+  });
+
+  // The original statement numbers its placeholders out of order - account_id
+  // is $1 while id and company_id are $2/$3 and the audit user is $4. Kept
+  // exactly, so the desktop and the browser bind the same values to the same
+  // columns.
+  registerRpc('core.updateDefaultAccount', {
+    paramCount: 4,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE default_accounts SET account_id = $1, updated_by = $4::uuid, updated_at = NOW()
+            WHERE id = $2::uuid AND company_id = $3::uuid`,
+      params: [p.accountId ?? null, String(p.id), session.user.companyId, session.user.id],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

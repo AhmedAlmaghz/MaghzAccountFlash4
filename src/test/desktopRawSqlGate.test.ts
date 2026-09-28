@@ -37,7 +37,7 @@ const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-resu
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
 
 /** measured 2026-09-25, tranche 7a (reference reads) */
-const CEILING = 174;
+const CEILING = 159;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -61,7 +61,10 @@ const GUARDS = [/isElectronPg\s*\(\s*\)/, /mainAuthBridge\s*\(\s*\)/];
  * somewhere and deleting one elsewhere still fails both tests.
  */
 const BASELINE: Record<string, number> = {
-  'src/core/api.ts': 17,
+  // applyDefaultTemplate composes several statements against several tables, so
+  // it stays here until it is migrated as one transaction rather than split into
+  // independent writes. The rest of core/api.ts reached zero.
+  'src/core/api.ts': 2,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
   'src/core/services/postingService.ts': 16,
   'src/modules/accounting/assets.ts': 10,

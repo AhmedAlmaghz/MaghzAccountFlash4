@@ -233,6 +233,12 @@ export async function getProductTypes(companyId: string): Promise<{ success: boo
 }
 
 export async function createProductType(data: Omit<ProductType, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.createProductType({ ...data })) as RpcEnvelope;
+    return res.success && res.rows?.[0]
+      ? { success: true, id: String(res.rows[0].id) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
     `INSERT INTO product_types (company_id, name_ar, name_en, code, usage, appears_in_sales, appears_in_purchases, appears_in_inventory, appears_in_manufacturing, has_stock_tracking, has_bom, default_sales_account_id, default_cogs_account_id, default_inventory_account_id, is_active, created_by, updated_by)
@@ -243,6 +249,10 @@ export async function createProductType(data: Omit<ProductType, 'id'>, _userId?:
 }
 
 export async function updateProductType(id: string, data: Partial<ProductType>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updateProductType({ ...data, id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query(
     `UPDATE product_types SET name_ar = $1, name_en = $2, code = $3, usage = $4, appears_in_sales = $5, appears_in_purchases = $6, appears_in_inventory = $7, appears_in_manufacturing = $8, has_stock_tracking = $9, has_bom = $10, default_sales_account_id = $11, default_cogs_account_id = $12, default_inventory_account_id = $13, is_active = $14, updated_by = $15, updated_at = NOW() WHERE id = $16 AND company_id = $17`,
@@ -252,6 +262,10 @@ export async function updateProductType(id: string, data: Partial<ProductType>, 
 }
 
 export async function deleteProductType(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.deleteProductType({ id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('DELETE FROM product_types WHERE id = $1 AND company_id = $2', [id, companyId]);
   return result.success ? { success: true } : { success: false, error: result.error };
@@ -271,6 +285,12 @@ export async function getUnits(companyId: string): Promise<{ success: boolean; d
 }
 
 export async function createUnit(data: Omit<Unit, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.createUnit({ ...data })) as RpcEnvelope;
+    return res.success && res.rows?.[0]
+      ? { success: true, id: String(res.rows[0].id) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
     'INSERT INTO units (company_id, name_ar, name_en, code, conversion_factor, base_unit_id, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
@@ -280,6 +300,10 @@ export async function createUnit(data: Omit<Unit, 'id'>, _userId?: string): Prom
 }
 
 export async function updateUnit(id: string, data: Partial<Unit>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updateUnit({ ...data, id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query(
     'UPDATE units SET name_ar = $1, name_en = $2, code = $3, conversion_factor = $4, base_unit_id = $5, is_active = $6 WHERE id = $7 AND company_id = $8',
@@ -289,6 +313,10 @@ export async function updateUnit(id: string, data: Partial<Unit>, companyId: str
 }
 
 export async function deleteUnit(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.deleteUnit({ id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('DELETE FROM units WHERE id = $1 AND company_id = $2', [id, companyId]);
   return result.success ? { success: true } : { success: false, error: result.error };
@@ -308,6 +336,12 @@ export async function getCashBoxes(companyId: string): Promise<{ success: boolea
 }
 
 export async function createCashBox(data: Omit<CashBox, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.createCashBox({ ...data })) as RpcEnvelope;
+    return res.success && res.rows?.[0]
+      ? { success: true, id: String(res.rows[0].id) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
     'INSERT INTO cash_boxes (company_id, name, code, account_id, branch_id, responsible_user_id, is_active, current_balance, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
@@ -317,6 +351,10 @@ export async function createCashBox(data: Omit<CashBox, 'id'>, _userId?: string)
 }
 
 export async function updateCashBox(id: string, data: Partial<CashBox>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updateCashBox({ ...data, id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query(
     'UPDATE cash_boxes SET name = $1, code = $2, account_id = $3, branch_id = $4, responsible_user_id = $5, is_active = $6, current_balance = $7, updated_by = $8, updated_at = NOW() WHERE id = $9 AND company_id = $10',
@@ -327,6 +365,10 @@ export async function updateCashBox(id: string, data: Partial<CashBox>, companyI
 
 // â”€â”€â”€ Delete Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function deleteCashBox(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.deleteCashBox({ id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('DELETE FROM cash_boxes WHERE id = $1 AND company_id = $2', [id, companyId]);
   return result.success ? { success: true } : { success: false, error: result.error };
@@ -346,6 +388,12 @@ export async function getCostCenters(companyId: string): Promise<{ success: bool
 }
 
 export async function createCostCenter(data: Omit<CostCenter, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.createCostCenter({ ...data })) as RpcEnvelope;
+    return res.success && res.rows?.[0]
+      ? { success: true, id: String(res.rows[0].id) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
     'INSERT INTO cost_centers (company_id, name_ar, name_en, code, parent_id, type, budget_amount, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
@@ -355,6 +403,10 @@ export async function createCostCenter(data: Omit<CostCenter, 'id'>, _userId?: s
 }
 
 export async function updateCostCenter(id: string, data: Partial<CostCenter>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updateCostCenter({ ...data, id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query(
     'UPDATE cost_centers SET name_ar = $1, name_en = $2, code = $3, parent_id = $4, type = $5, budget_amount = $6, is_active = $7 WHERE id = $8 AND company_id = $9',
@@ -364,6 +416,10 @@ export async function updateCostCenter(id: string, data: Partial<CostCenter>, co
 }
 
 export async function deleteCostCenter(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.deleteCostCenter({ id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('DELETE FROM cost_centers WHERE id = $1 AND company_id = $2', [id, companyId]);
   return result.success ? { success: true } : { success: false, error: result.error };
@@ -383,6 +439,12 @@ export async function getPayrollComponents(companyId: string): Promise<{ success
 }
 
 export async function createPayrollComponent(data: Omit<PayrollComponent, 'id'>, _userId?: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.createPayrollComponent({ ...data })) as RpcEnvelope;
+    return res.success && res.rows?.[0]
+      ? { success: true, id: String(res.rows[0].id) }
+      : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query<{ id: string }>(
     `INSERT INTO payroll_components (company_id, name_ar, name_en, code, type, calculation_method, default_amount, affects_gross_salary, affects_tax, affects_social_insurance, default_account_id, is_active, created_by, updated_by)
@@ -393,6 +455,10 @@ export async function createPayrollComponent(data: Omit<PayrollComponent, 'id'>,
 }
 
 export async function updatePayrollComponent(id: string, data: Partial<PayrollComponent>, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updatePayrollComponent({ ...data, id })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query(
     `UPDATE payroll_components SET name_ar = $1, name_en = $2, code = $3, type = $4, calculation_method = $5, default_amount = $6, affects_gross_salary = $7, affects_tax = $8, affects_social_insurance = $9, default_account_id = $10, is_active = $11, updated_by = $12, updated_at = NOW() WHERE id = $13 AND company_id = $14`,
@@ -415,6 +481,10 @@ export async function getDefaultAccounts(companyId: string): Promise<{ success: 
 }
 
 export async function updateDefaultAccount(id: string, accountId: string | null, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  if (isElectronPg() && coreRpc()) {
+    const res = (await coreRpc()!.updateDefaultAccount({ id, accountId })) as RpcEnvelope;
+    return res.success ? { success: true } : { success: false, error: res.error };
+  }
   const adapter = await getDbAdapter();
   const result = await adapter.query('UPDATE default_accounts SET account_id = $1, updated_by = $4, updated_at = NOW() WHERE id = $2 AND company_id = $3', [accountId, id, companyId, safeUserId(_userId)]);
   return result.success ? { success: true } : { success: false, error: result.error };
