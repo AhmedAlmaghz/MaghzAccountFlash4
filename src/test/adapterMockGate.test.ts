@@ -24,10 +24,15 @@ const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out']);
  * the test silently exercises the RPC branch instead of the fallback it means
  * to cover. Listed explicitly: an unstated exception is indistinguishable from
  * a mistake.
+ *
+ * All three install a bridge and hand the adapter a spy, so a method that
+ * reaches raw SQL is observed reaching it. Answering false would report every
+ * method as clean and prove nothing.
  */
 const DESKTOP_PATH_MOCKS = new Set([
   'src/test/desktopReachabilityGate.test.ts',
   'src/test/rpcReachabilityCrossCheck.test.ts',
+  'src/test/channelWiringGate.test.ts',
 ]);
 
 function testFiles(dir: string, out: string[] = []): string[] {
