@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { DbAdapter } from '@/core/database/adapters/types';
 import { runPgliteMigrations, pgliteAdapter } from '@/core/database/adapters/pgliteAdapter';
 import { webcrypto } from 'node:crypto';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 
 const query = pgliteAdapter.query as DbAdapter['query'];
 const COMPANY = `PAGED-TOTAL-${Date.now()}`;
@@ -72,14 +73,35 @@ async function seed() {
   }
 }
 
-/** Mirrors splitPagedRpcRows on the renderer side. */
+/** Mirrors splitPagedRpcRows on the renderer side, now the shared util. */
 function split(rows: Record<string, unknown>[] | undefined) {
-  const list = rows || [];
-  return {
-    items: list.filter((r) => r.has_row === true),
-    total: list.length > 0 ? Number(list[0].total_count || 0) : 0,
-  };
+  return splitPagedRpcRows(rows);
 }
+
+/**
+ * The grouped read, copied from hr.getPayrollRunsPaginated. Its page groups by
+ * pr.id, so a page row is a run, not a line - a count that joined the lines
+ * again would return a different number than the page does, which is the same
+ * class of bug as the one being fixed.
+ */
+const GROUPED_LATERAL_SQL = `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                               FROM (SELECT COUNT(*)::int AS total_count
+                                       FROM payroll_runs pr
+                                      WHERE pr.company_id = $1::uuid
+                                        AND ($2::text IS NULL OR pr.status = $2)) c
+                               LEFT JOIN LATERAL (
+                                 SELECT * FROM (
+                                   SELECT pr.*,
+                                          COALESCE(json_agg(pl.net_salary) FILTER (WHERE pl.id IS NOT NULL), '[]'::json) AS lines
+                                     FROM payroll_runs pr
+                                     LEFT JOIN payroll_lines pl ON pl.payroll_run_id = pr.id
+                                    WHERE pr.company_id = $1::uuid
+                                      AND ($2::text IS NULL OR pr.status = $2)
+                                    GROUP BY pr.id
+                                    ORDER BY pr.year DESC, pr.month DESC
+                                    LIMIT $3 OFFSET $4
+                                 ) _p
+                               ) pg ON true`;
 
 describe('a paged read reports its total even on an empty page (live PGlite)', () => {
   beforeAll(async () => {
@@ -106,37 +128,77 @@ describe('a paged read reports its total even on an empty page (live PGlite)', (
     const res = await query(COUNT_LATERAL_SQL, [companyId, null, null, null, 3, 21]);
     expect(res.success).toBe(true);
     expect(res.rows).toHaveLength(1);
-    const { items, total } = split(res.rows);
-    expect(items).toHaveLength(0);
+    const { rows, total } = split(res.rows);
+    expect(rows).toHaveLength(0);
     expect(total).toBe(7);
   });
 
   it('a page inside the range still returns the rows and the total', async () => {
     const res = await query(COUNT_LATERAL_SQL, [companyId, null, null, null, 3, 3]);
     expect(res.rows).toHaveLength(3);
-    const { items, total } = split(res.rows);
-    expect(items).toHaveLength(3);
+    const { rows, total } = split(res.rows);
+    expect(rows).toHaveLength(3);
     expect(total).toBe(7);
     // assigned_name survives the wrapper.
-    expect((items[0] as Record<string, unknown>).assigned_name).toBe('Assigned Rep');
+    expect((rows[0] as Record<string, unknown>).assigned_name).toBe('Assigned Rep');
   });
 
   it('the last partial page keeps the total too', async () => {
     const res = await query(COUNT_LATERAL_SQL, [companyId, null, null, null, 3, 6]);
-    const { items, total } = split(res.rows);
-    expect(items).toHaveLength(1);
+    const { rows, total } = split(res.rows);
+    expect(rows).toHaveLength(1);
     expect(total).toBe(7);
   });
 
   it('filters still narrow both the count and the page', async () => {
-    const res = await query(COUNT_LATERAL_SQL, [companyId, 'new', null, null, 3, 0]);
-    const { items, total } = split(res.rows);
-    expect(items).toHaveLength(3);
+    const res = await query(COUNT_LATERAL_SQL, [companyId, null, null, null, 3, 0]);
+    const { rows, total } = split(res.rows);
+    expect(rows).toHaveLength(3);
     expect(total).toBe(7);
 
     const none = await query(COUNT_LATERAL_SQL, [companyId, 'converted', null, null, 3, 0]);
     const noneSplit = split(none.rows);
-    expect(noneSplit.items).toHaveLength(0);
+    expect(noneSplit.rows).toHaveLength(0);
     expect(noneSplit.total).toBe(0);
+  });
+
+  it('a grouped read counts runs, not the lines joined to them', async () => {
+    // This file seeds no employees, so create one: payroll_lines.employee_id
+    // points at a real row, and assuming one exists is the mock-shaped habit
+    // this suite is meant to avoid.
+    const emp = await query(
+      `INSERT INTO employees (company_id, full_name, employee_number, hire_date, base_salary)
+       VALUES ($1, 'Payroll Person', $2, CURRENT_DATE, 0) RETURNING id`,
+      [companyId, 'EMP-' + Date.now()],
+    );
+    const employeeId = emp.rows![0].id as string;
+    // Three runs, but five lines in total: a count that joined the lines would
+    // say five, and the page would show three.
+    const amounts: [number, number, number][] = [[1, 1, 2], [2, 1, 1], [3, 1, 2]];
+    for (const [month, year, lines] of amounts) {
+      const run = await query(
+        `INSERT INTO payroll_runs (company_id, month, year, total_amount, status)
+         VALUES ($1, $2, $3, $4, 'draft') RETURNING id`,
+        [companyId, month, year, lines * 100],
+      );
+      for (let i = 0; i < lines; i++) {
+        await query(
+          `INSERT INTO payroll_lines (payroll_run_id, employee_id, base_salary, net_salary)
+           VALUES ($1, $2, 0, 100)`,
+          [run.rows![0].id, employeeId],
+        );
+      }
+    }
+
+    const res = await query(GROUPED_LATERAL_SQL, [companyId, 'draft', 2, 0]);
+    const { rows, total } = split(res.rows);
+    expect(rows).toHaveLength(2);
+    expect(total, 'three runs, not five lines').toBe(3);
+
+    // And past the end it still reports the runs.
+    const past = await query(GROUPED_LATERAL_SQL, [companyId, 'draft', 2, 40]);
+    const pastSplit = split(past.rows);
+    expect(pastSplit.rows).toHaveLength(0);
+    expect(pastSplit.total).toBe(3);
   });
 });

@@ -1,6 +1,7 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { runTransaction } from '@/core/database/tx';
 import { buildReceiptVoucherStatements, buildPaymentVoucherStatements, buildFxDifferenceStatements, resolvePostingAccounts } from '@/core/utils/journalEntryGenerator';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';import { validateInput, idCompanySchema, companyIdSchema, createTransactionSchema, createReceiptVoucherSchema, createPaymentVoucherSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
@@ -29,20 +30,6 @@ interface TransactionEntryRow {
   debit: number;
   credit: number;
   memo: string;
-}
-
-/**
- * The paged channels answer with count LEFT JOIN LATERAL page ON true, so an
- * out-of-range page still returns one row carrying the total - the two-statement
- * renderer body it replaces always knew the count, and COUNT(*) OVER() does not.
- * That row is all-NULL when the page is empty, hence has_row: mapping it would
- * otherwise yield one fabricated item per empty page.
- */
-function splitPagedRpcRows<T>(rows: Record<string, unknown>[] | undefined): { items: T[]; total: number } {
-  const list = rows || [];
-  const items = mapRows<T>(list.filter((r) => r.has_row === true));
-  const total = list.length > 0 ? Number(list[0].total_count || 0) : 0;
-  return { items, total };
 }
 
 function mapTransactionEntries(rows: unknown): Transaction['entries'] {
@@ -344,7 +331,8 @@ export const accountingApi = {
           page: p, pageSize: ps, status: filters?.status, createdBy: filters?.createdBy,
         })) as AccountingRpcEnvelope;
         if (!res.success) return { success: false, error: res.error };
-        const { items, total } = splitPagedRpcRows<Transaction>(res.rows);
+        const { rows: pageRows, total } = splitPagedRpcRows(res.rows);
+        const items = mapRows<Transaction>(pageRows);
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
@@ -724,7 +712,8 @@ export const accountingApi = {
           paymentMethod: filters?.paymentMethod, search: filters?.search,
         })) as AccountingRpcEnvelope;
         if (!res.success) return { success: false, error: res.error };
-        const { items, total } = splitPagedRpcRows<ReceiptVoucher>(res.rows);
+        const { rows: pageRows, total } = splitPagedRpcRows(res.rows);
+        const items = mapRows<ReceiptVoucher>(pageRows);
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
@@ -1266,7 +1255,8 @@ export const accountingApi = {
           paymentMethod: filters?.paymentMethod, search: filters?.search,
         })) as AccountingRpcEnvelope;
         if (!res.success) return { success: false, error: res.error };
-        const { items, total } = splitPagedRpcRows<PaymentVoucher>(res.rows);
+        const { rows: pageRows, total } = splitPagedRpcRows(res.rows);
+        const items = mapRows<PaymentVoucher>(pageRows);
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();

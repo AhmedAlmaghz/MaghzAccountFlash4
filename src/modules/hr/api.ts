@@ -1,5 +1,6 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { safeUserId } from '@/core/utils/userIdValidator';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { validateInput, idCompanySchema, companyIdSchema, createEmployeeSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { getNextDocumentNumber } from '@/core/api';
@@ -191,8 +192,7 @@ export const hrApi = {
           search: filters?.search ?? null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r: Record<string, unknown>) => mapEmployeeRow(r));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
@@ -595,8 +595,7 @@ export const hrApi = {
           status: filters?.status ?? null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const runs = rows.map((r: Record<string, unknown>) => {
           const run = mapPayrollRunRow(r);
           run.lines = parseJsonLines(r.lines).map(mapPayrollLineRow);
@@ -1001,8 +1000,7 @@ export const hrApi = {
           status: filters?.status ?? null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r: Record<string, unknown>) => mapLeaveRow(r));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
@@ -1248,8 +1246,7 @@ export const hrApi = {
           status: filters?.status ?? null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = rows.length > 0 ? Number((rows[0] as Record<string, unknown>).total_count || 0) : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r: Record<string, unknown>) => mapEosRow(r));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }

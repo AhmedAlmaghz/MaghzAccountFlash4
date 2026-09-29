@@ -61,10 +61,6 @@ const usesLateral = channels.filter((c) => /LEFT JOIN LATERAL/i.test(c.body)).ma
 
 /** Channels still reporting a total through a window function. Shrinks to []. */
 const STILL_DEFECTIVE = [
-  'hr.getEmployeesPaginated',
-  'hr.getEndOfServicesPaginated',
-  'hr.getLeavesPaginated',
-  'hr.getPayrollRunsPaginated',
   'manufacturing.getBomsPaginated',
   'manufacturing.getWorkOrdersPaginated',
   'pos.getShiftsPaginated',

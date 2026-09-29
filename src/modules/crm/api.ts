@@ -27,6 +27,7 @@ import type {
   OpportunityStage,
 } from './types';
 import { isValidStageTransition, stageTransitionError } from './types';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 
 // Typed RPC bridge for CRM (Phase 4 slice 7). In Electron the renderer sends
 // a structured payload and the main process derives `company_id` + audit
@@ -34,28 +35,6 @@ import { isValidStageTransition, stageTransitionError } from './types';
 // another company's rows. The fallback path (PGlite / e2e) still uses
 // `adapter.query` with explicit `company_id = $N` filters.
 type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
-
-/**
- * The paged channels answer with count LEFT JOIN LATERAL page ON true, so a page
- * past the end still returns one row carrying the total - the two-statement
- * renderer body it replaces always knew the count, and COUNT(*) OVER() does not
- * (proved live in src/test/pagedTotal.live.test.ts). That row is all-NULL when
- * the page is empty, hence has_row: mapping it unfiltered would fabricate one
- * item per empty page.
- *
- * Four reads share this, so the rule about what a page means is written once.
- */
-function splitPagedRpcRows(rows: Record<string, unknown>[] | undefined): {
-  rows: Record<string, unknown>[];
-  total: number;
-} {
-  const list = rows || [];
-  return {
-    rows: list.filter((r) => r.has_row === true),
-    total: list.length > 0 ? Number(list[0].total_count || 0) : 0,
-  };
-}
-
 
 async function invokeCrmRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
   const crm = (typeof window !== 'undefined' && window.electronDB?.crm) as

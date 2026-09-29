@@ -4068,14 +4068,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT e.*, d.name AS department_name, COUNT(*) OVER() AS total_count
-                FROM employees e LEFT JOIN departments d ON e.department_id = d.id
-               WHERE e.company_id = $1::uuid
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM employees e LEFT JOIN departments d ON e.department_id = d.id
+                         WHERE e.company_id = $1::uuid
+                 AND ($2::boolean IS NULL OR e.is_active = $2)
+                 AND ($3::uuid IS NULL OR e.department_id = $3)
+                 AND ($4::text IS NULL OR e.full_name ILIKE $4 OR e.employee_number ILIKE $4 OR e.email ILIKE $4)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT e.*, d.name AS department_name
+                        FROM employees e LEFT JOIN departments d ON e.department_id = d.id
+                       WHERE e.company_id = $1::uuid
                  AND ($2::boolean IS NULL OR e.is_active = $2)
                  AND ($3::uuid IS NULL OR e.department_id = $3)
                  AND ($4::text IS NULL OR e.full_name ILIKE $4 OR e.employee_number ILIKE $4 OR e.email ILIKE $4)
-               ORDER BY e.full_name
-               LIMIT $5 OFFSET $6`,
+                      ORDER BY e.full_name
+                      LIMIT $5 OFFSET $6
+                    ) _p
+                  ) pg ON true`,
         params: [
           session.user.companyId,
           p.isActive === undefined ? null : Boolean(p.isActive),
@@ -4298,20 +4309,28 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT pr.*, COALESCE(json_agg(json_build_object(
-                'id', pl.id, 'payroll_run_id', pl.payroll_run_id, 'employee_id', pl.employee_id,
-                'employee_name', e.full_name, 'base_salary', pl.base_salary, 'allowances', pl.allowances,
-                'deductions', pl.deductions, 'overtime', pl.overtime, 'net_salary', pl.net_salary
-              )) FILTER (WHERE pl.id IS NOT NULL), '[]'::json) AS lines,
-              COUNT(*) OVER() AS total_count
-               FROM payroll_runs pr
-               LEFT JOIN payroll_lines pl ON pl.payroll_run_id = pr.id
-               LEFT JOIN employees e ON pl.employee_id = e.id
-              WHERE pr.company_id = $1::uuid
-                AND ($2::text IS NULL OR pr.status = $2)
-              GROUP BY pr.id
-              ORDER BY pr.year DESC, pr.month DESC
-              LIMIT $3 OFFSET $4`,
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM payroll_runs pr
+                         WHERE pr.company_id = $1::uuid
+                  AND ($2::text IS NULL OR pr.status = $2)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT pr.*, COALESCE(json_agg(json_build_object(
+                  'id', pl.id, 'payroll_run_id', pl.payroll_run_id, 'employee_id', pl.employee_id,
+                  'employee_name', e.full_name, 'base_salary', pl.base_salary, 'allowances', pl.allowances,
+                  'deductions', pl.deductions, 'overtime', pl.overtime, 'net_salary', pl.net_salary
+                )) FILTER (WHERE pl.id IS NOT NULL), '[]'::json) AS lines
+                        FROM payroll_runs pr
+                        LEFT JOIN payroll_lines pl ON pl.payroll_run_id = pr.id
+                        LEFT JOIN employees e ON pl.employee_id = e.id
+                       WHERE pr.company_id = $1::uuid
+                  AND ($2::text IS NULL OR pr.status = $2)
+                       GROUP BY pr.id
+                       ORDER BY pr.year DESC, pr.month DESC
+                       LIMIT $3 OFFSET $4
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, typeof p.status === 'string' && p.status ? p.status : null, limit, offset],
       };
     },
@@ -4418,12 +4437,21 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT l.*, e.full_name AS employee_name, COUNT(*) OVER() AS total_count
-                FROM leaves l JOIN employees e ON l.employee_id = e.id
-               WHERE l.company_id = $1::uuid
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM leaves l JOIN employees e ON l.employee_id = e.id
+                         WHERE l.company_id = $1::uuid
+                 AND ($2::text IS NULL OR l.status = $2)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT l.*, e.full_name AS employee_name
+                        FROM leaves l JOIN employees e ON l.employee_id = e.id
+                       WHERE l.company_id = $1::uuid
                  AND ($2::text IS NULL OR l.status = $2)
-               ORDER BY l.created_at DESC
-               LIMIT $3 OFFSET $4`,
+                      ORDER BY l.created_at DESC
+                      LIMIT $3 OFFSET $4
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, typeof p.status === 'string' && p.status ? p.status : null, limit, offset],
       };
     },
@@ -4504,12 +4532,21 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT eos.*, emp.full_name AS employee_name, COUNT(*) OVER() AS total_count
-                FROM end_of_service eos JOIN employees emp ON eos.employee_id = emp.id
-               WHERE eos.company_id = $1::uuid
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM end_of_service eos JOIN employees emp ON eos.employee_id = emp.id
+                         WHERE eos.company_id = $1::uuid
+                 AND ($2::text IS NULL OR eos.status = $2)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT eos.*, emp.full_name AS employee_name
+                        FROM end_of_service eos JOIN employees emp ON eos.employee_id = emp.id
+                       WHERE eos.company_id = $1::uuid
                  AND ($2::text IS NULL OR eos.status = $2)
-               ORDER BY eos.created_at DESC
-               LIMIT $3 OFFSET $4`,
+                      ORDER BY eos.created_at DESC
+                      LIMIT $3 OFFSET $4
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, typeof p.status === 'string' && p.status ? p.status : null, limit, offset],
       };
     },
