@@ -2353,6 +2353,34 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // A transaction and its legs are two statements in the renderer, so this is
+  // one CTE returning both, for the same reason a single-query channel would
+  // have been a third shape rather than a translation. Only the SQL moves: the
+  // mapping into `entries[].account` stays in the renderer, so the two paths
+  // cannot disagree about the object the UI receives.
+  registerRpc('accounting.getTransactionById', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH tx AS (
+              SELECT * FROM transactions WHERE id = $1::uuid AND company_id = $2::uuid
+            ), legs AS (
+              SELECT COALESCE(json_agg(row_to_json(l) ORDER BY l.id), '[]'::json) AS rows
+              FROM (
+                SELECT je.*, a.name_ar AS account_name, a.code AS account_code
+                FROM journal_entries je
+                LEFT JOIN accounts a ON je.account_id = a.id
+                WHERE je.transaction_id = $1::uuid AND je.company_id = $2::uuid
+              ) l
+            )
+            SELECT (SELECT row_to_json(tx) FROM tx) AS transaction,
+                   (SELECT rows FROM legs) AS entries`,
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

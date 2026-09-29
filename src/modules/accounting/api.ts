@@ -14,6 +14,35 @@ const localToday = (): string => toDateString(new Date()) ?? '';
 
 type AccountingRpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
 
+/**
+ * A journal leg as it comes back from SQL, before the UI-facing mapping.
+ * Hoisted out of getTransactionById so the RPC and the PGlite paths shape the
+ * same object - the mapping is the part that is easy to get subtly different,
+ * and duplicating it is how the two paths would start disagreeing.
+ */
+interface TransactionEntryRow {
+  id: string;
+  transaction_id: string;
+  account_id: string;
+  account_name: string;
+  account_code: string;
+  debit: number;
+  credit: number;
+  memo: string;
+}
+
+function mapTransactionEntries(rows: unknown): Transaction['entries'] {
+  return ((rows as TransactionEntryRow[]) || []).map((row) => ({
+    id: row.id,
+    transactionId: row.transaction_id,
+    accountId: row.account_id,
+    account: { id: row.account_id, nameAr: row.account_name, code: row.account_code } as Account,
+    debit: Number(row.debit) || 0,
+    credit: Number(row.credit) || 0,
+    memo: row.memo,
+  }));
+}
+
 async function invokePostTransactionRpc(id: string): Promise<AccountingRpcEnvelope | null> {
   if (!isElectronPg()) return null;
   const fn = typeof window !== 'undefined' ? window.electronDB?.accounting?.postTransaction : undefined;
@@ -336,6 +365,21 @@ export const accountingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      // Typed RPC on desktop. The channel returns the row and its legs from one
+      // statement; the mapping below is the shared one, so the object the UI
+      // receives is identical on both paths.
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getTransactionById({ id })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        const row = res.rows?.[0];
+        const txRow = row?.transaction as Record<string, unknown> | undefined;
+        if (!txRow) return { success: false, error: 'Transaction not found' };
+        const tx = mapRows<Transaction>([txRow])[0];
+        tx.entries = mapTransactionEntries(row?.entries);
+        return { success: true, data: tx };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT * FROM transactions WHERE id = $1 AND company_id = $2`,
@@ -350,25 +394,7 @@ export const accountingApi = {
           WHERE je.transaction_id = $1 AND je.company_id = $2`,
           [id, companyId]
         );
-        interface EntryRow {
-          id: string;
-          transaction_id: string;
-          account_id: string;
-          account_name: string;
-          account_code: string;
-          debit: number;
-          credit: number;
-          memo: string;
-        }
-        tx.entries = (entriesResult.rows as EntryRow[] || []).map((row) => ({
-          id: row.id,
-          transactionId: row.transaction_id,
-          accountId: row.account_id,
-          account: { id: row.account_id, nameAr: row.account_name, code: row.account_code } as Account,
-          debit: Number(row.debit) || 0,
-          credit: Number(row.credit) || 0,
-          memo: row.memo,
-        }));
+        tx.entries = mapTransactionEntries(entriesResult.rows);
         return { success: true, data: tx };
       }
       return { success: false, error: 'Transaction not found' };
