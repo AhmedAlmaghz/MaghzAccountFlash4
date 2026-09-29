@@ -18,6 +18,18 @@ import { join, relative } from 'node:path';
 const ROOT = process.cwd();
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out']);
 
+/**
+ * Tests whose whole purpose is to measure the DESKTOP path, so they mock
+ * isElectronPg to answer true. Every other adapter mock must answer false, or
+ * the test silently exercises the RPC branch instead of the fallback it means
+ * to cover. Listed explicitly: an unstated exception is indistinguishable from
+ * a mistake.
+ */
+const DESKTOP_PATH_MOCKS = new Set([
+  'src/test/desktopReachabilityGate.test.ts',
+  'src/test/rpcReachabilityCrossCheck.test.ts',
+]);
+
 function testFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (SKIP.has(entry.name)) continue;
@@ -66,6 +78,11 @@ describe('module mocks cover the whole adapters surface', () => {
     for (const f of testFiles(join(ROOT, 'src'))) {
       const rel = relative(ROOT, f).replace(/\\/g, '/');
       if (rel === 'src/test/adapterMockGate.test.ts') continue;
+      // The reachability gates are the deliberate exception: they answer TRUE
+      // because measuring the desktop path is their entire purpose. A test that
+      // returns false here would report every function as clean and prove
+      // nothing. The exemption is written down so it reads as a decision.
+      if (DESKTOP_PATH_MOCKS.has(rel)) continue;
       const t = readFileSync(f, 'utf8');
       const at = t.indexOf("vi.mock('@/core/database/adapters'");
       if (at < 0) continue;
