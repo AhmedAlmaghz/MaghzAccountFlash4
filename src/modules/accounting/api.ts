@@ -238,6 +238,18 @@ export const accountingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      // Typed RPC on desktop. The company comes from the session there, so the
+      // companyId argument above is not a second way to name a tenant - and a
+      // payload that disagreed with the session is refused by registerRpc.
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getAccountById({ id })) as AccountingRpcEnvelope;
+        if (res.success && res.rows && res.rows.length > 0) {
+          return { success: true, data: mapRows<Account>(res.rows)[0] };
+        }
+        return { success: false, error: res.error || 'Account not found' };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT * FROM accounts WHERE id = $1 AND company_id = $2`,

@@ -213,7 +213,7 @@ describe('the static gate cannot under-report what the runtime observes', () => 
 
     expect(measured).toEqual({
       accounting: [
-        'createAccount', 'deleteAccount', 'getAccountById',
+        'createAccount', 'deleteAccount',
         'getTransactions', 'getTransactionsPaginated', 'getTransactionById',
         'updateTransaction', 'deleteTransaction',
         'getReceiptVouchers', 'getReceiptVouchersPaginated', 'postVoucher',

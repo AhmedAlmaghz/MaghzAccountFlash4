@@ -2325,6 +2325,34 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Accounting single-row read (Phase 0 tranche 8b) ────────────────────────
+  // A faithful port of the renderer statement, which is a single unfiltered
+  // SELECT - there is no room for the two to drift.
+  //
+  // Deliberately NOT wired, and this is the finding of the tranche rather than an
+  // omission. Three accounting channels already exist yet their methods still
+  // reach the adapter, and each is a partial port rather than a translation:
+  //   - createAccount inserts 9 columns where the renderer writes 13 (no id,
+  //     is_active, created_by or updated_by), so wiring it would drop the audit
+  //     columns on the desktop
+  //   - getAccounts builds the tree shape in main, which the renderer does not
+  //   - getTransactions joins journal_entries and aggregates `entries` as JSON,
+  //     where the renderer selects plain t.*
+  // getTransactionById is excluded here for the same reason: its renderer body
+  // runs TWO statements (the row, then its journal entries), so a single-query
+  // channel would be a third shape rather than a translation. Existence of a
+  // channel is not evidence of a completed migration.
+  registerRpc('accounting.getAccountById', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'SELECT * FROM accounts WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw
