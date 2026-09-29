@@ -5,7 +5,7 @@ slug: "en/Examples/02-import-fx"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # Example 02 — Al-Ofok Import (FX & differences)

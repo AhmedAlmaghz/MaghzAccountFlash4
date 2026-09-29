@@ -5,7 +5,7 @@ slug: "ar/02-getting-started/04-quick-start"
 group: "البدء السريع"
 language: "ar"
 created: 2026-09-12
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # أول دورة عمل كاملة — دليل سريع

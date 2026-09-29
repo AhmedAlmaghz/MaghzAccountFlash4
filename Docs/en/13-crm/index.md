@@ -5,7 +5,7 @@ slug: "en/13-crm/index"
 group: "CRM"
 language: "en"
 created: 2026-09-13
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # CRM — User Guide

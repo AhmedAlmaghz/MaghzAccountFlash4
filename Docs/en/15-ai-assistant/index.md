@@ -5,7 +5,7 @@ slug: "en/15-ai-assistant/index"
 group: "\"Maghz\" AI Assistant"
 language: "en"
 created: 2026-09-13
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # "Maghz" AI Assistant (مغزى) — Complete User Guide

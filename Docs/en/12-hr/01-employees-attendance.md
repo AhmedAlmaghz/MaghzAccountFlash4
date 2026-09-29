@@ -5,7 +5,7 @@ slug: "en/12-hr/01-employees-attendance"
 group: "Human Resources"
 language: "en"
 created: 2026-09-13
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # Employees, Attendance & Leave — User Guide

@@ -5,7 +5,7 @@ slug: "en/04-settings/07-hr-settings"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # HR Settings — User Guide

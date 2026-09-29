@@ -5,7 +5,7 @@ slug: "ar/14-reports/01-dashboard"
 group: "التقارير"
 language: "ar"
 created: 2026-09-12
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # لوحة التحكم الرئيسية — دليل الاستخدام

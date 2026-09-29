@@ -5,7 +5,7 @@ slug: "en/04-settings/04-document-sequences"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # Document Sequences — User Guide

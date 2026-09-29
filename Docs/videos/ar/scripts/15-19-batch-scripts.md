@@ -5,7 +5,7 @@ slug: "videos/ar/scripts/15-19-batch-scripts"
 group: "سكربتات الفيديو وسجل الإصدارات"
 language: "ar"
 created: 2026-09-20
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # سكربتات فيديو الدفعة (أ+ب) — جاهزة للتسجيل لاحقاً

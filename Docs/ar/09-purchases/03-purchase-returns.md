@@ -5,7 +5,7 @@ slug: "ar/09-purchases/03-purchase-returns"
 group: "المشتريات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # مرتجعات الشراء — دليل الاستخدام

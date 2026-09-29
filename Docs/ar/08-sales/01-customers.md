@@ -5,7 +5,7 @@ slug: "ar/08-sales/01-customers"
 group: "المبيعات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # العملاء — دليل الاستخدام

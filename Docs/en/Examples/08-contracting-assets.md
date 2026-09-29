@@ -5,7 +5,7 @@ slug: "en/Examples/08-contracting-assets"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # Example 08 — Modern Construction (contracting & fixed assets)

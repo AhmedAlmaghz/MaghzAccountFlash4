@@ -5,7 +5,7 @@ slug: "en/08-sales/02-invoices"
 group: "Sales"
 language: "en"
 created: 2026-09-13
-version: "0.26.1"
+version: "0.26.2"
 author: "Ahmed Almaghz"
 ---
 # Sales Invoices — User Guide
