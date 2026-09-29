@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createSupplierSchema, createPurchaseInvoiceSchema, createPurchaseOrderSchema, createPurchaseReturnSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { YER_CODE } from '@/core/utils/currencyConverter';
@@ -323,9 +324,8 @@ export const purchasesApi = {
           search: filters?.search ?? null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count ?? 0);
-        return { success: true, data: paginatedResult(mapSupplierRows(rows), total, p, ps) };
+        const { rows, total } = splitPagedRpcRows(result.rows);
+                return { success: true, data: paginatedResult(mapSupplierRows(rows), total, p, ps) };
       }
       const adapter = await getDbAdapter();
 
@@ -744,9 +744,8 @@ export const purchasesApi = {
           invoiceNumber: filters?.invoiceNumber || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count ?? 0);
-        return { success: true, data: paginatedResult(rows.map((r) => mapInvoice(r)), total, p, ps) };
+        const { rows, total } = splitPagedRpcRows(result.rows);
+                return { success: true, data: paginatedResult(rows.map((r) => mapInvoice(r)), total, p, ps) };
       }
       const adapter = await getDbAdapter();
 
@@ -1288,9 +1287,8 @@ export const purchasesApi = {
           supplierId: filters?.supplierId || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count ?? 0);
-        return { success: true, data: paginatedResult(rows.map((r) => mapOrder(r)), total, p, ps) };
+        const { rows, total } = splitPagedRpcRows(result.rows);
+                return { success: true, data: paginatedResult(rows.map((r) => mapOrder(r)), total, p, ps) };
       }
       const adapter = await getDbAdapter();
 
@@ -1584,9 +1582,8 @@ export const purchasesApi = {
           supplierId: filters?.supplierId || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count ?? 0);
-        return { success: true, data: paginatedResult(rows.map((r) => mapReturn(r)), total, p, ps) };
+        const { rows, total } = splitPagedRpcRows(result.rows);
+                return { success: true, data: paginatedResult(rows.map((r) => mapReturn(r)), total, p, ps) };
       }
       const adapter = await getDbAdapter();
 

@@ -5512,15 +5512,19 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const offset = (page - 1) * pageSize;
       const isActive = p.isActive === undefined || p.isActive === null ? null : (p.isActive === true || p.isActive === 'true');
       return {
-        sql: `SELECT s.*,
-                (COALESCE(s.opening_balance,0)
-                  + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0)
-                 - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0)
-                 - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0)
-                ) AS computed_balance,
-                (COUNT(*) OVER())::int AS total_count
-               FROM suppliers s WHERE s.company_id = $1::uuid AND ($2::boolean IS NULL OR s.is_active = $2) AND ($3::text IS NULL OR s.name ILIKE $3)
-               ORDER BY s.name LIMIT $4 OFFSET $5`,
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM suppliers s
+                       WHERE s.company_id = $1::uuid AND ($2::boolean IS NULL OR s.is_active = $2) AND ($3::text IS NULL OR s.name ILIKE $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT s.*, (COALESCE(s.opening_balance,0) + COALESCE((SELECT SUM(COALESCE(pi.base_currency_amount, pi.total_amount)) FROM purchase_invoices pi WHERE pi.supplier_id = s.id AND pi.company_id = s.company_id AND pi.status <> 'cancelled' AND COALESCE(pi.payment_type, 'credit') <> 'cash'),0) - COALESCE((SELECT SUM(COALESCE(pv.base_currency_amount, pv.amount)) FROM payment_vouchers pv WHERE pv.supplier_id = s.id AND pv.company_id = s.company_id AND pv.status = 'posted'),0) - COALESCE((SELECT SUM(total_amount) FROM purchase_returns pr WHERE pr.supplier_id = s.id AND pr.company_id = s.company_id AND pr.status = 'posted'),0) ) AS computed_balance
+                      FROM suppliers s
+                     WHERE s.company_id = $1::uuid AND ($2::boolean IS NULL OR s.is_active = $2) AND ($3::text IS NULL OR s.name ILIKE $3)
+                    ORDER BY s.name
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, isActive, TEXT_FILTER(p.search), pageSize, offset],
       };
     },
@@ -5690,14 +5694,23 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       return {
         // Document-number search stays server-side and exact (ASCII codes need
         // no Arabic normalization) — mirrors the renderer fallback.
-        sql: `SELECT i.*, s.name as supplier_name, s.id as supplier_id, (COUNT(*) OVER())::int AS total_count
-              FROM purchase_invoices i
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM purchase_invoices i
               LEFT JOIN suppliers s ON i.supplier_id = s.id
-              WHERE i.company_id = $1::uuid
+                       WHERE i.company_id = $1::uuid
                 AND ($2::text IS NULL OR i.status = $2)
                 AND ($3::uuid IS NULL OR i.supplier_id = $3)
-                AND ($4::text IS NULL OR i.invoice_number ILIKE '%' || $4 || '%')
-              ORDER BY i.date DESC LIMIT $5 OFFSET $6`,
+                AND ($4::text IS NULL OR i.invoice_number ILIKE '%' || $4 || '%')) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT i.*, s.name as supplier_name, s.id as supplier_id
+                      FROM purchase_invoices i LEFT JOIN suppliers s ON i.supplier_id = s.id
+                     WHERE i.company_id = $1::uuid AND ($2::text IS NULL OR i.status = $2) AND ($3::uuid IS NULL OR i.supplier_id = $3) AND ($4::text IS NULL OR i.invoice_number ILIKE '%' || $4 || '%')
+                    ORDER BY i.date DESC
+                    LIMIT $5 OFFSET $6
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, status, supplierId, invoiceNumber, pageSize, offset],
       };
     },
@@ -5741,13 +5754,22 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const status = typeof p.status === 'string' && p.status !== '' ? p.status : null;
       const supplierId = typeof p.supplierId === 'string' && /^[0-9a-fA-F]{8}-/.test(p.supplierId) ? p.supplierId : null;
       return {
-        sql: `SELECT po.*, s.name as supplier_name, s.id as supplier_id, (COUNT(*) OVER())::int AS total_count
-              FROM purchase_orders po
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM purchase_orders po
               LEFT JOIN suppliers s ON po.supplier_id = s.id
-              WHERE po.company_id = $1::uuid
+                       WHERE po.company_id = $1::uuid
                 AND ($2::text IS NULL OR po.status = $2)
-                AND ($3::uuid IS NULL OR po.supplier_id = $3)
-              ORDER BY po.date DESC LIMIT $4 OFFSET $5`,
+                AND ($3::uuid IS NULL OR po.supplier_id = $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT po.*, s.name as supplier_name, s.id as supplier_id
+                      FROM purchase_orders po LEFT JOIN suppliers s ON po.supplier_id = s.id
+                     WHERE po.company_id = $1::uuid AND ($2::text IS NULL OR po.status = $2) AND ($3::uuid IS NULL OR po.supplier_id = $3)
+                    ORDER BY po.date DESC
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, status, supplierId, pageSize, offset],
       };
     },
@@ -5791,13 +5813,22 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const status = typeof p.status === 'string' && p.status !== '' ? p.status : null;
       const supplierId = typeof p.supplierId === 'string' && /^[0-9a-fA-F]{8}-/.test(p.supplierId) ? p.supplierId : null;
       return {
-        sql: `SELECT r.*, s.name as supplier_name, s.id as supplier_id, (COUNT(*) OVER())::int AS total_count
-              FROM purchase_returns r
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM purchase_returns r
               LEFT JOIN suppliers s ON r.supplier_id = s.id
-              WHERE r.company_id = $1::uuid
+                       WHERE r.company_id = $1::uuid
                 AND ($2::text IS NULL OR r.status = $2)
-                AND ($3::uuid IS NULL OR r.supplier_id = $3)
-              ORDER BY r.date DESC LIMIT $4 OFFSET $5`,
+                AND ($3::uuid IS NULL OR r.supplier_id = $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT r.*, s.name as supplier_name, s.id as supplier_id
+                      FROM purchase_returns r LEFT JOIN suppliers s ON r.supplier_id = s.id
+                     WHERE r.company_id = $1::uuid AND ($2::text IS NULL OR r.status = $2) AND ($3::uuid IS NULL OR r.supplier_id = $3)
+                    ORDER BY r.date DESC
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, status, supplierId, pageSize, offset],
       };
     },

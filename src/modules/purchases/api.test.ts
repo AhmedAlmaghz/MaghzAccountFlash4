@@ -819,7 +819,7 @@ describe('purchasesApi typed RPC (supplier ledger reads)', () => {
     const calls = installRpcSurface({
       getSuppliersPaginated: async () => ({
         success: true,
-        rows: [{ id: SUPPLIER_ID, name: 'أ', total_count: 37, computed_balance: 0 }],
+        rows: [{ has_row: true,  id: SUPPLIER_ID, name: 'أ', total_count: 37, computed_balance: 0 }],
       }),
     });
 
@@ -956,7 +956,7 @@ describe('purchasesApi typed RPC (document reads)', () => {
 
   it('getInvoicesPaginated forwards filters and reads the window count', async () => {
     const calls = installRpc({
-      getInvoicesPaginated: async () => ({ success: true, rows: [header({ total_count: 12 })] }),
+      getInvoicesPaginated: async () => ({ success: true, rows: [header({ has_row: true, total_count: 12 })] }),
     });
     const res = await purchasesApi.getInvoicesPaginated(COMPANY_ID, 2, 5, { status: 'posted', supplierId: SUPPLIER_ID, invoiceNumber: 'PINV' });
     expect(res.data?.total).toBe(12);
@@ -1013,10 +1013,10 @@ describe('purchasesApi typed RPC (document reads)', () => {
   it('order and return reads route through their own channels', async () => {
     const calls = installRpc({
       getOrders: async () => ({ success: true, rows: [{ id: ORDER_ID, order_number: 'PO-1', total_amount: 10, lines: [] }] }),
-      getOrdersPaginated: async () => ({ success: true, rows: [{ id: ORDER_ID, order_number: 'PO-1', total_count: 3, lines: [] }] }),
+      getOrdersPaginated: async () => ({ success: true, rows: [{ has_row: true,  id: ORDER_ID, order_number: 'PO-1', total_count: 3, lines: [] }] }),
       getOrderById: async () => ({ success: true, rows: [{ id: ORDER_ID, order_number: 'PO-1', lines: [{ id: 'ol1', order_id: ORDER_ID, quantity: 3 }] }] }),
       getReturns: async () => ({ success: true, rows: [{ id: RETURN_ID, return_number: 'PRT-1', total_amount: 20, lines: [] }] }),
-      getReturnsPaginated: async () => ({ success: true, rows: [{ id: RETURN_ID, return_number: 'PRT-1', total_count: 1, lines: [] }] }),
+      getReturnsPaginated: async () => ({ success: true, rows: [{ has_row: true,  id: RETURN_ID, return_number: 'PRT-1', total_count: 1, lines: [] }] }),
       getReturnById: async () => ({ success: true, rows: [{ id: RETURN_ID, return_number: 'PRT-1', lines: [{ id: 'rl1', return_id: RETURN_ID, quantity: 1 }] }] }),
     });
 
