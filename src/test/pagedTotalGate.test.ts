@@ -59,14 +59,20 @@ const channels = readChannels();
 const usesWindowCount = channels.filter((c) => /COUNT\(\s*\*\s*\)\s*OVER/i.test(c.body)).map((c) => c.name).sort();
 const usesLateral = channels.filter((c) => /LEFT JOIN LATERAL/i.test(c.body)).map((c) => c.name).sort();
 
-/** Channels still reporting a total through a window function. Shrinks to []. */
-const STILL_DEFECTIVE = [
-  'pos.getShiftsPaginated',
-  'sales.getCustomersPaginated',
-  'sales.getInvoicesPaginated',
-  'sales.getQuotationsPaginated',
-  'sales.getReturnsPaginated',
-];
+/**
+ * Channels still reporting a total through a window function.
+ *
+ * Empty. Every paged read now uses count LEFT JOIN LATERAL page ON true, so the
+ * list can only grow if someone writes a new channel the old way - and then the
+ * gate fails by name rather than waiting for a user to hit an empty last page.
+ *
+ * The nineteen that were here went one module at a time: crm, hr, manufacturing,
+ * purchases, sales, pos. Two of them would have been silently wrong under a
+ * template - hr.getPayrollRunsPaginated counts groups, and the customers and
+ * suppliers carries correlated subqueries inside the select list - which is why
+ * the list was a list of names and not a count.
+ */
+const STILL_DEFECTIVE: string[] = [];
 
 describe('a paged read knows its total even when the page is empty', () => {
   it('finds the channels - the scan has to see something', () => {

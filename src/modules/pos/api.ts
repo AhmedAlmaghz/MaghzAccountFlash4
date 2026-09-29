@@ -1,6 +1,7 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import type { DbAdapter } from '@/core/database/adapters/types';
 import { mapRows } from '@/core/utils/mapPgRow';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { resolveExistingUserId, safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, companyIdSchema, posCheckoutSchema, openPosShiftSchema, closePosShiftSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
@@ -363,8 +364,11 @@ export const posApi = {
         if (!pos) return { success: false, error: 'RPC unavailable' };
         const result = await pos.getShiftsPaginated({ page: p, pageSize: ps });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = rows.length ? Number(rows[0].total_count) || rows.length : 0;
+        // The old read was "rows[0].total_count || rows.length" - a fallback that
+        // existed because the window count could vanish. With the count carried on
+        // a row that is always returned, the total is simply read and the fallback
+        // is gone rather than kept as a second opinion.
+        const { rows, total } = splitPagedRpcRows(result.rows);
         return { success: true, data: paginatedResult(rows.map(mapShiftRow), total, p, ps) };
       }
       const adapter = await getDbAdapter();

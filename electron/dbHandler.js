@@ -4676,17 +4676,19 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const offset = (page - 1) * pageSize;
       const isActive = p.isActive === undefined || p.isActive === null ? null : (p.isActive === true || p.isActive === 'true');
       return {
-        sql: `SELECT c.*,
-                (COALESCE(c.opening_balance,0)
-                 + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0)
-                 - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
-                 - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0)
-                 + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0)
-                 - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0)
-                 - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0)
-                ) AS computed_balance,
-                (COUNT(*) OVER())::int AS total_count
-         FROM customers c WHERE c.company_id = $1::uuid AND ($2::boolean IS NULL OR c.is_active = $2) AND ($3::text IS NULL OR c.name ILIKE $3 OR c.phone ILIKE $3 OR c.code ILIKE $3) ORDER BY c.name ASC LIMIT $4 OFFSET $5`,
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM customers c
+                       WHERE c.company_id = $1::uuid AND ($2::boolean IS NULL OR c.is_active = $2) AND ($3::text IS NULL OR c.name ILIKE $3 OR c.phone ILIKE $3 OR c.code ILIKE $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT c.*, (COALESCE(c.opening_balance,0) + COALESCE((SELECT SUM(total_amount) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled' AND COALESCE(i.payment_type, 'credit') <> 'cash'),0) - COALESCE((SELECT SUM(amount) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0) - COALESCE((SELECT SUM(pp.amount) FROM pos_payments pp JOIN sales_invoices i ON i.id = pp.invoice_id AND COALESCE(i.payment_type, 'credit') <> 'cash' WHERE pp.company_id = c.company_id AND pp.method = 'cash' AND i.customer_id = c.id AND i.company_id = c.company_id),0) + COALESCE((SELECT SUM(COALESCE(i.base_currency_amount, i.total_amount)) FROM sales_invoices i WHERE i.customer_id = c.id AND i.company_id = c.company_id AND i.status <> 'cancelled'),0) - COALESCE((SELECT SUM(COALESCE(rv.base_currency_amount, rv.amount)) FROM receipt_vouchers rv WHERE rv.customer_id = c.id AND rv.company_id = c.company_id AND rv.status = 'posted'),0) - COALESCE((SELECT SUM(total_amount) FROM sales_returns sr WHERE sr.customer_id = c.id AND sr.company_id = c.company_id AND sr.status = 'posted'),0) ) AS computed_balance
+                      FROM customers c
+                     WHERE c.company_id = $1::uuid AND ($2::boolean IS NULL OR c.is_active = $2) AND ($3::text IS NULL OR c.name ILIKE $3 OR c.phone ILIKE $3 OR c.code ILIKE $3)
+                    ORDER BY c.name ASC
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, isActive, TEXT_FILTER(p.search), pageSize, offset],
       };
     },
@@ -4834,7 +4836,19 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       return {
         // P2: server-side invoice_number search (ASCII codes — no Arabic
         // normalization trap). Mirrors the fallback API filter.
-        sql: `SELECT i.*, c.name as customer_name, (COUNT(*) OVER())::int AS total_count FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id WHERE i.company_id = $1::uuid AND ($2::text IS NULL OR i.status = $2) AND ($3::uuid IS NULL OR i.customer_id = $3) AND ($4::uuid IS NULL OR i.created_by = $4 OR i.created_by IS NULL) AND ($5::text IS NULL OR i.invoice_number ILIKE '%' || $5 || '%') ORDER BY i.date DESC LIMIT $6 OFFSET $7`,
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id
+                       WHERE i.company_id = $1::uuid AND ($2::text IS NULL OR i.status = $2) AND ($3::uuid IS NULL OR i.customer_id = $3) AND ($4::uuid IS NULL OR i.created_by = $4 OR i.created_by IS NULL) AND ($5::text IS NULL OR i.invoice_number ILIKE '%' || $5 || '%')) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT i.*, c.name as customer_name
+                      FROM sales_invoices i LEFT JOIN customers c ON i.customer_id = c.id
+                     WHERE i.company_id = $1::uuid AND ($2::text IS NULL OR i.status = $2) AND ($3::uuid IS NULL OR i.customer_id = $3) AND ($4::uuid IS NULL OR i.created_by = $4 OR i.created_by IS NULL) AND ($5::text IS NULL OR i.invoice_number ILIKE '%' || $5 || '%')
+                    ORDER BY i.date DESC
+                    LIMIT $6 OFFSET $7
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, p.status || null, UUID_FILTER(p.customerId), UUID_FILTER(p.createdBy), typeof p.invoiceNumber === 'string' && p.invoiceNumber ? p.invoiceNumber : null, pageSize, offset],
       };
     },
@@ -5059,7 +5073,19 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = (page - 1) * pageSize;
       return {
-        sql: `SELECT q.*, c.name as customer_name, (COUNT(*) OVER())::int AS total_count FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id WHERE q.company_id = $1::uuid AND ($2::text IS NULL OR q.status = $2) AND ($3::uuid IS NULL OR q.customer_id = $3) ORDER BY q.date DESC LIMIT $4 OFFSET $5`,
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id
+                       WHERE q.company_id = $1::uuid AND ($2::text IS NULL OR q.status = $2) AND ($3::uuid IS NULL OR q.customer_id = $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT q.*, c.name as customer_name
+                      FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id
+                     WHERE q.company_id = $1::uuid AND ($2::text IS NULL OR q.status = $2) AND ($3::uuid IS NULL OR q.customer_id = $3)
+                    ORDER BY q.date DESC
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, p.status || null, UUID_FILTER(p.customerId), pageSize, offset],
       };
     },
@@ -5301,7 +5327,19 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const pageSize = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = (page - 1) * pageSize;
       return {
-        sql: `SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref, (COUNT(*) OVER())::int AS total_count FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id WHERE r.company_id = $1::uuid AND ($2::text IS NULL OR r.status = $2) AND ($3::uuid IS NULL OR r.customer_id = $3) ORDER BY r.date DESC LIMIT $4 OFFSET $5`,
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id
+                       WHERE r.company_id = $1::uuid AND ($2::text IS NULL OR r.status = $2) AND ($3::uuid IS NULL OR r.customer_id = $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT r.*, c.name as customer_name, i.invoice_number as invoice_number_ref
+                      FROM sales_returns r LEFT JOIN customers c ON r.customer_id = c.id LEFT JOIN sales_invoices i ON r.invoice_id = i.id
+                     WHERE r.company_id = $1::uuid AND ($2::text IS NULL OR r.status = $2) AND ($3::uuid IS NULL OR r.customer_id = $3)
+                    ORDER BY r.date DESC
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, p.status || null, UUID_FILTER(p.customerId), pageSize, offset],
       };
     },
@@ -6062,15 +6100,21 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const pageSize = Math.max(1, Math.min(100, Number(p.pageSize) || 25));
       const offset = (page - 1) * pageSize;
       return {
-        sql: `SELECT ps.*, cb.name AS cash_box_name, u.full_name AS cashier_name,
-                     (SELECT COUNT(*)::int FROM pos_payments pp WHERE pp.shift_id = ps.id) AS payments_count,
-                     (COUNT(*) OVER())::int AS total_count
-                FROM pos_shifts ps
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM pos_shifts ps
                 LEFT JOIN cash_boxes cb ON cb.id = ps.cash_box_id
                 LEFT JOIN users u ON u.id = ps.user_id
-               WHERE ps.company_id = $1::uuid
-               ORDER BY ps.opened_at DESC
-               LIMIT $2 OFFSET $3`,
+                       WHERE ps.company_id = $1::uuid) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT ps.*, cb.name AS cash_box_name, u.full_name AS cashier_name, (SELECT COUNT(*)::int FROM pos_payments pp WHERE pp.shift_id = ps.id) AS payments_count
+                      FROM pos_shifts ps LEFT JOIN cash_boxes cb ON cb.id = ps.cash_box_id LEFT JOIN users u ON u.id = ps.user_id
+                     WHERE ps.company_id = $1::uuid
+                    ORDER BY ps.opened_at DESC
+                    LIMIT $2 OFFSET $3
+                  ) _p
+                ) pg ON true`,
         params: [session.user.companyId, pageSize, offset],
       };
     },

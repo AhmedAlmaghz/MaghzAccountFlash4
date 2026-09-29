@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { safeUserId, resolveExistingUserId } from '@/core/utils/userIdValidator';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createCustomerSchema, createInvoiceSchema, createQuotationSchema, createSalesReturnSchema } from '@/core/utils/validation';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
@@ -153,8 +154,7 @@ export const salesApi = {
           isActive: filters?.isActive,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count) || 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r: Record<string, unknown>) => {
           const mapped = mapRows<Customer>([r])[0];
           if (r.computed_balance !== undefined) mapped.balance = Number(r.computed_balance) || 0;
@@ -623,8 +623,7 @@ export const salesApi = {
           invoiceNumber: filters?.invoiceNumber,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count) || 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((row: Record<string, unknown>) => mapInvoiceRow(row));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
@@ -1304,8 +1303,7 @@ export const salesApi = {
           customerId: filters?.customerId,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count) || 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r: Record<string, unknown>) => mapQuotationRow(r));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
@@ -1618,8 +1616,7 @@ export const salesApi = {
           customerId: filters?.customerId,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
-        const total = Number(rows[0]?.total_count) || 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r: Record<string, unknown>) => mapReturnRow(r));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }

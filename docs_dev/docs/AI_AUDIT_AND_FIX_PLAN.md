@@ -861,6 +861,15 @@ tsc -b
 
 ## 13. سجل التغيير
 
+- **2026-09-26 (الحزمة 8m: `sales` و`pos` — و`STILL_DEFECTIVE = []`: عيب الإجمالي الحيّ مُغلق بالكامل):**
+  - **ما رُحّل**: `sales.getCustomersPaginated` · `getInvoicesPaginated` · `getQuotationsPaginated` · `getReturnsPaginated` · `pos.getShiftsPaginated`. **19 ← 0**. 23 قناة مقسّمة على `LEFT JOIN LATERAL`.
+  - **`sales.getCustomersPaginated` أثقل صيغة**: `computed_balance` فيه **ستة استعلامات فرعية مرتبطة**، أحدها `FROM pos_payments pp JOIN sales_invoices i ON ...` (JOIN داخل استعلام فرعي). الفحوص: 6 استعلامات باقية · `pos_payments` باقٍ · العدّاد على `customers c` وحده بلا رياضيات رصيد.
+  - **حارس الـJOIN كان أضعف مما بدا**: شرط `ON` كان يُلتقط حتى نهاية المقطع، فيبتلع الـJOIN الثاني. `getReturnsPaginated` فيه **JOINان** ⇒ الثاني لم يُفحص إطلاقاً. أُصلح ليتوقّف عند `JOIN` تالٍ أو `WHERE`. ⇒ **العبارة تُحدَّد بحاجزها التالي لا بحدّ المقطع** — والفارق أن حارساً يمرّ بلا فحص يبدو كحارس يعمل.
+  - **`pos.getShiftsPaginated` كان فيه حلٌّ احتياطي عرَض العيب**: `rows[0].total_count || rows.length` — أي «إن ضاع الإجمالي خمِّنْ». الآن الإجمالي يُقرأ مباشرة، والحل الاحتياطي **حُذف لا أُبقي** ⇒ لا مصدران للحقيقة.
+  - **أربعة أنماط renderer مختلفة في خمس وحدات** — `items.length > 0 && 'total_count' in row` · `rows.length > 0 ? Number(...) : 0` · `Number(rows[0]?.total_count ?? 0)` · `rows[0]?.total_count || 0`. المنطق صار واحداً في `splitPagedRpcRows`، والاختلاف بقي في **كيف يُمرَّر الـmapper** فقط. ⇒ **وحّد القراءة واترك الصياغة محلية**؛ توحيد الصياغة كان سيصطدم بالنوع.
+  - **القياس النهائي**: `COUNT(*) OVER` = **0** قناة · `LEFT JOIN LATERAL` = **23** · 188 قناة إجمالاً.
+  - **تحقّق**: `tsc` صفر | `eslint` صفر | **244/244** ملف (25 بوابة) | `build` | `db:check` سليم.
+
 - **2026-09-26 (الحزمة 8l: `purchases` مرحّلة — وحارس JOIN التقط ضِعفاً محتملاً في العدّاد قبل وقوعه):**
   - **ما رُحّل**: `getSuppliersPaginated` · `getInvoicesPaginated` · `getOrdersPaginated` · `getReturnsPaginated`. `STILL_DEFECTIVE` 9 ← **5**. 18 قناة LATERAL.
   - **`getSuppliersPaginated` هو الأصعب**: `computed_balance` فيه **ثلاثة استعلامات فرعية مرتبطة** (`SUM` على الفواتير/السندات/المردودات) داخل قائمة الأعمدة ⇒ `FROM`/`WHERE` داخليان. التحليل من الذيل ينجو، والإحصاء على `suppliers s` وحده **لا يحتاج** حسابات الرصيد ⇒ عدّاد أرخص **ونفس الرقم بالبناء**. الفحوص: `computed_balance` باقٍ · 3 استعلامات باقية · لا رياضيات رصيد في استعلام العدّ.
