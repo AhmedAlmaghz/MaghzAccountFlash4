@@ -2435,6 +2435,108 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // ── Paginated lists (Phase 0 tranche 8g) ───────────────────────────────────
+  // The renderer runs a COUNT and a page query as two statements, so the total is
+  // known even when the requested page is past the end. COUNT(*) OVER() cannot
+  // reproduce that: an empty page returns no rows and the total is lost with it,
+  // which is why the 20 existing channels that use OVER() report total = 0 for an
+  // out-of-range page while the browser path reports the true count. These three
+  // use count LEFT JOIN LATERAL page ON true, which always emits one row
+  // carrying the total, and has_row to tell an empty page from a real row.
+  // Being faithful here means keeping the renderer's behaviour, not copying the
+  // newer channels' shortcut.
+  // Kept as three literal channels rather than a shared builder: the value of a
+  // port is that its SQL can be read next to the renderer line it replaces, and
+  // a string-splitting template would hide the table and the ORDER BY.
+
+  registerRpc('accounting.getTransactionsPaginated', {
+    paramCount: 5,
+    compose: (p, session) => {
+      const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
+      const status = typeof p.status === 'string' && p.status ? p.status : null;
+      const createdBy = UUID_FILTER(p.createdBy);
+      const sql = `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                     FROM (SELECT COUNT(*)::int AS total_count FROM transactions t
+                            WHERE t.company_id = $1::uuid
+                              AND ($2::text IS NULL OR t.status = $2)
+                              AND ($3::uuid IS NULL OR t.created_by = $3 OR t.created_by IS NULL)) c
+                     LEFT JOIN LATERAL (
+                       SELECT * FROM (
+                         SELECT t.* FROM transactions t
+                          WHERE t.company_id = $1::uuid
+                            AND ($2::text IS NULL OR t.status = $2)
+                            AND ($3::uuid IS NULL OR t.created_by = $3 OR t.created_by IS NULL)
+                          ORDER BY t.date DESC LIMIT $4 OFFSET $5
+                       ) _p
+                     ) pg ON true`;
+      return { sql, params: [session.user.companyId, status, createdBy, limit, offset] };
+    },
+  });
+
+  registerRpc('accounting.getReceiptVouchersPaginated', {
+    paramCount: 6,
+    compose: (p, session) => {
+      const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
+      const status = typeof p.status === 'string' && p.status ? p.status : null;
+      const method = typeof p.paymentMethod === 'string' && p.paymentMethod ? p.paymentMethod : null;
+      const search = TEXT_FILTER(p.search);
+      const sql = `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                     FROM (SELECT COUNT(*)::int AS total_count
+                             FROM receipt_vouchers rv LEFT JOIN customers c2 ON rv.customer_id = c2.id
+                            WHERE rv.company_id = $1::uuid
+                              AND ($2::text IS NULL OR rv.status = $2)
+                              AND ($3::text IS NULL OR rv.payment_method = $3)
+                              AND ($4::text IS NULL OR c2.name ILIKE $4)) c
+                     LEFT JOIN LATERAL (
+                       SELECT * FROM (
+                         SELECT rv.*, c.name as customer_name
+                           FROM receipt_vouchers rv
+                           LEFT JOIN customers c ON rv.customer_id = c.id
+                          WHERE rv.company_id = $1::uuid
+                            AND ($2::text IS NULL OR rv.status = $2)
+                            AND ($3::text IS NULL OR rv.payment_method = $3)
+                            AND ($4::text IS NULL OR c.name ILIKE $4)
+                          ORDER BY rv.date DESC LIMIT $5 OFFSET $6
+                       ) _p
+                     ) pg ON true`;
+      return { sql, params: [session.user.companyId, status, method, search, limit, offset] };
+    },
+  });
+
+  registerRpc('accounting.getPaymentVouchersPaginated', {
+    paramCount: 6,
+    compose: (p, session) => {
+      const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
+      const status = typeof p.status === 'string' && p.status ? p.status : null;
+      const method = typeof p.paymentMethod === 'string' && p.paymentMethod ? p.paymentMethod : null;
+      const search = TEXT_FILTER(p.search);
+      const sql = `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                     FROM (SELECT COUNT(*)::int AS total_count
+                             FROM payment_vouchers pv LEFT JOIN suppliers s2 ON pv.supplier_id = s2.id
+                            WHERE pv.company_id = $1::uuid
+                              AND ($2::text IS NULL OR pv.status = $2)
+                              AND ($3::text IS NULL OR pv.payment_method = $3)
+                              AND ($4::text IS NULL OR s2.name ILIKE $4)) c
+                     LEFT JOIN LATERAL (
+                       SELECT * FROM (
+                         SELECT pv.*, c.name as supplier_name, a.name_ar as expense_account_name
+                           FROM payment_vouchers pv
+                           LEFT JOIN suppliers c ON pv.supplier_id = c.id
+                           LEFT JOIN accounts a ON pv.expense_account_id = a.id
+                          WHERE pv.company_id = $1::uuid
+                            AND ($2::text IS NULL OR pv.status = $2)
+                            AND ($3::text IS NULL OR pv.payment_method = $3)
+                            AND ($4::text IS NULL OR c.name ILIKE $4)
+                          ORDER BY pv.date DESC LIMIT $5 OFFSET $6
+                       ) _p
+                     ) pg ON true`;
+      return { sql, params: [session.user.companyId, status, method, search, limit, offset] };
+    },
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

@@ -31,6 +31,20 @@ interface TransactionEntryRow {
   memo: string;
 }
 
+/**
+ * The paged channels answer with count LEFT JOIN LATERAL page ON true, so an
+ * out-of-range page still returns one row carrying the total - the two-statement
+ * renderer body it replaces always knew the count, and COUNT(*) OVER() does not.
+ * That row is all-NULL when the page is empty, hence has_row: mapping it would
+ * otherwise yield one fabricated item per empty page.
+ */
+function splitPagedRpcRows<T>(rows: Record<string, unknown>[] | undefined): { items: T[]; total: number } {
+  const list = rows || [];
+  const items = mapRows<T>(list.filter((r) => r.has_row === true));
+  const total = list.length > 0 ? Number(list[0].total_count || 0) : 0;
+  return { items, total };
+}
+
 function mapTransactionEntries(rows: unknown): Transaction['entries'] {
   return ((rows as TransactionEntryRow[]) || []).map((row) => ({
     id: row.id,
@@ -323,6 +337,16 @@ export const accountingApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getTransactionsPaginated({
+          page: p, pageSize: ps, status: filters?.status, createdBy: filters?.createdBy,
+        })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        const { items, total } = splitPagedRpcRows<Transaction>(res.rows);
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['t.company_id = $1'];
@@ -692,6 +716,17 @@ export const accountingApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getReceiptVouchersPaginated({
+          page: p, pageSize: ps, status: filters?.status,
+          paymentMethod: filters?.paymentMethod, search: filters?.search,
+        })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        const { items, total } = splitPagedRpcRows<ReceiptVoucher>(res.rows);
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['rv.company_id = $1'];
@@ -1223,6 +1258,17 @@ export const accountingApi = {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getPaymentVouchersPaginated({
+          page: p, pageSize: ps, status: filters?.status,
+          paymentMethod: filters?.paymentMethod, search: filters?.search,
+        })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        const { items, total } = splitPagedRpcRows<PaymentVoucher>(res.rows);
+        return { success: true, data: paginatedResult(items, total, p, ps) };
+      }
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['pv.company_id = $1'];
