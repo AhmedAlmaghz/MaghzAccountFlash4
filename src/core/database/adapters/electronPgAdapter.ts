@@ -27,6 +27,8 @@ export interface ElectronDB extends PreloadDB {
     postTransaction(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getAccountById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getTransactionById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getReceiptVouchers(payload: { ownedByUserId?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getPaymentVouchers(payload: { ownedByUserId?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     // Posting pre-flight reads (Phase 0 tranche 8a). Read-only, and the only
     // part of postingService that moves before the compensation gap is settled.
     getSalesInvoiceForPosting(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;

@@ -11,14 +11,27 @@ import { join } from 'node:path';
  *
  *   createAccount    inserts 9 columns where the renderer writes 13 - no id, no
  *                    is_active, no created_by/updated_by
- *   getTransactions  joins journal_entries and aggregates `entries` as JSON where
- *                    the renderer selects plain t.*
+ *   getTransactions  returns a DIFFERENT SHAPE PER ARGUMENT. With ownedByUserId
+ *                    it selects t.* and returns no entries; without it it calls
+ *                    adapter.getTransactions, which attaches a json-aggregated
+ *                    entries array to every row. The existing channel matches the
+ *                    second branch, so wiring it would drop the created_by
+ *                    filter for one caller while keeping it for the other.
  *
  * When this gate was first written it found seven such methods, not three: five
  * more in hr, where the channel is an atomic consolidation of a multi-statement
  * renderer body rather than a translation of it. Two of the entries it was first
  * given were also wrong - accounting.getAccounts turned out to be wired
  * properly, so listing it would have documented a problem that does not exist.
+ *
+ * getTransactions is the sharper lesson, because the pins could not catch it.
+ * rpcReachabilityCrossCheck records method NAMES, and the name was right: the
+ * method does reach raw SQL. What the name hid is that the method is not one
+ * shape but two, chosen by a filter argument - so "a faithful port" is not a
+ * well-defined thing to build. A port written from the SQL alone would have
+ * looked faithful and shipped the wrong shape to one of the two callers. Reading
+ * the renderer body is the only way to know which branch a channel mirrors, and
+ * that is why this list carries a reason per entry rather than a count.
  *
  * Wiring any of them "to finish the migration" would silently change desktop
  * behaviour - dropping audit columns, returning a different shape, or altering
@@ -155,8 +168,10 @@ const DIVERGENT_CHANNELS: Record<string, string> = {
     'the channel inserts 9 columns where the renderer writes 13 - no id, is_active, ' +
     'created_by or updated_by; wiring it would drop the audit columns on the desktop',
   'accounting.getTransactions':
-    'the channel joins journal_entries and aggregates entries as JSON where the renderer ' +
-    'selects plain t.*; wiring it would make the desktop return a different shape',
+    'the method returns one shape with ownedByUserId (t.*, no entries) and another ' +
+    'without it (rows carrying a json-aggregated entries array); the channel matches ' +
+    'the second, so wiring it would drop the created_by filter for one of the two ' +
+    'callers. Faithful porting needs the shape difference settled, not a name match',
 
   // The five HR channels are registered with dynamic SQL, and their renderer
   // counterparts run two or more statements: a status/dependency guard, then the

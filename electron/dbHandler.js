@@ -2381,6 +2381,60 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Flat voucher lists (Phase 0 tranche 8e) ───────────────────────────────
+  // Faithful ports. Each keeps the renderer's optional ownedByUserId semantics,
+  // where the filter is added ONLY when the argument is supplied, so the
+  // unfiltered case returns everything. paramCount is null because the arity is
+  // 1 or 2 depending on that argument.
+  //
+  // accounting.getTransactions is deliberately NOT ported here. Its two branches
+  // return different shapes: with ownedByUserId it selects t.* and returns no
+  // entries, without it it calls adapter.getTransactions, which attaches a
+  // json-aggregated entries array to every row. A single channel cannot mirror
+  // both, and the existing channel matches the second branch - so wiring it
+  // would silently drop the created_by filter for one caller. Porting it needs
+  // the shape difference settled, not a name match.
+  registerRpc('accounting.getReceiptVouchers', {
+    paramCount: null,
+    compose: (p, session) => {
+      const params = [session.user.companyId];
+      let tail = '';
+      if (p.ownedByUserId) {
+        params.push(String(p.ownedByUserId));
+        tail = ` AND (rv.created_by = $${params.length}::uuid OR rv.created_by IS NULL)`;
+      }
+      return {
+        sql: `SELECT rv.*, c.name as customer_name
+                FROM receipt_vouchers rv
+                LEFT JOIN customers c ON rv.customer_id = c.id
+               WHERE rv.company_id = $1::uuid${tail}
+               ORDER BY rv.date DESC`,
+        params,
+      };
+    },
+  });
+
+  registerRpc('accounting.getPaymentVouchers', {
+    paramCount: null,
+    compose: (p, session) => {
+      const params = [session.user.companyId];
+      let tail = '';
+      if (p.ownedByUserId) {
+        params.push(String(p.ownedByUserId));
+        tail = ` AND (pv.created_by = $${params.length}::uuid OR pv.created_by IS NULL)`;
+      }
+      return {
+        sql: `SELECT pv.*, c.name as supplier_name, a.name_ar as expense_account_name
+                FROM payment_vouchers pv
+                LEFT JOIN suppliers c ON pv.supplier_id = c.id
+                LEFT JOIN accounts a ON pv.expense_account_id = a.id
+               WHERE pv.company_id = $1::uuid${tail}
+               ORDER BY pv.date DESC`,
+        params,
+      };
+    },
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

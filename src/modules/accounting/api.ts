@@ -653,6 +653,13 @@ export const accountingApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getReceiptVouchers({ ownedByUserId })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<ReceiptVoucher>(res.rows || []) };
+      }
       const adapter = await getDbAdapter();
       let sql = `
         SELECT rv.*, c.name as customer_name
@@ -1176,6 +1183,13 @@ export const accountingApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.getPaymentVouchers({ ownedByUserId })) as AccountingRpcEnvelope;
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<PaymentVoucher>(res.rows || []) };
+      }
       const adapter = await getDbAdapter();
       let sql = `
         SELECT pv.*, c.name as supplier_name, a.name_ar as expense_account_name
