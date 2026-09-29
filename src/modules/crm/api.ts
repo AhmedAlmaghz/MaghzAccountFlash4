@@ -35,6 +35,28 @@ import { isValidStageTransition, stageTransitionError } from './types';
 // `adapter.query` with explicit `company_id = $N` filters.
 type RpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
 
+/**
+ * The paged channels answer with count LEFT JOIN LATERAL page ON true, so a page
+ * past the end still returns one row carrying the total - the two-statement
+ * renderer body it replaces always knew the count, and COUNT(*) OVER() does not
+ * (proved live in src/test/pagedTotal.live.test.ts). That row is all-NULL when
+ * the page is empty, hence has_row: mapping it unfiltered would fabricate one
+ * item per empty page.
+ *
+ * Four reads share this, so the rule about what a page means is written once.
+ */
+function splitPagedRpcRows(rows: Record<string, unknown>[] | undefined): {
+  rows: Record<string, unknown>[];
+  total: number;
+} {
+  const list = rows || [];
+  return {
+    rows: list.filter((r) => r.has_row === true),
+    total: list.length > 0 ? Number(list[0].total_count || 0) : 0,
+  };
+}
+
+
 async function invokeCrmRpc(method: string, payload: Record<string, unknown> = {}): Promise<RpcEnvelope> {
   const crm = (typeof window !== 'undefined' && window.electronDB?.crm) as
     | Record<string, ((p: Record<string, unknown>) => Promise<RpcEnvelope>) | undefined>
@@ -158,10 +180,8 @@ export const crmApi = {
           search: filters?.search || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const items = (result.rows || []).map((r) => mapLeadRow(r));
-        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
-          ? Number((result.rows || [])[0].total_count)
-          : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
+        const items = rows.map((r) => mapLeadRow(r));
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
@@ -537,10 +557,8 @@ export const crmApi = {
           search: filters?.search || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const items = (result.rows || []).map(mapOpportunityRow);
-        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
-          ? Number((result.rows || [])[0].total_count)
-          : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
+        const items = rows.map(mapOpportunityRow);
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
@@ -900,10 +918,8 @@ export const crmApi = {
           search: filters?.search || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const items = (result.rows || []).map(mapTaskRow);
-        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
-          ? Number((result.rows || [])[0].total_count)
-          : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
+        const items = rows.map(mapTaskRow);
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
@@ -1112,10 +1128,8 @@ export const crmApi = {
           search: filters?.search || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const items = (result.rows || []).map(mapActivityRow);
-        const total = items.length > 0 && 'total_count' in (result.rows || [])[0]
-          ? Number((result.rows || [])[0].total_count)
-          : 0;
+        const { rows, total } = splitPagedRpcRows(result.rows);
+        const items = rows.map(mapActivityRow);
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();

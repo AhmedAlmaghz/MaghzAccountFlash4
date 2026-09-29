@@ -2997,15 +2997,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const status = typeof p.status === 'string' && p.status ? p.status : null;
       const assignedTo = UUID_FILTER(p.assignedTo);
       return {
-        sql: `SELECT l.*, u.full_name as assigned_name,
-                     COUNT(*) OVER() AS total_count
-                FROM leads l LEFT JOIN users u ON l.assigned_to = u.id
-               WHERE l.company_id = $1
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM leads l LEFT JOIN users u ON l.assigned_to = u.id
+                         WHERE l.company_id = $1
+                 AND ($2::text IS NULL OR l.status = $2)
+                 AND ($3::uuid IS NULL OR l.assigned_to = $3)
+                 AND ($4::text IS NULL OR l.name ILIKE $4 OR l.email ILIKE $4 OR l.phone ILIKE $4)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT l.*, u.full_name as assigned_name
+                        FROM leads l LEFT JOIN users u ON l.assigned_to = u.id
+                       WHERE l.company_id = $1
                  AND ($2::text IS NULL OR l.status = $2)
                  AND ($3::uuid IS NULL OR l.assigned_to = $3)
                  AND ($4::text IS NULL OR l.name ILIKE $4 OR l.email ILIKE $4 OR l.phone ILIKE $4)
-               ORDER BY l.created_at DESC
-               LIMIT $5 OFFSET $6`,
+                      ORDER BY l.created_at DESC
+                      LIMIT $5 OFFSET $6
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, status, assignedTo, search, limit, offset],
       };
     },
@@ -3210,15 +3220,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const stage = typeof p.stage === 'string' && p.stage ? p.stage : null;
       const assignedTo = UUID_FILTER(p.assignedTo);
       return {
-        sql: `SELECT o.*, u.full_name as assigned_name,
-                     COUNT(*) OVER() AS total_count
-                FROM opportunities o LEFT JOIN users u ON o.assigned_to = u.id
-               WHERE o.company_id = $1
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM opportunities o LEFT JOIN users u ON o.assigned_to = u.id
+                         WHERE o.company_id = $1
+                 AND ($2::text IS NULL OR o.stage = $2)
+                 AND ($3::uuid IS NULL OR o.assigned_to = $3)
+                 AND ($4::text IS NULL OR o.name ILIKE $4)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT o.*, u.full_name as assigned_name
+                        FROM opportunities o LEFT JOIN users u ON o.assigned_to = u.id
+                       WHERE o.company_id = $1
                  AND ($2::text IS NULL OR o.stage = $2)
                  AND ($3::uuid IS NULL OR o.assigned_to = $3)
                  AND ($4::text IS NULL OR o.name ILIKE $4)
-               ORDER BY o.created_at DESC
-               LIMIT $5 OFFSET $6`,
+                      ORDER BY o.created_at DESC
+                      LIMIT $5 OFFSET $6
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, stage, assignedTo, search, limit, offset],
       };
     },
@@ -3339,15 +3359,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const status = typeof p.status === 'string' && p.status ? p.status : null;
       const priority = typeof p.priority === 'string' && p.priority ? p.priority : null;
       return {
-        sql: `SELECT t.*, u.full_name as assigned_name,
-                     COUNT(*) OVER() AS total_count
-                FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id
-               WHERE t.company_id = $1
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id
+                         WHERE t.company_id = $1
+                 AND ($2::text IS NULL OR t.status = $2)
+                 AND ($3::text IS NULL OR t.priority = $3)
+                 AND ($4::text IS NULL OR t.title ILIKE $4 OR t.description ILIKE $4)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT t.*, u.full_name as assigned_name
+                        FROM tasks t LEFT JOIN users u ON t.assigned_to = u.id
+                       WHERE t.company_id = $1
                  AND ($2::text IS NULL OR t.status = $2)
                  AND ($3::text IS NULL OR t.priority = $3)
                  AND ($4::text IS NULL OR t.title ILIKE $4 OR t.description ILIKE $4)
-               ORDER BY t.due_date ASC
-               LIMIT $5 OFFSET $6`,
+                      ORDER BY t.due_date ASC
+                      LIMIT $5 OFFSET $6
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, status, priority, search, limit, offset],
       };
     },
@@ -3437,15 +3467,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const assignedTo = UUID_FILTER(p.assignedTo);
       const search = TEXT_FILTER(p.search);
       return {
-        sql: `SELECT a.*, u.full_name as assigned_name,
-                     COUNT(*) OVER() AS total_count
-                FROM activities a LEFT JOIN users u ON a.assigned_to = u.id
-               WHERE a.company_id = $1
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM activities a LEFT JOIN users u ON a.assigned_to = u.id
+                         WHERE a.company_id = $1
+                 AND ($2::text IS NULL OR a.type = $2)
+                 AND ($3::uuid IS NULL OR a.assigned_to = $3)
+                 AND ($4::text IS NULL OR a.subject ILIKE $4)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT a.*, u.full_name as assigned_name
+                        FROM activities a LEFT JOIN users u ON a.assigned_to = u.id
+                       WHERE a.company_id = $1
                  AND ($2::text IS NULL OR a.type = $2)
                  AND ($3::uuid IS NULL OR a.assigned_to = $3)
                  AND ($4::text IS NULL OR a.subject ILIKE $4)
-               ORDER BY a.activity_date DESC
-               LIMIT $5 OFFSET $6`,
+                      ORDER BY a.activity_date DESC
+                      LIMIT $5 OFFSET $6
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, type, assignedTo, search, limit, offset],
       };
     },
