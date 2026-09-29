@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { runTransaction, buildJournalEntryStatement } from '@/core/database/tx';
 import { validateInput, idCompanySchema, companyIdSchema, uuidSchema, createBomSchema, createWorkOrderSchema } from '@/core/utils/validation';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { clampPageArgs, paginatedResult, type PaginatedQueryResult } from '@/core/utils/pagination';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { toDateString } from '@/core/utils/mapPgRow';
@@ -1720,9 +1721,9 @@ export const manufacturingApi = {
           isActive: filters?.isActive,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r) => mapBomRow(r, true));
-        const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();
@@ -1777,9 +1778,8 @@ export const manufacturingApi = {
           status: filters?.status || null,
         });
         if (!result.success) return { success: false, error: result.error };
-        const rows = result.rows || [];
+        const { rows, total } = splitPagedRpcRows(result.rows);
         const items = rows.map((r) => mapWorkOrderRow(r));
-        const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
         return { success: true, data: paginatedResult(items, total, p, ps) };
       }
       const adapter = await getDbAdapter();

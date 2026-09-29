@@ -3589,15 +3589,24 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT b.*, p.name_ar AS product_name,
-                     (SELECT COUNT(*)::int FROM bom_lines bl WHERE bl.bom_id = b.id) AS lines_count,
-                     COUNT(*) OVER() AS total_count
-                FROM boms b LEFT JOIN products p ON b.product_id = p.id
-               WHERE b.company_id = $1
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM boms b LEFT JOIN products p ON b.product_id = p.id
+                         WHERE b.company_id = $1
+                 AND ($2::text IS NULL OR p.name_ar ILIKE $2 OR b.version ILIKE $2)
+                 AND ($3::boolean IS NULL OR b.is_active = $3)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT b.*, p.name_ar AS product_name,
+                     (SELECT COUNT(*)::int FROM bom_lines bl WHERE bl.bom_id = b.id) AS lines_count
+                        FROM boms b LEFT JOIN products p ON b.product_id = p.id
+                       WHERE b.company_id = $1
                  AND ($2::text IS NULL OR p.name_ar ILIKE $2 OR b.version ILIKE $2)
                  AND ($3::boolean IS NULL OR b.is_active = $3)
-               ORDER BY b.version DESC
-               LIMIT $4 OFFSET $5`,
+                      ORDER BY b.version DESC
+                      LIMIT $4 OFFSET $5
+                    ) _p
+                  ) pg ON true`,
         params: [
           session.user.companyId,
           TEXT_FILTER(p.search),
@@ -3711,14 +3720,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
       const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
       return {
-        sql: `SELECT w.*, p.name_ar AS product_name, e.full_name AS supervisor_name, COUNT(*) OVER() AS total_count
-                FROM work_orders w
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                  FROM (SELECT COUNT(*)::int AS total_count
+                          FROM work_orders w
                 LEFT JOIN products p ON w.product_id = p.id
                 LEFT JOIN employees e ON w.supervisor_id = e.id
-               WHERE w.company_id = $1
+                         WHERE w.company_id = $1
+                 AND ($2::text IS NULL OR w.status = $2)) c
+                  LEFT JOIN LATERAL (
+                    SELECT * FROM (
+                      SELECT w.*, p.name_ar AS product_name, e.full_name AS supervisor_name
+                        FROM work_orders w
+                LEFT JOIN products p ON w.product_id = p.id
+                LEFT JOIN employees e ON w.supervisor_id = e.id
+                       WHERE w.company_id = $1
                  AND ($2::text IS NULL OR w.status = $2)
-               ORDER BY w.order_number DESC
-               LIMIT $3 OFFSET $4`,
+                      ORDER BY w.order_number DESC
+                      LIMIT $3 OFFSET $4
+                    ) _p
+                  ) pg ON true`,
         params: [session.user.companyId, typeof p.status === 'string' && p.status ? p.status : null, limit, offset],
       };
     },
