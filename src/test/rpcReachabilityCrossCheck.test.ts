@@ -223,12 +223,12 @@ describe('the static gate cannot under-report what the runtime observes', () => 
       ],
       inventory: [
         'getProductsForSelect', 'getProductsPaginated', 'updateProduct', 'deleteProduct',
-        'getWarehouses', 'updateWarehouse', 'deleteWarehouse',
-        'getStock', 'getStockDetailed', 'getStockTransfers', 'deleteStockTransfer',
-        'completeStockTransfer', 'getInventoryTransactions', 'getInventoryTransactionsPaginated',
-        'deleteInventoryTransaction', 'getStockAdjustments', 'updateStockAdjustment',
+        'updateWarehouse', 'deleteWarehouse',
+        'deleteStockTransfer',
+        'completeStockTransfer', 'getInventoryTransactionsPaginated',
+        'deleteInventoryTransaction', 'updateStockAdjustment',
         'approveStockAdjustment', 'postStockAdjustment', 'deleteStockAdjustment',
-        'getCategories', 'deleteProductCategory', 'getInventoryKpis',
+        'deleteProductCategory', 'getInventoryKpis',
       ],
       hr: [
         'deleteEmployee', 'saveAttendance', 'previewPayrollRun', 'deletePayrollRun',

@@ -2537,6 +2537,117 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // ── Inventory fixed-SQL reads (Phase 0 tranche 8n) ─────────────────────────
+  // Single-statement, no filters beyond the tenant scope, no total to keep:
+  // these are the mechanical case, and they are mechanical on purpose. The
+  // paged ones need LEFT JOIN LATERAL and the writes need their guards moved,
+  // so neither is in this tranche.
+
+  // ── Inventory fixed-SQL reads (Phase 0 tranche 8n) ─────────────────────────
+  // Single-statement, no filters beyond the tenant scope, no total to keep:
+  // these are the mechanical case, and they are mechanical on purpose. The
+  // paged ones need LEFT JOIN LATERAL and the writes need their guards moved,
+  // so neither is in this tranche.
+  registerRpc('inventory.getWarehouses', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT * FROM warehouses WHERE company_id = $1 AND is_active = true ORDER BY name`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('inventory.getStock', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT * FROM stock WHERE company_id = $1`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('inventory.getStockDetailed', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT s.*, p.name_ar as product_name, p.code as product_code, p.unit, p.cost_price, w.name as warehouse_name
+                    FROM stock s
+                    JOIN products p ON p.id = s.product_id
+                    JOIN warehouses w ON w.id = s.warehouse_id
+                    WHERE s.company_id = $1`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('inventory.getStockTransfers', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT wt.id, wt.company_id, wt.from_warehouse_id, wt.to_warehouse_id, wt.date, wt.transfer_number,
+                            wt.reference, wt.status, wt.notes, wt.created_at,
+                            fw.name AS from_warehouse_name, tw.name AS to_warehouse_name,
+                            COUNT(wl.id)::int AS lines_count,
+                            COALESCE(SUM(wl.quantity), 0) AS total_quantity
+                     FROM warehouse_transfers wt
+                     LEFT JOIN warehouses fw ON fw.id = wt.from_warehouse_id
+                     LEFT JOIN warehouses tw ON tw.id = wt.to_warehouse_id
+                     LEFT JOIN warehouse_transfer_lines wl ON wl.transfer_id = wt.id
+                     WHERE wt.company_id = $1
+                     GROUP BY wt.id, fw.name, tw.name
+                     ORDER BY wt.created_at DESC`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('inventory.getInventoryTransactions', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT sm.id, sm.company_id, sm.product_id, sm.warehouse_id, sm.type, sm.quantity,
+                            sm.reference, sm.notes, sm.created_at, sm.created_at AS date,
+                            p.name_ar AS product_name, p.code AS product_code,
+                            w.name AS warehouse_name
+                       FROM stock_movements sm
+                       LEFT JOIN products p ON p.id = sm.product_id
+                       LEFT JOIN warehouses w ON w.id = sm.warehouse_id
+                      WHERE sm.company_id = $1
+                      ORDER BY sm.created_at DESC`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('inventory.getStockAdjustments', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT sa.*, p.name_ar AS product_name, p.code AS product_code,
+                            w.name AS warehouse_name, u.username AS approved_by_name
+                       FROM stock_adjustments sa
+                       LEFT JOIN products p ON p.id = sa.product_id
+                       LEFT JOIN warehouses w ON w.id = sa.warehouse_id
+                       LEFT JOIN users u ON u.id = sa.approved_by
+                      WHERE sa.company_id = $1
+                      ORDER BY sa.date DESC, sa.created_at DESC`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('inventory.getCategories', {
+    // Lifted verbatim from inventory/api.ts - not retyped. A port that is
+    // rewritten by hand acquires a typo no test can see.
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT * FROM product_categories WHERE company_id = $1 ORDER BY name`,
+      params: [session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

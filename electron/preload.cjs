@@ -86,6 +86,13 @@ contextBridge.exposeInMainWorld('electronDB', {
   inventory: {
     getProducts: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProducts', { ...payload, sessionToken }),
     createProduct: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProduct', { ...payload, sessionToken }),
+    getWarehouses: (payload) => ipcRenderer.invoke('db:rpc:inventory.getWarehouses', { ...payload, sessionToken }),
+    getStock: (payload) => ipcRenderer.invoke('db:rpc:inventory.getStock', { ...payload, sessionToken }),
+    getStockDetailed: (payload) => ipcRenderer.invoke('db:rpc:inventory.getStockDetailed', { ...payload, sessionToken }),
+    getStockTransfers: (payload) => ipcRenderer.invoke('db:rpc:inventory.getStockTransfers', { ...payload, sessionToken }),
+    getInventoryTransactions: (payload) => ipcRenderer.invoke('db:rpc:inventory.getInventoryTransactions', { ...payload, sessionToken }),
+    getStockAdjustments: (payload) => ipcRenderer.invoke('db:rpc:inventory.getStockAdjustments', { ...payload, sessionToken }),
+    getCategories: (payload) => ipcRenderer.invoke('db:rpc:inventory.getCategories', { ...payload, sessionToken }),
     createProductCategories: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProductCategories', { ...payload, sessionToken }),
     getProductUnits: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProductUnits', { ...payload, sessionToken }),
     ensureBaseProductUnit: (payload) => ipcRenderer.invoke('db:rpc:inventory.ensureBaseProductUnit', { ...payload, sessionToken }),

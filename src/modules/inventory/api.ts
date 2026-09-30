@@ -519,7 +519,14 @@ export const inventoryApi = {
   async getWarehouses(companyId: string): Promise<{ success: boolean; data?: Warehouse[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getWarehouses({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<Warehouse>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         'SELECT * FROM warehouses WHERE company_id = $1 AND is_active = true ORDER BY name',
@@ -616,7 +623,14 @@ export const inventoryApi = {
   async getStock(companyId: string): Promise<{ success: boolean; data?: Stock[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getStock({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<Stock>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         'SELECT * FROM stock WHERE company_id = $1',
@@ -656,7 +670,14 @@ export const inventoryApi = {
   async getStockDetailed(companyId: string): Promise<{ success: boolean; data?: StockItem[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getStockDetailed({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<StockItem>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT s.*, p.name_ar as product_name, p.code as product_code, p.unit, p.cost_price, w.name as warehouse_name
@@ -717,7 +738,14 @@ export const inventoryApi = {
   async getStockTransfers(companyId: string): Promise<{ success: boolean; data?: StockTransfer[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getStockTransfers({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<StockTransfer>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT wt.id, wt.company_id, wt.from_warehouse_id, wt.to_warehouse_id, wt.date, wt.transfer_number,
@@ -875,7 +903,14 @@ export const inventoryApi = {
   async getInventoryTransactions(companyId: string): Promise<{ success: boolean; data?: InventoryTransaction[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getInventoryTransactions({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<InventoryTransaction>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT sm.id, sm.company_id, sm.product_id, sm.warehouse_id, sm.type, sm.quantity,
@@ -1024,7 +1059,14 @@ export const inventoryApi = {
   async getStockAdjustments(companyId: string): Promise<{ success: boolean; data?: StockAdjustment[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getStockAdjustments({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<StockAdjustment>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT sa.*, p.name_ar AS product_name, p.code AS product_code,
@@ -1227,7 +1269,14 @@ export const inventoryApi = {
   async getCategories(companyId: string): Promise<{ success: boolean; data?: ProductCategory[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
-      if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (!cidValidation.success) return { success: false, error: cidValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getCategories({});
+        if (!res.success) return { success: false, error: res.error };
+        return { success: true, data: mapRows<ProductCategory>(res.rows || []) };
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         'SELECT * FROM product_categories WHERE company_id = $1 ORDER BY name',

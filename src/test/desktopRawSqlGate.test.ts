@@ -37,7 +37,7 @@ const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-resu
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
 
 /** measured 2026-09-25, tranche 7a (reference reads) */
-const CEILING = 401;
+const CEILING = 394;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -61,8 +61,8 @@ const GUARD_RE = /(isElectronPg\s*\(\s*\)|mainAuthBridge\s*\(\s*\))/;
  * somewhere and deleting one elsewhere still fails both tests.
  */
 const BASELINE: Record<string, number> = {
-  'src/modules/inventory/api.ts': 47,
   'src/modules/hr/api.ts': 44,
+  'src/modules/inventory/api.ts': 40,
   'src/modules/accounting/api.ts': 39,
   'src/modules/manufacturing/api.ts': 34,
   'src/modules/purchases/api.ts': 24,
