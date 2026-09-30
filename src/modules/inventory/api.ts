@@ -1180,14 +1180,23 @@ export const inventoryApi = {
     }
   },
 
-  async approveStockAdjustment(id: string, companyId: string, approvedBy: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  async approveStockAdjustment(id: string, companyId: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
       const adapter = await getDbAdapter();
+      if (isElectronPg()) {
+        // The approver is the session user — the channel takes no approver
+        // argument, so "approved by" can only ever be whoever pressed the
+        // button. Moving inventory and posting the variance entry is a
+        // certification, not a description.
+        const result = await window.electronDB!.inventory!.approveStockAdjustment({ id });
+        return { success: result.success, error: result.error };
+      }
+      const actor = safeUserId(_userId);
       return adapter.query(
-        `UPDATE stock_adjustments SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_by = $4, updated_at = NOW() WHERE id = $2 AND company_id = $3`,
-        [approvedBy, id, companyId, safeUserId(_userId)]
+        `UPDATE stock_adjustments SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_by = $2, updated_at = NOW() WHERE id = $3 AND company_id = $4`,
+        [actor, actor, id, companyId]
       );
     } catch (e) {
       return { success: false, error: String(e) };

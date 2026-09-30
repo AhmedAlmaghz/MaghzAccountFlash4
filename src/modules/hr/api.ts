@@ -1113,7 +1113,7 @@ export const hrApi = {
    * Approving enforces the leave balance STRICTLY (row-lock + recompute) —
    * the API is the last line of defense, not the UI.
    */
-  async updateLeaveStatus(id: string, companyId: string, status: Leave['status'], approvedBy?: string, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  async updateLeaveStatus(id: string, companyId: string, status: Leave['status'], _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -1161,17 +1161,16 @@ export const hrApi = {
       }
 
       if (isElectronPg()) {
-        const result = await invokeHrRpc('updateLeaveStatus', {
-          id,
-          status,
-          approvedBy: approvedBy || null,
-        });
+        // No approvedBy: the approver is the session user. A renderer that
+        // names a different approver is asking for an audit lie, so the field
+        // is gone rather than ignored.
+        const result = await invokeHrRpc('updateLeaveStatus', { id, status });
         return { success: result.success, error: result.error };
       }
       // leaves has no updated_at column
       const result = await adapter.query(
-        'UPDATE leaves SET status = $1, approved_by = $2, approved_at = $3, updated_by = $6 WHERE id = $4 AND company_id = $5',
-        [status, approvedBy || null, status === 'approved' ? new Date().toISOString() : null, id, companyId, safeUserId(_userId)]
+        'UPDATE leaves SET status = $1, approved_by = $2, approved_at = $3, updated_by = $4 WHERE id = $5 AND company_id = $6',
+        [status, safeUserId(_userId), status === 'approved' ? new Date().toISOString() : null, safeUserId(_userId), id, companyId]
       );
       return { success: result.success, error: result.error };
     } catch (e) {

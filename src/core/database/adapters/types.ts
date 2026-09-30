@@ -12,8 +12,11 @@ export interface DbAdapter {
   ping(): Promise<{ success: boolean; message?: string; db?: string; }>;
 
   // Generic CRUD
-  query<T = any>(sql: string, params?: any[]): Promise<{ success: boolean; rows?: T[]; error?: string }>;
-  transaction(queries: { sql: string; params?: any[] }[]): Promise<{ success: boolean; results?: any[]; error?: string }>;
+  // `errorCode` is the stable classification of a database failure (see
+  // core/utils/pgErrors) — `error` carries the human sentence. Optional and
+  // additive: an adapter that has nothing to classify simply omits it.
+  query<T = any>(sql: string, params?: any[]): Promise<{ success: boolean; rows?: T[]; error?: string; errorCode?: string }>;
+  transaction(queries: { sql: string; params?: any[] }[]): Promise<{ success: boolean; results?: any[]; error?: string; errorCode?: string }>;
 
   // Company
   getCompany(): Promise<{ success: boolean; data?: any; error?: string }>;
@@ -22,6 +25,14 @@ export interface DbAdapter {
   // Accounts
   getAccounts(companyId: string): Promise<{ success: boolean; data?: any[]; error?: string }>;
   createAccount(data: any): Promise<{ success: boolean; id?: string; error?: string }>;
+  /**
+   * The ledger of one account as raw rows (id, date, reference, description,
+   * debit, credit, opening, sort_type). `sort_type = 0` marks the opening row
+   * and appears only when `startDate` filters the window. Row→LedgerRow
+   * mapping belongs to the caller, so the shape travels unchanged from
+   * whichever driver answered.
+   */
+  getLedger(payload: { accountId: string; companyId: string; startDate?: string | null; endDate?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   // Transactions
   getTransactions(companyId: string): Promise<{ success: boolean; data?: any[]; error?: string }>;
   createTransaction(data: any): Promise<{ success: boolean; id?: string; error?: string }>;

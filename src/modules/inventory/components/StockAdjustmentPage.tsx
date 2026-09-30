@@ -152,7 +152,7 @@ export const StockAdjustmentPage: React.FC = () => {
 
   const handleApprove = async (id: string) => {
     if (!user?.id) return;
-    const result = await approve(id, user.id);
+    const result = await approve(id);
     if (result?.success) addToast('success', t('inventory.adjustment.approvedToast'));
     else addToast('error', result?.error || t('common.error'));
     setConfirmApprove(null);

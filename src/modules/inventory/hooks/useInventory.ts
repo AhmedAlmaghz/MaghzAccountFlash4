@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { inventoryApi } from '../api';
 import { usePaginatedList } from '@/core/hooks/usePaginatedList';
+import { useAuthStore } from '@/modules/auth/store';
 import type { Product, ProductUnit, Warehouse, Stock, StockItem, StockTransfer, InventoryTransaction, StockAdjustment, ProductCategory } from '../types';
 
 // ─── Shared caches for performance ──────────────────────────────────────────
@@ -385,6 +386,7 @@ export function useInventoryTransactionsPaginated(companyId: string, filters?: I
 export function useStockAdjustments(companyId: string) {
   const [adjustments, setAdjustments] = useState<StockAdjustment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const user = useAuthStore((s) => s.user);
 
   const reload = useCallback(async () => {
     if (!companyId) return;
@@ -416,13 +418,15 @@ export function useStockAdjustments(companyId: string) {
     return result;
   }, [reload, companyId]);
 
-  const approve = useCallback(async (id: string, approvedBy: string) => {
-    const result = await inventoryApi.approveStockAdjustment(id, companyId, approvedBy);
+  // The approver is whoever calls this — the API takes no approver argument,
+  // so the optimistic row below can only ever echo the caller's own identity.
+  const approve = useCallback(async (id: string) => {
+    const result = await inventoryApi.approveStockAdjustment(id, companyId, user?.id);
     if (result.success) {
-      setAdjustments(prev => prev.map(a => a.id === id ? { ...a, status: 'approved', approvedBy, approvedAt: new Date().toISOString() } : a));
+      setAdjustments(prev => prev.map(a => a.id === id ? { ...a, status: 'approved', approvedBy: user?.id, approvedAt: new Date().toISOString() } : a));
     }
     return result;
-  }, [companyId]);
+  }, [companyId, user?.id]);
 
   const post = useCallback(async (id: string) => {
     const result = await inventoryApi.postStockAdjustment(id, companyId);
@@ -538,6 +542,7 @@ export function useStockAdjustmentsPaginated(companyId: string, filters?: { stat
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [isLoading, setIsLoading] = useState(false);
+  const user = useAuthStore((s) => s.user);
 
   const reloadList = useCallback(async () => {
     if (!companyId) return;
@@ -569,11 +574,11 @@ export function useStockAdjustmentsPaginated(companyId: string, filters?: { stat
     return result;
   }, [reloadList, companyId]);
 
-  const approve = useCallback(async (id: string, approvedBy: string) => {
-    const result = await inventoryApi.approveStockAdjustment(id, companyId, approvedBy);
+  const approve = useCallback(async (id: string) => {
+    const result = await inventoryApi.approveStockAdjustment(id, companyId, user?.id);
     if (result.success) await reloadList();
     return result;
-  }, [reloadList, companyId]);
+  }, [reloadList, companyId, user?.id]);
 
   const post = useCallback(async (id: string) => {
     const result = await inventoryApi.postStockAdjustment(id, companyId);

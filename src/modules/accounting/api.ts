@@ -16,6 +16,61 @@ const localToday = (): string => toDateString(new Date()) ?? '';
 type AccountingRpcEnvelope = { success: boolean; rows?: Record<string, unknown>[]; error?: string };
 
 /**
+ * One row shape, three sources: the typed-RPC channel, the PGlite CTE and the
+ * PGlite unfiltered read all arrive here. The opening row is identified by
+ * `sort_type = 0` (only the first two sources emit it, and only when a start
+ * date filters the window) — so an unfiltered read, whose rows carry no
+ * `sort_type` at all, falls through to the movement branch untouched.
+ *
+ * The opening label lives HERE, not in SQL: the RPC composes no Arabic, and a
+ * label duplicated in a statement and a mapper is a label that drifts.
+ */
+const OPENING_LABEL = 'رصيد افتتاحي';
+
+interface LedgerQueryRow {
+  id: string;
+  date: string | null;
+  reference: string | null;
+  description: string | null;
+  debit: number;
+  credit: number;
+  opening: number | null;
+  sort_type: number;
+}
+
+function mapLedgerRows(raw: unknown[], startDate?: string): LedgerRow[] {
+  let runningBalance = 0;
+  return (raw as LedgerQueryRow[]).map((row) => {
+    if (row.sort_type === 0) {
+      // Opening row: the balance carried into the window (opening JEs
+      // included), so the last row's balance is still the FULL balance.
+      runningBalance = Number(row.opening) || 0;
+      return {
+        id: 'OPENING',
+        date: startDate ?? '',
+        reference: 'OPENING',
+        description: OPENING_LABEL,
+        debit: 0,
+        credit: 0,
+        balance: runningBalance,
+      } as LedgerRow;
+    }
+    const debit = Number(row.debit) || 0;
+    const credit = Number(row.credit) || 0;
+    runningBalance += debit - credit;
+    return {
+      id: String(row.id),
+      date: row.date ? String(toDateString(row.date) ?? row.date) : '',
+      reference: row.reference || undefined,
+      description: row.description || undefined,
+      debit,
+      credit,
+      balance: runningBalance,
+    } as LedgerRow;
+  });
+}
+
+/**
  * A journal leg as it comes back from SQL, before the UI-facing mapping.
  * Hoisted out of getTransactionById so the RPC and the PGlite paths shape the
  * same object - the mapping is the part that is easy to get subtly different,
@@ -144,34 +199,21 @@ export const accountingApi = {
       // column. `safeUserId` returns null for empty strings, whitespace and
       // non-UUID values so the FK sees NULL (column is nullable, ON DELETE SET
       // NULL) instead of raising "invalid input syntax for type uuid".
-      const userIdOrNull = safeUserId(userId);
-      const accountId = crypto.randomUUID();
-      const result = await adapter.query(
-        // NOTE: nullable params get a single explicit cast ($N::uuid). A
-        // "CASE WHEN $N IS NULL ..." wrapper makes PostgreSQL fail with
-        // "could not determine data type of parameter $N" because the IS
-        // NULL branch provides no type context.
-        `INSERT INTO accounts (id, company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance, is_active, created_by, updated_by)
-         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12::uuid, $13::uuid)
-         RETURNING id`,
-        [
-          accountId,
-          data.companyId,
-          data.code,
-          data.nameAr,
-          data.nameEn || null,
-          data.parentId || null,
-          data.type,
-          data.nature,
-          data.isGroup,
-          data.balance ?? 0,
-          data.isActive ?? true,
-          userIdOrNull,
-          userIdOrNull,
-        ]
-      );
-      if (result.success) {
-        const createdId = result.rows?.[0]?.id as string | undefined;
+      //
+      // The adapter owns the INSERT on every driver: the typed-RPC channel
+      // composes it in the main process (id database-generated, audit columns
+      // from the SESSION, and a "parent not in company" guard that turns a raw
+      // FK error into a sentence a user can act on), PGlite runs the same
+      // statement locally with the caller-supplied identity. This method used
+      // to inline a THIRD copy — 13 columns with a client-generated id — and
+      // that divergence is what let a channel sit registered but never called.
+      const created = await adapter.createAccount({
+        ...data,
+        isActive: data.isActive ?? true,
+        createdBy: safeUserId(userId),
+      });
+      const createdId = created.id;
+      if (created.success) {
         // Opening balance: post a balanced JE through Opening Balance Equity
         const openingAmount = Number((data as Partial<Account> & { openingAmount?: number }).openingAmount) || 0;
         if (createdId && openingAmount > 0 && !(data as Partial<Account>).openingBalancePosted) {
@@ -186,7 +228,7 @@ export const accountingApi = {
         }
         return { success: true, id: createdId };
       }
-      return { success: false, error: result.error };
+      return { success: false, error: created.error };
     } catch (e) {
       return { success: false, error: String(e) };
     }
@@ -2042,119 +2084,19 @@ export const accountingApi = {
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       const adapter = await getDbAdapter();
 
-      // Movement rows (posted JEs within the optional window).
-      const params: unknown[] = [accountId, companyId];
-      let movementWhere = 'je.account_id = $1 AND t.company_id = $2 AND t.status = \'posted\'';
-      if (startDate) { params.push(startDate); movementWhere += ` AND t.date >= $${params.length}`; }
-      if (endDate) { params.push(endDate); movementWhere += ` AND t.date <= $${params.length}`; }
-
-      // Opening row: ONLY when a start date filters the window — it carries
-      // the balance of everything posted BEFORE that date (real opening JEs
-      // included), so the last row's balance still equals the FULL balance.
-      // Without a start date the movement already shows every JE from zero,
-      // and a separate opening row would display the opening twice.
-      if (!startDate) {
-        const result = await adapter.query(`
-          SELECT t.id::text AS id, t.date, t.reference, t.description, je.debit, je.credit
-          FROM journal_entries je
-          JOIN transactions t ON je.transaction_id = t.id
-          WHERE ${movementWhere}
-          ORDER BY t.date, t.created_at`, params);
-        if (!result.success) return { success: false, error: result.error };
-        let runningBalance = 0;
-        const rows: LedgerRow[] = (result.rows || []).map((row) => {
-          const debit = Number(row.debit) || 0;
-          const credit = Number(row.credit) || 0;
-          runningBalance += debit - credit;
-          return {
-            id: String(row.id),
-            date: row.date ? String(toDateString(row.date) ?? row.date) : '',
-            reference: row.reference || undefined,
-            description: row.description || undefined,
-            debit,
-            credit,
-            balance: runningBalance,
-          } as LedgerRow;
-        });
-        return { success: true, data: rows };
-      }
-
-      // prior: everything posted strictly BEFORE startDate.
-      const priorParams: unknown[] = [accountId, companyId, startDate];
-      const priorWhere = "je.account_id = $1 AND t.company_id = $2 AND t.status = 'posted' AND t.date < $3";
-
-      const sql = `
-      WITH movement AS (
-        SELECT t.id, t.date, t.reference, t.description, je.debit, je.credit
-        FROM journal_entries je
-        JOIN transactions t ON je.transaction_id = t.id
-        WHERE ${movementWhere}
-      ),
-      prior AS (
-        SELECT COALESCE(SUM(je.debit - je.credit), 0) AS opening
-        FROM journal_entries je
-        JOIN transactions t ON je.transaction_id = t.id
-        WHERE ${priorWhere.replace(/\$(\d+)/g, (_m, n) => `$${Number(n) + priorParams.length}`)}
-      )
-      SELECT id::text AS id, date, reference, description, debit, credit, opening, sort_type
-      FROM (
-        SELECT $${priorParams.length + 1} AS id, NULL::date AS date, NULL AS reference,
-               'رصيد افتتاحي' AS description, 0 AS debit, 0 AS credit, 0 AS sort_type,
-               (SELECT opening FROM prior) AS opening
-        UNION ALL
-        SELECT m.id::text, m.date, m.reference, m.description, m.debit, m.credit, 1 AS sort_type,
-               NULL::numeric AS opening
-        FROM movement m
-      ) rows
-      ORDER BY sort_type, date, id`;
-      // Final param order: movement params ($1..) then the prior CTE's own
-      // shifted copies ($5.. = accountId, companyId, startDate) then the
-      // OPENING label — the prior WHERE references its own renumbered $N.
-      const finalParams: unknown[] = [...params, ...priorParams, 'OPENING'];
-
-      const result = await adapter.query(sql, finalParams);
-      if (result.success && result.rows) {
-        interface LedgerQueryRow {
-          id: string;
-          date: string | null;
-          reference: string | null;
-          description: string | null;
-          debit: number;
-          credit: number;
-          opening: number | null;
-          sort_type: number;
-        }
-        let runningBalance = 0;
-        const rows: LedgerRow[] = (result.rows as LedgerQueryRow[]).map((row) => {
-          if (row.sort_type === 0) {
-            // Opening row: balance before the period (opening + prior JEs)
-            runningBalance = Number(row.opening) || 0;
-            return {
-              id: 'OPENING',
-              date: startDate,
-              reference: 'OPENING',
-              description: 'رصيد افتتاحي',
-              debit: 0,
-              credit: 0,
-              balance: runningBalance,
-            } as LedgerRow;
-          }
-          const debit = Number(row.debit) || 0;
-          const credit = Number(row.credit) || 0;
-          runningBalance += debit - credit;
-          return {
-            id: String(row.id),
-            date: row.date ? String(toDateString(row.date) ?? row.date) : '',
-            reference: row.reference || undefined,
-            description: row.description || undefined,
-            debit,
-            credit,
-            balance: runningBalance,
-          } as LedgerRow;
-        });
-        return { success: true, data: rows };
-      }
-      return { success: false, error: result.error };
+      // Typed RPC — one statement, fixed slots, company from the session. The
+      // window is two nullable dates and the SQL guards itself: the opening
+      // row only materialises when a start date is present, so a filtered
+      // window still ends on the FULL balance while an unfiltered one shows
+      // every posting from zero with nothing double-counted.
+      const result = await adapter.getLedger({
+        accountId,
+        companyId,
+        startDate: startDate ?? null,
+        endDate: endDate ?? null,
+      });
+      if (!result.success) return { success: false, error: result.error };
+      return { success: true, data: mapLedgerRows(result.rows || [], startDate) };
     } catch (e) {
       return { success: false, error: String(e) };
     }

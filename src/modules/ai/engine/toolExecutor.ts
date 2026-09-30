@@ -225,7 +225,15 @@ export async function executeToolCall(
       typeof (result as { error?: unknown }).error === 'string'
     ) {
       const error = (result as { error: string }).error;
-      return { ok: false, error, errorClass: classifyToolError(error) };
+      // A tool that forwards its adapter's stable key lets the taxonomy skip
+      // the regex entirely — no tool does today, so this is a contract, not a
+      // path: when the first one does, the classification is already exact.
+      const stableKey = (result as { errorCode?: unknown }).errorCode;
+      return {
+        ok: false,
+        error,
+        errorClass: classifyToolError(error, typeof stableKey === 'string' ? stableKey : undefined),
+      };
     }
 
     if (tool.dangerLevel === 'write') {

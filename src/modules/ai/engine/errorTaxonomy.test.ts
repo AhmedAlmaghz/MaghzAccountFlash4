@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { classifyToolError, renderErrorGuidance } from './errorTaxonomy';
+import { PG_AR_SENTENCES } from '@/core/utils/pgErrors';
 
 /**
  * The taxonomy contract: every classification must yield a REASON (why) and a
@@ -114,6 +115,54 @@ describe('classifyToolError', () => {
     const c = classifyToolError('');
     expect(c.reason.length).toBeGreaterThan(5);
     expect(c.fixHint.length).toBeGreaterThan(5);
+  });
+
+  it('a forwarded stable key beats the regex — FK_VIOLATION becomes INVALID_REFERENCE, not a delete guard', () => {
+    // Before the key existed, a CREATE with a dead parentId matched
+    // DOCUMENT_HAS_CHILDREN ("archive instead of deleting") — guidance that
+    // tells the model to delete the record it just failed to create.
+    const c = classifyToolError('مرجع غير صالح — السجل المرتبط غير موجود أو لا يخص هذه الشركة', 'FK_VIOLATION');
+    expect(c.code).toBe('INVALID_REFERENCE');
+    expect(c.fixHint).toMatch(/search/);
+    expect(c.fixHint).not.toMatch(/أرشف/);
+    expect(c.retryable).toBe(true);
+  });
+
+  it('a forwarded UNIQUE_VIOLATION maps onto the duplicate family', () => {
+    const c = classifyToolError('القيمة مستخدمة مسبقاً — لا يمكن التكرار', 'UNIQUE_VIOLATION');
+    expect(c.code).toBe('DUPLICATE_ENTITY');
+  });
+
+  it('a forwarded INVALID_TEXT maps onto INVALID_VALUE', () => {
+    const c = classifyToolError('صيغة قيمة غير صحيحة', 'INVALID_TEXT_REPRESENTATION');
+    expect(c.code).toBe('INVALID_VALUE');
+  });
+
+  it('an unknown key falls through to the regex as if no key travelled', () => {
+    const c = classifyToolError('customerId مطلوب', 'SOMETHING_NEW');
+    expect(c.code).toBe('MISSING_ID');
+  });
+
+  it('exact-matches every adapter sentence even when no key travelled', () => {
+    // Tools forward only `{ error }` today, so the sentence is all the
+    // taxonomy gets. These are constants, not prose — pin the whole table.
+    const expected: Record<string, string> = {
+      FK_VIOLATION: 'INVALID_REFERENCE',
+      UNIQUE_VIOLATION: 'DUPLICATE_ENTITY',
+      NOT_NULL_VIOLATION: 'INVALID_VALUE',
+      CHECK_VIOLATION: 'INVALID_VALUE',
+      VALUE_TOO_LONG: 'INVALID_VALUE',
+      INVALID_TEXT_REPRESENTATION: 'INVALID_VALUE',
+      SERIALIZATION_FAILURE: 'DB_ERROR',
+      DEADLOCK_DETECTED: 'DB_ERROR',
+      DB_ERROR: 'DB_ERROR',
+    };
+    for (const [key, code] of Object.entries(expected)) {
+      const sentence = PG_AR_SENTENCES[key as keyof typeof PG_AR_SENTENCES];
+      const c = classifyToolError(sentence);
+      expect(c.code, `${key}: ${sentence}`).toBe(code);
+      expect(c.code, key).not.toBe('UNKNOWN');
+    }
   });
 });
 

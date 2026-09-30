@@ -112,6 +112,20 @@ describe('toolExecutor', () => {
       expect(outcome.errorClass).toBeDefined();
     });
 
+    it('forwards a tool-returned errorCode to the taxonomy, skipping the regex', async () => {
+      // The adapters classify at their boundary; a tool that preserves the
+      // key must not be re-guessed from prose. The sentence here is chosen to
+      // match NOTHING in the regex table — only the key can land the code.
+      useAuthStore.getState().login(adminUser);
+      registerTool(makeTool({
+        dangerLevel: 'write',
+        execute: async () => ({ error: 'مرجع زائف لا يطابق أي نمط', errorCode: 'FK_VIOLATION' }),
+      }));
+      const outcome = await executeToolCall('test.tool', {}, ctx);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.errorClass?.code).toBe('INVALID_REFERENCE');
+    });
+
     it('does not audit-log tools that return { error }', async () => {
       useAuthStore.getState().login(adminUser);
       registerTool(makeTool({

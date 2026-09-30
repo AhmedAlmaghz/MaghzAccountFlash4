@@ -4,6 +4,7 @@ import { mainThreadTransport } from './pgliteTransport';
 import type { DbTransport } from './pgliteTransport';
 import { getTransportMode } from './transportMode';
 import { getWorkerTransport } from './pgliteWorkerTransport';
+import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 /**
  * PGlite (PostgreSQL WASM) Adapter
@@ -74,6 +75,20 @@ function normalizeResult<T = unknown>(result: { rows?: unknown[]; error?: unknow
   }
   const rows = (result.rows || []) as Record<string, unknown>[];
   return { success: true, rows: rows.map(normalizeRow) as unknown as T[] };
+}
+
+/**
+ * One funnel for every caught driver error. PGlite raises the same SQLSTATEs as
+ * node-postgres on the same `DatabaseError` shape, so classifying here gives
+ * the browser path the identical sentence the Electron path gets from the main
+ * process — and `errorCode` lets a caller branch without parsing prose.
+ */
+function dbFailure(err: unknown): { success: false; error: string; errorCode?: string } {
+  const raw = err instanceof Error ? err.message : String(err);
+  const failure = classifyPgFailure(err);
+  return failure
+    ? { success: false, error: pgFailureMessage(failure), errorCode: failure.code }
+    : { success: false, error: raw };
 }
 
 // ─── Migration support ────────────────────────────────────────────────────────
@@ -1231,7 +1246,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async query<T = any>(sql: string, params?: any[]): Promise<{ success: boolean; rows?: T[]; error?: string }> {
+  async query<T = any>(sql: string, params?: any[]): Promise<{ success: boolean; rows?: T[]; error?: string; errorCode?: string }> {
     try {
       const t = activeTransport();
       await runPgliteMigrations();
@@ -1239,11 +1254,11 @@ export const pgliteAdapter: DbAdapter = {
       const result = await t.queryRaw(pgSql, params || []);
       return normalizeResult(result);
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return dbFailure(err);
     }
   },
 
-  async transaction(queries: { sql: string; params?: any[] }[]): Promise<{ success: boolean; results?: any[]; error?: string }> {
+  async transaction(queries: { sql: string; params?: any[] }[]): Promise<{ success: boolean; results?: any[]; error?: string; errorCode?: string }> {
     try {
       const t = activeTransport();
       await runPgliteMigrations();
@@ -1262,7 +1277,7 @@ export const pgliteAdapter: DbAdapter = {
         throw err;
       }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return dbFailure(err);
     }
   },
 
@@ -1306,15 +1321,76 @@ export const pgliteAdapter: DbAdapter = {
   },
 
   async createAccount(data: any) {
+    // 12 columns, mirroring accounting.createAccount in the main process: the
+    // earlier 9-column form dropped the caller's is_active (the column default
+    // won) and left both audit columns NULL. created_by/updated_by arrive from
+    // the caller here because PGlite has no session — the Electron path
+    // ignores them in favour of the session identity, which is the whole point
+    // of the typed-RPC layer.
     const result = await this.query(
-      `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [data.companyId, data.code, data.nameAr, data.nameEn, data.parentId, data.type, data.nature, data.isGroup, data.balance || 0],
+      `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance, is_active, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+      [
+        data.companyId, data.code, data.nameAr, data.nameEn ?? null, data.parentId ?? null,
+        data.type, data.nature, data.isGroup, data.balance || 0,
+        data.isActive === false ? false : true,
+        data.createdBy ?? null, data.createdBy ?? null,
+      ],
     );
     if (result.success && result.rows?.length && (result.rows[0] as { id?: unknown }).id) {
       return { success: true, id: String((result.rows[0] as { id: unknown }).id) };
     }
     return { success: false, error: result.error };
+  },
+
+  async getLedger(payload) {
+    // ONE statement, fixed slots — the same shape the typed-RPC channel uses
+    // (main process composes an identical SQL). The window is two nullable
+    // dates and the SQL guards itself: the opening row materialises only when
+    // a start date is present, so a filtered window still ends on the FULL
+    // balance while an unfiltered one shows every posting from zero. This
+    // replaces the renderer's three hand-built query shapes and its manual
+    // $N -> $N+3 renumbering of the `prior` CTE.
+    const result = await this.query(
+      `WITH movement AS (
+         SELECT t.id, t.date, t.created_at, t.reference, t.description, je.debit, je.credit
+         FROM journal_entries je
+         JOIN transactions t ON je.transaction_id = t.id
+         WHERE je.account_id = $1::uuid
+           AND t.company_id = $2::uuid
+           AND t.status = 'posted'
+           AND ($3::date IS NULL OR t.date >= $3::date)
+           AND ($4::date IS NULL OR t.date <= $4::date)
+       ),
+       prior AS (
+         SELECT COALESCE(SUM(je.debit - je.credit), 0) AS opening
+         FROM journal_entries je
+         JOIN transactions t ON je.transaction_id = t.id
+         WHERE je.account_id = $1::uuid
+           AND t.company_id = $2::uuid
+           AND t.status = 'posted'
+           AND $3::date IS NOT NULL
+           AND t.date < $3::date
+       )
+       SELECT id::text AS id, date, reference, description, debit, credit, opening, sort_type FROM (
+         SELECT 'OPENING' AS id, NULL::date AS date, NULL::text AS reference,
+                NULL::text AS description, 0::numeric AS debit, 0::numeric AS credit,
+                (SELECT opening FROM prior) AS opening, 0 AS sort_type
+         WHERE $3::date IS NOT NULL
+         UNION ALL
+         SELECT m.id::text, m.date, m.reference, m.description, m.debit, m.credit,
+                NULL::numeric AS opening, 1 AS sort_type
+         FROM movement m
+       ) rows
+       ORDER BY sort_type, date, created_at, id`,
+      [
+        String(payload.accountId),
+        String(payload.companyId),
+        payload.startDate ? String(payload.startDate) : null,
+        payload.endDate ? String(payload.endDate) : null,
+      ],
+    );
+    return { success: result.success, rows: result.rows as Record<string, unknown>[], error: result.error };
   },
 
   async getTransactions(companyId: string) {

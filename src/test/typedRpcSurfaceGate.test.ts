@@ -145,11 +145,13 @@ describe('typed RPC surfaces are wired everywhere', () => {
     // session. The shim is single-tenant and trusted, so reading p.companyId
     // there is harmless today — but the shim is what developers copy from, and
     // a shape that reads the company from the payload is the shape that
-    // reopened the audit hole once already. Rather than rewrite eight working
+    // reopened the audit hole once already. Rather than rewrite the remaining
     // shim methods on a single-line file — an attempt at it corrupted the
     // surface twice — the divergence is pinned by count, so it stays a visible
-    // decision and a ninth occurrence fails.
-    const KNOWN_DIVERGENT = 8;
+    // decision and one more occurrence fails.
+    // 8 → 7: accounting.createAccount stopped reading p.companyId when it moved
+    // to the _cid helper.
+    const KNOWN_DIVERGENT = 7;
     // Counting, not naming. A name-based scan has to guess which method owns a
     // given occurrence, and it got that wrong twice — once missing a channel,
     // once attributing an occurrence to the _cid helper. A count cannot be

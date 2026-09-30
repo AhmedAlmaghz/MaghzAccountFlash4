@@ -80,14 +80,15 @@ export const LeavesPage: React.FC = () => {
   };
 
   const handleApprove = async (row: Leave) => {
-    // approvedBy = current user id; the server enforces the balance strictly.
-    const res = await updateStatus(row.id, 'approved', user?.id);
+    // No approver argument: the server stamps the caller as the approver, and
+    // it enforces the balance strictly.
+    const res = await updateStatus(row.id, 'approved');
     if (res.success) addToast('success', t('hr.leaves.approveSuccess'));
     else addToast('error', res.error || t('hr.leaves.insufficient'));
   };
 
   const handleReject = async (row: Leave) => {
-    const res = await updateStatus(row.id, 'rejected', user?.id);
+    const res = await updateStatus(row.id, 'rejected');
     if (res.success) addToast('success', t('hr.leaves.updated'));
     else addToast('error', res.error || t('common.error'));
   };

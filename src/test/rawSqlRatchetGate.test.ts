@@ -43,7 +43,11 @@ const CEILINGS: Record<string, number> = {
   auth: 19,
   tax: 7,
 };
-const TOTAL_CEILING = 666;
+// Lowered 666 -> 663 with the accounting tranche: createAccount and
+// getAccountLedger moved to adapter channels, removing three
+// renderer-composed statements (the ledger alone used to be three hand-built
+// shapes with a manual $N renumbering).
+const TOTAL_CEILING = 663;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

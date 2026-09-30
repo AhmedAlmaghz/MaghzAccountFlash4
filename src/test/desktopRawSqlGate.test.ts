@@ -36,8 +36,14 @@ const ROOT = process.cwd();
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'test-results', 'playwright-report']);
 const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/g;
 
-/** measured 2026-09-25, tranche 7a (reference reads) */
-const CEILING = 381;
+/**
+ * measured 2026-09-25, tranche 7a (reference reads); lowered to 377 when
+ * createAccount + getAccountLedger moved onto adapter channels — three
+ * renderer-composed statements gone, one typed RPC and one fixed-slot ledger
+ * statement replacing them (the ledger alone used to be three hand-built
+ * shapes with a manual $N renumbering).
+ */
+const CEILING = 377;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -62,7 +68,7 @@ const GUARD_RE = /(isElectronPg\s*\(\s*\)|mainAuthBridge\s*\(\s*\))/;
  */
 const BASELINE: Record<string, number> = {
   'src/modules/hr/api.ts': 44,
-  'src/modules/accounting/api.ts': 39,
+  'src/modules/accounting/api.ts': 36,
   'src/modules/manufacturing/api.ts': 34,
   'src/modules/inventory/api.ts': 27,
   'src/modules/purchases/api.ts': 24,

@@ -4003,7 +4003,18 @@
     "title": "An unexpected error occurred",
     "description": "An unexpected error occurred. Please try again.",
     "home": "Home",
-    "reload": "Reload"
+    "reload": "Reload",
+    "db": {
+      "fkViolation": "Invalid reference — the linked record does not exist or belongs to another company",
+      "uniqueViolation": "Value already in use — duplicates are not allowed",
+      "notNullViolation": "A required field is missing",
+      "checkViolation": "Value rejected by a validation rule",
+      "valueTooLong": "Value exceeds the maximum length",
+      "invalidText": "Malformed value format",
+      "serializationFailure": "Concurrency conflict — please retry",
+      "deadlockDetected": "Request processing conflict — please retry",
+      "dbError": "Database error"
+    }
   },
   "common": {
     "loading": "Loading...",

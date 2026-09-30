@@ -3,6 +3,7 @@ import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 import type { DbAdapter, CompanySeedProfile } from './types';
 import { normalizeRow, pgliteAdapter, withoutInternalMigration } from './pgliteAdapter';
 import { ensureRemoteSchema } from './remoteSchema';
+import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 /**
  * Neon HTTP Adapter — remote Postgres for platforms without TCP sockets
@@ -69,6 +70,18 @@ function neonErrorMessage(err: unknown): string {
   return msg;
 }
 
+/**
+ * A Neon failure is a PostgreSQL failure with the same SQLSTATEs, so it gets
+ * the same sentence — with the secret-redacting message as the fallback for
+ * anything the table does not recognise.
+ */
+function neonFailure(err: unknown): { success: false; error: string; errorCode?: string } {
+  const failure = classifyPgFailure(err);
+  return failure
+    ? { success: false, error: pgFailureMessage(failure), errorCode: failure.code }
+    : { success: false, error: neonErrorMessage(err) };
+}
+
 export const neonHttpAdapter: DbAdapter = {
   async ping() {
     const s = requireSql();
@@ -88,7 +101,7 @@ export const neonHttpAdapter: DbAdapter = {
       const rows = (await s.fn.query(sqlText, params ?? [])) as unknown as Record<string, unknown>[];
       return { success: true, rows: (rows ?? []).map(normalizeRow) as unknown as T[] };
     } catch (err) {
-      return { success: false, error: neonErrorMessage(err) };
+      return neonFailure(err);
     }
   },
 
@@ -105,8 +118,14 @@ export const neonHttpAdapter: DbAdapter = {
         results: (results ?? []).map((rows) => ({ rows: (rows ?? []).map(normalizeRow) })),
       };
     } catch (err) {
-      return { success: false, error: neonErrorMessage(err) };
+      return neonFailure(err);
     }
+  },
+
+  async getLedger(payload: { accountId: string; companyId: string; startDate?: string | null; endDate?: string | null }) {
+    // One SQL definition for every local driver: the statement is plain
+    // PostgreSQL, so Neon runs the exact text PGlite runs.
+    return pgliteAdapter.getLedger(payload);
   },
 
   async getCompany() {

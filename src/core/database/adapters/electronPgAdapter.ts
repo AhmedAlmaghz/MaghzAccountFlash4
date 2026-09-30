@@ -1,4 +1,5 @@
 import type { DbAdapter, CompanySeedProfile } from './types';
+import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 export interface ElectronDB extends PreloadDB {
   updateConfig?(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }): Promise<{ success: boolean; connectionId?: string; error?: string }>;
@@ -22,7 +23,10 @@ export interface ElectronDB extends PreloadDB {
   // the main process; the renderer never composes SQL.
   accounting?: {
     getAccounts(payload?: { ownedByUserId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    createAccount(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; parentId?: string | null; type?: string; nature?: string; isGroup?: boolean; balance?: number }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createAccount(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; parentId?: string | null; type?: string; nature?: string; isGroup?: boolean; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // One channel, fixed slots. The company is the session's, so a caller
+    // cannot read another tenant's ledger; the two date slots may be null.
+    getLedger(payload: { accountId: string; companyId: string; startDate?: string | null; endDate?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getTransactions(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     postTransaction(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getAccountById(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -54,6 +58,8 @@ export interface ElectronDB extends PreloadDB {
     deleteInventoryTransaction(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteProductCategory(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteStockAdjustment(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // No approver argument: the main process stamps the session identity.
+    approveStockAdjustment(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteWarehouse(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getCategories(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getProducts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -384,6 +390,31 @@ type ElectronRpcSurface = NonNullable<Required<ElectronDB>['accounting']>
   & NonNullable<Required<ElectronDB>['purchases']>
   & NonNullable<Required<ElectronDB>['core']>;
 
+/**
+ * Every typed-RPC response crosses this once, so a SQLSTATE extracted in the
+ * main process is re-worded on all ~150 channels without touching a single
+ * call site. ONLY failures are rewritten — a successful result keeps its rows
+ * exactly as the caller expects, because the callers that want snake→camel
+ * call normalizeResult themselves.
+ */
+function withFailureClassification(surface: Record<string, unknown>): ElectronRpcSurface {
+  const out: Record<string, unknown> = {};
+  for (const [name, fn] of Object.entries(surface)) {
+    if (typeof fn !== 'function') {
+      out[name] = fn;
+      continue;
+    }
+    out[name] = async (...args: unknown[]) => {
+      const result = await (fn as (...a: unknown[]) => Promise<unknown>)(...args);
+      if (typeof result !== 'object' || result === null) return result;
+      const failure = classifyPgFailure(result);
+      if (!failure) return result;
+      return { ...(result as Record<string, unknown>), error: pgFailureMessage(failure), errorCode: failure.code };
+    };
+  }
+  return out as ElectronRpcSurface;
+}
+
 function getRPC(): ElectronRpcSurface {
   if (typeof window !== 'undefined' && window.electronDB) {
     const db = window.electronDB;
@@ -402,7 +433,7 @@ function getRPC(): ElectronRpcSurface {
     if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !tax || !purchases || !audit || !core) {
       throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/tax/purchases/audit/core)');
     }
-    return {
+    return withFailureClassification({
       ...acc,
       ...inv,
       ...ctc,
@@ -415,7 +446,7 @@ function getRPC(): ElectronRpcSurface {
       ...purchases,
       ...audit,
       ...core,
-    } as ElectronRpcSurface;
+    });
   }
   throw new Error('electronDB not available');
 }
@@ -455,7 +486,19 @@ function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-function normalizeResult<T = unknown>(result: { success: boolean; rows?: Record<string, unknown>[]; error?: string }): { success: boolean; rows?: T[]; error?: string } {
+function normalizeResult<T = unknown>(result: { success: boolean; rows?: Record<string, unknown>[]; error?: string; pgFailure?: unknown }): { success: boolean; rows?: T[]; error?: string; errorCode?: string } {
+  // A typed-RPC / _exec failure that carries a SQLSTATE is re-worded here, at
+  // the last place before the app sees it: main extracted the state (it is the
+  // only holder of the real driver error) and the sentence comes from the same
+  // table PGlite uses, so both environments report a violation identically.
+  const failure = result.pgFailure ? classifyPgFailure(result) : null;
+  if (failure) {
+    return {
+      success: false,
+      error: pgFailureMessage(failure),
+      errorCode: failure.code,
+    };
+  }
   if (result.success && result.rows) {
     return { ...result, rows: result.rows.map(normalizeRow) as unknown as T[] };
   }
@@ -490,7 +533,7 @@ export const electronPgAdapter: DbAdapter = {
       params: q.params,
     }));
     const raw = await getDB()._execBatch(pgQueries);
-    return raw;
+    return normalizeResult(raw);
   },
 
   async getCompany() {
@@ -535,6 +578,11 @@ export const electronPgAdapter: DbAdapter = {
     return { success: result.success, data: result.rows, error: result.error };
   },
 
+  async getLedger(payload) {
+    const result = await getRPC().getLedger(payload);
+    return { success: result.success, rows: result.rows, error: result.error };
+  },
+
   async createAccount(data) {
     const result = await getRPC().createAccount({
       companyId: data.companyId,
@@ -546,6 +594,7 @@ export const electronPgAdapter: DbAdapter = {
       nature: data.nature,
       isGroup: data.isGroup,
       balance: data.balance,
+      isActive: data.isActive,
     });
     if (result.success && result.rows?.length && result.rows[0]) {
       return { success: true, id: String(result.rows[0].id) };

@@ -164,9 +164,11 @@ function registeredChannels(): Set<string> {
  * cleanup task.
  */
 const DIVERGENT_CHANNELS: Record<string, string> = {
-  'accounting.createAccount':
-    'the channel inserts 9 columns where the renderer writes 13 - no id, is_active, ' +
-    'created_by or updated_by; wiring it would drop the audit columns on the desktop',
+  // accounting.createAccount used to sit here: "the channel inserts 9 columns
+  // where the renderer writes 13 - no id, is_active, created_by or updated_by".
+  // The channel is now 12 columns (is_active plus both audit columns from the
+  // session, id database-generated on every driver) and the method calls it, so
+  // the divergence it documented no longer exists.
   'accounting.getTransactions':
     'the method returns one shape with ownedByUserId (t.*, no entries) and another ' +
     'without it (rows carrying a json-aggregated entries array); the channel matches ' +

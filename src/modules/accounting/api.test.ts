@@ -616,91 +616,77 @@ describe('accountingApi.createAccount — FK safety for created_by/updated_by', 
 
   const VALID_UUID = '11111111-2222-3333-4444-555555555555';
 
-  it('passes a valid UUID userId as created_by and updated_by', async () => {
-    let capturedSql = '';
-    let capturedParams: unknown[] = [];
-    const adapter = makeMockAdapter(async (sql, params) => {
-      capturedSql = sql;
-      capturedParams = params;
-      return { success: true };
-    });
+  /**
+   * The INSERT now lives on the adapter (typed RPC on the desktop, the same
+   * statement on PGlite), so the FK-safety property is asserted where it is
+   * decided: the `createdBy` handed to the adapter. Desktop goes further —
+   * the main process stamps BOTH audit columns from the session and ignores
+   * this value entirely.
+   */
+  function captureCreateAccount() {
+    const seen: { payload: Record<string, unknown> | null } = { payload: null };
+    const adapter = {
+      ...makeMockAdapter(async () => ({ success: true })),
+      createAccount: vi.fn(async (data: Record<string, unknown>) => {
+        seen.payload = data;
+        return { success: true, id: 'new-account-id' };
+      }),
+    };
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    return seen;
+  }
 
-    const res = await accountingApi.createAccount(
-      {
-        companyId: '00000000-0000-0000-0000-000000000001',
-        code: '11103',
-        nameAr: 'محفظة جييب',
-        nameEn: '',
-        parentId: 'parent-uuid',
-        type: 'asset',
-        nature: 'debit',
-        isGroup: false,
-        balance: 0,
-        isActive: true,
-      },
-      VALID_UUID,
-    );
+  const ACCOUNT = {
+    companyId: '00000000-0000-0000-0000-000000000001',
+    code: '11103',
+    nameAr: 'محفظة جييب',
+    nameEn: '',
+    parentId: 'parent-uuid',
+    type: 'asset',
+    nature: 'debit',
+    isGroup: false,
+    balance: 0,
+    isActive: true,
+  } as never;
+
+  it('passes a valid UUID userId as the creating user', async () => {
+    const seen = captureCreateAccount();
+
+    const res = await accountingApi.createAccount(ACCOUNT, VALID_UUID);
     expect(res.success).toBe(true);
-    expect(capturedSql).toMatch(/\$12::uuid/);
-    expect(capturedSql).toMatch(/\$13::uuid/);
-    expect(capturedParams[11]).toBe(VALID_UUID);
-    expect(capturedParams[12]).toBe(VALID_UUID);
+    expect(res.id).toBe('new-account-id');
+    expect(seen.payload?.createdBy).toBe(VALID_UUID);
   });
 
   it('replaces empty-string userId with NULL (avoids PG uuid parse error)', async () => {
-    let capturedParams: unknown[] = [];
-    const adapter = makeMockAdapter(async (_sql, params) => {
-      capturedParams = params;
-      return { success: true };
-    });
-    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const seen = captureCreateAccount();
 
-    const res = await accountingApi.createAccount(
-      {
-        companyId: '00000000-0000-0000-0000-000000000001',
-        code: '11104',
-        nameAr: 'حساب اختبار',
-        nameEn: '',
-        parentId: 'parent-uuid',
-        type: 'asset',
-        nature: 'debit',
-        isGroup: false,
-        balance: 0,
-        isActive: true,
-      },
-      '',  // Empty userId should NOT cause FK failure
-    );
+    const res = await accountingApi.createAccount(ACCOUNT, '');  // Empty userId should NOT cause FK failure
     expect(res.success).toBe(true);
-    expect(capturedParams[11]).toBeNull();
-    expect(capturedParams[12]).toBeNull();
+    expect(seen.payload?.createdBy).toBeNull();
   });
 
   it('replaces malformed UUID userId with NULL', async () => {
-    let capturedParams: unknown[] = [];
-    const adapter = makeMockAdapter(async (_sql, params) => {
-      capturedParams = params;
-      return { success: true };
-    });
-    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const seen = captureCreateAccount();
 
-    const res = await accountingApi.createAccount(
-      {
-        companyId: '00000000-0000-0000-0000-000000000001',
-        code: '11105',
-        nameAr: 'حساب اختبار',
-        nameEn: '',
-        parentId: 'parent-uuid',
-        type: 'asset',
-        nature: 'debit',
-        isGroup: false,
-        balance: 0,
-        isActive: true,
-      },
-      'not-a-valid-uuid',
-    );
+    const res = await accountingApi.createAccount(ACCOUNT, 'not-a-valid-uuid');
     expect(res.success).toBe(true);
-    expect(capturedParams[11]).toBeNull();
+    expect(seen.payload?.createdBy).toBeNull();
+  });
+
+  it('forwards is_active instead of letting the column default win', async () => {
+    // The 9-column channel dropped this and created the account enabled.
+    const seen = captureCreateAccount();
+
+    const res = await accountingApi.createAccount({ ...(ACCOUNT as object), isActive: false } as never, VALID_UUID);
+    expect(res.success).toBe(true);
+    expect(seen.payload?.isActive).toBe(false);
+  });
+
+  it('does not compose the INSERT in the renderer any more', async () => {
+    const seen = captureCreateAccount();
+    await accountingApi.createAccount(ACCOUNT, VALID_UUID);
+    expect(seen.payload).not.toBeNull();
   });
 
   it('updateAccount also normalizes userId (cast ::uuid + null fallback)', async () => {
@@ -874,20 +860,15 @@ describe('accountingApi.getAccountLedger — opening balance integration', () =>
     return {
       query: vi.fn(async () => ({ success: true, rows })),
       transaction: vi.fn(async () => ({ success: true, results: [] })),
+      getLedger: vi.fn(async () => ({ success: true, rows })),
     };
   }
 
   it('without startDate: plain movement rows only — no duplicate opening row', async () => {
-    const adapter = {
-      query: vi.fn(async () => ({
-        success: true,
-        rows: [
-          { id: 'tx-1', date: '2026-01-05', reference: 'OPENING', description: 'رصيد افتتاحي', debit: 5000, credit: 0 },
-          { id: 'tx-2', date: '2026-08-05', reference: 'INV-1', description: 'فاتورة', debit: 1200, credit: 0 },
-        ],
-      })),
-      transaction: vi.fn(async () => ({ success: true, results: [] })),
-    };
+    const adapter = makeLedgerAdapter([
+      { id: 'tx-1', date: '2026-01-05', reference: 'OPENING', description: 'رصيد افتتاحي', debit: 5000, credit: 0 },
+      { id: 'tx-2', date: '2026-08-05', reference: 'INV-1', description: 'فاتورة', debit: 1200, credit: 0 },
+    ]);
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     const res = await accountingApi.getAccountLedger(ACCOUNT_ID, COMPANY_ID);
@@ -898,39 +879,32 @@ describe('accountingApi.getAccountLedger — opening balance integration', () =>
     expect(rows[0].id).toBe('tx-1');
     expect(rows[0].balance).toBe(5000);
     expect(rows[1].balance).toBe(6200);
-    // simple query, no prior CTE
-    const sql = (adapter.query.mock.calls as unknown[][])[0]?.[0] as string;
-    expect(sql).not.toMatch(/prior AS/);
-    expect(sql).toMatch(/ORDER BY t\.date, t\.created_at/);
+    // One channel, fixed slots: the absent window travels as explicit nulls,
+    // and the SQL decides (not the renderer) that there is no opening row.
+    expect(adapter.getLedger).toHaveBeenCalledTimes(1);
+    expect((adapter.getLedger.mock.calls as unknown[][])[0]?.[0]).toEqual({
+      accountId: ACCOUNT_ID,
+      companyId: COMPANY_ID,
+      startDate: null,
+      endDate: null,
+    });
   });
 
-  it('with startDate: SQL builds movement + prior CTEs with correct param shifting', async () => {
-    const captured: Array<{ sql: string; params: unknown[] }> = [];
-    const adapter = {
-      query: vi.fn(async (sql: string, params: unknown[]) => {
-        captured.push({ sql, params });
-        return { success: true, rows: [] };
-      }),
-      transaction: vi.fn(async () => ({ success: true, results: [] })),
-    };
+  it('with startDate: the same channel carries the window, with no extra statement', async () => {
+    const adapter = makeLedgerAdapter([]);
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
     await accountingApi.getAccountLedger(ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31');
-    expect(captured).toHaveLength(1);
-    const { sql, params } = captured[0];
-    // movement window
-    expect(sql).toMatch(/WITH movement AS/);
-    expect(sql).toMatch(/t\.date >= \$3/);
-    expect(sql).toMatch(/t\.date <= \$4/);
-    // prior window: same account/company but BEFORE the start boundary,
-    // with params shifted by priorParams.length (3) → $1..$3 become $4..$6
-    expect(sql).toMatch(/prior AS/);
-    expect(sql).toMatch(/t\.date < \$6/);
-    // opening row first (sort_type 0) via the trailing OPENING label param
-    expect(sql).toMatch(/رصيد افتتاحي/);
-    expect(sql).toMatch(/ORDER BY sort_type, date, id/);
-    // param order: [accountId, companyId, start, end, accountId, companyId, start, 'OPENING']
-    expect(params).toEqual([ACCOUNT_ID, COMPANY_ID, '2026-08-01', '2026-08-31', ACCOUNT_ID, COMPANY_ID, '2026-08-01', 'OPENING']);
+    // The old implementation built three different SQL shapes here and
+    // renumbered the `prior` CTE's parameters by hand. One channel, one call.
+    expect(adapter.getLedger).toHaveBeenCalledTimes(1);
+    expect(adapter.query).not.toHaveBeenCalled();
+    expect((adapter.getLedger.mock.calls as unknown[][])[0]?.[0]).toEqual({
+      accountId: ACCOUNT_ID,
+      companyId: COMPANY_ID,
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+    });
   });
 
   it('maps the opening row first and runs the balance from it', async () => {

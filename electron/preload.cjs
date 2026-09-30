@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('electronDB', {
   accounting: {
     getAccounts: (payload) => ipcRenderer.invoke('db:rpc:accounting.getAccounts', { ...payload, sessionToken }),
     createAccount: (payload) => ipcRenderer.invoke('db:rpc:accounting.createAccount', { ...payload, sessionToken }),
+    getLedger: (payload) => ipcRenderer.invoke('db:rpc:accounting.getLedger', { ...payload, sessionToken }),
     getTransactions: (payload) => ipcRenderer.invoke('db:rpc:accounting.getTransactions', { ...payload, sessionToken }),
     postTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.postTransaction', { ...payload, sessionToken }),
     createTransaction: (payload) => ipcRenderer.invoke('db:rpc:accounting.createTransaction', { ...payload, sessionToken }),
@@ -97,6 +98,7 @@ contextBridge.exposeInMainWorld('electronDB', {
     deleteStockTransfer: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteStockTransfer', { ...payload, sessionToken }),
     deleteInventoryTransaction: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteInventoryTransaction', { ...payload, sessionToken }),
     deleteStockAdjustment: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteStockAdjustment', { ...payload, sessionToken }),
+    approveStockAdjustment: (payload) => ipcRenderer.invoke('db:rpc:inventory.approveStockAdjustment', { ...payload, sessionToken }),
     deleteProductCategory: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteProductCategory', { ...payload, sessionToken }),
     getProductsPaginated: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProductsPaginated', { ...payload, sessionToken }),
     getInventoryTransactionsPaginated: (payload) => ipcRenderer.invoke('db:rpc:inventory.getInventoryTransactionsPaginated', { ...payload, sessionToken }),

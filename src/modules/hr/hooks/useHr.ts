@@ -188,8 +188,11 @@ export function useLeaves(companyId: string) {
     return res;
   }, [refresh, user?.id]);
 
-  const updateStatus = useCallback(async (id: string, status: Leave['status'], approvedBy?: string) => {
-    const res = await hrApi.updateLeaveStatus(id, companyId, status, approvedBy, user?.id);
+  // The approver is the caller — the API takes no approver argument (the
+  // Electron channel stamps the session identity, and the local path stamps
+  // this user), so a leave can never be approved in someone else's name.
+  const updateStatus = useCallback(async (id: string, status: Leave['status']) => {
+    const res = await hrApi.updateLeaveStatus(id, companyId, status, user?.id);
     if (res.success) await refresh();
     return res;
   }, [refresh, companyId, user?.id]);
@@ -220,8 +223,8 @@ export function useLeavesPaginated(companyId: string, filters?: LeaveFilters) {
     return res;
   }, [reloadList, user?.id]);
 
-  const updateStatus = useCallback(async (id: string, status: Leave['status'], approvedBy?: string) => {
-    const res = await hrApi.updateLeaveStatus(id, companyId, status, approvedBy, user?.id);
+  const updateStatus = useCallback(async (id: string, status: Leave['status']) => {
+    const res = await hrApi.updateLeaveStatus(id, companyId, status, user?.id);
     if (res.success) await reloadList();
     return res;
   }, [reloadList, companyId, user?.id]);

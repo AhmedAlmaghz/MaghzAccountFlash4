@@ -202,6 +202,49 @@ async function assertCompanyReferences(table, values, companyId, errorMessage) {
   if ((result.rows || []).length !== ids.length) throw new Error(errorMessage);
 }
 
+// ── PostgreSQL failure extraction ─────────────────────────────────────
+// The SQLSTATE is the only machine-readable part of a driver error, and it
+// dies at the IPC boundary: `error: err.message` shipped the English text
+// ("violates foreign key constraint x_parent_id_fkey") and nothing else, so a
+// renderer-side classifier could only pattern-match locale-dependent prose.
+// This is the last place that still holds the real error object — extract the
+// state here and ship a STABLE key. The wording lives in the renderer
+// (src/core/utils/pgErrors.ts), so changing a message never has to be mirrored
+// in this file, and PGlite (which never crosses this boundary) classifies the
+// same SQLSTATEs through the same table.
+const PG_STATE_CODES = {
+  '23503': 'FK_VIOLATION',
+  '23505': 'UNIQUE_VIOLATION',
+  '23502': 'NOT_NULL_VIOLATION',
+  '23514': 'CHECK_VIOLATION',
+  '22001': 'VALUE_TOO_LONG',
+  '22P02': 'INVALID_TEXT_REPRESENTATION',
+  '40001': 'SERIALIZATION_FAILURE',
+  '40P01': 'DEADLOCK_DETECTED',
+};
+
+function pgFailurePayload(err) {
+  if (!err || typeof err !== 'object') return null;
+  // Five characters, digits for class 00-42 and letters beyond it (XX000,
+  // P0001) — a digits-only test would drop half of SQLSTATE.
+  const sqlState = typeof err.code === 'string' && /^[0-9A-Za-z]{5}$/.test(err.code) ? err.code : null;
+  if (!sqlState) return null;
+  return {
+    code: PG_STATE_CODES[sqlState] || 'DB_ERROR',
+    pgCode: sqlState,
+    constraint: err.constraint ? String(err.constraint) : null,
+    table: err.table ? String(err.table) : null,
+    message: err.message ? String(err.message) : 'Database error',
+  };
+}
+
+/** Failure envelope for every DB channel: raw message + machine key. */
+function failureResponse(err) {
+  const message = err && err.message ? String(err.message) : String(err);
+  const pgFailure = pgFailurePayload(err);
+  return pgFailure ? { success: false, error: pgFailure.message, pgFailure } : { success: false, error: message };
+}
+
 function sessionPublicData(session) {
   return { user: session.user, permissions: session.permissions };
 }
@@ -1138,7 +1181,7 @@ export function registerDatabaseHandlers() {
       return { success: true, rows: result.rows, rowCount: result.rowCount };
     } catch (err) {
       console.error('[DB] Query error:', err.message, '\nSQL:', sql, '\nParams:', JSON.stringify(params));
-      return { success: false, error: err.message };
+      return failureResponse(err);
     }
   });
 
@@ -1183,10 +1226,10 @@ export function registerDatabaseHandlers() {
           await healSchemaDriftOnce();
           return await runBatch(); // single retry after healing
         } catch (retryErr) {
-          return { success: false, error: retryErr.message };
+          return failureResponse(retryErr);
         }
       }
-      return { success: false, error: err.message };
+      return failureResponse(err);
     }
   });
 
@@ -1229,7 +1272,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
         const rows = mapResult ? mapResult(result.rows) : result.rows;
         return { success: true, rows, rowCount: result.rowCount };
       } catch (err) {
-        return { success: false, error: err.message };
+        return failureResponse(err);
       }
     });
   };
@@ -1260,10 +1303,17 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
-  // accounting.createAccount
+  // accounting.createAccount — 12 columns, not 9.
+  // The 9-column version had two silent losses: the caller's is_active was
+  // dropped (the column default won, so "create this account disabled" created
+  // it enabled), and created_by/updated_by were written as NULL, leaving every
+  // account created through this channel unattributed. The id stays
+  // database-generated — a renderer-supplied primary key on a write channel is
+  // a hole, not a feature — and both audit columns come from the session, so
+  // the renderer can no longer attribute a row to another user.
   registerRpc('accounting.createAccount', {
     permission: 'accounting.create',
-    paramCount: 9,
+    paramCount: 12,
     validate: async (p, session) => {
       if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
       if (p.parentId !== undefined && p.parentId !== null) {
@@ -1271,18 +1321,78 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       }
     },
     compose: (p, session) => ({
-      sql: `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      sql: `INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance, is_active, created_by, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
       params: [
         session.user.companyId,
         String(p.code || ''),
         String(p.nameAr || ''),
-        String(p.nameEn || ''),
+        p.nameEn ? String(p.nameEn) : null,
         p.parentId ?? null,
         String(p.type || 'asset'),
         String(p.nature || 'debit'),
         p.isGroup ? true : false,
         Number(p.balance || 0),
+        p.isActive === false ? false : true,
+        session.user.id,
+        session.user.id,
+      ],
+    }),
+  });
+
+  // accounting.getLedger — one statement, fixed slots, company from session.
+  // The renderer used to build THREE different shapes of this query (no
+  // window / start-only / start+end) and renumber the `prior` CTE's parameters
+  // by hand ($N -> $N+3), which is the fragile pattern the typed-RPC layer
+  // exists to remove. Here the window is two nullable date slots and the SQL
+  // guards itself: the opening row only materialises when a start date is
+  // present, so a filtered window still ends on the FULL balance while an
+  // unfiltered one shows every posting from zero with nothing double-counted.
+  registerRpc('accounting.getLedger', {
+    // 4 SQL parameters = 3 caller slots (accountId, startDate, endDate) plus
+    // the company the session contributes. The static check counts the
+    // composed params, so it must be 4.
+    paramCount: 4,
+    validate: (p) => {
+      if (p.accountId && !UUID_RE.test(String(p.accountId))) throw new Error('accountId must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH movement AS (
+              SELECT t.id, t.date, t.created_at, t.reference, t.description, je.debit, je.credit
+              FROM journal_entries je
+              JOIN transactions t ON je.transaction_id = t.id
+              WHERE je.account_id = $1::uuid
+                AND t.company_id = $2::uuid
+                AND t.status = 'posted'
+                AND ($3::date IS NULL OR t.date >= $3::date)
+                AND ($4::date IS NULL OR t.date <= $4::date)
+            ),
+            prior AS (
+              SELECT COALESCE(SUM(je.debit - je.credit), 0) AS opening
+              FROM journal_entries je
+              JOIN transactions t ON je.transaction_id = t.id
+              WHERE je.account_id = $1::uuid
+                AND t.company_id = $2::uuid
+                AND t.status = 'posted'
+                AND $3::date IS NOT NULL
+                AND t.date < $3::date
+            )
+            SELECT id::text AS id, date, reference, description, debit, credit, opening, sort_type FROM (
+              SELECT 'OPENING' AS id, NULL::date AS date, NULL::text AS reference,
+                     NULL::text AS description, 0::numeric AS debit, 0::numeric AS credit,
+                     (SELECT opening FROM prior) AS opening, 0 AS sort_type
+              WHERE $3::date IS NOT NULL
+              UNION ALL
+              SELECT m.id::text, m.date, m.reference, m.description, m.debit, m.credit,
+                     NULL::numeric AS opening, 1 AS sort_type
+              FROM movement m
+            ) rows
+            ORDER BY sort_type, date, created_at, id`,
+      params: [
+        String(p.accountId),
+        session.user.companyId,
+        p.startDate ? String(p.startDate) : null,
+        p.endDate ? String(p.endDate) : null,
       ],
     }),
   });
@@ -2874,6 +2984,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     compose: (p, session) => ({
       sql: 'DELETE FROM stock_adjustments WHERE id = $1::uuid AND company_id = $2::uuid',
       params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  // inventory.approveStockAdjustment — the approver is the SESSION user.
+  // The renderer used to name the approver and the statement was raw SQL, so
+  // "approved by" was a value the caller chose; approving a stock adjustment is
+  // a certification that moves inventory and posts a journal entry, so it is
+  // stamped by whoever actually pressed the button. Lifting the statement here
+  // is what makes that possible at all — there is no session on the raw path.
+  registerRpc('inventory.approveStockAdjustment', {
+    paramCount: 4,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE stock_adjustments SET status = 'approved', approved_by = $1::uuid, approved_at = NOW(),
+              updated_by = $2::uuid, updated_at = NOW()
+            WHERE id = $3::uuid AND company_id = $4::uuid`,
+      params: [session.user.id, session.user.id, String(p.id), session.user.companyId],
     }),
   });
 
@@ -4858,18 +4987,25 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   });
 
   // hr.updateLeaveStatus — `leaves` has no updated_at column; omitted.
+  // `approved_by` is the SESSION user, not a payload field. It used to be
+  // accepted from the renderer and only checked for company membership, so any
+  // hr.edit holder could approve a leave and stamp it as someone who never saw
+  // it — and an approval is a certification with a financial consequence (the
+  // leave balance feeds the IAS 19 end-of-service provision). Delegation, if
+  // ever needed, is a separate audited action, not a free-text identity.
   registerRpc('hr.updateLeaveStatus', {
+    // 6 = the composed params (paramCount counts what compose() produces, not
+    // the caller slots). The caller supplies only id + status.
     paramCount: 6,
-    validate: async (p, session) => {
+    validate: (p) => {
       if (!p.id || !LEAVE_STATUSES.has(p.status)) throw new Error('id and valid status required');
-      if (p.approvedBy) await assertCompanyReferences('users', [p.approvedBy], session.user.companyId, 'Approver not found in company');
     },
     compose: (p, session) => ({
       sql: `UPDATE leaves SET status = $1, approved_by = $2::uuid, approved_at = $3, updated_by = $4::uuid
             WHERE id = $5::uuid AND company_id = $6::uuid RETURNING id`,
       params: [
         p.status,
-        UUID_FILTER(p.approvedBy),
+        session.user.id,
         p.status === 'approved' ? new Date().toISOString() : null,
         session.user.id,
         String(p.id),

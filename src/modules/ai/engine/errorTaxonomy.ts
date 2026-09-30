@@ -13,18 +13,26 @@
  *   "يكتشف الخطأ ويوجه المستخدم ويعرض سبب الخطأ وما يجب فعله" —
  *     instead of parroting the raw error.
  *
- * Classification is REGEX-BASED over the normalized Arabic message: the API
- * layer's business messages are the contract (they already carry the cause,
- * e.g. "المتبقي: 3 أيام", "لا يمكن حذف فاتورة مرحلة"). New API guards
- * should phrase messages so a classifier pattern catches the family —
- * and new patterns MUST come with a test.
+ * Classification runs in three layers, in order:
+ *   1. a STABLE KEY the tool forwarded (`errorCode` from the adapter
+ *      classification) — a key cannot be misread;
+ *   2. an EXACT match against the adapter's constant database sentences —
+ *      constants cannot drift the way prose does;
+ *   3. REGEXES over the normalized Arabic business message: the API layer's
+ *      messages are the contract (they already carry the cause, e.g.
+ *      "المتبقي: 3 أيام", "لا يمكن حذف فاتورة مرحلة"). New API guards should
+ *      phrase messages so a classifier pattern catches the family — and new
+ *      patterns MUST come with a test.
  */
+
+import { PG_AR_SENTENCES, type PgFailureCode } from '@/core/utils/pgErrors';
 
 export type ToolErrorCode =
   // ── Validation & input ──────────────────────────────────────────────────
   | 'MISSING_ID'               // a required entity id was absent
   | 'MISSING_FIELD'            // a required business field was absent
   | 'INVALID_VALUE'            // quantity/amount/date out of range or malformed
+  | 'INVALID_REFERENCE'        // a foreign-key reference is dead or cross-tenant
   | 'AMOUNT_NOT_POSITIVE'
   | 'UNBALANCED_ENTRY'        // journal debit != credit
   | 'DUPLICATE_DOCUMENT'      // identical fingerprint blocked
@@ -216,6 +224,38 @@ const PATTERNS: Pattern[] = [
 const UNKNOWN_REASON = 'خطأ غير مصنّف — رسالة الـ API الخام هي المرجع.';
 const UNKNOWN_FIX = 'اقرأ رسالة الخطأ الخام واشرحها للمستخدم ببساطة، واقترح بديلاً يدوياً من الشاشات إن تعذّر التنفيذ.';
 
+/**
+ * A database failure that reached a tool never carries raw PG prose any more:
+ * every adapter classifies at its boundary and reports a constant sentence
+ * (`PG_AR_SENTENCES`) plus — when the key survived — a stable code. Both land
+ * here on the same taxonomy family, because these strings are constants, not
+ * locale-moving prose.
+ *
+ * INVALID_REFERENCE fills a hole the regexes left: a CREATE with a dead
+ * parentId used to fall into DOCUMENT_HAS_CHILDREN ("archive instead of
+ * deleting"), whose guidance actively harms a create — it told the model to
+ * delete the record it had just failed to create.
+ */
+const STABLE_KEY_TO_CODE: Record<PgFailureCode, ToolErrorCode> = {
+  FK_VIOLATION: 'INVALID_REFERENCE',
+  UNIQUE_VIOLATION: 'DUPLICATE_ENTITY',
+  NOT_NULL_VIOLATION: 'INVALID_VALUE',
+  CHECK_VIOLATION: 'INVALID_VALUE',
+  VALUE_TOO_LONG: 'INVALID_VALUE',
+  INVALID_TEXT_REPRESENTATION: 'INVALID_VALUE',
+  SERIALIZATION_FAILURE: 'DB_ERROR',
+  DEADLOCK_DETECTED: 'DB_ERROR',
+  DB_ERROR: 'DB_ERROR',
+};
+
+const INVALID_REFERENCE = {
+  reason:
+    'مرجع ميت: المعرف الممرَّر (عميل/مورد/منتج/حساب أب…) غير موجود في هذه الشركة — غالباً معرف ملفّق أو منسوخ من سياق آخر، لا سجل حقيقي.',
+  fixHint:
+    'لا تخترع معرفات ولا تعيد نفسها: استدعِ أداة search المناسبة بالاسم من كلام المستخدم، وإن لم يوجد فأنشئ الكيان أولاً (أو اسأل المستخدم) ثم أعد التنفيذ. معرف UUID حرفي في الحقول = توقف فوراً.',
+  retryable: true,
+};
+
 /** Fold Arabic variants so classifier patterns match despite orthography. */
 function normalizeForClassify(s: string): string {
   return s
@@ -225,8 +265,33 @@ function normalizeForClassify(s: string): string {
     .replace(/ة/g, 'ه');
 }
 
-export function classifyToolError(rawError: string): ToolErrorClassification {
+/**
+ * @param rawError  the tool's error text, as always.
+ * @param stableKey the database stable key when it survived to the tool
+ *                  (`errorCode` on a tool's returned object). Beats the regex:
+ *                  a key cannot be misread, a sentence can.
+ */
+export function classifyToolError(rawError: string, stableKey?: string | null): ToolErrorClassification {
   const raw = (rawError || '').trim();
+
+  if (stableKey && stableKey in STABLE_KEY_TO_CODE) {
+    const code = STABLE_KEY_TO_CODE[stableKey as PgFailureCode];
+    if (code === 'INVALID_REFERENCE') {
+      return { code, userMessage: raw, reason: INVALID_REFERENCE.reason, fixHint: INVALID_REFERENCE.fixHint, retryable: INVALID_REFERENCE.retryable, raw };
+    }
+    const p = PATTERNS.find((pattern) => pattern.code === code)!;
+    return { code, userMessage: raw, reason: p.reason, fixHint: p.fixHint, retryable: p.retryable, raw };
+  }
+
+  // No key travelled with the failure — but the adapters report database
+  // sentences from a constant table, so an EXACT match is still a key:
+  // constants cannot drift the way prose does.
+  for (const [key, sentence] of Object.entries(PG_AR_SENTENCES)) {
+    if (raw === (sentence as string)) {
+      return classifyToolError(raw, key);
+    }
+  }
+
   const norm = normalizeForClassify(raw);
 
   for (const p of PATTERNS) {
