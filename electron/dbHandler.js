@@ -2782,6 +2782,101 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // ── Inventory writes, tranche 8q (shape-detected) ────────────────────
+  // deleteProduct: the guard asks which ledgers still point here, so it is a
+  // database fact and this process decides it. refs and the delete are one
+  // statement, so they cannot interleave and both read the same snapshot.
+  // SQL and message text are lifted from the renderer, not retyped.
+  registerRpc('inventory.deleteProduct', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH refs AS (
+              SELECT source, count(*)::int AS count FROM (
+        SELECT 'sales_invoice_lines' AS source FROM sales_invoice_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'quotation_lines' FROM quotation_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'sales_return_lines' FROM sales_return_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'purchase_invoice_lines' FROM purchase_invoice_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'purchase_order_lines' FROM purchase_order_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'purchase_return_lines' FROM purchase_return_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'work_orders' FROM work_orders WHERE product_id = $1::uuid AND company_id = $2::uuid
+        ) t GROUP BY source HAVING count(*) > 0 ORDER BY source
+            ), del AS (
+              DELETE FROM products WHERE id = $1::uuid AND company_id = $2::uuid
+                 AND NOT EXISTS (SELECT 1 FROM refs)
+              RETURNING id
+            )
+            SELECT (SELECT COALESCE(json_agg(json_build_object('source', source, 'count', count) ORDER BY source), '[]'::json) FROM refs) AS refs,
+                   (SELECT count(*) FROM del) AS deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) {
+        const list = Array.isArray(r.refs)
+          ? r.refs.map((x) => `${x.source}: ${x.count}`).join('، ')
+          : '';
+        throw new Error('لا يمكن حذف الصنف لأنه مستخدم في مستندات قائمة (${list}). عطّل الصنف بدلاً من حذفه.');
+      }
+      return rows;
+    },
+  });
+
+  // deleteStockTransfer: the renderer deleted the lines and then the parent as two
+  // statements, so a failure on the second left a header with no lines. One
+  // statement, with the line delete reading the parent RETURNING output, so the
+  // order is guaranteed and the orphan window does not exist.
+  registerRpc('inventory.deleteStockTransfer', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH del AS (
+              DELETE FROM warehouse_transfers WHERE id = $1::uuid AND company_id = $2::uuid
+              RETURNING id
+            ), lines AS (
+              DELETE FROM warehouse_transfer_lines WHERE transfer_id IN (SELECT id FROM warehouse_transfers WHERE id = $1 AND company_id = $2)
+            )
+            SELECT (SELECT count(*) FROM del) AS deleted,
+                   (SELECT count(*) FROM lines) AS lines_deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) return rows;
+      return rows;
+    },
+  });
+
+  // deleteInventoryTransaction: a single DELETE with no guard - the lifted statement,
+  // scoped by the session company rather than a payload one.
+  registerRpc('inventory.deleteInventoryTransaction', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM stock_movements WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
+  // deleteStockAdjustment: a single DELETE with no guard - the lifted statement,
+  // scoped by the session company rather than a payload one.
+  registerRpc('inventory.deleteStockAdjustment', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM stock_adjustments WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

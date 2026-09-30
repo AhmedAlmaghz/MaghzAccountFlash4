@@ -326,7 +326,12 @@ export const inventoryApi = {
   async deleteProduct(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
-      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!idValidation.success) return { success: false, error: idValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        return surface.deleteProduct({ id });
+      }
+
       const adapter = await getDbAdapter();
       // The product FKs on the document-line tables are ON DELETE CASCADE (owner
       // decision), so without this guard deleting a product would silently strip
@@ -817,7 +822,12 @@ export const inventoryApi = {
   async deleteStockTransfer(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
-      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!idValidation.success) return { success: false, error: idValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        return surface.deleteStockTransfer({ id });
+      }
+
       const adapter = await getDbAdapter();
       const del = await adapter.query(
         `DELETE FROM warehouse_transfer_lines WHERE transfer_id IN (SELECT id FROM warehouse_transfers WHERE id = $1 AND company_id = $2)`,
@@ -1076,7 +1086,12 @@ export const inventoryApi = {
   async deleteInventoryTransaction(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
-      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!idValidation.success) return { success: false, error: idValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        return surface.deleteInventoryTransaction({ id });
+      }
+
       const adapter = await getDbAdapter();
       return adapter.query('DELETE FROM stock_movements WHERE id = $1 AND company_id = $2', [id, companyId]);
     } catch (e) {
@@ -1286,7 +1301,12 @@ export const inventoryApi = {
   async deleteStockAdjustment(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
-      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!idValidation.success) return { success: false, error: idValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        return surface.deleteStockAdjustment({ id });
+      }
+
       const adapter = await getDbAdapter();
       return adapter.query('DELETE FROM stock_adjustments WHERE id = $1 AND company_id = $2', [id, companyId]);
     } catch (e) {
