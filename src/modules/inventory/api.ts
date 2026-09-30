@@ -1,4 +1,5 @@
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
+import { splitPagedRpcRows } from '@/core/utils/pagedRpc';
 import { mapRows, toDateString } from '@/core/utils/mapPgRow';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { z } from 'zod';
@@ -129,7 +130,16 @@ export const inventoryApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getProductsPaginated({ page: p, pageSize: ps, ...{ search: filters?.search, isActive: filters?.isActive, productTypeId: filters?.productTypeId } });
+        if (!res.success) return { success: false, error: res.error };
+        const { rows, total } = splitPagedRpcRows(res.rows);
+        const paged = mapRows<Product>(rows);
+        return { success: true, data: paginatedResult(paged, total, p, ps) };
+      }
+
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['p.company_id = $1'];
@@ -942,7 +952,16 @@ export const inventoryApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
-      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);
+      const { page: p, pageSize: ps, offset } = clampPageArgs(page, pageSize);      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = await surface.getInventoryTransactionsPaginated({ page: p, pageSize: ps, ...{ type: filters?.type, productId: filters?.productId } });
+        if (!res.success) return { success: false, error: res.error };
+        const { rows, total } = splitPagedRpcRows(res.rows);
+        const paged = mapRows<InventoryTransaction>(rows);
+        return { success: true, data: paginatedResult(paged, total, p, ps) };
+      }
+
       const adapter = await getDbAdapter();
 
       const conditions: string[] = ['sm.company_id = $1'];

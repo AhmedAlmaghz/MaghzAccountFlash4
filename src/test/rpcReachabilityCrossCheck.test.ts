@@ -222,11 +222,10 @@ describe('the static gate cannot under-report what the runtime observes', () => 
         'getAccountLedger', 'applyPaymentToInvoice',
       ],
       inventory: [
-        'getProductsForSelect', 'getProductsPaginated', 'updateProduct', 'deleteProduct',
+        'getProductsForSelect', 'updateProduct', 'deleteProduct',
         'updateWarehouse', 'deleteWarehouse',
         'deleteStockTransfer',
-        'completeStockTransfer', 'getInventoryTransactionsPaginated',
-        'deleteInventoryTransaction', 'updateStockAdjustment',
+        'completeStockTransfer', 'deleteInventoryTransaction', 'updateStockAdjustment',
         'approveStockAdjustment', 'postStockAdjustment', 'deleteStockAdjustment',
         'deleteProductCategory', 'getInventoryKpis',
       ],

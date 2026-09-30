@@ -2648,6 +2648,93 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Inventory paged reads (Phase 0 tranche 8o) ─────────────────────────────
+  // count LEFT JOIN LATERAL page ON true, so a page past the end still reports
+  // the true total - the renderer runs a COUNT and a page query as two
+  // statements and its total is always known. Fixed slots for the optional
+  // filters rather than a built WHERE: isActive uses !== undefined, so a
+  // deliberate false is a filter and only an absent value becomes NULL.
+  registerRpc('inventory.getProductsPaginated', {
+    paramCount: 6,
+    compose: (p, session) => {
+      const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
+      const isActive = p.isActive === undefined || p.isActive === null ? null : Boolean(p.isActive);
+      const productTypeId = UUID_FILTER(p.productTypeId);
+      return {
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM products p
+            LEFT JOIN product_types pt ON pt.id = p.product_type_id
+            LEFT JOIN units u ON (u.name_ar = p.unit OR u.code = p.unit) AND u.company_id = p.company_id
+                       WHERE p.company_id = $1::uuid
+                AND ($2::boolean IS NULL OR p.is_active = $2)
+                AND ($3::uuid IS NULL OR p.product_type_id = $3)
+                AND ($4::text IS NULL OR p.name_ar ILIKE $4 OR p.name_en ILIKE $4 OR p.code ILIKE $4 OR p.barcode ILIKE $4 OR p.sku ILIKE $4)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT p.*, pt.name_ar AS product_type_name,
+                u.name_ar AS unit_name, u.code AS unit_code,
+                COALESCE(
+                  (SELECT json_agg(ppc.category_id)
+                   FROM product_product_categories ppc
+                   WHERE ppc.product_id = p.id), '[]'::json
+                ) AS category_ids,
+                COALESCE(
+                  (SELECT json_agg(jsonb_build_object('id', pc.id, 'name', pc.name) ORDER BY pc.name)
+                   FROM product_product_categories ppc
+                   JOIN product_categories pc ON pc.id = ppc.category_id
+                   WHERE ppc.product_id = p.id), '[]'::json
+                ) AS category_names
+                      FROM products p
+            LEFT JOIN product_types pt ON pt.id = p.product_type_id
+            LEFT JOIN units u ON (u.name_ar = p.unit OR u.code = p.unit) AND u.company_id = p.company_id
+                     WHERE p.company_id = $1::uuid
+                AND ($2::boolean IS NULL OR p.is_active = $2)
+                AND ($3::uuid IS NULL OR p.product_type_id = $3)
+                AND ($4::text IS NULL OR p.name_ar ILIKE $4 OR p.name_en ILIKE $4 OR p.code ILIKE $4 OR p.barcode ILIKE $4 OR p.sku ILIKE $4)
+                    ORDER BY p.code, p.name_ar
+                    LIMIT $5 OFFSET $6
+                  ) _p
+                ) pg ON true`,
+        params: [session.user.companyId, isActive, productTypeId, TEXT_FILTER(p.search), limit, offset],
+      };
+    },
+  });
+  registerRpc('inventory.getInventoryTransactionsPaginated', {
+    paramCount: 5,
+    compose: (p, session) => {
+      const limit = Math.max(1, Math.min(500, Number(p.pageSize) || 25));
+      const offset = Math.max(0, (Number(p.page) || 1) - 1) * limit;
+      const type = typeof p.type === 'string' && p.type ? p.type : null;
+      const productId = UUID_FILTER(p.productId);
+      return {
+        sql: `SELECT c.total_count, (pg.id IS NOT NULL) AS has_row, pg.*
+                FROM (SELECT COUNT(*)::int AS total_count
+                        FROM stock_movements sm
+           LEFT JOIN products p ON sm.product_id = p.id
+           LEFT JOIN warehouses w ON sm.warehouse_id = w.id
+                       WHERE sm.company_id = $1::uuid
+                     AND ($2::text IS NULL OR sm.type = $2)
+                     AND ($3::uuid IS NULL OR sm.product_id = $3)) c
+                LEFT JOIN LATERAL (
+                  SELECT * FROM (
+                    SELECT sm.*, sm.created_at AS date, p.name_ar as product_name, w.name as warehouse_name
+                      FROM stock_movements sm
+           LEFT JOIN products p ON sm.product_id = p.id
+           LEFT JOIN warehouses w ON sm.warehouse_id = w.id
+                     WHERE sm.company_id = $1::uuid
+                     AND ($2::text IS NULL OR sm.type = $2)
+                     AND ($3::uuid IS NULL OR sm.product_id = $3)
+                    ORDER BY sm.created_at DESC
+                    LIMIT $4 OFFSET $5
+                  ) _p
+                ) pg ON true`,
+        params: [session.user.companyId, type, productId, limit, offset],
+      };
+    },
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw
