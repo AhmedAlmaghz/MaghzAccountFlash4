@@ -5,7 +5,7 @@ slug: "en/09-purchases/01-suppliers"
 group: "Purchases"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Suppliers — User Guide

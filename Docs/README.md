@@ -5,7 +5,7 @@ slug: "README"
 group: "الدليل / Guide"
 language: "ar,en"
 created: 2026-09-12
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # MaghzAccountPro — User Documentation / توثيق المستخدم

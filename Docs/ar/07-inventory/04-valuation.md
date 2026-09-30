@@ -5,7 +5,7 @@ slug: "ar/07-inventory/04-valuation"
 group: "المخازن"
 language: "ar"
 created: 2026-09-20
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # طرق تقييم المخزون — دليل الاستخدام

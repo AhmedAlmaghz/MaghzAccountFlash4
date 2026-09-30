@@ -5,7 +5,7 @@ slug: "en/06-accounting/06-year-end-assets"
 group: "Accounting"
 language: "en"
 created: 2026-09-20
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Year-End Close, Fixed Assets & Reversal — User Guide

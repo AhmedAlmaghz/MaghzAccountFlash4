@@ -5,7 +5,7 @@ slug: "en/07-inventory/02-warehouses-stock"
 group: "Inventory"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Warehouses & Stock — User Guide

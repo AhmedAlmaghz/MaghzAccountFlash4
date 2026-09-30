@@ -5,7 +5,7 @@ slug: "en/Examples/06-pharmacy-fifo"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Example 06 — Al-Shifa Pharmacy (FIFO, return, shortage & payment)

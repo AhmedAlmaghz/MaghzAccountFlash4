@@ -5,7 +5,7 @@ slug: "ar/06-accounting/04-financial-reports"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-12
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # التقارير المالية — دليل الاستخدام

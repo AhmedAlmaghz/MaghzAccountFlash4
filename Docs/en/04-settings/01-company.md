@@ -5,7 +5,7 @@ slug: "en/04-settings/01-company"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Company Information — User Guide

@@ -5,7 +5,7 @@ slug: "en/02-getting-started/03-login"
 group: "Getting Started"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Login — User Guide

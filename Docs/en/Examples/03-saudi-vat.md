@@ -5,7 +5,7 @@ slug: "en/Examples/03-saudi-vat"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Example 03 — Riyadh Trading (15% VAT & VAT return)

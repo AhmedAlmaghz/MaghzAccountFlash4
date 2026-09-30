@@ -5,7 +5,7 @@ slug: "ar/16-multicurrency/02-fx-revaluation"
 group: "العملات المتعددة"
 language: "ar"
 created: 2026-09-20
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # فروق أسعار الصرف وإعادة التقييم — دليل الاستخدام

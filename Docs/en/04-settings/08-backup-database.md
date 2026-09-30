@@ -5,7 +5,7 @@ slug: "en/04-settings/08-backup-database"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Backup, Database & Reset Setup — User Guide

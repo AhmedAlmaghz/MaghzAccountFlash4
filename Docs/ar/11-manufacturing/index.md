@@ -5,7 +5,7 @@ slug: "ar/11-manufacturing/index"
 group: "التصنيع"
 language: "ar"
 created: 2026-09-12
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # التصنيع — دليل الاستخدام

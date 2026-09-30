@@ -5,7 +5,7 @@ slug: "en/14-reports/02-reports-hub"
 group: "Reports"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Reports Hub — User Guide

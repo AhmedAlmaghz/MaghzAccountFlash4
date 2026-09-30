@@ -5,7 +5,7 @@ slug: "ar/08-sales/04-sales-returns"
 group: "المبيعات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # مرتجعات المبيعات — دليل الاستخدام

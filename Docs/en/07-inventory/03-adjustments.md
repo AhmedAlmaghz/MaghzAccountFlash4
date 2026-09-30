@@ -5,7 +5,7 @@ slug: "en/07-inventory/03-adjustments"
 group: "Inventory"
 language: "en"
 created: 2026-09-13
-version: "0.26.2"
+version: "0.26.3"
 author: "Ahmed Almaghz"
 ---
 # Stock Adjustments (Stock Counts) — User Guide
