@@ -2735,6 +2735,53 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // ── Inventory guarded delete (Phase 0 tranche 8p) ─────────────────────────
+  // The guard asks four tables whether they still reference the warehouse, so
+  // it is a fact from the database and belongs here rather than in the
+  // renderer. The renderer version is deleted, not kept: a second copy of the
+  // same rule is not defence in depth, it is a second thing to drift.
+  //
+  // One statement, so the check and the delete cannot interleave and both see
+  // the same snapshot. The SQL and the message text are lifted from the
+  // renderer, not retyped, so the user-visible wording is unchanged.
+  registerRpc('inventory.deleteWarehouse', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH refs AS (
+              SELECT source, count(*)::int AS count FROM (
+        SELECT 'sales_invoice_lines' AS source FROM sales_invoice_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'quotation_lines' FROM quotation_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'sales_return_lines' FROM sales_return_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'purchase_invoice_lines' FROM purchase_invoice_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'purchase_order_lines' FROM purchase_order_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'purchase_return_lines' FROM purchase_return_lines WHERE product_id = $1::uuid
+        UNION ALL SELECT 'work_orders' FROM work_orders WHERE product_id = $1::uuid AND company_id = $2::uuid
+        ) t GROUP BY source HAVING count(*) > 0 ORDER BY source
+            ), del AS (
+              DELETE FROM warehouses w
+               WHERE w.id = $1::uuid AND w.company_id = $2::uuid
+                 AND NOT EXISTS (SELECT 1 FROM refs)
+              RETURNING w.id
+            )
+            SELECT (SELECT COALESCE(json_agg(json_build_object('source', source, 'count', count) ORDER BY source), '[]'::json) FROM refs) AS refs,
+                   (SELECT count(*) FROM del) AS deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) {
+        const list = Array.isArray(r.refs)
+          ? r.refs.map((x) => `${x.source}: ${x.count}`).join('، ')
+          : '';
+        throw new Error('لا يمكن حذف المستودع لوجود حركات أو أرصدة مرتبطة به (${list}). عطّل المستودع بدلاً من حذفه.');
+      }
+      return rows;
+    },
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

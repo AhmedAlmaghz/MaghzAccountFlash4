@@ -600,6 +600,16 @@ export const inventoryApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        // The reference check asks four tables whether they still point here,
+        // so it is a fact from the database: on this path the main process
+        // decides it. The PGlite fallback below keeps an equivalent guard
+        // because it has no main process to hold it - one rule per execution
+        // path, not one copy in the tree.
+        return surface.deleteWarehouse({ id });
+      }
       const adapter = await getDbAdapter();
       // Stock rows carry a NOT NULL warehouse_id and the column had no foreign
       // key, so deleting a warehouse holding inventory left stock pointing at a
