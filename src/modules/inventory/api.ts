@@ -1383,7 +1383,12 @@ export const inventoryApi = {
   async deleteProductCategory(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
-      if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (!idValidation.success) return { success: false, error: idValidation.error };      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        return surface.deleteProductCategory({ id });
+      }
+
       const adapter = await getDbAdapter();
       const result = await adapter.query('DELETE FROM product_categories WHERE id = $1 AND company_id = $2', [id, companyId]);
       return result.success ? { success: true } : { success: false, error: result.error };

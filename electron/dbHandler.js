@@ -2877,6 +2877,21 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Inventory single-statement writes, tranche 8r ──────────────────
+
+  // deleteProductCategory: one DELETE FROM, no guard, statement lifted from the
+  // renderer and scoped by the session company instead of a payload one.
+  registerRpc('inventory.deleteProductCategory', {
+    paramCount: 1,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: 'DELETE FROM product_categories WHERE id = $1::uuid AND company_id = $2::uuid',
+      params: [String(p.id), session.user.companyId],
+    }),
+  });
+
   // ── Tax engine (Phase 0 tranche) ───────────────────────────────────────────
   // The tax engine is a posting guard: assertPeriodOpen runs inside eight
   // posting paths, so on desktop it was reaching PostgreSQL through the raw

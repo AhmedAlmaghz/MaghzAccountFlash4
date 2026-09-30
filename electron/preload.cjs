@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('electronDB', {
     deleteStockTransfer: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteStockTransfer', { ...payload, sessionToken }),
     deleteInventoryTransaction: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteInventoryTransaction', { ...payload, sessionToken }),
     deleteStockAdjustment: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteStockAdjustment', { ...payload, sessionToken }),
+    deleteProductCategory: (payload) => ipcRenderer.invoke('db:rpc:inventory.deleteProductCategory', { ...payload, sessionToken }),
     getProductsPaginated: (payload) => ipcRenderer.invoke('db:rpc:inventory.getProductsPaginated', { ...payload, sessionToken }),
     getInventoryTransactionsPaginated: (payload) => ipcRenderer.invoke('db:rpc:inventory.getInventoryTransactionsPaginated', { ...payload, sessionToken }),
     createProductCategories: (payload) => ipcRenderer.invoke('db:rpc:inventory.createProductCategories', { ...payload, sessionToken }),
