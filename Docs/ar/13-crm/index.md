@@ -5,7 +5,7 @@ slug: "ar/13-crm/index"
 group: "علاقات العملاء CRM"
 language: "ar"
 created: 2026-09-12
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # CRM — دليل الاستخدام

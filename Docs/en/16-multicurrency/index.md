@@ -5,7 +5,7 @@ slug: "en/16-multicurrency/index"
 group: "Multi-Currency"
 language: "en"
 created: 2026-09-13
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # Multi-Currency — User Guide

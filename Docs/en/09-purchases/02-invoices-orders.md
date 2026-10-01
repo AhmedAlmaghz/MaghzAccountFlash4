@@ -5,7 +5,7 @@ slug: "en/09-purchases/02-invoices-orders"
 group: "Purchases"
 language: "en"
 created: 2026-09-13
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # Purchase Invoices & Purchase Orders — User Guide

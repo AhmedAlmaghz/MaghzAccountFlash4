@@ -5,7 +5,7 @@ slug: "en/10-pos/03-settings-reports"
 group: "Point of Sale (POS)"
 language: "en"
 created: 2026-09-13
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # POS Settings & Reports — User Guide

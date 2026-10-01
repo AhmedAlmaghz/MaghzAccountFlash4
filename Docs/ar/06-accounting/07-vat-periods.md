@@ -5,7 +5,7 @@ slug: "ar/06-accounting/07-vat-periods"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-20
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # الفترات الضريبية والإقرار — دليل الاستخدام

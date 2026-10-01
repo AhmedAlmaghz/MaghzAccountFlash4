@@ -5,7 +5,7 @@ slug: "ar/17-tax-jurisdictions/index"
 group: "الولايات الضريبية"
 language: "ar"
 created: 2026-09-20
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # الولايات الضريبية — دليل الاستخدام

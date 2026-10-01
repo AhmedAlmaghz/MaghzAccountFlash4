@@ -5,7 +5,7 @@ slug: "en/10-pos/01-terminal"
 group: "Point of Sale (POS)"
 language: "en"
 created: 2026-09-13
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # Cashier Screen — User Guide

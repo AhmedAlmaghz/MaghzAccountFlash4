@@ -5,7 +5,7 @@ slug: "en/02-getting-started/01-installation"
 group: "Getting Started"
 language: "en"
 created: 2026-09-13
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # Installation — User Guide

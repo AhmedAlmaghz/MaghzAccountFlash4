@@ -5,7 +5,7 @@ slug: "ar/Examples/05-services-payroll"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # مثال 05 — شركة آفاق للاستشارات (خدمات ورواتب ومخصصات)

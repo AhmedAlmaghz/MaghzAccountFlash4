@@ -5,7 +5,7 @@ slug: "en/index"
 group: "Complete User Guide"
 language: "en"
 created: 2026-09-13
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # Complete User Guide — MaghzAccountPro

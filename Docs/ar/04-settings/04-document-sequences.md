@@ -5,7 +5,7 @@ slug: "ar/04-settings/04-document-sequences"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # ترقيم المستندات — دليل الاستخدام

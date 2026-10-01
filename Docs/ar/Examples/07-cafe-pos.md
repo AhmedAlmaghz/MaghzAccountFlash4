@@ -5,7 +5,7 @@ slug: "ar/Examples/07-cafe-pos"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.6"
+version: "0.26.7"
 author: "Ahmed Almaghz"
 ---
 # مثال 07 — كافيه الديوان POS (ورديات وفروق وعهد)
