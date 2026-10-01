@@ -5,7 +5,7 @@ slug: "ar/01-introduction/index"
 group: "مقدمة النظام"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # نظرة عامة على النظام — MaghzAccountPro

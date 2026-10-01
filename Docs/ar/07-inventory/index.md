@@ -5,7 +5,7 @@ slug: "ar/07-inventory/index"
 group: "المخازن"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # المخازن — دليل الاستخدام

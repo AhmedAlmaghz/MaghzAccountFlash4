@@ -5,7 +5,7 @@ slug: "en/99-appendix/05-faq"
 group: "Appendices"
 language: "en"
 created: 2026-09-13
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # Frequently Asked Questions

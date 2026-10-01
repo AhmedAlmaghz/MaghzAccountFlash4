@@ -5,7 +5,7 @@ slug: "ar/Examples/02-import-fx"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # مثال 02 — شركة الأفق للاستيراد (عملات أجنبية وفروق صرف)

@@ -5,7 +5,7 @@ slug: "en/06-accounting/07-vat-periods"
 group: "Accounting"
 language: "en"
 created: 2026-09-20
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # Tax Periods & VAT Return — User Guide

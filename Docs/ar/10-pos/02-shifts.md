@@ -5,7 +5,7 @@ slug: "ar/10-pos/02-shifts"
 group: "نقاط البيع POS"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # الورديات — دليل الاستخدام

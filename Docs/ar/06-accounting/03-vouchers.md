@@ -5,7 +5,7 @@ slug: "ar/06-accounting/03-vouchers"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # سندات القبض والصرف — دليل الاستخدام

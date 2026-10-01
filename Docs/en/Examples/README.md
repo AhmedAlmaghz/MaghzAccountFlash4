@@ -5,7 +5,7 @@ slug: "en/Examples/README"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # Solved Training Examples — User Guide

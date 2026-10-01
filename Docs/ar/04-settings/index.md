@@ -5,7 +5,7 @@ slug: "ar/04-settings/index"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # الإعدادات — دليل الاستخدام

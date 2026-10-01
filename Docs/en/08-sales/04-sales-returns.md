@@ -5,7 +5,7 @@ slug: "en/08-sales/04-sales-returns"
 group: "Sales"
 language: "en"
 created: 2026-09-13
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # Sales Returns — User Guide

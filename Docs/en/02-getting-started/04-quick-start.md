@@ -5,7 +5,7 @@ slug: "en/02-getting-started/04-quick-start"
 group: "Getting Started"
 language: "en"
 created: 2026-09-13
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # Your First Complete Workflow — Quick Start

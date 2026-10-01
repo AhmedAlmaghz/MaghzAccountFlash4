@@ -5,7 +5,7 @@ slug: "ar/06-accounting/02-journal-entries"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # قيود اليومية — دليل الاستخدام

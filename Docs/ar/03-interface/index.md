@@ -5,7 +5,7 @@ slug: "ar/03-interface/index"
 group: "الواجهة العامة"
 language: "ar"
 created: 2026-09-12
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # الواجهة العامة — دليل الاستخدام

@@ -5,7 +5,7 @@ slug: "ar/Examples/10-wholesale-aging"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.5"
+version: "0.26.6"
 author: "Ahmed Almaghz"
 ---
 # مثال 10 — موزع النخبة للجملة (ائتمان وخصم وأعمار وسلفة)
