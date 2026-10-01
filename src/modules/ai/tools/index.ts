@@ -14,6 +14,7 @@ import { posTools } from './posTools';
 import { fixedAssetTools } from './fixedAssetTools';
 import { taxTools } from './taxTools';
 import { memoryTools } from './memoryTools';
+import { entityTools } from './entityTools';
 import { jevTools } from '../jev/jevTools';
 
 /**
@@ -24,7 +25,7 @@ let registered = false;
 
 export function ensureToolsRegistered(): void {
   if (registered) return;
-  registerTools([...readTools, ...searchTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools, ...batchTools, ...directionTools, ...posTools, ...fixedAssetTools, ...taxTools, ...memoryTools, ...jevTools]);
+  registerTools([...readTools, ...searchTools, ...entityTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools, ...batchTools, ...directionTools, ...posTools, ...fixedAssetTools, ...taxTools, ...memoryTools, ...jevTools]);
   registered = true;
 }
 

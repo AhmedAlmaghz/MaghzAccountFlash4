@@ -20,6 +20,8 @@ vi.mock('../tools/index', () => ({
 }));
 vi.mock('../entityResolver', () => ({
   resolveEntitiesInText: vi.fn(async (_text: string) => ({ all: [], highConfidence: [], corrections: [], text: _text })),
+  searchEntities: vi.fn(async () => []),
+  needsEntityResolution: vi.fn(() => false),
 }));
 vi.mock('./toolExecutor', () => ({
   executeToolCall: mocks.executeToolCall,

@@ -16,7 +16,7 @@ import { jevSearchAll } from './jevSearch';
 export const jevTools: ToolDefinition[] = [
   {
     name: 'jev.search_all',
-    descriptionAr: 'بحث موحد في كل الكيانات (عملاء/موردون/منتجات/وحدات/حسابات/فواتير/سندات/قيود/موظفون/مخازن/تصنيع/فرص...) بطلب قرار واحد — استخدمه بدل استدعاء عدة أدوات search.* عندما لا تعرف نوع الكيان',
+    descriptionAr: 'بحث موحد احتياطي لمنتصف السلسلة فقط (كيانات غير محلولة بكتلة الحل) — نقطة البداية هي كتلة "حلّ الكيانات" ثم ai.resolve_entities، لا هذه الأداة',
     labelAr: 'بحث موحد (JEV)',
     permission: 'ai.use',
     dangerLevel: 'read',

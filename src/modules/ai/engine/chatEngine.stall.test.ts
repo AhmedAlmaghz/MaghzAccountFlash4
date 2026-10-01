@@ -16,7 +16,11 @@ vi.mock('../tools/registry', () => ({
   toLlmTools: vi.fn(() => []),
 }));
 vi.mock('../tools/index', () => ({ ensureToolsRegistered: mocks.ensureToolsRegistered }));
-vi.mock('../entityResolver', () => ({ resolveEntitiesInText: mocks.resolveEntitiesInText }));
+vi.mock('../entityResolver', () => ({
+  resolveEntitiesInText: mocks.resolveEntitiesInText,
+  searchEntities: vi.fn(async () => []),
+  needsEntityResolution: vi.fn(() => false),
+}));
 vi.mock('./toolExecutor', () => ({
   executeToolCall: vi.fn(),
   resolveTool: vi.fn(() => undefined),

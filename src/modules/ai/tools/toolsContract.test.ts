@@ -180,6 +180,10 @@ describe('AI tools contract gate (CI)', () => {
       // gate is the meta entry point, same pattern as reports.dashboard
       // hybrids that gate per-block at runtime.
       'jev.search_all',
+      // ai.resolve_entities gates per-ENTITY at runtime (entityService with
+      // rbacFilter:true filters searchers by the caller's permissions) —
+      // same meta-entry pattern as jev.search_all above.
+      'ai.resolve_entities',
     ]);
     const violations = tools
       .filter((t) => t.dangerLevel === 'read')

@@ -1,4 +1,5 @@
 import type { PendingToolCall } from '../types';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
 
 /**
  * Identical-retry ceiling: the same write (toolName + stable args) that
@@ -41,4 +42,31 @@ export function prunePendingCall(calls: PendingToolCall[], callId: string): Pend
 /** True when this exact write already failed enough to stop re-asking. */
 export function hasExhaustedRetries(attempts: Map<string, number>, toolName: string, args: unknown): boolean {
   return (attempts.get(writeAttemptKey(toolName, args)) ?? 0) >= WRITE_RETRY_LIMIT;
+}
+
+/**
+ * Dedup key for READ/search calls — Arabic-normalized at the leaves.
+ * "شركة الأمل" vs "شركه الامل" (alef/teh variants, case, extra spaces)
+ * map to ONE key, so a spelling-variant re-search hits the loop guard
+ * instead of executing a second identical 200-row fetch. Writes keep the
+ * exact writeAttemptKey (retry semantics must stay byte-precise).
+ */
+export function readAttemptKey(toolName: string, args: unknown): string {
+  const stable = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(stable);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(
+        Object.keys(v as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, stable((v as Record<string, unknown>)[k])]),
+      );
+    }
+    if (typeof v === 'string') {
+      // Arabic-normalized leaf: spelling variants ("شركة" vs "شركه")
+      // map to one key. normalizeArabic is dependency-free (no import cycle).
+      return normalizeArabic(v);
+    }
+    return v;
+  };
+  return `${toolName}::${JSON.stringify(stable(args))}`;
 }

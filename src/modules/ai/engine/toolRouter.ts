@@ -44,7 +44,11 @@ const ALWAYS_ON_TOOLS: readonly string[] = [
   // search paths — one LLM turn + one 200-row fetch PER family, up to the
   // iteration cap. Individual search.* tools ride their domain groups below
   // and stay reachable for single-entity verification + adaptive expansion).
+  // Phase 1 unification: ai.resolve_entities is the single deterministic
+  // entry point (local fuzzy first, JEV fallback). search.* stay registered
+  // but are NOT advertised by intent — reachable via adaptive expansion only.
   'jev.search_all',
+  'ai.resolve_entities',
 ];
 
 interface DomainGroup {
@@ -73,12 +77,16 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     // (visibleByName filters) but lie to the reader; domain prefixes alone
     // already route the whole family (see the reports group below).
     // P1 (JEV): jev.rank_customers_churn rides the sales intent.
-    // Search unification (2026-09-24): search.* left ALWAYS_ON for
-    // jev.search_all — each family rides its domain so verification stays
-    // one intent away, never a blind guess.
+    // Search unification (2026-09-24, superseded Phase 1): search.* NO
+    // LONGER ride domains — ai.resolve_entities (always-on) is the single
+    // discovery path; search.* stay reachable via adaptive expansion only.
+    // Phase 1 unification: search.* REMOVED from intent advertisement.
+    // The model must use ai.resolve_entities (always-on) for discovery;
+    // search.* remain registered + reachable via adaptive expansion
+    // (a called-but-unadvertised tool joins the next cycle) for rare
+    // single-entity verification. This ends the multi-fan-out loop.
     prefixes: [
       'sales.', 'jev.rank_customers_churn',
-      'search.customers', 'search.sales_invoices', 'search.quotations', 'search.sales_returns',
     ],
     keywords: [
       'بيع', 'مبيعات', 'فاتورة بيع', 'فواتير بيع', 'عميل', 'عملاء', 'عرض سعر', 'عروض أسعار',
@@ -87,10 +95,7 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
-    prefixes: [
-      'purchases.',
-      'search.suppliers', 'search.purchase_invoices', 'search.purchase_orders', 'search.purchase_returns',
-    ],
+    prefixes: ['purchases.'],
     keywords: [
       'شراء', 'مشتريات', 'فاتورة شراء', 'فواتير شراء', 'مورد', 'موردين', 'أمر شراء',
       'أوامر شراء', 'مردود مشتريات', 'مديونية', 'أرصدة الموردين', 'دائن', 'سداد',
@@ -98,10 +103,9 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
   },
   {
     // P1 (JEV): jev.score_stock rides the inventory intent.
+    // Phase 1: search.* removed from advertisement (see sales group note).
     prefixes: [
       'inventory.', 'read.inventory_kpis', 'read.inventory_valuation', 'jev.score_stock',
-      'search.products', 'search.product_units', 'search.units', 'search.warehouses',
-      'search.categories', 'search.stock_movements', 'search.stock_adjustments', 'search.stock_transfers',
     ],
     keywords: [
       'مخزن', 'مخازن', 'مخزون', 'منتج', 'منتجات', 'صنف', 'أصناف', 'مستودع', 'مستودعات',
@@ -111,8 +115,6 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
   {
     prefixes: [
       'hr.', 'read.attendance_summary', 'read.employee_payroll_history', 'read.end_of_service', 'read.hr_kpis',
-      'search.employees', 'search.attendance', 'search.leaves', 'search.payroll_runs',
-      'search.end_of_services', 'search.departments',
     ],
     keywords: [
       'موظف', 'موظفين', 'موظفون', 'راتب', 'رواتب', 'مسير', 'حضور', 'غياب', 'انصراف',
@@ -122,9 +124,9 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
   },
   {
     // P1 (JEV): jev.score_lead rides the CRM intent.
+    // Phase 1: search.* removed from advertisement (see sales group note).
     prefixes: [
       'crm.', 'manufacturing.check_bom_availability', 'jev.score_lead',
-      'search.leads', 'search.opportunities', 'search.tasks', 'search.activities',
     ],
     keywords: [
       'عميل محتمل', 'عملاء محتملين', 'فرصة', 'فرص', 'مرشح', 'مرشحين', 'قيادة', 'عملاء جدد',
@@ -133,8 +135,9 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
+    // Phase 1: search.* removed from advertisement (see sales group note).
     prefixes: [
-      'manufacturing.', 'search.boms', 'search.work_orders', 'search.products',
+      'manufacturing.',
     ],
     keywords: [
       'تصنيع', 'إنتاج', 'تشغيل', 'أمر تشغيل', 'أوامر تشغيل', 'bom', 'قائمة مواد',
@@ -150,7 +153,8 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     ],
   },
   {
-    prefixes: ['settings.', 'search.cash_boxes', 'search.cost_centers', 'search.units', 'search.product_types', 'search.document_sequences', 'search.categories'],
+    // Phase 1: search.* removed from advertisement (see sales group note).
+    prefixes: ['settings.'],
     keywords: [
       'إعدادات', 'اعدادات', 'ثيم', 'ثيمات', 'ألوان', 'مظهر', 'واجهة', 'فرع', 'فروع',
       'صندوق', 'صناديق', 'مركز تكلفة', 'وحدة', 'وحدات', 'نوع منتج', 'أنواع منتجات',
@@ -179,8 +183,6 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     // six real read.* tools (readTools.ts) may be named explicitly.
     prefixes: [
       'accounting.',
-      'search.accounts', 'search.cash_boxes', 'search.receipt_vouchers',
-      'search.payment_vouchers', 'search.journal_entries', 'search.cost_centers',
     ],
     keywords: [
       'قيود', 'قيد', 'يومية', 'حساب', 'حسابات', 'شجرة الحسابات', 'ميزان', 'ميزانية',

@@ -5,6 +5,7 @@ import {
   hasExhaustedRetries,
   prunePendingCall,
   writeAttemptKey,
+  readAttemptKey,
 } from './confirmations';
 import type { PendingToolCall } from '../types';
 
@@ -44,5 +45,20 @@ describe('confirmations slice-2 equivalence', () => {
     const attempts = new Map([[writeAttemptKey('t', { a: 1 }), 2]]);
     expect(hasExhaustedRetries(attempts, 't', { a: 1 })).toBe(true);
     expect(hasExhaustedRetries(attempts, 't', { a: 2 })).toBe(false);
+  });
+
+  it('readAttemptKey folds Arabic spelling variants (loop guard catches re-search)', () => {
+    expect(readAttemptKey('search.customers', { query: 'شركة الأمل' })).toBe(
+      readAttemptKey('search.customers', { query: 'شركه الامل' }),
+    );
+    expect(readAttemptKey('search.customers', { query: 'شركة الأمل' })).not.toBe(
+      readAttemptKey('search.customers', { query: 'شركة النور' }),
+    );
+  });
+
+  it('writeAttemptKey stays byte-precise (writes are not folded)', () => {
+    expect(writeAttemptKey('t', { q: 'شركة الأمل' })).not.toBe(
+      writeAttemptKey('t', { q: 'شركه الامل' }),
+    );
   });
 });

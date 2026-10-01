@@ -37,6 +37,7 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
       'ai.batch_status', 'ai.classify_document', 'ai.enqueue_batch', 'ai.resume_batch',
       'ai.clear_queue',
       'jev.search_all',
+      'ai.resolve_entities',
     ];
     for (const n of core) registerTool(makeTool(n, 'ai.use' as never));
     // Verification search tools — routed by domain intent, NOT always-on
@@ -52,20 +53,24 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     seedRegistry();
     const routed = routeToolsForCycle([userMsg('مرحبا')]);
     expect(routed.routedByIntent).toBe(false);
-    // 'مرحبا' matches no keyword → only always-on (9 registered above);
-    // search.* verification tools stay out until an intent routes them
-    expect(routed.tools.length).toBe(9);
+    // 'مرحبا' matches no keyword → only always-on (10 registered above);
+    // search.* verification tools stay out (reachable via adaptive expansion)
+    expect(routed.tools.length).toBe(10);
     expect(routed.dropped).toBe(0);
     expect(routed.tools.every((t) => getVisibleTools().some((v) => v.name === t.name))).toBe(true);
   });
 
-  it('search unification: sales intent routes search.customers for verification, silence does not', () => {
+  it('search unification (Phase 1): ai.resolve_entities is always-on; search.* never intent-routed', () => {
     seedRegistry();
     const silent = routeToolsForCycle([userMsg('مرحبا')]);
     expect(silent.tools.map((t) => t.name)).not.toContain('search.customers');
     expect(silent.tools.map((t) => t.name)).toContain('jev.search_all');
+    expect(silent.tools.map((t) => t.name)).toContain('ai.resolve_entities');
+    // Phase 1: even a sales intent must NOT advertise search.* — the single
+    // discovery path is ai.resolve_entities; search.* stay adaptive-only.
     const sales = routeToolsForCycle([userMsg('أنشئ فاتورة بيع لعميل')]);
-    expect(sales.tools.map((t) => t.name)).toContain('search.customers');
+    expect(sales.tools.map((t) => t.name)).not.toContain('search.customers');
+    expect(sales.tools.map((t) => t.name)).toContain('ai.resolve_entities');
   });
 
   it('routes the sales domain on sales intent keywords', () => {
@@ -196,7 +201,7 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
         userMsg('تمام'),
       ]);
       expect(routed.routedByIntent).toBe(false);
-      expect(routed.tools.length).toBe(9);
+      expect(routed.tools.length).toBe(10);
     });
   });
 });

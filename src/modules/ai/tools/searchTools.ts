@@ -68,14 +68,6 @@ function searchParam(description: string): Record<string, unknown> {
   };
 }
 
-/**
- * Normalise an Arabic query for search — strips diacritics, collapses alef/hamza/yeh/teh
- * variants into a common form so common typos and dialectal differences are tolerated.
- */
-function normalizeQuery(query: string): string {
-  return normalizeArabic(query);
-}
-
 /** Flatten the hierarchical accounts tree for text search. */
 function flattenAccounts(accounts: Account[]): Account[] {
   const out: Account[] = [];
@@ -410,9 +402,8 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم عرض السعر أو جزء من اسم العميل'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       // Paginated window instead of the old full-table fetch (getQuotations
       // returned EVERY quotation to the renderer and filtered in JS).
       // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200), consistent with every
@@ -422,12 +413,14 @@ export const searchTools: ToolDefinition[] = [
       // thousand-row datasets — tracked, not done here.)
       const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data.items
-        .filter((q) =>
-          q.quotationNumber.toLowerCase().includes(cleanQuery) ||
-          normalizeQuery(q.customer?.name || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1): token-aware scoring so non-contiguous
+      // multi-word queries ("شوكلاتة صغير") match — pure includes() returned
+      // zero and forced the model into retry loops.
+      const matches = fuzzySearch(
+        query,
+        res.data.items,
+        (q) => `${q.quotationNumber || ''} ${q.customer?.name || ''}`,
+      ).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((q) => ({
           id: q.id,
@@ -448,14 +441,12 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم المستودع'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await inventoryApi.getWarehouses(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((w) => normalizeQuery(w.name).includes(cleanQuery))
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1): token-aware instead of pure includes().
+      const matches = fuzzySearch(query, res.data, (w) => w.name).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((w) => ({ id: w.id, name: w.name, isActive: w.isActive })),
         totalMatches: matches.length,
@@ -470,9 +461,8 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم الفاتورة أو اسم العميل'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       // Paginated window instead of the old full-table fetch (getInvoices
       // returned EVERY invoice to the renderer — thousands of rows on real
       // datasets — then filtered in JS).
@@ -497,11 +487,13 @@ export const searchTools: ToolDefinition[] = [
         seen.add(inv.id);
         matches.push(inv);
       };
-      for (const inv of fuzzyRes.data.items) {
-        const n = (inv.invoiceNumber || '').toLowerCase();
-        const c = normalizeQuery(inv.customer?.name || '');
-        if (n.includes(cleanQuery) || c.includes(cleanQuery)) push(inv);
-      }
+      // Unified fuzzy (Phase 1): token-aware name matching + exact number.
+      // Pure includes() missed non-contiguous multi-word names.
+      for (const m of fuzzySearch(
+        query,
+        fuzzyRes.data.items,
+        (inv) => `${inv.invoiceNumber || ''} ${inv.customer?.name || ''}`,
+      ).slice(0, 8)) push(m.item);
       const numberItems = numberRes.success && numberRes.data ? numberRes.data.items : [];
       for (const inv of numberItems) push(inv);
       const out = matches.slice(0, 8);
@@ -525,9 +517,8 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم الفاتورة أو اسم المورد'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       // Paginated window instead of the old full-table fetch.
       // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200) — see quotations note.
       // Plus a server-side number pass for digit-bearing queries (mirrors
@@ -547,11 +538,12 @@ export const searchTools: ToolDefinition[] = [
         seen.add(inv.id);
         matches.push(inv);
       };
-      for (const inv of fuzzyRes.data.items) {
-        const n = (inv.invoiceNumber || '').toLowerCase();
-        const s = normalizeQuery(inv.supplier?.name || '');
-        if (n.includes(cleanQuery) || s.includes(cleanQuery)) push(inv);
-      }
+      // Unified fuzzy (Phase 1).
+      for (const m of fuzzySearch(
+        query,
+        fuzzyRes.data.items,
+        (inv) => `${inv.invoiceNumber || ''} ${inv.supplier?.name || ''}`,
+      ).slice(0, 8)) push(m.item);
       const numberItems = numberRes.success && numberRes.data ? numberRes.data.items : [];
       for (const inv of numberItems) push(inv);
       const out = matches.slice(0, 8);
@@ -575,18 +567,16 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم الأمر أو اسم المورد'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await purchasesApi.getOrders(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((o) => {
-          const n = (o.orderNumber || '').toLowerCase();
-          const s = normalizeQuery(o.supplier?.name || '');
-          return n.includes(cleanQuery) || s.includes(cleanQuery);
-        })
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        res.data,
+        (o) => `${o.orderNumber || ''} ${o.supplier?.name || ''}`,
+      ).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((o) => ({
           id: o.id,
@@ -695,21 +685,20 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم سند القبض أو اسم العميل'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       // Window widened 8 → 200 (same fix as search.journal_entries): a
       // voucher older than the 8 newest was permanently unfindable and the
       // model reported existing vouchers as nonexistent.
       const res = await accountingApi.getReceiptVouchersPaginated(ctx.companyId, 1, 200, { status: undefined });
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
-      const matches = items
-        .filter((v) =>
-          v.voucherNumber.toLowerCase().includes(cleanQuery) ||
-          normalizeQuery(v.customerName).includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        items,
+        (v) => `${v.voucherNumber || ''} ${v.customerName || ''}`,
+      ).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((v) => ({
           id: v.id,
@@ -730,19 +719,18 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم سند الصرف أو اسم المورد'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       // Window widened 8 → 200 (same fix as search.journal_entries).
       const res = await accountingApi.getPaymentVouchersPaginated(ctx.companyId, 1, 200, { status: undefined });
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
-      const matches = items
-        .filter((v) =>
-          v.voucherNumber.toLowerCase().includes(cleanQuery) ||
-          normalizeQuery(v.supplierName || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        items,
+        (v) => `${v.voucherNumber || ''} ${v.supplierName || ''}`,
+      ).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((v) => ({
           id: v.id,
@@ -832,19 +820,22 @@ export const searchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await salesApi.getReturns(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const combined: Array<{ id: string; returnNumber: string; entityName: string; status: string; totalAmount: number }> = [];
-      for (const r of res.data) {
-        const n = (r.returnNumber || '').toLowerCase();
+      // Unified fuzzy (Phase 1) — keeps the [object Object]-safe name extraction.
+      const combined = fuzzySearch(
+        query,
+        res.data,
+        (r) => {
+          const cName = r.customer && typeof r.customer === 'object' ? String((r.customer as { name?: string }).name ?? '') : String(r.customer ?? '');
+          return `${r.returnNumber || ''} ${cName}`;
+        },
+      ).slice(0, 8).map((m) => {
+        const r = m.item;
         const cName = r.customer && typeof r.customer === 'object' ? String((r.customer as { name?: string }).name ?? '') : String(r.customer ?? '');
-        const c = normalizeQuery(cName);
-        if (n.includes(cleanQuery) || c.includes(cleanQuery)) {
-          combined.push({ id: r.id, returnNumber: r.returnNumber || '', entityName: cName, status: r.status, totalAmount: r.totalAmount });
-        }
-      }
-      return { matches: combined.slice(0, 8), totalMatches: combined.length };
+        return { id: r.id, returnNumber: r.returnNumber || '', entityName: cName, status: r.status, totalAmount: r.totalAmount };
+      });
+      return { matches: combined, totalMatches: combined.length };
     },
   },
   {
@@ -857,19 +848,22 @@ export const searchTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await purchasesApi.getReturns(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const combined: Array<{ id: string; returnNumber: string; entityName: string; status: string; totalAmount: number }> = [];
-      for (const r of res.data) {
-        const n = (r.returnNumber || '').toLowerCase();
+      // Unified fuzzy (Phase 1).
+      const combined = fuzzySearch(
+        query,
+        res.data,
+        (r) => {
+          const sName = r.supplier && typeof r.supplier === 'object' ? String((r.supplier as { name?: string }).name ?? '') : String(r.supplier ?? '');
+          return `${r.returnNumber || ''} ${sName}`;
+        },
+      ).slice(0, 8).map((m) => {
+        const r = m.item;
         const sName = r.supplier && typeof r.supplier === 'object' ? String((r.supplier as { name?: string }).name ?? '') : String(r.supplier ?? '');
-        const s = normalizeQuery(sName);
-        if (n.includes(cleanQuery) || s.includes(cleanQuery)) {
-          combined.push({ id: r.id, returnNumber: r.returnNumber || '', entityName: sName, status: r.status, totalAmount: r.totalAmount });
-        }
-      }
-      return { matches: combined.slice(0, 8), totalMatches: combined.length };
+        return { id: r.id, returnNumber: r.returnNumber || '', entityName: sName, status: r.status, totalAmount: r.totalAmount };
+      });
+      return { matches: combined, totalMatches: combined.length };
     },
   },
   {
@@ -880,20 +874,19 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('رقم المرجع أو وصف القيد'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       // Window widened 8 → 200: the old 8-row window made any reference
       // older than the newest 8 transactions permanently unfindable.
       const res = await accountingApi.getTransactionsPaginated(ctx.companyId, 1, 200);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
-      const matches = items
-        .filter((t) =>
-          normalizeQuery(t.reference || '').includes(cleanQuery) ||
-          normalizeQuery(t.description || '').includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        items,
+        (t) => `${t.reference || ''} ${t.description || ''}`,
+      ).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((t) => ({
           id: t.id,
@@ -916,21 +909,17 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم المنتج أو نوع الحركة (in/out/transfer)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      // Window widened 8 → 200 (same fix as search.journal_entries), and
-      // product-name matching routed through normalizeQuery like every other
-      // search in this file (raw toLowerCase missed ة/أ variants).
-      const cleanQuery = normalizeQuery(query);
       const res = await inventoryApi.getInventoryTransactionsPaginated(ctx.companyId, 1, 200);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
-      const matches = items
-        .filter((m) =>
-          normalizeQuery(m.productName || '').includes(cleanQuery) ||
-          m.type.toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        items,
+        (m) => `${m.productName || ''} ${m.type || ''}`,
+      ).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((m) => ({
           id: m.id,
@@ -1056,17 +1045,15 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم التصنيف (عربي أو إنجليزي)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       const res = await settingsApi.getProductTypes(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب التصنيفات' };
-      // P3 fix: Arabic-normalized matching like every other search in this
-      // file — raw toLowerCase missed ة/أ variants (e.g. query "فئه" vs "فئة").
-      const cleanQuery = normalizeQuery(query);
-      const matches = res.data
-        .filter((t) => !query || normalizeQuery(t.nameAr || '').includes(cleanQuery) || normalizeQuery(t.nameEn || '').includes(cleanQuery))
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = (!query
+        ? res.data.slice(0, 8).map((item) => ({ item, score: 1 }))
+        : fuzzySearch(query, res.data, (t) => `${t.nameAr || ''} ${t.nameEn || ''}`)).slice(0, 8);
       return {
-        matches: matches.map((t) => ({ id: t.id, nameAr: t.nameAr, nameEn: t.nameEn, code: t.code, isActive: t.isActive })),
+        matches: matches.map((m) => ({ id: m.item.id, nameAr: m.item.nameAr, nameEn: m.item.nameEn, code: m.item.code, isActive: m.item.isActive })),
         totalMatches: matches.length,
       };
     },
@@ -1080,16 +1067,15 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم الوحدة (عربي أو إنجليزي)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       const res = await settingsApi.getUnits(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الوحدات' };
-      // P3 fix: same Arabic normalization as product_types above.
-      const cleanQuery = normalizeQuery(query);
-      const matches = res.data
-        .filter((u) => !query || normalizeQuery(u.nameAr || '').includes(cleanQuery) || normalizeQuery(u.nameEn || '').includes(cleanQuery))
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = (!query
+        ? res.data.slice(0, 8).map((item) => ({ item, score: 1 }))
+        : fuzzySearch(query, res.data, (u) => `${u.nameAr || ''} ${u.nameEn || ''}`)).slice(0, 8);
       return {
-        matches: matches.map((u) => ({ id: u.id, nameAr: u.nameAr, nameEn: u.nameEn, code: u.code, conversionFactor: u.conversionFactor, isActive: u.isActive })),
+        matches: matches.map((m) => ({ id: m.item.id, nameAr: m.item.nameAr, nameEn: m.item.nameEn, code: m.item.code, conversionFactor: m.item.conversionFactor, isActive: m.item.isActive })),
         totalMatches: matches.length,
       };
     },
@@ -1124,16 +1110,15 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم مركز التكلفة (عربي أو إنجليزي)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       const res = await settingsApi.getCostCenters(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب مراكز التكلفة' };
-      // P3 fix: same Arabic normalization as product_types above.
-      const cleanQuery = normalizeQuery(query);
-      const matches = res.data
-        .filter((c) => !query || normalizeQuery(c.nameAr || '').includes(cleanQuery) || normalizeQuery(c.nameEn || '').includes(cleanQuery))
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = (!query
+        ? res.data.slice(0, 8).map((item) => ({ item, score: 1 }))
+        : fuzzySearch(query, res.data, (c) => `${c.nameAr || ''} ${c.nameEn || ''}`)).slice(0, 8);
       return {
-        matches: matches.map((c) => ({ id: c.id, nameAr: c.nameAr, nameEn: c.nameEn, code: c.code, type: c.type, isActive: c.isActive })),
+        matches: matches.map((m) => ({ id: m.item.id, nameAr: m.item.nameAr, nameEn: m.item.nameEn, code: m.item.code, type: m.item.type, isActive: m.item.isActive })),
         totalMatches: matches.length,
       };
     },
@@ -1182,26 +1167,25 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم الموظف أو الحالة (draft/approved/paid)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await hrApi.getEndOfServicesPaginated(ctx.companyId, 1, 20);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
-      const matches = items
-        .filter((e) =>
-          normalizeQuery(e.employeeName || '').includes(cleanQuery) ||
-          e.status.toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        items,
+        (e) => `${e.employeeName || ''} ${e.status || ''}`,
+      ).slice(0, 8);
       return {
-        matches: matches.map((e) => ({
-          id: e.id,
-          employeeName: e.employeeName,
-          terminationDate: e.terminationDate,
-          serviceYears: e.serviceYears,
-          eosAmount: e.eosAmount,
-          status: e.status,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          employeeName: m.item.employeeName,
+          terminationDate: m.item.terminationDate,
+          serviceYears: m.item.serviceYears,
+          eosAmount: m.item.eosAmount,
+          status: m.item.status,
         })),
         totalMatches: matches.length,
       };
@@ -1216,27 +1200,25 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم المنتج أو المستودع أو الحالة (draft/approved/posted)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await inventoryApi.getStockAdjustments(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((a) =>
-          normalizeQuery(a.productName || '').includes(cleanQuery) ||
-          normalizeQuery(a.warehouseName || '').includes(cleanQuery) ||
-          a.status.toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        res.data,
+        (a) => `${a.productName || ''} ${a.warehouseName || ''} ${a.status || ''}`,
+      ).slice(0, 8);
       return {
-        matches: matches.map((a) => ({
-          id: a.id,
-          title: a.productName,
-          date: a.date,
-          systemQty: a.systemQty,
-          actualQty: a.actualQty,
-          difference: a.difference,
-          status: a.status,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          title: m.item.productName,
+          date: m.item.date,
+          systemQty: m.item.systemQty,
+          actualQty: m.item.actualQty,
+          difference: m.item.difference,
+          status: m.item.status,
         })),
         totalMatches: matches.length,
       };
@@ -1251,26 +1233,24 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('المستودع المصدر أو الهدف أو الحالة (draft/approved/posted)'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await inventoryApi.getStockTransfers(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((t) =>
-          normalizeQuery(t.fromWarehouseName || '').includes(cleanQuery) ||
-          normalizeQuery(t.toWarehouseName || '').includes(cleanQuery) ||
-          t.status.toLowerCase().includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(
+        query,
+        res.data,
+        (t) => `${t.fromWarehouseName || ''} ${t.toWarehouseName || ''} ${t.status || ''}`,
+      ).slice(0, 8);
       return {
-        matches: matches.map((t) => ({
-          id: t.id,
-          title: `${t.fromWarehouseName || '?'} ← ${t.toWarehouseName || '?'}`,
-          reference: t.reference,
-          totalQuantity: t.totalQuantity,
-          date: t.date,
-          status: t.status,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          title: `${m.item.fromWarehouseName || '?'} ← ${m.item.toWarehouseName || '?'}`,
+          reference: m.item.reference,
+          totalQuantity: m.item.totalQuantity,
+          date: m.item.date,
+          status: m.item.status,
         })),
         totalMatches: matches.length,
       };
@@ -1285,21 +1265,17 @@ export const searchTools: ToolDefinition[] = [
     dangerLevel: 'read',
     parameters: searchParam('اسم التصنيف'),
     execute: async (args, ctx) => {
-      const query = String(args.query || '').trim().toLowerCase();
+      const query = String(args.query || '').trim();
       if (!query) return { error: 'نص البحث مطلوب' };
-      const cleanQuery = normalizeQuery(query);
       const res = await inventoryApi.getCategories(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
-      const matches = res.data
-        .filter((c) =>
-          normalizeQuery(c.name).includes(cleanQuery)
-        )
-        .slice(0, 8);
+      // Unified fuzzy (Phase 1).
+      const matches = fuzzySearch(query, res.data, (c) => c.name).slice(0, 8);
       return {
-        matches: matches.map((c) => ({
-          id: c.id,
-          title: c.name,
-          parentId: c.parentId,
+        matches: matches.map((m) => ({
+          id: m.item.id,
+          title: m.item.name,
+          parentId: m.item.parentId,
         })),
         totalMatches: matches.length,
       };

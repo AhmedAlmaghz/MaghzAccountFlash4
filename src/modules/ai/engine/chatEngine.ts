@@ -9,7 +9,6 @@ import { routeToolsForCycle } from './toolRouter';
 import { jevRouteToolsForCycle } from '../jev/jevToolRouter';
 import { recordJevMetric, recordJevRoute, estimateJevCost } from '../jev/jevMetrics';
 import { jevGuardCheck } from '../jev/jevGuard';
-import { jevSearchAll } from '../jev/jevSearch';
 import { checkJevPostingTool, isPostingGuardBlocked, postingBadge } from '../jev/jevPostingGuard';
 import { ensureSkillsRegistered, selectActiveSkills } from '../skills';
 import { buildSystemPrompt, type LiveCompanyContext } from './systemPrompt';
@@ -33,7 +32,9 @@ import { addUsage, checkBudget, emptyUsage, formatUsage, type TokenUsage } from 
 import { expandDialectText } from './dialectMap';
 import { clearAttachmentBlobs } from '../attachments/attachmentBlobs';
 import { registerAiSessionDisposer } from './sessionBoundary';
-import { resolveEntitiesInText, needsEntityResolution } from '../entityResolver';
+import { needsEntityResolution } from '../entityResolver';
+import { planRequest } from './requestPlanner';
+import { resolveEntities, renderEntityBlock } from './entityService';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, LlmTool, PendingToolCall, ToolContext } from '../types';
 import type { Skill } from '../skills/types';
@@ -104,8 +105,9 @@ import {
   prunePendingCall,
   WRITE_RETRY_LIMIT,
   writeAttemptKey as writeAttemptKeyFn,
+  readAttemptKey as readAttemptKeyFn,
 } from './confirmations';
-export { WRITE_RETRY_LIMIT, findPendingCall, hasExhaustedRetries, prunePendingCall, writeAttemptKey } from './confirmations';
+export { WRITE_RETRY_LIMIT, findPendingCall, hasExhaustedRetries, prunePendingCall, writeAttemptKey, readAttemptKey } from './confirmations';
 
 /**
  * runLoop stage contracts live in ./streaming (imported above).
@@ -441,17 +443,15 @@ class ChatEngine {
         // Dialect expansion is best-effort — never block the message
       }
 
-      // ── P3 unified fast-path: JEV search + guard run CONCURRENTLY ──────
-      // One JEV decision for search routing + one for guard Nouls, in
-      // parallel (~2.5s worst case combined, ~150ms typical). When JEV
-      // resolves entities with high confidence the legacy 19-table fan-out
-      // below is skipped entirely (it froze the second message on PGlite).
-      // Everything here is best-effort — legacy paths run when JEV misses.
-      // Filler follow-ups ("استمر"، "شكراً") skip the SEARCH leg entirely
-      // (needsEntityResolution gate) — the guard leg still runs.
-      let jevLinked: Array<{ type: string; id: string; name: string; confidence: number }> = [];
-      let jevCandidates: Array<{ type: string; id: string; name: string; score: number }> = [];
-      let jevSearchUsed = false;
+      // ── Unified entity path (Phase 1+2): ONE deterministic plan + ONE
+      // resolution pass. Local fuzzy first, JEV only as fallback INSIDE
+      // entityService. The old dual path (jevSearchAll fast-path + 19-table
+      // token fan-out + per-family search.* fan-out) paid the search cost
+      // 2-6× per request and ranked differently each time — the root cause
+      // of repeat-search loops. Filler follow-ups ("استمر"، "شكراً") skip
+      // resolution entirely (needsEntityResolution gate). The guard leg
+      // still runs (security, not search). Resolution NEVER rewrites the
+      // user's text — IDs ride in the authoritative block below (rule 52).
       // Filler follow-ups ("استمر"، "شكراً") skip the SEARCH leg entirely.
       // Fail-open to true when the import is stubbed (unit-test mocks).
       let wantsSearch = true;
@@ -461,23 +461,13 @@ class ChatEngine {
         wantsSearch = true;
       }
       try {
-        const [searchRes, guard] = await Promise.all([
-          wantsSearch
-            ? deadlineOr(
-              jevSearchAll(this.ctx, userText).catch(() => null),
-              2500,
-              null,
-              'jev-search-fastpath',
-            )
-            : Promise.resolve(null),
-          deadlineOr(
-            jevGuardCheck(this.ctx.companyId, userText),
-            2000,
-            null,
-            'jev-guard-input',
-          ),
-        ]);
-        // Guard first — block ends the turn before any DB-backed correction.
+        const guard = await deadlineOr(
+          jevGuardCheck(this.ctx.companyId, userText),
+          2000,
+          null,
+          'jev-guard-input',
+        );
+        // Guard first — block ends the turn before any DB-backed resolution.
         if (guard?.jevUsed) {
           recordJevMetric({
             at: Date.now(), label: 'guard-input', latencyMs: 120, inputTokens: 180, outputTokens: 0,
@@ -498,77 +488,42 @@ class ChatEngine {
             });
           }
         }
-        if (searchRes && searchRes.jevUsed) {
-          jevSearchUsed = true;
-          // Only gated winners auto-inject — weak matches stay candidates.
-          // (A top-1 hit from a weakly-routed family once injected an
-          // unrelated bank for a warehouse question — never again.)
-          jevLinked = searchRes.linked.filter((l) => l.injectable);
-          if (jevLinked.length === 0) {
-            jevCandidates = searchRes.hits.slice(0, 6);
-          }
-        }
-      } catch { /* fast-path best-effort */ }
+      } catch { /* guard best-effort */ }
 
-      if (jevSearchUsed && (jevLinked.length > 0 || jevCandidates.length > 0)) {
-        // JEV-resolved entities are AUTHORITATIVE for the model (rule 52):
-        // inject gated winners' IDs so no search turns are needed, and SKIP
-        // the legacy fan-out (the PGlite freeze source). Weak candidates are
-        // listed for verification, never commanded.
-        const { SEARCH_TYPE_LABELS_AR } = await import('../jev/jevSearch');
-        const lines: string[] = [];
-        if (dialectChanged.length > 0) {
-          lines.push(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
-        }
-        for (const l of jevLinked.slice(0, 6)) {
-          lines.push(`- **${SEARCH_TYPE_LABELS_AR[l.type] ?? l.type}**: "${l.name}" (id: ${l.id}) — ثقة ${(l.confidence * 100).toFixed(0)}%`);
-        }
-        if (jevLinked.length === 0 && jevCandidates.length > 0) {
-          lines.push(`- **مرشحون (تحقق بأداة بحث واحدة فقط، ولا تنشئ كياناً جديداً قبل سؤال المستخدم):** ${jevCandidates.map((h) => `"${h.name}" (${SEARCH_TYPE_LABELS_AR[h.type] ?? h.type})`).join('، ')}`);
-        }
-        correctionMsg = `⚡ **حلّ JEV الكيانات تلقائياً:**\n${lines.join('\n')}\n\n_المعرفات أعلاه نهائية وملزمة — ممنوع استدعاء أي أداة search.* لها. ابحث فقط عن كيانات غير مذكورة أعلاه._`;
-        traceSend('entities-done');
-      } else {
+      if (wantsSearch) {
         try {
           // Deadline-guarded: a wedged entity/DB read must degrade to raw
           // text, never hold the "thinking" spinner forever before the first
           // provider byte.
+          const planned = planRequest(userText);
           const resolved = await deadlineOr(
-            resolveEntitiesInText(userText, this.ctx.companyId),
+            resolveEntities(planned.entityRequests, this.ctx.companyId),
             PRE_LLM_DEADLINE_MS,
             null,
             'entities',
           );
           if (!resolved) {
             console.warn('[ai] entity resolution timed out — proceeding with raw text');
-          } else {
-            userText = resolved.text || userText;
-
-            if (resolved.corrections.length > 0 || dialectChanged.length > 0) {
-              // Build user-friendly correction summary
-              const lines: string[] = [];
-              if (dialectChanged.length > 0) {
-                lines.push(`- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق`);
-              }
-              for (const c of resolved.corrections) {
-                const typeLabel: Record<string, string> = {
-                  account: 'حساب', customer: 'عميل', supplier: 'مورد',
-                  employee: 'موظف', product: 'منتج', cashBox: 'خزنة',
-                  invoice: 'فاتورة مبيعات',
-                  purchaseInvoice: 'فاتورة مشتريات', quotation: 'عرض سعر',
-                  receiptVoucher: 'سند قبض', paymentVoucher: 'سند صرف',
-                  workOrder: 'أمر تشغيل', bom: 'شجرة منتج',
-                  lead: 'عميل محتمل', warehouse: 'مستودع',
-                };
-                const lbl = typeLabel[c.type] ?? c.type;
-                lines.push(`- **${lbl}**: "${c.original}" ← "${c.corrected}"`);
-              }
-              correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n${lines.join('\n')}\n\n_تم تحديث طلبك بالمصطلحات والأسماء الصحيحة._`;
+          } else if (resolved.length > 0) {
+            const block = renderEntityBlock(resolved);
+            if (block) {
+              correctionMsg = dialectChanged.length > 0
+                ? block.replace(
+                  '⚡ **حلّ الكيانات تلقائياً:**\n',
+                  `⚡ **حلّ الكيانات تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n`,
+                )
+                : block;
+            } else if (dialectChanged.length > 0) {
+              correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
             }
+          } else if (dialectChanged.length > 0) {
+            correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
           }
         } catch {
           // Entity resolution is best-effort — never block the user's message
         }
+        traceSend('entities-done');
+      } else {
         traceSend('entities-done');
       }
 
@@ -2018,7 +1973,9 @@ class ChatEngine {
     // (search → payment → re-search for the fresh balance) still executes.
     const dedupedReads: Array<{ tc: LlmCompletionData['toolCalls'][number]; cached?: string }> = [];
     for (const tc of readCalls) {
-      const key = ChatEngine.writeAttemptKey(tc.name, tc.arguments);
+      // Phase 1: normalized dedup key — a spelling-variant re-search
+      // ("شركه" after "شركة") hits the guard instead of a fresh 200-row fetch.
+      const key = readAttemptKeyFn(tc.name, tc.arguments);
       const entry = this.readCallCache.get(key);
       if (entry && entry.sinceWrite === this.writeCounter) {
         dedupedReads.push({

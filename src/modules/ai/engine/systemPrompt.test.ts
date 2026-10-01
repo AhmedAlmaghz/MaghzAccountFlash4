@@ -97,7 +97,9 @@ describe('buildSystemPrompt', () => {
   it('contains the tool usage guide with examples', () => {
     const prompt = buildSystemPrompt({ tools: [] });
     expect(prompt).toContain('كيفية استخدام الأدوات');
-    expect(prompt).toContain('search.customers');
+    // Unified path (Phase 1+2): single deterministic discovery tool, not
+    // scattered search.* fan-out.
+    expect(prompt).toContain('ai.resolve_entities');
     expect(prompt).toContain('sales.create_invoice');
   });
 
