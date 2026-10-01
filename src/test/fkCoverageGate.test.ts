@@ -149,8 +149,10 @@ const DOCUMENTED: Record<string, string> = {
   'purchase_orders.cash_box_id': 'Phase 62 decision: cash-box reference is audit-only, not a blocking constraint',
   'quotations.cash_box_id': 'Phase 62 decision: cash-box reference is audit-only, not a blocking constraint',
   'end_of_service.cash_box_id': 'Phase 62 decision: the payout cash box is audit-only; payEndOfService validates it in the API',
-  // POS: the shift that issued the receipt, kept for the Z report.
-  'sales_invoices.shift_id': 'POS receipt keeps its shift reference; a closed shift is never deleted, so no constraint is needed',
+  // (sales_invoices.shift_id was here pre-v0.26.5: 0027 declared its FK inline
+  // in CREATE TABLE, a shape the parser did not read. The unified baseline
+  // emits it as ALTER TABLE ADD CONSTRAINT, so the key exists and the
+  // documented entry was dropped.)
 };
 
 interface Gap { column: string; target: string }
@@ -174,8 +176,14 @@ describe('reference columns carry a key or a documented reason', () => {
     for (const must of ['customers', 'suppliers', 'products', 'accounts', 'sales_invoices', 'work_orders']) {
       expect(names, `table ${must} is parsed`).toContain(must);
     }
-    // retired by an explicit, documented migration
-    expect([...retired].sort()).toEqual(['banks', 'calls', 'crm_activities']);
+    // v0.26.5 squash: the unified baseline never contained the retired tables
+    // (banks 0002, crm_activities + calls 0015 were dropped by additive
+    // migrations that no longer exist), so nothing is retired WITHIN the file —
+    // but the three names must stay absent from the parsed set forever.
+    expect([...retired].sort()).toEqual([]);
+    for (const gone of ['banks', 'calls', 'crm_activities']) {
+      expect(tables.has(gone), `${gone} must stay retired`).toBe(false);
+    }
   });
 
   it('reads the declared keys from all three SQL shapes', () => {

@@ -26,8 +26,13 @@ function makeAdapter(log: string[], opts?: { failOn?: (sql: string) => string | 
 describe('getBundledMigrations / splitMigrationStatements', () => {
   it('exposes the full bundled chain', () => {
     const ms = getBundledMigrations();
-    expect(ms.length).toBeGreaterThanOrEqual(38);
+    // v0.26.5 squashed the 0000–0042 chain into a single baseline — the
+    // contract is "the bundle is non-empty and starts with the baseline",
+    // not a fixed file count (future additive migrations stay welcome).
+    expect(ms.length).toBeGreaterThanOrEqual(1);
     expect(ms[0].name).toBe('0000_init');
+    expect(ms[0].sql).toMatch(/--> statement-breakpoint/);
+    expect(ms[0].sql).toMatch(/CREATE TABLE (IF NOT EXISTS )?"companies"/);
     expect(ms.every((m) => m.sql.length > 0)).toBe(true);
   });
   it('splits on drizzle breakpoints', () => {

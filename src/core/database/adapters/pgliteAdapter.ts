@@ -93,99 +93,15 @@ function dbFailure(err: unknown): { success: false; error: string; errorCode?: s
 
 // ─── Migration support ────────────────────────────────────────────────────────
 // Vite exposes the raw SQL from the drizzle folder via ?raw imports.
-// Pre-production squash: a SINGLE consolidated baseline generated from the
-// Drizzle schemas (single source of truth). Replay safety on existing browser
-// databases is provided by normalizeIdempotent() below — mirroring
-// electron/migrationRunner.js.
+// Pre-production squash: a SINGLE consolidated baseline — the exact schema the
+// full 0000–0042 migration chain produced (PostgreSQL catalog diff-verified).
+// Replay safety on existing browser databases is provided by
+// normalizeIdempotent() below — mirroring electron/migrationRunner.js.
 
 import schemaInit from '@root/drizzle/0000_init.sql?raw';
-import invoicePaymentColumns from '@root/drizzle/0001_invoice_payment_columns.sql?raw';
-import dropBanksUnifyCash from '@root/drizzle/0002_drop_banks_unify_cash.sql?raw';
-import woOutputWarehouse from '@root/drizzle/0003_wo_output_warehouse.sql?raw';
-import manufacturingPro from '@root/drizzle/0004_manufacturing_pro.sql?raw';
-import woProductionCosts from '@root/drizzle/0005_wo_production_costs.sql?raw';
-import productTypeBomFlags from '@root/drizzle/0006_product_type_bom_flags.sql?raw';
-import woWipAccounting from '@root/drizzle/0007_wo_wip_accounting.sql?raw';
-import productTypesUpdatedAt from '@root/drizzle/0008_product_types_updated_at.sql?raw';
-import missingUpdatedAt from '@root/drizzle/0009_missing_updated_at.sql?raw';
-import aiChatPerformance from '@root/drizzle/0010_ai_chat_performance.sql?raw';
-import crmAuditColumns from '@root/drizzle/0011_crm_audit_columns.sql?raw';
-import defaultAccountsExpansion from '@root/drizzle/0012_default_accounts_expansion.sql?raw';
-import openingBalanceDates from '@root/drizzle/0013_opening_balance_dates.sql?raw'
-import hrProfessional from '@root/drizzle/0014_hr_professional.sql?raw'
-import crmProfessional from '@root/drizzle/0015_crm_professional.sql?raw'
-import hrAttendanceNotes from '@root/drizzle/0016_hr_attendance_notes.sql?raw';
-import usersPhotoUrl from '@root/drizzle/0017_users_photo_url.sql?raw';
-import recomputePartyBalances from '@root/drizzle/0018_recompute_party_balances.sql?raw';
-import payrollComponentsAudit from '@root/drizzle/0019_payroll_components_audit.sql?raw';
-import companiesAudit from '@root/drizzle/0020_companies_audit.sql?raw';
-import productUnits from '@root/drizzle/0021_product_units.sql?raw';
-import aiJobQueue from '@root/drizzle/0022_ai_job_queue.sql?raw';
-import aiChatAttachments from '@root/drizzle/0023_ai_chat_attachments.sql?raw';
-import aiJobItemLabels from '@root/drizzle/0024_ai_job_item_labels.sql?raw';
-import aiJobRefOutputs from '@root/drizzle/0025_ai_job_ref_outputs.sql?raw';
-import stockUniqueIndex from '@root/drizzle/0026_stock_unique_index.sql?raw';
-import posModule from '@root/drizzle/0027_pos_module.sql?raw';
-import aiJobItemLeases from '@root/drizzle/0028_ai_job_item_leases.sql?raw';
-import usersRolesHardening from '@root/drizzle/0029_users_roles_hardening.sql?raw';
-import posReceiptAndLineCost from '@root/drizzle/0030_pos_receipt_and_line_cost.sql?raw';
-import discountAccounts from '@root/drizzle/0031_discount_accounts.sql?raw';
-import inventoryValuation from '@root/drizzle/0032_inventory_valuation.sql?raw';
-import fxRevaluation from '@root/drizzle/0033_fx_revaluation.sql?raw';
-import vatSplitPeriods from '@root/drizzle/0034_vat_split_periods.sql?raw';
-import phase5CloseAssetsPeriods from '@root/drizzle/0035_phase5_close_assets_periods.sql?raw';
-import leaveProvisionAccount from '@root/drizzle/0036_leave_provision_account.sql?raw';
-import treasuryBoxAccounts from '@root/drizzle/0037_treasury_box_accounts.sql?raw';
-import lineProductFks from '@root/drizzle/0038_line_product_fks.sql?raw';
-import partyAndAuditFks from '@root/drizzle/0039_party_and_audit_fks.sql?raw';
-import warehouseFks from '@root/drizzle/0040_warehouse_fks.sql?raw';
-import workorderProductAuditFks from '@root/drizzle/0041_workorder_product_audit_fks.sql?raw';
-import treeFks from '@root/drizzle/0042_tree_fks.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
-  { name: '0001_invoice_payment_columns', sql: invoicePaymentColumns },
-  { name: '0002_drop_banks_unify_cash', sql: dropBanksUnifyCash },
-  { name: '0003_wo_output_warehouse', sql: woOutputWarehouse },
-  { name: '0004_manufacturing_pro', sql: manufacturingPro },
-  { name: '0005_wo_production_costs', sql: woProductionCosts },
-  { name: '0006_product_type_bom_flags', sql: productTypeBomFlags },
-  { name: '0007_wo_wip_accounting', sql: woWipAccounting },
-  { name: '0008_product_types_updated_at', sql: productTypesUpdatedAt },
-  { name: '0009_missing_updated_at', sql: missingUpdatedAt },
-  { name: '0010_ai_chat_performance', sql: aiChatPerformance },
-  { name: '0011_crm_audit_columns', sql: crmAuditColumns },
-  { name: '0012_default_accounts_expansion', sql: defaultAccountsExpansion },
-  { name: '0013_opening_balance_dates', sql: openingBalanceDates },
-  { name: '0014_hr_professional', sql: hrProfessional },
-  { name: '0015_crm_professional', sql: crmProfessional },
-  { name: '0016_hr_attendance_notes', sql: hrAttendanceNotes },
-  { name: '0017_users_photo_url', sql: usersPhotoUrl },
-  { name: '0018_recompute_party_balances', sql: recomputePartyBalances },
-  { name: '0019_payroll_components_audit', sql: payrollComponentsAudit },
-  { name: '0020_companies_audit', sql: companiesAudit },
-  { name: '0021_product_units', sql: productUnits },
-  { name: '0022_ai_job_queue', sql: aiJobQueue },
-  { name: '0023_ai_chat_attachments', sql: aiChatAttachments },
-  { name: '0024_ai_job_item_labels', sql: aiJobItemLabels },
-  { name: '0025_ai_job_ref_outputs', sql: aiJobRefOutputs },
-  { name: '0026_stock_unique_index', sql: stockUniqueIndex },
-  { name: '0027_pos_module', sql: posModule },
-  { name: '0028_ai_job_item_leases', sql: aiJobItemLeases },
-  { name: '0029_users_roles_hardening', sql: usersRolesHardening },
-  { name: '0030_pos_receipt_and_line_cost', sql: posReceiptAndLineCost },
-  { name: '0031_discount_accounts', sql: discountAccounts },
-  { name: '0032_inventory_valuation', sql: inventoryValuation },
-  { name: '0033_fx_revaluation', sql: fxRevaluation },
-  { name: '0034_vat_split_periods', sql: vatSplitPeriods },
-  { name: '0035_phase5_close_assets_periods', sql: phase5CloseAssetsPeriods },
-  { name: '0036_leave_provision_account', sql: leaveProvisionAccount },
-  { name: '0037_treasury_box_accounts', sql: treasuryBoxAccounts },
-  { name: '0038_line_product_fks', sql: lineProductFks },
-  { name: '0039_party_and_audit_fks', sql: partyAndAuditFks },
-  { name: '0040_warehouse_fks', sql: warehouseFks },
-  { name: '0041_workorder_product_audit_fks', sql: workorderProductAuditFks },
-  { name: '0042_tree_fks', sql: treeFks },
 ];
 
 /**
