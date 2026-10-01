@@ -5,7 +5,7 @@ slug: "en/03-interface/index"
 group: "The Interface"
 language: "en"
 created: 2026-09-13
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # General Interface — User Guide

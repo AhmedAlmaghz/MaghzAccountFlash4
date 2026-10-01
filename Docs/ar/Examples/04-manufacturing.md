@@ -5,7 +5,7 @@ slug: "ar/Examples/04-manufacturing"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # مثال 04 — مصنع النور للعصير (أمر تشغيل وتكلفة إنتاج)

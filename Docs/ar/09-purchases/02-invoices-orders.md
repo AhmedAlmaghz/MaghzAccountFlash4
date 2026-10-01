@@ -5,7 +5,7 @@ slug: "ar/09-purchases/02-invoices-orders"
 group: "المشتريات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # فواتير الشراء وأوامر الشراء — دليل الاستخدام

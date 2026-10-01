@@ -5,7 +5,7 @@ slug: "en/04-settings/03-vat"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # Value Added Tax (VAT) Settings — User Guide

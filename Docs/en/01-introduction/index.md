@@ -5,7 +5,7 @@ slug: "en/01-introduction/index"
 group: "System Introduction"
 language: "en"
 created: 2026-09-13
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # System Overview — MaghzAccountPro

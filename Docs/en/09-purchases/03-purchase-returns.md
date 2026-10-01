@@ -5,7 +5,7 @@ slug: "en/09-purchases/03-purchase-returns"
 group: "Purchases"
 language: "en"
 created: 2026-09-13
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # Purchase Returns — User Guide

@@ -5,7 +5,7 @@ slug: "en/16-multicurrency/02-fx-revaluation"
 group: "Multi-Currency"
 language: "en"
 created: 2026-09-20
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # Exchange Differences & Revaluation — User Guide

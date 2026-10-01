@@ -5,7 +5,7 @@ slug: "en/Examples/04-manufacturing"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # Example 04 — Al-Noor Juice Factory (work orders & production cost)

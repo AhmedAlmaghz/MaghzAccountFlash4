@@ -5,7 +5,7 @@ slug: "ar/99-appendix/04-troubleshooting"
 group: "الملاحق"
 language: "ar"
 created: 2026-09-12
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # استكشاف الأخطاء وإصلاحها

@@ -5,7 +5,7 @@ slug: "en/06-accounting/03-vouchers"
 group: "Accounting"
 language: "en"
 created: 2026-09-13
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # Receipt Vouchers & Payment Vouchers — User Guide

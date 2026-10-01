@@ -5,7 +5,7 @@ slug: "ar/99-appendix/05-faq"
 group: "الملاحق"
 language: "ar"
 created: 2026-09-12
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # الأسئلة الشائعة

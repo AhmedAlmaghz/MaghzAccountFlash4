@@ -5,7 +5,7 @@ slug: "ar/04-settings/05-classifications"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # التصنيفات — دليل الاستخدام

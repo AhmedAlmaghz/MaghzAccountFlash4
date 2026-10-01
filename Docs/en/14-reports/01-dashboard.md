@@ -5,7 +5,7 @@ slug: "en/14-reports/01-dashboard"
 group: "Reports"
 language: "en"
 created: 2026-09-13
-version: "0.26.3"
+version: "0.26.5"
 author: "Ahmed Almaghz"
 ---
 # Main Dashboard — User Guide
