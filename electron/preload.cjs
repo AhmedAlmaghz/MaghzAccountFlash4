@@ -192,6 +192,14 @@ contextBridge.exposeInMainWorld('electronDB', {
     updateEndOfServiceStatus: (payload) => ipcRenderer.invoke('db:rpc:hr.updateEndOfServiceStatus', { ...payload, sessionToken }),
     deleteEndOfService: (payload) => ipcRenderer.invoke('db:rpc:hr.deleteEndOfService', { ...payload, sessionToken }),
     getHrKpis: (payload) => ipcRenderer.invoke('db:rpc:hr.getHrKpis', { ...payload, sessionToken }),
+    getDepartments: (payload) => ipcRenderer.invoke('db:rpc:hr.getDepartments', { ...payload, sessionToken }),
+    createDepartment: (payload) => ipcRenderer.invoke('db:rpc:hr.createDepartment', { ...payload, sessionToken }),
+    updateDepartment: (payload) => ipcRenderer.invoke('db:rpc:hr.updateDepartment', { ...payload, sessionToken }),
+    deleteDepartment: (payload) => ipcRenderer.invoke('db:rpc:hr.deleteDepartment', { ...payload, sessionToken }),
+    getPayrollComponentsList: (payload) => ipcRenderer.invoke('db:rpc:hr.getPayrollComponentsList', { ...payload, sessionToken }),
+    createPayrollComponent: (payload) => ipcRenderer.invoke('db:rpc:hr.createPayrollComponent', { ...payload, sessionToken }),
+    updatePayrollComponent: (payload) => ipcRenderer.invoke('db:rpc:hr.updatePayrollComponent', { ...payload, sessionToken }),
+    deactivatePayrollComponent: (payload) => ipcRenderer.invoke('db:rpc:hr.deactivatePayrollComponent', { ...payload, sessionToken }),
   },
   // Phase 4 slice 10 — Sales typed RPC. Session-derived companyId + audit
   // userId; updateInvoice / updateQuotation / updateReturn are

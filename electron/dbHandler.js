@@ -5134,6 +5134,218 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── hr.departments + hr.payroll-components (Phase 0 tranche 9) ───────────
+  // Reference CRUD that Phase 74 added straight to `adapter.query`, so unlike
+  // the rest of hr it had no channel and its SQL text crossed the process
+  // boundary on the desktop. Lifted, not retyped: the statements below are the
+  // renderer ones with the company parameter replaced by the session company.
+  //
+  // `affects_gross_salary` / `affects_tax` / `affects_social_insurance` are
+  // DERIVED from the type in both implementations and are not payload fields —
+  // a payload that could set them would let a caller mark a deduction as part
+  // of gross salary and change every payroll total downstream.
+  const PAYROLL_COMPONENT_TYPES = new Set(['earning', 'deduction', 'tax', 'insurance', 'net']);
+  const PAYROLL_COMPONENT_METHODS = new Set(['fixed', 'percentage', 'formula']);
+
+  registerRpc('hr.getDepartments', {
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: `SELECT d.id, d.company_id, d.name, d.manager_id, mu.full_name AS manager_name,
+                   (SELECT COUNT(*)::int FROM employees e WHERE e.department_id = d.id AND e.company_id = d.company_id) AS employee_count
+              FROM departments d
+              LEFT JOIN users mu ON d.manager_id = mu.id
+             WHERE d.company_id = $1::uuid
+             ORDER BY d.name`,
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('hr.createDepartment', {
+    paramCount: 4,
+    validate: (p) => {
+      if (!String(p.name || '').trim()) throw new Error('اسم القسم مطلوب.');
+    },
+    compose: (p, session) => ({
+      sql: `INSERT INTO departments (company_id, name, manager_id, created_by, updated_by)
+            VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $4::uuid) RETURNING id`,
+      params: [
+        session.user.companyId,
+        String(p.name).trim(),
+        UUID_FILTER(p.managerId),
+        session.user.id,
+      ],
+    }),
+  });
+
+  // Partial update. The renderer sends only the keys the form changed; the
+  // COLUMN list is decided here, so the caller cannot name one — a payload
+  // naming `company_id` or `created_by` has no effect because neither string
+  // appears in this file.
+  registerRpc('hr.updateDepartment', {
+    paramCount: null, // dynamic: the SET clause length follows the payload
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+      if (p.name === undefined && p.managerId === undefined) throw new Error('nothing to update');
+      if (p.name !== undefined && !String(p.name).trim()) throw new Error('اسم القسم مطلوب.');
+    },
+    compose: (p, session) => {
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (p.name !== undefined) { fields.push(`name = $${idx++}`); values.push(String(p.name).trim()); }
+      if (p.managerId !== undefined) { fields.push(`manager_id = $${idx++}::uuid`); values.push(p.managerId || null); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(session.user.id);
+      const whereIdx = idx;
+      values.push(String(p.id));
+      values.push(session.user.companyId);
+      const sql = `UPDATE departments SET ${fields.join(', ')} WHERE id = $${whereIdx}::uuid AND company_id = $${whereIdx + 1}::uuid`;
+      return { sql, params: values };
+    },
+  });
+
+  // The guard asks whether employees still point here, so it is a fact from the
+  // database and belongs in this process rather than in the renderer — a second
+  // copy of the same rule is not defence in depth, it is a second thing to
+  // drift. One statement, so the count and the delete cannot interleave and see
+  // different snapshots. Message text lifted from the renderer, unparenthesised,
+  // because `(` and `)` look directional inside a pattern.
+  registerRpc('hr.deleteDepartment', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      // `HAVING count(*) > 0` is load-bearing. A bare aggregate always returns
+      // exactly one row — even when the count is zero — so `NOT EXISTS (SELECT 1
+      // FROM refs)` is then ALWAYS false and the delete never fires: verified on
+      // PGlite, an empty department came back deleted=0 with the row still
+      // there. HAVING turns "no references" into zero rows, which is what
+      // NOT EXISTS is asking. This is the shape inventory.deleteWarehouse uses,
+      // and the reason it was worth copying rather than writing.
+      sql: `WITH refs AS (
+              SELECT count(*)::int AS linked FROM employees
+               WHERE department_id = $1::uuid AND company_id = $2::uuid
+              HAVING count(*) > 0
+            ), del AS (
+              DELETE FROM departments d
+               WHERE d.id = $1::uuid AND d.company_id = $2::uuid
+                 AND NOT EXISTS (SELECT 1 FROM refs)
+              RETURNING d.id
+            )
+            SELECT COALESCE((SELECT linked FROM refs), 0) AS linked,
+                   (SELECT count(*) FROM del) AS deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) {
+        const linked = Number(r.linked || 0);
+        if (linked > 0) {
+          throw new Error(`لا يمكن حذف القسم لوجود ${linked} موظف مرتبط به — انقل الموظفين إلى قسم آخر أولاً.`);
+        }
+        // linked = 0 AND deleted = 0 means there was no such department. The
+        // renderer returned success for this case, because DELETE of a missing
+        // row is not an error in PostgreSQL; saying so out loud is the honest
+        // answer, and it is the only way a caller learns the id was wrong.
+        throw new Error('القسم غير موجود.');
+      }
+      return rows;
+    },
+  });
+
+  registerRpc('hr.getPayrollComponentsList', {
+    paramCount: 1,
+    compose: (_p, session) => ({
+      sql: 'SELECT * FROM payroll_components WHERE company_id = $1::uuid ORDER BY type, name_ar',
+      params: [session.user.companyId],
+    }),
+  });
+
+  registerRpc('hr.createPayrollComponent', {
+    // 12 = company + nameAr + nameEn + code + type + method + defaultAmount +
+    // the three derived affect_* flags + isActive + the session user (which
+    // fills both audit columns, so it is passed once and bound twice).
+    paramCount: 12,
+    validate: (p) => {
+      if (!String(p.nameAr || '').trim()) throw new Error('اسم المكوّن بالعربية مطلوب.');
+      if (!PAYROLL_COMPONENT_TYPES.has(p.type)) throw new Error('نوع المكوّن غير صالح (earning/deduction/tax/insurance/net).');
+      if (p.calculationMethod !== undefined && !PAYROLL_COMPONENT_METHODS.has(p.calculationMethod)) {
+        throw new Error('طريقة الحساب غير صالحة.');
+      }
+    },
+    compose: (p, session) => {
+      const type = String(p.type);
+      return {
+        sql: `INSERT INTO payroll_components (company_id, name_ar, name_en, code, type, calculation_method, default_amount, affects_gross_salary, affects_tax, affects_social_insurance, is_active, created_by, updated_by)
+              VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::uuid, $12::uuid) RETURNING id`,
+        params: [
+          session.user.companyId,
+          String(p.nameAr).trim(),
+          p.nameEn || null,
+          p.code || null,
+          type,
+          PAYROLL_COMPONENT_METHODS.has(p.calculationMethod) ? p.calculationMethod : 'fixed',
+          p.defaultAmount == null ? 0 : Number(p.defaultAmount),
+          type === 'earning',
+          type === 'tax',
+          type === 'insurance',
+          p.isActive === undefined ? true : Boolean(p.isActive),
+          session.user.id,
+        ],
+      };
+    },
+  });
+
+  // Partial update, same shape as hr.updateDepartment. `type` is re-validated
+  // here because it decides the three derived affect_* columns below.
+  registerRpc('hr.updatePayrollComponent', {
+    paramCount: null, // dynamic: the SET clause length follows the payload
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+      if (p.type !== undefined && !PAYROLL_COMPONENT_TYPES.has(p.type)) throw new Error('نوع المكوّن غير صالح.');
+      if (p.calculationMethod !== undefined && !PAYROLL_COMPONENT_METHODS.has(p.calculationMethod)) {
+        throw new Error('طريقة الحساب غير صالحة.');
+      }
+    },
+    compose: (p, session) => {
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (p.nameAr !== undefined) { fields.push(`name_ar = $${idx++}`); values.push(String(p.nameAr).trim()); }
+      if (p.nameEn !== undefined) { fields.push(`name_en = $${idx++}`); values.push(p.nameEn || null); }
+      if (p.code !== undefined) { fields.push(`code = $${idx++}`); values.push(p.code || null); }
+      if (p.type !== undefined) { fields.push(`type = $${idx++}`); values.push(p.type); }
+      if (p.calculationMethod !== undefined) { fields.push(`calculation_method = $${idx++}`); values.push(p.calculationMethod); }
+      if (p.defaultAmount !== undefined) { fields.push(`default_amount = $${idx++}`); values.push(p.defaultAmount); }
+      if (p.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(p.isActive); }
+      fields.push(`updated_by = $${idx++}::uuid`);
+      values.push(session.user.id);
+      fields.push('updated_at = NOW()');
+      const whereIdx = idx;
+      values.push(String(p.id));
+      values.push(session.user.companyId);
+      const sql = `UPDATE payroll_components SET ${fields.join(', ')} WHERE id = $${whereIdx}::uuid AND company_id = $${whereIdx + 1}::uuid`;
+      return { sql, params: values };
+    },
+  });
+
+  /**
+   * Soft delete only — components may be referenced by past payroll runs, so a
+   * hard delete would rewrite history. Deactivation keeps the rows addressable.
+   */
+  registerRpc('hr.deactivatePayrollComponent', {
+    paramCount: 3,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `UPDATE payroll_components SET is_active = false, updated_by = $3::uuid, updated_at = NOW()
+             WHERE id = $1::uuid AND company_id = $2::uuid`,
+      params: [String(p.id), session.user.companyId, session.user.id],
+    }),
+  });
+
   // ── sales (Phase 4 slice 10) ──────────────────────────────────────────────
   // All sales queries derive `company_id` and audit `user_id` from the
   // authenticated session (never from the renderer payload). create* use CTEs

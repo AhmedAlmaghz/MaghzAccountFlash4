@@ -147,7 +147,7 @@ export interface ElectronDB extends PreloadDB {
     getLeaves(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getLeavesPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createLeave(payload: { employeeId: string; leaveType?: string; startDate: string; endDate: string; days?: number; status?: string; reason?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    updateLeaveStatus(payload: { id: string; status: string; approvedBy?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateLeaveStatus(payload: { id: string; status: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteLeave(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getEndOfServices(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getEndOfServicesPaginated(payload: { page: number; pageSize: number; status?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -155,6 +155,20 @@ export interface ElectronDB extends PreloadDB {
     updateEndOfServiceStatus(payload: { id: string; status: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteEndOfService(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getHrKpis(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // Departments and payroll components (Phase 0 tranche 9). Partial updates
+    // send only the keys the form changed; the channel decides the columns, so
+    // no field here can name one. `createPayrollComponent` deliberately has no
+    // affectGrossSalary/affectsTax/affectsSocialInsurance: those are derived
+    // from `type` on the main side, and a payload that could set them would let
+    // a caller reclassify a deduction and change every payroll total.
+    getDepartments(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createDepartment(payload: { name: string; managerId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateDepartment(payload: { id: string; name?: string; managerId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deleteDepartment(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getPayrollComponentsList(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createPayrollComponent(payload: { nameAr: string; nameEn?: string | null; code?: string | null; type: string; calculationMethod?: string; defaultAmount?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updatePayrollComponent(payload: { id: string; nameAr?: string; nameEn?: string | null; code?: string | null; type?: string; calculationMethod?: string; defaultAmount?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deactivatePayrollComponent(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
   // Phase 4 slice 10 — Sales typed RPC. Session-derived companyId + audit
   // userId; updateInvoice / updateQuotation / updateReturn run as

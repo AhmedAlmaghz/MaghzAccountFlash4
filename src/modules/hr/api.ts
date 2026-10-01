@@ -1648,14 +1648,22 @@ export const hrApi = {
   },
 
   // ─── Departments ───────────────────────────────────────────────────────────
-  // NOTE: no dedicated `db:rpc:hr.*` handlers exist for departments — these
-  // methods run through `adapter.query` on BOTH environments. In Electron the
-  // `db:internal-query` channel applies assertSqlAuthorized and the
-  // SQL_MODULE_TABLE_RULES hr rule covers the `departments` table.
+  // Departments and payroll components are `db:rpc:hr.*` channels (Phase 0
+  // tranche 9). On the desktop the company and the audit user come from the
+  // session, so `created_by`/`updated_by` are not caller-chosen; the PGlite
+  // fallback below keeps the explicit `company_id = $N` filters.
   async getDepartments(companyId: string): Promise<{ success: boolean; data?: Department[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getDepartments');
+        if (!result.success) return { success: false, error: result.error };
+        return {
+          success: true,
+          data: (result.rows || []).map((r: Record<string, unknown>) => mapDepartmentRow(r)),
+        };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT d.id, d.company_id, d.name, d.manager_id, mu.full_name AS manager_name,
@@ -1681,6 +1689,12 @@ export const hrApi = {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
       if (!data.name || !data.name.trim()) return { success: false, error: 'اسم القسم مطلوب.' };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('createDepartment', { name: data.name, managerId: data.managerId });
+        if (!result.success) return { success: false, error: result.error };
+        if (result.rows?.[0]?.id) return { success: true, id: String(result.rows[0].id) };
+        return { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO departments (company_id, name, manager_id, created_by, updated_by)
@@ -1700,6 +1714,10 @@ export const hrApi = {
       if (!idValidation.success) return { success: false, error: idValidation.error };
       if (data.name !== undefined && !data.name.trim()) return { success: false, error: 'اسم القسم مطلوب.' };
       if (data.name === undefined && data.managerId === undefined) return { success: true };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('updateDepartment', { id, name: data.name, managerId: data.managerId });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -1724,9 +1742,15 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('deleteDepartment', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       // Guard: a department with linked employees must not be deleted —
-      // moving the employees first is the user's job.
+      // moving the employees first is the user's job. The desktop channel runs
+      // this as one statement (count and delete in the same snapshot); here it
+      // stays as two statements, which is what PGlite has always done.
       const count = await adapter.query<{ cnt: string | number }>(
         `SELECT COUNT(*)::int AS cnt FROM employees WHERE department_id = $1::uuid AND company_id = $2::uuid`,
         [id, companyId],
@@ -1747,6 +1771,11 @@ export const hrApi = {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('getPayrollComponentsList');
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, data: (result.rows || []).map((r: Record<string, unknown>) => mapPayrollComponentRow(r)) };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `SELECT * FROM payroll_components WHERE company_id = $1::uuid ORDER BY type, name_ar`,
@@ -1778,6 +1807,22 @@ export const hrApi = {
       const type = validTypes.includes(data.type) ? data.type : null;
       if (!type) return { success: false, error: 'نوع المكوّن غير صالح (earning/deduction/tax/insurance/net).' };
       const method = (data.calculationMethod && validMethods.includes(data.calculationMethod)) ? data.calculationMethod : 'fixed';
+      if (isElectronPg()) {
+        // The three affect_* columns are DERIVED from the type on the main side.
+        // They are not sent: a payload that could set them would let a caller
+        // mark a deduction as part of gross salary and move every payroll total.
+        const result = await invokeHrRpc('createPayrollComponent', {
+          nameAr: data.nameAr,
+          nameEn: data.nameEn,
+          code: data.code,
+          type,
+          calculationMethod: method,
+          defaultAmount: data.defaultAmount,
+          isActive: data.isActive,
+        });
+        if (result.rows?.[0]?.id) return { success: true, id: String(result.rows[0].id) };
+        return { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO payroll_components (company_id, name_ar, name_en, code, type, calculation_method, default_amount, affects_gross_salary, affects_tax, affects_social_insurance, is_active, created_by, updated_by)
@@ -1808,6 +1853,19 @@ export const hrApi = {
       const validMethods = ['fixed', 'percentage', 'formula'] as const;
       if (data.type !== undefined && !validTypes.includes(data.type)) return { success: false, error: 'نوع المكوّن غير صالح.' };
       if (data.calculationMethod !== undefined && !validMethods.includes(data.calculationMethod)) return { success: false, error: 'طريقة الحساب غير صالحة.' };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('updatePayrollComponent', {
+          id,
+          nameAr: data.nameAr,
+          nameEn: data.nameEn,
+          code: data.code,
+          type: data.type,
+          calculationMethod: data.calculationMethod,
+          defaultAmount: data.defaultAmount,
+          isActive: data.isActive,
+        });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const values: unknown[] = [];
@@ -1843,6 +1901,10 @@ export const hrApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokeHrRpc('deactivatePayrollComponent', { id });
+        return { success: result.success, error: result.error };
+      }
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `UPDATE payroll_components SET is_active = false, updated_by = $3::uuid, updated_at = NOW()

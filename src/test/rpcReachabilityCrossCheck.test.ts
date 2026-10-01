@@ -206,6 +206,14 @@ describe('the static gate cannot under-report what the runtime observes', () => 
    * fail here, by name.
    *
    * A migration removes a name from the list. A regression adds one.
+   *
+   * Caveat worth keeping: the probe is argument-driven, so a method whose
+   * validation rejects every probe argument reads as clean whether or not it is
+   * guarded. That is why `createDepartment` / `updateDepartment` /
+   * `createPayrollComponent` / `updatePayrollComponent` never appeared here even
+   * while they still held raw statements — the other four of that block did, and
+   * the count assertion above is what covered the gap. Absence from this list is
+   * not evidence of a guard; `desktopRawSqlGate` is.
    */
   it('names the methods that reach raw SQL, per surface', async () => {
     const measured: Record<string, string[]> = {};
@@ -229,8 +237,7 @@ describe('the static gate cannot under-report what the runtime observes', () => 
       hr: [
         'deleteEmployee', 'saveAttendance', 'previewPayrollRun', 'deletePayrollRun',
         'postPayrollRun', 'getLeaveBalances', 'deleteLeave', 'previewEndOfService',
-        'payEndOfService', 'deleteEndOfService', 'getDepartments', 'deleteDepartment',
-        'getPayrollComponentsList', 'deactivatePayrollComponent',
+        'payEndOfService', 'deleteEndOfService',
       ],
       manufacturing: [
         'getNextBatchNumber', 'getBomAvailability',

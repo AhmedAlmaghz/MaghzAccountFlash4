@@ -41,9 +41,15 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
  * createAccount + getAccountLedger moved onto adapter channels — three
  * renderer-composed statements gone, one typed RPC and one fixed-slot ledger
  * statement replacing them (the ledger alone used to be three hand-built
- * shapes with a manual $N renumbering).
+ * shapes with a manual $N renumbering); lowered to 368 with the hr departments
+ * and payroll-components tranche, eight functions and nine statements, of
+ * which the delete guard collapsed from two statements to one CTE.
+ *
+ * `rawSqlRatchetGate` did NOT move and must not: it counts the fallback text,
+ * which the migration deliberately preserves for PGlite. Both ceilings falling
+ * together would mean the fallback was deleted rather than bypassed.
  */
-const CEILING = 377;
+const CEILING = 368;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -67,7 +73,7 @@ const GUARD_RE = /(isElectronPg\s*\(\s*\)|mainAuthBridge\s*\(\s*\))/;
  * somewhere and deleting one elsewhere still fails both tests.
  */
 const BASELINE: Record<string, number> = {
-  'src/modules/hr/api.ts': 44,
+  'src/modules/hr/api.ts': 35,
   'src/modules/accounting/api.ts': 36,
   'src/modules/manufacturing/api.ts': 34,
   'src/modules/inventory/api.ts': 27,

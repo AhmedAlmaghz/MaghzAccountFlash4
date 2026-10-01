@@ -140,7 +140,12 @@ describe('document rewrite atomicity on a real engine (PGlite)', () => {
       [invoiceId],
     );
     expect(bad.success).toBe(false);
-    expect(String(bad.error)).toMatch(/foreign key/i);
+    // Branch on the stable key, never on the prose. The engine's own wording is
+    // now a localized sentence (see pgErrors.ts), so matching `/foreign key/i`
+    // here asserted the driver's English text — which the adapter deliberately
+    // stops surfacing, and which would break again on the next translation.
+    expect(bad.errorCode, 'the rejection must be classifiable without parsing the message: ' + String(bad.error))
+      .toBe('FK_VIOLATION');
   }, 60_000);
 
   it('a failed re-insert leaves the previous header AND lines untouched', async () => {
