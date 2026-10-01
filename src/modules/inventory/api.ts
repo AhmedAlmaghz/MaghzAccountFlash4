@@ -578,6 +578,13 @@ export const inventoryApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        // Partial update: only the keys the form changed travel. The COLUMN list
+        // is decided in the main process, so this payload cannot name one.
+        return surface.updateWarehouse({ id, ...data }) as Promise<{ success: boolean; error?: string }>;
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const params: unknown[] = [];
@@ -588,8 +595,12 @@ export const inventoryApi = {
       if (data.isActive !== undefined) { fields.push(`is_active = $${idx++}`); params.push(data.isActive); }
       fields.push(`updated_by = $${idx++}`);
       params.push(safeUserId(_userId));
-      fields.push('updated_at = NOW()');
-      if (fields.length === 0) return { success: true };
+      // No `updated_at`: the table has never had one, so stamping it made every
+      // warehouse edit fail on both platforms. `updated_by` is the audit trail.
+      // NOTE: there is also no "nothing to update" early return here, and there
+      // never was one that could fire — `updated_by` is pushed above, so
+      // fields.length is never 0. An empty payload therefore rewrites the audit
+      // column only. The channel does the same, so the two paths agree.
       params.push(id);
       params.push(companyId);
       return adapter.query(
@@ -1154,6 +1165,11 @@ export const inventoryApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.inventory : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        return surface.updateStockAdjustment({ id, ...data }) as Promise<{ success: boolean; error?: string }>;
+      }
       const adapter = await getDbAdapter();
       const fields: string[] = [];
       const params: unknown[] = [];
@@ -1162,9 +1178,14 @@ export const inventoryApi = {
       if (data.actualQty !== undefined) { fields.push(`actual_qty = $${idx++}`); params.push(data.actualQty); }
       if (data.difference !== undefined) { fields.push(`difference = $${idx++}`); params.push(data.difference); }
       if (data.reason !== undefined) { fields.push(`reason = $${idx++}`); params.push(data.reason); }
-      if (data.status !== undefined) { fields.push(`status = $${idx++}`); params.push(data.status); }
       if (data.unitCost !== undefined) { fields.push(`unit_cost = $${idx++}`); params.push(data.unitCost); }
       if (data.warehouseId !== undefined) { fields.push(`warehouse_id = $${idx++}`); params.push(data.warehouseId); }
+      // `status` is deliberately absent, on this path and on the channel's. It
+      // used to be settable here, which is the P0-4 shape: a status flip with no
+      // journal entry and no stock movement, since both live in
+      // postStockAdjustment. No caller sent it (the page and the AI tool send
+      // quantities, reason and cost), so removing it costs nothing and closes a
+      // way to bypass the posting path.
       fields.push(`updated_by = $${idx++}`);
       params.push(_updatedBy || null);
       fields.push('updated_at = NOW()');

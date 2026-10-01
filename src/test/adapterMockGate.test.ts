@@ -22,17 +22,19 @@ const SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'out']);
  * Tests whose whole purpose is to measure the DESKTOP path, so they mock
  * isElectronPg to answer true. Every other adapter mock must answer false, or
  * the test silently exercises the RPC branch instead of the fallback it means
- * to cover. Listed explicitly: an unstated exception is indistinguishable from
- * a mistake.
+ * to cover. Listed explicitly: an unstated exception is indistinguishable from a
+ * mistake.
  *
- * All three install a bridge and hand the adapter a spy, so a method that
- * reaches raw SQL is observed reaching it. Answering false would report every
- * method as clean and prove nothing.
+ * All four install a bridge and hand the adapter a spy, so a method that
+ * reaches raw SQL is observed reaching it — and tranche9b.routing additionally
+ * flips the predicate back to false to prove the fallback still issues its own
+ * SQL. Answering false would report every method as clean and prove nothing.
  */
 const DESKTOP_PATH_MOCKS = new Set([
   'src/test/desktopReachabilityGate.test.ts',
   'src/test/rpcReachabilityCrossCheck.test.ts',
   'src/test/channelWiringGate.test.ts',
+  'src/test/tranche9b.routing.test.ts',
 ]);
 
 function testFiles(dir: string, out: string[] = []): string[] {

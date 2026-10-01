@@ -43,13 +43,18 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
  * statement replacing them (the ledger alone used to be three hand-built
  * shapes with a manual $N renumbering); lowered to 368 with the hr departments
  * and payroll-components tranche, eight functions and nine statements, of
- * which the delete guard collapsed from two statements to one CTE.
+ * which the delete guard collapsed from two statements to one CTE; lowered to
+ * 362 with the tranche that resolved both standing refusals — the two dynamic
+ * SET updates and the two guarded voucher deletes, six statements in four
+ * functions. The voucher guard also shed a branch: its fifth case existed to
+ * translate a foreign-key violation that no constraint can raise, because
+ * nothing references those two tables.
  *
  * `rawSqlRatchetGate` did NOT move and must not: it counts the fallback text,
  * which the migration deliberately preserves for PGlite. Both ceilings falling
  * together would mean the fallback was deleted rather than bypassed.
  */
-const CEILING = 368;
+const CEILING = 362;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -74,9 +79,9 @@ const GUARD_RE = /(isElectronPg\s*\(\s*\)|mainAuthBridge\s*\(\s*\))/;
  */
 const BASELINE: Record<string, number> = {
   'src/modules/hr/api.ts': 35,
-  'src/modules/accounting/api.ts': 36,
+  'src/modules/accounting/api.ts': 32,
   'src/modules/manufacturing/api.ts': 34,
-  'src/modules/inventory/api.ts': 27,
+  'src/modules/inventory/api.ts': 24,
   'src/modules/purchases/api.ts': 24,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
   'src/modules/sales/api.ts': 14,

@@ -36,6 +36,11 @@ export interface ElectronDB extends PreloadDB {
     getTransactionsPaginated(payload: { page?: number; pageSize?: number; status?: string; createdBy?: string; paymentMethod?: string; search?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getReceiptVouchersPaginated(payload: { page?: number; pageSize?: number; status?: string; createdBy?: string; paymentMethod?: string; search?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getPaymentVouchersPaginated(payload: { page?: number; pageSize?: number; status?: string; createdBy?: string; paymentMethod?: string; search?: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // Guarded deletes (tranche 9b). The four refusal reasons are decided inside
+    // the main process from one statement; the payload carries an id and nothing
+    // else, so the caller cannot talk the guard into deleting a posted voucher.
+    deleteReceiptVoucher(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    deletePaymentVoucher(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     // Posting pre-flight reads (Phase 0 tranche 8a). Read-only, and the only
     // part of postingService that moves before the compensation gap is settled.
     getSalesInvoiceForPosting(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -60,6 +65,12 @@ export interface ElectronDB extends PreloadDB {
     deleteStockAdjustment(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     // No approver argument: the main process stamps the session identity.
     approveStockAdjustment(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    // Partial updates (tranche 9b): send only the keys that changed. The COLUMN
+    // list is decided in the main process, so no field here can name one.
+    // `updateStockAdjustment` deliberately has no `status`: a status flip without
+    // the journal entry and stock movement is what postStockAdjustment is for.
+    updateWarehouse(payload: { id: string; name?: string; code?: string; branchId?: string | null; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateStockAdjustment(payload: { id: string; systemQty?: number; actualQty?: number; difference?: number; reason?: string; unitCost?: number; warehouseId?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteWarehouse(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getCategories(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getProducts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;

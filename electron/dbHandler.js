@@ -1397,6 +1397,126 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
+  // ── Voucher deletes, tranche 9b ──────────────────────────────────────────
+  // These were the second standing refusal ("a five-reason guard whose fifth
+  // branch is a 23503 catch that a CTE cannot express"). Two things made that
+  // refusal obsolete, and both are established facts, not hopes:
+  //
+  //   1. The fifth branch is UNREACHABLE. It existed to translate a foreign-key
+  //      violation raised by the DELETE. Nothing references these tables: their
+  //      eight FKs all point outward (companies cascade, customers/suppliers
+  //      restrict, users set null), so the catalog returns zero constraints
+  //      naming them as the referenced side, and deleting a draft voucher on a
+  //      real engine raises no 23503. The catch was also matching on prose
+  //      ("violates"), which is the fragile pattern the SQLSTATE work replaced.
+  //   2. The four real reasons are all predicates on the row itself, so one
+  //      statement expresses all of them and none of them can interleave.
+  //
+  // `IS DISTINCT FROM` is a deliberate translation of `String(v.status) === …`:
+  // the JS comparison let a NULL status through, and plain `NOT IN` would return
+  // NULL for NULL and quietly start blocking deletes. The wording is lifted
+  // from the renderer unchanged.
+  //
+  // Both are written out rather than produced by a shared helper over the two
+  // table names: typedRpcSurfaceGate discovers channels by matching
+  // `registerRpc('name'`, so an interpolated name disappears from the source and
+  // its preload wiring stops being checked. Their mapResult is likewise inlined
+  // rather than shared, because the gates evaluate a channel by extracting its
+  // object literal — a channel that closes over an outer const stops being
+  // evaluable, and a gate that cannot evaluate a channel is not a gate. The
+  // duplication is four branches of identical wording, and
+  // partialUpdateAllowlistGate is extended to compare the two wordings so the
+  // copy cannot drift.
+  registerRpc('accounting.deleteReceiptVoucher', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH v AS (
+              SELECT status, amount_applied FROM receipt_vouchers
+               WHERE id = $1::uuid AND company_id = $2::uuid
+            ), del AS (
+              DELETE FROM receipt_vouchers r
+               WHERE r.id = $1::uuid AND r.company_id = $2::uuid
+                 AND EXISTS (
+                   SELECT 1 FROM v
+                    WHERE v.status IS DISTINCT FROM 'posted'
+                      AND v.status IS DISTINCT FROM 'reversed'
+                      AND COALESCE(v.amount_applied, 0) = 0
+                 )
+              RETURNING r.id
+            )
+            SELECT (SELECT count(*) FROM v)::int AS found,
+                   COALESCE((SELECT status FROM v), '') AS status,
+                   COALESCE((SELECT amount_applied FROM v), 0) AS applied,
+                   (SELECT count(*) FROM del)::int AS deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) {
+        if (Number(r.found) === 0) throw new Error('Voucher not found');
+        const status = String(r.status || '');
+        if (status === 'posted') {
+          throw new Error('Cannot delete a posted voucher — reverse it with a reversal voucher instead.');
+        }
+        if (status === 'reversed') {
+          throw new Error('Cannot delete a reversed voucher — it is terminal.');
+        }
+        if (Number(r.applied || 0) > 0) {
+          throw new Error('Cannot delete voucher with applied payments. Reverse the payment first by creating a reversal voucher.');
+        }
+      }
+      return rows;
+    },
+  });
+
+  registerRpc('accounting.deletePaymentVoucher', {
+    paramCount: 2,
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => ({
+      sql: `WITH v AS (
+              SELECT status, amount_applied FROM payment_vouchers
+               WHERE id = $1::uuid AND company_id = $2::uuid
+            ), del AS (
+              DELETE FROM payment_vouchers r
+               WHERE r.id = $1::uuid AND r.company_id = $2::uuid
+                 AND EXISTS (
+                   SELECT 1 FROM v
+                    WHERE v.status IS DISTINCT FROM 'posted'
+                      AND v.status IS DISTINCT FROM 'reversed'
+                      AND COALESCE(v.amount_applied, 0) = 0
+                 )
+              RETURNING r.id
+            )
+            SELECT (SELECT count(*) FROM v)::int AS found,
+                   COALESCE((SELECT status FROM v), '') AS status,
+                   COALESCE((SELECT amount_applied FROM v), 0) AS applied,
+                   (SELECT count(*) FROM del)::int AS deleted`,
+      params: [String(p.id), session.user.companyId],
+    }),
+    mapResult: (rows) => {
+      const r = rows && rows[0];
+      if (r && Number(r.deleted) === 0) {
+        if (Number(r.found) === 0) throw new Error('Voucher not found');
+        const status = String(r.status || '');
+        if (status === 'posted') {
+          throw new Error('Cannot delete a posted voucher — reverse it with a reversal voucher instead.');
+        }
+        if (status === 'reversed') {
+          throw new Error('Cannot delete a reversed voucher — it is terminal.');
+        }
+        if (Number(r.applied || 0) > 0) {
+          throw new Error('Cannot delete voucher with applied payments. Reverse the payment first by creating a reversal voucher.');
+        }
+      }
+      return rows;
+    },
+  });
+
   // accounting.getTransactions — uses json_agg so the renderer no longer
   // needs a second round-trip to fetch journal entries.
   registerRpc('accounting.getTransactions', {
@@ -2985,6 +3105,78 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       sql: 'DELETE FROM stock_adjustments WHERE id = $1::uuid AND company_id = $2::uuid',
       params: [String(p.id), session.user.companyId],
     }),
+  });
+
+  // inventory.updateWarehouse — partial update, so `paramCount: null`.
+  // The renderer named the columns; here the main process does. The payload says
+  // WHICH fields changed and never which columns, so a caller cannot steer
+  // `company_id` or the audit trail by guessing a field name.
+  //
+  // No "nothing to update" early return, deliberately: the renderer had one,
+  // but it sat AFTER `updated_by` was pushed, so `fields.length` could never be
+  // zero and the guard could never fire. Copying it would have copied a lie.
+  // Here the audit columns are always written, which is what actually happened.
+  registerRpc('inventory.updateWarehouse', {
+    paramCount: null, // dynamic: the SET clause length follows the payload
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => {
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (p.name !== undefined) { fields.push(`name = $${idx++}`); values.push(p.name); }
+      if (p.code !== undefined) { fields.push(`code = $${idx++}`); values.push(p.code); }
+      if (p.branchId !== undefined) { fields.push(`branch_id = $${idx++}`); values.push(p.branchId); }
+      if (p.isActive !== undefined) { fields.push(`is_active = $${idx++}`); values.push(p.isActive); }
+      fields.push(`updated_by = $${idx++}`);
+      values.push(session.user.id);
+      // No `updated_at`, and that is not an oversight: `warehouses` carries
+      // created_by/updated_by/created_at and has never had an updated_at. The
+      // renderer stamped `updated_at = NOW()` all along, the engine rejected it,
+      // and editing a warehouse therefore failed on both platforms. `updated_by`
+      // carries the audit intent by itself.
+      const whereIdx = idx;
+      values.push(String(p.id));
+      values.push(session.user.companyId);
+      const sql = `UPDATE warehouses SET ${fields.join(', ')} WHERE id = $${whereIdx}::uuid AND company_id = $${whereIdx + 1}::uuid`;
+      return { sql, params: values };
+    },
+  });
+
+  // inventory.updateStockAdjustment — partial update, same shape.
+  //
+  // `status` is deliberately NOT in the allowlist. The renderer accepted it, but
+  // no caller sends it (the page and the AI tool send quantities, reason and
+  // cost only), and accepting it is the P0-4 shape: a status flip with no
+  // journal entry and no stock movement, because those live in
+  // postStockAdjustment. Dropping it here AND in the PGlite fallback keeps the
+  // two execution paths identical — a column the desktop refuses and the browser
+  // honours is the drift this whole layer exists to remove.
+  registerRpc('inventory.updateStockAdjustment', {
+    paramCount: null, // dynamic: the SET clause length follows the payload
+    validate: (p) => {
+      if (!UUID_RE.test(String(p.id || ''))) throw new Error('id must be a uuid');
+    },
+    compose: (p, session) => {
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (p.systemQty !== undefined) { fields.push(`system_qty = $${idx++}`); values.push(p.systemQty); }
+      if (p.actualQty !== undefined) { fields.push(`actual_qty = $${idx++}`); values.push(p.actualQty); }
+      if (p.difference !== undefined) { fields.push(`difference = $${idx++}`); values.push(p.difference); }
+      if (p.reason !== undefined) { fields.push(`reason = $${idx++}`); values.push(p.reason); }
+      if (p.unitCost !== undefined) { fields.push(`unit_cost = $${idx++}`); values.push(p.unitCost); }
+      if (p.warehouseId !== undefined) { fields.push(`warehouse_id = $${idx++}`); values.push(p.warehouseId); }
+      fields.push(`updated_by = $${idx++}`);
+      values.push(session.user.id);
+      fields.push('updated_at = NOW()');
+      const whereIdx = idx;
+      values.push(String(p.id));
+      values.push(session.user.companyId);
+      const sql = `UPDATE stock_adjustments SET ${fields.join(', ')} WHERE id = $${whereIdx}::uuid AND company_id = $${whereIdx + 1}::uuid`;
+      return { sql, params: values };
+    },
   });
 
   // inventory.approveStockAdjustment — the approver is the SESSION user.

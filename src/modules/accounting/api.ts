@@ -1201,6 +1201,15 @@ export const accountingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        // The four refusal reasons are facts about the row, so the main process
+        // decides them from one statement — they cannot interleave with the
+        // delete, and the caller only ever supplies an id.
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.deleteReceiptVoucher({ id })) as { success: boolean; error?: string };
+        return { success: res.success, error: res.error };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT invoice_id, amount_applied, base_currency_applied, status FROM receipt_vouchers WHERE id = $1::uuid AND company_id = $2::uuid',
@@ -1573,6 +1582,12 @@ export const accountingApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const surface = typeof window !== 'undefined' ? window.electronDB?.accounting : undefined;
+        if (!surface) return { success: false, error: 'RPC unavailable' };
+        const res = (await surface.deletePaymentVoucher({ id })) as { success: boolean; error?: string };
+        return { success: res.success, error: res.error };
+      }
       const adapter = await getDbAdapter();
       const check = await adapter.query(
         'SELECT invoice_id, amount_applied, base_currency_applied, status FROM payment_vouchers WHERE id = $1::uuid AND company_id = $2::uuid',
