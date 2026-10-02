@@ -348,6 +348,7 @@
       "copyFailed": "Copy failed — copy the visible error message instead"
     },
     "stalledRecovered": "The assistant stopped responding for a while so it was reset automatically — please resend your request",
+    "showOlder": "Show older messages ({{count}})",
     "send": "Send",
     "thinking": "Thinking...",
     "executingTool": "Executing: {{tool}}",

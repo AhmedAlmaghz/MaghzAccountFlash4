@@ -63,4 +63,44 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(p.slots.quantities).toEqual([10]);
     expect(p.slots.prices).toEqual([500]);
   });
+
+  it('pairs multi-line invoices in reading order (C3)', () => {
+    const p = planRequest('فاتورة مبيعات للعميل محمد 10 كرتون بـ 500 و5 علب بـ 200');
+    expect(p.plan).toBe('single-write');
+    expect(p.slots.lines).toEqual([
+      { quantity: 10, unitPrice: 500 },
+      { quantity: 5, unitPrice: 200 },
+    ]);
+  });
+
+  it('asks once for the priceless trailing line only', () => {
+    const p = planRequest('فاتورة مبيعات للعميل محمد 10 كرتون بـ 500 و5 علب');
+    expect(p.plan).toBe('ask');
+    expect(p.slots.lines).toEqual([
+      { quantity: 10, unitPrice: 500 },
+      { quantity: 5 },
+    ]);
+    expect(p.missing.some((m) => m.field === 'unitPrice')).toBe(true);
+  });
+
+  it('plans manufacturing work orders with product + quantity (no price asked)', () => {
+    const p = planRequest('أنشئ أمر تشغيل 100 علبة زبادي');
+    expect(p.intent).toBe('manufacturing.work_order');
+    expect(p.writeTool).toBe('manufacturing.create_work_order');
+    expect(p.slots.quantities).toEqual([100]);
+    expect(p.entityRequests.map((e) => e.kind)).toEqual(['product']);
+    expect(p.plan).toBe('single-write');
+  });
+
+  it('asks for work-order quantity when absent', () => {
+    const p = planRequest('أنشئ أمر تشغيل لمنتج الزبادي');
+    expect(p.intent).toBe('manufacturing.work_order');
+    expect(p.missing.some((m) => m.field === 'quantity')).toBe(true);
+  });
+
+  it('routes lead/employee/product creation before generic party words', () => {
+    expect(planRequest('سجل عميل محتمل اسمه خالد').intent).toBe('crm.lead');
+    expect(planRequest('أضف موظف جديد اسمه سالم').intent).toBe('hr.employee');
+    expect(planRequest('أضف منتج جديد اسمه سكر').intent).toBe('inventory.product');
+  });
 });

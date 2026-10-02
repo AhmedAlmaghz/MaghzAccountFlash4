@@ -150,6 +150,22 @@ export function ChatPanel() {
     return -1;
   }, [visibleMessages]);
 
+  // C2 render window: reconciliation is O(N) per store update (memoized
+  // bubbles skip paint, but the parent still diffs all N children on every
+  // chunk flush). Cap MOUNTED bubbles at the newest RENDER_WINDOW with an
+  // expander — engine history, persistence and suggestions keep seeing the
+  // full list. lastAssistantIndex stays in full-list coordinates; the map
+  // below offsets by the hidden prefix length.
+  const RENDER_WINDOW = 100;
+  const [renderLimit, setRenderLimit] = useState(RENDER_WINDOW);
+  const firstMessageId = visibleMessages[0]?.id;
+  useEffect(() => {
+    // New/loaded conversation (or emptied store) → back to the tail window.
+    setRenderLimit(RENDER_WINDOW);
+  }, [firstMessageId]);
+  const hiddenCount = Math.max(0, visibleMessages.length - renderLimit);
+  const renderedMessages = hiddenCount > 0 ? visibleMessages.slice(-renderLimit) : visibleMessages;
+
   const handleSend = useCallback(async (text: string, attachments: PreparedAttachment[] = []) => {
     await engine.send(text, attachments);
   }, [engine]);
@@ -317,14 +333,24 @@ export function ChatPanel() {
       {/* Messages scroll area — centered column, full width on mobile */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl w-full mx-auto px-3 sm:px-4 py-4 space-y-5">
-          {visibleMessages.map((msg, idx) => (
+          {hiddenCount > 0 && (
+            <div className="flex justify-center">
+              <button
+                onClick={() => setRenderLimit((l) => l + RENDER_WINDOW)}
+                className="px-3 py-1.5 text-xs font-medium rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95"
+              >
+                {t('ai.showOlder', { count: hiddenCount })}
+              </button>
+            </div>
+          )}
+          {renderedMessages.map((msg, idx) => (
             <MessageBubble
               key={msg.id}
               message={msg}
               onConfirm={handleConfirm}
-              isLastAssistant={idx === lastAssistantIndex && !isProcessing}
-              onRegenerate={idx === lastAssistantIndex && !isProcessing ? handleRegenerate : undefined}
-              suggestions={idx === lastAssistantIndex ? lastAssistantSuggestions : undefined}
+              isLastAssistant={idx + hiddenCount === lastAssistantIndex && !isProcessing}
+              onRegenerate={idx + hiddenCount === lastAssistantIndex && !isProcessing ? handleRegenerate : undefined}
+              suggestions={idx + hiddenCount === lastAssistantIndex ? lastAssistantSuggestions : undefined}
               onSuggestion={handleSuggestion}
             />
           ))}
