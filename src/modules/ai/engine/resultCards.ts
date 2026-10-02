@@ -286,8 +286,14 @@ export function summarizeResult(result: unknown): string {
         const label = statLabels[k] ?? k.replace(/_/g, ' ');
         if (typeof v === 'number') {
           lines.push(`${label}: ${fmtCurrency(v)}`);
-        } else if (v !== null && v !== undefined) {
+        } else if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'object') {
+          // Detail rows (e.g. products/invoices lists) — a table, never
+          // String(array-of-objects) which yields "[object Object],…".
+          lines.push(renderTable(v as Record<string, unknown>[], label));
+        } else if (v !== null && v !== undefined && typeof v !== 'object') {
           lines.push(`${label}: ${String(v)}`);
+        } else if (v !== null && v !== undefined) {
+          lines.push(`${label}: ${safeJson(v)}`);
         }
       }
       return lines.join('\n');
@@ -301,7 +307,9 @@ export function summarizeResult(result: unknown): string {
     // ── Simple array → numbered list ────────────────────────────────
     if (Array.isArray(obj)) {
       if (obj.length === 0) return '(فارغ)';
-      return obj.map((item, i) => `${i + 1}. ${String(item)}`).join('\n');
+      return obj
+        .map((item, i) => `${i + 1}. ${typeof item === 'object' ? safeJson(item) : String(item)}`)
+        .join('\n');
     }
 
     // ── Single object with known fields → card ──────────────────────

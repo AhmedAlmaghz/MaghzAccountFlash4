@@ -267,4 +267,22 @@ describe('inventory.create_product — unit catalog validation (transcript regre
     expect(String(res.error)).toContain('غير موجودة في الكتالوج');
     expect(mockedApi.updateProduct).not.toHaveBeenCalled();
   });
+
+  it('matches unit abbreviations inside catalog names (live 2026-10-02: "كيلو" ⊂ "كيلوغرام")', async () => {
+    vi.mocked(getUnits).mockResolvedValue({
+      success: true,
+      data: [
+        ...CATALOG,
+        { id: 'u-kg', nameAr: 'كيلوغرام', nameEn: 'Kilogram', code: 'KG', isActive: true },
+      ],
+    } as never);
+    const res = (await findTool('inventory.create_product').execute(
+      { nameAr: 'كنافة', costPrice: 2000, unitName: 'كيلو' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+    expect(mockedApi.createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ unit: 'كيلوغرام' }),
+    );
+  });
 });

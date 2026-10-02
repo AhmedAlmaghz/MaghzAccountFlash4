@@ -110,4 +110,14 @@ describe('entityService — unified resolution (local first, JEV fallback)', () 
     expect(out.map((r) => r.request.text)).toEqual(['a', 'b', 'c', 'd', 'e']);
     expect(out.every((r) => r.status === 'same')).toBe(true);
   });
+
+  it('skips giant blobs instead of fake-missing verdicts (live 2026-10-02)', async () => {
+    const blob = 'ضيف ' + 'صنف جديد '.repeat(200);
+    const [r] = await resolveEntities([{ text: blob, kind: 'product' }], 'co1', {
+      jevFallback: false,
+    });
+    expect(r.status).toBe('skip');
+    expect(mockedSearch).not.toHaveBeenCalled();
+    expect(renderEntityBlock([r])).toBeNull();
+  });
 });

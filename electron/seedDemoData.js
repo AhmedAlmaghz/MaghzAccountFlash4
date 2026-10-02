@@ -123,6 +123,7 @@ const UNITS = [
   { code: 'UNT',  name_ar: 'وحدة',       name_en: 'Unit',    conv: 1 },
   { code: 'CTN', name_ar: 'كرتون',     name_en: 'Carton',   conv: 1 },
   { code: 'KG',  name_ar: 'كيلوغرام',   name_en: 'Kilogram', conv: 1 },
+  { code: 'GRM', name_ar: 'غرام',       name_en: 'Gram',     conv: 1 },
   { code: 'LTR', name_ar: 'لتر',         name_en: 'Liter',    conv: 1 },
   { code: 'MTR', name_ar: 'متر',         name_en: 'Meter',    conv: 1 },
   { code: 'PC',  name_ar: 'حبة',  name_en: 'Piece',  conv: 1 },

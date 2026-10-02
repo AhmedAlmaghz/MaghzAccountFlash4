@@ -182,4 +182,11 @@ describe('renderErrorGuidance', () => {
     const block = renderErrorGuidance(c);
     expect(block).toContain('لن تنجح');
   });
+
+  it('empty search text is INVALID_VALUE and non-retryable (live 2026-10-02)', () => {
+    const c = classifyToolError('نص البحث مطلوب');
+    expect(c.code).toBe('INVALID_VALUE');
+    expect(c.retryable).toBe(false);
+    expect(renderErrorGuidance(c)).toContain('لن تنجح');
+  });
 });

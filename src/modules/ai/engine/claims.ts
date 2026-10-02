@@ -84,9 +84,24 @@ export function stripImitationToolBlocks(content: string): string {
   if (!content) return content;
   const BLOCK_START = /^\s*(?:\[(?:تم (?:تنفيذ|استدعاء):|TOOL_RESULT:|TOOL_CALLED:)|@@@call:)/;
   const PAYLOAD_LINE = /^\s*[{}[\]"']/;
+  // Input-only fences the model must never echo: untrusted-data and
+  // attachment blocks exist in history as CONTEXT for the model. When they
+  // appear in assistant OUTPUT it is parroting (seen live: whole JSON dumps
+  // with fences rendered as chat bubbles), not content — drop the whole span.
+  const FENCE_START = /^\s*<<<(BEGIN_UNTRUSTED_DATA|BEGIN_ATTACHMENT)\b/;
+  const FENCE_END = /^\s*<<<(END_UNTRUSTED_DATA|END_ATTACHMENT)\b/;
   const filtered: string[] = [];
   let skipPayload = false;
+  let skipFence = false;
   for (const line of content.split('\n')) {
+    if (skipFence) {
+      if (FENCE_END.test(line)) skipFence = false;
+      continue;
+    }
+    if (FENCE_START.test(line)) {
+      skipFence = true;
+      continue;
+    }
     if (BLOCK_START.test(line)) {
       skipPayload = true;
       continue;

@@ -68,14 +68,22 @@ async function resolveUnitName(
     return { unit: (hit && (hit.nameAr || hit.nameEn)) || 'piece' };
   }
   const norm = unitNorm(name);
-  const hit = catalog.find(
-    (u) =>
-      u.isActive !== false &&
-      [u.nameAr || '', u.nameEn || '', u.code || ''].some((c) => {
-        const cn = unitNorm(c);
-        return !!cn && cn === norm;
-      }),
-  );
+  const active = catalog.filter((u) => u.isActive !== false);
+  const namesOf = (u: (typeof active)[number]) =>
+    [u.nameAr || '', u.nameEn || '', u.code || '']
+      .map((c) => unitNorm(c).replace(/^(ال|لل)/, ''))
+      .filter(Boolean);
+  const want = norm.replace(/^(ال|لل)/, '');
+  // 1) exact (after ال-stripping both sides)
+  let hit = active.find((u) => namesOf(u).some((cn) => cn === want));
+  // 2) substring either direction ("كيلو" ⊂ "كيلوغرام" — live 2026-10-02;
+  // also tolerates glued suffixes like "سطلخام"). Minimum 3 chars so a
+  // 1-2 letter fragment can never match a whole catalog by accident.
+  if (!hit && want.length >= 3) {
+    hit = active.find((u) =>
+      namesOf(u).some((cn) => cn.length >= 3 && (cn.includes(want) || want.includes(cn))),
+    );
+  }
   if (!hit) return { error: `الوحدة "${name}" غير موجودة في الكتالوج — ابحث بـ search.units أو أنشئها من الإعدادات (وحدات القياس) أولاً` };
   return { unit: hit.nameAr || name };
 }

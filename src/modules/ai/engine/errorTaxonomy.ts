@@ -95,6 +95,17 @@ const PATTERNS: Pattern[] = [
     retryable: true,
   },
   {
+    // Live 2026-10-02: the model called search.* with an EMPTY query over
+    // and over ("نص البحث مطلوب" ×N across tools). An empty search can never
+    // succeed — mark it non-retryable so the loop guard kills the spiral and
+    // the model asks for (or derives) a real search text instead.
+    code: 'INVALID_VALUE',
+    re: /نص البحث مطلوب/,
+    reason: 'استدعيت البحث بنص فارغ — البحث الفارغ لا يعيد شيئاً أبداً.',
+    fixHint: 'مرّر اسم الكيان أو جزأه في query (من كلام المستخدم أو كتلة الحل) — ولا تعاود الاستدعاء الفارغ أبداً.',
+    retryable: false,
+  },
+  {
     code: 'UNBALANCED_ENTRY',
     re: /مجموع المدين .* لا يساوي مجموع الدائن|القيد غير متوازن/,
     reason: 'القيد المحاسبي مكسور التوازن: مجموع المدين لا يساوي مجموع الدائن — وهو شرط القيد المزدوج.',

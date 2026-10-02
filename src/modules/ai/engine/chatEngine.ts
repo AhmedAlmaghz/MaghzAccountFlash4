@@ -435,7 +435,10 @@ class ChatEngine {
       const memoryP = deadlineOr(loadMemoryBlock(this.ctx.companyId), PRE_LLM_DEADLINE_MS, null, 'memory')
         .catch(() => null);
       const planned = planRequest(userText);
-      const entitiesP = wantsSearch
+      // Giant task lists (>2000 chars) are handled by the batch flow via
+      // search tools — pre-resolving their blob wastes fetches and (before
+      // the entityService skip guard) produced bogus "missing" verdicts.
+      const entitiesP = wantsSearch && userText.length <= 2000
         ? deadlineOr(
           resolveEntities(planned.entityRequests, this.ctx.companyId),
           PRE_LLM_DEADLINE_MS,
@@ -930,7 +933,7 @@ class ChatEngine {
           .filter((i) => i.status === 'failed')
           .slice(0, 6)
           .map((i) => batchItemLabel(i));
-        const msg = `لا جديد للاستئناف — الدفعة اكتملت جزئياً سابقاً (${batchProgressLine(detail)})${failedNamed.length > 0 ? ` — الفاشل: ${failedNamed.join('؛ ')}` : ''}. قل "أعد الفاشلة" إن أردت التصحيح.`;
+        const msg = `لا جديد للاستئناف — الدفعة اكتملت جزئياً سابقاً (${batchProgressLine(detail)})${failedNamed.length > 0 ? ` — الفاشل: ${failedNamed.join('؛ ')}` : ''}. قل "أعد الفاشلة" إن أردت التصحيح — ولا تستدعِ الاستئناف مجدداً لهذه الدفعة (تكراره يولّد نفس الرسالة).`;
         // الجلسة 2026-09-24: "استمر" المتكرر على دفعة منتهية ولّد 5 رسائل
         // متطابقة تلوث السياق — لا تدفع نفس الرسالة مرتين متتاليتين.
         const lastContent = store.messages.length > 0

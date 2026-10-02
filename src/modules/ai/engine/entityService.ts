@@ -45,7 +45,7 @@ export interface EntityRequest {
   kind: EntityKind;
 }
 
-export type ResolveStatus = 'same' | 'confirm' | 'missing';
+export type ResolveStatus = 'same' | 'confirm' | 'missing' | 'skip';
 
 export interface ResolvedEntity {
   request: EntityRequest;
@@ -169,6 +169,14 @@ async function resolveOne(
   if (!text) {
     return { request: req, status: 'missing', id: null, name: null, score: 0, candidates: [] };
   }
+  // Live 2026-10-02: a 40-task message arrived as ONE product request whose
+  // text was the whole message — scoring it yields a bogus "missing" verdict
+  // that forbids searching ("ممنوع استدعاء أي أداة search"). A blob this
+  // long is a task LIST, not an entity name: skip it (no verdict) so the
+  // batch flow handles it via search tools instead.
+  if (text.length > 400) {
+    return { request: req, status: 'skip', id: null, name: null, score: 0, candidates: [] };
+  }
   const types = KIND_TO_TYPES[req.kind] ?? [];
   let matches: EntityMatch[] = [];
   try {
@@ -290,9 +298,10 @@ export async function resolveEntities(
  * stays valid whichever path produced it.
  */
 export function renderEntityBlock(resolved: ResolvedEntity[]): string | null {
-  if (resolved.length === 0) return null;
+  const shown = resolved.filter((r) => r.status !== 'skip');
+  if (shown.length === 0) return null;
   const lines: string[] = [];
-  for (const r of resolved) {
+  for (const r of shown) {
     const label = KIND_LABEL_AR[r.request.kind] ?? r.request.kind;
     if (r.status === 'same' && r.id && r.name) {
       lines.push(`- **${label}**: "${r.name}" (id: ${r.id}) — ثقة ${(r.score * 100).toFixed(0)}%`);

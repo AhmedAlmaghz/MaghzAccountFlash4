@@ -10,6 +10,7 @@ import {
   computeHeaderDiscount,
   parseLines,
   resolveLineUnits,
+  resolveInvoiceId,
   LINES_SCHEMA,
 } from './shared';
 import { localToday } from '../../engine/dateUtils';
@@ -348,14 +349,17 @@ export const purchasesWriteTools: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        invoiceId: { type: 'string', description: 'معرف فاتورة المشتريات (UUID)' },
+        invoiceId: { type: 'string', description: 'معرف فاتورة المشتريات (UUID) أو رقمها البشري (PINV-0001)' },
       },
       required: ['invoiceId'],
     },
     summarizeArgs: (a) => `ترحيل فاتورة مشتريات: ${a.invoiceId}`,
     execute: async (args, ctx) => {
-      const invoiceId = str(args.invoiceId);
-      if (!invoiceId) return { error: 'invoiceId مطلوب' };
+      const raw = str(args.invoiceId);
+      if (!raw) return { error: 'invoiceId مطلوب' };
+      const resolved = await resolveInvoiceId(ctx.companyId, 'purchases', raw);
+      if (!resolved.id) return { error: resolved.error };
+      const invoiceId = resolved.id;
       const res = await purchasesApi.postInvoice(invoiceId, ctx.companyId);
       if (!res.success) return { error: res.error || 'فشل ترحيل الفاتورة' };
       return { posted: true, invoiceId };

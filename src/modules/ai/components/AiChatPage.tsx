@@ -20,6 +20,7 @@ import { usePermission } from '@/modules/auth/hooks/usePermission';
 import { aiApi } from '../api';
 import { aiPersistence } from '../api/persistence';
 import { getChatEngine } from '../engine/chatEngine';
+import { stripImitationToolBlocks } from '../engine/claims';
 import { localToday } from '../engine/dateUtils';
 import { useAiStore } from '../store';
 import { ChatPanel } from './ChatPanel';
@@ -179,14 +180,19 @@ export default function AiChatPage() {
     for (const msg of messages) {
       const role = msg.role === 'user' ? t('ai.you') || 'You' : t('ai.title');
       if (msg.content) {
-        lines.push(`**${role}:** ${msg.content}\n`);
+        // Defense-in-depth: internal history markers ([TOOL_RESULT:], fenced
+        // untrusted/attachment blocks) must never leak into an exported file
+        // even if one ever slips into a stored bubble.
+        lines.push(`**${role}:** ${stripImitationToolBlocks(msg.content)}\n`);
       }
       if (msg.toolCall) {
         lines.push(`> *${msg.toolCall.label}: ${msg.toolCall.resultSummary || msg.toolCall.status}*\n`);
       }
     }
     const md = lines.join('\n');
-    const blob = new Blob([md], { type: 'text/markdown' });
+    // Explicit UTF-8 charset: without it some viewers guess Latin-1 and
+    // Arabic comes out as mojibake (seen live on exported tool labels).
+    const blob = new Blob(['\uFEFF' + md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

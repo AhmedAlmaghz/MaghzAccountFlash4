@@ -29,6 +29,7 @@ import type { EntityRequest, EntityKind } from './entityService';
 export type PlannedIntent =
   | 'sales.invoice'
   | 'purchases.invoice'
+  | 'invoice.undirected'
   | 'accounting.receipt'
   | 'accounting.payment'
   | 'accounting.journal'
@@ -70,7 +71,7 @@ export interface PlannedRequest {
   plan: 'single-write' | 'ask' | 'generic';
 }
 
-const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic'>, string> = {
+const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undirected'>, string> = {
   'sales.invoice': 'sales.create_invoice',
   'purchases.invoice': 'purchases.create_invoice',
   'accounting.receipt': 'accounting.create_receipt_voucher',
@@ -107,6 +108,22 @@ function detectIntent(norm: string): PlannedIntent {
   if (JOURNAL_RE.test(norm)) return 'accounting.journal';
   if (PURCHASES_RE.test(norm)) return 'purchases.invoice';
   if (SALES_RE.test(norm)) return 'sales.invoice';
+  // Party-type inference (live session 2026-10-02): a bare "فاتورة من X"
+  // with no بيع/شراء keyword must still resolve — مورد/موردين means the
+  // party is a supplier (purchase side), عميل/عملاء means customer side.
+  // Arabic prepositions disambiguate the rest: "فاتورة من X" (goods FROM
+  // a party) leans purchase, "فاتورة لـ/إلى X" leans sales.
+  // سند without قبض/صرف stays generic (direction genuinely unknown).
+  if (/فاتور|فواتير/.test(norm)) {
+    if (/مورد|موردين|توريد/.test(norm)) return 'purchases.invoice';
+    if (/عميل|عملاء|زبون|زبائن/.test(norm)) return 'sales.invoice';
+    // Prepositions anywhere after the invoice word: "فاتورة نقدية من أبو
+    // العز" (goods FROM a party) leans purchase, "فاتورة لغدرة" leans sales.
+    if (/\sمن\s/.test(norm)) return 'purchases.invoice';
+    // \w never matches Arabic letters — use \S for the word tail (فاتوره).
+    if (/فاتور\S*\s+ل/.test(norm)) return 'sales.invoice';
+    return 'invoice.undirected';
+  }
   return 'generic';
 }
 
@@ -174,6 +191,12 @@ function needsFor(intent: PlannedIntent): EntityKind[] {
       return ['customer', 'product'];
     case 'purchases.invoice':
       return ['supplier', 'product'];
+    case 'invoice.undirected':
+      // Party unknown pre-resolution: ask BOTH families from the same blob.
+      // The block then shows which side exists and the model picks the
+      // matching create tool (rule 55) — never "مبيعات أم مشتريات؟" when
+      // one side hits.
+      return ['supplier', 'customer', 'product'];
     case 'accounting.receipt':
       return ['customer'];
     case 'accounting.payment':
@@ -181,7 +204,10 @@ function needsFor(intent: PlannedIntent): EntityKind[] {
     case 'accounting.journal':
       return ['account'];
     case 'manufacturing.work_order':
-      return ['product'];
+      // Product + warehouse (output store) from the same blob — the model
+      // needs both UUIDs before create_work_order/complete (live 2026-10-02:
+      // empty warehouse searches looped because nothing pre-resolved them).
+      return ['product', 'warehouse'];
     case 'crm.lead':
       return ['lead'];
     case 'hr.employee':
@@ -220,7 +246,9 @@ export function planRequest(rawText: string): PlannedRequest {
 
   const isCash = CASH_RE.test(norm);
   const slots: PlannedRequest['slots'] = { quantities: [], prices: [], lines: [] };
-  if (intent === 'sales.invoice' || intent === 'purchases.invoice') {
+  const isInvoiceLike =
+    intent === 'sales.invoice' || intent === 'purchases.invoice' || intent === 'invoice.undirected';
+  if (isInvoiceLike) {
     slots.paymentType = isCash ? 'cash' : 'credit';
     const paired = extractLinePairs(extractNumbers(text));
     slots.quantities = paired.quantities;
@@ -247,7 +275,7 @@ export function planRequest(rawText: string): PlannedRequest {
 
   // Plan-time gaps only (resolution gaps come from entityService scores).
   const missing: MissingField[] = [];
-  if (intent === 'sales.invoice' || intent === 'purchases.invoice') {
+  if (isInvoiceLike) {
     if (slots.quantities.length === 0) {
       missing.push({ field: 'quantity', questionAr: 'ما الكمية المطلوبة؟' });
     }
@@ -276,7 +304,8 @@ export function planRequest(rawText: string): PlannedRequest {
 
   return {
     intent,
-    writeTool: INTENT_WRITE_TOOL[intent],
+    // Undirected invoices name no tool — the block decides (rule 55).
+    writeTool: intent === 'invoice.undirected' ? null : INTENT_WRITE_TOOL[intent],
     slots,
     entityRequests,
     missing,

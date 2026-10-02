@@ -1,6 +1,8 @@
 import { parseFlexibleNumber } from '../../engine/argNormalizers';
 import { coreApi } from '@/modules/core/api';
 import { guardedQuery } from '../reportCommon';
+import { salesApi } from '@/modules/sales/api';
+import { purchasesApi } from '@/modules/purchases/api';
 
 /**
  * Shared helpers for ALL write-tool domains (Phase 77 split). Extracted
@@ -15,6 +17,35 @@ export function num(v: unknown): number {
 
 export function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/** Strict UUID shape — PG rejects anything else with "Invalid input". */
+export function isUuid(v: string): boolean {
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
+}
+
+/**
+ * Accept an invoice UUID OR its human number (INV-0001 / PINV-0002…).
+ * Live session 2026-10-02: the model posted "فاتورة الشجاع" by passing a
+ * name/number where a UUID was required → "id: Invalid input" ×4. Resolving
+ * the number here turns that whole failure class into success; a truly
+ * unknown value still fails loudly with guidance instead of a PG error.
+ */
+export async function resolveInvoiceId(
+  companyId: string,
+  kind: 'sales' | 'purchases',
+  idOrNumber: string,
+): Promise<{ id?: string; error?: string }> {
+  const v = idOrNumber.trim();
+  if (!v) return { error: 'invoiceId مطلوب' };
+  if (isUuid(v)) return { id: v };
+  const api = kind === 'sales' ? salesApi : purchasesApi;
+  const res = await api.getInvoicesPaginated(companyId, 1, 50, { invoiceNumber: v });
+  const hit = res.success && res.data ? res.data.items[0] : undefined;
+  if (hit) return { id: hit.id };
+  return {
+    error: `لم تُعثر على فاتورة برقم "${v}" — مرّر معرف الفاتورة (id) من نتيجة البحث أو الإنشاء، لا الاسم ولا رقماً تخمينياً`,
+  };
 }
 
 import { roundMoney, getCompanyDecimalPlaces } from '@/core/utils/locale';

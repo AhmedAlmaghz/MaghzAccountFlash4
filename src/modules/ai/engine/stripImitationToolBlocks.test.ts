@@ -66,4 +66,14 @@ describe('stripImitationToolBlocks', () => {
   it('trims surrounding whitespace of the result', () => {
     expect(stripImitationToolBlocks('\n\n  [تم تنفيذ: x] {...}  \n\n')).toBe('');
   });
+
+  it('strips echoed untrusted-data fences with their JSON payload (live 2026-10-02)', () => {
+    const content = 'تم الإنشاء\n<<<BEGIN_UNTRUSTED_DATA مصدر: نتيجة أداة>>>\n{"total":10}\n<<<END_UNTRUSTED_DATA>>>\nخاتمة';
+    expect(stripImitationToolBlocks(content)).toBe('تم الإنشاء\nخاتمة');
+  });
+
+  it('strips echoed attachment fences too', () => {
+    const content = '<<<BEGIN_ATTACHMENT ملف>>>\nنص مستخرج\n<<<END_ATTACHMENT>>>';
+    expect(stripImitationToolBlocks(content)).toBe('');
+  });
 });

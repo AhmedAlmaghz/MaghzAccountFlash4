@@ -83,12 +83,12 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(p.missing.some((m) => m.field === 'unitPrice')).toBe(true);
   });
 
-  it('plans manufacturing work orders with product + quantity (no price asked)', () => {
+  it('plans manufacturing work orders with product + warehouse (no price asked)', () => {
     const p = planRequest('أنشئ أمر تشغيل 100 علبة زبادي');
     expect(p.intent).toBe('manufacturing.work_order');
     expect(p.writeTool).toBe('manufacturing.create_work_order');
     expect(p.slots.quantities).toEqual([100]);
-    expect(p.entityRequests.map((e) => e.kind)).toEqual(['product']);
+    expect(p.entityRequests.map((e) => e.kind).sort()).toEqual(['product', 'warehouse'].sort());
     expect(p.plan).toBe('single-write');
   });
 
@@ -102,5 +102,25 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(planRequest('سجل عميل محتمل اسمه خالد').intent).toBe('crm.lead');
     expect(planRequest('أضف موظف جديد اسمه سالم').intent).toBe('hr.employee');
     expect(planRequest('أضف منتج جديد اسمه سكر').intent).toBe('inventory.product');
+  });
+
+  it('infers purchase from supplier party, sales from customer party', () => {
+    expect(planRequest('سجل فاتورة من المورد الشجاع ب 10 كرتون بـ 500').intent).toBe('purchases.invoice');
+    expect(planRequest('سجل فاتورة للعميل محمد ب 10 كرتون بـ 500').intent).toBe('sales.invoice');
+  });
+
+  it('infers purchase from من and sales from لـ prepositions', () => {
+    expect(planRequest('فاتورة نقدية من أبو العز ب 6 كنافة').intent).toBe('purchases.invoice');
+    expect(planRequest('فاتورة لغدرة ب 5 كرتون').intent).toBe('sales.invoice');
+  });
+
+  it('leaves truly undirected invoices to the block (rule 55)', () => {
+    const p = planRequest('سجل فاتورة ب 6 كنافة بسعر 300');
+    expect(p.intent).toBe('invoice.undirected');
+    expect(p.writeTool).toBeNull();
+    expect(p.entityRequests.map((e) => e.kind).sort()).toEqual(
+      ['customer', 'product', 'supplier'].sort(),
+    );
+    expect(p.plan).toBe('single-write');
   });
 });

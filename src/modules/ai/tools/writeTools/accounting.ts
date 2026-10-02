@@ -59,6 +59,50 @@ function flatAccounts(list: Account[]): Account[] {
   return out;
 }
 
+/**
+ * Resolve a journal leg by name or code when the model has no UUID.
+ * Exact (code/name) first, then token-aware fuzzy (≥0.5) — "الصندوق
+ * الرئيسي" and "محفظة جيب" resolve without a prior search round-trip.
+ * Unknown names fail loudly with guidance (never a PG "Invalid input").
+ */
+async function resolveAccountByNameOrCode(
+  companyId: string,
+  name?: string,
+  code?: string,
+): Promise<{ id?: string; error?: string }> {
+  const wantCode = code?.trim();
+  const wantName = name?.trim();
+  try {
+    const res = await accountingApi.getAccounts(companyId);
+    if (!res.success || !res.data) return { error: 'تعذر قراءة شجرة الحسابات — أعد المحاولة' };
+    const flat = flatAccounts(res.data);
+    if (wantCode) {
+      const hit = flat.find((a) => a.code === wantCode);
+      if (hit) return { id: hit.id };
+    }
+    if (wantName) {
+      const exact = flat.find(
+        (a) => normalizeArabic(a.nameAr) === normalizeArabic(wantName) || normalizeArabic(a.nameEn ?? '') === normalizeArabic(wantName),
+      );
+      if (exact) return { id: exact.id };
+      let best: Account | null = null;
+      let bestScore = 0;
+      for (const a of flat) {
+        const s = Math.max(tokenBestScore(wantName, a.nameAr), tokenBestScore(wantName, a.nameEn ?? ''));
+        if (s > bestScore) {
+          bestScore = s;
+          best = a;
+        }
+      }
+      if (best && bestScore >= 0.5) return { id: best.id };
+      return { error: `الحساب "${wantName}" غير موجود — ابحث بـ search.accounts عن الاسم الدقيق أو أنشئ الحساب أولاً` };
+    }
+    return { error: 'كل entry يحتاج accountId (أو accountName/accountCode)' };
+  } catch {
+    return { error: 'تعذر قراءة شجرة الحسابات — أعد المحاولة' };
+  }
+}
+
 export interface ResolvedExpense {
   id: string;
   name: string;
@@ -394,11 +438,13 @@ export const accountingWriteTools: ToolDefinition[] = [
           items: {
             type: 'object',
             properties: {
-              accountId: { type: 'string', description: 'معرف الحساب (من search.accounts)' },
+              accountId: { type: 'string', description: 'معرف الحساب (من search.accounts) — أو مرّر accountName/accountCode بدلاً منه' },
+              accountName: { type: 'string', description: 'اسم الحساب (يُحل تلقائياً لمعرفه — بديل accountId)' },
+              accountCode: { type: 'string', description: 'كود الحساب (يُحل تلقائياً لمعرفه — بديل accountId)' },
               debit: { type: 'number', description: 'مبلغ مدين (اختياري إذا credit موجود)' },
               credit: { type: 'number', description: 'مبلغ دائن (اختياري إذا debit موجود)' },
             },
-            required: ['accountId'],
+            required: [],
           },
         },
       },
@@ -418,8 +464,21 @@ export const accountingWriteTools: ToolDefinition[] = [
       let totalCredit = 0;
 
       for (const item of rawEntries) {
-        const accountId = str((item as Record<string, unknown>).accountId);
-        if (!accountId) return { error: 'كل entry يحتاج accountId — استخدم search.accounts أولاً' };
+        const leg = item as Record<string, unknown>;
+        let accountId = str(leg.accountId);
+        // Live 2026-10-02: the model often holds account NAMES ("الصندوق
+        // الرئيسي") not UUIDs when building entries — resolving here turns
+        // would-be "Invalid input" failures into posted entries.
+        if (!accountId) {
+          const byName = str(leg.accountName);
+          const byCode = str(leg.accountCode);
+          if (byName || byCode) {
+            const resolved = await resolveAccountByNameOrCode(ctx.companyId, byName, byCode);
+            if (!resolved.id) return { error: resolved.error };
+            accountId = resolved.id;
+          }
+        }
+        if (!accountId) return { error: 'كل entry يحتاج accountId (أو accountName/accountCode) — استخدم search.accounts أولاً' };
         const debit = num((item as Record<string, unknown>).debit);
         const credit = num((item as Record<string, unknown>).credit);
         if (debit <= 0 && credit <= 0) return { error: 'كل entry يحتاج debit أو credit أكبر من صفر' };

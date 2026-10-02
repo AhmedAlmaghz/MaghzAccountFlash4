@@ -38,4 +38,21 @@ describe('summarizeResult — empty-search fallback visibility', () => {
     expect(s).toContain('شركة الأمل');
     expect(s).not.toContain('لا توجد نتائج');
   });
+
+  it('never emits [object Object] for stat payloads with detail arrays (live 2026-10-02)', () => {
+    const s = summarizeResult({
+      total: 10,
+      products: [
+        { code: 'PRD-0001', name: 'شوكلاتة صغير' },
+        { code: 'PRD-0002', name: 'شوكلاتة كبير' },
+      ],
+    });
+    expect(s).not.toContain('[object Object]');
+    expect(s).toContain('شوكلاتة صغير');
+  });
+
+  it('never emits [object Object] for plain arrays of objects', () => {
+    const s = summarizeResult([{ a: 1 }, { b: 2 }]);
+    expect(s).not.toContain('[object Object]');
+  });
 });
