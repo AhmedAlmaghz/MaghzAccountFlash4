@@ -49,7 +49,44 @@ let lastPingAt = 0;
  */
 const PING_TTL_MS = 30_000;
 
+/**
+ * C1 outer bound on adapter acquisition. Dynamic imports, PGlite
+ * migrations and ping() each hang forever on a wedged transport
+ * (saturated UI thread / locked IDB) — previously the chat preamble's
+ * 30s deadlines detached but the underlying work kept the thread
+ * saturated AND every other caller (settings screens, reports) spun with
+ * no bound at all. 15s then an honest Arabic error the DbError screen
+ * shows verbatim (diagnosable, never a silent spinner).
+ */
+const ADAPTER_ACQUIRE_TIMEOUT_MS = 15_000;
+
 export async function getDbAdapter(): Promise<DbAdapter> {
+  const pending = acquireDbAdapter();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            'انتهت مهلة الاتصال بقاعدة البيانات (15 ثانية) — قد تكون قاعدة PGlite المحلية عالقة (تبويب آخر مفتوح؟) أو الخادم لا يستجيب. أغلق التبويبات الزائدة وحاول مجدداً.',
+          ),
+        ),
+      ADAPTER_ACQUIRE_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } catch (err) {
+    // Abandoned acquisition may reject later with no listener — swallow so
+    // the late failure can't surface as an unhandled rejection crash.
+    pending.catch(() => {});
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function acquireDbAdapter(): Promise<DbAdapter> {
   const mode = getDbMode();
 
   // E2E always uses the HTTP bridge — PGlite would create an empty
