@@ -92,6 +92,10 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
       'بيع', 'مبيعات', 'فاتورة بيع', 'فواتير بيع', 'عميل', 'عملاء', 'عرض سعر', 'عروض أسعار',
       'مردود', 'مرتجع', 'تسعيرة', 'مردودات', 'أجل', 'مدين', 'ذمم', 'أرصدة العملاء',
       'تحصيل', 'العميل',
+      // Bare "فاتورة/فواتير" routes BOTH sides (undirected invoices are
+      // decided from the resolved party type — rule 55 — so both create
+      // tools must be advertised).
+      'فاتورة', 'فواتير',
     ],
   },
   {
@@ -99,6 +103,7 @@ const DOMAIN_GROUPS: readonly DomainGroup[] = [
     keywords: [
       'شراء', 'مشتريات', 'فاتورة شراء', 'فواتير شراء', 'مورد', 'موردين', 'أمر شراء',
       'أوامر شراء', 'مردود مشتريات', 'مديونية', 'أرصدة الموردين', 'دائن', 'سداد',
+      'فاتورة', 'فواتير',
     ],
   },
   {

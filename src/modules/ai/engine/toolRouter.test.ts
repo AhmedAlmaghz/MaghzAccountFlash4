@@ -91,6 +91,17 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     expect(routed.routedByIntent).toBe(true);
   });
 
+  it('bare invoice routes BOTH sales and purchases (undirected, rule 55)', () => {
+    seedRegistry();
+    registerTool(makeTool('purchases.tool_0', 'purchases.view'));
+    const routed = routeToolsForCycle([userMsg('سجل فاتورة ب 6 كنافة')]);
+    const names = new Set(routed.tools.map((t) => t.name));
+    // The party type decides later — both create tools must be advertised.
+    expect(names.has('sales.tool_0')).toBe(true);
+    expect(names.has('purchases.tool_0')).toBe(true);
+    expect(routed.routedByIntent).toBe(true);
+  });
+
   it('scans the last 3 user messages for intent (lookback)', () => {
     seedRegistry();
     const routed = routeToolsForCycle([

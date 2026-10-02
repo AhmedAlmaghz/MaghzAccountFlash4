@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planRequest } from './requestPlanner';
+import { planRequest, renderPlannedSlots } from './requestPlanner';
 
 describe('requestPlanner — deterministic per-request planning', () => {
   it('plans a cash sales invoice: intent + tool + cash + qty/price + 3 entity requests', () => {
@@ -23,16 +23,19 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(p.entityRequests.map((e) => e.kind)).not.toContain('cash_box');
   });
 
-  it('asks once when price is missing (never invents prices)', () => {
+  it('proceeds without asking when only quantity is said (price comes from the catalog)', () => {
     const p = planRequest('أنشئ فاتورة مبيعات للعميل محمد 10 وحدات كرتون');
-    expect(p.plan).toBe('ask');
-    expect(p.missing.some((m) => m.field === 'unitPrice')).toBe(true);
+    expect(p.plan).toBe('single-write');
+    expect(p.slots.lines).toEqual([{ quantity: 10 }]);
+    expect(renderPlannedSlots(p)).toContain('بطاقة الصنف');
   });
 
-  it('asks once when quantity is missing', () => {
+  it('asks quantity (not a bogus qty=500 line) when only a price is said', () => {
     const p = planRequest('فاتورة مبيعات للعميل محمد بسعر 500');
-    // "500" parses as the single number → quantity by convention; price missing.
-    expect(p.missing.some((m) => m.field === 'unitPrice')).toBe(true);
+    expect(p.plan).toBe('ask');
+    expect(p.slots.lines).toEqual([]);
+    expect(p.slots.prices).toEqual([500]);
+    expect(p.missing.some((m) => m.field === 'quantity')).toBe(true);
   });
 
   it('plans purchase invoices with supplier + product', () => {
@@ -73,14 +76,14 @@ describe('requestPlanner — deterministic per-request planning', () => {
     ]);
   });
 
-  it('asks once for the priceless trailing line only', () => {
+  it('keeps priceless trailing lines with catalog-price hint (no blocking ask)', () => {
     const p = planRequest('فاتورة مبيعات للعميل محمد 10 كرتون بـ 500 و5 علب');
-    expect(p.plan).toBe('ask');
+    expect(p.plan).toBe('single-write');
     expect(p.slots.lines).toEqual([
       { quantity: 10, unitPrice: 500 },
       { quantity: 5 },
     ]);
-    expect(p.missing.some((m) => m.field === 'unitPrice')).toBe(true);
+    expect(renderPlannedSlots(p)).toContain('بطاقة الصنف');
   });
 
   it('plans manufacturing work orders with product + warehouse (no price asked)', () => {
@@ -122,5 +125,18 @@ describe('requestPlanner — deterministic per-request planning', () => {
       ['customer', 'product', 'supplier'].sort(),
     );
     expect(p.plan).toBe('single-write');
+  });
+
+  it('renderPlannedSlots surfaces lines, date and cash hints (nothing discarded)', () => {
+    const p = planRequest('فاتورة نقدية للعميل محمد 10 كرتون بـ 500 و5 علب بـ 200 بتاريخ 2026-10-02');
+    const hint = renderPlannedSlots(p);
+    expect(hint).toContain('10 × بسعر 500');
+    expect(hint).toContain('5 × بسعر 200');
+    expect(hint).toContain('2026-10-02');
+    expect(hint).toContain('نقدي');
+  });
+
+  it('renderPlannedSlots stays silent for generic plans and empty slots', () => {
+    expect(renderPlannedSlots(planRequest('مرحبا'))).toBeNull();
   });
 });

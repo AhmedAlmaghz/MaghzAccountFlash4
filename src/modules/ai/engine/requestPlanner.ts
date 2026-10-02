@@ -137,6 +137,25 @@ function extractNumbers(text: string): number[] {
   return out;
 }
 
+/**
+ * Remove date spans before number extraction. Live 2026-10-02: "بتاريخ
+ * 2026-10-02" fed 2026/10/02 into the invoice lines as phantom quantities
+ * and prices (and would corrupt voucher amounts the same way). Dates are
+ * extracted separately by extractDate — they must not also be money.
+ */
+function stripDateSpans(text: string): string {
+  const months =
+    'يناير|فبراير|مارس|ابريل|أبريل|مايو|يونيو|يوليو|يوليه|اغسطس|أغسطس|سبتمبر|اكتوبر|أكتوبر|نوفمبر|ديسمبر|كانون|شباط|اذار|آذار|نيسان|ايار|أيار|حزيران|تموز|اب|آب|ايلول|أيلول|تشرين|محرم|صفر|ربيع|جمادى|رجب|شعبان|رمضان|شوال|ذو|الحجة';
+  return toLatinDigits(text)
+    .replace(/\b\d{4}-\d{1,2}-\d{1,2}\b/g, ' ')
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, ' ')
+    .replace(new RegExp(`\\d{1,2}\\s*(?:${months})\\s*\\d{3,4}?`, 'g'), ' ');
+}
+
+function extractDocumentNumbers(text: string): number[] {
+  return extractNumbers(stripDateSpans(text));
+}
+
 function extractDate(text: string): string | undefined {
   // Explicit ISO first, then the flexible Arabic parser (12-8, 15 أغسطس…).
   const iso = toLatinDigits(text).match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
@@ -183,6 +202,24 @@ function extractLinePairs(numbers: number[]): {
     quantities: lines.map((l) => l.quantity),
     prices: lines.map((l) => l.unitPrice).filter((p): p is number => p !== undefined),
   };
+}
+
+/**
+ * Numbers that are explicitly PRICES in prose ("بسعر 500") are not
+ * quantities. Without this, "فاتورة بسعر 500" (no quantity said) planned a
+ * bogus quantity=500 line; with it, the quantity is correctly missing and
+ * asked once.
+ */
+function extractPriceAnchored(text: string): Set<number> {
+  const out = new Set<number>();
+  const latin = toLatinDigits(text);
+  const re = /(?:سعر|بمبلغ|مبلغ|بمقدار|بقيمة|بسعر)\s*(\d+(?:\.\d+)?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(latin)) !== null) {
+    const n = parseFlexibleNumber(m[1]);
+    if (typeof n === 'number' && Number.isFinite(n)) out.add(n);
+  }
+  return out;
 }
 
 function needsFor(intent: PlannedIntent): EntityKind[] {
@@ -250,14 +287,22 @@ export function planRequest(rawText: string): PlannedRequest {
     intent === 'sales.invoice' || intent === 'purchases.invoice' || intent === 'invoice.undirected';
   if (isInvoiceLike) {
     slots.paymentType = isCash ? 'cash' : 'credit';
-    const paired = extractLinePairs(extractNumbers(text));
+    let nums = extractDocumentNumbers(text);
+    // A lone price-anchored number ("بسعر 500", no quantity said) is a
+    // KNOWN price with a MISSING quantity — not a quantity of 500.
+    let knownPrice: number[] = [];
+    if (nums.length === 1 && extractPriceAnchored(text).has(nums[0])) {
+      knownPrice = nums;
+      nums = [];
+    }
+    const paired = extractLinePairs(nums);
     slots.quantities = paired.quantities;
-    slots.prices = paired.prices;
+    slots.prices = [...paired.prices, ...knownPrice];
     slots.lines = paired.lines;
   }
   if (intent === 'manufacturing.work_order') {
     // Quantity matters; unit cost comes from the BOM (never asked here).
-    const paired = extractLinePairs(extractNumbers(text));
+    const paired = extractLinePairs(extractDocumentNumbers(text));
     slots.quantities = paired.quantities;
     slots.prices = paired.prices;
     slots.lines = paired.lines;
@@ -274,27 +319,22 @@ export function planRequest(rawText: string): PlannedRequest {
   const entityRequests: EntityRequest[] = kinds.map((kind) => ({ text, kind }));
 
   // Plan-time gaps only (resolution gaps come from entityService scores).
+  // NOTE (live 2026-10-02): a missing unit price is NOT a gap — the tools
+  // require unitPrice but the model fills it from the catalog
+  // (search.products costPrice/salePrice), which is data, not invention.
+  // Asking the price for every "20 شوكلاتة" (no price said) would block the
+  // dominant flow; explicit user prices ride in the hint below and win.
   const missing: MissingField[] = [];
   if (isInvoiceLike) {
     if (slots.quantities.length === 0) {
       missing.push({ field: 'quantity', questionAr: 'ما الكمية المطلوبة؟' });
-    }
-    const priceless = slots.lines.filter((l) => l.unitPrice === undefined).length;
-    if (priceless > 0) {
-      missing.push({
-        field: 'unitPrice',
-        questionAr:
-          priceless > 1
-            ? `هناك ${priceless} بنود بلا سعر — ما أسعار الوحدات؟ (لا أفترض أسعاراً — أخبرني بها)`
-            : 'ما سعر الوحدة؟ (لا أفترض أسعاراً — أخبرني بالسعر)',
-      });
     }
   }
   if (intent === 'manufacturing.work_order' && slots.quantities.length === 0) {
     missing.push({ field: 'quantity', questionAr: 'ما كمية الإنتاج المطلوبة؟' });
   }
   if (intent === 'accounting.receipt' || intent === 'accounting.payment') {
-    const numbers = extractNumbers(text);
+    const numbers = extractDocumentNumbers(text);
     if (numbers.length === 0) {
       missing.push({ field: 'amount', questionAr: 'ما مبلغ السند؟' });
     } else {
@@ -311,4 +351,32 @@ export function planRequest(rawText: string): PlannedRequest {
     missing,
     plan: missing.length > 0 ? 'ask' : 'single-write',
   };
+}
+
+/**
+ * Render the planner's extracted scalars as a hint block for the model.
+ * The slots were previously computed and then DISCARDED — the model
+ * re-parsed numbers from prose every turn and misread them (live
+ * 2026-10-02: multi-line invoices built with wrong quantities/prices).
+ * These are EXTRACTION hints, not execution orders: IDs still come from
+ * the entity block, and priceless lines must be asked (rule 3).
+ * Returns null when there is nothing worth showing.
+ */
+export function renderPlannedSlots(planned: PlannedRequest): string | null {
+  if (planned.plan !== 'single-write') return null;
+  const parts: string[] = [];
+  if (planned.slots.lines.length > 0) {
+    const bits = planned.slots.lines.map((l) =>
+      l.unitPrice === undefined
+        ? `${l.quantity} × (السعر من بطاقة الصنف عبر البحث)`
+        : `${l.quantity} × بسعر ${l.unitPrice}`,
+    );
+    parts.push(`- **البنود المستخرجة**: ${bits.join('؛ ')}`);
+  }
+  if (planned.slots.date) parts.push(`- **التاريخ**: ${planned.slots.date}`);
+  if (planned.slots.paymentType === 'cash') {
+    parts.push('- **الدفع**: نقدي — مرّر paymentType=cash مع cashBoxId من الكتلة أعلاه، لا فاتورة آجلة (القاعدة 28)');
+  }
+  if (parts.length === 0) return null;
+  return `📋 **معطيات مستخرجة من الطلب (استخدمها كما هي، لا تُعد حسابها):**\n${parts.join('\n')}`;
 }

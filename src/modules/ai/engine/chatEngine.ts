@@ -33,7 +33,7 @@ import { expandDialectText } from './dialectMap';
 import { clearAttachmentBlobs } from '../attachments/attachmentBlobs';
 import { registerAiSessionDisposer } from './sessionBoundary';
 import { needsEntityResolution } from '../entityResolver';
-import { planRequest } from './requestPlanner';
+import { planRequest, renderPlannedSlots } from './requestPlanner';
 import { resolveEntities, renderEntityBlock } from './entityService';
 import { getInvoiceTaxConfig } from '../tools/writeTools/shared';
 import type { ChatMessage, LlmCompletionData, LlmMessage, LlmStreamChunk, LlmTool, PendingToolCall, ToolContext } from '../types';
@@ -525,6 +525,13 @@ class ChatEngine {
         }
       } else if (dialectChanged.length > 0) {
         correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
+      }
+      // Planner slots were previously computed then discarded — the model
+      // re-parsed numbers from prose and misread multi-line invoices. Append
+      // the extracted lines/date/cash hint so the first write uses them.
+      const slotsHint = renderPlannedSlots(planned);
+      if (slotsHint) {
+        correctionMsg = correctionMsg ? `${correctionMsg}\n\n${slotsHint}` : slotsHint;
       }
       traceSend('entities-done');
 
