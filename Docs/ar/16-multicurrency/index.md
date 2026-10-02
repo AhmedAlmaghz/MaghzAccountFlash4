@@ -5,7 +5,7 @@ slug: "ar/16-multicurrency/index"
 group: "العملات المتعددة"
 language: "ar"
 created: 2026-09-12
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # العملات المتعددة — دليل الاستخدام

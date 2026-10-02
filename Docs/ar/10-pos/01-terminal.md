@@ -5,7 +5,7 @@ slug: "ar/10-pos/01-terminal"
 group: "نقاط البيع POS"
 language: "ar"
 created: 2026-09-12
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # شاشة الكاشير — دليل الاستخدام

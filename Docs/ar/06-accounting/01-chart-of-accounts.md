@@ -5,7 +5,7 @@ slug: "ar/06-accounting/01-chart-of-accounts"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-12
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # شجرة الحسابات — دليل الاستخدام

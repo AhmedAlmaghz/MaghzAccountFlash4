@@ -5,7 +5,7 @@ slug: "en/Examples/01-retail-store"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # Example 01 — Al-Amana Store (full trading cycle)

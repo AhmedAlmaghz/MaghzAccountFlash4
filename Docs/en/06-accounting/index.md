@@ -5,7 +5,7 @@ slug: "en/06-accounting/index"
 group: "Accounting"
 language: "en"
 created: 2026-09-13
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # Accounting Module — User Guide

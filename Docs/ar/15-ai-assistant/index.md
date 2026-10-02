@@ -5,7 +5,7 @@ slug: "ar/15-ai-assistant/index"
 group: "الوكيل الذكي «مغزى»"
 language: "ar"
 created: 2026-09-12
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # الوكيل الذكي «مغزى» — دليل الاستخدام الشامل

@@ -5,7 +5,7 @@ slug: "ar/Examples/09-school-payroll"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # مثال 09 — مدارس المستقبل الأهلية (رواتب ونهاية خدمة ومشتريات)

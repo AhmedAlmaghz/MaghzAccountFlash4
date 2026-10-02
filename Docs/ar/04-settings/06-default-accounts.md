@@ -5,7 +5,7 @@ slug: "ar/04-settings/06-default-accounts"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.8"
+version: "0.26.9"
 author: "Ahmed Almaghz"
 ---
 # الحسابات الافتراضية — دليل الاستخدام
