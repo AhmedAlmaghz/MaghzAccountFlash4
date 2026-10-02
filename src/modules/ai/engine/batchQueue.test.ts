@@ -11,6 +11,7 @@ import {
   nextRetryDelayMs,
   substituteRefs,
   extractRefNames,
+  parseRefPath,
   summarizeBatchProgress,
   summarizeBatchOutcomeForModel,
   batchItemLabel,
@@ -458,5 +459,26 @@ describe('extractRefNames — B1 wave-scheduler scan', () => {
   it('ignores plain strings and non-strings', () => {
     expect(extractRefNames({ name: 'الشجاع', qty: 5, flag: true })).toEqual([]);
     expect(extractRefNames({})).toEqual([]);
+  });
+
+  it('parseRefPath tolerates the model ref. namespace and dotted paths', () => {
+    expect(parseRefPath('p_inv_1.id')).toEqual({ ref: 'p_inv_1', fields: ['id'] });
+    expect(parseRefPath('ref.p_inv_1.id')).toEqual({ ref: 'p_inv_1', fields: ['id'] });
+    expect(parseRefPath('sup1')).toEqual({ ref: 'sup1', fields: [] });
+  });
+
+  it('substitutes namespaced dotted refs (live 2026-10-02: {{ref.p_inv_1.id}})', () => {
+    const outputs = new Map([['p_inv_1', { invoiceId: 'uuid-1' }]]);
+    const res = substituteRefs(
+      { invoiceId: '{{ref.p_inv_1.id}}' },
+      outputs,
+      new Map([['p_inv_1', 'sales.create_invoice']]),
+    );
+    expect(res).toEqual({ ok: true, args: { invoiceId: 'uuid-1' } });
+  });
+
+  it('fails loudly on leftover placeholders instead of passing them to PG', () => {
+    const res = substituteRefs({ invoiceId: '{{nope.nothing.here}}' }, new Map());
+    expect(res.ok).toBe(false);
   });
 });

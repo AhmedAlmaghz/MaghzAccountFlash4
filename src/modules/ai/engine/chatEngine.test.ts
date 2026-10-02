@@ -484,6 +484,49 @@ describe('ChatEngine', () => {
     expect(messages[2].content).toBe('تم إلغاء العملية');
   });
 
+  it('refuses a singleton write identical to a session-executed one (no duplicate documents)', async () => {
+    // Live 2026-10-02: a failed batch's items were re-issued one by one,
+    // minting PINV-0004 as a duplicate of PINV-0001 while the batch still
+    // said "failed". An identical singleton must be refused, not carded.
+    mocks.resolveTool.mockReturnValue(tool('write'));
+    const args = { a: 1 };
+    mocks.complete.mockResolvedValue({
+      success: true,
+      data: { content: '', toolCalls: [], finishReason: 'stop', usage: null },
+    });
+    mocks.executeToolCall.mockResolvedValue({ ok: true, result: { id: 'x1' } });
+
+    // First issuance → approved → executed → key registered.
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: {
+        content: '',
+        toolCalls: [{ id: 'dup-1', name: 'test.write', arguments: args }],
+        finishReason: 'tool_calls',
+        usage: null,
+      },
+    });
+    await getChatEngine().send('نفذ');
+    await getChatEngine().resolveConfirmation('dup-1', true);
+    expect(mocks.executeToolCall).toHaveBeenCalledTimes(1);
+
+    // Identical re-issuance → honest refusal, no card, no execution.
+    mocks.complete.mockResolvedValueOnce({
+      success: true,
+      data: {
+        content: '',
+        toolCalls: [{ id: 'dup-2', name: 'test.write', arguments: args }],
+        finishReason: 'tool_calls',
+        usage: null,
+      },
+    });
+    await getChatEngine().send('نفذ مجددا');
+    expect(mocks.executeToolCall).toHaveBeenCalledTimes(1);
+    const messages = useAiStore.getState().messages;
+    expect(messages.some((m) => m.toolCall?.callId === 'dup-2')).toBe(false);
+    expect(messages.some((m) => typeof m.content === 'string' && m.content.includes('نُفذت هذه العملية فعلاً'))).toBe(true);
+  });
+
   it('stops re-issuing confirmation cards after the SAME write call fails twice (identical-retry guard)', async () => {
     // Regression: a model stuck in approve→fail→retry-verbatim loop spawned
     // confirmation cards forever. The guard caps identical retries at 2 —

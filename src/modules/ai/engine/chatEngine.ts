@@ -17,7 +17,7 @@ import { isBatchActive, isAnyBatchActive, runBatch, batchProgressLine } from './
 import { buildUserParts, llmTextOf, pruneMediaForWire, trimAttachmentsToBudget, untrustedDataBlock } from './llmParts';
 import { extractiveDigest, digestMessage } from './summarizer';
 import { TaskLedger } from './taskLedger';
-import { summarizeBatchOutcomeForModel, batchItemLabel, completedKeysOf } from './batchQueue';
+import { summarizeBatchOutcomeForModel, batchItemLabel, completedKeysOf, buildIdempotencyKey } from './batchQueue';
 import { getBatch } from '../api/batch';
 import { planBatchResume } from './batchQueue';
 import type { JobBatchDetail } from '../api/batchTypes';
@@ -724,6 +724,12 @@ class ChatEngine {
           // Mark as REALLY executed — the anti-fabrication guard allows
           // success claims only when at least one write landed here.
           this.successfulWritesThisSend.add(pending.toolName);
+          // Session duplicate guard: a later IDENTICAL singleton (or batch
+          // item) must be refused, not re-executed (live 2026-10-02:
+          // PINV-0004 duplicated PINV-0001 after a batch failure).
+          try {
+            this.ledger.registerCompletedKeys([buildIdempotencyKey(pending.toolName, pending.args)]);
+          } catch { /* ledger is best-effort */ }
           // READ-LOOP GUARD: a successful write changed the data — repeated
           // reads after this point are legitimate (fresh balance, fresh
           // list) and must execute again instead of hitting the cache.
@@ -2115,6 +2121,32 @@ class ChatEngine {
         // an honest summary instead of looping back into the LLM.
         return false;
       }
+
+      // Session-executed guard (live 2026-10-02): a singleton write
+      // identical (tool + stable args) to an already-executed batch item is
+      // a DUPLICATE document, not a new operation (PINV-0004 duplicated
+      // PINV-0001 this way: batch failed, model re-issued items one by one,
+      // batch status still said "failed"). Refuse BEFORE any confirmation
+      // card — approving it would mint the duplicate.
+      const fresh: typeof confirmable = [];
+      for (const tc of confirmable) {
+        let alreadyDone = false;
+        try {
+          alreadyDone = this.ledger.hasCompletedKey(buildIdempotencyKey(tc.name, tc.arguments));
+        } catch {
+          alreadyDone = false;
+        }
+        if (alreadyDone) {
+          const msg = `نُفذت هذه العملية فعلاً في هذه الجلسة بنفس المعطيات (${tc.name}) — إنشاؤها مجدداً سيكرر المستند. إن أردت تكراراً مقصوداً غيّر بياناً مميزاً (التاريخ/المرجع) ثم أعد.`;
+          this.pushToolResultAfterPartner(tc.id, `خطأ: ${msg}`);
+          this.store().addMessage({ role: 'assistant', kind: 'error', content: msg });
+        } else {
+          fresh.push(tc);
+        }
+      }
+      if (fresh.length === 0) return false;
+      confirmable.length = 0;
+      confirmable.push(...fresh);
 
       const postingChecks = new Map<string, Awaited<ReturnType<typeof checkJevPostingTool>>>();
       await Promise.all(confirmable.map(async (tc) => {

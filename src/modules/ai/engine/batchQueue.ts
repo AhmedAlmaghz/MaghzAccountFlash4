@@ -317,9 +317,25 @@ export function truncateScalarsForPersist(
 }
 
 const REF_WHOLE_RE = /^@([A-Za-z0-9_][\w-]*)$/;
-const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*)(?:\.([A-Za-z0-9_]+))?\s*\}\}/g;
+// Dotted paths: {{ref}} {{ref.field}} {{ref.a.b}}. The leading "ref."
+// namespace is model dialect ("{{ref.p_inv_1.id}}") — stripped during
+// parsing so it resolves exactly like "{{p_inv_1.id}}".
+const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*(?:\.[A-Za-z0-9_][\w-]*)*)\s*\}\}/g;
+/** Any leftover placeholder after substitution = unresolved (loud, never passthrough). */
+const REF_LEFTOVER_RE = /\{\{\s*[A-Za-z0-9_][\w\-.]*\s*\}\}/;
 
 export type RefOutputs = Map<string, Record<string, string | number | boolean>>;
+
+/**
+ * Split a placeholder path into [refName, ...fieldPath], tolerating the
+ * model's "ref." namespace prefix ("ref.p_inv_1.id" → ref "p_inv_1").
+ */
+export function parseRefPath(path: string): { ref: string; fields: string[] } {
+  const segs = path.split('.').filter((s) => s.length > 0);
+  if (segs.length > 1 && segs[0].toLowerCase() === 'ref') segs.shift();
+  const [ref, ...fields] = segs;
+  return { ref: ref ?? '', fields };
+}
 
 /**
  * B1: names of every {{ref}} / {{ref.field}} / @ref placeholder inside args.
@@ -338,7 +354,8 @@ export function extractRefNames(args: Record<string, unknown>): string[] {
     REF_TEMPLATE_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = REF_TEMPLATE_RE.exec(s)) !== null) {
-      names.add(m[1]);
+      const { ref } = parseRefPath(m[1]);
+      if (ref) names.add(ref);
     }
   };
   const walk = (v: unknown): void => {
@@ -452,7 +469,7 @@ export type SubstituteResult =
   | { ok: false; /** Arabic guidance when a reference cannot be resolved. */ error: string };
 
 /**
- * Deep-substitute {{ref}} / {{ref.field}} / @ref placeholders.
+ * Deep-substitute {{ref}} / {{ref.field}} / {{ref.a.b}} / @ref placeholders.
  * Unknown refs fail LOUDLY (never silently null) with actionable guidance.
  * `refTools` maps ref → producing tool name so resolveOutputId can honor
  * the explicit PRIMARY_ID_FIELD annotation (P0-7) instead of relying purely
@@ -465,6 +482,24 @@ export function substituteRefs(
 ): SubstituteResult {
   const missing = new Set<string>();
 
+  const readPath = (
+    data: Record<string, string | number | boolean>,
+    fields: string[],
+    ref: string,
+  ): string | number | boolean | undefined => {
+    if (fields.length === 0 || (fields.length === 1 && fields[0].toLowerCase() === 'id')) {
+      // Explicit `.id` honors the same entity-id annotation (no tool returns
+      // a bare `id` — creators return supplierId/invoiceId/…).
+      return resolveOutputId(data, refTools?.get(ref)) ?? undefined;
+    }
+    let cur: unknown = data;
+    for (const f of fields) {
+      if (!cur || typeof cur !== 'object') return undefined;
+      cur = (cur as Record<string, unknown>)[f];
+    }
+    return cur as string | number | boolean | undefined;
+  };
+
   const subString = (s: string): string => {
     if (REF_WHOLE_RE.test(s)) {
       const ref = s.slice(1);
@@ -476,19 +511,16 @@ export function substituteRefs(
       }
       return id;
     }
-    return s.replace(REF_TEMPLATE_RE, (_m, ref: string, field?: string) => {
+    return s.replace(REF_TEMPLATE_RE, (_m, path: string) => {
+      const { ref, fields } = parseRefPath(path);
       const data = outputs.get(ref);
       if (!data) {
         missing.add(ref);
         return _m;
       }
-      // Explicit `.id` honors the same entity-id annotation (no tool returns
-      // a bare `id` — creators return supplierId/invoiceId/…).
-      const value = !field || field.toLowerCase() === 'id'
-        ? resolveOutputId(data, refTools?.get(ref))
-        : data[field];
+      const value = readPath(data, fields, ref);
       if (value === undefined || value === null || value === '') {
-        missing.add(field ? `${ref}.${field}` : ref);
+        missing.add(path);
         return _m;
       }
       // NOTE: no $-escaping here — this callback is a replacer FUNCTION and
@@ -516,6 +548,34 @@ export function substituteRefs(
     return {
       ok: false,
       error: `مرجع غير متوفر (${names}) — العنصر المنتج له لم يكتمل بعد أو فشل. أنشئه أولاً واربط هذا العنصر به عبر after، أو تحقق من نجاحه عبر ai.batch_status.`,
+    };
+  }
+  // Leftover-placeholder tripwire (live 2026-10-02): values like
+  // "{{ref.p_inv_1.id}}" used to sail through untouched (old single-dot
+  // regex never matched them) and hit the DB as literal UUIDs. Anything
+  // still shaped like a placeholder after substitution is a failed
+  // reference — fail here, never at PG.
+  const leftover: string[] = [];
+  const scan = (v: unknown): void => {
+    if (typeof v === 'string') {
+      REF_TEMPLATE_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = REF_TEMPLATE_RE.exec(v)) !== null) leftover.push(m[1]);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const e of v) scan(e);
+      return;
+    }
+    if (v && typeof v === 'object') {
+      for (const val of Object.values(v as Record<string, unknown>)) scan(val);
+    }
+  };
+  scan(resolved);
+  if (leftover.length > 0) {
+    return {
+      ok: false,
+      error: `مرجع غير محلول (${[...new Set(leftover)].join('، ')}) — استخدم أسماء المراجع المعرفة في عناصر الدفعة نفسها ({{name}} أو {{name.field}}) وتأكد أن العنصر المنتج مكتمل وناجح.`,
     };
   }
   return { ok: true, args: resolved };

@@ -152,6 +152,25 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(planRequest('سند قبض من غدرة ب 50000').intent).toBe('accounting.receipt');
   });
 
+  it('extractEntityQuery strips command/doc words to the bare name', () => {
+    const p = planRequest('فاتورة ابو العز هي فاتورة مشتريات بسعر 300');
+    expect(p.intent).toBe('purchases.invoice');
+    const texts = p.entityRequests.map((e) => e.text);
+    expect(texts).toContain('ابو العز');
+    expect(texts.every((t) => !t.includes('فاتوره'))).toBe(true);
+  });
+
+  it('routes work-order state changes to update (never to journals)', () => {
+    const start = planRequest('حول امر التشغيل الى قيد التنفيذ');
+    expect(start.intent).toBe('manufacturing.work_order_status');
+    expect(start.writeTool).toBe('manufacturing.update_work_order_status');
+    expect(start.slots.workOrderStatus).toBe('in_progress');
+    const done = planRequest('حوله ايضا إلى مكتمل');
+    expect(done.intent).toBe('manufacturing.work_order_status');
+    expect(done.slots.workOrderStatus).toBe('completed');
+    expect(renderPlannedSlots(done)).toContain('مكتمل');
+  });
+
   it('splits the live-session journal deterministically with a balancing figure', () => {
     const p = planRequest('قم بتسجيل قيد ب 500000 الصندوق الرئيسي و 500000 حساب محفظة جيب من حساب رأس المال');
     expect(p.intent).toBe('accounting.journal');

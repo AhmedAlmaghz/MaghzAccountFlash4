@@ -34,6 +34,7 @@ export type PlannedIntent =
   | 'accounting.payment'
   | 'accounting.journal'
   | 'manufacturing.work_order'
+  | 'manufacturing.work_order_status'
   | 'crm.lead'
   | 'hr.employee'
   | 'inventory.product'
@@ -70,6 +71,8 @@ export interface PlannedRequest {
     lines: PlannedLine[];
     /** Deterministic journal legs (accounting.journal only). */
     journalLegs: PlannedJournalLeg[];
+    /** Target work-order state (manufacturing.work_order_status only). */
+    workOrderStatus?: 'in_progress' | 'completed';
     paymentType?: 'cash' | 'credit';
     date?: string;
   };
@@ -88,6 +91,7 @@ const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undi
   'accounting.payment': 'accounting.create_payment_voucher',
   'accounting.journal': 'accounting.create_journal_entry',
   'manufacturing.work_order': 'manufacturing.create_work_order',
+  'manufacturing.work_order_status': 'manufacturing.update_work_order_status',
   'crm.lead': 'crm.create_lead',
   'hr.employee': 'hr.create_employee',
   'inventory.product': 'inventory.create_product',
@@ -98,6 +102,9 @@ const CASH_RE = /نقد|كاش|فور|مدفوع|مقبوض|عاجل|حاضر/;
 const QUESTION_RE = /؟|^(ما|ماذا|مادا|كم|هل|لماذا|ليش|وين|اين|أين|متى|متا|كيف|اعرض|اوضح|اشرح|هات|اذكر|عدد|بكم)/;
 /** Creation/posting/payment verbs and nouns — the user orders an action. */
 const ACTION_RE = /أنشئ|انشئ|إنشاء|انشاء|سجل|سجّل|تسجيل|ضيف|أضف|اضف|إضافة|اضافة|افتح|احذف|حذف|عدل|عدّل|تعديل|رحل|رحّل|ترحيل|ادفع|دفع|حوّل|تحويل|سدد|تسديد|اصرف|صرف|اقبض|قبض|استلم|استلام|ولّد|اطبع|صدّر|اقفل/;const MFG_RE = /أمر\s*تشغيل|امر\s*تشغيل|تصنيع|إنتاج|انتاج|شغل.*مصنع|bom/;
+/** Execution-state change of an EXISTING work order — must beat JOURNAL_RE's bare قيد. */
+const WO_STATUS_RE =
+  /قيد\s*التنفيذ|قيد\s*التشغيل|مكتمل|اكتمل|إنهاء|انهاء|إغلاق|اغلاق|ابدا\s*التنفيذ|ابدأ/;
 const LEAD_RE = /عميل\s*محتمل|عملاء\s*محتملين|فرص|فرصة|تأهيل|متابعة\s*عميل/;
 const NEW_EMPLOYEE_RE = /موظف\s*جديد|إضافة\s*موظف|اضافة\s*موظف|تعيين\s*موظف/;
 const NEW_PRODUCT_RE = /منتج\s*جديد|صنف\s*جديد|إضافة\s*صنف|اضافة\s*صنف|إضافة\s*منتج|اضافة\s*منتج/;
@@ -114,6 +121,12 @@ function detectIntent(norm: string): PlannedIntent {
   if (NEW_EMPLOYEE_RE.test(norm)) return 'hr.employee';
   if (NEW_PRODUCT_RE.test(norm)) return 'inventory.product';
   if (LEAD_RE.test(norm)) return 'crm.lead';
+  // Work-order STATUS change ("حول أمر التشغيل إلى قيد التنفيذ") before
+  // everything containing قيد — otherwise JOURNAL_RE's bare قيد hijacks it
+  // and the engine hunts a chart account named "التنفيذ" (live 2026-10-02).
+  if (WO_STATUS_RE.test(norm) && /أمر|امر|تشغيل|طلب|حول|انقل|بدء|ابدا/.test(norm)) {
+    return 'manufacturing.work_order_status';
+  }
   if (MFG_RE.test(norm)) return 'manufacturing.work_order';
   // Receipt/payment first: they contain party words too ("سند قبض من عميل").
   if (RECEIPT_RE.test(norm)) return 'accounting.receipt';
@@ -215,6 +228,45 @@ function extractLinePairs(numbers: number[]): {
     quantities: lines.map((l) => l.quantity),
     prices: lines.map((l) => l.unitPrice).filter((p): p is number => p !== undefined),
   };
+}
+
+/**
+ * Short entity query extractor (live 2026-10-02 follow-up).
+ *
+ * entityRequests used to carry the FULL user blob ("فاتورة ابو العز هي
+ * فاتورة مشتريات"), diluting fuzzy scores with command/doc words until a
+ * present entity scored "missing". Stripping the command vocabulary leaves
+ * the name ("ابو العز") — dramatically higher scores from the first lookup.
+ * Falls back to the full blob when nothing remains (never empty).
+ */
+const QUERY_STRIP = new Set([
+  'سجل', 'انشي', 'انشئ', 'انشاء', 'ضيف', 'اضف', 'اضافه', 'افتح', 'احذف',
+  'حذف', 'عدل', 'تعديل', 'رحل', 'ترحيل', 'ادفع', 'دفع', 'حول', 'تحويل',
+  'سدد', 'سداد', 'اصرف', 'صرف', 'اقبض', 'قبض', 'استلم', 'استلام',
+  'فاتوره', 'فواتير', 'سند', 'سندات', 'قيد', 'قيود', 'مبيعات', 'مشتريات',
+  'بيع', 'شراء', 'نقدي', 'نقديه', 'اجل', 'اجله', 'كاش', 'امر', 'تشغيل',
+  'هي', 'هو', 'من', 'في', 'علي', 'علي', 'الي', 'الي', 'ب', 'ل', 'الجديد',
+  'الجديده', 'جديد', 'جديده',
+  // Price words + bare numbers are slots, not names ("بسعر 300" must not
+  // dilute "ابو العز"; codes like WH-001 survive — they are not pure digits).
+  'سعر', 'بسعر', 'مبلغ', 'بمبلغ', 'مقدار', 'بمقدار', 'قيمه', 'بقيمه',
+]);
+
+/** Pure-number tokens carry no name signal (amounts, years, counts). */
+function isBareNumber(t: string): boolean {
+  return /^\d+(?:\.\d+)?$/.test(t);
+}
+
+export function extractEntityQuery(rawText: string): string {
+  const norm = normalizeArabic(rawText ?? '');
+  const kept = norm
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !QUERY_STRIP.has(t) && !isBareNumber(t));
+  const short = kept.join(' ').trim();
+  // "اسمه X" definition zones: the name follows the marker — prefer it.
+  const defZone = norm.match(/(?:اسمه|باسم|المسمي|تحت اسم)\s+(.+?)(?:[،,.\n]|$)/);
+  if (defZone && defZone[1].trim().length >= 2) return defZone[1].trim();
+  return short.length >= 2 ? short : norm.trim();
 }
 
 /**
@@ -378,6 +430,10 @@ function needsFor(intent: PlannedIntent): EntityKind[] {
       // needs both UUIDs before create_work_order/complete (live 2026-10-02:
       // empty warehouse searches looped because nothing pre-resolved them).
       return ['product', 'warehouse'];
+    case 'manufacturing.work_order_status':
+      // Which order is resolved from the short query (number/product);
+      // the target state is already decided below — never searched.
+      return ['workOrder'];
     case 'crm.lead':
       return ['lead'];
     case 'hr.employee':
@@ -455,6 +511,11 @@ export function planRequest(rawText: string): PlannedRequest {
     slots.prices = paired.prices;
     slots.lines = paired.lines;
   }
+  if (intent === 'manufacturing.work_order_status') {
+    slots.workOrderStatus = /مكتمل|اكتمل|إنهاء|انهاء|إغلاق|اغلاق/.test(norm)
+      ? 'completed'
+      : 'in_progress';
+  }
   // Journal legs split BEFORE entity requests are built — resolution is
   // per-leg (each account text independently).
   const journalSplit =
@@ -470,11 +531,14 @@ export function planRequest(rawText: string): PlannedRequest {
     kinds.push('cash_box');
   }
   // Journal legs resolve per-leg (each account text independently) — one
-  // blob request could never separate three accounts.
+  // blob request could never separate three accounts. Leg texts are already
+  // short; other kinds go through the short-query extractor so command/doc
+  // words never dilute the fuzzy score ("فاتورة ابو العز هي فاتورة
+  // مشتريات" → "ابو العز").
   const entityRequests: EntityRequest[] =
     intent === 'accounting.journal' && slots.journalLegs.length > 0
       ? slots.journalLegs.map((l) => ({ text: l.accountText, kind: 'account' as const }))
-      : kinds.map((kind) => ({ text, kind }));
+      : kinds.map((kind) => ({ text: extractEntityQuery(text), kind }));
 
   // Plan-time gaps only (resolution gaps come from entityService scores).
   // NOTE (live 2026-10-02): a missing unit price is NOT a gap — the tools
@@ -544,8 +608,7 @@ export function renderPlannedSlots(planned: PlannedRequest): string | null {
     );
     parts.push(`- **البنود المستخرجة**: ${bits.join('؛ ')}`);
   }
-  if (planned.slots.journalLegs.length > 0) {
-    const bits = planned.slots.journalLegs.map((l) =>
+  if (planned.slots.journalLegs.length > 0) {    const bits = planned.slots.journalLegs.map((l) =>
       l.debit !== undefined
         ? `مدين ${l.debit} ← ${l.accountText}`
         : l.credit !== undefined
@@ -557,6 +620,13 @@ export function renderPlannedSlots(planned: PlannedRequest): string | null {
     );
   }
   if (planned.slots.date) parts.push(`- **التاريخ**: ${planned.slots.date}`);
+  if (planned.slots.workOrderStatus) {
+    parts.push(
+      planned.slots.workOrderStatus === 'completed'
+        ? '- **الحالة المستهدفة**: مكتمل (completed) — مرّر workOrderId من الكتلة أعلاه لأداة update_work_order_status'
+        : '- **الحالة المستهدفة**: قيد التنفيذ (in_progress) — مرّر workOrderId من الكتلة أعلاه لأداة update_work_order_status',
+    );
+  }
   if (planned.slots.paymentType === 'cash') {
     parts.push('- **الدفع**: نقدي — مرّر paymentType=cash مع cashBoxId من الكتلة أعلاه، لا فاتورة آجلة (القاعدة 28)');
   }
