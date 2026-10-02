@@ -212,3 +212,33 @@ describe('manufacturing.create_work_order — human-key aliases (transcript regr
     expect(String(res.error)).toContain('plannedQuantity');
   });
 });
+
+describe('manufacturing.create_bom — duplicate guard (live 2026-10-02)', () => {
+  const PROD2 = '22222222-2222-4222-8222-222222222222';
+  const MAT2 = '33333333-3333-4333-8333-333333333333';
+
+  it('refuses a second active BOM for the same product instead of twinning it', async () => {
+    const api = vi.mocked(manufacturingApi) as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    api.getBoms = vi.fn(async () => ({
+      success: true,
+      data: [{ id: 'bom-old', productId: PROD2, version: '1.0', isActive: true }],
+    }));
+    const res = (await findTool('manufacturing.create_bom').execute(
+      { productId: PROD2, lines: [{ materialId: MAT2, quantity: 1, unitCost: 10 }] },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(String(res.error)).toContain('تركيبة نشطة');
+    expect(api.createBom).not.toHaveBeenCalled();
+  });
+
+  it('creates when no active twin exists', async () => {
+    const api = vi.mocked(manufacturingApi) as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    api.getBoms = vi.fn(async () => ({ success: true, data: [] }));
+    api.createBom = vi.fn(async () => ({ success: true, id: 'bom-new' }));
+    const res = (await findTool('manufacturing.create_bom').execute(
+      { productId: PROD2, lines: [{ materialId: MAT2, quantity: 1, unitCost: 10 }] },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.created).toBe(true);
+  });
+});

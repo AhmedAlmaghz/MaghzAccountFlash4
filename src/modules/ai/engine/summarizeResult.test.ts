@@ -55,4 +55,21 @@ describe('summarizeResult — empty-search fallback visibility', () => {
     const s = summarizeResult([{ a: 1 }, { b: 2 }]);
     expect(s).not.toContain('[object Object]');
   });
+
+  it('renders totals beside detail rows as counts, not currency (live 2026-10-02)', () => {
+    const s = summarizeResult({
+      total: 4,
+      invoices: [
+        { number: 'PINV-0001', total: 100 },
+        { number: 'PINV-0002', total: 200 },
+      ],
+    });
+    expect(s).toContain('عدد النتائج: 4');
+    expect(s).not.toMatch(/الإجمالي: ٤/);
+  });
+
+  it('still renders money totals with currency when no detail rows exist', () => {
+    const s = summarizeResult({ total: 1500 });
+    expect(s).toContain('ر.ي');
+  });
 });

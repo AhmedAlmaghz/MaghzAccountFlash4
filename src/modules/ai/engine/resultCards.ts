@@ -260,6 +260,12 @@ export function summarizeResult(result: unknown): string {
     const hasStats = statKeys.some((k) => k in obj);
     if (hasStats) {
       const lines: string[] = ['📊 **الملخص**\n'];
+      // Live 2026-10-02: search/report payloads shaped {total: 4, invoices:
+      // [...]} rendered "🏷️ الإجمالي: ٤ ر.ي" — a COUNT dressed as money.
+      // When sibling detail rows exist, total* integers are counts, not currency.
+      const hasRows = ['matches', 'items', 'invoices', 'products', 'lines', 'data'].some(
+        (k) => Array.isArray(obj[k]) && (obj[k] as unknown[]).length > 0,
+      );
       const statLabels: Record<string, string> = {
         invoiceCount: '📄 عدد الفواتير',
         invoice_count: '📄 عدد الفواتير',
@@ -285,7 +291,15 @@ export function summarizeResult(result: unknown): string {
       for (const [k, v] of Object.entries(obj)) {
         const label = statLabels[k] ?? k.replace(/_/g, ' ');
         if (typeof v === 'number') {
-          lines.push(`${label}: ${fmtCurrency(v)}`);
+          if (
+            hasRows &&
+            Number.isInteger(v) &&
+            /^(total|totalMatches|total_matches|totalCount|total_count|count)$/i.test(k)
+          ) {
+            lines.push(`🔢 عدد النتائج: ${v}`);
+          } else {
+            lines.push(`${label}: ${fmtCurrency(v)}`);
+          }
         } else if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'object') {
           // Detail rows (e.g. products/invoices lists) — a table, never
           // String(array-of-objects) which yields "[object Object],…".

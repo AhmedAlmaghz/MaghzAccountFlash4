@@ -56,6 +56,17 @@ function fuzzySearch<T>(
 }
 
 /**
+ * Empty-query browse (live 2026-10-02): the model sprayed EMPTY searches
+ * across families ("بحث عن منتج: نص البحث مطلوب" ×N) when it had no text
+ * to pass. An error there is a dead end that invites another empty retry;
+ * listing the head is data the model can act on. Rendered as a 💡 hint via
+ * the standard `suggestion` field so both card and model see it.
+ */
+function browseHint(label: string): string {
+  return `عرض أول النتائج لأن البحث كان فارغاً — مرّر اسماً أدق في query للتضييق على ${label}`;
+}
+
+/**
  * Search tools — resolve human names ("العميل محمد") to entity IDs.
  * The LLM must call these BEFORE any tool that takes an entity ID.
  */
@@ -91,9 +102,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم العميل أو جزء منه'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await salesApi.getCustomersPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((c) => ({ id: c.id, name: c.name, phone: c.phone, balance: c.balance })),
+          totalMatches: head.length,
+          suggestion: browseHint('العملاء'),
+        };
+      }
       // Token-aware matching (same as search.accounts): multi-word requests
       // ("شوكلاتة صغير") almost never appear verbatim inside entity names —
       // per-token scoring finds them while exact hits still rank highest.
@@ -122,9 +140,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم المورد أو جزء منه'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await purchasesApi.getSuppliersPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((s) => ({ id: s.id, name: s.name, phone: s.phone, balance: s.balance })),
+          totalMatches: head.length,
+          suggestion: browseHint('الموردين'),
+        };
+      }
       const matches = fuzzySearch(
         query,
         res.data.items,
@@ -150,9 +175,23 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم المنتج أو كوده أو جزء منه'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await inventoryApi.getProductsPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((p) => ({
+            id: p.id,
+            code: p.code,
+            name: p.nameAr,
+            salePrice: p.salePrice,
+            costPrice: p.costPrice,
+            unit: p.unit,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('المنتجات'),
+        };
+      }
       let typeUsage = new Map<string, { usage: string; name: string }>();
       try {
         const typesRes = await settingsApi.getProductTypes(ctx.companyId);
@@ -311,9 +350,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم العميل المحتمل أو بريده أو هاتفه'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await crmApi.getLeadsPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((l) => ({ id: l.id, name: l.name, phone: l.phone, status: l.status })),
+          totalMatches: head.length,
+          suggestion: browseHint('العملاء المحتملين'),
+        };
+      }
       const matches = findAllFuzzyMatches(
         query,
         res.data.items,
@@ -371,9 +417,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم الموظف أو رقمه أو بريده'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await hrApi.getEmployeesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((e) => ({ id: e.id, name: e.fullName, employeeNumber: e.employeeNumber })),
+          totalMatches: head.length,
+          suggestion: browseHint('الموظفين'),
+        };
+      }
       const matches = findAllFuzzyMatches(
         query,
         res.data.items,
@@ -403,7 +456,6 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم عرض السعر أو جزء من اسم العميل'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       // Paginated window instead of the old full-table fetch (getQuotations
       // returned EVERY quotation to the renderer and filtered in JS).
       // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200), consistent with every
@@ -413,6 +465,20 @@ export const searchTools: ToolDefinition[] = [
       // thousand-row datasets — tracked, not done here.)
       const res = await salesApi.getQuotationsPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT, {});
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((q) => ({
+            id: q.id,
+            quotationNumber: q.quotationNumber,
+            customerName: q.customer?.name,
+            totalAmount: q.totalAmount,
+            status: q.status,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('عروض الأسعار'),
+        };
+      }
       // Unified fuzzy (Phase 1): token-aware scoring so non-contiguous
       // multi-word queries ("شوكلاتة صغير") match — pure includes() returned
       // zero and forced the model into retry loops.
@@ -442,9 +508,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم المستودع'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await inventoryApi.getWarehouses(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.slice(0, 8);
+        return {
+          matches: head.map((w) => ({ id: w.id, name: w.name, isActive: w.isActive })),
+          totalMatches: head.length,
+          suggestion: browseHint('المستودعات'),
+        };
+      }
       // Unified fuzzy (Phase 1): token-aware instead of pure includes().
       const matches = fuzzySearch(query, res.data, (w) => w.name).slice(0, 8).map((m) => m.item);
       return {
@@ -462,7 +535,6 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم الفاتورة أو اسم العميل'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       // Paginated window instead of the old full-table fetch (getInvoices
       // returned EVERY invoice to the renderer — thousands of rows on real
       // datasets — then filtered in JS).
@@ -480,6 +552,20 @@ export const searchTools: ToolDefinition[] = [
           : Promise.resolve({ success: true as const, data: null }),
       ]);
       if (!fuzzyRes.success || !fuzzyRes.data) return { error: fuzzyRes.error || 'فشل البحث' };
+      if (!query) {
+        const head = fuzzyRes.data.items.slice(0, 8);
+        return {
+          matches: head.map((inv) => ({
+            id: inv.id,
+            invoiceNumber: inv.invoiceNumber,
+            customerName: inv.customer?.name,
+            status: inv.status,
+            totalAmount: inv.totalAmount,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('فواتير المبيعات'),
+        };
+      }
       const seen = new Set<string>();
       const matches: typeof fuzzyRes.data.items = [];
       const push = (inv: (typeof fuzzyRes.data.items)[number]) => {
@@ -518,7 +604,6 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم الفاتورة أو اسم المورد'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       // Paginated window instead of the old full-table fetch.
       // P2 fix: window 100 → FUZZY_FETCH_LIMIT (200) — see quotations note.
       // Plus a server-side number pass for digit-bearing queries (mirrors
@@ -531,6 +616,20 @@ export const searchTools: ToolDefinition[] = [
           : Promise.resolve({ success: true as const, data: null }),
       ]);
       if (!fuzzyRes.success || !fuzzyRes.data) return { error: fuzzyRes.error || 'فشل البحث' };
+      if (!query) {
+        const head = fuzzyRes.data.items.slice(0, 8);
+        return {
+          matches: head.map((inv) => ({
+            id: inv.id,
+            invoiceNumber: inv.invoiceNumber,
+            supplierName: inv.supplier?.name,
+            status: inv.status,
+            totalAmount: inv.totalAmount,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('فواتير المشتريات'),
+        };
+      }
       const seen = new Set<string>();
       const matches: typeof fuzzyRes.data.items = [];
       const push = (inv: (typeof fuzzyRes.data.items)[number]) => {
@@ -568,9 +667,22 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم الأمر أو اسم المورد'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await purchasesApi.getOrders(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.slice(0, 8);
+        return {
+          matches: head.map((o) => ({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            supplierName: o.supplier?.name,
+            status: o.status,
+            totalAmount: o.totalAmount,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('أوامر الشراء'),
+        };
+      }
       // Unified fuzzy (Phase 1).
       const matches = fuzzySearch(
         query,
@@ -598,9 +710,22 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم المنتج أو رقم الإصدار'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await manufacturingApi.getBoms(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.slice(0, 8);
+        return {
+          matches: head.map((b) => ({
+            id: b.id,
+            productName: b.productName,
+            version: b.version,
+            isActive: b.isActive,
+            totalCost: b.totalCost,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('أشجار المنتجات'),
+        };
+      }
       // P3 fix: the match key no longer includes the row UUID — hex-ish
       // queries could score against it (noise), and it never helps recall.
       const matches = fuzzySearch(query, res.data, (b) => `${b.productName || ''} ${b.version}`).slice(0, 8).map((m) => m.item);
@@ -625,9 +750,22 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم أمر التشغيل أو اسم المنتج'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await manufacturingApi.getWorkOrders(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.slice(0, 8);
+        return {
+          matches: head.map((w) => ({
+            id: w.id,
+            orderNumber: w.orderNumber,
+            productName: w.productName,
+            status: w.status,
+            quantity: w.quantity,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('أوامر التشغيل'),
+        };
+      }
       const matches = fuzzySearch(query, res.data, (w) => `${w.orderNumber} ${w.productName || ''}`).slice(0, 8).map((m) => m.item);
       return {
         matches: matches.map((w) => ({
@@ -686,13 +824,26 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم سند القبض أو اسم العميل'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       // Window widened 8 → 200 (same fix as search.journal_entries): a
       // voucher older than the 8 newest was permanently unfindable and the
       // model reported existing vouchers as nonexistent.
       const res = await accountingApi.getReceiptVouchersPaginated(ctx.companyId, 1, 200, { status: undefined });
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
+      if (!query) {
+        const head = items.slice(0, 8);
+        return {
+          matches: head.map((v) => ({
+            id: v.id,
+            voucherNumber: v.voucherNumber,
+            customerName: v.customerName,
+            amount: v.amount,
+            status: v.status,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('سندات القبض'),
+        };
+      }
       // Unified fuzzy (Phase 1).
       const matches = fuzzySearch(
         query,
@@ -720,11 +871,24 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم سند الصرف أو اسم المورد'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       // Window widened 8 → 200 (same fix as search.journal_entries).
       const res = await accountingApi.getPaymentVouchersPaginated(ctx.companyId, 1, 200, { status: undefined });
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
+      if (!query) {
+        const head = items.slice(0, 8);
+        return {
+          matches: head.map((v) => ({
+            id: v.id,
+            voucherNumber: v.voucherNumber,
+            supplierName: v.supplierName,
+            amount: v.amount,
+            status: v.status,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('سندات الصرف'),
+        };
+      }
       // Unified fuzzy (Phase 1).
       const matches = fuzzySearch(
         query,
@@ -819,9 +983,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم مردود المبيعات أو اسم العميل'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await salesApi.getReturns(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      const toRow = (r: (typeof res.data)[number]) => {
+        const cName = r.customer && typeof r.customer === 'object' ? String((r.customer as { name?: string }).name ?? '') : String(r.customer ?? '');
+        return { id: r.id, returnNumber: r.returnNumber || '', entityName: cName, status: r.status, totalAmount: r.totalAmount };
+      };
+      if (!query) {
+        const head = res.data.slice(0, 8).map(toRow);
+        return { matches: head, totalMatches: head.length, suggestion: browseHint('مردودات المبيعات') };
+      }
       // Unified fuzzy (Phase 1) — keeps the [object Object]-safe name extraction.
       const combined = fuzzySearch(
         query,
@@ -847,9 +1018,16 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم مردود المشتريات أو اسم المورد'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await purchasesApi.getReturns(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      const toRow = (r: (typeof res.data)[number]) => {
+        const sName = r.supplier && typeof r.supplier === 'object' ? String((r.supplier as { name?: string }).name ?? '') : String(r.supplier ?? '');
+        return { id: r.id, returnNumber: r.returnNumber || '', entityName: sName, status: r.status, totalAmount: r.totalAmount };
+      };
+      if (!query) {
+        const head = res.data.slice(0, 8).map(toRow);
+        return { matches: head, totalMatches: head.length, suggestion: browseHint('مردودات المشتريات') };
+      }
       // Unified fuzzy (Phase 1).
       const combined = fuzzySearch(
         query,
@@ -875,12 +1053,24 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('رقم المرجع أو وصف القيد'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       // Window widened 8 → 200: the old 8-row window made any reference
       // older than the newest 8 transactions permanently unfindable.
       const res = await accountingApi.getTransactionsPaginated(ctx.companyId, 1, 200);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
+      const toRow = (t: (typeof items)[number]) => ({
+        id: t.id,
+        reference: t.reference,
+        description: t.description,
+        date: t.date,
+        totalAmount: t.totalAmount,
+        status: t.status,
+        entryCount: t.entries?.length || 0,
+      });
+      if (!query) {
+        const head = items.slice(0, 8).map(toRow);
+        return { matches: head, totalMatches: head.length, suggestion: browseHint('القيود اليومية') };
+      }
       // Unified fuzzy (Phase 1).
       const matches = fuzzySearch(
         query,

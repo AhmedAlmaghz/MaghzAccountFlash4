@@ -155,6 +155,22 @@ export const manufacturingWriteTools: ToolDefinition[] = [
       const totalCost = round2(lines.reduce((s, l) => s + l.quantity * l.unitCost, 0));
       const outputQuantity = num(args.outputQuantity) > 0 ? num(args.outputQuantity) : 1;
 
+      // Live 2026-10-02: the model created the SAME product's BOM twice
+      // (identical rows in search results). An active BOM per product is
+      // unique by business rule — refuse with the existing BOM's id instead
+      // of minting a twin (update it via manufacturing.update_bom instead).
+      try {
+        const existing = await manufacturingApi.getBoms(ctx.companyId);
+        const twin = existing.success && existing.data
+          ? existing.data.find((b) => b.productId === productId && b.isActive !== false)
+          : undefined;
+        if (twin) {
+          return {
+            error: `توجد تركيبة نشطة لهذا المنتج مسبقاً (${twin.version ?? ''} — ${twin.id.slice(0, 8)}…). لا تُنشئ مكرراً: حدّثها عبر manufacturing.update_bom أو عطّلها أولاً.`,
+          };
+        }
+      } catch { /* guard best-effort — creation proceeds */ }
+
       const res = await manufacturingApi.createBom({
         companyId: ctx.companyId,
         productId,
