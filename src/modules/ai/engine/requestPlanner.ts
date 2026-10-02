@@ -50,6 +50,14 @@ export interface PlannedLine {
   unitPrice?: number;
 }
 
+/** One journal leg with a cleaned account text for resolution. */
+export interface PlannedJournalLeg {
+  /** Account name as said (amounts/markers stripped) — resolved per-leg. */
+  accountText: string;
+  debit?: number;
+  credit?: number;
+}
+
 export interface PlannedRequest {
   intent: PlannedIntent;
   /** Exact write tool for this intent (null when generic/ask-only). */
@@ -60,6 +68,8 @@ export interface PlannedRequest {
     prices: number[];
     /** Paired lines for multi-item documents (C3) — preferred over the flat arrays. */
     lines: PlannedLine[];
+    /** Deterministic journal legs (accounting.journal only). */
+    journalLegs: PlannedJournalLeg[];
     paymentType?: 'cash' | 'credit';
     date?: string;
   };
@@ -225,6 +235,126 @@ function extractPriceAnchored(text: string): Set<number> {
   return out;
 }
 
+/** Noise tokens stripped from a leg's account text.
+ * Entries MUST be in normalizeArabic() output form (the text is normalized
+ * BEFORE tokenizing — e.g. دائن arrives as داين, ة as ه; an unnormalized
+ * entry silently never matches). */
+const LEG_NOISE = new Set([
+  'حساب', 'من', 'الي', 'الى', 'مدين', 'المدين', 'داين', 'الداين',
+  'منه', 'عليه', 'و', 'ب', 'Dr', 'Cr',
+  // Dictation command words leak into the first leg's span ("سجل قيد 2000
+  // إلى حساب المصروفات") — never account names.
+  'سجل', 'قيد', 'تسجيل', 'انشاء',
+]);
+
+/** Remove amounts, side markers and conjunctions → clean account text.
+ * Input MUST already be normalizeArabic() output (see LEG_NOISE). Arabic
+ * punctuation (،؛:) is blanked first so it never glues to a name. */
+function cleanLegAccount(span: string): string {
+  const norm = normalizeArabic(span);
+  const tokens = norm
+    .replace(/\d+(?:\.\d+)?/g, ' ')
+    .replace(/[،؛:]/g, ' ')
+    .split(/\s+/)
+    .map((t) => (t === 'لحساب' ? 'حساب' : t))
+    .filter((t) => t.length > 0 && !LEG_NOISE.has(t));
+  return tokens.join(' ').trim();
+}
+
+function legSide(spanNorm: string): 'debit' | 'credit' | null {
+  // spanNorm is normalizeArabic() output: دائن arrives as داين.
+  if (/(^|\s)(مدين|المدين|دين|عليه|منه)(\s|$)/.test(spanNorm)) return 'debit';
+  if (/(^|\s)(داين|الداين|داينه|له|لها)(\s|$)/.test(spanNorm)) return 'credit';
+  return null;
+}
+
+/**
+ * Deterministic journal-leg splitter (independent task).
+ *
+ * Dictation convention: amounts open legs ("500000 الصندوق …"), an explicit
+ * مدين/دائن marker wins, "من حساب X" is the CREDIT source, "إلى/لحساب X"
+ * is a debit destination, everything else defaults to debit. A single
+ * amount-less leg takes the balancing figure (|D−C| on the smaller side);
+ * anything else unbalanced is reported, never invented.
+ */
+export function extractJournalLegs(rawText: string): {
+  legs: PlannedJournalLeg[];
+  balanced: boolean;
+  totalDebit: number;
+  totalCredit: number;
+} {
+  const empty = { legs: [], balanced: false, totalDebit: 0, totalCredit: 0 };
+  const text = toLatinDigits(rawText ?? '');
+  if (!text.trim()) return empty;
+  const clean = stripDateSpans(text);
+
+  // Side tails: "… من حساب رأس المال" (credit source), "… إلى حساب X"
+  // or "… لحساب X" (debit destination). Last occurrence wins.
+  let main = clean;
+  let tailText: string | null = null;
+  let tailSide: 'debit' | 'credit' = 'credit';
+  const mFrom = clean.match(/^(.*)\sمن\s+(حساب\s+)?(.+)$/);
+  const mTo = !mFrom && clean.match(/^(.*)\s(?:إلى|الى|الي|لحساب)\s+(حساب\s+)?(.+)$/);
+  if (mFrom) {
+    main = mFrom[1];
+    tailText = (mFrom[2] ?? '') + mFrom[3];
+    tailSide = 'credit';
+  } else if (mTo) {
+    main = mTo[1];
+    tailText = (mTo[2] ?? '') + mTo[3];
+    tailSide = 'debit';
+  }
+
+  const legs: PlannedJournalLeg[] = [];
+  // Each amount opens a leg spanning to the next amount.
+  const re = /(\d+(?:\.\d+)?)/g;
+  const hits: Array<{ value: number; index: number; end: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(main)) !== null) {
+    const n = parseFlexibleNumber(m[1]);
+    if (typeof n === 'number' && Number.isFinite(n)) {
+      hits.push({ value: n, index: m.index, end: m.index + m[1].length });
+    }
+  }
+  for (let i = 0; i < hits.length; i++) {
+    const span = main.slice(hits[i].index, i + 1 < hits.length ? hits[i + 1].index : undefined);
+    // Side comes from the region BEFORE this leg's own amount (markers
+    // precede their amount: "مدين 1000 …"). Reading the whole span leaks
+    // the NEXT leg's marker ("…الصندوق، دائن 1000") into this leg's side.
+    const prevEnd = i > 0 ? hits[i - 1].end : 0;
+    const side =
+      legSide(normalizeArabic(main.slice(prevEnd, hits[i].index))) ?? 'debit';
+    const accountText = cleanLegAccount(span);
+    if (!accountText) continue;
+    legs.push(
+      side === 'debit'
+        ? { accountText, debit: hits[i].value }
+        : { accountText, credit: hits[i].value },
+    );
+  }
+  if (tailText) {
+    const accountText = cleanLegAccount(tailText);
+    if (accountText) {
+      legs.push(
+        tailSide === 'debit' ? { accountText, debit: undefined } : { accountText, credit: undefined },
+      );
+    }
+  }
+
+  const totalDebit = legs.reduce((s, l) => s + (l.debit ?? 0), 0);
+  const totalCredit = legs.reduce((s, l) => s + (l.credit ?? 0), 0);
+  const open = legs.filter((l) => l.debit === undefined && l.credit === undefined);
+  if (open.length === 1 && totalDebit !== totalCredit) {
+    const diff = Math.abs(totalDebit - totalCredit);
+    if (totalDebit > totalCredit) open[0].credit = diff;
+    else open[0].debit = diff;
+  }
+  const d = legs.reduce((s, l) => s + (l.debit ?? 0), 0);
+  const c = legs.reduce((s, l) => s + (l.credit ?? 0), 0);
+  const balanced = legs.length > 0 && d > 0 && Math.abs(d - c) < 0.01;
+  return { legs, balanced, totalDebit: d, totalCredit: c };
+}
+
 function needsFor(intent: PlannedIntent): EntityKind[] {
   switch (intent) {
     case 'sales.invoice':
@@ -266,7 +396,7 @@ export function planRequest(rawText: string): PlannedRequest {
     return {
       intent: 'generic',
       writeTool: null,
-      slots: { quantities: [], prices: [], lines: [] },
+      slots: { quantities: [], prices: [], lines: [], journalLegs: [] },
       entityRequests: [],
       missing: [],
       plan: 'generic',
@@ -282,7 +412,7 @@ export function planRequest(rawText: string): PlannedRequest {
     return {
       intent: 'generic',
       writeTool: null,
-      slots: { quantities: [], prices: [], lines: [] },
+      slots: { quantities: [], prices: [], lines: [], journalLegs: [] },
       entityRequests: [],
       missing: [],
       plan: 'generic',
@@ -292,7 +422,7 @@ export function planRequest(rawText: string): PlannedRequest {
     return {
       intent,
       writeTool: null,
-      slots: { quantities: [], prices: [], lines: [] },
+      slots: { quantities: [], prices: [], lines: [], journalLegs: [] },
       entityRequests: [],
       missing: [],
       plan: 'generic',
@@ -300,7 +430,7 @@ export function planRequest(rawText: string): PlannedRequest {
   }
 
   const isCash = CASH_RE.test(norm);
-  const slots: PlannedRequest['slots'] = { quantities: [], prices: [], lines: [] };
+  const slots: PlannedRequest['slots'] = { quantities: [], prices: [], lines: [], journalLegs: [] };
   const isInvoiceLike =
     intent === 'sales.invoice' || intent === 'purchases.invoice' || intent === 'invoice.undirected';
   if (isInvoiceLike) {
@@ -325,6 +455,11 @@ export function planRequest(rawText: string): PlannedRequest {
     slots.prices = paired.prices;
     slots.lines = paired.lines;
   }
+  // Journal legs split BEFORE entity requests are built — resolution is
+  // per-leg (each account text independently).
+  const journalSplit =
+    intent === 'accounting.journal' ? extractJournalLegs(text) : null;
+  if (journalSplit) slots.journalLegs = journalSplit.legs;
   const date = extractDate(text);
   if (date) slots.date = date;
 
@@ -334,7 +469,12 @@ export function planRequest(rawText: string): PlannedRequest {
   if ((intent === 'sales.invoice' || intent === 'purchases.invoice') && slots.paymentType === 'cash') {
     kinds.push('cash_box');
   }
-  const entityRequests: EntityRequest[] = kinds.map((kind) => ({ text, kind }));
+  // Journal legs resolve per-leg (each account text independently) — one
+  // blob request could never separate three accounts.
+  const entityRequests: EntityRequest[] =
+    intent === 'accounting.journal' && slots.journalLegs.length > 0
+      ? slots.journalLegs.map((l) => ({ text: l.accountText, kind: 'account' as const }))
+      : kinds.map((kind) => ({ text, kind }));
 
   // Plan-time gaps only (resolution gaps come from entityService scores).
   // NOTE (live 2026-10-02): a missing unit price is NOT a gap — the tools
@@ -357,6 +497,19 @@ export function planRequest(rawText: string): PlannedRequest {
       missing.push({ field: 'amount', questionAr: 'ما مبلغ السند؟' });
     } else {
       slots.prices = numbers;
+    }
+  }
+  if (intent === 'accounting.journal' && journalSplit) {
+    if (journalSplit.legs.length === 0) {
+      missing.push({
+        field: 'legs',
+        questionAr: 'ما أطراف القيد؟ (اذكر كل طرف بمبلغه وحسابه، مثال: مدين 500000 الصندوق الرئيسي، دائن 500000 رأس المال)',
+      });
+    } else if (!journalSplit.balanced) {
+      missing.push({
+        field: 'legs',
+        questionAr: `أطراف القيد غير متوازنة (مدين ${journalSplit.totalDebit} مقابل دائن ${journalSplit.totalCredit}) — صحّح المبالغ أو الحسابات ثم أعد الطلب`,
+      });
     }
   }
 
@@ -390,6 +543,18 @@ export function renderPlannedSlots(planned: PlannedRequest): string | null {
         : `${l.quantity} × بسعر ${l.unitPrice}`,
     );
     parts.push(`- **البنود المستخرجة**: ${bits.join('؛ ')}`);
+  }
+  if (planned.slots.journalLegs.length > 0) {
+    const bits = planned.slots.journalLegs.map((l) =>
+      l.debit !== undefined
+        ? `مدين ${l.debit} ← ${l.accountText}`
+        : l.credit !== undefined
+          ? `دائن ${l.credit} ← ${l.accountText}`
+          : `${l.accountText} (يُحسب)`,
+    );
+    parts.push(
+      `- **أطراف القيد المستخرجة (متوازنة — استخدمها كما هي في entries مع معرفات الكتلة أعلاه)**: ${bits.join('؛ ')}`,
+    );
   }
   if (planned.slots.date) parts.push(`- **التاريخ**: ${planned.slots.date}`);
   if (planned.slots.paymentType === 'cash') {

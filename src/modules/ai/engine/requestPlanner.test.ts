@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planRequest, renderPlannedSlots } from './requestPlanner';
+import { planRequest, renderPlannedSlots, extractJournalLegs } from './requestPlanner';
 
 describe('requestPlanner — deterministic per-request planning', () => {
   it('plans a cash sales invoice: intent + tool + cash + qty/price + 3 entity requests', () => {
@@ -150,5 +150,52 @@ describe('requestPlanner — deterministic per-request planning', () => {
   it('terse verb-less commands keep their intent (question gate needs a question form)', () => {
     expect(planRequest('فاتورة نقدية من أبو العز ب 6 كنافة').intent).toBe('purchases.invoice');
     expect(planRequest('سند قبض من غدرة ب 50000').intent).toBe('accounting.receipt');
+  });
+
+  it('splits the live-session journal deterministically with a balancing figure', () => {
+    const p = planRequest('قم بتسجيل قيد ب 500000 الصندوق الرئيسي و 500000 حساب محفظة جيب من حساب رأس المال');
+    expect(p.intent).toBe('accounting.journal');
+    expect(p.plan).toBe('single-write');
+    // Account texts ride normalized (matching is normalized both sides).
+    expect(p.slots.journalLegs).toEqual([
+      { accountText: 'الصندوق الرييسي', debit: 500000 },
+      { accountText: 'محفظه جيب', debit: 500000 },
+      { accountText: 'راس المال', credit: 1000000 },
+    ]);
+    // One resolution request PER leg (no blob guessing).
+    expect(p.entityRequests).toEqual([
+      { text: 'الصندوق الرييسي', kind: 'account' },
+      { text: 'محفظه جيب', kind: 'account' },
+      { text: 'راس المال', kind: 'account' },
+    ]);
+    expect(renderPlannedSlots(p)).toContain('متوازنة');
+  });
+
+  it('asks once for unbalanced journals instead of inventing a plug', () => {
+    const p = planRequest('سجل قيد مدين 500000 الصندوق دائن 400000 البنك');
+    expect(p.intent).toBe('accounting.journal');
+    expect(p.plan).toBe('ask');
+    expect(p.missing.some((m) => m.field === 'legs')).toBe(true);
+  });
+
+  it('asks once when a journal names no legs at all', () => {
+    const p = planRequest('سجل قيد اليوم');
+    expect(p.plan).toBe('ask');
+    expect(p.missing.some((m) => m.field === 'legs')).toBe(true);
+  });
+
+  it('extractJournalLegs honors explicit markers and إلى-destinations', () => {
+    expect(
+      extractJournalLegs('قيد: مدين 1000 الصندوق، دائن 1000 المبيعات').legs,
+    ).toEqual([
+      { accountText: 'الصندوق', debit: 1000 },
+      { accountText: 'المبيعات', credit: 1000 },
+    ]);
+    expect(
+      extractJournalLegs('سجل قيد 2000 إلى حساب المصروفات من حساب الصندوق').legs,
+    ).toEqual([
+      { accountText: 'المصروفات', debit: 2000 },
+      { accountText: 'الصندوق', credit: 2000 },
+    ]);
   });
 });

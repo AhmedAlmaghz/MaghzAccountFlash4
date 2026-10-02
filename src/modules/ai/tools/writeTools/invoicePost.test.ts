@@ -47,7 +47,7 @@ describe('post_invoice UUID-or-number resolution (live 2026-10-02)', () => {
   it('resolves a human invoice number before posting (sales)', async () => {
     vi.mocked(salesApi.getInvoicesPaginated).mockResolvedValue({
       success: true,
-      data: { items: [{ id: UUID }] },
+      data: { items: [{ id: UUID, invoiceNumber: 'INV-0001' }] },
     } as never);
     vi.mocked(salesApi.postInvoice).mockResolvedValue({ success: true } as never);
     const res = (await findTool(salesWriteTools, 'sales.post_invoice').execute(
@@ -61,7 +61,7 @@ describe('post_invoice UUID-or-number resolution (live 2026-10-02)', () => {
   it('resolves a human invoice number before posting (purchases)', async () => {
     vi.mocked(purchasesApi.getInvoicesPaginated).mockResolvedValue({
       success: true,
-      data: { items: [{ id: UUID }] },
+      data: { items: [{ id: UUID, invoiceNumber: 'PINV-0002' }] },
     } as never);
     vi.mocked(purchasesApi.postInvoice).mockResolvedValue({ success: true } as never);
     const res = (await findTool(purchasesWriteTools, 'purchases.post_invoice').execute(
@@ -82,6 +82,19 @@ describe('post_invoice UUID-or-number resolution (live 2026-10-02)', () => {
       ctx,
     )) as Record<string, unknown>;
     expect(String(res.error)).toContain('لم تُعثر على فاتورة');
+    expect(vi.mocked(salesApi.postInvoice)).not.toHaveBeenCalled();
+  });
+
+  it('refuses partial number hits (INV-0001 must not post INV-00010)', async () => {
+    vi.mocked(salesApi.getInvoicesPaginated).mockResolvedValue({
+      success: true,
+      data: { items: [{ id: 'other-uuid', invoiceNumber: 'INV-00010' }] },
+    } as never);
+    const res = (await findTool(salesWriteTools, 'sales.post_invoice').execute(
+      { invoiceId: 'INV-0001' },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(String(res.error)).toContain('ليس رقم فاتورة كاملاً');
     expect(vi.mocked(salesApi.postInvoice)).not.toHaveBeenCalled();
   });
 });
