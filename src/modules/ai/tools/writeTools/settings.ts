@@ -23,6 +23,7 @@ import {
   num,
   str,
 } from './shared';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
 import { useAppStore } from '@/core/store';
 import {
   BUILT_IN_THEMES,
@@ -568,22 +569,28 @@ export const settingsWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         nameAr: { type: 'string', description: 'اسم العنصر بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'اسم العنصر بالإنجليزية' },
-        type: { type: 'string', enum: ['allowance', 'deduction'], description: 'النوع: إضافة (allowance) أو خصم (deduction)' },
+        type: { type: 'string', description: 'النوع: allowance/earning/إضافة/بدل/حافز (إضافة) أو deduction/خصم/استقطاع/غياب/تأخير/أقساط (خصم)' },
         calculationMethod: { type: 'string', enum: ['fixed', 'percentage'], description: 'طريقة الحساب: ثابت (fixed) أو نسبة (percentage)' },
         value: { type: 'number', description: 'القيمة (المبلغ الثابت أو النسبة المئوية)' },
         isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
       },
-      required: ['nameAr', 'type'],
+      required: ['type'],
     },
-    summarizeArgs: (a) => `إضافة عنصر راتب: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
+    summarizeArgs: (a) => `إضافة عنصر راتب: ${String((a as Record<string, unknown>).nameAr ?? (a as Record<string, unknown>).name ?? '').slice(0, 30)}`,
     execute: async (args, ctx) => {
-      const nameAr = str(args.nameAr);
-      if (!nameAr) return { error: 'nameAr مطلوب' };
+      const nameAr = str(args.nameAr) ?? str(args.name);
+      if (!nameAr) return { error: 'nameAr مطلوب (يقبل name كبديل)' };
       const rawType = str(args.type);
-      if (!rawType) return { error: 'type مطلوب — allowance أو deduction' };
-      // Map legacy tool vocabulary to the payroll_components enum
-      const type = rawType === 'deduction' ? 'deduction' as const : 'earning' as const;
+      if (!rawType) return { error: 'type مطلوب — allowance/إضافة أو deduction/خصم' };
+      // Map Arabic + legacy tool vocabulary to the payroll_components enum.
+      // Earning side: allowance/earning/إضافة/بدل/بدلات/حافز/حوافز/راتب/أساسي.
+      // Deduction side: deduction/خصم/استقطاع/غياب/تأخير/أقساط/قسط/جزاء.
+      const normType = normalizeArabic(rawType);
+      const type = /deduction|خصم|استقطاع|غياب|تاخير|تأخير|اقساط|أقساط|قسط|جزاء|سلف/.test(normType)
+        ? 'deduction' as const
+        : 'earning' as const;
       const res = await hrApi.createPayrollComponent({
         companyId: ctx.companyId,
         nameAr,
@@ -610,8 +617,9 @@ export const settingsWriteTools: ToolDefinition[] = [
       properties: {
         componentId: { type: 'string', description: 'معرف العنصر (UUID)' },
         nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
-        type: { type: 'string', enum: ['allowance', 'deduction'], description: 'النوع' },
+        type: { type: 'string', description: 'النوع: allowance/إضافة أو deduction/خصم' },
         calculationMethod: { type: 'string', enum: ['fixed', 'percentage'], description: 'طريقة الحساب' },
         value: { type: 'number', description: 'القيمة' },
         isActive: { type: 'boolean', description: 'حالة التفعيل' },
@@ -623,11 +631,14 @@ export const settingsWriteTools: ToolDefinition[] = [
       const componentId = str(args.componentId);
       if (!componentId) return { error: 'componentId مطلوب — استخدم settings.get_payroll_components أولاً' };
       const data: Parameters<typeof hrApi.updatePayrollComponent>[2] = {};
-      if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
+      const updNameAr = str(args.nameAr) ?? str(args.name);
+      if (updNameAr !== undefined) data.nameAr = updNameAr;
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.type !== undefined) {
-        const rawType = str(args.type);
-        data.type = rawType === 'deduction' ? 'deduction' : 'earning';
+        const rawType = str(args.type) ?? '';
+        data.type = /deduction|خصم|استقطاع|غياب|تاخير|تأخير|اقساط|أقساط|قسط|جزاء|سلف/.test(normalizeArabic(rawType))
+          ? 'deduction'
+          : 'earning';
       }
       if (args.calculationMethod !== undefined) data.calculationMethod = str(args.calculationMethod) as 'fixed' | 'percentage' | 'formula';
       if (args.value !== undefined) data.defaultAmount = num(args.value);

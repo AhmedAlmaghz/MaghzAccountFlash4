@@ -35,6 +35,7 @@ export type PlannedIntent =
   | 'accounting.journal'
   | 'manufacturing.work_order'
   | 'manufacturing.work_order_status'
+  | 'hr.operations'
   | 'crm.lead'
   | 'hr.employee'
   | 'inventory.product'
@@ -84,7 +85,7 @@ export interface PlannedRequest {
   plan: 'single-write' | 'ask' | 'generic';
 }
 
-const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undirected'>, string> = {
+const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undirected' | 'hr.operations'>, string> = {
   'sales.invoice': 'sales.create_invoice',
   'purchases.invoice': 'purchases.create_invoice',
   'accounting.receipt': 'accounting.create_receipt_voucher',
@@ -102,6 +103,8 @@ const CASH_RE = /نقد|كاش|فور|مدفوع|مقبوض|عاجل|حاضر/;
 const QUESTION_RE = /؟|^(ما|ماذا|مادا|كم|هل|لماذا|ليش|وين|اين|أين|متى|متا|كيف|اعرض|اوضح|اشرح|هات|اذكر|عدد|بكم)/;
 /** Creation/posting/payment verbs and nouns — the user orders an action. */
 const ACTION_RE = /أنشئ|انشئ|إنشاء|انشاء|سجل|سجّل|تسجيل|ضيف|أضف|اضف|إضافة|اضافة|افتح|احذف|حذف|عدل|عدّل|تعديل|رحل|رحّل|ترحيل|ادفع|دفع|حوّل|تحويل|سدد|تسديد|اصرف|صرف|اقبض|قبض|استلم|استلام|ولّد|اطبع|صدّر|اقفل/;const MFG_RE = /أمر\s*تشغيل|امر\s*تشغيل|تصنيع|إنتاج|انتاج|شغل.*مصنع|bom/;
+/** HR batch operations: payroll/attendance/leaves/components/departments. */
+const HR_OPS_RE = /راتب|رواتب|مسير|حضور|غياب|انصراف|اجازه|إجازه|اجازات|إجازات|مكونات|بنود.*راتب|كشف.*راتب|موظف|موظفين|قسم|اقسام|أقسام/;
 /** Execution-state change of an EXISTING work order — must beat JOURNAL_RE's bare قيد. */
 const WO_STATUS_RE =
   /قيد\s*التنفيذ|قيد\s*التشغيل|مكتمل|اكتمل|إنهاء|انهاء|إغلاق|اغلاق|ابدا\s*التنفيذ|ابدأ/;
@@ -127,6 +130,12 @@ function detectIntent(norm: string): PlannedIntent {
   if (WO_STATUS_RE.test(norm) && /أمر|امر|تشغيل|طلب|حول|انقل|بدء|ابدا/.test(norm)) {
     return 'manufacturing.work_order_status';
   }
+  // HR operational batch (live 2026-10-02 session 3): payroll runs,
+  // attendance, leaves and components in one message. No single write tool
+  // covers it — the model drives wizards (preview→generate→post) with the
+  // pre-resolved employees. Matching it here STOPS the invoice fallback
+  // from rendering garbage "extracted lines" (250000 × بسعر 6…) on HR text.
+  if (HR_OPS_RE.test(norm)) return 'hr.operations';
   if (MFG_RE.test(norm)) return 'manufacturing.work_order';
   // Receipt/payment first: they contain party words too ("سند قبض من عميل").
   if (RECEIPT_RE.test(norm)) return 'accounting.receipt';
@@ -438,6 +447,10 @@ function needsFor(intent: PlannedIntent): EntityKind[] {
       return ['lead'];
     case 'hr.employee':
       return ['employee'];
+    case 'hr.operations':
+      // Employees resolve up-front; the wizards (preview→generate→post,
+      // attendance, leaves) consume their UUIDs. No invoice lines ever.
+      return ['employee'];
     case 'inventory.product':
       return ['product'];
     default:
@@ -580,7 +593,11 @@ export function planRequest(rawText: string): PlannedRequest {
   return {
     intent,
     // Undirected invoices name no tool — the block decides (rule 55).
-    writeTool: intent === 'invoice.undirected' ? null : INTENT_WRITE_TOOL[intent],
+    // HR operations are multi-step by nature (wizards) — no single tool.
+    writeTool:
+      intent === 'invoice.undirected' || intent === 'hr.operations'
+        ? null
+        : INTENT_WRITE_TOOL[intent],
     slots,
     entityRequests,
     missing,

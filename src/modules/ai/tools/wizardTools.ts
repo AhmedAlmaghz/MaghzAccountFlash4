@@ -637,7 +637,45 @@ export const wizardTools: ToolDefinition[] = [
         status: 'draft',
         lines: lines.map((l) => ({ employeeId: l.employeeId })),
       });
-      if (!createRes.success) return { error: createRes.error || 'فشل إنشاء مسير الرواتب' };
+      if (!createRes.success) {
+        // Duplicate period → reuse the existing run instead of dying: draft
+        // → post it in step 3 below; posted → report done (live 2026-10-02).
+        if (/بالفعل|موجود|مكرر|duplicate|already/i.test(createRes.error || '')) {
+          try {
+            const existing = await hrApi.getPayrollRuns(ctx.companyId);
+            const hit = existing.success && existing.data
+              ? existing.data.find((r) => r.month === month && r.year === year)
+              : undefined;
+            if (hit && hit.status === 'posted') {
+              return {
+                success: true,
+                status: 'posted',
+                journalPosted: true,
+                payrollId: hit.id,
+                employeeCount: lines.length,
+                totalGross: preview.data.totalGross,
+                totalNet: preview.data.totalNet,
+                message: `مسير شهر ${month}/${year} مرحّل مسبقاً — لا حاجة لإعادة إنشائه`,
+              };
+            }
+            if (hit) {
+              const postRes = await hrApi.postPayrollRun(hit.id, ctx.companyId, ctx.userId);
+              if (!postRes.success) return { error: postRes.error || 'فشل ترحيل المسير الموجود' };
+              return {
+                success: true,
+                status: 'posted',
+                journalPosted: true,
+                payrollId: hit.id,
+                employeeCount: lines.length,
+                totalGross: preview.data.totalGross,
+                totalNet: preview.data.totalNet,
+                message: `المسير كان موجوداً كمسودة — تم ترحيله الآن (${lines.length} موظف، الصافي: ${preview.data.totalNet})`,
+              };
+            }
+          } catch { /* fall through to the plain error */ }
+        }
+        return { error: createRes.error || 'فشل إنشاء مسير الرواتب' };
+      }
       const payrollId = createRes.id;
       if (!payrollId) return { error: 'تم إنشاء المسير لكن لم يُرجع معرف' };
 

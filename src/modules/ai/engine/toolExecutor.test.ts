@@ -80,6 +80,14 @@ describe('toolExecutor', () => {
       expect(outcome.error).toContain('غير معروفة');
     });
 
+    it('suggests the closest registered tool for near-miss names (live 2026-10-02)', async () => {
+      useAuthStore.getState().login(adminUser);
+      registerTool(makeTool({ name: 'hr.get_employees', permission: 'hr.view' }));
+      const outcome = await executeToolCall('hr.get_ employees', {}, ctx);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toContain('hr.get_employees');
+    });
+
     it('rejects when user lacks permission', async () => {
       useAuthStore.getState().login(viewerUser);
       registerTool(makeTool({ permission: 'hr.delete' as ToolDefinition['permission'] }));

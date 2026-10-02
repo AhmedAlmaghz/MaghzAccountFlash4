@@ -1,7 +1,8 @@
-import { getTool } from '../tools/registry';
+import { getTool, getAllTools } from '../tools/registry';
 import { useAuthStore } from '@/modules/auth/store';
 import { logAudit } from '@/core/utils/auditLogger';
 import { sanitizeToolArgs } from './argNormalizers';
+import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
 import { classifyToolError, type ToolErrorClassification } from './errorTaxonomy';
 import type { ToolContext, ToolDefinition } from '../types';
 import { checkJevPostingTool } from '../jev/jevPostingGuard';
@@ -151,6 +152,25 @@ export function resetToolRateLimiter(): void {
 }
 
 /**
+ * Closest registered tool names to a hallucinated one (whitespace-tolerant:
+ * "hr.get_ employees" still matches "hr.get_employees"). Pure, capped at 3.
+ */
+export function suggestSimilarTools(name: string, limit = 3): string | null {
+  const want = normalizeArabic(String(name ?? '').replace(/\s+/g, ''));
+  if (!want) return null;
+  const scored = getAllTools()
+    .map((t) => ({
+      name: t.name,
+      score: fuzzyMatchScore(want, normalizeArabic(t.name.replace(/\s+/g, ''))),
+    }))
+    .filter((s) => s.score >= 0.5)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((s) => s.name);
+  return scored.length > 0 ? scored.join('، ') : null;
+}
+
+/**
  * Hard wall-clock budgets for a single tool execution. A hung DB query (or a
  * stuck adapter call) must never freeze the whole agent loop and UI — the
  * MAX_ITERATIONS loop-cap cannot help because it only counts completed calls.
@@ -170,7 +190,11 @@ export async function executeToolCall(
 ): Promise<ExecutionOutcome> {
   const tool = getTool(name);
   if (!tool) {
-    const error = `أداة غير معروفة: ${name}`;
+    // Did-you-mean (live 2026-10-02: "hr.get_ employees" with a stray space
+    // died as a bare unknown). Suggest the closest registered siblings so
+    // one typo costs a correction, not a spiral.
+    const hint = suggestSimilarTools(name);
+    const error = `أداة غير معروفة: ${name}${hint ? ` — هل تقصد: ${hint}؟` : ''}`;
     return { ok: false, error, errorClass: classifyToolError(error) };
   }
 

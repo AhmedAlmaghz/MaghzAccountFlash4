@@ -152,6 +152,16 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(planRequest('سند قبض من غدرة ب 50000').intent).toBe('accounting.receipt');
   });
 
+  it('routes HR batch operations to hr.operations with employees only (never invoice lines)', () => {
+    const p = planRequest('سجل حضور شهر 9 كاملاً لكل الموظفين واصدر كشف الراتب لشهر 9');
+    expect(p.intent).toBe('hr.operations');
+    expect(p.writeTool).toBeNull();
+    expect(p.entityRequests.map((e) => e.kind)).toEqual(['employee']);
+    // The bug: invoice slots rendered garbage lines on HR text.
+    expect(p.slots.lines).toEqual([]);
+    expect(renderPlannedSlots(p)).toBeNull();
+  });
+
   it('extractEntityQuery strips command/doc words to the bare name', () => {
     const p = planRequest('فاتورة ابو العز هي فاتورة مشتريات بسعر 300');
     expect(p.intent).toBe('purchases.invoice');

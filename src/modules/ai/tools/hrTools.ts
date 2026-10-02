@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { hrApi } from '@/modules/hr/api';
 import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
+import { normalizeDateArg } from '../engine/argNormalizers';
 
 /**
  * HR professional tools — built on the professionalized hrApi surface where
@@ -18,6 +19,26 @@ function num(v: unknown): number {
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * Find an existing payroll run for a month/year (live 2026-10-02: the model
+ * retried creation 5× against "يوجد مسير للفترة" instead of using the run
+ * that is already there). Returns the run or null — never throws.
+ */
+async function findPayrollRun(
+  companyId: string,
+  month: number,
+  year: number,
+): Promise<{ id: string; status: string } | null> {
+  try {
+    const res = await hrApi.getPayrollRuns(companyId);
+    if (!res.success || !res.data) return null;
+    const hit = res.data.find((r) => r.month === month && r.year === year);
+    return hit ? { id: hit.id, status: hit.status } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -258,7 +279,29 @@ export const hrTools: ToolDefinition[] = [
         status: 'draft',
         lines: lines.map((l) => ({ employeeId: l.employeeId })),
       });
-      if (!res.success) return { error: res.error || 'فشل إنشاء مسير الرواتب' };
+      if (!res.success) {
+        // Duplicate period → hand back the EXISTING run instead of a dead
+        // end (the model looped 5× on "يوجد مسير بالفعل"). Draft → post it;
+        // posted → nothing to do.
+        if (/بالفعل|موجود|مكرر|duplicate|already/i.test(res.error || '')) {
+          const existing = await findPayrollRun(ctx.companyId, month, year);
+          if (existing) {
+            return {
+              exists: true,
+              payrollId: existing.id,
+              status: existing.status,
+              employeeCount: lines.length,
+              totalGross: preview.data.totalGross,
+              totalNet: preview.data.totalNet,
+              note:
+                existing.status === 'draft'
+                  ? 'المسير موجود كمسودة — رحّله عبر hr.post_payroll_run بهذا المعرف'
+                  : 'المسير مرحّل مسبقاً — لا حاجة لإعادة إنشائه',
+            };
+          }
+        }
+        return { error: res.error || 'فشل إنشاء مسير الرواتب' };
+      }
       return {
         created: true,
         payrollId: res.id,
@@ -307,12 +350,49 @@ export const hrTools: ToolDefinition[] = [
       return `حفظ حضور ${count} موظف ليوم ${a.date}`;
     },
     execute: async (args, ctx) => {
-      const date = str(args.date);
+      // Leniency (live 2026-10-02): the model sends a SINGULAR record
+      // ({employeeId|employeeName, status, date}) instead of records[] —
+      // wrap it instead of failing "سجل واحد على الأقل".
+      let raw: unknown[] = Array.isArray(args.records) ? args.records : [];
+      if (raw.length === 0 && (str(args.employeeId) || str(args.employeeName))) {
+        raw = [{
+          employeeId: args.employeeId,
+          employeeName: args.employeeName,
+          status: args.status,
+          checkIn: args.checkIn,
+          checkOut: args.checkOut,
+          notes: args.notes,
+        }];
+      }
+      // Arabic dates ("21 سبتمبر", "2026-9-21") normalize here — the old
+      // code passed them raw to the API ("التاريخ مطلوب" ×4 in one session).
+      const date = normalizeDateArg(str(args.date)) ?? str(args.date);
       if (!date) return { error: 'التاريخ مطلوب بصيغة YYYY-MM-DD' };
-      const raw = Array.isArray(args.records) ? args.records : [];
       if (raw.length === 0) return { error: 'يجب تمرير سجل حضور واحد على الأقل' };
 
-      const records = raw
+      // Resolve employee NAMES internally (the planner only guarantees IDs
+      // when resolution succeeded — a name straight from prose must work).
+      const withIds: unknown[] = [];
+      for (const item of raw) {
+        const r = (item ?? {}) as Record<string, unknown>;
+        let employeeId = str(r.employeeId);
+        if (!employeeId && str(r.employeeName)) {
+          const found = await hrApi.getEmployeesPaginated(ctx.companyId, 1, 200);
+          const list = found.success && found.data ? found.data.items : [];
+          const want = normalizeArabic(String(r.employeeName));
+          const best = list
+            .map((e) => ({ e, s: fuzzyMatchScore(want, `${e.fullName ?? ''} ${e.employeeNumber ?? ''}`) }))
+            .filter((x) => x.s >= 0.5)
+            .sort((a, b) => b.s - a.s)[0];
+          if (!best) {
+            return { error: `الموظف "${String(r.employeeName)}" غير موجود — ابحث بـ search.employees أو أنشئه بـ hr.create_employee أولاً` };
+          }
+          employeeId = best.e.id;
+        }
+        withIds.push({ ...r, employeeId });
+      }
+
+      const records = withIds
         .map((item) => {
           const r = (item ?? {}) as Record<string, unknown>;
           const employeeId = str(r.employeeId);
@@ -422,9 +502,22 @@ export const hrTools: ToolDefinition[] = [
     },
     execute: async (args, ctx) => {
       const query = str(args.query);
-      if (!query) return { error: 'query مطلوب — اكتب اسم القسم أو المدير' };
       const res = await hrApi.getDepartments(ctx.companyId);
       if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأقسام' };
+      const toRow = (d: { id: string; name: string; managerName?: string; employeeCount?: number }) => ({
+        id: d.id,
+        name: d.name,
+        managerName: d.managerName,
+        employeeCount: d.employeeCount,
+      });
+      // Empty query browses the head (live 2026-10-02: empty searches looped).
+      if (!query) {
+        const head = (res.data as unknown[]).slice(0, 8);
+        return {
+          departments: head.map((d) => toRow(d as { id: string; name: string })),
+          suggestion: 'عرض أول الأقسام لأن البحث كان فارغاً — مرّر اسماً أدق في query للتضييق',
+        };
+      }
       const matches = fuzzySearch(query, res.data, (d) => `${d.name} ${d.managerName ?? ''}`);
       if (matches.length === 0) {
         return { departments: [], note: 'لا توجد أقسام مطابقة — جرّب اسماً أدق أو أضف القسم عبر hr.create_department' };
@@ -451,13 +544,15 @@ export const hrTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         name: { type: 'string', description: 'اسم القسم (إلزامي)' },
+        nameAr: { type: 'string', description: 'بديل لـ name (العربية أولاً)' },
         managerId: { type: 'string', description: 'معرف المدير من المستخدمين (اختياري)' },
       },
-      required: ['name'],
+      required: [],
     },
-    summarizeArgs: (a) => `إنشاء قسم: ${String((a as Record<string, unknown>).name || '').slice(0, 30)}`,
+    summarizeArgs: (a) => `إنشاء قسم: ${String((a as Record<string, unknown>).name ?? (a as Record<string, unknown>).nameAr ?? '').slice(0, 30)}`,
     execute: async (args, ctx) => {
-      const name = str(args.name);
+      // Arabic-first alias: the model naturally writes nameAr (live 2026-10-02).
+      const name = str(args.name) ?? str(args.nameAr);
       if (!name) return { error: 'name مطلوب — اسم القسم إلزامي' };
       const managerId = str(args.managerId);
       const res = await hrApi.createDepartment({ companyId: ctx.companyId, name, managerId }, ctx.userId);

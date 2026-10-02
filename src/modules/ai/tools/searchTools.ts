@@ -9,6 +9,7 @@ import { manufacturingApi } from '@/modules/manufacturing/api';
 import type { Account } from '@/modules/accounting/types';
 import * as settingsApi from '@/core/api';
 import { normalizeArabic, findAllFuzzyMatches, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
+import { toLatinDigits } from '../engine/argNormalizers';
 
 /**
  * Cap for fuzzy-match fetches. Datasets are small enough that fetching all rows
@@ -1323,12 +1324,29 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('شهر (1-12) أو سنة أو الحالة (draft/posted)'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim().toLowerCase();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await hrApi.getPayrollRunsPaginated(ctx.companyId, 1, 20);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
+      const toRow = (r: (typeof items)[number]) => ({
+        id: r.id,
+        title: `${monthNames[(r.month - 1) % 12] || r.month} ${r.year}`,
+        month: r.month,
+        year: r.year,
+        totalAmount: r.totalAmount,
+        status: r.status,
+      });
+      if (!query) {
+        const head = items.slice(0, 8).map(toRow);
+        return { matches: head, totalMatches: head.length, suggestion: browseHint('مسيرات الرواتب') };
+      }
+      // Live 2026-10-02: "شهر 9" matched nothing — extract month/year
+      // NUMBERS from prose (Arabic-Indic included) and compare numerically
+      // instead of substring-matching the whole sentence.
+      const latin = toLatinDigits(query);
+      const nums = [...latin.matchAll(/\d+/g)].map((m) => Number(m[0]));
       const matches = items
         .filter((r) =>
+          nums.some((n) => n === r.month || n === r.year) ||
           String(r.month).includes(query) ||
           String(r.year).includes(query) ||
           r.status.toLowerCase().includes(query)
@@ -1345,6 +1363,9 @@ export const searchTools: ToolDefinition[] = [
           status: r.status,
         })),
         totalMatches: matches.length,
+        ...(matches.length === 0
+          ? { suggestion: 'لا توجد مسيرات مطابقة — جرّب "شهر 9" أو "2026" أو الحالة (draft/posted)، أو أنشئ مسيراً عبر hr.generate_payroll_run' }
+          : {}),
       };
     },
   },
