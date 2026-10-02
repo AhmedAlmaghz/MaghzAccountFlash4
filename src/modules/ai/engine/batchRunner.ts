@@ -3,15 +3,80 @@ import { executeToolCall } from './toolExecutor';
 import { getTool } from '../tools/registry';
 import {
   extractOutputScalars,
+  extractRefNames,
   isTerminalBatchStatus,
   nextRetryDelayMs,
   substituteRefs,
   summarizeBatchProgress,
   type RefOutputs,
 } from './batchQueue';
-import type { JobBatchDetail, JobBatchSummary } from '../api/batchTypes';
+import type { JobBatchDetail, JobBatchItem, JobBatchSummary } from '../api/batchTypes';
 import { BATCH_CLAIM_LIMIT } from '../api/batchTypes';
 import { checkJevPostingTool } from '../jev/jevPostingGuard';
+
+/**
+ * B1 wave width: independent items per parallel flight. 3 is deliberate —
+ * wide enough to overlap the 10-30 sequential IPC queries inside one posting
+ * flow (while item A waits on the network, B and C progress), narrow enough
+ * to keep PGlite's single IDB lock and the renderer's UI thread responsive
+ * (every flight still starts with yieldToUi). Ordering inside a wave is
+ * irrelevant BY CONSTRUCTION (wavePartition guarantees no intra-wave deps).
+ */
+export const BATCH_WAVE_CONCURRENCY = 3;
+
+/**
+ * B1 wave scheduler: partition a claimed chunk into ordered waves where each
+ * wave holds only items with NO dependencies on each other. Edges come from
+ * numeric after_seq links AND {{ref}}/@ref placeholders that name another
+ * chunk item's ref (or seq string). The claim gate already guarantees every
+ * item's EXTERNAL parents are done — waves only encode INTRA-chunk order,
+ * so producer→consumer ref chains (supplier → its invoices) keep working
+ * while independent roots run side by side. Kahn's algorithm, chunk order
+ * preserved inside each wave; a cycle (impossible — enqueue enforces
+ * backward-only DAG) degrades to one sequential tail wave, never a hang.
+ */
+export function wavePartition(items: JobBatchItem[]): JobBatchItem[][] {
+  if (items.length === 0) return [];
+  const byRef = new Map<string, number>();
+  const bySeq = new Map<string, number>();
+  items.forEach((it, i) => {
+    if (it.ref) byRef.set(it.ref, i);
+    bySeq.set(String(it.seq), i);
+  });
+  const deps: Array<Set<number>> = items.map(() => new Set<number>());
+  items.forEach((it, i) => {
+    if (typeof it.afterSeq === 'number') {
+      const p = bySeq.get(String(it.afterSeq));
+      if (p !== undefined && p !== i) deps[i].add(p);
+    }
+    for (const name of extractRefNames(it.args ?? {})) {
+      const p = byRef.has(name) ? byRef.get(name) : bySeq.get(name);
+      if (p !== undefined && p !== i) deps[i].add(p);
+    }
+  });
+  const waves: JobBatchItem[][] = [];
+  const done = new Set<number>();
+  const remaining = new Set<number>(items.map((_, i) => i));
+  while (remaining.size > 0) {
+    const wave = [...remaining].filter((i) => {
+      for (const d of deps[i]) {
+        if (!done.has(d)) return false;
+      }
+      return true;
+    });
+    if (wave.length === 0) {
+      // Cycle guard: run the rest sequentially in chunk order.
+      waves.push([...remaining].map((i) => items[i]));
+      break;
+    }
+    for (const i of wave) {
+      remaining.delete(i);
+      done.add(i);
+    }
+    waves.push(wave.map((i) => items[i]));
+  }
+  return waves;
+}
 
 /**
  * Batch worker — runs in the renderer, state lives in Postgres.
@@ -176,22 +241,21 @@ function newWorkerId(): string {
 }
 
 /**
- * P1 stop-wedge fix: release claimed-but-unstarted items of the CURRENT
- * chunk back to `queued` without burning attempts. `executedCount` is how
- * many of `chunk` this worker already finished — everything after that
- * index was never started and is safe to release (still ours: claimed_by =
- * workerId, lease live). Idempotent and best-effort: a failed release only
- * means the old 30-minute-lease behaviour for those rows.
+ * B1 stop helper: release NEVER-STARTED claimed items back to `queued`
+ * without burning attempts. Takes explicit ids (not a chunk-order count)
+ * because wave-parallel execution starts items out of claim order — only
+ * ids absent from the started set are safe to release. Idempotent and
+ * best-effort: a failed release only means the old 30-minute-lease
+ * behaviour for those rows.
  */
-async function releaseChunkRemainder(
+async function releaseIds(
   companyId: string,
   userId: string,
   batchId: string,
   workerId: string,
-  chunk: Array<{ id: string }>,
-  executedCount: number,
+  ids: string[],
 ): Promise<void> {
-  const pending = chunk.slice(executedCount).map((it) => it.id).filter(Boolean);
+  const pending = ids.filter(Boolean);
   if (pending.length === 0) return;
   try {
     await aiApi.batchRelease(companyId, userId, batchId, workerId, pending);
@@ -335,17 +399,27 @@ async function runBatchInner(
       continue;
     }
     emptyClaimStreak = 0;
+    // Narrowed once: non-empty from the checks above. Closures below must
+    // use this binding (not claim.data) or TS18048 trips on the closure.
+    const chunk = claim.data;
 
-    // Index of the chunk item currently being processed — used ONLY by the
-    // stop path below to release the unstarted remainder (P1 stop-wedge).
-    let executedInChunk = 0;
+    // B1 wave-parallel chunk execution. The old loop ran items strictly one
+    // by one while each posting flow holds 10-30 sequential IPC queries, so
+    // a 10-item chunk serialized hundreds of round-trips. Waves run
+    // independent items side by side (width BATCH_WAVE_CONCURRENCY) while
+    // producer→consumer ref/after edges inside the chunk keep their order
+    // across waves. Stop is honored BETWEEN flights (in-flight items always
+    // finish — never abandon a financial write); never-started ids release.
+    const chunkState = { detail, chunkRetryDelay: 0 };
+    const startedIds = new Set<string>();
+    const unstartedIds = (): string[] =>
+      chunk.map((it) => it.id).filter((id) => id && !startedIds.has(id));
+
     // P3-5 fix: collect max retry delay for retried items in this chunk;
     // sleeping inside the loop blocked siblings. Defer to after the loop.
-    let chunkRetryDelay = 0;
-    for (const item of claim.data) {
-      // Cooperative gap: back-to-back heavy writes (invoice + journal +
-      // stock on the UI-thread PGlite) must not starve input/paint.
-      await yieldToUi();
+    const runChunkItem = async (
+      item: JobBatchItem,
+    ): Promise<{ terminal: JobBatchDetail | null; breakRound: boolean }> => {
       // Resolve {{ref}} / @ref placeholders against outputs captured so far
       // (seeded from persisted result_data at run start, so resumes work).
       // NOTE: pause/cancel is honored at chunk boundaries (loop top +
@@ -362,14 +436,14 @@ async function runBatchInner(
           false,
         );
         if (failed.success && failed.data?.finalStatus) {
-          detail = (await refresh(companyId, userId, batchId)) ?? detail;
-          callbacks.onProgress?.(detail);
-          return detail;
+          chunkState.detail = (await refresh(companyId, userId, batchId)) ?? chunkState.detail;
+          callbacks.onProgress?.(chunkState.detail);
+          return { terminal: chunkState.detail, breakRound: false };
         }
         if (failed.success) {
-          detail.failedCount += 1;
-          detail.skippedCount += failed.data?.skipped ?? 0;
-          callbacks.onProgress?.(detail);
+          chunkState.detail.failedCount += 1;
+          chunkState.detail.skippedCount += failed.data?.skipped ?? 0;
+          callbacks.onProgress?.(chunkState.detail);
         }
       } else {
         // P1 RATE_LIMIT fix: the 60/min write budget is shared by the whole
@@ -385,11 +459,12 @@ async function runBatchInner(
         if (!execution.blocked && execution.outcome.errorClass?.code === 'RATE_LIMIT') {
           const waited = await sleepRateLimitWindow(callbacks.shouldStop, callbacks.rateLimitWindowMs);
           if (!waited) {
-            // Stopped during the cooldown — release the rest of the chunk
-            // (this item included: it never executed) and exit honestly.
-            await releaseChunkRemainder(companyId, userId, batchId, workerId, claim.data, executedInChunk);
-            detail = (await refresh(companyId, userId, batchId)) ?? detail;
-            return detail;
+            // Stopped during the cooldown — release the never-started
+            // remainder (this item included: it never executed — it IS in
+            // startedIds, so re-add it explicitly) and exit honestly.
+            await releaseIds(companyId, userId, batchId, workerId, [...unstartedIds(), item.id]);
+            chunkState.detail = (await refresh(companyId, userId, batchId)) ?? chunkState.detail;
+            return { terminal: chunkState.detail, breakRound: false };
           }
           execution = await executeGuardedItem(item.toolName, sub.args);
         }
@@ -401,13 +476,13 @@ async function runBatchInner(
             companyId, userId, batchId, item.id, extractResultRef(outcome.result), scalars,
           );
           if (done.success && done.data?.finalStatus) {
-            detail = (await refresh(companyId, userId, batchId)) ?? detail;
-            callbacks.onProgress?.(detail);
-            return detail;
+            chunkState.detail = (await refresh(companyId, userId, batchId)) ?? chunkState.detail;
+            callbacks.onProgress?.(chunkState.detail);
+            return { terminal: chunkState.detail, breakRound: false };
           }
           if (done.success) {
-            detail.doneCount += 1;
-            callbacks.onProgress?.(detail);
+            chunkState.detail.doneCount += 1;
+            callbacks.onProgress?.(chunkState.detail);
           } else {
             // P1 fix: a failed itemDone used to be a SILENT no-op (the write
             // executed but the row was flipped by a concurrent cancel/pause
@@ -416,8 +491,8 @@ async function runBatchInner(
             // re-read the header and bail this round so the next round (or
             // the honest terminal state) reflects reality.
             console.warn(`[ai-batch] batchItemDone failed for seq ${item.seq}: ${done.error ?? 'unknown'}`);
-            detail = await syncHeader(companyId, userId, batchId, detail);
-            break;
+            chunkState.detail = await syncHeader(companyId, userId, batchId, chunkState.detail);
+            return { terminal: null, breakRound: true };
           }
         } else {
           // P1 fix: for WRITE tools a timeout abandons (not aborts) the
@@ -449,36 +524,66 @@ async function runBatchInner(
             // Also: don't sleep inside the loop (blocked siblings); collect
             // max delay and sleep once after the chunk.
             const delay = nextRetryDelayMs(item.attempts) ?? 0;
-            if (delay > 0) chunkRetryDelay = Math.max(chunkRetryDelay, delay);
+            if (delay > 0) chunkState.chunkRetryDelay = Math.max(chunkState.chunkRetryDelay, delay);
           }
           if (failed.success && failed.data?.finalStatus) {
-            detail = (await refresh(companyId, userId, batchId)) ?? detail;
-            callbacks.onProgress?.(detail);
-            return detail;
+            chunkState.detail = (await refresh(companyId, userId, batchId)) ?? chunkState.detail;
+            callbacks.onProgress?.(chunkState.detail);
+            return { terminal: chunkState.detail, breakRound: false };
           }
           if (failed.success && !failed.data?.retried) {
-            detail.failedCount += 1;
-            detail.skippedCount += failed.data?.skipped ?? 0;
-            callbacks.onProgress?.(detail);
+            chunkState.detail.failedCount += 1;
+            chunkState.detail.skippedCount += failed.data?.skipped ?? 0;
+            callbacks.onProgress?.(chunkState.detail);
           }
         }
       }
-      // Stop is honored BETWEEN items (after the current one finishes),
-      // never by abandoning an item mid-execution. Unexecuted chunk items
-      // are released back to queued (no attempt burned) so resume is instant.
-      executedInChunk += 1;
-      if (callbacks.shouldStop?.()) {
-        await releaseChunkRemainder(companyId, userId, batchId, workerId, claim.data, executedInChunk);
-        detail = (await refresh(companyId, userId, batchId)) ?? detail;
-        return detail;
+      return { terminal: null, breakRound: false };
+    };
+
+    const waves = wavePartition(chunk);
+    let waveExit: JobBatchDetail | null = null;
+    waveLoop: for (const wave of waves) {
+      for (let i = 0; i < wave.length; i += BATCH_WAVE_CONCURRENCY) {
+        // No pre-flight stop check here: the loop-top check above covers
+        // chunk entry, and the previous flight's post-check covers every
+        // later wave. A pre-flight check would double-count stop-budget
+        // stubs AND delay the first flight for no reason.
+        const flight = wave.slice(i, i + BATCH_WAVE_CONCURRENCY);
+        for (const f of flight) startedIds.add(f.id);
+        // Cooperative gap: back-to-back heavy writes (invoice + journal +
+        // stock on the UI-thread PGlite) must not starve input/paint.
+        await yieldToUi();
+        const results = await Promise.all(flight.map((it) => runChunkItem(it)));
+        // Stop is honored BETWEEN flights (after in-flight items finish),
+        // never by abandoning an item mid-execution. Unexecuted chunk items
+        // are released back to queued (no attempt burned) so resume is instant.
+        if (callbacks.shouldStop?.()) {
+          await releaseIds(companyId, userId, batchId, workerId, unstartedIds());
+          chunkState.detail = (await refresh(companyId, userId, batchId)) ?? chunkState.detail;
+          waveExit = chunkState.detail;
+          break waveLoop;
+        }
+        const term = results.find((r) => r.terminal);
+        if (term?.terminal) {
+          waveExit = term.terminal;
+          break waveLoop;
+        }
+        if (results.some((r) => r.breakRound)) {
+          // chunkState.detail already header-synced inside the break path;
+          // fall through to the end-of-round handling below.
+          break waveLoop;
+        }
       }
     }
+    detail = chunkState.detail;
+    if (waveExit) return waveExit;
 
     // P3-5 fix: honor real backoff schedule (0 → 30s → 5min) without capping
     // to 10s, and without blocking siblings inside the loop. Sleep once
     // after the chunk if any item was retried.
-    if (chunkRetryDelay > 0) {
-      const waited = await sleepRateLimitWindow(callbacks.shouldStop, chunkRetryDelay);
+    if (chunkState.chunkRetryDelay > 0) {
+      const waited = await sleepRateLimitWindow(callbacks.shouldStop, chunkState.chunkRetryDelay);
       if (!waited) {
         detail = (await refresh(companyId, userId, batchId)) ?? detail;
         return detail;

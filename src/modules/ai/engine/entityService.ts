@@ -242,20 +242,44 @@ async function resolveOne(
  * Resolve a batch of entity requests with per-entity error isolation: one
  * failing type never rejects the whole batch (the old Promise.all fan-out
  * collapsed to [] on a single API failure).
+ *
+ * Bounded parallelism (3): requests are independent (different kinds, no
+ * shared state), so the old sequential for-await paid 2-3× fetch latency
+ * for a cash invoice for nothing. Order of the returned array still matches
+ * the input order. JEV fallbacks inside resolveOne stay rare (ambiguous
+ * band only) and also run within the bound.
  */
+const RESOLVE_CONCURRENCY = 3;
+
 export async function resolveEntities(
   requests: EntityRequest[],
   companyId: string,
   opts?: { jevFallback?: boolean; rbacFilter?: boolean },
 ): Promise<ResolvedEntity[]> {
   if (!companyId || requests.length === 0) return [];
-  const out: ResolvedEntity[] = [];
-  for (const req of requests) {
-    try {
-      out.push(await resolveOne(req, companyId, opts));
-    } catch {
-      out.push({ request: req, status: 'missing', id: null, name: null, score: 0, candidates: [] });
-    }
+  const out: ResolvedEntity[] = new Array(requests.length);
+  const missingFor = (req: EntityRequest): ResolvedEntity => ({
+    request: req,
+    status: 'missing',
+    id: null,
+    name: null,
+    score: 0,
+    candidates: [],
+  });
+  for (let i = 0; i < requests.length; i += RESOLVE_CONCURRENCY) {
+    const slice = requests
+      .map((req, idx) => ({ req, idx }))
+      .slice(i, i + RESOLVE_CONCURRENCY);
+    const settled = await Promise.all(
+      slice.map(async ({ req, idx }) => {
+        try {
+          return { idx, r: await resolveOne(req, companyId, opts) };
+        } catch {
+          return { idx, r: missingFor(req) };
+        }
+      }),
+    );
+    for (const { idx, r } of settled) out[idx] = r;
   }
   return out;
 }

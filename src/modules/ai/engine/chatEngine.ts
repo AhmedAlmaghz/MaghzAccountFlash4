@@ -68,6 +68,14 @@ export { MAX_ITERATIONS, isTransientProviderError } from './runLoop';
 const PRE_LLM_DEADLINE_MS = 30_000;
 
 /**
+ * A1 outer bound for the per-cycle JEV tool router. The sync keyword
+ * fallback costs ~0ms, so 8s is generous: any healthy JEV answer (cached
+ * ~0ms, network ~0.15-2.5s) lands far below it; only a wedged DB read hits
+ * the ceiling, and then the fallback serves instantly.
+ */
+const ROUTER_DEADLINE_MS = 8_000;
+
+/**
  * Backoff before the single transient-provider retry (429/503/529/lost
  * stream). Long enough for quota windows to ease and overload to drain,
  * short enough that the user does not stare at a frozen chat.
@@ -391,15 +399,54 @@ class ChatEngine {
       const tools = getVisibleTools();
       const activeSkills = this.activeSkillsForMessage(text);
       traceSend('prefix-sync-done');
-      // Deadline-guarded: a wedged settings read must degrade, not hang.
-      const liveContext = await deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {}, 'live-context');
       // سجّل الطلب قبل بناء البرومبت ليظهر نصه الكامل في سجل المهمة من أول
       // دورة — النص الخام كما كتبه المستخدم هو المرجع (ليس النص المطبَّع).
       this.ledger.recordRequest(text);
-      // الحقائق المثبتة (C2): deadline-guarded مثل السياق الحي — مخزن معطوب
-      // يعني "بلا حقائق"، لا تعليق أبداً.
-      const memoryBlock = await deadlineOr(loadMemoryBlock(this.ctx.companyId), PRE_LLM_DEADLINE_MS, null, 'memory')
+
+      // Dialect first (sync) — the canonical text feeds the plan, the
+      // resolution gate, and the entity pass below.
+      let userText = text;
+      let correctionMsg: string | null = null;
+      let dialectChanged: string[] = [];
+      try {
+        const expanded = expandDialectText(text);
+        userText = expanded.text;
+        dialectChanged = expanded.changed;
+      } catch {
+        // Dialect expansion is best-effort — never block the message
+      }
+
+      // Filler follow-ups ("استمر"، "شكراً") skip resolution entirely.
+      // Fail-open to true when the import is stubbed (unit-test mocks).
+      let wantsSearch = true;
+      try {
+        wantsSearch = needsEntityResolution(userText);
+      } catch {
+        wantsSearch = true;
+      }
+
+      // A1 parallel preamble: live context + memory + entity resolution race
+      // ONE shared ceiling instead of three sequential 30s ceilings (90s
+      // worst case before the first provider byte). All three are
+      // independent (settings read / memory read / entity reads) — the only
+      // ordering that matters is ledger.recordRequest above (sync, done).
+      const liveP = deadlineOr(this.fetchLiveContext(), PRE_LLM_DEADLINE_MS, {}, 'live-context');
+      // الحقائق المثبتة (C2): مخزن معطوب يعني "بلا حقائق"، لا تعليق أبداً.
+      const memoryP = deadlineOr(loadMemoryBlock(this.ctx.companyId), PRE_LLM_DEADLINE_MS, null, 'memory')
         .catch(() => null);
+      const planned = planRequest(userText);
+      const entitiesP = wantsSearch
+        ? deadlineOr(
+          resolveEntities(planned.entityRequests, this.ctx.companyId),
+          PRE_LLM_DEADLINE_MS,
+          null,
+          'entities',
+        )
+        : Promise.resolve(null);
+      const [liveContext, memoryBlock, resolved] = await Promise.all([liveP, memoryP, entitiesP]);
+      if (wantsSearch && !resolved) {
+        console.warn('[ai] entity resolution timed out — proceeding with raw text');
+      }
       const systemContent = buildSystemPrompt({
         tools,
         activeSkills,
@@ -423,43 +470,12 @@ class ChatEngine {
         this.history.unshift({ role: 'system', content: systemContent });
       }
 
-      // ── Dialect expansion + entity resolution ──────────────────────────
-      // Pre-process the user message:
-      //  1. DIALECT: regional business words (Yemeni/Gulf/Egyptian…) are
-      //     rewritten into the canonical vocabulary BEFORE anything else —
-      //     search tools and the model read one language.
-      //  2. ENTITY: fuzzy-match entity names against the DB, correct guarded
-      //     typos, and alert the user about corrections.
-      let userText = text;
-      let correctionMsg: string | null = null;
-
-      // Dialect first — the canonical text feeds entity resolution too.
-      let dialectChanged: string[] = [];
-      try {
-        const expanded = expandDialectText(text);
-        userText = expanded.text;
-        dialectChanged = expanded.changed;
-      } catch {
-        // Dialect expansion is best-effort — never block the message
-      }
-
-      // ── Unified entity path (Phase 1+2): ONE deterministic plan + ONE
-      // resolution pass. Local fuzzy first, JEV only as fallback INSIDE
-      // entityService. The old dual path (jevSearchAll fast-path + 19-table
-      // token fan-out + per-family search.* fan-out) paid the search cost
-      // 2-6× per request and ranked differently each time — the root cause
-      // of repeat-search loops. Filler follow-ups ("استمر"، "شكراً") skip
-      // resolution entirely (needsEntityResolution gate). The guard leg
-      // still runs (security, not search). Resolution NEVER rewrites the
-      // user's text — IDs ride in the authoritative block below (rule 52).
-      // Filler follow-ups ("استمر"، "شكراً") skip the SEARCH leg entirely.
-      // Fail-open to true when the import is stubbed (unit-test mocks).
-      let wantsSearch = true;
-      try {
-        wantsSearch = needsEntityResolution(userText);
-      } catch {
-        wantsSearch = true;
-      }
+      // ── Guard + unified entity block ────────────────────────────────
+      // The guard runs AFTER the parallel preamble (security, not search):
+      // a block ends the turn before the model ever sees the resolved IDs.
+      // Resolution itself already finished above (entitiesP); here we only
+      // render its authoritative block (rule 52). Resolution NEVER rewrites
+      // the user's text — IDs ride in the block, the text stays.
       try {
         const guard = await deadlineOr(
           jevGuardCheck(this.ctx.companyId, userText),
@@ -490,42 +506,24 @@ class ChatEngine {
         }
       } catch { /* guard best-effort */ }
 
-      if (wantsSearch) {
-        try {
-          // Deadline-guarded: a wedged entity/DB read must degrade to raw
-          // text, never hold the "thinking" spinner forever before the first
-          // provider byte.
-          const planned = planRequest(userText);
-          const resolved = await deadlineOr(
-            resolveEntities(planned.entityRequests, this.ctx.companyId),
-            PRE_LLM_DEADLINE_MS,
-            null,
-            'entities',
-          );
-          if (!resolved) {
-            console.warn('[ai] entity resolution timed out — proceeding with raw text');
-          } else if (resolved.length > 0) {
-            const block = renderEntityBlock(resolved);
-            if (block) {
-              correctionMsg = dialectChanged.length > 0
-                ? block.replace(
-                  '⚡ **حلّ الكيانات تلقائياً:**\n',
-                  `⚡ **حلّ الكيانات تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n`,
-                )
-                : block;
-            } else if (dialectChanged.length > 0) {
-              correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
-            }
-          } else if (dialectChanged.length > 0) {
-            correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
-          }
-        } catch {
-          // Entity resolution is best-effort — never block the user's message
+      // Render the pre-resolved entity block (resolved in the parallel
+      // preamble above — no second DB pass here).
+      if (wantsSearch && resolved && resolved.length > 0) {
+        const block = renderEntityBlock(resolved);
+        if (block) {
+          correctionMsg = dialectChanged.length > 0
+            ? block.replace(
+              '⚡ **حلّ الكيانات تلقائياً:**\n',
+              `⚡ **حلّ الكيانات تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n`,
+            )
+            : block;
+        } else if (dialectChanged.length > 0) {
+          correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
         }
-        traceSend('entities-done');
-      } else {
-        traceSend('entities-done');
+      } else if (dialectChanged.length > 0) {
+        correctionMsg = `🔍 **تمت معالجة طلبك تلقائياً:**\n- **لهجة**: تم توحيد ${dialectChanged.length} مصطلحاً محلياً بالمصطلح النظامي لضمان فهم دقيق\n\n_تم تحديث طلبك بالمصطلحات الصحيحة._`;
       }
+      traceSend('entities-done');
 
       // Append the (possibly corrected) user turn to the LLM history. The UI
       // bubble was already stored optimistically at press time above.
@@ -1553,8 +1551,16 @@ class ChatEngine {
     let jevIntent: string | null = null;
     let jevConfidence: number | undefined;
     try {
-      const jevRouted = await jevRouteToolsForCycle(this.ctx.companyId, this.history, this.extraAdvertisedTools);
-      if (jevRouted.jevUsed) {
+      // A1: outer deadline — this was the ONLY preamble await with no guard.
+      // A wedged getJevConfig DB read delayed the first provider byte
+      // forever. On expiry the sync keyword router below serves instantly.
+      const jevRouted = await deadlineOr(
+        jevRouteToolsForCycle(this.ctx.companyId, this.history, this.extraAdvertisedTools),
+        ROUTER_DEADLINE_MS,
+        null,
+        'jev-router',
+      );
+      if (jevRouted && jevRouted.jevUsed) {
         jevUsed = true;
         jevIntent = String(jevRouted.intent);
         jevConfidence = jevRouted.confidence;

@@ -26,7 +26,7 @@ vi.mock('./toolExecutor', () => ({
 
 import { aiApi } from '../api/index';
 import { executeToolCall } from './toolExecutor';
-import { runBatch, extractResultRef, batchProgressLine } from './batchRunner';
+import { runBatch, extractResultRef, batchProgressLine, wavePartition, BATCH_WAVE_CONCURRENCY } from './batchRunner';
 
 const mockedApi = vi.mocked(aiApi, true);
 const mockedExec = vi.mocked(executeToolCall);
@@ -247,12 +247,15 @@ describe('runBatch', () => {
     expect(await runBatch('c1', 'u1', 'missing')).toBeNull();
   });
 
-  it('honors shouldStop between items', async () => {
+  it('honors shouldStop between waves', async () => {
+    // B1: independent items share one wave, so this test chains i2 after i1
+    // via a ref (two waves) — stop is honored between waves of work, and
+    // in-flight items always finish.
     mockedApi.batchClaim.mockResolvedValueOnce({
       success: true,
       data: [
-        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 1 },
-        { id: 'i2', seq: 1, toolName: 't.b', args: {}, afterSeq: null, attempts: 1 },
+        { id: 'i1', seq: 0, toolName: 't.a', args: {}, ref: 'w1', afterSeq: null, attempts: 1 },
+        { id: 'i2', seq: 1, toolName: 't.b', args: { id: '{{w1.id}}' }, afterSeq: null, attempts: 1 },
       ] as never,
     });
     mockedExec.mockResolvedValue({ ok: true, result: {} });
@@ -263,17 +266,19 @@ describe('runBatch', () => {
 
     let calls = 0;
     await runBatch('c1', 'u1', 'b1', { shouldStop: () => ++calls > 1 });
-    // first item executed, then stop checked before the second
+    // first wave executed (i1), then stop checked before the second wave
     expect(mockedExec).toHaveBeenCalledTimes(1);
   });
 
   it('P1 stop-wedge: stopping releases the unexecuted chunk remainder (no attempt burned)', async () => {
+    // B1: i2/i3 chain off i1's ref so they sit in a later wave — the stop
+    // below releases exactly the never-started ids.
     mockedApi.batchClaim.mockResolvedValueOnce({
       success: true,
       data: [
-        { id: 'i1', seq: 0, toolName: 't.a', args: {}, afterSeq: null, attempts: 1 },
-        { id: 'i2', seq: 1, toolName: 't.b', args: {}, afterSeq: null, attempts: 1 },
-        { id: 'i3', seq: 2, toolName: 't.c', args: {}, afterSeq: null, attempts: 1 },
+        { id: 'i1', seq: 0, toolName: 't.a', args: {}, ref: 'w1', afterSeq: null, attempts: 1 },
+        { id: 'i2', seq: 1, toolName: 't.b', args: { id: '{{w1.id}}' }, afterSeq: null, attempts: 1 },
+        { id: 'i3', seq: 2, toolName: 't.c', args: { id: '{{w1.id}}' }, afterSeq: null, attempts: 1 },
       ] as never,
     });
     mockedExec.mockResolvedValue({ ok: true, result: {} });
@@ -514,6 +519,118 @@ describe('JEV enforcement', () => {
       'c1', 'u1', 'b1', 'recheck-1', expect.stringContaining('JEV'), 'JEV_POSTING_BLOCKED', false,
     );
     expect(final?.status).toBe('partial');
+  });
+});
+
+describe('B1 wavePartition — producer→consumer order, independent side-by-side', () => {
+  const item = (overrides: Record<string, unknown>) =>
+    ({
+      id: 'x', seq: 0, toolName: 't.a', args: {}, afterSeq: null, ref: null, attempts: 1,
+      ...overrides,
+    }) as never;
+
+  it('puts independent items in a single wave', () => {
+    const waves = wavePartition([
+      item({ id: 'a', seq: 0 }),
+      item({ id: 'b', seq: 1 }),
+      item({ id: 'c', seq: 2 }),
+    ]);
+    expect(waves).toHaveLength(1);
+    expect(waves[0].map((i) => (i as { id: string }).id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('orders ref chains across waves (supplier before its invoices)', () => {
+    const waves = wavePartition([
+      item({ id: 's', seq: 0, ref: 'sup1', toolName: 'purchases.create_supplier' }),
+      item({ id: 'v1', seq: 1, args: { supplierId: '{{sup1.id}}' } }),
+      item({ id: 'v2', seq: 2, args: { supplierId: '@sup1' } }),
+    ]);
+    expect(waves).toHaveLength(2);
+    expect(waves[0].map((i) => (i as { id: string }).id)).toEqual(['s']);
+    expect(waves[1].map((i) => (i as { id: string }).id).sort()).toEqual(['v1', 'v2']);
+  });
+
+  it('honors numeric after_seq edges inside the chunk', () => {
+    const waves = wavePartition([
+      item({ id: 'a', seq: 0 }),
+      item({ id: 'b', seq: 1, afterSeq: 0 }),
+    ]);
+    expect(waves).toHaveLength(2);
+    expect(waves[0][0]).toMatchObject({ id: 'a' });
+    expect(waves[1][0]).toMatchObject({ id: 'b' });
+  });
+
+  it('never hangs on cycles — degrades to one sequential tail', () => {
+    const waves = wavePartition([
+      item({ id: 'a', seq: 0, ref: 'ra', args: { x: '{{rb}}' } }),
+      item({ id: 'b', seq: 1, ref: 'rb', args: { x: '{{ra}}' } }),
+    ]);
+    expect(waves).toHaveLength(1);
+    expect(waves[0]).toHaveLength(2);
+  });
+
+  it('wave width is 3 (overlap without saturating PGlite/UI)', () => {
+    expect(BATCH_WAVE_CONCURRENCY).toBe(3);
+  });
+});
+
+describe('B1 parallel flights — independent items overlap, dependents wait', () => {
+  beforeEach(() => {
+    mockedApi.batchList.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it('executes an independent chunk concurrently and completes all', async () => {
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 'i1', seq: 0, toolName: 'sales.create_invoice', args: { x: 1 }, afterSeq: null, attempts: 1 },
+        { id: 'i2', seq: 1, toolName: 'sales.create_invoice', args: { x: 2 }, afterSeq: null, attempts: 1 },
+        { id: 'i3', seq: 2, toolName: 'sales.create_invoice', args: { x: 3 }, afterSeq: null, attempts: 1 },
+      ] as never,
+    });
+    let inFlight = 0;
+    let maxFlight = 0;
+    mockedExec.mockImplementation(async () => {
+      inFlight += 1;
+      maxFlight = Math.max(maxFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 10));
+      inFlight -= 1;
+      return { ok: true, result: { invoiceNumber: 'INV-1' } };
+    });
+    mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 3 }) });
+
+    const final = await runBatch('c1', 'u1', 'b1');
+    expect(mockedExec).toHaveBeenCalledTimes(3);
+    expect(maxFlight).toBeGreaterThan(1);
+    expect(maxFlight).toBeLessThanOrEqual(BATCH_WAVE_CONCURRENCY);
+    expect(final?.status).toBe('done');
+  });
+
+  it('resolves intra-chunk refs in wave order (consumer sees producer output)', async () => {
+    mockedApi.batchClaim.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: 's', seq: 0, toolName: 'purchases.create_supplier', args: { name: 'الشجاع' }, ref: 'sup1', afterSeq: null, attempts: 1 },
+        { id: 'v', seq: 1, toolName: 'purchases.create_invoice', args: { supplierId: '{{sup1.id}}' }, afterSeq: null, attempts: 1 },
+      ] as never,
+    });
+    mockedExec.mockImplementation(async (name: string) => {
+      if (name === 'purchases.create_supplier') return { ok: true, result: { supplierId: 'sup-uuid-1' } };
+      return { ok: true, result: { invoiceNumber: 'PINV-1' } };
+    });
+    mockedApi.batchItemDone.mockResolvedValue({ success: true, data: { finalStatus: null } });
+    mockedApi.batchGet
+      .mockResolvedValueOnce({ success: true, data: detail({ status: 'running' }) })
+      .mockResolvedValue({ success: true, data: detail({ status: 'done', doneCount: 2 }) });
+
+    const final = await runBatch('c1', 'u1', 'b1');
+    expect(mockedExec).toHaveBeenCalledWith(
+      'purchases.create_invoice', { supplierId: 'sup-uuid-1' }, { companyId: 'c1', userId: 'u1' },
+    );
+    expect(final?.status).toBe('done');
   });
 });
 

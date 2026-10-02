@@ -102,4 +102,12 @@ describe('entityService — unified resolution (local first, JEV fallback)', () 
     expect(block).toContain('شركة الأمل');
     expect(block).toContain('c1');
   });
+
+  it('resolves bounded-parallel batches in input order (A1)', async () => {
+    mockedSearch.mockImplementation(async (q: string) => [match(`id-${q}`, `اسم ${q}`, 0.97)]);
+    const reqs = ['a', 'b', 'c', 'd', 'e'].map((t) => ({ text: t, kind: 'customer' as const }));
+    const out = await resolveEntities(reqs, 'co1', { jevFallback: false });
+    expect(out.map((r) => r.request.text)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(out.every((r) => r.status === 'same')).toBe(true);
+  });
 });

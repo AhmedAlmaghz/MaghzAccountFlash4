@@ -10,6 +10,7 @@ import {
   stableStringify,
   nextRetryDelayMs,
   substituteRefs,
+  extractRefNames,
   summarizeBatchProgress,
   summarizeBatchOutcomeForModel,
   batchItemLabel,
@@ -438,5 +439,24 @@ describe('batchToolLayer — dependency auto-ordering (session 2026-09-24)', () 
     expect(batchToolLayer('accounting.create_payment_voucher')).toBe(2);
     expect(batchToolLayer('crm.convert_lead_to_customer')).toBe(2);
     expect(batchToolLayer('hr.process_payroll_flow')).toBe(2);
+  });
+});
+
+describe('extractRefNames — B1 wave-scheduler scan', () => {
+  it('finds {{ref}}, {{ref.field}} and @ref placeholders', () => {
+    expect(extractRefNames({ supplierId: '{{sup1.id}}' })).toEqual(['sup1']);
+    expect(extractRefNames({ id: '@sup1' })).toEqual(['sup1']);
+    expect(extractRefNames({ x: '{{a}} and {{b.field}}' }).sort()).toEqual(['a', 'b']);
+  });
+
+  it('finds refs nested in lines arrays', () => {
+    expect(
+      extractRefNames({ lines: [{ productId: '{{prod1}}', qty: 2 }] }),
+    ).toEqual(['prod1']);
+  });
+
+  it('ignores plain strings and non-strings', () => {
+    expect(extractRefNames({ name: 'الشجاع', qty: 5, flag: true })).toEqual([]);
+    expect(extractRefNames({})).toEqual([]);
   });
 });

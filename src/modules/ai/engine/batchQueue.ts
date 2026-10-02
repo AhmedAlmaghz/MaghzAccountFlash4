@@ -322,6 +322,43 @@ const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*)(?:\.([A-Za-z0-9_]+))?\s*\}\
 export type RefOutputs = Map<string, Record<string, string | number | boolean>>;
 
 /**
+ * B1: names of every {{ref}} / {{ref.field}} / @ref placeholder inside args.
+ * Used by the wave scheduler to keep producer→consumer order: an item that
+ * names another chunk item's ref (or seq) must run in a LATER wave than it.
+ * Pure scan — never resolves, never throws.
+ */
+export function extractRefNames(args: Record<string, unknown>): string[] {
+  const names = new Set<string>();
+  const scanString = (s: string): void => {
+    const whole = REF_WHOLE_RE.exec(s);
+    if (whole) {
+      names.add(whole[1]);
+      return;
+    }
+    REF_TEMPLATE_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = REF_TEMPLATE_RE.exec(s)) !== null) {
+      names.add(m[1]);
+    }
+  };
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') {
+      scanString(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const e of v) walk(e);
+      return;
+    }
+    if (v && typeof v === 'object') {
+      for (const val of Object.values(v as Record<string, unknown>)) walk(val);
+    }
+  };
+  walk(args);
+  return [...names];
+}
+
+/**
  * P0-7 fix: explicit primary-key annotation per tool. "First Id-suffixed key
  * wins" is convention-over-configuration — any tool result shaped
  * `{ customerId, invoiceId }` (echoing input ids) or `{ bomId, workOrderId }`
