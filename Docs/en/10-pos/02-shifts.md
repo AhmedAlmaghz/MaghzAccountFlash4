@@ -5,7 +5,7 @@ slug: "en/10-pos/02-shifts"
 group: "Point of Sale (POS)"
 language: "en"
 created: 2026-09-13
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # Shifts — User Guide

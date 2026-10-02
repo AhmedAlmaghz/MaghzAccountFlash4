@@ -5,7 +5,7 @@ slug: "ar/04-settings/02-branches-currencies"
 group: "الإعدادات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # الفروع والعملات — دليل الاستخدام

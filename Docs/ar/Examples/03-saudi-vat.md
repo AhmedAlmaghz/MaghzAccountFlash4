@@ -5,7 +5,7 @@ slug: "ar/Examples/03-saudi-vat"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # مثال 03 — شركة الرياض التجارية (ضريبة 15% وإقرار VAT)

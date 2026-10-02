@@ -5,7 +5,7 @@ slug: "ar/14-reports/02-reports-hub"
 group: "التقارير"
 language: "ar"
 created: 2026-09-12
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # مركز التقارير — دليل الاستخدام

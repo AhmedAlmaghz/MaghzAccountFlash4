@@ -5,7 +5,7 @@ slug: "ar/07-inventory/02-warehouses-stock"
 group: "المخازن"
 language: "ar"
 created: 2026-09-12
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # المستودعات والمخزون — دليل الاستخدام

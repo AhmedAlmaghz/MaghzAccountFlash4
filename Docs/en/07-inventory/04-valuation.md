@@ -5,7 +5,7 @@ slug: "en/07-inventory/04-valuation"
 group: "Inventory"
 language: "en"
 created: 2026-09-20
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # Inventory Valuation Methods — User Guide

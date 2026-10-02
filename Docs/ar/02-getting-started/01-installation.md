@@ -5,7 +5,7 @@ slug: "ar/02-getting-started/01-installation"
 group: "البدء السريع"
 language: "ar"
 created: 2026-09-12
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # التثبيت — دليل الاستخدام

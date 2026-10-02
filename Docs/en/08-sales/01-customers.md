@@ -5,7 +5,7 @@ slug: "en/08-sales/01-customers"
 group: "Sales"
 language: "en"
 created: 2026-09-13
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # Customers — User Guide

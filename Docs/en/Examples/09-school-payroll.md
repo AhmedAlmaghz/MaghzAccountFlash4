@@ -5,7 +5,7 @@ slug: "en/Examples/09-school-payroll"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # Example 09 — Al-Mustaqbal Schools (payroll, EOS & purchases)

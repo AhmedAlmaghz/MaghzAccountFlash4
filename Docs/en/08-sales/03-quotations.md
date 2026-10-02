@@ -5,7 +5,7 @@ slug: "en/08-sales/03-quotations"
 group: "Sales"
 language: "en"
 created: 2026-09-13
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # Quotations — User Guide

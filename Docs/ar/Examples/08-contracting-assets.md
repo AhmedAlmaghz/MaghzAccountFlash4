@@ -5,7 +5,7 @@ slug: "ar/Examples/08-contracting-assets"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # مثال 08 — شركة البناء الحديث (مقاولات وأصول ثابتة)

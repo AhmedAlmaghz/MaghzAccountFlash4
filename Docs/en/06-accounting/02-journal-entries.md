@@ -5,7 +5,7 @@ slug: "en/06-accounting/02-journal-entries"
 group: "Accounting"
 language: "en"
 created: 2026-09-13
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # Journal Entries — User Guide

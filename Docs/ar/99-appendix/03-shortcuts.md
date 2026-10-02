@@ -5,7 +5,7 @@ slug: "ar/99-appendix/03-shortcuts"
 group: "الملاحق"
 language: "ar"
 created: 2026-09-12
-version: "0.26.7"
+version: "0.26.8"
 author: "Ahmed Almaghz"
 ---
 # اختصارات لوحة المفاتيح
