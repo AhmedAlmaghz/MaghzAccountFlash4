@@ -41,8 +41,24 @@ export async function resolveInvoiceId(
   if (isUuid(v)) return { id: v };
   const api = kind === 'sales' ? salesApi : purchasesApi;
   const res = await api.getInvoicesPaginated(companyId, 1, 50, { invoiceNumber: v });
-  const hit = res.success && res.data ? res.data.items[0] : undefined;
-  if (hit) return { id: hit.id };
+  const items = res.success && res.data ? res.data.items : [];
+  // The server filter is ILIKE-substring ('INV-0001' also matches
+  // 'INV-00010'): posting the first partial hit could post the WRONG
+  // invoice — a financial integrity hole. Exact number match only.
+  const exact = items.find(
+    (it) => String(it.invoiceNumber || '').trim().toLowerCase() === v.toLowerCase(),
+  );
+  if (exact) return { id: exact.id };
+  if (items.length > 0) {
+    const nums = items
+      .slice(0, 5)
+      .map((it) => String(it.invoiceNumber || ''))
+      .filter(Boolean)
+      .join('، ');
+    return {
+      error: `"${v}" ليس رقم فاتورة كاملاً — المرشحات الجزئية: ${nums}. مرّر المعرف (id) الدقيق من نتيجة البحث.`,
+    };
+  }
   return {
     error: `لم تُعثر على فاتورة برقم "${v}" — مرّر معرف الفاتورة (id) من نتيجة البحث أو الإنشاء، لا الاسم ولا رقماً تخمينياً`,
   };

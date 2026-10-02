@@ -139,4 +139,16 @@ describe('requestPlanner — deterministic per-request planning', () => {
   it('renderPlannedSlots stays silent for generic plans and empty slots', () => {
     expect(renderPlannedSlots(planRequest('مرحبا'))).toBeNull();
   });
+
+  it('question gate: information questions never plan a write (no unprompted creation)', () => {
+    expect(planRequest('ما رصيد العميل محمد؟').intent).toBe('generic');
+    expect(planRequest('بكم الكنافة؟').intent).toBe('generic');
+    expect(planRequest('كم فواتير اليوم؟').intent).toBe('generic');
+    expect(planRequest('اعرض فواتير العميل محمد').intent).toBe('generic');
+  });
+
+  it('terse verb-less commands keep their intent (question gate needs a question form)', () => {
+    expect(planRequest('فاتورة نقدية من أبو العز ب 6 كنافة').intent).toBe('purchases.invoice');
+    expect(planRequest('سند قبض من غدرة ب 50000').intent).toBe('accounting.receipt');
+  });
 });

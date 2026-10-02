@@ -84,7 +84,10 @@ const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undi
 };
 
 const CASH_RE = /نقد|كاش|فور|مدفوع|مقبوض|عاجل|حاضر/;
-const MFG_RE = /أمر\s*تشغيل|امر\s*تشغيل|تصنيع|إنتاج|انتاج|شغل.*مصنع|bom/;
+/** Question words — asking for information, not ordering an action. */
+const QUESTION_RE = /؟|^(ما|ماذا|مادا|كم|هل|لماذا|ليش|وين|اين|أين|متى|متا|كيف|اعرض|اوضح|اشرح|هات|اذكر|عدد|بكم)/;
+/** Creation/posting/payment verbs and nouns — the user orders an action. */
+const ACTION_RE = /أنشئ|انشئ|إنشاء|انشاء|سجل|سجّل|تسجيل|ضيف|أضف|اضف|إضافة|اضافة|افتح|احذف|حذف|عدل|عدّل|تعديل|رحل|رحّل|ترحيل|ادفع|دفع|حوّل|تحويل|سدد|تسديد|اصرف|صرف|اقبض|قبض|استلم|استلام|ولّد|اطبع|صدّر|اقفل/;const MFG_RE = /أمر\s*تشغيل|امر\s*تشغيل|تصنيع|إنتاج|انتاج|شغل.*مصنع|bom/;
 const LEAD_RE = /عميل\s*محتمل|عملاء\s*محتملين|فرص|فرصة|تأهيل|متابعة\s*عميل/;
 const NEW_EMPLOYEE_RE = /موظف\s*جديد|إضافة\s*موظف|اضافة\s*موظف|تعيين\s*موظف/;
 const NEW_PRODUCT_RE = /منتج\s*جديد|صنف\s*جديد|إضافة\s*صنف|اضافة\s*صنف|إضافة\s*منتج|اضافة\s*منتج/;
@@ -270,6 +273,21 @@ export function planRequest(rawText: string): PlannedRequest {
     };
   }
   const intent = detectIntent(norm);
+  // Question gate: "ما رصيد العميل؟" / "بكم الكنافة؟" mention entities but
+  // order nothing — planning a write (and injecting binding IDs) for a pure
+  // question pushes the model toward unprompted creation. Terse verb-less
+  // COMMANDS ("فاتورة نقدية من أبو العز") keep their intent; only an
+  // explicit question form without any action verb falls back to generic.
+  if (intent !== 'generic' && QUESTION_RE.test(norm) && !ACTION_RE.test(norm)) {
+    return {
+      intent: 'generic',
+      writeTool: null,
+      slots: { quantities: [], prices: [], lines: [] },
+      entityRequests: [],
+      missing: [],
+      plan: 'generic',
+    };
+  }
   if (intent === 'generic') {
     return {
       intent,
