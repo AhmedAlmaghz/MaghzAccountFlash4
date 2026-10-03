@@ -1,15 +1,16 @@
 {
   "name": "MaghzERP",
   "private": true,
-  "version": "0.26.9",
+  "version": "0.26.10",
   "author": "Ahmed Almaghz",
-  "publisher": "",
+  "publisher": "MaghzAI",
   "keywords": [
     "maghzaccount",
     "maghz-erp",
     "maghzaccount-pro",
     "maghz-erp-desktop",
     "accounting",
+    "ai accounting",
     "accounting software",
     "accounting software desktop",
     "saas accounting software",
@@ -61,7 +62,7 @@
   },
   "build": {
     "appId": "com.maghzaccount.pro",
-    "productName": "maghzaccount-pro",
+    "productName": "maghzERP-AI",
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
@@ -94,7 +95,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "MaghzAccount Pro"
+      "shortcutName": "MaghzERP AI"
     },
     "portable": {
       "artifactName": "${productName}-Portable-${version}.${ext}"

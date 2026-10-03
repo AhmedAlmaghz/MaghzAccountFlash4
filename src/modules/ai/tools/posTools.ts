@@ -79,7 +79,7 @@ async function resolvePosUnit(
     const list = res.success && res.data ? res.data : [];
     const norm = normalizeArabic(name).replace(/^(ال|لل)/, '');
     const hit = list.find((u) => {
-      const cands = [u.unitName || '', u.code || ''].map((s) => normalizeArabic(s).replace(/^(ال|لل)/, ''));
+      const cands = [u.unitName || '', u.unitCode || ''].map((s) => normalizeArabic(s).replace(/^(ال|لل)/, ''));
       return cands.some((c) => c && (c === norm || (c.length >= 3 && norm.length >= 3 && (c.includes(norm) || norm.includes(c)))));
     });
     if (!hit) return { error: `الوحدة "${name}" غير معرفة لهذا المنتج — ابحث بـ search.product_units أولاً` };

@@ -321,8 +321,6 @@ const REF_WHOLE_RE = /^@([A-Za-z0-9_][\w-]*)$/;
 // namespace is model dialect ("{{ref.p_inv_1.id}}") — stripped during
 // parsing so it resolves exactly like "{{p_inv_1.id}}".
 const REF_TEMPLATE_RE = /\{\{\s*([A-Za-z0-9_][\w-]*(?:\.[A-Za-z0-9_][\w-]*)*)\s*\}\}/g;
-/** Any leftover placeholder after substitution = unresolved (loud, never passthrough). */
-const REF_LEFTOVER_RE = /\{\{\s*[A-Za-z0-9_][\w\-.]*\s*\}\}/;
 
 export type RefOutputs = Map<string, Record<string, string | number | boolean>>;
 
