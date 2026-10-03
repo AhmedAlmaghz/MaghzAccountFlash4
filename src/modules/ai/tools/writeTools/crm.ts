@@ -7,6 +7,67 @@ import {
   str,
 } from './shared';
 import { localToday } from '../../engine/dateUtils';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
+import { normalizeDateArg } from '../../engine/argNormalizers';
+
+/**
+ * Arabic-first enum maps (audit round): the model writes Arabic — English-only
+ * enums turned every CRM call into a post-approval rejection. Maps return the
+ * canonical English value or undefined (caller errors loudly with guidance).
+ */
+function mapAr(value: string | undefined, table: Record<string, string>): string | undefined {
+  if (!value) return undefined;
+  const norm = normalizeArabic(value);
+  if (table[norm]) return table[norm];
+  return undefined;
+}
+
+const AR_PRIORITY: Record<string, string> = {
+  منخفضه: 'low', واطيه: 'low', عاديه: 'medium', متوسطه: 'medium',
+  عاليه: 'high', عاجله: 'high', مهمه: 'high', low: 'low', medium: 'medium', high: 'high',
+};
+
+const AR_ACTIVITY: Record<string, string> = {
+  اتصال: 'call', مكالمه: 'call', هاتف: 'call', call: 'call',
+  اجتماع: 'meeting', لقاء: 'meeting', meeting: 'meeting',
+  بريد: 'email', ايميل: 'email', إيميل: 'email', email: 'email',
+  زياره: 'visit', visit: 'visit',
+  ملاحظه: 'note', ملاحظات: 'note', note: 'note',
+};
+
+const AR_LEAD_STATUS: Record<string, string> = {
+  جديد: 'new', جديده: 'new', new: 'new',
+  تواصل: 'contacted', 'تم التواصل': 'contacted', contacted: 'contacted',
+  موهل: 'qualified', مؤهل: 'qualified', qualified: 'qualified',
+  مفقود: 'lost', ضايع: 'lost', خسر: 'lost', lost: 'lost',
+};
+
+const AR_STAGE: Record<string, string> = {
+  جديد: 'new', جديده: 'new', new: 'new',
+  موهل: 'qualified', مؤهل: 'qualified', qualified: 'qualified',
+  عرض: 'proposal', عرض_سعر: 'proposal', proposal: 'proposal',
+  تفاوض: 'negotiation', مفاوضات: 'negotiation', negotiation: 'negotiation',
+  فوز: 'won', مكسوب: 'won', رابح: 'won', won: 'won',
+  خساره: 'lost', مفقود: 'lost', lost: 'lost',
+};
+
+const AR_TASK_STATUS: Record<string, string> = {
+  معلق: 'pending', انتظار: 'pending', pending: 'pending',
+  // in_progress is NOT a valid Task status (schema: pending/completed/
+  // cancelled) — map the in-progress phrasing to the only open state.
+  'قيد التنفيذ': 'pending', in_progress: 'pending',
+  منجز: 'completed', مكتمل: 'completed', تم: 'completed', completed: 'completed',
+  ملغي: 'cancelled', cancelled: 'cancelled',
+};
+
+/** First non-empty string among alias keys (Arabic-first model habits). */
+function strAny(args: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const s = str(args[k]);
+    if (s) return s;
+  }
+  return undefined;
+}
 
 /**
  * WRITE tools — علاقات العملاء (19 أداة).
@@ -32,17 +93,18 @@ export const crmWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         name: { type: 'string', description: 'اسم العميل المحتمل (إلزامي)' },
+        nameAr: { type: 'string', description: 'بديل لـ name' },
         phone: { type: 'string' },
         company: { type: 'string', description: 'اسم الشركة' },
         source: { type: 'string', description: 'مصدر العميل' },
         estimatedValue: { type: 'number', description: 'القيمة المتوقعة' },
       },
-      required: ['name'],
+      required: [],
     },
-    summarizeArgs: (a) => `إنشاء عميل محتمل: ${a.name}`,
+    summarizeArgs: (a) => `إنشاء عميل محتمل: ${a.name ?? a.nameAr}`,
     execute: async (args, ctx) => {
-      const name = str(args.name);
-      if (!name) return { error: 'الاسم مطلوب' };
+      const name = strAny(args as Record<string, unknown>, 'name', 'nameAr');
+      if (!name) return { error: 'الاسم مطلوب (name أو nameAr)' };
       const res = await crmApi.createLead({
         companyId: ctx.companyId,
         name,
@@ -68,25 +130,41 @@ export const crmWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         name: { type: 'string', description: 'اسم الفرصة (إلزامي)' },
-        value: { type: 'number', description: 'قيمة الفرصة' },
+        opportunityName: { type: 'string', description: 'بديل لـ name' },
+        title: { type: 'string', description: 'بديل لـ name' },
+        value: { type: 'number', description: 'قيمة الفرصة (اختياري — افتراضي 0)' },
+        amount: { type: 'number', description: 'بديل لـ value' },
+        estimatedValue: { type: 'number', description: 'بديل لـ value' },
+        stage: { type: 'string', description: 'المرحلة الابتدائية (عربي أو إنجليزي — افتراضي new)' },
         leadId: { type: 'string', description: 'معرف عميل محتمل (اختياري)' },
         customerId: { type: 'string', description: 'معرف عميل (اختياري)' },
         probability: { type: 'number', description: 'نسبة النجاح 0-100 (اختياري)' },
+        assignedTo: { type: 'string', description: 'معرف المسؤول (اختياري)' },
+        notes: { type: 'string', description: 'ملاحظات (اختياري)' },
       },
-      required: ['name', 'value'],
+      required: ['name'],
     },
     summarizeArgs: (a) => `إنشاء فرصة بيعية: ${a.name} — القيمة: ${a.value}`,
     execute: async (args, ctx) => {
-      const name = str(args.name);
-      if (!name) return { error: 'اسم الفرصة مطلوب' };
+      const rec = args as Record<string, unknown>;
+      const name = strAny(rec, 'name', 'opportunityName', 'title');
+      if (!name) return { error: 'اسم الفرصة مطلوب (name أو opportunityName أو title)' };
+      const value = args.value !== undefined ? num(args.value)
+        : args.amount !== undefined ? num(args.amount)
+        : args.estimatedValue !== undefined ? num(args.estimatedValue) : 0;
+      const stageRaw = str(args.stage);
+      const stage = stageRaw ? (mapAr(stageRaw, AR_STAGE) ?? null) : 'new';
+      if (!stage) return { error: `مرحلة غير صحيحة ("${stageRaw}") — المراحل: new/جديد، qualified/مؤهل، proposal/عرض، negotiation/تفاوض، won/فوز، lost/خسارة` };
       const res = await crmApi.createOpportunity({
         companyId: ctx.companyId,
         name,
-        value: num(args.value),
-        stage: 'new',
+        value,
+        stage,
         probability: args.probability !== undefined ? num(args.probability) : undefined,
         leadId: str(args.leadId) || undefined,
         customerId: str(args.customerId) || undefined,
+        assignedTo: str(args.assignedTo) || undefined,
+        notes: str(args.notes),
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء الفرصة' };
       return { created: true, opportunityId: res.id, name };
@@ -103,25 +181,42 @@ export const crmWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'عنوان المهمة (إلزامي)' },
-        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري)' },
-        priority: { type: 'string', enum: ['low', 'medium', 'high'], description: 'الأولوية (افتراضي medium)' },
+        عنوان: { type: 'string', description: 'بديل لـ title' },
+        subject: { type: 'string', description: 'بديل لـ title' },
+        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD (اختياري — يقبل "12-8" و"15 أغسطس")' },
+        priority: { type: 'string', description: 'الأولوية: low/medium/high أو منخفضة/متوسطة/عالية (افتراضي medium)' },
         description: { type: 'string' },
+        leadId: { type: 'string', description: 'معرف عميل محتمل (اختياري)' },
+        opportunityId: { type: 'string', description: 'معرف فرصة (اختياري)' },
+        customerId: { type: 'string', description: 'معرف عميل (اختياري)' },
+        assignedTo: { type: 'string', description: 'معرف المسؤول (اختياري)' },
       },
-      required: ['title'],
+      required: [],
     },
-    summarizeArgs: (a) => `إنشاء مهمة: ${a.title}${a.dueDate ? ` — تستحق ${a.dueDate}` : ''}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      const title = r.title ?? r.عنوان ?? r.subject;
+      return `إنشاء مهمة: ${title}${r.dueDate ? ` — تستحق ${r.dueDate}` : ''}`;
+    },
     execute: async (args, ctx) => {
-      const title = str(args.title);
-      if (!title) return { error: 'عنوان المهمة مطلوب' };
-      const priority = str(args.priority);
-      if (priority && !['low', 'medium', 'high'].includes(priority)) return { error: 'أولوية غير صحيحة' };
+      const rec = args as Record<string, unknown>;
+      const title = strAny(rec, 'title', 'عنوان', 'subject', 'name');
+      if (!title) return { error: 'عنوان المهمة مطلوب (title أو عنوان)' };
+      const priorityRaw = str(args.priority);
+      const priority = priorityRaw ? (mapAr(priorityRaw, AR_PRIORITY) ?? null) : 'medium';
+      if (!priority) return { error: `أولوية غير صحيحة ("${priorityRaw}") — استخدم low/medium/high أو منخفضة/متوسطة/عالية` };
+      const dueRaw = str(args.dueDate);
       const res = await crmApi.createTask({
         companyId: ctx.companyId,
         title,
         description: str(args.description),
-        dueDate: str(args.dueDate),
-        priority: (priority as 'low' | 'medium' | 'high') || 'medium',
+        dueDate: dueRaw ? (normalizeDateArg(dueRaw) ?? undefined) : undefined,
+        priority: priority as 'low' | 'medium' | 'high',
         status: 'pending',
+        leadId: str(args.leadId) || undefined,
+        opportunityId: str(args.opportunityId) || undefined,
+        customerId: str(args.customerId) || undefined,
+        assignedTo: str(args.assignedTo) || undefined,
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء المهمة' };
       return { created: true, taskId: res.id, title };
@@ -138,30 +233,36 @@ export const crmWriteTools: ToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['call', 'meeting', 'email', 'visit', 'note'], description: 'نوع النشاط (افتراضي note)' },
+        type: { type: 'string', description: 'نوع النشاط عربي أو إنجليزي: اتصال/مكالمة/اجتماع/بريد/زيارة/ملاحظة (افتراضي note)' },
         subject: { type: 'string', description: 'عنوان النشاط (إلزامي)' },
+        عنوان: { type: 'string', description: 'بديل لـ subject' },
         description: { type: 'string', description: 'وصف النشاط' },
-        activityDate: { type: 'string', description: 'تاريخ النشاط YYYY-MM-DD (افتراضي اليوم)' },
+        activityDate: { type: 'string', description: 'تاريخ النشاط (اختياري — يقبل "12-8" و"15 أغسطس"، افتراضي اليوم)' },
         durationMinutes: { type: 'number', description: 'المدة بالدقائق' },
         leadId: { type: 'string', description: 'معرف العميل المحتمل (اختياري — من crm.get_leads)' },
         opportunityId: { type: 'string', description: 'معرف الفرصة البيعية (اختياري)' },
         customerId: { type: 'string', description: 'معرف العميل (اختياري — من search.customers)' },
       },
-      required: ['subject'],
+      required: [],
     },
-    summarizeArgs: (a) => `تسجيل نشاط: ${a.subject} (${a.type || 'note'})${a.leadId ? ' — مرتبط بعميل محتمل' : ''}`,
+    summarizeArgs: (a) => {
+      const r = a as Record<string, unknown>;
+      return `تسجيل نشاط: ${r.subject ?? r.عنوان} (${r.type || 'note'})${r.leadId ? ' — مرتبط بعميل محتمل' : ''}`;
+    },
     execute: async (args, ctx) => {
-      const subject = str(args.subject);
-      if (!subject) return { error: 'عنوان النشاط مطلوب' };
-      const activityType = str(args.type) || 'note';
-      if (!['call', 'meeting', 'email', 'visit', 'note'].includes(activityType)) return { error: 'نوع نشاط غير صحيح' };
+      const rec = args as Record<string, unknown>;
+      const subject = strAny(rec, 'subject', 'عنوان', 'title', 'name');
+      if (!subject) return { error: 'عنوان النشاط مطلوب (subject أو عنوان)' };
+      const typeRaw = str(args.type) || 'note';
+      const activityType = mapAr(typeRaw, AR_ACTIVITY);
+      if (!activityType) return { error: `نوع نشاط غير صحيح ("${typeRaw}") — استخدم call/مكالمة، meeting/اجتماع، email/بريد، visit/زيارة، note/ملاحظة` };
 
       const res = await crmApi.createActivity({
         companyId: ctx.companyId,
         type: activityType as 'call' | 'meeting' | 'email' | 'visit' | 'note',
         subject,
         description: str(args.description),
-        activityDate: str(args.activityDate) || today(),
+        activityDate: str(args.activityDate) ? (normalizeDateArg(str(args.activityDate)) ?? undefined) : today(),
         durationMinutes: args.durationMinutes !== undefined ? num(args.durationMinutes) : undefined,
         leadId: str(args.leadId),
         opportunityId: str(args.opportunityId),
@@ -183,7 +284,7 @@ export const crmWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         leadId: { type: 'string', description: 'معرف العميل المحتمل (من crm.get_leads)' },
-        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'lost'], description: 'الحالة الجديدة (للتحويل إلى عميل استخدم crm.convert_lead_to_customer)' },
+        status: { type: 'string', description: 'الحالة الجديدة عربي أو إنجليزي: جديد/new، contacted/تواصل، qualified/مؤهل، lost/مفقود (للتحويل إلى عميل استخدم crm.convert_lead_to_customer)' },
         rating: { type: 'string', enum: ['hot', 'warm', 'cold'], description: 'التقييم (اختياري)' },
         notes: { type: 'string', description: 'ملاحظات' },
       },
@@ -192,9 +293,12 @@ export const crmWriteTools: ToolDefinition[] = [
     summarizeArgs: (a) => `تحديث حالة عميل محتمل إلى: ${a.status}`,
     execute: async (args, ctx) => {
       const leadId = str(args.leadId);
-      const status = str(args.status);
+      const statusRaw = str(args.status);
       if (!leadId) return { error: 'leadId مطلوب' };
-      if (!status || !['new', 'contacted', 'qualified', 'converted', 'lost'].includes(status)) return { error: 'حالة غير صحيحة' };
+      const status = statusRaw ? mapAr(statusRaw, AR_LEAD_STATUS) : undefined;
+      if (!status || !['new', 'contacted', 'qualified', 'converted', 'lost'].includes(status)) {
+        return { error: `حالة غير صحيحة ("${statusRaw}") — استخدم جديد/contacted/مؤهل/مفقود` };
+      }
       // P2 fix: 'converted' is owned by the atomic convertLeadToCustomer CTE
       // (creates the customer + flips the lead + optional first opportunity
       // in one transaction). Setting it via plain updateLead marks the lead
@@ -218,14 +322,14 @@ export const crmWriteTools: ToolDefinition[] = [
   {
     name: 'crm.update_opportunity_stage',
     labelAr: 'تحديث مرحلة فرصة بيعية',
-    descriptionAr: 'يُحدّث مرحلة فرصة بيعية (مثلاً إلى won/lost/proposal). استخدم crm.get_opportunities أولاً.',
+    descriptionAr: 'يُحدّث مرحلة فرصة بيعية — المراحل تقدمية للأمام فقط (new→qualified→proposal→negotiation→won/lost) وwon/lost نهائية لا تُفتح. استخدم crm.get_opportunities أولاً.',
     permission: 'crm.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         opportunityId: { type: 'string', description: 'معرف الفرصة (من crm.get_opportunities)' },
-        stage: { type: 'string', enum: ['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost'], description: 'المرحلة الجديدة' },
+        stage: { type: 'string', description: 'المرحلة الجديدة عربي أو إنجليزي: جديد/new، مؤهل/qualified، عرض/proposal، تفاوض/negotiation، فوز/won، خسارة/lost' },
         probability: { type: 'number', description: 'نسبة النجاح 0-100 (اختياري)' },
         notes: { type: 'string', description: 'ملاحظات' },
       },
@@ -234,9 +338,12 @@ export const crmWriteTools: ToolDefinition[] = [
     summarizeArgs: (a) => `تحديث مرحلة فرصة بيعية إلى: ${a.stage}`,
     execute: async (args, ctx) => {
       const opportunityId = str(args.opportunityId);
-      const stage = str(args.stage);
+      const stageRaw = str(args.stage);
       if (!opportunityId) return { error: 'opportunityId مطلوب' };
-      if (!stage || !['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost'].includes(stage)) return { error: 'مرحلة غير صحيحة' };
+      const stage = stageRaw ? mapAr(stageRaw, AR_STAGE) : undefined;
+      if (!stage || !['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost'].includes(stage)) {
+        return { error: `مرحلة غير صحيحة ("${stageRaw}") — المراحل تقدمية: جديد→مؤهل→عرض→تفاوض→فوز/خسارة، والأخيرتان نهائيتان` };
+      }
       const data: Record<string, unknown> = { stage };
       if (args.probability !== undefined) {
         const prob = num(args.probability);
@@ -404,7 +511,9 @@ export const crmWriteTools: ToolDefinition[] = [
         if (str(args.status) === 'converted') {
           return { error: 'التحويل إلى عميل يتم عبر crm.convert_lead_to_customer فقط (ينشئ العميل + يحوّل الحالة ذرّياً) — لا يمكن تعيين converted مباشرة' };
         }
-        data.status = str(args.status);
+        const mapped = mapAr(str(args.status) ?? '', AR_LEAD_STATUS);
+        if (!mapped) return { error: `حالة غير صحيحة — استخدم جديد/contacted/مؤهل/مفقود` };
+        data.status = mapped;
       }
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل' };
       const res = await crmApi.updateLead(leadId, ctx.companyId, data);
@@ -426,7 +535,7 @@ export const crmWriteTools: ToolDefinition[] = [
         opportunityId: { type: 'string', description: 'معرف الفرصة (UUID)' },
         name: { type: 'string' },
         value: { type: 'number' },
-        stage: { type: 'string', enum: ['new', 'qualified', 'proposal', 'negotiation', 'won', 'lost'] },
+        stage: { type: 'string', description: 'المرحلة عربي أو إنجليزي (تقدمية للأمام فقط، وwon/lost نهائية)' },
         probability: { type: 'number', description: 'نسبة النجاح 0-100' },
         notes: { type: 'string' },
       },
@@ -439,7 +548,11 @@ export const crmWriteTools: ToolDefinition[] = [
       const data: Record<string, unknown> = {};
       if (args.name !== undefined) data.name = str(args.name);
       if (args.value !== undefined) data.value = num(args.value);
-      if (args.stage !== undefined) data.stage = str(args.stage);
+      if (args.stage !== undefined) {
+        const mapped = mapAr(str(args.stage) ?? '', AR_STAGE);
+        if (!mapped) return { error: 'مرحلة غير صحيحة — المراحل تقدمية: جديد→مؤهل→عرض→تفاوض→فوز/خسارة' };
+        data.stage = mapped;
+      }
       if (args.probability !== undefined) {
         const prob = num(args.probability);
         if (prob < 0 || prob > 100) return { error: 'نسبة النجاح بين 0 و 100' };
@@ -465,9 +578,12 @@ export const crmWriteTools: ToolDefinition[] = [
       properties: {
         taskId: { type: 'string', description: 'معرف المهمة (UUID)' },
         title: { type: 'string' },
-        dueDate: { type: 'string', description: 'تاريخ الاستحقاق YYYY-MM-DD' },
-        priority: { type: 'string', enum: ['low', 'medium', 'high'] },
-        status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
+        dueDate: { type: 'string', description: 'تاريخ الاستحقاق (يقبل "12-8" و"15 أغسطس")' },
+        priority: { type: 'string', description: 'الأولوية عربي أو إنجليزي: منخفضة/متوسطة/عالية' },
+        // Drift fix: updateTaskSchema allows ONLY pending/completed/cancelled
+        // — the old in_progress enum value always failed validation AFTER
+        // approval. 'قيد التنفيذ' maps to pending (the only open state).
+        status: { type: 'string', description: 'الحالة عربي أو إنجليزي: معلق/منجز/ملغي (قيد التنفيذ = معلق)' },
         notes: { type: 'string' },
       },
       required: ['taskId'],
@@ -478,9 +594,20 @@ export const crmWriteTools: ToolDefinition[] = [
       if (!taskId) return { error: 'taskId مطلوب' };
       const data: Record<string, unknown> = {};
       if (args.title !== undefined) data.title = str(args.title);
-      if (args.dueDate !== undefined) data.dueDate = String(args.dueDate);
-      if (args.priority !== undefined) data.priority = str(args.priority);
-      if (args.status !== undefined) data.status = str(args.status);
+      if (args.dueDate !== undefined) {
+        const rawDue = str(args.dueDate);
+        data.dueDate = rawDue ? (normalizeDateArg(rawDue) ?? rawDue) : rawDue;
+      }
+      if (args.priority !== undefined) {
+        const mapped = mapAr(str(args.priority) ?? '', AR_PRIORITY);
+        if (!mapped) return { error: 'أولوية غير صحيحة — استخدم منخفضة/متوسطة/عالية' };
+        data.priority = mapped;
+      }
+      if (args.status !== undefined) {
+        const mapped = mapAr(str(args.status) ?? '', AR_TASK_STATUS);
+        if (!mapped) return { error: 'حالة غير صحيحة — استخدم معلق/منجز/ملغي' };
+        data.status = mapped;
+      }
       // P1 fix: tasks have NO notes column (zod strips it, the API never
       // forwards it) — map to description like complete_task does, instead
       // of vanishing silently (the Phase-34 updateOpportunity-notes class).

@@ -896,11 +896,13 @@ export const posApi = {
 
       // Statement A — invoice header + all lines (single CTE, atomic by
       // itself; same statement shape as salesApi.createInvoice's fallback).
+      // Pure-credit sales carry no box: NULL (not '') so the ::uuid cast holds.
+      const boxIdOrNull = input.cashBoxId || null;
       const params: unknown[] = [
         invoiceId, input.companyId, receiptNumber, walkInCustomerId, date,
         input.subtotal, input.discountAmount ?? 0, input.vatAmount ?? 0,
         input.totalAmount, paidAmount, currencyCode, 1,
-        input.totalAmount, paidAmount, paymentType, input.cashBoxId,
+        input.totalAmount, paidAmount, paymentType, boxIdOrNull,
         input.notes ?? null, safeUser, safeUser, input.shiftId,
       ];
       let sql = `WITH inv AS (INSERT INTO sales_invoices
@@ -937,7 +939,7 @@ export const posApi = {
       ];
 
       // Statement B — POS payment legs (one row per method actually used).
-      const payParams: unknown[] = [input.companyId, input.shiftId, invoiceId, input.cashBoxId, safeUser];
+      const payParams: unknown[] = [input.companyId, input.shiftId, invoiceId, boxIdOrNull, safeUser];
       const payValues: string[] = [];
       if (input.cashAmount > 0) {
         payValues.push(`($1::uuid, $2::uuid, $3::uuid, 'cash', $${payParams.length + 1}::numeric, $4::uuid, $5::uuid)`);

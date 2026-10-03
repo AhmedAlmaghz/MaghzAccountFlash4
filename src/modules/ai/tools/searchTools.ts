@@ -388,9 +388,21 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('اسم الفرصة البيعية'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await crmApi.getOpportunitiesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((m) => ({
+            id: m.id,
+            name: m.name,
+            stage: m.stage,
+            value: m.value,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('الفرص البيعية'),
+        };
+      }
       const matches = findAllFuzzyMatches(
         query,
         res.data.items,
@@ -917,9 +929,21 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('عنوان المهمة أو اسم المسؤول'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await crmApi.getTasksPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((m) => ({
+            id: m.id,
+            title: m.title,
+            status: m.status,
+            priority: m.priority,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('المهام'),
+        };
+      }
       const matches = findAllFuzzyMatches(
         query,
         res.data.items,
@@ -948,9 +972,21 @@ export const searchTools: ToolDefinition[] = [
     parameters: searchParam('موضوع النشاط أو نوعه (call/meeting/email/visit/note)'),
     execute: async (args, ctx) => {
       const query = String(args.query || '').trim();
-      if (!query) return { error: 'نص البحث مطلوب' };
       const res = await crmApi.getActivitiesPaginated(ctx.companyId, 1, FUZZY_FETCH_LIMIT);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
+      if (!query) {
+        const head = res.data.items.slice(0, 8);
+        return {
+          matches: head.map((m) => ({
+            id: m.id,
+            subject: m.subject,
+            type: m.type,
+            activityDate: m.activityDate,
+          })),
+          totalMatches: head.length,
+          suggestion: browseHint('الأنشطة'),
+        };
+      }
       const matches = findAllFuzzyMatches(
         query,
         res.data.items,

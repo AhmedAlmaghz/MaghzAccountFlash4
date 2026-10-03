@@ -6,7 +6,14 @@ vi.mock('@/modules/pos/api', () => ({
     getShiftSummary: vi.fn(),
     getShiftsPaginated: vi.fn(),
     checkout: vi.fn(),
+    getProducts: vi.fn(),
   },
+}));
+vi.mock('@/modules/sales/api', () => ({
+  salesApi: { getCustomersPaginated: vi.fn() },
+}));
+vi.mock('@/modules/inventory/api', () => ({
+  inventoryApi: { getProductUnits: vi.fn() },
 }));
 
 import { posApi } from '@/modules/pos/api';
@@ -153,5 +160,71 @@ describe('pos tools contract', () => {
     expect(write.dangerLevel).toBe('write');
     expect(typeof write.summarizeArgs).toBe('function');
     expect(write.summarizeArgs?.({ lines: [SAMPLE_LINE], totalAmount: 200, cashAmount: 200, creditAmount: 0 })).toContain('200');
+  });
+
+  it('posts pure-credit sales with no cash box (live audit)', async () => {
+    const checkout = findTool('pos.checkout_sale');
+    const { posApi: mockedPos } = await import('@/modules/pos/api');
+    vi.mocked(mockedPos.checkout).mockResolvedValue({ success: true, invoiceId: 'inv-1' } as never);
+    const res = (await checkout.execute(
+      {
+        shiftId: SHIFT_ID,
+        lines: [{ productId: PRODUCT_ID, quantity: 1, unitPrice: 500 }],
+        cashAmount: 0,
+        creditAmount: 500,
+        customerId: CUSTOMER_ID,
+      },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.sold).toBe(true);
+    expect(vi.mocked(mockedPos.checkout)).toHaveBeenCalledWith(
+      expect.objectContaining({ cashBoxId: '', creditAmount: 500 }),
+      ctx.userId,
+    );
+  });
+
+  it('rejects cash sales without a cash box (with guidance, pre-approval)', async () => {
+    const checkout = findTool('pos.checkout_sale');
+    const res = (await checkout.execute(
+      {
+        shiftId: SHIFT_ID,
+        lines: [{ productId: PRODUCT_ID, quantity: 1, unitPrice: 500 }],
+        cashAmount: 500,
+        creditAmount: 0,
+      },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(String(res.error)).toContain('cashBoxId');
+  });
+
+  it('resolves product/customer names internally (no UUID needed)', async () => {
+    const checkout = findTool('pos.checkout_sale');
+    const { posApi: mockedPos } = await import('@/modules/pos/api');
+    const { salesApi: mockedSales } = await import('@/modules/sales/api');
+    vi.mocked(mockedPos.getProducts).mockResolvedValue({
+      success: true,
+      data: [{ id: PRODUCT_ID, code: 'P1', nameAr: 'شوكلاتة', salePrice: 500 }],
+    } as never);
+    vi.mocked(mockedSales.getCustomersPaginated).mockResolvedValue({
+      success: true,
+      data: { items: [{ id: CUSTOMER_ID, name: 'غدرة' }] },
+    } as never);
+    vi.mocked(mockedPos.checkout).mockResolvedValue({ success: true, invoiceId: 'inv-2' } as never);
+    const res = (await checkout.execute(
+      {
+        shiftId: SHIFT_ID,
+        cashBoxId: BOX_ID,
+        lines: [{ productName: 'شوكلاتة', quantity: 2, unitPrice: 500 }],
+        cashAmount: 1000,
+        creditAmount: 0,
+        customerName: 'غدرة',
+      },
+      ctx,
+    )) as Record<string, unknown>;
+    expect(res.sold).toBe(true);
+    expect(vi.mocked(mockedPos.checkout)).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: CUSTOMER_ID }),
+      ctx.userId,
+    );
   });
 });

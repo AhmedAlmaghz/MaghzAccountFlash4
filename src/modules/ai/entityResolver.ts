@@ -20,6 +20,7 @@ import { accountingApi } from '@/modules/accounting/api';
 import { hrApi } from '@/modules/hr/api';
 import { manufacturingApi } from '@/modules/manufacturing/api';
 import { crmApi } from '@/modules/crm/api';
+import { fixedAssetsApi } from '@/modules/accounting/assets';
 import { useAuthStore } from '@/modules/auth/store';
 import * as coreApi from '@/core/api';
 
@@ -31,7 +32,7 @@ export type EntityType =
   | 'invoice' | 'purchaseInvoice' | 'quotation'
   | 'receiptVoucher' | 'paymentVoucher'
   | 'journalEntry' | 'workOrder' | 'bom'
-  | 'lead' | 'opportunity' | 'task';
+  | 'lead' | 'opportunity' | 'task' | 'activity' | 'asset';
 
 export interface EntityMatch {
   type: EntityType;
@@ -146,7 +147,10 @@ function toMatch(row: DbRow, type: EntityType, labelAr: string, props: Record<st
   return {
     type,
     id: String(row.id ?? ''),
-    name: str(row, 'name_ar', 'name', 'fullName', 'full_name'),
+    // Task rows carry `title`, activities carry `subject`, assets carry
+    // camelCase `nameAr` — without these keys every such match was nameless
+    // (score 0 → always empty).
+    name: str(row, 'name_ar', 'nameAr', 'name', 'fullName', 'full_name', 'title', 'subject'),
     code: row.code ? String(row.code) : row.employeeNumber ? String(row.employeeNumber) : undefined,
     labelAr,
     confidence: 0,
@@ -418,6 +422,30 @@ async function searchTasks(query: string, companyId: string): Promise<EntityMatc
   return rankMatches(query, cached);
 }
 
+async function searchActivities(query: string, companyId: string): Promise<EntityMatch[]> {
+  const key = `activities:${companyId}`;
+  let cached = cacheGet(key);
+  if (!cached) {
+    const res = await crmApi.getActivitiesPaginated(companyId, 1, ENTITY_FETCH_LIMIT);
+    if (!res.success || !res.data) return [];
+    cached = res.data.items.map((a) => toMatch(a, 'activity', 'نشاط', { type: 'type' }));
+    cacheSet(key, cached);
+  }
+  return rankMatches(query, cached);
+}
+
+async function searchAssets(query: string, companyId: string): Promise<EntityMatch[]> {
+  const key = `assets:${companyId}`;
+  let cached = cacheGet(key);
+  if (!cached) {
+    const res = await fixedAssetsApi.getFixedAssets(companyId);
+    if (!res.success || !res.data) return [];
+    cached = res.data.map((a) => toMatch(a, 'asset', 'أصل', { code: 'code' }));
+    cacheSet(key, cached);
+  }
+  return rankMatches(query, cached);
+}
+
 // ─── Registry ────────────────────────────────────────────────────────────────
 
 interface EntitySearcherDef {
@@ -444,6 +472,8 @@ const ENTITY_SEARCHERS: EntitySearcherDef[] = [
   { type: 'lead', labelAr: 'عميل محتمل', searcher: searchLeads },
   { type: 'opportunity', labelAr: 'فرصة بيعية', searcher: searchOpportunities },
   { type: 'task', labelAr: 'مهمة', searcher: searchTasks },
+  { type: 'activity', labelAr: 'نشاط', searcher: searchActivities },
+  { type: 'asset', labelAr: 'أصل', searcher: searchAssets },
 ];
 
 // ─── Ranking ─────────────────────────────────────────────────────────────────
@@ -529,6 +559,8 @@ const ENTITY_PERMISSIONS: Record<EntityType, string> = {
   lead: 'crm.view',
   opportunity: 'crm.view',
   task: 'crm.view',
+  activity: 'crm.view',
+  asset: 'accounting.view',
 };
 
 function canSee(type: EntityType): boolean {

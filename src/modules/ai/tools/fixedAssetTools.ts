@@ -2,6 +2,8 @@ import type { ToolDefinition } from '../types';
 import { fixedAssetsApi } from '@/modules/accounting/assets';
 import { num, str } from './writeTools/shared';
 import { localToday } from '../engine/dateUtils';
+import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
+import { normalizeDateArg } from '../engine/argNormalizers';
 
 /**
  * Fixed-asset tools — سجل الأصول الثابتة (3 أدوات).
@@ -13,9 +15,57 @@ import { localToday } from '../engine/dateUtils';
  */
 
 const METHODS = ['straight_line', 'declining_balance'] as const;
-type FundingKind = 'cash' | 'payable' | 'opening';
 
 export const fixedAssetTools: ToolDefinition[] = [
+  {
+    name: 'search.fixed_assets',
+    labelAr: 'بحث عن أصل ثابت',
+    descriptionAr: 'يبحث في الأصول الثابتة بالاسم أو الرمز ويعيد معرفها (id) وقيمتها الدفترية وحالتها. استخدمه قبل الاستبعاد أو الإهلاك.',
+    permission: 'accounting.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'اسم الأصل أو رمزه (فارغ = تصفح الأحدث)' },
+      },
+    },
+    execute: async (args, ctx) => {
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      const res = await fixedAssetsApi.getFixedAssets(ctx.companyId);
+      if (!res.success) return { error: res.error || 'فشل جلب الأصول الثابتة' };
+      const list = res.data ?? [];
+      const toRow = (a: (typeof list)[number]) => ({
+        id: a.id,
+        code: a.code,
+        name: a.nameAr,
+        category: a.category,
+        cost: a.cost,
+        netBookValue: a.netBookValue,
+        status: a.status,
+      });
+      if (!query) {
+        const head = list.slice(0, 8).map(toRow);
+        return {
+          matches: head,
+          totalMatches: head.length,
+          suggestion: 'عرض أول الأصول لأن البحث كان فارغاً — مرّر اسماً أدق في query للتضييق',
+        };
+      }
+      const nq = normalizeArabic(query);
+      const scored = list
+        .map((a) => ({
+          a,
+          s: fuzzyMatchScore(nq, `${a.nameAr ?? ''} ${a.code ?? ''}`),
+        }))
+        .filter((x) => x.s >= 0.35)
+        .sort((x, y) => y.s - x.s)
+        .slice(0, 8);
+      return {
+        matches: scored.map((x) => toRow(x.a)),
+        totalMatches: scored.length,
+      };
+    },
+  },
   {
     name: 'accounting.list_fixed_assets',
     labelAr: 'قائمة الأصول الثابتة',
@@ -48,51 +98,64 @@ export const fixedAssetTools: ToolDefinition[] = [
   {
     name: 'accounting.create_fixed_asset',
     labelAr: 'تسجيل أصل ثابت',
-    descriptionAr: 'يسجل أصلاً ثابتاً جديداً مع قيد الرسملة تلقائياً (مدين الأصول الثابتة / دائن الخزينة أو الدائنين أو الافتتاحي حسب التمويل). التمويل النقدي يتطلب cashBoxId (من search.cash_boxes).',
+    descriptionAr: 'يسجل أصلاً ثابتاً جديداً مع قيد الرسملة تلقائياً (مدين الأصول الثابتة / دائن الخزينة أو الدائنين أو الافتتاحي حسب التمويل). التمويل النقدي يتطلب cashBoxId (من search.cash_boxes). الطريقة والتمويل تقبلان العربية (ثابت/متناقص، نقدي/آجل/افتتاحي).',
     permission: 'accounting.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         code: { type: 'string', description: 'رمز الأصل (اختياري — يُولَّد تلقائياً)' },
-        name: { type: 'string', description: 'اسم الأصل بالعربية (إلزامي)' },
+        name: { type: 'string', description: 'اسم الأصل (إلزامي)' },
+        nameAr: { type: 'string', description: 'بديل لـ name' },
         nameEn: { type: 'string', description: 'اسم الأصل بالإنجليزية' },
         category: { type: 'string', description: 'فئة الأصل (معدات، سيارات، أثاث…)' },
-        purchaseDate: { type: 'string', description: 'تاريخ الشراء YYYY-MM-DD (افتراضي اليوم)' },
+        purchaseDate: { type: 'string', description: 'تاريخ الشراء (اختياري — يقبل "12-8" و"15 أغسطس"، افتراضي اليوم)' },
         cost: { type: 'number', description: 'تكلفة الشراء (أكبر من صفر)' },
         salvageValue: { type: 'number', description: 'القيمة التخريدية (افتراضي 0)' },
         usefulLifeMonths: { type: 'number', description: 'العمر الإنتاجي بالشهور 1-1200' },
-        method: { type: 'string', enum: ['straight_line', 'declining_balance'], description: 'طريقة الإهلاك (افتراضي straight_line)' },
-        funding: { type: 'string', enum: ['cash', 'payable', 'opening'], description: 'مصدر التمويل: cash=خزينة، payable=دائنون، opening=رصيد افتتاحي (افتراضي cash)' },
+        method: { type: 'string', description: 'طريقة الإهلاك: straight_line/ثابت أو declining_balance/متناقص (افتراضي straight_line)' },
+        funding: { type: 'string', description: 'مصدر التمويل: cash/نقدي، payable/آجل، opening/افتتاحي (افتراضي cash)' },
         cashBoxId: { type: 'string', description: 'معرف الخزينة — إلزامي للتمويل النقدي' },
       },
-      required: ['name', 'cost', 'usefulLifeMonths'],
+      required: ['cost', 'usefulLifeMonths'],
     },
     summarizeArgs: (a) => {
       const r = a as Record<string, unknown>;
-      return `تسجيل أصل ثابت "${String(r.name || '')}" بتكلفة ${r.cost} (تمويل ${r.funding || 'cash'})`;
+      return `تسجيل أصل ثابت "${String(r.name ?? r.nameAr ?? '')}" بتكلفة ${r.cost} (تمويل ${r.funding || 'cash'})`;
     },
     execute: async (args, ctx) => {
-      const nameAr = str(args.name);
+      const rec = args as Record<string, unknown>;
+      const nameAr = str(rec.name) ?? str(rec.nameAr);
       const cost = num(args.cost);
-      if (!nameAr) return { error: 'اسم الأصل مطلوب' };
+      if (!nameAr) return { error: 'اسم الأصل مطلوب (name أو nameAr)' };
       if (!(cost > 0)) return { error: 'تكلفة الأصل يجب أن تكون أكبر من صفر' };
       const life = num(args.usefulLifeMonths);
       if (!Number.isInteger(life) || life < 1 || life > 1200) {
         return { error: 'العمر الإنتاجي يجب أن يكون عدداً صحيحاً بين 1 و 1200 شهراً' };
       }
-      const method = str(args.method) || 'straight_line';
-      if (!(METHODS as readonly string[]).includes(method)) {
-        return { error: 'طريقة الإهلاك يجب أن تكون straight_line أو declining_balance' };
+      const methodRaw = str(args.method) || 'straight_line';
+      const methodNorm = normalizeArabic(methodRaw);
+      const method = /متناقص|declining/.test(methodNorm) ? 'declining_balance'
+        : /ثابت|قسط|straight|line/.test(methodNorm) ? 'straight_line'
+        : (METHODS as readonly string[]).includes(methodRaw) ? methodRaw : null;
+      if (!method) {
+        return { error: 'طريقة الإهلاك يجب أن تكون straight_line/ثابت أو declining_balance/متناقص' };
       }
-      const purchaseDate = str(args.purchaseDate) || localToday();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate)) return { error: 'تاريخ الشراء يجب أن يكون YYYY-MM-DD' };
+      const purchaseRaw = str(args.purchaseDate);
+      const purchaseDate = purchaseRaw ? (normalizeDateArg(purchaseRaw) ?? null) : localToday();
+      if (!purchaseDate || !/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate)) {
+        return { error: `تاريخ الشراء غير مفهوم ("${purchaseRaw}") — استخدم YYYY-MM-DD أو "15 أغسطس 2026"` };
+      }
       const salvageValue = num(args.salvageValue);
       if (salvageValue < 0) return { error: 'القيمة التخريدية لا يمكن أن تكون سالبة' };
       if (salvageValue >= cost) return { error: 'القيمة التخريدية يجب أن تكون أقل من التكلفة' };
-      const fundingKind = (str(args.funding) || 'cash') as FundingKind;
-      if (!['cash', 'payable', 'opening'].includes(fundingKind)) {
-        return { error: 'مصدر التمويل يجب أن يكون cash أو payable أو opening' };
+      const fundingRaw = str(args.funding) || 'cash';
+      const fundingNorm = normalizeArabic(fundingRaw);
+      const fundingKind = /دائن|آجل|payable/.test(fundingNorm) ? 'payable'
+        : /افتتاح|opening/.test(fundingNorm) ? 'opening'
+        : /نقد|كاش|cash/.test(fundingNorm) ? 'cash' : null;
+      if (!fundingKind) {
+        return { error: 'مصدر التمويل يجب أن يكون cash/نقدي أو payable/آجل أو opening/افتتاحي' };
       }
       const cashBoxId = str(args.cashBoxId);
       if (fundingKind === 'cash' && !cashBoxId) {

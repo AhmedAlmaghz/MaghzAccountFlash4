@@ -66,7 +66,9 @@ const ID_FIELDS = [
   'warehouseId', 'fromWarehouseId',
   'toWarehouseId', 'cashBoxId', 'employeeId', 'accountId', 'unitId',
   'baseUnitId', 'productTypeId', 'categoryId', 'departmentId', 'leadId',
-  'opportunityId', 'workOrderId', 'bomId', 'bomProductId', 'shiftId', 'payrollRunId',
+  'opportunityId', 'taskId', 'activityId', 'workOrderId', 'bomId', 'bomProductId',
+  'shiftId', 'payrollRunId', 'quotationId', 'receiptVoucherId', 'paymentVoucherId',
+  'returnId', 'assetId', 'periodId',
   'openingStockWarehouseId',
 ] as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

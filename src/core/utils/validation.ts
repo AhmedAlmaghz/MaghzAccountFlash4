@@ -658,7 +658,9 @@ export const posCheckoutSchema = z.object({
   companyId: companyIdSchema,
   shiftId: uuidSchema,
   customerId: uuidSchema.nullable().optional().or(z.literal('')),
-  cashBoxId: uuidSchema,
+  // Optional at the schema level: pure-credit sales carry no box (the API
+  // skips the GL lookup at cashAmount 0). Enforced below when cash > 0.
+  cashBoxId: uuidSchema.nullable().optional().or(z.literal('')),
   subtotal: currencyAmountSchema,
   discountAmount: currencyAmountSchema.optional(),
   vatAmount: currencyAmountSchema.optional(),
@@ -680,6 +682,15 @@ export const posCheckoutSchema = z.object({
   message: 'cash + credit must equal total',
 }).refine((d) => d.cashAmount > 0 || d.creditAmount > 0, {
   message: 'payment amount required',
+}).refine((d) => {
+  // Cash without a box has no GL leg to post to — credit-only needs none.
+  if (d.cashAmount > 0) {
+    const b = d.cashBoxId;
+    if (!b || b === '') return false;
+  }
+  return true;
+}, {
+  message: 'cash box required for cash payment',
 }).refine((d) => {
   if (d.creditAmount > 0) {
     const cid = d.customerId;

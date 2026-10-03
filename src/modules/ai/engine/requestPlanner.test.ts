@@ -152,6 +152,37 @@ describe('requestPlanner — deterministic per-request planning', () => {
     expect(planRequest('سند قبض من غدرة ب 50000').intent).toBe('accounting.receipt');
   });
 
+  it('plans POS terminal sales with product + customer + till', () => {
+    const p = planRequest('بيع في الكاشير 2 شوكلاتة');
+    expect(p.intent).toBe('pos.sale');
+    expect(p.writeTool).toBe('pos.checkout_sale');
+    expect(p.entityRequests.map((e) => e.kind).sort()).toEqual(
+      ['cash_box', 'customer', 'product'].sort(),
+    );
+  });
+
+  it('routes asset/period/settings texts away from invoice fallback', () => {
+    const asset = planRequest('سجل أصل ثابت رافعة شوكية بتكلفة 500000');
+    expect(asset.intent).toBe('accounting.asset');
+    expect(asset.entityRequests.map((e) => e.kind)).toEqual(['asset']);
+    const period = planRequest('اقفل السنة المالية 2025');
+    expect(period.intent).toBe('tax.period');
+    expect(period.slots.fiscalYear).toBe(2025);
+    expect(renderPlannedSlots(period)).toContain('2025');
+    const settings = planRequest('أنشئ صندوق جديد');
+    expect(settings.intent).toBe('settings.manage');
+    // Invoice words inside settings text must not reroute.
+    expect(planRequest('سجل قيد ب 500000 الصندوق من رأس المال').intent).toBe('accounting.journal');
+  });
+
+  it('matches hamza-laden input via normalized patterns (no dead alternatives)', () => {
+    // Every keyword below carries إ/أ/ة in raw form — normalization folds
+    // them before matching, so the intent must still hit.
+    expect(planRequest('أنشئ أمر تشغيل 50 علبة').intent).toBe('manufacturing.work_order');
+    expect(planRequest('إقفال السنة المالية 2025').intent).toBe('tax.period');
+    expect(planRequest('إضافة وحدة جديدة').intent).toBe('settings.manage');
+  });
+
   it('routes HR batch operations to hr.operations with employees only (never invoice lines)', () => {
     const p = planRequest('سجل حضور شهر 9 كاملاً لكل الموظفين واصدر كشف الراتب لشهر 9');
     expect(p.intent).toBe('hr.operations');

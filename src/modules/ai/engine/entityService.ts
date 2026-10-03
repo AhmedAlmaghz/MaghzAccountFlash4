@@ -37,7 +37,10 @@ export type EntityKind =
   | 'receiptVoucher'
   | 'paymentVoucher'
   | 'workOrder'
-  | 'bom';
+  | 'bom'
+  | 'task'
+  | 'activity'
+  | 'asset';
 
 export interface EntityRequest {
   /** Raw user text for this entity ("محمد الأحمدي"، "كرتون"). */
@@ -85,6 +88,9 @@ const KIND_TO_TYPES: Record<EntityKind, EntityType[]> = {
   paymentVoucher: ['paymentVoucher'],
   workOrder: ['workOrder'],
   bom: ['bom'],
+  task: ['task'],
+  activity: ['activity'],
+  asset: ['asset'],
 };
 
 const KIND_LABEL_AR: Record<EntityKind, string> = {
@@ -104,6 +110,9 @@ const KIND_LABEL_AR: Record<EntityKind, string> = {
   paymentVoucher: 'سند صرف',
   workOrder: 'أمر تشغيل',
   bom: 'شجرة منتج',
+  task: 'مهمة',
+  activity: 'نشاط',
+  asset: 'أصل ثابت',
 };
 
 export function entityKindLabel(kind: EntityKind): string {

@@ -296,14 +296,37 @@ describe('AI search tools — fuzzy matching against DB rows', () => {
       expect(result).toMatchObject({ error: expect.stringContaining('connection') });
     });
 
-    it('returns error for empty query', async () => {
-      const result = await findTool('search.customers').execute({ query: '' }, ctx);
-      expect(result).toMatchObject({ error: expect.stringContaining('مطلوب') });
+    it('browses the head on empty query instead of erroring (no dead ends)', async () => {
+      vi.mocked(salesApi.getCustomersPaginated).mockResolvedValue({
+        success: true,
+        data: {
+          items: [
+            { id: 'c1', name: 'شركة الأمل للتجارة', phone: '777111222', balance: 5000, code: 'CUST-001' },
+            { id: 'c2', name: 'مؤسسة النور', phone: '777333444', balance: 0, code: 'CUST-002' },
+          ],
+          total: 2,
+          page: 1,
+          pageSize: 200,
+          totalPages: 1,
+        },
+      });
+
+      const result = (await findTool('search.customers').execute({ query: '' }, ctx)) as {
+        matches: unknown[];
+        suggestion?: string;
+      };
+
+      expect(result.matches).toHaveLength(2);
+      expect(result.suggestion).toBeTruthy();
     });
 
-    it('does not call API when query is empty', async () => {
+    it('fetches before deciding on empty query (browse needs data)', async () => {
+      vi.mocked(salesApi.getCustomersPaginated).mockResolvedValue({
+        success: true,
+        data: { items: [], total: 0, page: 1, pageSize: 200, totalPages: 0 },
+      });
       await findTool('search.customers').execute({ query: '   ' }, ctx);
-      expect(salesApi.getCustomersPaginated).not.toHaveBeenCalled();
+      expect(salesApi.getCustomersPaginated).toHaveBeenCalled();
     });
   });
 

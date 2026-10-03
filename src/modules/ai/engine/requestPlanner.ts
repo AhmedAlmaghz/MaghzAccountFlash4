@@ -35,6 +35,13 @@ export type PlannedIntent =
   | 'accounting.journal'
   | 'manufacturing.work_order'
   | 'manufacturing.work_order_status'
+  | 'pos.sale'
+  | 'accounting.asset'
+  | 'tax.period'
+  | 'settings.manage'
+  | 'accounting.asset'
+  | 'tax.period'
+  | 'settings.manage'
   | 'hr.operations'
   | 'crm.lead'
   | 'hr.employee'
@@ -74,6 +81,8 @@ export interface PlannedRequest {
     journalLegs: PlannedJournalLeg[];
     /** Target work-order state (manufacturing.work_order_status only). */
     workOrderStatus?: 'in_progress' | 'completed';
+    /** Fiscal year for period/close flows (tax.period only). */
+    fiscalYear?: number;
     paymentType?: 'cash' | 'credit';
     date?: string;
   };
@@ -85,7 +94,10 @@ export interface PlannedRequest {
   plan: 'single-write' | 'ask' | 'generic';
 }
 
-const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undirected' | 'hr.operations'>, string> = {
+const INTENT_WRITE_TOOL: Record<
+  Exclude<PlannedIntent, 'generic' | 'invoice.undirected' | 'hr.operations' | 'accounting.asset' | 'tax.period' | 'settings.manage'>,
+  string
+> = {
   'sales.invoice': 'sales.create_invoice',
   'purchases.invoice': 'purchases.create_invoice',
   'accounting.receipt': 'accounting.create_receipt_voucher',
@@ -93,6 +105,7 @@ const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undi
   'accounting.journal': 'accounting.create_journal_entry',
   'manufacturing.work_order': 'manufacturing.create_work_order',
   'manufacturing.work_order_status': 'manufacturing.update_work_order_status',
+  'pos.sale': 'pos.checkout_sale',
   'crm.lead': 'crm.create_lead',
   'hr.employee': 'hr.create_employee',
   'inventory.product': 'inventory.create_product',
@@ -100,22 +113,31 @@ const INTENT_WRITE_TOOL: Record<Exclude<PlannedIntent, 'generic' | 'invoice.undi
 
 const CASH_RE = /نقد|كاش|فور|مدفوع|مقبوض|عاجل|حاضر/;
 /** Question words — asking for information, not ordering an action. */
-const QUESTION_RE = /؟|^(ما|ماذا|مادا|كم|هل|لماذا|ليش|وين|اين|أين|متى|متا|كيف|اعرض|اوضح|اشرح|هات|اذكر|عدد|بكم)/;
+const QUESTION_RE = /؟|^(ما|ماذا|مادا|كم|هل|لماذا|ليش|وين|اين|متى|متا|كيف|اعرض|اوضح|اشرح|هات|اذكر|عدد|بكم)/;
 /** Creation/posting/payment verbs and nouns — the user orders an action. */
-const ACTION_RE = /أنشئ|انشئ|إنشاء|انشاء|سجل|سجّل|تسجيل|ضيف|أضف|اضف|إضافة|اضافة|افتح|احذف|حذف|عدل|عدّل|تعديل|رحل|رحّل|ترحيل|ادفع|دفع|حوّل|تحويل|سدد|تسديد|اصرف|صرف|اقبض|قبض|استلم|استلام|ولّد|اطبع|صدّر|اقفل/;const MFG_RE = /أمر\s*تشغيل|امر\s*تشغيل|تصنيع|إنتاج|انتاج|شغل.*مصنع|bom/;
+const ACTION_RE = /انشئ|انشاء|سجل|تسجيل|ضيف|اضف|اضافه|افتح|احذف|حذف|عدل|تعديل|رحل|ترحيل|ادفع|دفع|حول|تحويل|سدد|تسديد|اصرف|صرف|اقبض|قبض|استلم|استلام|ولد|اطبع|صدر|اقفل/;
+const MFG_RE = /امر\s*تشغيل|تصنيع|انتاج|شغل.*مصنع|bom/;
+/** POS terminal sale — needs cashier/shift/terminal context, never a bare بيع. */
+const POS_RE = /كاشير|ورديه|شيفت|نقطه بيع|تقرير\s*z|ايصال/;
+/** Fixed assets: register/depreciate/dispose — never an invoice. */
+const ASSET_RE = /اصول|اصل ثابت|اهلاك|استبعاد/;
+/** Tax periods & year-end close (patterns in normalizeArabic() output form). */
+const PERIOD_RE = /فتره|فترات|اقرار|اقفال|سنه\s+(ال)?ماليه|اعاده تقييم/;
+/** Settings management (entities resolved via search tools, not the block). */
+const SETTINGS_RE = /اعدادات|إعدادات|فرع|فروع|صندوق|صناديق|مركز تكلفه|مركز التكلفة|تسلسل|ترقيم|قوالب|قالب|ثيم|وحده|وحدات/;
 /** HR batch operations: payroll/attendance/leaves/components/departments. */
-const HR_OPS_RE = /راتب|رواتب|مسير|حضور|غياب|انصراف|اجازه|إجازه|اجازات|إجازات|مكونات|بنود.*راتب|كشف.*راتب|موظف|موظفين|قسم|اقسام|أقسام/;
+const HR_OPS_RE = /راتب|رواتب|مسير|حضور|غياب|انصراف|اجازه|اجازات|مكونات|بنود.*راتب|كشف.*راتب|موظف|موظفين|قسم|اقسام/;
 /** Execution-state change of an EXISTING work order — must beat JOURNAL_RE's bare قيد. */
 const WO_STATUS_RE =
-  /قيد\s*التنفيذ|قيد\s*التشغيل|مكتمل|اكتمل|إنهاء|انهاء|إغلاق|اغلاق|ابدا\s*التنفيذ|ابدأ/;
-const LEAD_RE = /عميل\s*محتمل|عملاء\s*محتملين|فرص|فرصة|تأهيل|متابعة\s*عميل/;
-const NEW_EMPLOYEE_RE = /موظف\s*جديد|إضافة\s*موظف|اضافة\s*موظف|تعيين\s*موظف/;
-const NEW_PRODUCT_RE = /منتج\s*جديد|صنف\s*جديد|إضافة\s*صنف|اضافة\s*صنف|إضافة\s*منتج|اضافة\s*منتج/;
+  /قيد\s*التنفيذ|قيد\s*التشغيل|مكتمل|اكتمل|انهاء|اغلاق|ابدا\s*التنفيذ/;
+const LEAD_RE = /عميل\s*محتمل|عملاء\s*محتملين|فرص|فرصه|تاهيل|متابعه\s*عميل/;
+const NEW_EMPLOYEE_RE = /موظف\s*جديد|اضافه\s*موظف|تعيين\s*موظف/;
+const NEW_PRODUCT_RE = /منتج\s*جديد|صنف\s*جديد|اضافه\s*صنف|اضافه\s*منتج/;
 const SALES_RE = /فاتور\w*\s*(بيع|مبيع)|فواتير\s*بيع|بيع|مبيعات|عميل|عملاء/;
 const PURCHASES_RE = /فاتور\w*\s*(شراء|مشتر)|فواتير\s*شراء|مشتريات|مورد|موردين|شراء/;
 const RECEIPT_RE = /سند\s*قبض|سندقبض|قبض|تحصيل|استلام.*عميل/;
 const PAYMENT_RE = /سند\s*صرف|سندصرف|صرف|سداد.*مورد|دفع.*مورد|مصروف/;
-const JOURNAL_RE = /قيد|قيود|يومية|دفتر/;
+const JOURNAL_RE = /قيد|قيود|يوميه|دفتر/;
 
 function detectIntent(norm: string): PlannedIntent {
   // Specific creation phrases first — they contain generic party words too
@@ -136,6 +158,9 @@ function detectIntent(norm: string): PlannedIntent {
   // pre-resolved employees. Matching it here STOPS the invoice fallback
   // from rendering garbage "extracted lines" (250000 × بسعر 6…) on HR text.
   if (HR_OPS_RE.test(norm)) return 'hr.operations';
+  // POS before sales: "بيع في الكاشير" is a terminal sale, not an invoice.
+  // POS_RE requires terminal context (bare بيع/نقدي stays sales.invoice).
+  if (POS_RE.test(norm)) return 'pos.sale';
   if (MFG_RE.test(norm)) return 'manufacturing.work_order';
   // Receipt/payment first: they contain party words too ("سند قبض من عميل").
   if (RECEIPT_RE.test(norm)) return 'accounting.receipt';
@@ -154,11 +179,16 @@ function detectIntent(norm: string): PlannedIntent {
     if (/عميل|عملاء|زبون|زبائن/.test(norm)) return 'sales.invoice';
     // Prepositions anywhere after the invoice word: "فاتورة نقدية من أبو
     // العز" (goods FROM a party) leans purchase, "فاتورة لغدرة" leans sales.
-    if (/\sمن\s/.test(norm)) return 'purchases.invoice';
     // \w never matches Arabic letters — use \S for the word tail (فاتوره).
+    if (/\sمن\s/.test(norm)) return 'purchases.invoice';
     if (/فاتور\S*\s+ل/.test(norm)) return 'sales.invoice';
     return 'invoice.undirected';
   }
+  // Asset/period/settings AFTER document intents: "الصندوق" inside an
+  // invoice/voucher/journal must not reroute to settings.
+  if (ASSET_RE.test(norm)) return 'accounting.asset';
+  if (PERIOD_RE.test(norm)) return 'tax.period';
+  if (SETTINGS_RE.test(norm)) return 'settings.manage';
   return 'generic';
 }
 
@@ -439,6 +469,10 @@ function needsFor(intent: PlannedIntent): EntityKind[] {
       // needs both UUIDs before create_work_order/complete (live 2026-10-02:
       // empty warehouse searches looped because nothing pre-resolved them).
       return ['product', 'warehouse'];
+    case 'pos.sale':
+      // Product + customer + till: the shift itself comes from
+      // pos.get_active_shift at execution time (rule 47), never from search.
+      return ['product', 'customer', 'cash_box'];
     case 'manufacturing.work_order_status':
       // Which order is resolved from the short query (number/product);
       // the target state is already decided below — never searched.
@@ -451,6 +485,14 @@ function needsFor(intent: PlannedIntent): EntityKind[] {
       // Employees resolve up-front; the wizards (preview→generate→post,
       // attendance, leaves) consume their UUIDs. No invoice lines ever.
       return ['employee'];
+    case 'accounting.asset':
+      return ['asset'];
+    case 'tax.period':
+    case 'settings.manage':
+      // Periods/settings resolve via their own search/list tools mid-chain,
+      // not the pre-resolution block — the intent match itself is the win
+      // (stops invoice/journal fallback garbage on these texts).
+      return [];
     case 'inventory.product':
       return ['product'];
     default:
@@ -501,7 +543,10 @@ export function planRequest(rawText: string): PlannedRequest {
   const isCash = CASH_RE.test(norm);
   const slots: PlannedRequest['slots'] = { quantities: [], prices: [], lines: [], journalLegs: [] };
   const isInvoiceLike =
-    intent === 'sales.invoice' || intent === 'purchases.invoice' || intent === 'invoice.undirected';
+    intent === 'sales.invoice' ||
+    intent === 'purchases.invoice' ||
+    intent === 'invoice.undirected' ||
+    intent === 'pos.sale';
   if (isInvoiceLike) {
     slots.paymentType = isCash ? 'cash' : 'credit';
     let nums = extractDocumentNumbers(text);
@@ -525,9 +570,17 @@ export function planRequest(rawText: string): PlannedRequest {
     slots.lines = paired.lines;
   }
   if (intent === 'manufacturing.work_order_status') {
-    slots.workOrderStatus = /مكتمل|اكتمل|إنهاء|انهاء|إغلاق|اغلاق/.test(norm)
+    slots.workOrderStatus = /مكتمل|اكتمل|انهاء|اغلاق/.test(norm)
       ? 'completed'
       : 'in_progress';
+  }
+  if (intent === 'tax.period') {
+    // Fiscal year travels with the plan — the model must not re-parse it
+    // per turn ("اقفل السنة 2025" → 2025, never an amount). Up to two words
+    // may sit between ("السنة المالية 2025").
+    const m = text.match(/(?:سنة|سنه|عام|فتره|فترة)(?:\s+\S+){0,2}\s*(\d{4})|(\d{4})\s*(?:سنة|سنه|عام)/);
+    const y = m ? Number(m[1] ?? m[2]) : NaN;
+    if (Number.isInteger(y) && y >= 2000 && y <= 2100) slots.fiscalYear = y;
   }
   // Journal legs split BEFORE entity requests are built — resolution is
   // per-leg (each account text independently).
@@ -542,8 +595,7 @@ export function planRequest(rawText: string): PlannedRequest {
   // family scores it independently (no name segmentation attempted).
   if ((intent === 'sales.invoice' || intent === 'purchases.invoice') && slots.paymentType === 'cash') {
     kinds.push('cash_box');
-  }
-  // Journal legs resolve per-leg (each account text independently) — one
+  }  // Journal legs resolve per-leg (each account text independently) — one
   // blob request could never separate three accounts. Leg texts are already
   // short; other kinds go through the short-query extractor so command/doc
   // words never dilute the fuzzy score ("فاتورة ابو العز هي فاتورة
@@ -593,9 +645,13 @@ export function planRequest(rawText: string): PlannedRequest {
   return {
     intent,
     // Undirected invoices name no tool — the block decides (rule 55).
-    // HR operations are multi-step by nature (wizards) — no single tool.
+    // HR operations / assets / periods / settings are multi-step by nature.
     writeTool:
-      intent === 'invoice.undirected' || intent === 'hr.operations'
+      intent === 'invoice.undirected' ||
+      intent === 'hr.operations' ||
+      intent === 'accounting.asset' ||
+      intent === 'tax.period' ||
+      intent === 'settings.manage'
         ? null
         : INTENT_WRITE_TOOL[intent],
     slots,
@@ -637,6 +693,9 @@ export function renderPlannedSlots(planned: PlannedRequest): string | null {
     );
   }
   if (planned.slots.date) parts.push(`- **التاريخ**: ${planned.slots.date}`);
+  if (planned.slots.fiscalYear) {
+    parts.push(`- **السنة المالية**: ${planned.slots.fiscalYear} — استخدمها في أدوات الفترات/الإقفال كما هي`);
+  }
   if (planned.slots.workOrderStatus) {
     parts.push(
       planned.slots.workOrderStatus === 'completed'

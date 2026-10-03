@@ -197,15 +197,16 @@ export const settingsWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         nameAr: { type: 'string', description: 'اسم النوع بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'اسم النوع بالإنجليزية' },
         isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
       },
-      required: ['nameAr'],
+      required: [],
     },
-    summarizeArgs: (a) => `إضافة نوع منتج: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
+    summarizeArgs: (a) => `إضافة نوع منتج: ${String((a as Record<string, unknown>).nameAr ?? (a as Record<string, unknown>).name ?? '').slice(0, 30)}`,
     execute: async (args, ctx) => {
-      const nameAr = str(args.nameAr);
-      if (!nameAr) return { error: 'nameAr مطلوب' };
+      const nameAr = str(args.nameAr) ?? str(args.name);
+      if (!nameAr) return { error: 'nameAr مطلوب (يقبل name كبديل)' };
       const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       data.isActive = args.isActive !== undefined ? Boolean(args.isActive) : true;
@@ -227,6 +228,7 @@ export const settingsWriteTools: ToolDefinition[] = [
       properties: {
         productTypeId: { type: 'string', description: 'معرف نوع المنتج (UUID)' },
         nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
         isActive: { type: 'boolean', description: 'حالة التفعيل' },
       },
@@ -237,7 +239,8 @@ export const settingsWriteTools: ToolDefinition[] = [
       const productTypeId = str(args.productTypeId);
       if (!productTypeId) return { error: 'productTypeId مطلوب — استخدم settings.get_product_types أولاً' };
       const data: Record<string, unknown> = {};
-      if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
+      const updNameAr = str(args.nameAr) ?? str(args.name);
+      if (updNameAr !== undefined) data.nameAr = updNameAr;
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
@@ -282,18 +285,19 @@ export const settingsWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         nameAr: { type: 'string', description: 'اسم الوحدة بالعربية (مثل: كيلوغرام)' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'اسم الوحدة بالإنجليزية (مثل: kg)' },
         code: { type: 'string', description: 'رمز الوحدة (مثل: كجم)' },
         conversionFactor: { type: 'number', description: 'معامل التحويل إلى الوحدة الأساسية' },
         baseUnitId: { type: 'string', description: 'معرف الوحدة الأساسية (UUID)' },
         isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
       },
-      required: ['nameAr'],
+      required: [],
     },
-    summarizeArgs: (a) => `إضافة وحدة قياس: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
+    summarizeArgs: (a) => `إضافة وحدة قياس: ${String((a as Record<string, unknown>).nameAr ?? (a as Record<string, unknown>).name ?? '').slice(0, 30)}`,
     execute: async (args, ctx) => {
-      const nameAr = str(args.nameAr);
-      if (!nameAr) return { error: 'nameAr مطلوب' };
+      const nameAr = str(args.nameAr) ?? str(args.name);
+      if (!nameAr) return { error: 'nameAr مطلوب (يقبل name كبديل)' };
       const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
@@ -318,6 +322,7 @@ export const settingsWriteTools: ToolDefinition[] = [
       properties: {
         unitId: { type: 'string', description: 'معرف الوحدة (UUID)' },
         nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
         code: { type: 'string', description: 'رمز الوحدة' },
         conversionFactor: { type: 'number', description: 'معامل التحويل' },
@@ -331,7 +336,8 @@ export const settingsWriteTools: ToolDefinition[] = [
       const unitId = str(args.unitId);
       if (!unitId) return { error: 'unitId مطلوب — استخدم settings.get_units أولاً' };
       const data: Record<string, unknown> = {};
-      if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
+      const updUnitName = str(args.nameAr) ?? str(args.name);
+      if (updUnitName !== undefined) data.nameAr = updUnitName;
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
       if (args.conversionFactor !== undefined) data.conversionFactor = num(args.conversionFactor);
@@ -379,17 +385,18 @@ export const settingsWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         nameAr: { type: 'string', description: 'اسم الصندوق بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'اسم الصندوق بالإنجليزية' },
         openingBalance: { type: 'number', description: 'الرصيد الافتتاحي', default: 0 },
         description: { type: 'string', description: 'وصف الصندوق' },
         isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
       },
-      required: ['nameAr'],
+      required: [],
     },
-    summarizeArgs: (a) => `إضافة صندوق نقدي: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
+    summarizeArgs: (a) => `إضافة صندوق نقدي: ${String((a as Record<string, unknown>).nameAr ?? (a as Record<string, unknown>).name ?? '').slice(0, 30)}`,
     execute: async (args, ctx) => {
-      const nameAr = str(args.nameAr);
-      if (!nameAr) return { error: 'nameAr مطلوب' };
+      const nameAr = str(args.nameAr) ?? str(args.name);
+      if (!nameAr) return { error: 'nameAr مطلوب (يقبل name كبديل)' };
       const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       data.openingBalance = args.openingBalance !== undefined ? num(args.openingBalance) : 0;
@@ -413,6 +420,7 @@ export const settingsWriteTools: ToolDefinition[] = [
       properties: {
         cashBoxId: { type: 'string', description: 'معرف الصندوق (UUID)' },
         nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
         openingBalance: { type: 'number', description: 'الرصيد الافتتاحي' },
         description: { type: 'string', description: 'الوصف' },
@@ -425,7 +433,8 @@ export const settingsWriteTools: ToolDefinition[] = [
       const cashBoxId = str(args.cashBoxId);
       if (!cashBoxId) return { error: 'cashBoxId مطلوب — استخدم settings.get_cash_boxes أولاً' };
       const data: Record<string, unknown> = {};
-      if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
+      const updBoxName = str(args.nameAr) ?? str(args.name);
+      if (updBoxName !== undefined) data.nameAr = updBoxName;
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.openingBalance !== undefined) data.openingBalance = num(args.openingBalance);
       if (args.description !== undefined) data.description = str(args.description);
@@ -472,18 +481,19 @@ export const settingsWriteTools: ToolDefinition[] = [
       type: 'object',
       properties: {
         nameAr: { type: 'string', description: 'اسم المركز بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'اسم المركز بالإنجليزية' },
         code: { type: 'string', description: 'كود المركز' },
         description: { type: 'string', description: 'وصف المركز' },
         parentId: { type: 'string', description: 'معرف المركز الأب (UUID — اختياري)' },
         isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
       },
-      required: ['nameAr'],
+      required: [],
     },
-    summarizeArgs: (a) => `إضافة مركز تكلفة: ${String((a as Record<string, unknown>).nameAr || '').slice(0, 30)}`,
+    summarizeArgs: (a) => `إضافة مركز تكلفة: ${String((a as Record<string, unknown>).nameAr ?? (a as Record<string, unknown>).name ?? '').slice(0, 30)}`,
     execute: async (args, ctx) => {
-      const nameAr = str(args.nameAr);
-      if (!nameAr) return { error: 'nameAr مطلوب' };
+      const nameAr = str(args.nameAr) ?? str(args.name);
+      if (!nameAr) return { error: 'nameAr مطلوب (يقبل name كبديل)' };
       const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
@@ -508,6 +518,7 @@ export const settingsWriteTools: ToolDefinition[] = [
       properties: {
         costCenterId: { type: 'string', description: 'معرف المركز (UUID)' },
         nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
         code: { type: 'string', description: 'الكود' },
         description: { type: 'string', description: 'الوصف' },
@@ -521,7 +532,8 @@ export const settingsWriteTools: ToolDefinition[] = [
       const costCenterId = str(args.costCenterId);
       if (!costCenterId) return { error: 'costCenterId مطلوب — استخدم settings.get_cost_centers أولاً' };
       const data: Record<string, unknown> = {};
-      if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
+      const updCcName = str(args.nameAr) ?? str(args.name);
+      if (updCcName !== undefined) data.nameAr = updCcName;
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
       if (args.description !== undefined) data.description = str(args.description);

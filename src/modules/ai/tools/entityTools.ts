@@ -27,6 +27,9 @@ const KINDS: EntityKind[] = [
   'paymentVoucher',
   'workOrder',
   'bom',
+  'task',
+  'activity',
+  'asset',
 ];
 
 export const entityTools: ToolDefinition[] = [
