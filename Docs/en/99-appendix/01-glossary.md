@@ -5,7 +5,7 @@ slug: "en/99-appendix/01-glossary"
 group: "Appendices"
 language: "en"
 created: 2026-09-13
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Glossary

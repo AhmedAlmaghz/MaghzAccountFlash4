@@ -5,7 +5,7 @@ slug: "ar/Examples/01-retail-store"
 group: "أمثلة تدريبية محلولة"
 language: "ar"
 created: 2026-09-21
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # مثال 01 — متجر الأمانة للتجارة (دورة تجارية كاملة)

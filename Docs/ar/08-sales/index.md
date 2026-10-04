@@ -5,7 +5,7 @@ slug: "ar/08-sales/index"
 group: "المبيعات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # المبيعات — دليل الاستخدام

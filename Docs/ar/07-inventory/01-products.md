@@ -5,7 +5,7 @@ slug: "ar/07-inventory/01-products"
 group: "المخازن"
 language: "ar"
 created: 2026-09-12
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # المنتجات — دليل الاستخدام

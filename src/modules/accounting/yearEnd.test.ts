@@ -14,6 +14,10 @@ import {
   openAccountingPeriod,
   previewFiscalClose,
   closeFiscalYear,
+  generateSubPeriods,
+  closeAccountingPeriod,
+  reopenAccountingPeriod,
+  reopenAccountingPeriodById,
 } from './yearEnd';
 
 // Real zod validation runs here (not mocked) — Zod 4 strict UUIDs need a
@@ -271,5 +275,129 @@ describe('closeFiscalYear', () => {
     const res = await closeFiscalYear(COMPANY_ID, 2024, 'user-1');
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/retained/i);
+  });
+});
+
+describe('soft-close guard + range precedence', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('blocks soft_closed by default, allows with { allowSoft }', async () => {
+    mockDb(async () => ({
+      success: true,
+      rows: [{ id: 'p1', company_id: COMPANY_ID, year: 2025, period_type: 'monthly', start_date: '2025-01-01', end_date: '2025-01-31', status: 'soft_closed', closed_at: null }],
+    }));
+    const blocked = await assertAccountingPeriodOpen(COMPANY_ID, '2025-01-15');
+    expect(blocked.open).toBe(false);
+    const allowed = await assertAccountingPeriodOpen(COMPANY_ID, '2025-01-15', undefined, { allowSoft: true });
+    expect(allowed.open).toBe(true);
+  });
+
+  it('prefers the smallest covering range (month beats year)', async () => {
+    const { adapter } = mockDb(async () => ({
+      success: true,
+      rows: [{ id: 'pM', company_id: COMPANY_ID, year: 2025, period_type: 'monthly', start_date: '2025-01-01', end_date: '2025-01-31', status: 'closed', closed_at: null }],
+    }));
+    const res = await assertAccountingPeriodOpen(COMPANY_ID, '2025-01-15');
+    expect(res.open).toBe(false);
+    const sql = String(adapter.query.mock.calls[0]?.[0] || '');
+    expect(sql).toMatch(/end_date - start_date/);
+  });
+});
+
+describe('generateSubPeriods', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('generates 12 contiguous monthly ranges for a calendar year', async () => {
+    const seen: string[] = [];
+    mockDb(async (sql, params) => {
+      if (sql.includes('FROM companies')) return { success: true, rows: [] };
+      if (sql.includes('INSERT INTO accounting_periods')) {
+        seen.push(`${params?.[3]}..${params?.[4]}`);
+        return { success: true, rows: [{ id: `p-${seen.length}`, company_id: COMPANY_ID, year: 2025, period_type: 'monthly', start_date: params?.[3], end_date: params?.[4], status: 'open', closed_at: null }] };
+      }
+      return { success: true, rows: [] };
+    });
+    const res = await generateSubPeriods(COMPANY_ID, 2025, 'monthly');
+    expect(res.success).toBe(true);
+    expect(res.data).toHaveLength(12);
+    expect(seen[0]).toBe('2025-01-01..2025-01-31');
+    expect(seen[1]).toBe('2025-02-01..2025-02-28');
+    expect(seen[11]).toBe('2025-12-01..2025-12-31');
+  });
+
+  it('generates 4 quarters + honors a mid-year fiscal start', async () => {
+    const seen: string[] = [];
+    mockDb(async (sql, params) => {
+      if (sql.includes('FROM companies')) return { success: true, rows: [{ fiscal_year_start: '2024-04-01' }] };
+      if (sql.includes('INSERT INTO accounting_periods')) {
+        seen.push(`${params?.[3]}..${params?.[4]}`);
+        return { success: true, rows: [{ id: `p-${seen.length}`, company_id: COMPANY_ID, year: 2025, period_type: 'quarterly', start_date: params?.[3], end_date: params?.[4], status: 'open', closed_at: null }] };
+      }
+      return { success: true, rows: [] };
+    });
+    const res = await generateSubPeriods(COMPANY_ID, 2025, 'quarterly');
+    expect(res.success).toBe(true);
+    expect(res.data).toHaveLength(4);
+    expect(seen[0]).toBe('2025-04-01..2025-06-30');
+    expect(seen[3]).toBe('2026-01-01..2026-03-31');
+  });
+});
+
+describe('close/reopen sequencing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('refuses closing while an earlier period is open (oldest-first)', async () => {
+    mockDb(async (sql) => {
+      // 'end_date <' first: every period query contains 'company_id =' which
+      // itself contains the substring 'id ='.
+      if (sql.includes('end_date <')) return { success: true, rows: [{ end_date: '2025-02-28' }] };
+      if (sql.includes('FROM accounting_periods') && sql.includes('id =')) {
+        return { success: true, rows: [{ id: 'p3', year: 2025, period_type: 'monthly', start_date: '2025-03-01', end_date: '2025-03-31', status: 'open' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    const res = await closeAccountingPeriod(COMPANY_ID, '12345678-2222-4333-8444-555555555555', 'user-1', 'final');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/oldest-first/);
+  });
+
+  it('refuses reopening while a later period is closed (newest-first)', async () => {
+    mockDb(async (sql) => {
+      if (sql.includes('end_date >')) return { success: true, rows: [{ end_date: '2025-03-31' }] };
+      if (sql.includes('FROM accounting_periods') && sql.includes('id =')) {
+        return { success: true, rows: [{ end_date: '2025-01-31', status: 'closed' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    const res = await reopenAccountingPeriodById(COMPANY_ID, '12345678-2222-4333-8444-555555555555', 'user-1');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/newest-first/);
+  });
+
+  it('yearly reopen resolves the annual row then reopens by id', async () => {
+    const queries: string[] = [];
+    mockDb(async (sql) => {
+      queries.push(sql);
+      if (sql.includes('FROM companies')) return { success: true, rows: [] };
+      // 'end_date >' before 'id =': every period query embeds 'company_id ='
+      // which itself contains the substring 'id ='.
+      if (sql.includes('end_date >')) return { success: true, rows: [] };
+      if (sql.includes('start_date =')) {
+        return { success: true, rows: [{ id: 'aaaaaaaa-2222-4333-8444-555555555555' }] };
+      }
+      if (sql.includes('FROM accounting_periods') && sql.includes('id =')) {
+        return { success: true, rows: [{ end_date: '2024-12-31', status: 'closed' }] };
+      }
+      return { success: true, rows: [] };
+    });
+    const res = await reopenAccountingPeriod(COMPANY_ID, 2024, 'user-1');
+    expect(res.success, res.error || '').toBe(true);
+    expect(queries.some((q) => q.includes(`status = 'open'`) && q.includes('closed_at = NULL'))).toBe(true);
   });
 });

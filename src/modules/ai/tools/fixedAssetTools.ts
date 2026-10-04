@@ -116,6 +116,11 @@ export const fixedAssetTools: ToolDefinition[] = [
         method: { type: 'string', description: 'طريقة الإهلاك: straight_line/ثابت أو declining_balance/متناقص (افتراضي straight_line)' },
         funding: { type: 'string', description: 'مصدر التمويل: cash/نقدي، payable/آجل، opening/افتتاحي (افتراضي cash)' },
         cashBoxId: { type: 'string', description: 'معرف الخزينة — إلزامي للتمويل النقدي' },
+        location: { type: 'string', description: 'موقع الأصل (مستودع، فرع…)' },
+        custodian: { type: 'string', description: 'العهدة / المسؤول عن الأصل' },
+        serialNumber: { type: 'string', description: 'الرقم التسلسلي' },
+        warrantyExpiry: { type: 'string', description: 'نهاية الضمان YYYY-MM-DD' },
+        notes: { type: 'string', description: 'ملاحظات' },
       },
       required: ['cost', 'usefulLifeMonths'],
     },
@@ -174,6 +179,11 @@ export const fixedAssetTools: ToolDefinition[] = [
           usefulLifeMonths: life,
           method: method as (typeof METHODS)[number],
           funding: { kind: fundingKind, ...(cashBoxId ? { cashBoxId } : {}) },
+          ...(str(args.location) ? { location: str(args.location) as string } : {}),
+          ...(str(args.custodian) ? { custodian: str(args.custodian) as string } : {}),
+          ...(str(args.serialNumber) ? { serialNumber: str(args.serialNumber) as string } : {}),
+          ...(str(args.warrantyExpiry) ? { warrantyExpiry: str(args.warrantyExpiry) as string } : {}),
+          ...(str(args.notes) ? { notes: str(args.notes) as string } : {}),
         },
         ctx.userId
       );

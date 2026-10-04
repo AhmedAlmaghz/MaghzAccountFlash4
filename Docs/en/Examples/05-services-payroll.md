@@ -5,7 +5,7 @@ slug: "en/Examples/05-services-payroll"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Example 05 — Afaq Consulting (services, payroll & provisions)

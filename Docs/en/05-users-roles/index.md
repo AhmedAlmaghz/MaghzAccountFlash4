@@ -5,7 +5,7 @@ slug: "en/05-users-roles/index"
 group: "Users & Roles"
 language: "en"
 created: 2026-09-13
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Users, Roles & Permissions — User Guide

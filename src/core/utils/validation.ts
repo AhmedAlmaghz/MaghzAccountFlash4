@@ -731,6 +731,11 @@ export const createFixedAssetSchema = z.object({
   usefulLifeMonths: z.number().int().min(1).max(1200),
   method: fixedAssetMethodSchema,
   funding: assetFundingSchema,
+  location: z.string().max(150).optional().or(z.literal('')),
+  custodian: z.string().max(200).optional().or(z.literal('')),
+  serialNumber: z.string().max(100).optional().or(z.literal('')),
+  warrantyExpiry: dateSchema.optional().or(z.literal('')),
+  notes: z.string().max(2000).optional().or(z.literal('')),
 });
 
 export const updateFixedAssetSchema = z.object({
@@ -741,6 +746,11 @@ export const updateFixedAssetSchema = z.object({
   salvageValue: currencyAmountSchema.optional(),
   usefulLifeMonths: z.number().int().min(1).max(1200).optional(),
   method: fixedAssetMethodSchema.optional(),
+  location: z.string().max(150).optional().or(z.literal('')),
+  custodian: z.string().max(200).optional().or(z.literal('')),
+  serialNumber: z.string().max(100).optional().or(z.literal('')),
+  warrantyExpiry: dateSchema.optional().or(z.literal('')).nullable().optional(),
+  notes: z.string().max(2000).optional().or(z.literal('')),
 });
 
 export const depreciationRunSchema = z.object({

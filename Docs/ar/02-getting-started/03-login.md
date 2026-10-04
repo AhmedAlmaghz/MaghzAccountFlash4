@@ -5,7 +5,7 @@ slug: "ar/02-getting-started/03-login"
 group: "البدء السريع"
 language: "ar"
 created: 2026-09-12
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # تسجيل الدخول — دليل الاستخدام

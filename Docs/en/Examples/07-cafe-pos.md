@@ -5,7 +5,7 @@ slug: "en/Examples/07-cafe-pos"
 group: "Solved Training Examples"
 language: "en"
 created: 2026-09-21
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Example 07 — Al-Diwan Café POS (shifts, differences & custody)

@@ -56,12 +56,10 @@ const ACC = {
   SALARIES: '52101',       // رواتب وأجور
   RENT_WAREHOUSE: '52201', // إيجار مستودعات
   RENT_OFFICE: '52202',    // إيجار مكاتب
-  ELECTRICITY: '52301',    // كهرباء وماء
-  ADVERTISING: '52401',    // إعلانات ودعاية
-  MAINTENANCE: '52501',    // صيانة معدات
-  SHIPPING: '52601',       // نقل وشحن
-  BUILDING_DEP: '52701',   // استهلاك مباني
-  EQUIPMENT_DEP: '52702',  // استهلاك معدات
+  ELECTRICITY: '52301',    // كهرباء وماء → لا حساب مخصص في الدليل، يسقط على المتنوعة
+  ADVERTISING: '52301',    // إعلانات ودعاية → لا حساب مخصص في الدليل، يسقط على المتنوعة
+  MAINTENANCE: '52301',    // صيانة معدات → لا حساب مخصص في الدليل، يسقط على المتنوعة (كانت 52501 = مصروف نهاية خدمة: خطأ)
+  SHIPPING: '52401',       // نقل وشحن (seed: Shipping & Freight)
   PRICE_VARIANCE: '51901', // فروق أسعار الشراء والتقييم (Phase 1)
   INV_SHORTAGE: '52901',   // عجز المخزون — فاقد (Phase 1)
   INV_SURPLUS: '41901',    // فائض المخزون — عثور (Phase 1)
@@ -180,6 +178,7 @@ export async function getDefaultAccountId(companyId: string, functionKey: string
     default_fixed_assets: ACC.FIXED_ASSETS,
     default_accumulated_depreciation: ACC.ACC_DEP,
     default_depreciation_expense: ACC.DEP_EXPENSE,
+    default_asset_disposal_gain: '41902',
     default_retained_earnings: ACC.RETAINED,
   };
   const code = fallbackMap[functionKey];

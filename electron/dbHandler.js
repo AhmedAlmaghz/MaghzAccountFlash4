@@ -1688,7 +1688,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // since it's truly dynamic and needs `ON CONFLICT DO NOTHING`.
   registerRpc('inventory.createProduct', {
     permission: 'inventory.create',
-    paramCount: 14,
+    paramCount: 19,
     validate: async (p, session) => {
       if (!p.code || !p.nameAr) throw new Error('code and nameAr required');
       if (p.categoryId !== undefined && p.categoryId !== null) {
@@ -1699,8 +1699,8 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       }
     },
     compose: (p, session) => ({
-      sql: `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+      sql: `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by, image, min_stock, max_stock, reorder_point, standard_cost)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
       params: [
         session.user.companyId,
         String(p.code || ''),
@@ -1716,6 +1716,11 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
         p.isActive === false ? false : true,
         session.user.id,
         session.user.id,
+        p.image ?? null,
+        p.minStock ?? null,
+        p.maxStock ?? null,
+        p.reorderPoint ?? null,
+        p.standardCost ?? null,
       ],
     }),
   });
@@ -3276,7 +3281,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
 
   // tax.findPeriod — the period covering a posting date, or none (open).
   registerRpc('tax.findPeriod', {
-    paramCount: 1,
+    paramCount: 2,
     compose: (p, session) => ({
       sql: `SELECT id, company_id, country_code, period_type, start_date, end_date, status, filed_at
                FROM tax_periods
@@ -3289,12 +3294,21 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
-  // tax.openPeriod — idempotent per company + range.
+  // tax.openPeriod — idempotent per company + range, overlap-guarded: any
+  // intersecting range (not just the exact duplicate) refuses via mapResult.
   registerRpc('tax.openPeriod', {
-    paramCount: 4,
+    paramCount: 5,
+    mapResult: (rows) => {
+      if (!rows?.length) throw new Error('Tax period overlaps an existing period');
+      return rows;
+    },
     compose: (p, session) => ({
       sql: `INSERT INTO tax_periods (company_id, country_code, period_type, start_date, end_date, status)
-            VALUES ($1::uuid, $2, $3, $4::date, $5::date, 'open')
+            SELECT $1::uuid, $2, $3, $4::date, $5::date, 'open'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM tax_periods
+              WHERE company_id = $1::uuid AND start_date <= $5::date AND end_date >= $4::date
+            )
             ON CONFLICT (company_id, start_date, end_date) DO UPDATE SET updated_at = NOW()
             RETURNING id`,
       params: [
@@ -3309,20 +3323,30 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       for (const f of ['startDate', 'endDate']) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p[f] || '').slice(0, 10))) throw new Error(`${f} must be YYYY-MM-DD`);
       }
+      if (String(p.endDate).slice(0, 10) < String(p.startDate).slice(0, 10)) throw new Error('endDate must be on or after startDate');
       if (!p.countryCode || !p.periodType) throw new Error('countryCode and periodType are required');
     },
   });
 
   // tax.setPeriodStatus — close / reopen / mark filed. The filed_at stamp is
   // set by the same UPDATE, so a filed period always carries its filing date.
+  // State machine (open → closed → filed; closed → open): filed is terminal.
   registerRpc('tax.setPeriodStatus', {
-    paramCount: 1,
+    paramCount: 3,
+    mapResult: (rows) => {
+      if (!rows?.length) throw new Error('Illegal tax-period transition (open → closed → filed; filed is terminal)');
+      return rows;
+    },
     compose: (p, session) => ({
       sql: `UPDATE tax_periods
                SET status = $1::varchar,
                    filed_at = CASE WHEN $1::varchar = 'filed' THEN NOW() ELSE filed_at END,
                    updated_at = NOW()
-             WHERE id = $2::uuid AND company_id = $3::uuid`,
+             WHERE id = $2::uuid AND company_id = $3::uuid
+               AND ((status = 'open' AND $1::varchar = 'closed')
+                 OR (status = 'closed' AND $1::varchar IN ('open', 'filed'))
+                 OR (status = $1::varchar))
+             RETURNING id`,
       params: [String(p.status || ''), String(p.periodId || ''), session.user.companyId],
     }),
     validate: (p) => {
@@ -3333,7 +3357,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
 
   // tax.listPeriods — newest first.
   registerRpc('tax.listPeriods', {
-    paramCount: 0,
+    paramCount: 1,
     compose: (_p, session) => ({
       sql: `SELECT id, company_id, country_code, period_type, start_date, end_date, status, filed_at
                FROM tax_periods WHERE company_id = $1::uuid ORDER BY end_date DESC`,
@@ -8115,6 +8139,12 @@ export async function seedInitialData(adminPassword, company) {
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
       VALUES ($1, '41901', 'ظپط§ط¦ط¶ ط§ظ„ظ…ط®ط²ظˆظ†', 'Inventory Surplus Gain', $2, 'revenue', 'credit', FALSE, 0);
     `, [companyId, revenueId]);
+    // Fixed-asset disposal gains live apart from inventory surplus (IAS 16
+    // presentation: operating gains are not stock-count gains).
+    await client.query(`
+      INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
+      VALUES ($1, '41902', 'أرباح استبعاد الأصول الثابتة', 'Fixed Asset Disposal Gains', $2, 'revenue', 'credit', FALSE, 0);
+    `, [companyId, revenueId]);
 
     // Phase 5: fixed-asset groups + leaves (12/121/12101 cost, 12102 contra).
     const faGroupRes = await client.query(`
@@ -8245,6 +8275,7 @@ export async function seedInitialData(adminPassword, company) {
       { key: 'default_price_variance', code: '51901', required: false },
       { key: 'default_inventory_shortage', code: '52901', required: false },
       { key: 'default_inventory_surplus', code: '41901', required: false },
+      { key: 'default_asset_disposal_gain', code: '41902', required: false },
       // Phase 2 (FIN-2): realized + unrealized exchange differences.
       { key: 'default_exchange_difference', code: '52902', required: false },
       // Phase 5: fixed assets + depreciation + retained earnings.

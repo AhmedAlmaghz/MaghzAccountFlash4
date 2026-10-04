@@ -6,12 +6,14 @@ import { join } from 'path';
  * Schema contract tests — unified squashed baseline.
  *
  * The project keeps ONE idempotent baseline (0000_init.sql): the squash of the
- * original 0000–0042 migration chain, generated from the exact PostgreSQL state
- * that chain produced on a fresh database (verified by a full catalog diff:
- * tables, columns, constraints and indexes are byte-for-byte equivalent).
+ * original 0000–0042 migration chain, plus small additive migrations
+ * (0001_asset_periods.sql, …) for later schema work. Every additive file is
+ * idempotent (IF NOT EXISTS / guarded DO blocks / WHERE NOT EXISTS) and
+ * registered in the PGlite MIGRATIONS list, so Electron, browser and e2e
+ * all converge on the same schema.
  *
  * These tests enforce the contract so future schema work stays safe:
- *   1. The baseline is the only migration file; the journal mirrors it.
+ *   1. The migration files match the journal; every file is PGlite-registered.
  *   2. The baseline contains every business table and critical column.
  *   3. Hand-maintained performance/partial indexes are present.
  *   4. The cascade/restrict/set-null decisions from migrations 0038–0042
@@ -25,16 +27,18 @@ const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort
 const baselineFile = '0000_init.sql';
 const sql = readFileSync(join(MIGRATIONS_DIR, baselineFile), 'utf-8');
 
-describe('Migration layout: single squashed baseline', () => {
-  it('the baseline is the ONLY migration file', () => {
-    expect(files).toEqual([baselineFile]);
+describe('Migration layout: squashed baseline + additive migrations', () => {
+  it('the baseline plus additive migrations only', () => {
+    expect(files).toEqual([baselineFile, '0001_asset_periods.sql']);
   });
 
-  it('journal mirrors the baseline exactly', () => {
+  it('journal mirrors the migration files in order', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8'));
-    expect(journal.entries).toHaveLength(1);
+    expect(journal.entries).toHaveLength(2);
     expect(journal.entries[0].tag).toBe('0000_init');
     expect(journal.entries[0].idx).toBe(0);
+    expect(journal.entries[1].tag).toBe('0001_asset_periods');
+    expect(journal.entries[1].idx).toBe(1);
     expect(journal.dialect).toBe('postgresql');
     // Snapshot must exist for future drizzle-kit generate diffs.
     expect(existsSync(join(MIGRATIONS_DIR, 'meta', '0000_snapshot.json'))).toBe(true);
@@ -80,12 +84,60 @@ describe('Migration layout: single squashed baseline', () => {
     expect(guarded.length).toBe(all.length);
   });
 
-  it('PGlite ships the same single baseline (hand-maintained registry)', () => {
+  it('PGlite ships the baseline plus registered additive migrations', () => {
     const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf8');
     expect(pglite).toMatch(/import schemaInit from '@root\/drizzle\/0000_init\.sql\?raw'/);
     expect(pglite).toMatch(/\{ name: '0000_init', sql: schemaInit \}/);
-    // and nothing else is registered
-    expect(pglite).not.toMatch(/000[1-9]_|00[1-4][0-9]_/);
+    expect(pglite).toMatch(/0001_asset_periods\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0001_asset_periods', sql: schemaAssetPeriods \}/);
+  });
+
+  it('every drizzle/*.sql file is registered in PGlite (no orphan migration)', () => {
+    const pglite = readFileSync(join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'), 'utf8');
+    for (const f of files) {
+      const name = f.replace(/\.sql$/, '');
+      expect(pglite).toContain(`'${name}'`);
+    }
+  });
+});
+
+describe('0001_asset_periods: additive, idempotent, scoped', () => {
+  const sql1 = readFileSync(join(MIGRATIONS_DIR, '0001_asset_periods.sql'), 'utf-8');
+
+  it('adds the five operational columns to fixed_assets', () => {
+    for (const c of ['"location"', '"custodian"', '"serial_number"', '"warranty_expiry"', '"notes"']) {
+      expect(sql1).toContain(`ADD COLUMN IF NOT EXISTS ${c}`);
+    }
+  });
+
+  it('adds period_type to accounting_periods with an annual default', () => {
+    expect(sql1).toContain(`ADD COLUMN IF NOT EXISTS "period_type"`);
+    expect(sql1).toContain(`DEFAULT 'annual'`);
+  });
+
+  it('swaps the yearly unique for a range unique (sub-periods need it)', () => {
+    expect(sql1).toContain(`DROP CONSTRAINT "uq_accounting_periods_year"`);
+    expect(sql1).toContain(`ADD CONSTRAINT "uq_accounting_periods_range" UNIQUE("company_id","start_date","end_date")`);
+  });
+
+  it('widens the status check to the soft-close state', () => {
+    expect(sql1).toContain(`'open','soft_closed','closed'`);
+  });
+
+  it('seeds 41902 + its default key per company, idempotently', () => {
+    expect(sql1).toContain(`'41902'`);
+    expect(sql1).toContain(`'default_asset_disposal_gain'`);
+    expect(sql1).toContain(`WHERE NOT EXISTS`);
+  });
+
+  it('every statement is breakpoint-terminated and guarded', () => {
+    const statements = sql1.split('--> statement-breakpoint').map((s) => s.trim()).filter(Boolean);
+    expect(statements.length).toBeGreaterThan(5);
+    for (const stmt of statements) {
+      expect(stmt.endsWith(';'), `statement without trailing ;: ${stmt.slice(0, 60)}`).toBe(true);
+    }
+    // No bare ADD COLUMN / ADD CONSTRAINT outside a guard.
+    expect(sql1).not.toMatch(/ADD COLUMN "(location|custodian|serial_number|warranty_expiry|notes|period_type)" varchar[^;]*;/);
   });
 });
 

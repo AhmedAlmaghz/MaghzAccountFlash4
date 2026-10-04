@@ -99,9 +99,11 @@ function dbFailure(err: unknown): { success: false; error: string; errorCode?: s
 // normalizeIdempotent() below — mirroring electron/migrationRunner.js.
 
 import schemaInit from '@root/drizzle/0000_init.sql?raw';
+import schemaAssetPeriods from '@root/drizzle/0001_asset_periods.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
+  { name: '0001_asset_periods', sql: schemaAssetPeriods },
 ];
 
 /**
@@ -297,6 +299,7 @@ const ACCOUNTS: Array<{
     { code: '421', name_ar: 'خصومات مكتسبة', name_en: 'Discounts Earned', type: 'revenue', nature: 'credit', is_group: true, parent_code: '42' },
     { code: '42101', name_ar: 'خصم مكتسب', name_en: 'Purchase Discounts Earned', type: 'revenue', nature: 'credit', is_group: false, parent_code: '421' },
     { code: '41901', name_ar: 'فائض المخزون', name_en: 'Inventory Surplus Gain', type: 'revenue', nature: 'credit', is_group: false, parent_code: '41' },
+    { code: '41902', name_ar: 'أرباح استبعاد الأصول الثابتة', name_en: 'Fixed Asset Disposal Gains', type: 'revenue', nature: 'credit', is_group: false, parent_code: '41' },
     // Expenses
     { code: '5', name_ar: 'المصروفات', name_en: 'Expenses', type: 'expense', nature: 'debit', is_group: true, parent_code: null },
     { code: '51', name_ar: 'تكلفة المبيعات', name_en: 'Cost of Sales', type: 'expense', nature: 'debit', is_group: true, parent_code: '5' },
@@ -366,6 +369,7 @@ const DEFAULT_ACCOUNTS: Array<{ key: string; account_code: string; required: boo
   { key: 'default_exchange_difference', account_code: '52902', required: false, description: 'فروق أسعار الصرف (محققة وغير محققة)' },
   { key: 'default_inventory_shortage', account_code: '52901', required: false, description: 'عجز المخزون (فاقد)' },
   { key: 'default_inventory_surplus', account_code: '41901', required: false, description: 'فائض المخزون (عثور)' },
+  { key: 'default_asset_disposal_gain', account_code: '41902', required: false, description: 'أرباح استبعاد الأصول الثابتة' },
   { key: 'default_inventory', account_code: '11301', required: true, description: 'حساب المخزون' },
   { key: 'default_wip', account_code: '11302', required: false, description: 'حساب بضاعة تحت التشغيل' },
   { key: 'default_finished_goods', account_code: '11303', required: false, description: 'حساب مخزون البضاعة التامة' },
@@ -1412,9 +1416,9 @@ export const pgliteAdapter: DbAdapter = {
 
   async createProduct(data: any) {
     const result = await this.query(
-      `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-      [data.companyId, data.code, data.nameAr, data.nameEn, data.barcode, data.sku, data.unit, data.categoryId ?? null, data.productTypeId ?? null, data.costPrice, data.salePrice, data.isActive ?? true, data.createdBy ?? null, data.updatedBy ?? null],
+      `INSERT INTO products (company_id, code, name_ar, name_en, barcode, sku, unit, category_id, product_type_id, cost_price, sale_price, is_active, created_by, updated_by, image, min_stock, max_stock, reorder_point, standard_cost)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
+      [data.companyId, data.code, data.nameAr, data.nameEn, data.barcode, data.sku, data.unit, data.categoryId ?? null, data.productTypeId ?? null, data.costPrice, data.salePrice, data.isActive ?? true, data.createdBy ?? null, data.updatedBy ?? null, data.image ?? null, data.minStock ?? null, data.maxStock ?? null, data.reorderPoint ?? null, data.standardCost ?? null],
     );
     if (result.success && result.rows?.length && (result.rows[0] as { id?: unknown }).id) {
       const productId = String((result.rows[0] as { id: unknown }).id);

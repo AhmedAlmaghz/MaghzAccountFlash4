@@ -9,6 +9,7 @@ import {
   setTaxPeriodStatus,
   listTaxPeriods,
   computeVatReturn,
+  isValidTaxTransition,
 } from './engine';
 
 vi.mock('@/core/database/adapters', () => ({
@@ -190,6 +191,8 @@ describe('period lifecycle + VAT return', () => {
       stubDb(async (sql) => {
         queries.push(sql);
         if (sql.includes('INSERT INTO tax_periods')) return { success: true, rows: [{ id: 'p-new' }] };
+        // Overlap probe (range predicate) vs the list query (no predicate).
+        if (sql.includes('FROM tax_periods') && sql.includes('start_date <=')) return { success: true, rows: [] };
         if (sql.includes('FROM tax_periods')) {
           return {
             success: true,
@@ -208,6 +211,26 @@ describe('period lifecycle + VAT return', () => {
     expect(queries.some((q) => q.includes('ON CONFLICT (company_id, start_date, end_date)'))).toBe(true);
     const list = await listTaxPeriods('comp-1');
     expect(list[0].id).toBe('p2');
+  });
+
+  it('refuses an overlapping tax period', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(
+      stubDb(async (sql) => {
+        if (sql.includes('FROM tax_periods') && sql.includes('start_date <=')) {
+          return { success: true, rows: [{ id: 'p-old' }] };
+        }
+        return { success: true, rows: [] };
+      }) as never
+    );
+    const res = await openTaxPeriod('comp-1', { countryCode: 'SA', periodType: 'monthly', startDate: '2026-09-15', endDate: '2026-10-15' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/overlap/i);
+  });
+
+  it('rejects an end date before the start date', async () => {
+    const res = await openTaxPeriod('comp-1', { countryCode: 'SA', periodType: 'monthly', startDate: '2026-10-31', endDate: '2026-10-01' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/on or after/);
   });
 
   it('computes the return from posted JE legs (output − input)', async () => {
@@ -272,11 +295,46 @@ describe('period lifecycle + VAT return', () => {
     vi.mocked(getDbAdapter).mockResolvedValue(
       stubDb(async (sql) => {
         queries.push(sql);
+        if (sql.includes('SELECT status FROM tax_periods')) return { success: true, rows: [{ status: 'open' }] };
         return { success: true, rows: [] };
       }) as never
     );
     const res = await setTaxPeriodStatus('comp-1', 'p1', 'closed');
     expect(res.success).toBe(true);
     expect(queries.some((q) => q.includes('UPDATE tax_periods'))).toBe(true);
+  });
+
+  it('filed is terminal: filed → open refuses on every path', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(
+      stubDb(async (sql) => {
+        if (sql.includes('SELECT status FROM tax_periods')) return { success: true, rows: [{ status: 'filed' }] };
+        return { success: true, rows: [] };
+      }) as never
+    );
+    const res = await setTaxPeriodStatus('comp-1', 'p1', 'open');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/terminal|Illegal/);
+  });
+
+  it('open → filed jumps the queue (must close first)', async () => {
+    vi.mocked(getDbAdapter).mockResolvedValue(
+      stubDb(async (sql) => {
+        if (sql.includes('SELECT status FROM tax_periods')) return { success: true, rows: [{ status: 'open' }] };
+        return { success: true, rows: [] };
+      }) as never
+    );
+    const res = await setTaxPeriodStatus('comp-1', 'p1', 'filed');
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Illegal/);
+  });
+
+  it('isValidTaxTransition encodes open → closed → filed (+idempotent re-sets)', async () => {
+    expect(isValidTaxTransition('open', 'closed')).toBe(true);
+    expect(isValidTaxTransition('closed', 'filed')).toBe(true);
+    expect(isValidTaxTransition('closed', 'open')).toBe(true);
+    expect(isValidTaxTransition('open', 'open')).toBe(true);
+    expect(isValidTaxTransition('open', 'filed')).toBe(false);
+    expect(isValidTaxTransition('filed', 'open')).toBe(false);
+    expect(isValidTaxTransition('filed', 'closed')).toBe(false);
   });
 });

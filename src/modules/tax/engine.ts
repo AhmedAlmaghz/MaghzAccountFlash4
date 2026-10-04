@@ -188,31 +188,52 @@ export interface TaxPeriodInput {
   endDate: string;
 }
 
-/** Open a tax period (idempotent per company+range). */
+/** Legal tax-period transitions (filed is terminal — same machine as the RPC). */
+export function isValidTaxTransition(from: string, to: string): boolean {
+  if (from === to) return true; // idempotent re-set
+  if (from === 'open' && to === 'closed') return true;
+  if (from === 'closed' && (to === 'open' || to === 'filed')) return true;
+  return false;
+}
+
+/** Open a tax period (idempotent per company+range; overlapping ranges refuse). */
 export async function openTaxPeriod(
   companyId: string,
   input: TaxPeriodInput,
   db?: Queryable
 ): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
+    const start = String(input.startDate || '').slice(0, 10);
+    const end = String(input.endDate || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      return { success: false, error: 'startDate and endDate must be YYYY-MM-DD' };
+    }
+    if (end < start) return { success: false, error: 'endDate must be on or after startDate' };
     let id: string | undefined;
     if (rpcPath(db)) {
       const res = (await taxRpc()!.openPeriod({
         countryCode: input.countryCode,
         periodType: input.periodType,
-        startDate: input.startDate,
-        endDate: input.endDate,
+        startDate: start,
+        endDate: end,
       })) as RpcEnvelope;
       if (!res.success) return { success: false, error: res.error };
       id = res.rows?.[0] ? String(res.rows[0].id) : undefined;
     } else {
       const adapter = db || ((await getDbAdapter()) as Queryable);
+      const overlap = await adapter.query(
+        `SELECT id FROM tax_periods
+          WHERE company_id = $1::uuid AND start_date <= $2::date AND end_date >= $3::date LIMIT 1`,
+        [companyId, end, start]
+      );
+      if (!overlap.success) return { success: false, error: overlap.error };
+      if (overlap.rows?.length) return { success: false, error: 'Tax period overlaps an existing period' };
       const res = await adapter.query<{ id: string }>(
         `INSERT INTO tax_periods (company_id, country_code, period_type, start_date, end_date, status)
          VALUES ($1::uuid, $2, $3, $4::date, $5::date, 'open')
          ON CONFLICT (company_id, start_date, end_date) DO UPDATE SET updated_at = NOW()
          RETURNING id`,
-        [companyId, input.countryCode, input.periodType, input.startDate, input.endDate]
+        [companyId, input.countryCode, input.periodType, start, end]
       );
       if (!res.success) return { success: false, error: res.error };
       id = res.rows?.[0] ? String((res.rows[0] as { id: unknown }).id) : undefined;
@@ -223,7 +244,7 @@ export async function openTaxPeriod(
   }
 }
 
-/** Close / reopen / mark-filed a tax period. */
+/** Close / reopen / mark-filed a tax period (state machine enforced). */
 export async function setTaxPeriodStatus(
   companyId: string,
   periodId: string,
@@ -237,6 +258,17 @@ export async function setTaxPeriodStatus(
       return { success: true };
     }
     const adapter = db || ((await getDbAdapter()) as Queryable);
+    const cur = await adapter.query(
+      `SELECT status FROM tax_periods WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [periodId, companyId]
+    );
+    if (!cur.success) return { success: false, error: cur.error };
+    const row = (cur.rows || [])[0] as Record<string, unknown> | undefined;
+    if (!row) return { success: false, error: 'Tax period not found' };
+    if (!isValidTaxTransition(String(row.status), status)) {
+      return { success: false, error: 'Illegal tax-period transition (open → closed → filed; filed is terminal)' };
+    }
+    if (String(row.status) === status) return { success: true };
     const res = await adapter.query(
       `UPDATE tax_periods SET status = $1::varchar, filed_at = CASE WHEN $1::varchar = 'filed' THEN NOW() ELSE filed_at END, updated_at = NOW()
         WHERE id = $2::uuid AND company_id = $3::uuid`,

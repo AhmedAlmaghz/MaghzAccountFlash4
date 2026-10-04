@@ -181,6 +181,76 @@ describe('fixedAssetsApi CRUD guards', () => {
     expect(ok.success).toBe(true);
     expect(adapter.query).toHaveBeenCalled();
   });
+
+  it('updateFixedAsset refuses salvage at/above stored cost', async () => {
+    const queries: string[] = [];
+    mockDb(async (sql) => {
+      queries.push(sql);
+      if (sql.includes('FROM fixed_assets')) {
+        return { success: true, rows: [{ status: 'active', cost: 12000, accumulated_depreciation: 0 }] };
+      }
+      return { success: true, rows: [] };
+    });
+    const bad = await fixedAssetsApi.updateFixedAsset(ASSET_ID, COMPANY_ID, { salvageValue: 12000 }, USER_ID);
+    expect(bad.success).toBe(false);
+    expect(bad.error).toMatch(/Salvage/);
+    expect(queries.some((q) => q.includes('UPDATE fixed_assets'))).toBe(false);
+    const good = await fixedAssetsApi.updateFixedAsset(
+      ASSET_ID, COMPANY_ID,
+      { salvageValue: 1000, location: 'المستودع 1', custodian: 'أمين العهدة', serialNumber: 'SN-1', warrantyExpiry: '2027-01-01', notes: 'ملاحظة' },
+      USER_ID
+    );
+    expect(good.success).toBe(true);
+    const upd = queries.find((q) => q.includes('UPDATE fixed_assets'))!;
+    for (const col of ['salvage_value', 'location', 'custodian', 'serial_number', 'warranty_expiry', 'notes']) {
+      expect(upd).toContain(col);
+    }
+  });
+
+  it('createFixedAsset persists operational fields in the same batch', async () => {
+    vi.mocked(getNextDocumentNumber).mockResolvedValue({ success: true, number: 'FA-0099' } as never);
+    const { tx } = mockDb(async (sql, params) => {
+      if (sql.includes('FROM default_accounts')) {
+        return { success: true, rows: [{ account_id: 'acc-' + String(params[1]) }] };
+      }
+      if (sql.includes('FROM cash_boxes')) return { success: true, rows: [{ account_id: 'acc-box' }] };
+      return { success: true, rows: [] };
+    });
+    const res = await fixedAssetsApi.createFixedAsset({
+      companyId: COMPANY_ID, nameAr: 'رافعة', purchaseDate: '2026-03-01',
+      cost: 90000, usefulLifeMonths: 84, method: 'declining_balance',
+      funding: { kind: 'cash', cashBoxId: CASH_BOX_ID },
+      location: 'الساحة', custodian: 'سائق', serialNumber: 'SN-99', warrantyExpiry: '2028-03-01', notes: 'n',
+    }, USER_ID);
+    expect(res.success).toBe(true);
+    const ins = tx.find((q) => q.sql.includes('INSERT INTO fixed_assets'))!;
+    expect(ins.sql).toContain('location');
+    expect(ins.sql).toContain('serial_number');
+    const flat = ins.params || [];
+    expect(flat).toContain('الساحة');
+    expect(flat).toContain('SN-99');
+  });
+
+  it('getFixedAssetsPaginated searches across code/names/custodian/serial/location', async () => {
+    const { adapter } = mockDb(async (sql) => {
+      if (sql.includes('COUNT(*)')) return { success: true, rows: [{ total: 2 }] };
+      return {
+        success: true,
+        rows: [
+          { id: ASSET_ID, company_id: COMPANY_ID, code: 'FA-1', name_ar: 'أ', purchase_date: '2026-01-01', cost: 100, salvage_value: 0, useful_life_months: 12, method: 'straight_line', accumulated_depreciation: 0, status: 'active' },
+        ],
+      };
+    });
+    const res = await fixedAssetsApi.getFixedAssetsPaginated(COMPANY_ID, 1, 25, { search: 'SN', status: 'active' });
+    expect(res.success).toBe(true);
+    expect(res.data?.total).toBe(2);
+    expect(res.data?.totalPages).toBe(1);
+    const dataSql = String(adapter.query.mock.calls[1]?.[0] || '');
+    for (const col of ['serial_number', 'custodian', 'location', 'name_ar', 'code']) {
+      expect(dataSql).toContain(col);
+    }
+    expect(dataSql).toContain('COUNT(*) OVER()');
+  });
 });
 
 describe('fixedAssetsApi.runDepreciation', () => {
@@ -232,7 +302,8 @@ describe('fixedAssetsApi.runDepreciation', () => {
     const { tx } = mockDb(async (sql) => {
       if (sql.includes('FROM fixed_assets')) return { success: true, rows: [ASSET_ROW] };
       if (sql.includes('FROM default_accounts')) return { success: true, rows: [{ account_id: 'acc-' }] };
-      if (sql.includes('FROM transactions')) return { success: true, rows: [{ id: 't-old' }] };
+      // Batched existence probe selects `reference` (one query, not N+1).
+      if (sql.includes('FROM transactions')) return { success: true, rows: [{ reference: 'DEP-2026-04-FA-0001' }] };
       return { success: true, rows: [] };
     });
     const res = await fixedAssetsApi.runDepreciation(COMPANY_ID, 2026, 4, USER_ID);
@@ -315,6 +386,37 @@ describe('fixedAssetsApi.disposeFixedAsset', () => {
     expect(res.success).toBe(true);
     if (!res.success) return;
     expect(res.data?.gain).toBe(1000);
+    const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
+    const flat = je.params || [];
+    const n = (flat.length - 6) / 4;
+    const legs = Array.from({ length: n }, (_, i) => ({
+      acc: String(flat[6 + i * 4]),
+      debit: Number(flat[6 + i * 4 + 1]),
+      credit: Number(flat[6 + i * 4 + 2]),
+    }));
+    expect(legs.find((l) => l.acc === 'acc-default_asset_disposal_gain')).toMatchObject({ credit: 1000 });
+  });
+
+  it('falls back to inventory-surplus gains when the disposal key is unmapped', async () => {
+    const { tx } = mockDb(async (sql, params) => {
+      if (sql.includes('FROM fixed_assets')) return { success: true, rows: [ASSET_ROW] };
+      if (sql.includes('FROM accounting_periods')) return { success: true, rows: [] };
+      if (sql.includes('FROM default_accounts')) {
+        const key = String(params[1]);
+        if (key === 'default_asset_disposal_gain') return { success: true, rows: [] };
+        return { success: true, rows: [{ account_id: 'acc-' + key }] };
+      }
+      if (sql.includes('FROM cash_boxes')) return { success: true, rows: [{ account_id: 'acc-box' }] };
+      if (sql.includes('FROM transactions')) return { success: true, rows: [] };
+      return { success: true, rows: [] };
+    });
+    const res = await fixedAssetsApi.disposeFixedAsset(
+      COMPANY_ID, ASSET_ID,
+      { date: '2026-09-01', proceeds: 10000, cashBoxId: BOX_ID, reason: 'legacy chart without 41902' },
+      USER_ID
+    );
+    expect(res.success, res.success ? '' : (res as { error: string }).error).toBe(true);
+    if (!res.success) return;
     const je = tx.find((q) => q.sql.includes('WITH new_tx'))!;
     const flat = je.params || [];
     const n = (flat.length - 6) / 4;

@@ -5,7 +5,7 @@ slug: "en/04-settings/06-default-accounts"
 group: "Settings"
 language: "en"
 created: 2026-09-13
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Default Accounts — User Guide

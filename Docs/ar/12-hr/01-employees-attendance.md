@@ -5,7 +5,7 @@ slug: "ar/12-hr/01-employees-attendance"
 group: "الموظفون"
 language: "ar"
 created: 2026-09-12
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # الموظفون والحضور والإجازات — دليل الاستخدام

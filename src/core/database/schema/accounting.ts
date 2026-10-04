@@ -39,14 +39,15 @@ export const transactions = pgTable('transactions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
-// ─── Accounting Periods (fiscal lock per year: open/closed) ─────────────────
+// ─── Accounting Periods (fiscal lock: annual + sub-periods, open/soft_closed/closed) ──
 export const accountingPeriods = pgTable('accounting_periods', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   year: integer('year').notNull(),
+  periodType: varchar('period_type', { length: 20 }).notNull().default('annual'), // annual, half, quarterly, monthly
   startDate: date('start_date').notNull(),
   endDate: date('end_date').notNull(),
-  status: varchar('status', { length: 20 }).notNull().default('open'), // open, closed
+  status: varchar('status', { length: 20 }).notNull().default('open'), // open, soft_closed, closed
   closedAt: timestamp('closed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -68,6 +69,11 @@ export const fixedAssets = pgTable('fixed_assets', {
   accumulatedDepreciation: numeric('accumulated_depreciation', { precision: 18, scale: 4 }).notNull().default('0'),
   status: varchar('status', { length: 20 }).notNull().default('active'), // active, disposed
   disposedAt: date('disposed_at'),
+  location: varchar('location', { length: 150 }),
+  custodian: varchar('custodian', { length: 200 }),
+  serialNumber: varchar('serial_number', { length: 100 }),
+  warrantyExpiry: date('warranty_expiry'),
+  notes: text('notes'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

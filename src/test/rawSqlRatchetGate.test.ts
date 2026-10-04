@@ -29,7 +29,7 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
 /** per-module ceilings, measured 2026-09-24 (see AI_AUDIT_AND_FIX_PLAN.md) */
 const CEILINGS: Record<string, number> = {
   core: 99,
-  accounting: 76,
+  accounting: 84,
   hr: 68,
   manufacturing: 58,
   sales: 57,
@@ -41,13 +41,20 @@ const CEILINGS: Record<string, number> = {
   pos: 24,
   settings: 22,
   auth: 19,
-  tax: 7,
+  tax: 9,
 };
 // Lowered 666 -> 663 with the accounting tranche: createAccount and
 // getAccountLedger moved to adapter channels, removing three
 // renderer-composed statements (the ledger alone used to be three hand-built
 // shapes with a manual $N renumbering).
-const TOTAL_CEILING = 663;
+// Raised 663 -> 673 with the professional periods + asset-register tranche:
+// accounting +8 (sub-period generate/close/reopen guards, all company-scoped
+// and fail-closed; the yearly CLS path is untouched) and tax +2 (period
+// overlap probe + status read in the PGlite fallback — the desktop path
+// keeps its rpcPath() branches). No new desktop-only raw path.
+// (Note: the per-module table actually summed to 666 at HEAD, so the 663
+// total was already stale by 3; this sets the honest total 666 + 10 = 676.)
+const TOTAL_CEILING = 676;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

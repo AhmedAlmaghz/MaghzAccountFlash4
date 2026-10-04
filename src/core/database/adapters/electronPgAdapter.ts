@@ -74,7 +74,7 @@ export interface ElectronDB extends PreloadDB {
     deleteWarehouse(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getCategories(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getProducts(payload: { companyId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    createProduct(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; barcode?: string | null; sku?: string | null; unit?: string | null; categoryId?: string | null; productTypeId?: string | null; costPrice?: number; salePrice?: number; isActive?: boolean; createdBy?: string | null; updatedBy?: string | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createProduct(payload: { companyId: string; code: string; nameAr: string; nameEn?: string; barcode?: string | null; sku?: string | null; unit?: string | null; categoryId?: string | null; productTypeId?: string | null; costPrice?: number; salePrice?: number; isActive?: boolean; createdBy?: string | null; updatedBy?: string | null; image?: string | null; minStock?: number | null; maxStock?: number | null; reorderPoint?: number | null; standardCost?: number | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     createProductCategories(payload: { productId: string; categoryIds: string[] }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     getProductUnits(payload: { productId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     ensureBaseProductUnit(payload: { productId: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
@@ -706,6 +706,11 @@ export const electronPgAdapter: DbAdapter = {
       isActive: data.isActive,
       createdBy: data.createdBy,
       updatedBy: data.updatedBy,
+      image: data.image ?? null,
+      minStock: data.minStock ?? null,
+      maxStock: data.maxStock ?? null,
+      reorderPoint: data.reorderPoint ?? null,
+      standardCost: data.standardCost ?? null,
     });
     if (result.success && result.rows?.length && result.rows[0]) {
       const productId = String(result.rows[0].id);

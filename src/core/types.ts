@@ -127,6 +127,7 @@ export const DEFAULT_ACCOUNT_FUNCTIONS: { key: string; labelAr: string; labelEn:
   { key: 'default_fixed_assets', labelAr: 'تكلفة الأصول الثابتة', labelEn: 'Fixed Assets at Cost', required: false },
   { key: 'default_accumulated_depreciation', labelAr: 'مجمع الإهلاك', labelEn: 'Accumulated Depreciation', required: false },
   { key: 'default_depreciation_expense', labelAr: 'مصروف الإهلاك', labelEn: 'Depreciation Expense', required: false },
+  { key: 'default_asset_disposal_gain', labelAr: 'أرباح استبعاد الأصول', labelEn: 'Asset Disposal Gains', required: false },
   { key: 'default_retained_earnings', labelAr: 'الأرباح المبقاة', labelEn: 'Retained Earnings', required: false },
   // ── حسابات عامة ──
   { key: 'default_opening_balance', labelAr: 'الأرصدة الافتتاحية', labelEn: 'Opening Balance Equity', required: false },

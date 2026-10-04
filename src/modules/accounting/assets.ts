@@ -56,6 +56,11 @@ export interface FixedAsset {
   netBookValue: number;
   status: 'active' | 'disposed';
   disposedAt?: string;
+  location?: string;
+  custodian?: string;
+  serialNumber?: string;
+  warrantyExpiry?: string;
+  notes?: string;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -129,6 +134,11 @@ function mapAssetRow(r: Record<string, unknown>): FixedAsset {
     netBookValue: round2(cost - acc),
     status: String(r.status) === 'disposed' ? 'disposed' : 'active',
     disposedAt: r.disposed_at ? toDateString(r.disposed_at) || undefined : undefined,
+    location: r.location ? String(r.location) : undefined,
+    custodian: r.custodian ? String(r.custodian) : undefined,
+    serialNumber: r.serial_number ? String(r.serial_number) : undefined,
+    warrantyExpiry: r.warranty_expiry ? toDateString(r.warranty_expiry) || undefined : undefined,
+    notes: r.notes ? String(r.notes) : undefined,
   };
 }
 
@@ -167,6 +177,51 @@ export const fixedAssetsApi = {
   },
 
   /**
+   * Server-side paginated register with search (code / names / custodian /
+   * serial / location) and status filter — the full-list getFixedAssets stays
+   * for small callers (depreciation run, AI tools).
+   */
+  async getFixedAssetsPaginated(
+    companyId: string,
+    page = 1,
+    pageSize = 25,
+    filters?: { search?: string; status?: 'active' | 'disposed' }
+  ): Promise<{ success: boolean; data?: { items: FixedAsset[]; total: number; page: number; pageSize: number; totalPages: number }; error?: string }> {
+    try {
+      const v = validateInput(companyIdSchema, companyId);
+      if (!v.success) return { success: false, error: v.error };
+      const p = Math.max(1, Math.floor(Number(page) || 1));
+      const ps = Math.max(1, Math.min(500, Math.floor(Number(pageSize) || 25)));
+      const offset = (p - 1) * ps;
+      const conditions = [`company_id = $1::uuid`];
+      const params: unknown[] = [companyId];
+      if (filters?.status) {
+        params.push(filters.status);
+        conditions.push(`status = $${params.length}`);
+      }
+      if (filters?.search?.trim()) {
+        params.push(`%${filters.search.trim()}%`);
+        const s = `$${params.length}`;
+        conditions.push(`(code ILIKE ${s} OR name_ar ILIKE ${s} OR name_en ILIKE ${s} OR custodian ILIKE ${s} OR serial_number ILIKE ${s} OR location ILIKE ${s})`);
+      }
+      const where = conditions.join(' AND ');
+      const adapter = await getDbAdapter();
+      const countRes = await adapter.query(`SELECT COUNT(*)::int AS total FROM fixed_assets WHERE ${where}`, params);
+      if (!countRes.success) return { success: false, error: countRes.error };
+      const total = Number((countRes.rows?.[0] as Record<string, unknown> | undefined)?.total || 0);
+      const dataRes = await adapter.query(
+        `SELECT *, (COUNT(*) OVER())::int AS total_count FROM fixed_assets WHERE ${where} ORDER BY code LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, ps, offset]
+      );
+      if (!dataRes.success) return { success: false, error: dataRes.error };
+      const items = (dataRes.rows || []).map((r) => mapAssetRow(r as Record<string, unknown>));
+      return { success: true, data: { items, total, page: p, pageSize: ps, totalPages: Math.max(1, Math.ceil(total / ps)) } };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  /**
    * Register an asset AND capitalize it (Dr 12101 / Cr treasury|payables|
    * opening-equity) — ONE atomic batch. The GL cost leg is what depreciation
    * and the balance sheet read; a register without its JE would understate
@@ -186,6 +241,11 @@ export const fixedAssetsApi = {
       usefulLifeMonths: number;
       method: DepreciationMethod;
       funding: { kind: 'cash' | 'payable' | 'opening'; cashBoxId?: string };
+      location?: string;
+      custodian?: string;
+      serialNumber?: string;
+      warrantyExpiry?: string;
+      notes?: string;
     },
     userId?: string
   ): Promise<{ success: boolean; id?: string; code?: string; error?: string }> {
@@ -236,12 +296,14 @@ export const fixedAssetsApi = {
           ],
         }),
         {
-          sql: `INSERT INTO fixed_assets (id, company_id, code, name_ar, name_en, category, purchase_date, cost, salvage_value, useful_life_months, method, created_by, updated_by)
-                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::date, $8::numeric, $9::numeric, $10, $11, $12::uuid, $13::uuid)`,
+          sql: `INSERT INTO fixed_assets (id, company_id, code, name_ar, name_en, category, purchase_date, cost, salvage_value, useful_life_months, method, location, custodian, serial_number, warranty_expiry, notes, created_by, updated_by)
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::date, $8::numeric, $9::numeric, $10, $11, $12, $13, $14, $15::date, $16, $17::uuid, $18::uuid)`,
           params: [
             assetId, v.data.companyId, code, v.data.nameAr, v.data.nameEn || null, v.data.category || null,
             v.data.purchaseDate, cost, v.data.salvageValue ?? 0, v.data.usefulLifeMonths,
-            v.data.method, safeUserId(userId), safeUserId(userId),
+            v.data.method, v.data.location || null, v.data.custodian || null, v.data.serialNumber || null,
+            v.data.warrantyExpiry || null, v.data.notes || null,
+            safeUserId(userId), safeUserId(userId),
           ],
         },
       ];
@@ -269,7 +331,7 @@ export const fixedAssetsApi = {
   async updateFixedAsset(
     id: string,
     companyId: string,
-    data: { nameAr?: string; nameEn?: string; category?: string; purchaseDate?: string; salvageValue?: number; usefulLifeMonths?: number; method?: DepreciationMethod },
+    data: { nameAr?: string; nameEn?: string; category?: string; purchaseDate?: string; salvageValue?: number; usefulLifeMonths?: number; method?: DepreciationMethod; location?: string; custodian?: string; serialNumber?: string; warrantyExpiry?: string | null; notes?: string },
     userId?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
@@ -279,7 +341,7 @@ export const fixedAssetsApi = {
       if (!v.success) return { success: false, error: v.error };
       const adapter = await getDbAdapter();
       const cur = await adapter.query(
-        `SELECT status, accumulated_depreciation FROM fixed_assets WHERE id = $1::uuid AND company_id = $2::uuid`,
+        `SELECT status, cost, accumulated_depreciation FROM fixed_assets WHERE id = $1::uuid AND company_id = $2::uuid`,
         [id, companyId]
       );
       if (!cur.success) return { success: false, error: cur.error };
@@ -291,6 +353,11 @@ export const fixedAssetsApi = {
       if ((Number(row.accumulated_depreciation) || 0) > 0 && v.data.purchaseDate !== undefined) {
         return { success: false, error: 'Purchase date is locked once depreciation is posted' };
       }
+      // Salvage must stay below cost — otherwise computeTargetAccumulated
+      // clamps to zero and depreciation silently stops.
+      if (v.data.salvageValue !== undefined && Number(v.data.salvageValue) >= Number(row.cost || 0)) {
+        return { success: false, error: 'Salvage value must be below cost' };
+      }
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;
@@ -301,6 +368,11 @@ export const fixedAssetsApi = {
       if (v.data.salvageValue !== undefined) { fields.push(`salvage_value = $${idx++}::numeric`); values.push(v.data.salvageValue); }
       if (v.data.usefulLifeMonths !== undefined) { fields.push(`useful_life_months = $${idx++}`); values.push(v.data.usefulLifeMonths); }
       if (v.data.method !== undefined) { fields.push(`method = $${idx++}`); values.push(v.data.method); }
+      if (v.data.location !== undefined) { fields.push(`location = $${idx++}`); values.push(v.data.location || null); }
+      if (v.data.custodian !== undefined) { fields.push(`custodian = $${idx++}`); values.push(v.data.custodian || null); }
+      if (v.data.serialNumber !== undefined) { fields.push(`serial_number = $${idx++}`); values.push(v.data.serialNumber || null); }
+      if (v.data.warrantyExpiry !== undefined) { fields.push(`warranty_expiry = $${idx++}::date`); values.push(v.data.warrantyExpiry || null); }
+      if (v.data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(v.data.notes || null); }
       if (!fields.length) return { success: true };
       fields.push(`updated_at = NOW()`);
       fields.push(`updated_by = $${idx++}::uuid`); values.push(safeUserId(userId));
@@ -384,17 +456,22 @@ export const fixedAssetsApi = {
       let skipped = 0;
       let total = 0;
       const refOf = (code: string) => `DEP-${year}-${String(month).padStart(2, '0')}-${code}`;
+      // One query for all existing refs of this month (N+1 per asset would
+      // issue a round-trip per row — 500 assets = 500 queries pre-transaction).
+      const codes = ((list.rows || []) as Record<string, unknown>[]).map((r) => String(r.code || ''));
+      const refs = codes.map(refOf);
+      const existRes = await adapter.query(
+        `SELECT reference FROM transactions WHERE company_id = $1::uuid AND reference = ANY($2::text[])`,
+        [companyId, refs]
+      );
+      if (!existRes.success) return { success: false, error: existRes.error };
+      const existing = new Set(((existRes.rows || []) as Record<string, unknown>[]).map((r) => String(r.reference)));
       for (const r of (list.rows || []) as Record<string, unknown>[]) {
         const asset = mapAssetRow(r);
         const amount = periodDepreciation(asset, targetAsOf);
         if (amount < 0.005) { skipped++; continue; }
         const ref = refOf(asset.code);
-        const dup = await adapter.query(
-          `SELECT id FROM transactions WHERE company_id = $1::uuid AND reference = $2 LIMIT 1`,
-          [companyId, ref]
-        );
-        if (!dup.success) return { success: false, error: dup.error };
-        if (dup.rows?.length) { skipped++; continue; }
+        if (existing.has(ref)) { skipped++; continue; }
         statements.push(
           buildJournalEntryStatement(companyId, {
             reference: ref,
@@ -435,7 +512,7 @@ export const fixedAssetsApi = {
   /**
    * Dispose an active asset: clear cost + accumulated, book proceeds to the
    * cash box, plug gain/loss — ONE atomic JE + terminal flip.
-   * Gain → Cr 41901 (misc gains live there); loss → Dr 52301 misc expenses.
+   * Gain → Cr 41902 (disposal gains); loss → Dr 52301 misc expenses.
    */
   async disposeFixedAsset(
     companyId: string,
@@ -478,16 +555,17 @@ export const fixedAssetsApi = {
         if (!cashAcc) return { success: false, error: 'Cash box has no GL account' };
       }
       const misc = await getDefaultAccountId(companyId, 'default_misc_expense');
-      const surplus = await getDefaultAccountId(companyId, 'default_inventory_surplus');
+      const surplus = (await getDefaultAccountId(companyId, 'default_asset_disposal_gain'))
+        || await getDefaultAccountId(companyId, 'default_inventory_surplus');
       if (loss > 0 && !misc) return { success: false, error: 'Misc-expense account not configured (52301)' };
-      if (gain > 0 && !surplus) return { success: false, error: 'Gains account not configured (41901)' };
+      if (gain > 0 && !surplus) return { success: false, error: 'Disposal-gains account not configured (41902)' };
       const reference = `DSP-${asset.code}`;
       const dup = await adapter.query(
         `SELECT id FROM transactions WHERE company_id = $1::uuid AND reference = $2 LIMIT 1`,
         [companyId, reference]
       );
       if (!dup.success) return { success: false, error: dup.error };
-      if (dup.rows?.length) return { success: false, error: 'Asset already disposed' };
+      if (dup.rows?.length) return { success: false, error: `Disposal journal ${reference} already exists — the asset may need a page refresh` };
       const entries: Array<{ accountId: string; debit: number; credit: number; memo: string }> = [
         { accountId: accs.ids.accumulated, debit: asset.accumulatedDepreciation, credit: 0, memo: `تصفية مجمع إهلاك ${asset.code}` },
       ];

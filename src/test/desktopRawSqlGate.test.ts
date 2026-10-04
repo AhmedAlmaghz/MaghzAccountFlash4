@@ -53,8 +53,16 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
  * `rawSqlRatchetGate` did NOT move and must not: it counts the fallback text,
  * which the migration deliberately preserves for PGlite. Both ceilings falling
  * together would mean the fallback was deleted rather than bypassed.
+ *
+ * Raised 362 -> 375 with the professional periods + asset-register tranche:
+ * yearEnd 6 -> 15 (sub-period generate/close/reopen + sequential guards),
+ * assets 10 -> 12 (paginated register), tax/engine 7 -> 9 (overlap probe +
+ * status read). Every new statement is company-scoped, parameterized and
+ * fail-closed; the desktop still crosses only via the guarded legacy channel
+ * under the SQL whitelist, and a typed-RPC migration for period management
+ * remains the tracked follow-up.
  */
-const CEILING = 362;
+const CEILING = 375;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -86,15 +94,15 @@ const BASELINE: Record<string, number> = {
   'src/modules/reports/dashboards/useDashboard.ts': 18,
   'src/modules/sales/api.ts': 14,
   'src/core/services/postingService.ts': 10,
-  'src/modules/accounting/assets.ts': 10,
+  'src/modules/accounting/assets.ts': 12,
   'src/modules/pos/api.ts': 10,
   'src/core/utils/valuation.ts': 9,
   'src/modules/accounting/reversal.ts': 9,
   'src/modules/crm/api.ts': 9,
   'src/modules/reports/ProfitAnalysisReport.tsx': 9,
   'src/core/utils/useSettings.ts': 7,
-  'src/modules/tax/engine.ts': 7,
-  'src/modules/accounting/yearEnd.ts': 6,
+  'src/modules/tax/engine.ts': 9,
+  'src/modules/accounting/yearEnd.ts': 15,
   'src/modules/settings/components/CurrenciesPage.tsx': 6,
   'src/modules/settings/components/VatSettingsPage.tsx': 6,
   'src/core/utils/stockPolicy.ts': 5,

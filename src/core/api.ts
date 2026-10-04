@@ -508,7 +508,8 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_discount_allowed: '41201', default_discount_received: '42101',
       default_leave_provision: '21504',
       default_fixed_assets: '12101', default_accumulated_depreciation: '12102',
-      default_depreciation_expense: '52601', default_retained_earnings: '32101',
+      default_depreciation_expense: '52601', default_asset_disposal_gain: '41902',
+      default_retained_earnings: '32101',
     },
     manufacturing: {
       default_cash: '11101', default_sales: '41101', default_cogs: '51101',
@@ -529,7 +530,8 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_discount_allowed: '41201', default_discount_received: '42101',
       default_leave_provision: '21504',
       default_fixed_assets: '12101', default_accumulated_depreciation: '12102',
-      default_depreciation_expense: '52601', default_retained_earnings: '32101',
+      default_depreciation_expense: '52601', default_asset_disposal_gain: '41902',
+      default_retained_earnings: '32101',
     },
     services: {
       default_cash: '11101', default_sales: '41102', default_cogs: '51101',
@@ -546,7 +548,8 @@ export async function applyDefaultTemplate(companyId: string, template: 'trading
       default_discount_allowed: '41201', default_discount_received: '42101',
       default_leave_provision: '21504',
       default_fixed_assets: '12101', default_accumulated_depreciation: '12102',
-      default_depreciation_expense: '52601', default_retained_earnings: '32101',
+      default_depreciation_expense: '52601', default_asset_disposal_gain: '41902',
+      default_retained_earnings: '32101',
     },
   };
   const adapter = await getDbAdapter();

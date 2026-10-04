@@ -5,7 +5,7 @@ slug: "en/11-manufacturing/index"
 group: "Manufacturing"
 language: "en"
 created: 2026-09-13
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Manufacturing — User Guide

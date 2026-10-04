@@ -205,10 +205,12 @@ export const VatReturnPanel: React.FC = () => {
                     <Button size="sm" variant="secondary" leftIcon={<Lock size={14} />} onClick={() => handleStatus('closed')} isLoading={isWorking}>
                       {t('settings.tax.closePeriod')}
                     </Button>
-                  ) : (
+                  ) : selected.status === 'closed' ? (
                     <Button size="sm" variant="secondary" leftIcon={<LockOpen size={14} />} onClick={() => handleStatus('open')} isLoading={isWorking}>
                       {t('settings.tax.reopenPeriod')}
                     </Button>
+                  ) : (
+                    <span className="text-xs text-slate-500">{t('settings.tax.filedTerminal')}</span>
                   )}
                   {selected.status === 'closed' && (
                     <Button size="sm" variant="primary" leftIcon={<Send size={14} />} onClick={() => handleStatus('filed')} isLoading={isWorking}>

@@ -5,7 +5,7 @@ slug: "en/08-sales/index"
 group: "Sales"
 language: "en"
 created: 2026-09-13
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # Sales — User Guide

@@ -5,7 +5,7 @@ slug: "ar/06-accounting/05-financial-controls"
 group: "المحاسبة"
 language: "ar"
 created: 2026-09-20
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # الضوابط المالية وتقييد العمليات — دليل الاستخدام

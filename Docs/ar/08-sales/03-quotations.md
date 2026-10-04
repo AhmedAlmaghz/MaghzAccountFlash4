@@ -5,7 +5,7 @@ slug: "ar/08-sales/03-quotations"
 group: "المبيعات"
 language: "ar"
 created: 2026-09-12
-version: "0.26.9"
+version: "0.26.11"
 author: "Ahmed Almaghz"
 ---
 # عروض الأسعار — دليل الاستخدام
