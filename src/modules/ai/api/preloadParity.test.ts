@@ -88,6 +88,7 @@ describe('preload parity gate (CI)', () => {
       'getOrders', 'getOrdersPaginated', 'getOrderById',
       'getReturns', 'getReturnsPaginated', 'getReturnById', 'getPurchasesKpis',
       'createSupplier', 'updateSupplier', 'deleteSupplier',
+      'createInvoice', 'updateInvoice', 'deleteInvoice',
     ]) {
       expect(surface, `e2e purchases surface missing: ${method}`).toContain(`${method}:async`);
     }

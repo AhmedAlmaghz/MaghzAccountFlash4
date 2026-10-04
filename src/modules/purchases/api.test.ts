@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('@/core/database/adapters', () => ({
   getDbAdapter: vi.fn(),
   // Default: the renderer fallback path. Typed-RPC suites flip this to true.
@@ -1283,5 +1283,108 @@ describe('purchasesApi.convertOrderToInvoice (claim before create)', () => {
     // partially_received order into a state it never had.
     expect(release).toMatch(/SET status = \$3/);
     expect(release).toMatch(/NOT EXISTS \(SELECT 1 FROM purchase_invoices WHERE purchase_order_id/);
+  });
+});
+
+describe('purchasesApi invoice writes — Electron typed-RPC path', () => {
+  const INVOICE_ID = '00000000-0000-0000-0000-000000000040';
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(isElectronPg).mockReturnValue(true);
+  });
+  afterEach(() => {
+    vi.mocked(isElectronPg).mockReturnValue(false);
+    (window as unknown as { electronDB?: unknown }).electronDB = undefined;
+  });
+
+  function bridge(methods: Record<string, (...args: never[]) => Promise<unknown>>) {
+    (window as unknown as { electronDB: unknown }).electronDB = { purchases: methods };
+  }
+
+  it('createInvoice routes through the RPC channel and returns its id', async () => {
+    const seen: Record<string, unknown>[] = [];
+    bridge({
+      createInvoice: async (p: Record<string, unknown>) => {
+        seen.push(p);
+        return { success: true, rows: [{ id: INVOICE_ID }] };
+      },
+    });
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await purchasesApi.createInvoice({
+      companyId: COMPANY_ID,
+      invoiceNumber: 'PINV-0001',
+      supplierId: SUPPLIER_ID,
+      date: '2026-07-13',
+      subtotal: 1000,
+      discountAmount: 0,
+      vatAmount: 150,
+      totalAmount: 1150,
+      paidAmount: 0,
+      status: 'draft',
+      lines: [{ productId: PRODUCT_ID, quantity: 5, unitPrice: 200, lineTotal: 1000 }],
+    });
+    expect(res).toEqual({ success: true, id: INVOICE_ID });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].supplierId).toBe(SUPPLIER_ID);
+    expect(adapter.query).not.toHaveBeenCalled();
+  });
+
+  it('createInvoice surfaces an RPC refusal without touching SQL', async () => {
+    bridge({ createInvoice: async () => ({ success: false, error: 'Supplier not found in company' }) });
+    const adapter = makeMockAdapter(async () => ({ success: true, rows: [] }));
+    vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+    const res = await purchasesApi.createInvoice({
+      companyId: COMPANY_ID,
+      invoiceNumber: 'PINV-0002',
+      supplierId: SUPPLIER_ID,
+      date: '2026-07-13',
+      subtotal: 100,
+      discountAmount: 0,
+      vatAmount: 0,
+      totalAmount: 100,
+      paidAmount: 0,
+      status: 'draft',
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toBe('Supplier not found in company');
+    expect(adapter.query).not.toHaveBeenCalled();
+  });
+
+  it('updateInvoice sends { data } through the RPC channel', async () => {
+    const seen: Record<string, unknown>[] = [];
+    bridge({
+      updateInvoice: async (p: Record<string, unknown>) => {
+        seen.push(p);
+        return { success: true };
+      },
+    });
+    const res = await purchasesApi.updateInvoice(INVOICE_ID, COMPANY_ID, { notes: 'hi' });
+    expect(res).toEqual({ success: true });
+    expect(seen).toEqual([{ data: { id: INVOICE_ID, notes: 'hi' } }]);
+  });
+
+  it('deleteInvoice refuses a posted invoice from the guard row', async () => {
+    bridge({
+      deleteInvoice: async () => ({ success: true, rows: [{ status: 'posted', paid_amount: 0, id: null }] }),
+    });
+    const res = await purchasesApi.deleteInvoice(INVOICE_ID, COMPANY_ID);
+    expect(res).toEqual({ success: false, error: 'Cannot delete posted invoice. Cancel it first.' });
+  });
+
+  it('deleteInvoice refuses a draft with payments from the guard row', async () => {
+    bridge({
+      deleteInvoice: async () => ({ success: true, rows: [{ status: 'draft', paid_amount: 50, id: null }] }),
+    });
+    const res = await purchasesApi.deleteInvoice(INVOICE_ID, COMPANY_ID);
+    expect(res).toEqual({ success: false, error: 'Cannot delete invoice with payments. Refund the payment first.' });
+  });
+
+  it('deleteInvoice succeeds when the guard row shows a clean draft', async () => {
+    bridge({
+      deleteInvoice: async () => ({ success: true, rows: [{ status: 'draft', paid_amount: 0, id: INVOICE_ID }] }),
+    });
+    const res = await purchasesApi.deleteInvoice(INVOICE_ID, COMPANY_ID);
+    expect(res).toEqual({ success: true });
   });
 });

@@ -40,8 +40,8 @@ contextBridge.exposeInMainWorld('electronDB', {
   ping: () => ipcRenderer.invoke('db:ping'),
   _exec: (sql, params = []) => ipcRenderer.invoke('db:internal-query', { sql, params, sessionToken }),
   _execBatch: (queries) => ipcRenderer.invoke('db:internal-transaction', { queries, sessionToken }),
-  testConnection: (config) => ipcRenderer.invoke('db:test-connection', config),
-  updateConfig: (config) => ipcRenderer.invoke('db:update-config', config),
+  testConnection: (config) => ipcRenderer.invoke('db:test-connection', { ...(config || {}), sessionToken }),
+  updateConfig: (config) => ipcRenderer.invoke('db:update-config', { ...(config || {}), sessionToken }),
   seedDefault: (adminPassword, company) => ipcRenderer.invoke('db:seed-default', { sessionToken, adminPassword, company }),
   seedDemo: (adminPassword, company) => ipcRenderer.invoke('db:seed-demo', { sessionToken, adminPassword, company }),
   clearAll: (payload) => ipcRenderer.invoke('db:clear-all', { ...(payload || {}), sessionToken }),
@@ -260,6 +260,9 @@ contextBridge.exposeInMainWorld('electronDB', {
     createSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.createSupplier', { ...payload, sessionToken }),
     updateSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.updateSupplier', { ...payload, sessionToken }),
     deleteSupplier: (payload) => ipcRenderer.invoke('db:rpc:purchases.deleteSupplier', { ...payload, sessionToken }),
+    createInvoice: (payload) => ipcRenderer.invoke('db:rpc:purchases.createInvoice', { ...payload, sessionToken }),
+    updateInvoice: (payload) => ipcRenderer.invoke('db:rpc:purchases.updateInvoice', { ...payload, sessionToken }),
+    deleteInvoice: (payload) => ipcRenderer.invoke('db:rpc:purchases.deleteInvoice', { ...payload, sessionToken }),
   },
   // POS typed RPC (module 13). Session-derived companyId + cashier userId.
   // Checkout stays renderer-composed (journal machinery) and ships through

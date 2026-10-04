@@ -68,6 +68,11 @@ function parseJsonLines(value: unknown): Record<string, unknown>[] {
   return [];
 }
 
+function firstId(rows?: Record<string, unknown>[]): string | undefined {
+  const first = rows && rows.length > 0 ? rows[0] : undefined;
+  return first && 'id' in first && first.id != null ? String(first.id) : undefined;
+}
+
 // Aging bucketing lives here (not in the SQL) because the bucket boundaries
 // depend on "today" in the caller's clock. Both backends hand the same leg
 // rows to it — invoice dues, opening balance, posted payments, posted returns
@@ -844,11 +849,23 @@ export const purchasesApi = {
       if (data.exchangeRate !== undefined && data.exchangeRate <= 0) {
         return { success: false, error: 'Exchange rate must be positive.' };
       }
-      const adapter = await getDbAdapter();
       const currencyCode = data.currencyCode || YER_CODE;
       const exchangeRate = data.exchangeRate ?? 1;
       const baseCurrencyAmount = data.baseCurrencyAmount ?? (data.totalAmount * exchangeRate);
       const baseCurrencyPaid = data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * exchangeRate);
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('createInvoice', {
+          ...data,
+          currencyCode,
+          exchangeRate,
+          baseCurrencyAmount,
+          baseCurrencyPaid,
+        });
+        return result.success
+          ? { success: true, id: firstId(result.rows) }
+          : { success: false, error: result.error };
+      }
+      const adapter = await getDbAdapter();
       const invoiceId = crypto.randomUUID();
       const params: unknown[] = [invoiceId, data.companyId, data.invoiceNumber, data.supplierId, data.purchaseOrderId || null, data.date, data.dueDate, data.subtotal, data.discountAmount, data.vatAmount, data.totalAmount, data.paidAmount, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyPaid, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
       let sql = `WITH inv AS (INSERT INTO purchase_invoices (id,company_id,invoice_number,supplier_id,purchase_order_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7::date,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::uuid,$20,$21::uuid,$22::uuid) RETURNING id)`;
@@ -899,6 +916,10 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('updateInvoice', { data: { id, ...data } });
+        return result.success ? { success: true } : { success: false, error: result.error };
+      }
       const adapter = await getDbAdapter();
       // Phase 0 fix: parity with sales.updateInvoice — a posted invoice
       // already moved JE + stock + supplier balance. Its lines are frozen
@@ -960,6 +981,19 @@ export const purchasesApi = {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
+      if (isElectronPg()) {
+        const result = await invokePurchasesRpc('deleteInvoice', { id });
+        if (!result.success) return { success: false, error: result.error };
+        const row = result.rows?.[0];
+        if (!row) return { success: false, error: 'Invoice not found' };
+        if (String(row.status) !== 'draft') {
+          return { success: false, error: 'Cannot delete posted invoice. Cancel it first.' };
+        }
+        if (Number(row.paid_amount) > 0) {
+          return { success: false, error: 'Cannot delete invoice with payments. Refund the payment first.' };
+        }
+        return { success: true };
+      }
       const adapter = await getDbAdapter();
       // Phase 0 fix: parity with sales.deleteInvoice — deleting a posted or
       // paid invoice would orphan its JE + stock moves + supplier balance.

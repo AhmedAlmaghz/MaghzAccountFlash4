@@ -245,6 +245,9 @@ export interface ElectronDB extends PreloadDB {
     createSupplier(payload: { code: string; name: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateSupplier(payload: { id: string; name?: string; code?: string; phone?: string | null; email?: string | null; address?: string | null; taxNumber?: string | null; balance?: number; isActive?: boolean }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     deleteSupplier(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    createInvoice(payload: { invoiceNumber: string; supplierId: string; purchaseOrderId?: string | null; date?: string | null; dueDate?: string | null; subtotal?: number; discountAmount?: number; vatAmount?: number; totalAmount: number; paidAmount?: number; currencyCode?: string; exchangeRate?: number; baseCurrencyAmount?: number; baseCurrencyPaid?: number; status?: string; paymentType?: string; cashBoxId?: string | null; notes?: string | null; lines?: Array<{ productId: string; quantity: number; unitPrice: number; discountPercent?: number; vatPercent?: number; lineTotal?: number; currencyCode?: string | null; exchangeRate?: number | null; baseCurrencyLineTotal?: number | null }> }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    updateInvoice(payload: { data: Record<string, unknown> }): Promise<{ success: boolean; error?: string }>;
+    deleteInvoice(payload: { id: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   };
   // POS typed RPC (module 13). Session-derived companyId + cashier userId.
   // checkout itself stays renderer-composed (journal machinery) and ships

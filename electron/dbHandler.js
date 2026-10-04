@@ -6896,6 +6896,166 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     },
   });
 
+  // purchases.createInvoice (AP mirror of sales.createInvoice: CTE header +
+  // lines, session-derived company/audit ids, live-validated references).
+  // Purchase lines carry no unit_cost snapshot column, so no products JOIN
+  // is needed here.
+  registerRpc('purchases.createInvoice', {
+    compose: (p, session) => {
+      const cid = session.user.companyId;
+      const uid = session.user.id;
+      const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
+      const params = [cid, String(p.invoiceNumber || ''), String(p.supplierId), p.purchaseOrderId || null, p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
+      let sql = `WITH inv AS (INSERT INTO purchase_invoices (company_id, invoice_number, supplier_id, purchase_order_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::date, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12::varchar, $13::numeric, $14::numeric, $15::numeric, $16::varchar, $17, $18::uuid, $19, $20::uuid, $21::uuid) RETURNING id)`;
+      if (Array.isArray(p.lines) && p.lines.length) {
+        const lineValues = [];
+        for (const line of p.lines) {
+          const off = params.length;
+          const lineRate = line.exchangeRate !== undefined && line.exchangeRate !== null ? Number(line.exchangeRate) : lr;
+          const lineBaseTotal = line.baseCurrencyLineTotal !== undefined && line.baseCurrencyLineTotal !== null ? Number(line.baseCurrencyLineTotal) : (Number(line.lineTotal) || 0) * lineRate;
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::varchar, $${off + 9}::numeric, $${off + 10}::numeric, $${off + 11}::uuid, $${off + 12}::numeric, $${off + 13}::numeric)`);
+          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
+        }
+        sql += `,lines_ins AS (INSERT INTO purchase_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total, v.unit_id, v.unit_factor, v.base_quantity FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) ON true)`;
+      }
+      sql += ' SELECT id FROM inv';
+      return { sql, params };
+    },
+    paramCount: null,
+    validate: async (p, session) => {
+      if (!p.invoiceNumber) throw new Error('invoiceNumber required');
+      if (!p.supplierId) throw new Error('supplierId required');
+      if (p.status !== undefined && p.status !== 'draft') throw new Error('Purchase invoices must be created as drafts.');
+      if (p.paidAmount !== undefined && p.totalAmount !== undefined && Number(p.paidAmount) > Number(p.totalAmount)) throw new Error('Paid amount cannot exceed total amount.');
+      if (p.exchangeRate !== undefined && Number(p.exchangeRate) <= 0) throw new Error('Exchange rate must be positive.');
+      await assertCompanyReferences('suppliers', [p.supplierId], session.user.companyId, 'Supplier not found in company');
+      if (p.cashBoxId) await assertCompanyReferences('cash_boxes', [p.cashBoxId], session.user.companyId, 'Cash box not found in company');
+      await assertCompanyReferences('products', (Array.isArray(p.lines) ? p.lines : []).map((line) => line.productId), session.user.companyId, 'Product not found in company');
+    },
+  });
+
+  // purchases.updateInvoice (transaction: dynamic header SET + guarded line
+  // rebuild — AP mirror of sales.updateInvoice, strict paid-amount rule).
+  ipcMain.handle('db:rpc:purchases.updateInvoice', async (event, payload = {}) => {
+    const session = getSession(event.sender.id, payload.sessionToken);
+    if (!session) return { success: false, error: 'Authentication required' };
+    if (!hasPermission(session, 'purchases.edit')) return { success: false, error: 'Permission denied' };
+    const p = payload.data || {};
+    if (!p.id) return { success: false, error: 'id required' };
+    if (p.status !== undefined && p.status !== 'draft') return { success: false, error: 'Use the invoice posting method to change status' };
+    if (p.exchangeRate !== undefined && (!Number.isFinite(Number(p.exchangeRate)) || Number(p.exchangeRate) <= 0)) return { success: false, error: 'Exchange rate must be positive' };
+    if (p.paidAmount !== undefined && (!Number.isFinite(Number(p.paidAmount)) || Number(p.paidAmount) < 0)) return { success: false, error: 'Paid amount must be non-negative' };
+    const cid = session.user.companyId;
+    const uid = session.user.id;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const checkSql = `SELECT status, paid_amount, base_currency_paid, total_amount, created_by FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
+      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
+      const check = await execQuery(client, checkSql, [String(p.id), cid]);
+      if (!check.rows?.length || !canAccessOwnedRow(session, 'purchases', check.rows[0].created_by)) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Invoice not found' };
+      }
+      const status = String(check.rows[0].status || '');
+      const currentPaid = Number(check.rows[0].paid_amount) || 0;
+      const currentBasePaid = Number(check.rows[0].base_currency_paid) || 0;
+      if (status !== 'draft') {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Only draft invoices can be updated' };
+      }
+      if (p.paidAmount !== undefined && Number(p.paidAmount) !== currentPaid) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Use the payment workflow to change paid amount' };
+      }
+      if (p.baseCurrencyPaid !== undefined && Number(p.baseCurrencyPaid) !== currentBasePaid) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Use the payment workflow to change base paid amount' };
+      }
+      if (p.supplierId !== undefined) {
+        const supplierSql = `SELECT id FROM suppliers WHERE id = $1::uuid AND company_id = $2::uuid`;
+        assertSqlAuthorized(session, supplierSql, [String(p.supplierId), cid]);
+        const supplier = await execQuery(client, supplierSql, [String(p.supplierId), cid]);
+        if (!supplier.rows?.length) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Supplier not found in company' };
+        }
+      }
+      const fields = [];
+      const values = [];
+      let idx = 1;
+      if (p.supplierId !== undefined) { fields.push(`supplier_id = $${idx++}::uuid`); values.push(p.supplierId); }
+      if (p.purchaseOrderId !== undefined) { fields.push(`purchase_order_id = $${idx++}::uuid`); values.push(p.purchaseOrderId || null); }
+      if (p.date !== undefined) { fields.push(`date = $${idx++}::date`); values.push(p.date); }
+      if (p.dueDate !== undefined) { fields.push(`due_date = $${idx++}::date`); values.push(p.dueDate); }
+      if (p.subtotal !== undefined) { fields.push(`subtotal = $${idx++}::numeric`); values.push(p.subtotal); }
+      if (p.discountAmount !== undefined) { fields.push(`discount_amount = $${idx++}::numeric`); values.push(p.discountAmount); }
+      if (p.vatAmount !== undefined) { fields.push(`vat_amount = $${idx++}::numeric`); values.push(p.vatAmount); }
+      if (p.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}::numeric`); values.push(p.totalAmount); }
+      if (p.currencyCode !== undefined) { fields.push(`currency_code = $${idx++}::varchar`); values.push(p.currencyCode); }
+      if (p.exchangeRate !== undefined) { fields.push(`exchange_rate = $${idx++}::numeric`); values.push(p.exchangeRate); }
+      if (p.baseCurrencyAmount !== undefined) { fields.push(`base_currency_amount = $${idx++}::numeric`); values.push(p.baseCurrencyAmount); }
+      if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
+      if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
+      if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
+      fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
+      values.push(uid, String(p.id), cid);
+      const updateSql = `UPDATE purchase_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
+      assertSqlAuthorized(session, updateSql, values, { allowFinancialUpdate: true });
+      await execQuery(client, updateSql, values);
+      if (p.lines !== undefined) {
+        if (!Array.isArray(p.lines) || p.lines.length === 0) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'At least one line is required.' };
+        }
+        const deleteSql = `DELETE FROM purchase_invoice_lines WHERE invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM purchase_invoices WHERE id = $1)`;
+        assertSqlAuthorized(session, deleteSql, [String(p.id), cid]);
+        await execQuery(client, deleteSql, [String(p.id), cid]);
+        const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
+        const lineValues = [];
+        const lineParams = [];
+        for (const line of p.lines) {
+          const off = lineParams.length;
+          const lineRate = line.exchangeRate !== undefined && line.exchangeRate !== null ? Number(line.exchangeRate) : lr;
+          const lineBaseTotal = line.baseCurrencyLineTotal !== undefined && line.baseCurrencyLineTotal !== null ? Number(line.baseCurrencyLineTotal) : (Number(line.lineTotal) || 0) * lineRate;
+          const usnap = snapLineUnit(line);
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`);
+          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
+        }
+        lineParams.push(cid);
+        const insertSql = `INSERT INTO purchase_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) SELECT v.* FROM (VALUES ${lineValues.join(', ')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid`;
+        assertSqlAuthorized(session, insertSql, lineParams, { readOnlyTables: ['products'] });
+        const inserted = await execQuery(client, insertSql, lineParams);
+        if (Number(inserted.rowCount) !== p.lines.length) throw new Error('Product not found in company');
+      }
+      await client.query('COMMIT');
+      return { success: true };
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (rbErr) { void rbErr; }
+      return { success: false, error: e.message || String(e) };
+    } finally {
+      client.release();
+    }
+  });
+
+  // purchases.deleteInvoice (guarded CTE: draft + unpaid only — AP mirror of
+  // sales.deleteInvoice).
+  registerRpc('purchases.deleteInvoice', {
+    permission: 'purchases.delete',
+    compose: (p, session) => {
+      const ownerId = isOwnOnly(session, 'purchases') ? session.user.id : null;
+      return {
+        sql: `WITH check_row AS (SELECT status, paid_amount, created_by FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)), del AS (DELETE FROM purchase_invoices WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'draft' AND paid_amount = 0 AND ($3::uuid IS NULL OR created_by = $3::uuid) RETURNING id) SELECT (SELECT status::text FROM check_row), (SELECT paid_amount::numeric FROM check_row), (SELECT id::text FROM del)`,
+        params: [String(p.id), session.user.companyId, ownerId],
+      };
+    },
+    paramCount: 3,
+    validate: (p) => {
+      if (!p.id) throw new Error('id required');
+    },
+  });
+
   // ── POS (نقاط البيع) ─────────────────────────────────────────────────
   // Cashiers interact with shifts/payments/products through these typed
   // handlers; checkout itself stays renderer-composed (journal machinery)
@@ -8427,6 +8587,9 @@ export function registerOnboardingHandlers() {
   // GCP, self-hosted) or the legacy host/port parts. Never switches the
   // active pool and never persists anything.
   ipcMain.handle('db:test-connection', async (event, config, sessionToken) => {
+    // Unified IPC shape: preloads send ONE object carrying sessionToken.
+    // Accept the legacy two-arg form too (defense in depth).
+    if (sessionToken === undefined && config && typeof config === 'object') sessionToken = config.sessionToken;
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
@@ -8488,6 +8651,8 @@ export function registerOnboardingHandlers() {
   // in the vault → survives restarts) or legacy parts (converted to a URL
   // and persisted the same way). Unifies what used to be memory-only.
   ipcMain.handle('db:update-config', async (event, config, sessionToken) => {
+    // Same unified shape as db:test-connection (see above).
+    if (sessionToken === undefined && config && typeof config === 'object') sessionToken = config.sessionToken;
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
