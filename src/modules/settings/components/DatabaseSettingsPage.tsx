@@ -12,6 +12,7 @@ import {
   type VaultConnectionMeta,
 } from '@/core/database/connectionVault';
 import { validateDatabaseUrl, buildDatabaseUrl, providerLabel, resolveDriver } from '@/core/database/connection';
+import { isRelayAvailable } from '@/core/database/relayClient';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 
@@ -21,8 +22,9 @@ import { useToastStore } from '@/core/store/toastStore';
  *   1. PGlite (local) — zero-config default on every platform.
  *   2. Remote PostgreSQL — ONE pasted DATABASE_URL for any provider
  *      (local, Supabase, Neon, GCP, self-hosted). Desktop talks direct
- *      TCP; web/mobile browsers use the Neon HTTP driver (no TCP in
- *      browsers), so non-Neon remotes are honestly gated with guidance.
+ *      TCP; Neon rides its HTTP driver on web; every other provider rides
+ *      the same-origin relay (/api/db) when one answers — otherwise the
+ *      honest capability guidance stands.
  *
  * Secrets: encrypted with the OS keychain on desktop (main process vault),
  * device storage on web (disclosed in the UI).
@@ -49,6 +51,9 @@ export const DatabaseSettingsPage: React.FC = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [isFormSaving, setIsFormSaving] = useState(false);
+  // Same-origin relay probe (web only): decides whether non-Neon remotes
+  // are routable. Null = still probing (fail-closed until known).
+  const [relayUp, setRelayUp] = useState<boolean | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -63,8 +68,17 @@ export const DatabaseSettingsPage: React.FC = () => {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (isDesktop) return;
+    let cancelled = false;
+    isRelayAvailable()
+      .then((r) => { if (!cancelled) setRelayUp(r.up); })
+      .catch(() => { if (!cancelled) setRelayUp(false); });
+    return () => { cancelled = true; };
+  }, [isDesktop]);
+
   const detected = validateDatabaseUrl(connUrl);
-  const webBlocked = !isDesktop && detected.ok && detected.parsed && resolveDriver(detected.parsed.provider, 'web') === null;
+  const webBlocked = !isDesktop && detected.ok && detected.parsed && resolveDriver(detected.parsed.provider, 'web') === null && relayUp !== true;
 
   const syncActiveToDesktop = async (id: string | null) => {
     setStoredActiveRemoteId(id);
@@ -87,7 +101,12 @@ export const DatabaseSettingsPage: React.FC = () => {
       } else {
         setTestResult({
           ok: false,
-          message: r.error === 'webTcpUnsupported' ? t('settings.database.webTcpDesc') : (r.error || t('settings.database.connectionFailed')),
+          message:
+            r.error === 'webTcpUnsupported'
+              ? t('settings.database.webTcpDesc')
+              : r.error === 'relayBlockedTarget'
+                ? t('settings.database.relayBlockedTarget')
+                : (r.error || t('settings.database.connectionFailed')),
         });
       }
     } catch (err) {
@@ -280,15 +299,24 @@ export const DatabaseSettingsPage: React.FC = () => {
           {!isDesktop && (
             <p className="text-xs text-amber-600 dark:text-amber-400">{t('settings.database.secretOnDevice')}</p>
           )}
+          {!isDesktop && mode === 'pg' && (
+            <p className={`text-xs mt-1 ${relayUp ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+              {relayUp === null
+                ? t('settings.database.relayChecking')
+                : relayUp
+                  ? t('settings.database.relayUp')
+                  : t('settings.database.relayDown')}
+            </p>
+          )}
 
           {/* Saved list */}
           {connections.length === 0 && !showForm && (
             <p className="text-sm text-slate-400">{t('settings.database.connEmpty')}</p>
           )}
           <div className="space-y-2">
-            {connections.map((c) => {
-              const isActive = c.id === activeRemoteId;
-              const blocked = !isDesktop && resolveDriver(c.provider, 'web') === null;
+              {connections.map((c) => {
+                const isActive = c.id === activeRemoteId;
+                const blocked = !isDesktop && resolveDriver(c.provider, 'web') === null && relayUp !== true;
               return (
                 <div
                   key={c.id}

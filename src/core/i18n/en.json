@@ -3386,6 +3386,10 @@
       "connActivated": "Remote connection activated",
       "connEmpty": "No saved connections yet — add the first one with a DATABASE_URL.",
       "webTcpDesc": "Browsers cannot open TCP sockets — this provider (Supabase/self-hosted/local) only works in the desktop app. On web, use Neon.",
+      "relayChecking": "Checking the fallback channel…",
+      "relayUp": "Fallback channel available — every provider works on web through it.",
+      "relayDown": "No fallback channel — on web only Neon works, other providers need the desktop app.",
+      "relayBlockedTarget": "Target refused by the fallback channel (local or private host not allowed here).",
       "useLocal": "Back to local database"
     },
     "company": {

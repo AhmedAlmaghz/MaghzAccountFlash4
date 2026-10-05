@@ -186,6 +186,30 @@ export const authApi = {
     try {
       const mainAuth = mainAuthBridge();
       if (!mainAuth) {
+        // Web-relay route (Supabase/self-hosted/local via same-origin
+        // relay): credentials verify server-side and the JWT session that
+        // comes back authorizes every later relay call. Falls through to
+        // the direct-adapter path when no relay serves this remote.
+        try {
+          const { isRelayRouteActive } = await import('@/core/database/adapters');
+          if (typeof isRelayRouteActive === 'function' && (await isRelayRouteActive())) {
+            const { getActiveRemoteUrl } = await import('@/core/database/connectionVault');
+            const { relayLogin } = await import('@/core/database/relayClient');
+            const databaseUrl = await getActiveRemoteUrl();
+            if (databaseUrl) {
+              const routed = await relayLogin(databaseUrl, credentials.username, credentials.password);
+              if (!routed.success || !routed.user) {
+                return { success: false, error: routed.error || 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+              }
+              if (credentials.rememberMe) {
+                localStorage.setItem('auth_remember', credentials.username);
+              }
+              return { success: true, user: routed.user as User, permissions: (routed.permissions || []) as Permission[] };
+            }
+          }
+        } catch {
+          /* relay unreachable — fall through to the direct-adapter path */
+        }
         // Browser/PGlite fallback — verify against the users table directly.
         const rate = pgliteCheckRateLimit(credentials.username);
         if (!rate.allowed) {
@@ -278,6 +302,12 @@ export const authApi = {
   async logout(): Promise<void> {
     try {
       await window.electronAuth?.logout();
+      try {
+        const { clearRelayToken } = await import('@/core/database/relayClient');
+        clearRelayToken();
+      } catch {
+        /* relay client unavailable — nothing to clear */
+      }
       localStorage.removeItem('auth_user');
       localStorage.removeItem('auth_remember');
     } catch {

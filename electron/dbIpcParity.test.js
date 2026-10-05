@@ -26,6 +26,79 @@ function read(rel) {
   return readFileSync(resolve(ROOT, rel), 'utf-8');
 }
 
+/** Extract a balanced `{...}` block starting at the first `{` at/after `from`. */
+function extractBlock(src, from) {
+  const start = src.indexOf('{', from);
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  throw new Error('unbalanced block');
+}
+
+/** role -> sorted permission list from a FALLBACK_PERMISSIONS literal. */
+function rolePermissions(block) {
+  const out = {};
+  const re = /(\w+):\s*\[([\s\S]*?)\]/g;
+  let m;
+  while ((m = re.exec(block)) !== null) {
+    out[m[1]] = [...m[2].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+  }
+  return out;
+}
+
+/** All table names inside `tables: [...]` lists of a rules literal. */
+function ruleTables(block) {
+  const found = new Set();
+  for (const m of block.matchAll(/tables:\s*\[([\s\S]*?)\]/g)) {
+    for (const t of m[1].matchAll(/'([a-z_][a-z0-9_]*)'/g)) found.add(t[1]);
+  }
+  return [...found].sort();
+}
+
+describe('relay guard parity with the main process (CI)', () => {
+  const main = read(MAIN);
+  const relay = read('api/_lib/relayGuard.js');
+
+  it('FALLBACK_PERMISSIONS are identical per role', () => {
+    const a = rolePermissions(extractBlock(main, main.indexOf('FALLBACK_PERMISSIONS')));
+    const b = rolePermissions(extractBlock(relay, relay.indexOf('FALLBACK_PERMISSIONS')));
+    expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
+    for (const role of Object.keys(a)) {
+      expect(b[role], `role ${role} drifted between dbHandler and relayGuard`).toEqual(a[role]);
+    }
+  });
+
+  it('SQL_MODULE_TABLE_RULES cover the identical table set', () => {
+    const a = ruleTables(extractBlock(main, main.indexOf('SQL_MODULE_TABLE_RULES = [')));
+    const b = ruleTables(extractBlock(relay, relay.indexOf('SQL_MODULE_TABLE_RULES = [')));
+    expect(b).toEqual(a);
+  });
+
+  it('guard patterns and rule keys are identical', () => {
+    for (const name of ['FORBIDDEN_STATEMENT_PATTERN', 'RAW_SQL_FORBIDDEN_COLUMN_PATTERN']) {
+      const grab = (src) => {
+        const i = src.indexOf(`${name} = /`);
+        const end = src.indexOf('/i', i);
+        return src.slice(i, end + 2);
+      };
+      expect(grab(relay), `${name} drifted`).toBe(grab(main));
+    }
+    const keys = (src, mapName) => {
+      const i = src.indexOf(`${mapName} = new Map([`);
+      const end = src.indexOf(']);', i);
+      const slice = src.slice(i, end);
+      return [...slice.matchAll(/\['([a-z_][a-z0-9_]*)'/g)].map((m) => m[1]).sort();
+    };
+    expect(keys(relay, 'FINANCIAL_UPDATE_RULES')).toEqual(keys(main, 'FINANCIAL_UPDATE_RULES'));
+    expect(keys(relay, 'RAW_SQL_CHILD_PARENT_RULES')).toEqual(keys(main, 'RAW_SQL_CHILD_PARENT_RULES'));
+  });
+});
+
 describe('db IPC shape parity (CI)', () => {
   const cjs = read(CJS);
   const js = read(JS);

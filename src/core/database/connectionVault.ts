@@ -234,6 +234,28 @@ export async function resolveActiveWebRemote(): Promise<{ driver: 'http'; databa
   return { driver: 'http', databaseUrl: url };
 }
 
+/**
+ * Resolve the active remote connection for the generic relay path (any
+ * provider on web through a reachable same-origin relay). Unlike
+ * resolveActiveWebRemote there is no provider restriction — reachability
+ * is decided by the relay health probe at the call site.
+ */
+export async function resolveActiveRelayRemote(): Promise<{ databaseUrl: string }> {
+  const url = await getActiveRemoteUrl();
+  if (!url) {
+    throw new RemoteCapabilityError(
+      'no-remote-connection',
+      'No remote database selected. Add a DATABASE_URL in Settings → Database, or keep using the local database.',
+    );
+  }
+  try {
+    parseDatabaseUrl(url);
+  } catch {
+    throw new RemoteCapabilityError('invalid-remote-url', 'The saved connection URL is invalid. Re-enter it in Settings → Database.');
+  }
+  return { databaseUrl: url };
+}
+
 /** Find a saved connection's metadata by id (either platform). */
 export async function findRemoteConnection(id: string): Promise<VaultConnectionMeta | null> {
   const all = await listRemoteConnections();
@@ -247,8 +269,20 @@ export async function testRemoteConnection(
   const parsed = parseDatabaseUrl(databaseUrl); // throws on invalid
   const b = bridge();
   if (b?.test) return b.test({ databaseUrl: parsed.raw });
-  // Web: only Neon-compatible endpoints are routable (no TCP in browsers).
+  // Web: only Neon-compatible endpoints are directly routable (no TCP in
+  // browsers). Any other provider rides the same-origin relay when one
+  // answers the health probe; otherwise the honest capability error stands.
   if (parsed.provider !== 'neon') {
+    try {
+      const { isRelayAvailable, relayCall } = await import('./relayClient');
+      if ((await isRelayAvailable()).up) {
+        const r = await relayCall('pingdb', { databaseUrl: parsed.raw });
+        if (r.success) return { success: true, db: r.db, version: r.version };
+        return { success: false, error: r.code === 'blocked-target' ? 'relayBlockedTarget' : (r.error || 'connectionFailed') };
+      }
+    } catch {
+      /* probe/call failed — fall through to the capability error */
+    }
     return {
       success: false,
       error: 'webTcpUnsupported',

@@ -85,9 +85,86 @@ function jevRelayPlugin() {
   };
 }
 
+/**
+ * Dev-only twin of api/db.ts (generic Postgres-over-HTTPS relay).
+ * Mounts the SAME request handler (api/_lib/relayHandler.js) at the same
+ * path, so local web development against a local Postgres needs no extra
+ * process: `vite dev` serves both the app and its relay. Production uses
+ * the Vercel serverless function; behavior is identical by construction.
+ */
+function dbRelayPlugin() {
+  // One handler per dev-server lifetime (stable sessions across requests —
+  // a fresh secret per request would invalidate every JWT immediately).
+  // Explicitly insecure and dev-only: production MUST set MAGHZ_RELAY_SECRET.
+  let relay: { handle: (req: { method?: string; body?: unknown; headers?: Record<string, string>; clientIp?: string }) => Promise<{ status: number; body: unknown }> } | null = null;
+  async function getRelay() {
+    if (!relay) {
+      const { createRelayHandler } = await import('./api/_lib/relayHandler.js');
+      relay = createRelayHandler({
+        env: {
+          ...process.env,
+          MAGHZ_RELAY_SECRET: process.env.MAGHZ_RELAY_SECRET || 'dev-only-relay-secret-NEVER-use-in-production-0123456789',
+        },
+      });
+    }
+    return relay;
+  }
+  return {
+    name: 'db-relay-dev',
+    configureServer(server: { middlewares: { use: (fn: (req: never, res: never, next: () => void) => void) => void } }) {
+      server.middlewares.use(((req: never, res: never, next: () => void) => {
+        const r = req as unknown as { url?: string; method?: string; headers?: Record<string, string>; socket?: { remoteAddress?: string }; on: (ev: string, fn: (c?: Uint8Array) => void) => void };
+        const w = res as unknown as {
+          setHeader: (k: string, v: string) => void;
+          end: (b?: string) => void;
+          statusCode: number;
+        };
+        const pathname = (r.url || '').split('?')[0];
+        if (pathname !== '/api/db') return next();
+        if ((r.method || 'GET').toUpperCase() === 'GET') {
+          void getRelay().then((h) => h.handle({ method: 'GET', body: {}, headers: r.headers, clientIp: r.socket?.remoteAddress })).then((out) => {
+            w.statusCode = out.status;
+            w.setHeader('Content-Type', 'application/json');
+            w.end(JSON.stringify(out.body));
+          }).catch(() => {
+            w.statusCode = 500;
+            w.setHeader('Content-Type', 'application/json');
+            w.end(JSON.stringify({ ok: false }));
+          });
+          return;
+        }
+        if ((r.method || '').toUpperCase() !== 'POST') return next();
+        const chunks: Uint8Array[] = [];
+        r.on('data', (c?: Uint8Array) => { if (c) chunks.push(c); });
+        r.on('end', () => {
+          void (async () => {
+            try {
+              let body: unknown = {};
+              try {
+                body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+              } catch {
+                body = {};
+              }
+              const h = await getRelay();
+              const out = await h.handle({ method: 'POST', body, headers: r.headers, clientIp: r.socket?.remoteAddress });
+              w.statusCode = out.status;
+              w.setHeader('Content-Type', 'application/json');
+              w.end(JSON.stringify(out.body));
+            } catch {
+              w.statusCode = 500;
+              w.setHeader('Content-Type', 'application/json');
+              w.end(JSON.stringify({ success: false, code: 'unavailable', error: 'relay failure' }));
+            }
+          })();
+        });
+      }) as (req: never, res: never, next: () => void) => void);
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [react(), versionJsonPlugin(), jevRelayPlugin()],
+  plugins: [react(), versionJsonPlugin(), jevRelayPlugin(), dbRelayPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
   },

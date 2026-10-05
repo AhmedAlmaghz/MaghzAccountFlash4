@@ -164,25 +164,74 @@ async function acquireDbAdapter(): Promise<DbAdapter> {
     }
   }
 
-  // Web / mobile browser with a remote database selected. Browsers cannot
-  // open TCP sockets, so only Neon-compatible endpoints are routable here
-  // (official HTTP driver). Anything else raises a structured capability
-  // error the settings UI maps to guidance — never a transport mystery.
+  // Web / mobile browser with a remote database selected.
+  //   - Neon-compatible endpoints ride the official HTTP driver directly
+  //     (no extra hop).
+  //   - Every other provider (Supabase, self-hosted, local, …) rides the
+  //     same-origin relay (/api/db) when one answers the health probe —
+  //     browsers cannot open TCP sockets, so the relay executes the
+  //     parameterized statements server-side under the same SQL contract
+  //     as the desktop channel. Without a relay the structured capability
+  //     error below maps to guidance in the settings UI — never a mystery.
   if (mode === 'pg' && !isElectron() && !isE2E) {
-    const { resolveActiveWebRemote } = await import('../connectionVault');
-    const remote = await resolveActiveWebRemote();
+    const { getActiveRemoteUrl, RemoteCapabilityError } = await import('../connectionVault');
+    const { parseDatabaseUrl } = await import('../connection');
+    const url = await getActiveRemoteUrl();
+    if (!url) {
+      throw new RemoteCapabilityError(
+        'no-remote-connection',
+        'No remote database selected. Add a DATABASE_URL in Settings → Database, or keep using the local database.',
+      );
+    }
+    let provider: string;
     try {
-      const { configureNeonHttp, neonHttpAdapter } = await import('./neonHttpAdapter');
-      configureNeonHttp(remote.databaseUrl);
-      const ping = await neonHttpAdapter.ping();
+      provider = parseDatabaseUrl(url).provider;
+    } catch {
+      throw new RemoteCapabilityError(
+        'invalid-remote-url',
+        'The saved connection URL is invalid. Re-enter it in Settings → Database.',
+      );
+    }
+    if (provider === 'neon') {
+      const { resolveActiveWebRemote } = await import('../connectionVault');
+      const remote = await resolveActiveWebRemote();
+      try {
+        const { configureNeonHttp, neonHttpAdapter } = await import('./neonHttpAdapter');
+        configureNeonHttp(remote.databaseUrl);
+        const ping = await neonHttpAdapter.ping();
+        if (ping.success) {
+          console.log('[DB Adapter] Neon Postgres via HTTPS (web)');
+          adapter = neonHttpAdapter;
+          adapterMode = mode;
+          lastPingAt = Date.now();
+          return adapter;
+        }
+        throw new Error(ping.message || 'Neon ping failed');
+      } catch (err) {
+        adapter = null;
+        if (err instanceof Error && err.name === 'RemoteCapabilityError') throw err;
+        throw err instanceof Error ? err : new Error(String(err));
+      }
+    }
+    const { isRelayAvailable } = await import('../relayClient');
+    const relay = await isRelayAvailable();
+    if (!relay.up) {
+      throw new RemoteCapabilityError(
+        'non-neon-on-web',
+        'Direct TCP connections (Supabase, self-hosted, local) need the desktop app. On web, remote databases must be Neon (HTTP driver).',
+      );
+    }
+    try {
+      const { relayHttpAdapter } = await import('./relayHttpAdapter');
+      const ping = await relayHttpAdapter.ping();
       if (ping.success) {
-        console.log('[DB Adapter] Neon Postgres via HTTPS (web)');
-        adapter = neonHttpAdapter;
+        console.log('[DB Adapter] Postgres via relay HTTPS (web)');
+        adapter = relayHttpAdapter;
         adapterMode = mode;
         lastPingAt = Date.now();
         return adapter;
       }
-      throw new Error(ping.message || 'Neon ping failed');
+      throw new Error(ping.message || 'Relay ping failed');
     } catch (err) {
       adapter = null;
       if (err instanceof Error && err.name === 'RemoteCapabilityError') throw err;
@@ -193,6 +242,27 @@ async function acquireDbAdapter(): Promise<DbAdapter> {
   throw new Error(
     'قاعدة البيانات غير متوفرة. اختر "PGlite محلي" من الإعدادات، أو تأكد من تشغيل PostgreSQL.'
   );
+}
+
+/**
+ * Is the active route a web-relay remote (non-Neon provider through a
+ * reachable same-origin relay)? Used by the auth layer (relay login) and
+ * the settings UI. Never throws — unknown means "not a relay route".
+ */
+export async function isRelayRouteActive(): Promise<boolean> {
+  try {
+    if (getDbMode() !== 'pg' || isElectron()) return false;
+    if (typeof window !== 'undefined' && (window as { electronDB?: { ping?: unknown } }).electronDB?.ping) return false;
+    const { getActiveRemoteUrl } = await import('../connectionVault');
+    const { parseDatabaseUrl } = await import('../connection');
+    const url = await getActiveRemoteUrl();
+    if (!url) return false;
+    if (parseDatabaseUrl(url).provider === 'neon') return false;
+    const { isRelayAvailable } = await import('../relayClient');
+    return (await isRelayAvailable()).up;
+  } catch {
+    return false;
+  }
 }
 
 export { isElectron, isElectronPg };
