@@ -8145,7 +8145,7 @@ export async function seedInitialData(adminPassword, company) {
     // 2a. Seed default admin role
     await client.query(`
       INSERT INTO roles (company_id, name, description, permissions, is_system)
-      SELECT $1, 'ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ…', 'ظ…ط¯ظٹط± ط§ظ„ظ†ط¸ط§ظ… - طµظ„ط§ط­ظٹط§طھ ظƒط§ظ…ظ„ط©', '["all"]', TRUE
+      SELECT $1, 'مدير النظام', 'مدير النظام - صلاحيات كاملة', '["all"]', TRUE
       WHERE NOT EXISTS (SELECT 1 FROM roles WHERE roles.company_id = $1 AND roles.is_system = TRUE);
     `, [companyId]);
 
@@ -8154,25 +8154,25 @@ export async function seedInitialData(adminPassword, company) {
     // Assets
     const assetsRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, type, nature, is_group)
-      VALUES ($1, '1', 'ط§ظ„ط£طµظˆظ„', 'Assets', 'asset', 'debit', TRUE) RETURNING id;
+      VALUES ($1, '1', 'الأصول', 'Assets', 'asset', 'debit', TRUE) RETURNING id;
     `, [companyId]);
     const assetsId = assetsRes.rows[0].id;
 
     const curAssetsRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
-      VALUES ($1, '11', 'ط§ظ„ط£طµظˆظ„ ط§ظ„ظ…طھط¯ط§ظˆظ„ط©', 'Current Assets', $2, 'asset', 'debit', TRUE) RETURNING id;
+      VALUES ($1, '11', 'الأصول المتداولة', 'Current Assets', $2, 'asset', 'debit', TRUE) RETURNING id;
     `, [companyId, assetsId]);
     const curAssetsId = curAssetsRes.rows[0].id;
 
     const cashGroupRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group)
-      VALUES ($1, '111', 'ط§ظ„طµظ†ط¯ظˆظ‚ ظˆط§ظ„ط¨ظ†ظˆظƒ', 'Cash & Treasuries', $2, 'asset', 'debit', TRUE) RETURNING id;
+      VALUES ($1, '111', 'الصندوق والبنوك', 'Cash & Treasuries', $2, 'asset', 'debit', TRUE) RETURNING id;
     `, [companyId, curAssetsId]);
     const cashGroupId = cashGroupRes.rows[0].id;
 
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '11101', 'ط§ظ„طµظ†ط¯ظˆظ‚ ط§ظ„ط±ط¦ظٹط³ظٹ', 'Main Cash', $2, 'asset', 'debit', FALSE, 5000000);
+      VALUES ($1, '11101', 'الصندوق الرئيسي', 'Main Cash', $2, 'asset', 'debit', FALSE, 5000000);
     `, [companyId, cashGroupId]);
 
     await client.query(`
@@ -8182,61 +8182,61 @@ export async function seedInitialData(adminPassword, company) {
 
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '31101', 'ط±ط£ط³ ط§ظ„ظ…ط§ظ„ ط§ظ„ظ…ط¯ظپظˆط¹', 'Paid-in Capital', $2, 'equity', 'credit', FALSE, 20000000);
+      VALUES ($1, '31101', 'رأس المال المدفوع', 'Paid-in Capital', $2, 'equity', 'credit', FALSE, 20000000);
     `, [companyId, equityId]);
 
     // Revenues
     const revenueRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, type, nature, is_group)
-      VALUES ($1, '4', 'ط§ظ„ط¥ظٹط±ط§ط¯ط§طھ', 'Revenues', 'revenue', 'credit', TRUE) RETURNING id;
+      VALUES ($1, '4', 'الإيرادات', 'Revenues', 'revenue', 'credit', TRUE) RETURNING id;
     `, [companyId]);
     const revenueId = revenueRes.rows[0].id;
 
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '41101', 'ظ…ط¨ظٹط¹ط§طھ ط§ظ„ظ…ظ†طھط¬ط§طھ', 'Product Sales', $2, 'revenue', 'credit', FALSE, 0);
+      VALUES ($1, '41101', 'مبيعات المنتجات', 'Product Sales', $2, 'revenue', 'credit', FALSE, 0);
     `, [companyId, revenueId]);
 
     // Expenses
     const expenseRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, type, nature, is_group)
-      VALUES ($1, '5', 'ط§ظ„ظ…طµط±ظˆظپط§طھ', 'Expenses', 'expense', 'debit', TRUE) RETURNING id;
+      VALUES ($1, '5', 'المصروفات', 'Expenses', 'expense', 'debit', TRUE) RETURNING id;
     `, [companyId]);
     const expenseId = expenseRes.rows[0].id;
 
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '52201', 'ظ…طµط±ظˆظپط§طھ ط§ظ„ط¥ظٹط¬ط§ط±', 'Rent Expense', $2, 'expense', 'debit', FALSE, 0);
+      VALUES ($1, '52201', 'مصروفات الإيجار', 'Rent Expense', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
 
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '52101', 'ط±ظˆط§طھط¨ ط§ظ„ظ…ظˆط¸ظپظٹظ†', 'Employee Salaries', $2, 'expense', 'debit', FALSE, 0);
+      VALUES ($1, '52101', 'رواتب الموظفين', 'Employee Salaries', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
 
     // Trade Debtors
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '11201', 'ط§ظ„ظ…ط¯ظٹظ†ظˆظ† ط§ظ„طھط¬ط§ط±ظٹظˆظ†', 'Trade Customers', $2, 'asset', 'debit', FALSE, 0);
+      VALUES ($1, '11201', 'المدينون التجاريون', 'Trade Customers', $2, 'asset', 'debit', FALSE, 0);
     `, [companyId, curAssetsId]);
 
     // Inventory
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '11301', 'ط¨ط¶ط§ط¹ط© ط£ظˆظ„ ط§ظ„ظ…ط¯ط©', 'Opening Inventory', $2, 'asset', 'debit', FALSE, 0);
+      VALUES ($1, '11301', 'بضاعة أول المدة', 'Opening Inventory', $2, 'asset', 'debit', FALSE, 0);
     `, [companyId, curAssetsId]);
 
     // Liabilities sub-accounts
     const liabRes = await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, type, nature, is_group)
-      VALUES ($1, '2', 'ط§ظ„ط§ظ„طھط²ط§ظ…ط§طھ', 'Liabilities', 'liability', 'credit', TRUE) RETURNING id;
+      VALUES ($1, '2', 'الالتزامات', 'Liabilities', 'liability', 'credit', TRUE) RETURNING id;
     `, [companyId]);
     const liabId = liabRes.rows[0].id;
 
     // Trade Creditors
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '21101', 'ط§ظ„ط¯ط§ط¦ظ†ظˆظ† ط§ظ„طھط¬ط§ط±ظٹظˆظ†', 'Trade Suppliers', $2, 'liability', 'credit', FALSE, 0);
+      VALUES ($1, '21101', 'الدائنون التجاريون', 'Trade Suppliers', $2, 'liability', 'credit', FALSE, 0);
     `, [companyId, liabId]);
 
     // VAT Payable
@@ -8254,25 +8254,25 @@ export async function seedInitialData(adminPassword, company) {
     // Additional revenue accounts
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '41102', 'ظ…ط¨ظٹط¹ط§طھ ط§ظ„ط®ط¯ظ…ط§طھ', 'Services Sales', $2, 'revenue', 'credit', FALSE, 0);
+      VALUES ($1, '41102', 'مبيعات الخدمات', 'Services Sales', $2, 'revenue', 'credit', FALSE, 0);
     `, [companyId, revenueId]);
 
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '41103', 'ظ…ط±ط¯ظˆط¯ط§طھ ط§ظ„ظ…ط¨ظٹط¹ط§طھ', 'Sales Returns', $2, 'revenue', 'credit', FALSE, 0);
+      VALUES ($1, '41103', 'مردودات المبيعات', 'Sales Returns', $2, 'revenue', 'credit', FALSE, 0);
     `, [companyId, revenueId]);
 
     // COGS
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '51101', 'طھظƒظ„ظپط© ط¨ط¶ط§ط¹ط© ظ…ط¨ط§ط¹ط©', 'Cost of Goods Sold', $2, 'expense', 'debit', FALSE, 0);
+      VALUES ($1, '51101', 'تكلفة بضاعة مباعة', 'Cost of Goods Sold', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
 
     // Discount accounts (explicit discount legs, gross method — see 0031):
     // 41201 contra-revenue (debit nature), 42101 other income (credit nature).
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '41201', 'ط®طµظ… ظ…ط³ظ…ظˆط­ ط¨ظ‡', 'Sales Discounts Allowed', $2, 'revenue', 'debit', FALSE, 0);
+      VALUES ($1, '41201', 'خصم مسموح به', 'Sales Discounts Allowed', $2, 'revenue', 'debit', FALSE, 0);
     `, [companyId, revenueId]);
 
     await client.query(`
@@ -8289,15 +8289,15 @@ export async function seedInitialData(adminPassword, company) {
     // perpetual-valuation postings (PPV, stock-count gain/loss).
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '51901', 'ظپط±ظˆظ‚ ط§ط³ط¹ط§ط± ط§ظ„ط´ط±ط§ط،', 'Purchase Price Variance', $2, 'expense', 'debit', FALSE, 0);
+      VALUES ($1, '51901', 'فروق أسعار الشراء', 'Purchase Price Variance', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '52901', 'ط¹ط¬ط² ط§ظ„ظ…ط®ط²ظˆظ†', 'Inventory Shortage Loss', $2, 'expense', 'debit', FALSE, 0);
+      VALUES ($1, '52901', 'عجز المخزون', 'Inventory Shortage Loss', $2, 'expense', 'debit', FALSE, 0);
     `, [companyId, expenseId]);
     await client.query(`
       INSERT INTO accounts (company_id, code, name_ar, name_en, parent_id, type, nature, is_group, balance)
-      VALUES ($1, '41901', 'ظپط§ط¦ط¶ ط§ظ„ظ…ط®ط²ظˆظ†', 'Inventory Surplus Gain', $2, 'revenue', 'credit', FALSE, 0);
+      VALUES ($1, '41901', 'فائض المخزون', 'Inventory Surplus Gain', $2, 'revenue', 'credit', FALSE, 0);
     `, [companyId, revenueId]);
     // Fixed-asset disposal gains live apart from inventory surplus (IAS 16
     // presentation: operating gains are not stock-count gains).
@@ -8352,12 +8352,12 @@ export async function seedInitialData(adminPassword, company) {
 
     await client.query(`
       INSERT INTO currencies (company_id, code, name, symbol, exchange_rate, is_default, is_active)
-      VALUES ($1, 'YER', 'ط§ظ„ط±ظٹط§ظ„ ط§ظ„ظٹظ…ظ†ظٹ', 'ط±.ظٹ', 1, true, true) ON CONFLICT DO NOTHING;
+      VALUES ($1, 'YER', 'الريال اليمني', 'ر.ي', 1, true, true) ON CONFLICT DO NOTHING;
     `, [companyId]);
 
     await client.query(`
       INSERT INTO branches (company_id, name, code, address, is_active)
-      VALUES ($1, 'ط§ظ„ظپط±ط¹ ط§ظ„ط±ط¦ظٹط³ظٹ', 'HQ', 'طµظ†ط¹ط§ط، - ط´ط§ط±ط¹ ط§ظ„ط³طھظٹظ†', true) ON CONFLICT DO NOTHING;
+      VALUES ($1, 'الفرع الرئيسي', 'HQ', 'صنعاء - شارع الستين', true) ON CONFLICT DO NOTHING;
     `, [companyId]);
 
     // 5. Seed document sequences
@@ -8479,13 +8479,13 @@ export async function seedInitialData(adminPassword, company) {
       await client.query(`
         INSERT INTO cash_boxes (company_id, name, code, current_balance, account_id)
         VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING;
-      `, [companyId, 'ط§ظ„طµظ†ط¯ظˆظ‚ ط§ظ„ط±ط¦ظٹط³ظٹ', 'MAIN-CB', 5000000, cashBoxAccRes.rows[0].id]);
+      `, [companyId, 'الصندوق الرئيسي', 'MAIN-CB', 5000000, cashBoxAccRes.rows[0].id]);
 
       await client.query(`
         INSERT INTO cash_boxes (company_id, name, code, current_balance, account_id)
         SELECT $1, $2, $3, $4, $5
         WHERE NOT EXISTS (SELECT 1 FROM cash_boxes WHERE company_id = $1 AND code = $3);
-      `, [companyId, 'طµظ†ط¯ظˆظ‚ ظپط±ط¹ ط§ظ„ط­ط¯ظٹط¯ط©', 'CB-HOD', 200000, cashBoxAccRes.rows[0].id]);
+      `, [companyId, 'صندوق فرع الحديدة', 'CB-HOD', 200000, cashBoxAccRes.rows[0].id]);
 
       await client.query(`
         INSERT INTO cash_boxes (company_id, name, code, current_balance, account_id)
@@ -8498,27 +8498,27 @@ export async function seedInitialData(adminPassword, company) {
     await client.query(`
       INSERT INTO cost_centers (company_id, name_ar, name_en, code, type, budget_amount)
       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING;
-    `, [companyId, 'ط§ظ„ظپط±ط¹ ط§ظ„ط±ط¦ظٹط³ظٹ', 'Main Branch', 'HQ', 'branch', 0]);
+    `, [companyId, 'الفرع الرئيسي', 'Main Branch', 'HQ', 'branch', 0]);
 
     await client.query(`
       INSERT INTO cost_centers (company_id, name_ar, name_en, code, type, budget_amount)
       SELECT $1, $2, $3, $4, $5, $6
       WHERE NOT EXISTS (SELECT 1 FROM cost_centers WHERE company_id = $1 AND code = $4);
-    `, [companyId, 'ظ‚ط³ظ… ط§ظ„ظ…ط¨ظٹط¹ط§طھ', 'Sales Department', 'CC-SAL', 'department', 1500000]);
+    `, [companyId, 'قسم المبيعات', 'Sales Department', 'CC-SAL', 'department', 1500000]);
 
     await client.query(`
       INSERT INTO cost_centers (company_id, name_ar, name_en, code, type, budget_amount)
       SELECT $1, $2, $3, $4, $5, $6
       WHERE NOT EXISTS (SELECT 1 FROM cost_centers WHERE company_id = $1 AND code = $4);
-    `, [companyId, 'ظ‚ط³ظ… ط§ظ„ط¥ظ†طھط§ط¬', 'Production Department', 'CC-PRD', 'department', 2500000]);
+    `, [companyId, 'قسم الإنتاج', 'Production Department', 'CC-PRD', 'department', 2500000]);
 
     // 5g. Seed payroll components
     const payrollComps = [
-      { name_ar: 'ط§ظ„ط±ط§طھط¨ ط§ظ„ط£ط³ط§ط³ظٹ', name_en: 'Base Salary', code: 'BAS', type: 'earning', method: 'fixed', amount: 0, gross: true, tax: true, ins: false },
+      { name_ar: 'الراتب الأساسي', name_en: 'Base Salary', code: 'BAS', type: 'earning', method: 'fixed', amount: 0, gross: true, tax: true, ins: false },
       { name_ar: 'ط¨ط¯ظ„ ط³ظƒظ†', name_en: 'Housing Allowance', code: 'HOU', type: 'earning', method: 'fixed', amount: 150000, gross: true, tax: false, ins: false },
       { name_ar: 'ط¨ط¯ظ„ ظ†ظ‚ظ„', name_en: 'Transport Allowance', code: 'TRN', type: 'earning', method: 'fixed', amount: 50000, gross: true, tax: false, ins: false },
       { name_ar: 'ط¶ط±ظٹط¨ط© ط¯ط®ظ„', name_en: 'Income Tax', code: 'TAX', type: 'tax', method: 'formula', amount: 0, gross: false, tax: true, ins: false },
-      { name_ar: 'طھط£ظ…ظٹظ†ط§طھ ط§ط¬طھظ…ط§ط¹ظٹط©', name_en: 'Social Insurance', code: 'INS', type: 'deduction', method: 'percentage', amount: 9, gross: false, tax: false, ins: true },
+      { name_ar: 'تأمينات اجتماعية', name_en: 'Social Insurance', code: 'INS', type: 'deduction', method: 'percentage', amount: 9, gross: false, tax: false, ins: true },
     ];
     for (const pc of payrollComps) {
       await client.query(`
@@ -8530,11 +8530,11 @@ export async function seedInitialData(adminPassword, company) {
     // 6. Seed sample customer and supplier
     await client.query(`
       INSERT INTO customers (company_id, code, name, phone, email, address, balance, is_active)
-      VALUES ($1, 'CUST-001', 'ط¹ظ…ظٹظ„ ط§ظپطھط±ط§ط¶ظٹ', '+967700000001', 'demo@customer.ye', 'طµظ†ط¹ط§ط،', 0, true) ON CONFLICT DO NOTHING;
+      VALUES ($1, 'CUST-001', 'عميل افتراضي', '+967700000001', 'demo@customer.ye', 'صنعاء', 0, true) ON CONFLICT DO NOTHING;
     `, [companyId]);
     await client.query(`
       INSERT INTO suppliers (company_id, code, name, phone, email, address, balance, is_active)
-      VALUES ($1, 'SUP-001', 'ظ…ظˆط±ط¯ ط§ظپطھط±ط§ط¶ظٹ', '+967700000002', 'demo@supplier.ye', 'ط¬ط¯ط©', 0, true) ON CONFLICT DO NOTHING;
+      VALUES ($1, 'SUP-001', 'مورد افتراضي', '+967700000002', 'demo@supplier.ye', 'جدة', 0, true) ON CONFLICT DO NOTHING;
     `, [companyId]);
 
     // Set created_by for seeded document tables
@@ -8558,10 +8558,10 @@ export async function seedInitialData(adminPassword, company) {
       `, [
         companyId,
         adminId,
-        'ط§ظ„ظ†ط¸ط§ظ…',
-        'طھظ‡ظٹط¦ط© ظˆطھط؛ط°ظٹط© ظ‚ط§ط¹ط¯ط© ط§ظ„ط¨ظٹط§ظ†ط§طھ MaghzAccountFlash35',
-        'ط§ظ„ط£ط³ط§ط³ (Core)',
-        `طھظ… ط¥ظ†ط´ط§ط، ط§ظ„ط¬ط¯ط§ظˆظ„ ط§ظ„ط£ط³ط§ط³ظٹط© ظˆطھط£ط³ظٹط³ ط¯ظ„ظٹظ„ ط§ظ„ط­ط³ط§ط¨ط§طھ ظ„ظ„ط´ط±ظƒط© "${companyId}" ط¨ط§ظ„ط±ظٹط§ظ„ ط§ظ„ظٹظ…ظ†ظٹ (YER) ط¨ظ†ط¬ط§ط­.`
+        'النظام',
+        'تهيئة وتغذية قاعدة البيانات MaghzAccountFlash35',
+        'الأساس (Core)',
+        `تم إنشاء الجداول الأساسية وتأسيس دليل الحسابات للشركة "${companyId}" بالريال اليمني (YER) بنجاح.`
       ]);
     } catch (logErr) {
       console.warn('[DB] Could not write activity log:', logErr.message);
@@ -8579,7 +8579,7 @@ export async function seedInitialData(adminPassword, company) {
   }
 }
 
-// â”€â”€â”€ IPC Handlers for Onboarding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- IPC Handlers for Onboarding ---
 
 export function registerOnboardingHandlers() {
   // Test connection with provided config. Accepts either a full
@@ -8892,7 +8892,7 @@ export function registerOnboardingHandlers() {
         const check = await pool.query('SELECT id FROM companies LIMIT 1');
         const existingId = check.rows[0]?.id;
         if (!existingId) {
-          return { success: false, error: 'ظپط´ظ„ ط§ظ„ط¨ط°ط±: ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظˆظ„ط§ ظٹظ…ظƒظ† ط¥ظ†ط´ط§ط¦ظ‡ط§' };
+          return { success: false, error: 'فشل البذر: لا توجد بيانات ولا يمكن إنشاؤها' };
         }
         const existingProfile = sanitizeCompanyProfile(company);
         if (existingProfile) await applyCompanyProfile(existingId, existingProfile);

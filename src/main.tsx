@@ -11,6 +11,7 @@ import { AlertTriangle, HardDrive, RefreshCw } from 'lucide-react';
 import { Button, ErrorBoundary } from './core/ui/components';
 import { useTranslation } from './core/i18n/useTranslation';
 import { setDbMode } from './core/database/adapters';
+import { isEmptyDatabaseResult } from './app/emptyDb';
 
 // Direction/language are owned by the app store (imported above): the saved
 // preference wins, otherwise the device language detected at first run (see
@@ -168,6 +169,15 @@ function App() {
             fiscalYearStart: company.fiscalYearStart,
           });
           // Company loaded successfully
+        } else if (isEmptyDatabaseResult(companyResult)) {
+          // Reachable but EMPTY database (fresh Neon/pg with schema, no rows)
+          // while onboarding completed elsewhere (e.g. PGlite on another
+          // device). Booting into the router with no company breaks every
+          // page — re-run the wizard against THIS database instead, which
+          // provisions company + admin on the active adapter.
+          const { useOnboardingStore } = await import('./core/store/onboardingStore');
+          if (!cancelled) useOnboardingStore.getState().reset();
+          return;
         } else {
           console.error('[App] Could not load company');
         }
