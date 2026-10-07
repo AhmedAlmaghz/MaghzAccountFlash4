@@ -61,8 +61,16 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
  * fail-closed; the desktop still crosses only via the guarded legacy channel
  * under the SQL whitelist, and a typed-RPC migration for period management
  * remains the tracked follow-up.
+ *
+ * Lowered 375 -> 370 with the purchases invoice-write tranche:
+ * createInvoice/updateInvoice/deleteInvoice moved behind isElectronPg() +
+ * return onto typed RPC (verified live against Postgres inside ROLLBACK),
+ * five renderer-composed statements gone from the reachable set. The
+ * remoteSchema wake-retry refactor in the same window deliberately keeps
+ * `adapter.query` text at every call site (thunk form) so this counter
+ * keeps seeing those four statements — see queryWithWakeRetry.
  */
-const CEILING = 375;
+const CEILING = 370;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -90,7 +98,7 @@ const BASELINE: Record<string, number> = {
   'src/modules/accounting/api.ts': 32,
   'src/modules/manufacturing/api.ts': 34,
   'src/modules/inventory/api.ts': 24,
-  'src/modules/purchases/api.ts': 24,
+  'src/modules/purchases/api.ts': 19,
   'src/modules/reports/dashboards/useDashboard.ts': 18,
   'src/modules/sales/api.ts': 14,
   'src/core/services/postingService.ts': 10,

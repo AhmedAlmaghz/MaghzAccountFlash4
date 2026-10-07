@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 /**
  * Child-collection replacement must be atomic.
@@ -56,7 +56,10 @@ function apiFiles(dir: string, out: string[] = []): string[] {
 
 /** Method bodies keyed by `${relPath}:${name}` — line-shape, CRLF tolerant. */
 function methodBodies(absPath: string): Array<{ key: string; body: string }> {
-  const rel = absPath.replace(`${process.cwd()}\\`, '').replace(/\\/g, '/');
+  // Platform-independent relativization: the old `${cwd}\\` strip was a
+  // no-op on Linux, producing absolute keys that matched nothing (and every
+  // offender check after it). relative() + sep-split works on both.
+  const rel = relative(process.cwd(), absPath).split(sep).join('/');
   const lines = readFileSync(absPath, 'utf8').split(/\r?\n/);
   const bodies: Array<{ key: string; body: string }> = [];
   let name: string | null = null;

@@ -18,21 +18,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function queryWithWakeRetry(
-  adapter: Pick<DbAdapter, 'query'>,
-  sql: string,
-  params?: unknown[],
-): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }> {
+async function queryWithWakeRetry<T extends { success: boolean; error?: string }>(
+  fn: () => Promise<T>,
+): Promise<T> {
+  // NOTE (ratchet gates): call sites pass a thunk wrapping the adapter
+  // call, so the call text stays at every call site and src/test/*SqlGate
+  // counters keep seeing the statements. Funneling the SQL through a
+  // differently-named helper signature would hide reachable statements
+  // (the laundering direction that hides debt).
   let lastError: unknown = null;
   for (let attempt = 0; attempt <= WAKE_DELAYS_MS.length; attempt++) {
     if (attempt > 0) await sleep(WAKE_DELAYS_MS[attempt - 1]);
     try {
-      const r = await adapter.query(sql, params);
-      if (r.success) return { success: r.success, rows: r.rows as Record<string, unknown>[] | undefined, error: r.error };
+      const r = await fn();
+      if (r.success) return r;
       lastError = new Error(r.error || 'statement failed');
-      if (!isWakeRetryableError(lastError)) {
-        return { success: r.success, rows: r.rows as Record<string, unknown>[] | undefined, error: r.error };
-      }
+      if (!isWakeRetryableError(lastError)) return r;
     } catch (err) {
       lastError = err;
       if (!isWakeRetryableError(err)) throw err;
@@ -56,25 +57,27 @@ export async function ensureRemoteSchema(
   onProgress?: (applied: number, total: number, name: string) => void,
 ): Promise<{ success: boolean; applied: number; error?: string }> {
   try {
-    const track = await queryWithWakeRetry(
-      adapter,
-      `CREATE TABLE IF NOT EXISTS ${MIGRATION_TRACKING_TABLE} (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())`,
+    const track = await queryWithWakeRetry(() =>
+      adapter.query(
+        `CREATE TABLE IF NOT EXISTS ${MIGRATION_TRACKING_TABLE} (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())`,
+      ),
     );
     if (!track.success) return { success: false, applied: 0, error: track.error };
 
     const migrations = getBundledMigrations();
     let applied = 0;
     for (const migration of migrations) {
-      const existing = await queryWithWakeRetry(
-        adapter,
-        `SELECT 1 FROM ${MIGRATION_TRACKING_TABLE} WHERE name = $1 LIMIT 1`,
-        [migration.name],
+      const existing = await queryWithWakeRetry(() =>
+        adapter.query(
+          `SELECT 1 FROM ${MIGRATION_TRACKING_TABLE} WHERE name = $1 LIMIT 1`,
+          [migration.name],
+        ),
       );
       if (!existing.success) return { success: false, applied, error: existing.error };
       if ((existing.rows?.length ?? 0) > 0) continue;
       try {
         for (const stmt of splitMigrationStatements(migration.sql)) {
-          const r = await queryWithWakeRetry(adapter, stmt);
+          const r = await queryWithWakeRetry(() => adapter.query(stmt));
           if (!r.success) throw new Error(r.error || 'statement failed');
         }
       } catch (err) {
@@ -85,7 +88,9 @@ export async function ensureRemoteSchema(
           error: `Remote migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
-      const mark = await queryWithWakeRetry(adapter, `INSERT INTO ${MIGRATION_TRACKING_TABLE} (name) VALUES ($1)`, [migration.name]);
+      const mark = await queryWithWakeRetry(() =>
+        adapter.query(`INSERT INTO ${MIGRATION_TRACKING_TABLE} (name) VALUES ($1)`, [migration.name]),
+      );
       if (!mark.success) return { success: false, applied, error: mark.error };
       applied++;
       onProgress?.(applied, migrations.length, migration.name);
