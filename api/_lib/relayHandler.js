@@ -126,9 +126,38 @@ function poolConfigFromParsed(p) {
     ssl: p.ssl ? (p.strictVerify ? { rejectUnauthorized: true } : { require: true, rejectUnauthorized: false }) : undefined,
     max: 5,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000,
+    // Suspended serverless computes (Neon scale-to-zero) need a full wake
+    // cycle before the first byte flows — fail fast here and every cold
+    // start becomes a hard error instead of a slow success.
+    connectionTimeoutMillis: 30000,
     statement_timeout: STATEMENT_TIMEOUT_MS,
   };
+}
+
+/**
+ * Cold-start tolerance for first-touch operations (pingdb/login/migrate):
+ * a waking compute fails the first attempt with a timeout, then answers.
+ * Retries timeout/connection-class errors only — auth errors, syntax
+ * errors and guard rejections fail fast with their message intact.
+ */
+const WAKE_RETRYABLE = /timed out|timeout|ECONNRESET|ECONNREFUSED|EPIPE|connection terminated|too many clients|remaining connection slots|server is starting|connection closed|fetch failed|network/i;
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withWakeRetry(fn, delays = [5000, 15000]) {
+  let last = null;
+  for (let i = 0; i <= delays.length; i++) {
+    if (i > 0) await sleepMs(delays[i - 1]);
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (!WAKE_RETRYABLE.test(String((e && e.message) || e))) throw e;
+    }
+  }
+  throw last;
 }
 
 function privateTargetsAllowed(env) {
@@ -250,13 +279,16 @@ function createRelayHandler(deps = {}) {
       return { status: 500, body: { success: false, code: 'unavailable', error: 'relay pool unavailable' } };
     }
     try {
-      const client = await pool.connect();
-      try {
-        const r = await client.query('SELECT current_database() AS db, version() AS version');
-        return { status: 200, body: { success: true, db: r.rows[0].db, version: r.rows[0].version } };
-      } finally {
-        client.release();
-      }
+      const probe = () => (async () => {
+        const client = await pool.connect();
+        try {
+          return await client.query('SELECT current_database() AS db, version() AS version');
+        } finally {
+          client.release();
+        }
+      })();
+      const result = await withWakeRetry(probe);
+      return { status: 200, body: { success: true, db: result.rows[0].db, version: result.rows[0].version } };
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       if (/ENOTFOUND|getaddrinfo/i.test(raw)) {
@@ -301,10 +333,10 @@ function createRelayHandler(deps = {}) {
       return { status: 500, body: { success: false, code: 'unavailable', error: 'relay pool unavailable' } };
     }
     try {
-      const result = await pool.query(
+      const result = await withWakeRetry(() => pool.query(
         'SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, password_hash FROM users WHERE username = $1',
         [username.trim()],
-      );
+      ));
       const row = (result.rows || []).find((r) => r.is_active && verifyRelayPassword(password, r.password_hash));
       if (!row) {
         loginLimiter.recordFailure(clientIp, username);
@@ -542,7 +574,7 @@ function createRelayHandler(deps = {}) {
         if ((seen.rows || []).length > 0) continue;
       try {
         for (const stmt of splitStatements(file.sql)) {
-          await pool.query(normalizeIdempotent(stmt));
+          await withWakeRetry(() => pool.query(normalizeIdempotent(stmt)));
         }
       } catch (e) {
           return { status: 200, body: { success: false, code: 'migration-failed', error: `migration ${file.name} failed` } };
@@ -682,4 +714,4 @@ function createRelayHandler(deps = {}) {
   };
 }
 
-export { createRelayHandler, RELAY_VERSION };
+export { createRelayHandler, RELAY_VERSION, withWakeRetry, WAKE_RETRYABLE };

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { DbAdapter } from './types';
-import { ensureRemoteSchema } from './remoteSchema';
+import { ensureRemoteSchema, isWakeRetryableError } from './remoteSchema';
 import { getBundledMigrations, splitMigrationStatements } from './pgliteAdapter';
 
 function makeAdapter(log: string[], opts?: { failOn?: (sql: string) => string | null; tracked?: Set<string> }) {
@@ -83,5 +83,47 @@ describe('ensureRemoteSchema', () => {
     const r = await ensureRemoteSchema(makeAdapter(log, { failOn: () => 'boom' }));
     expect(r.success).toBe(false);
     expect(r.error).toBe('boom');
+  });
+});
+
+describe('isWakeRetryableError + cold-start retries', () => {
+  it('classifies only wake-class failures as retryable', () => {
+    expect(isWakeRetryableError(new Error('TimeoutError: signal timed out'))).toBe(true);
+    expect(isWakeRetryableError(new Error('fetch failed'))).toBe(true);
+    expect(isWakeRetryableError(new Error('password authentication failed'))).toBe(false);
+    expect(isWakeRetryableError(new Error('syntax error at or near "x"'))).toBe(false);
+    expect(isWakeRetryableError('relation "t" does not exist')).toBe(false);
+  });
+
+  it('rides out a waking compute (two timeouts, then success)', async () => {
+    const log: string[] = [];
+    let calls = 0;
+    const adapter = {
+      query: vi.fn(async (sql: string, _params?: unknown[]) => {
+        log.push(sql.slice(0, 60));
+        calls++;
+        if (calls <= 2) return { success: false, error: 'TimeoutError: signal timed out' };
+        if (sql.startsWith('SELECT 1 FROM')) return { success: true, rows: [] };
+        if (sql.startsWith('INSERT INTO')) return { success: true, rows: [] };
+        return { success: true, rows: [] };
+      }),
+    } as unknown as Pick<DbAdapter, 'query'>;
+    const r = await ensureRemoteSchema(adapter);
+    expect(r.success).toBe(true);
+    expect(calls).toBeGreaterThan(2);
+  }, 30000);
+
+  it('fails fast on auth errors without burning retries', async () => {
+    let calls = 0;
+    const adapter = {
+      query: vi.fn(async () => {
+        calls++;
+        return { success: false, error: 'password authentication failed' };
+      }),
+    } as unknown as Pick<DbAdapter, 'query'>;
+    const r = await ensureRemoteSchema(adapter);
+    expect(r.success).toBe(false);
+    expect(r.error).toBe('password authentication failed');
+    expect(calls).toBe(1);
   });
 });

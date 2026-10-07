@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { createRelayHandler } from './relayHandler.js';
+import { createRelayHandler, withWakeRetry, WAKE_RETRYABLE } from './relayHandler.js';
 import { verifyRelayToken, issueRelayToken } from './relayAuth.js';
 
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
@@ -321,6 +321,26 @@ describe('relayHandler — migrate (admin only)', () => {
     expect(r.body).toMatchObject({ success: true, applied: 1 });
     const again = await h.handle({ method: 'POST', body: { action: 'migrate', databaseUrl: URL, token: adminToken() }, headers: {}, clientIp: '1.1.1.1' });
     expect(again.body).toMatchObject({ success: true, applied: 0 });
+  });
+});
+
+describe('relayHandler — cold-start wake tolerance', () => {
+  it('retries timeout-class failures, not auth failures', async () => {
+    expect(WAKE_RETRYABLE.test('TimeoutError: signal timed out')).toBe(true);
+    expect(WAKE_RETRYABLE.test('password authentication failed')).toBe(false);
+    expect(WAKE_RETRYABLE.test('syntax error at or near "x"')).toBe(false);
+    let calls = 0;
+    const r = await withWakeRetry(async () => {
+      calls++;
+      if (calls < 3) throw new Error('TimeoutError: signal timed out');
+      return 'awake';
+    }, [1, 1]);
+    expect(r).toBe('awake');
+    expect(calls).toBe(3);
+    await expect(withWakeRetry(async () => { throw new Error('password authentication failed'); }, [1])).rejects.toThrow(
+      /password authentication failed/,
+    );
+    await expect(withWakeRetry(async () => { throw new Error('TimeoutError: x'); }, [])).rejects.toThrow(/TimeoutError/);
   });
 });
 

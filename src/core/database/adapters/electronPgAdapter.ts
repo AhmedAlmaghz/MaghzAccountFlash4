@@ -3,13 +3,13 @@ import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 export interface ElectronDB extends PreloadDB {
   updateConfig?(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }): Promise<{ success: boolean; connectionId?: string; error?: string }>;
-  testConnection?(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }): Promise<{ success: boolean; db?: string; version?: string; error?: string }>;
+  testConnection?(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }): Promise<{ success: boolean; db?: string; version?: string; error?: string; code?: string }>;
   connections?: {
-    list?: () => Promise<{ success: boolean; connections?: Array<Record<string, unknown>>; activeId?: string | null; error?: string }>;
-    save?: (payload: { name: string; databaseUrl: string; id?: string }) => Promise<{ success: boolean; connection?: Record<string, unknown>; error?: string }>;
-    remove?: (payload: { id: string }) => Promise<{ success: boolean; error?: string }>;
-    setActive?: (payload: { id: string | null }) => Promise<{ success: boolean; error?: string }>;
-    test?: (payload: { databaseUrl: string }) => Promise<{ success: boolean; db?: string; version?: string; error?: string }>;
+    list?: () => Promise<{ success: boolean; connections?: Array<Record<string, unknown>>; activeId?: string | null; error?: string; code?: string }>;
+    save?: (payload: { name: string; databaseUrl: string; id?: string }) => Promise<{ success: boolean; connection?: Record<string, unknown>; error?: string; code?: string }>;
+    remove?: (payload: { id: string }) => Promise<{ success: boolean; error?: string; code?: string }>;
+    setActive?: (payload: { id: string | null }) => Promise<{ success: boolean; error?: string; code?: string }>;
+    test?: (payload: { databaseUrl: string }) => Promise<{ success: boolean; db?: string; version?: string; error?: string; code?: string }>;
   };
   clearAll?(payload?: { confirm?: boolean; username?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
   seedDefault?(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;

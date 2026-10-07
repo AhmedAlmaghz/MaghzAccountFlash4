@@ -28,13 +28,16 @@ let sql: NeonSql | null = null;
 let activeUrl = '';
 
 /** (Re)bind the adapter to a connection string. Throws on empty input. */
-export function configureNeonHttp(databaseUrl: string): void {
+export function configureNeonHttp(databaseUrl: string, timeoutMs = 60000): void {
   const url = (databaseUrl || '').trim();
   if (!url) throw new Error('DATABASE_URL is empty');
   if (url !== activeUrl || !sql) {
     sql = neon(url, {
       disableWarningInBrowsers: true,
-      fetchOptions: { signal: AbortSignal.timeout(30000) },
+      // Suspended Neon computes need a full wake cycle (tens of seconds)
+      // before the first byte flows — a short cap turns every cold start
+      // into a TimeoutError. 60s default; setup paths retry on top of it.
+      fetchOptions: { signal: AbortSignal.timeout(timeoutMs) },
     });
     activeUrl = url;
   }

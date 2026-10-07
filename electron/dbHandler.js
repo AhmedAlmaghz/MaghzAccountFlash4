@@ -404,9 +404,35 @@ async function assertOnboardingAllowed(event, sessionToken) {
     companyExists = false;
   }
   if (companyExists) {
-    throw new Error('Not allowed after initial setup');
+    const err = new Error('Not allowed after initial setup');
+    err.code = 'setup-locked';
+    throw err;
   }
   return session || null;
+}
+
+/**
+ * Stable denial envelope for onboarding-gated channels: the renderer maps
+ * `code` (not prose) to guidance — e.g. `setup-locked` tells the settings
+ * UI to ask for an admin server login instead of showing a dead end.
+ */
+function gateDenied(err) {
+  const code = err && typeof err.code === 'string' ? err.code : undefined;
+  return { success: false, error: err instanceof Error ? err.message : String(err), ...(code ? { code } : {}) };
+}
+
+/**
+ * Weaker gate for read-only probes (db:test-connection): any authenticated
+ * main-process session may test connectivity — admins AND regular users.
+ * Unauthenticated callers still fall back to the onboarding rule, so a
+ * renderer with no session cannot probe the network on a set-up machine.
+ * Mutations (save/set-active/seed/clear) keep the strict admin-or-fresh
+ * assertOnboardingAllowed below.
+ */
+async function assertSessionOrSetup(event, sessionToken) {
+  const session = getSession(event.sender.id, sessionToken);
+  if (session) return session;
+  return assertOnboardingAllowed(event, sessionToken);
 }
 
 async function verifyAdminPassword(username, password, companyId) {
@@ -957,7 +983,7 @@ function createPool() {
     ssl: /^true$/i.test(process.env.DB_SSL || '') || /neon\.tech/i.test(process.env.DB_HOST || ''),
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000,
+    connectionTimeoutMillis: 30000,
   };
   pool = new Pool({ ...activeDbConfig });
 
@@ -1067,7 +1093,7 @@ function parseDbUrl(raw) {
  * `disable` (and the localhost default) means plain TCP. This matches what
  * `psql` does with the same URL, so a URL that works in psql works here.
  */
-function poolConfigFromParsed(p, timeoutMs = 15000) {
+function poolConfigFromParsed(p, timeoutMs = 30000) {
   return {
     host: p.host,
     port: p.port,
@@ -8591,14 +8617,14 @@ export function registerOnboardingHandlers() {
     // Accept the legacy two-arg form too (defense in depth).
     if (sessionToken === undefined && config && typeof config === 'object') sessionToken = config.sessionToken;
     try {
-      await assertOnboardingAllowed(event, sessionToken);
+      await assertSessionOrSetup(event, sessionToken);
     } catch (err) {
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
     let poolCfg;
     try {
       if (config && config.databaseUrl) {
-        poolCfg = poolConfigFromParsed(parseDbUrl(config.databaseUrl), 8000);
+        poolCfg = poolConfigFromParsed(parseDbUrl(config.databaseUrl), 30000);
       } else {
         poolCfg = {
           host: (config && config.host) || 'localhost',
@@ -8606,16 +8632,22 @@ export function registerOnboardingHandlers() {
           database: (config && config.database) || 'postgres',
           user: (config && config.user) || 'postgres',
           password: (config && config.password) || '',
-          connectionTimeoutMillis: 8000,
+          connectionTimeoutMillis: 30000,
           max: 2,
         };
       }
     } catch (err) {
       return { success: false, error: err.message };
     }
-    const testPool = new Pool(poolCfg);
-    try {
-      const client = await testPool.connect();
+    // Suspended serverless computes (Neon scale-to-zero) fail the first
+    // touch with a timeout, then answer once awake — one patient retry
+    // before reporting, so a cold database reads as slow, not dead.
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 8000));
+      const testPool = new Pool(poolCfg);
+      try {
+        const client = await testPool.connect();
       const result = await client.query('SELECT NOW() as time, current_database() as db, version() as version');
       client.release();
       await testPool.end();
@@ -8627,15 +8659,19 @@ export function registerOnboardingHandlers() {
         /* ignore */
       }
       const raw = err instanceof Error ? err.message : String(err);
+      // Waking computes fail first with timeouts — retry once before
+      // reporting. Anything else (DNS, auth, SSL) fails fast: retrying a
+      // wrong password or host only wastes the user's time.
+      if (/ETIMEDOUT|timeout|ECONNRESET|ECONNREFUSED|EPIPE|connection terminated/i.test(raw)) {
+        lastErr = err;
+        continue;
+      }
       // Translate cryptic DNS/pool errors into actionable Arabic guidance
       if (/ENOTFOUND|getaddrinfo/i.test(raw)) {
         return {
           success: false,
           error: `تعذر الوصول للمضيف — تحقق من DATABASE_URL (المضيف غير موجود). للـ Supabase تأكد من نسخ الرابط من Dashboard > Connect (يستخدم المنفذ 5432 أو 6543 للـ pooler) وأن المشروع نشط وليس متوقفاً مؤقتاً.`,
         };
-      }
-      if (/ETIMEDOUT|timeout/i.test(raw)) {
-        return { success: false, error: `انتهت مهلة الاتصال — تحقق من الشبكة/الجدار الناري والمنفذ (${poolCfg.port}). للـ Supabase جرّب المنفذ 6543 (pooler) بدل 5432.` };
       }
       if (/password authentication failed|28P01/i.test(raw)) {
         return { success: false, error: 'فشل التوثيق — تحقق من اسم المستخدم وكلمة المرور في DATABASE_URL.' };
@@ -8645,6 +8681,9 @@ export function registerOnboardingHandlers() {
       }
       return { success: false, error: raw };
     }
+    }
+    const rawLast = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    return { success: false, error: `انتهت مهلة الاتصال بعد محاولتين — تحقق من الشبكة/الجدار الناري والمنفذ (${poolCfg.port}). للـ Supabase جرّب المنفذ 6543 (pooler) بدل 5432. (${rawLast})` };
   });
 
   // Update active pool config. Accepts a DATABASE_URL (persisted encrypted
@@ -8656,7 +8695,7 @@ export function registerOnboardingHandlers() {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
     try {
       let rawUrl = config && config.databaseUrl ? String(config.databaseUrl) : null;
@@ -8716,7 +8755,7 @@ export function registerOnboardingHandlers() {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
     const vault = loadConnVault();
     return { success: true, connections: vault.connections.map(connMeta), activeId: vault.activeId };
@@ -8726,7 +8765,7 @@ export function registerOnboardingHandlers() {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
     try {
       const parsed = parseDbUrl(databaseUrl);
@@ -8765,7 +8804,7 @@ export function registerOnboardingHandlers() {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
     const vault = loadConnVault();
     vault.connections = vault.connections.filter((c) => c.id !== id);
@@ -8789,7 +8828,7 @@ export function registerOnboardingHandlers() {
     try {
       await assertOnboardingAllowed(event, sessionToken);
     } catch (err) {
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
     const vault = loadConnVault();
     if (id !== null && !vault.connections.some((c) => c.id === id)) {
@@ -8876,7 +8915,7 @@ export function registerOnboardingHandlers() {
       }
     } catch (err) {
       console.error('[DB] Clear all error:', err.message);
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
   });
 
@@ -8901,7 +8940,7 @@ export function registerOnboardingHandlers() {
       return { success: true, companyId, adminPassword: effectivePassword };
     } catch (err) {
       console.error('[DB] Seed failed:', err.message);
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
   });
 
@@ -8939,7 +8978,7 @@ export function registerOnboardingHandlers() {
       }
     } catch (err) {
       console.error('[DB] Demo seeding failed:', err.message);
-      return { success: false, error: err.message };
+      return gateDenied(err);
     }
   });
 

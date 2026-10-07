@@ -90,24 +90,23 @@ export const DatabaseSettingsPage: React.FC = () => {
     }
   };
 
+  // Stable backend codes map to guidance (never raw prose matching).
+  const mapDbError = (error?: string, code?: string, fallback?: string): string => {
+    if (code === 'setup-locked') return t('settings.database.setupLocked');
+    if (error === 'webTcpUnsupported') return t('settings.database.webTcpDesc');
+    if (error === 'relayBlockedTarget') return t('settings.database.relayBlockedTarget');
+    return error || fallback || t('settings.database.connectionFailed');
+  };
+
   const handleTestUrl = async () => {
     setIsTesting(true);
     setTestResult(null);
     setFormError('');
     try {
       const r = await testRemoteConnection(connUrl);
-      if (r.success) {
-        setTestResult({ ok: true, message: `${t('settings.database.connected')}${r.db ? ` — ${r.db}` : ''}` });
+      if (r.success) {        setTestResult({ ok: true, message: `${t('settings.database.connected')}${r.db ? ` — ${r.db}` : ''}` });
       } else {
-        setTestResult({
-          ok: false,
-          message:
-            r.error === 'webTcpUnsupported'
-              ? t('settings.database.webTcpDesc')
-              : r.error === 'relayBlockedTarget'
-                ? t('settings.database.relayBlockedTarget')
-                : (r.error || t('settings.database.connectionFailed')),
-        });
+        setTestResult({ ok: false, message: mapDbError(r.error, r.code) });
       }
     } catch (err) {
       setTestResult({ ok: false, message: err instanceof Error ? err.message : t('settings.database.connectionFailed') });
@@ -126,8 +125,7 @@ export const DatabaseSettingsPage: React.FC = () => {
       }
       const saved = await saveRemoteConnection({ name: connName, databaseUrl: url });
       if (!saved.success || !saved.connection) {
-        const key = saved.error === 'webTcpUnsupported' ? 'settings.database.webTcpDesc' : null;
-        throw new Error(key ? t(key) : (saved.error || t('settings.database.saveError')));
+        throw new Error(mapDbError(saved.error, saved.code, t('settings.database.saveError')));
       }
       addToast('success', t('settings.database.connSaved'));
       setConnName('');

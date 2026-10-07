@@ -3389,7 +3389,8 @@
       "relayChecking": "Checking the fallback channel…",
       "relayUp": "Fallback channel available — every provider works on web through it.",
       "relayDown": "No fallback channel — on web only Neon works, other providers need the desktop app.",
-      "relayBlockedTarget": "Target refused by the fallback channel (local or private host not allowed here).",
+      "relayBlockedTarget": "Target refused by the fallback channel. For local targets (localhost/intranet): use the desktop app, or run web from the local dev server where the channel applies.",
+      "setupLocked": "Connection management is locked after setup — sign in as an admin on the server connection first, then retry.",
       "useLocal": "Back to local database"
     },
     "company": {

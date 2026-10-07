@@ -31,7 +31,7 @@ interface ElectronConnectionsBridge {
   save?: (payload: { name: string; databaseUrl: string; id?: string }) => Promise<{ success: boolean; connection?: VaultConnectionMeta; error?: string }>;
   remove?: (payload: { id: string }) => Promise<{ success: boolean; error?: string }>;
   setActive?: (payload: { id: string | null }) => Promise<{ success: boolean; error?: string }>;
-  test?: (payload: { databaseUrl: string }) => Promise<{ success: boolean; db?: string; version?: string; error?: string }>;
+  test?: (payload: { databaseUrl: string }) => Promise<{ success: boolean; db?: string; version?: string; error?: string; code?: string }>;
 }
 
 function isElectronEnv(): boolean {
@@ -122,21 +122,32 @@ export interface SaveConnectionInput {
  */
 export async function saveRemoteConnection(
   input: SaveConnectionInput,
-): Promise<{ success: boolean; connection?: VaultConnectionMeta; error?: string }> {
+): Promise<{ success: boolean; connection?: VaultConnectionMeta; error?: string; code?: string }> {
   const name = (input.name || '').trim() || 'PostgreSQL';
   const parsed = parseDatabaseUrl(input.databaseUrl); // throws on invalid
-  // Platform wall: browsers cannot open TCP — only Neon works on web.
-  // Save would succeed but activation would always fail with "desktop-only".
-  // Fail fast with honest guidance instead of a silent dead connection.
+  // Platform wall: browsers cannot open TCP — non-Neon remotes ride the
+  // same-origin relay when one answers, otherwise fail fast with honest
+  // guidance instead of a silent dead connection.
   if (!isElectronEnv() && parsed.provider !== 'neon') {
-    return {
-      success: false,
-      error: 'webTcpUnsupported',
-    };
+    try {
+      const { isRelayAvailable } = await import('./relayClient');
+      if (!(await isRelayAvailable()).up) {
+        return {
+          success: false,
+          error: 'webTcpUnsupported',
+        };
+      }
+    } catch {
+      return {
+        success: false,
+        error: 'webTcpUnsupported',
+      };
+    }
   }
   const b = bridge();
   if (b?.save) {
-    return b.save({ name, databaseUrl: parsed.raw, id: input.id });
+    const r = await b.save({ name, databaseUrl: parsed.raw, id: input.id });
+    return { success: r.success, connection: r.connection, error: r.error, code: (r as { code?: string }).code };
   }
   // Web fallback: device storage (disclosed in UI).
   const vault = readWebVault();
@@ -265,10 +276,13 @@ export async function findRemoteConnection(id: string): Promise<VaultConnectionM
 /** Test a URL without saving. Electron tests via main TCP; web tests Neon HTTP. */
 export async function testRemoteConnection(
   databaseUrl: string,
-): Promise<{ success: boolean; db?: string; version?: string; error?: string }> {
+): Promise<{ success: boolean; db?: string; version?: string; error?: string; code?: string }> {
   const parsed = parseDatabaseUrl(databaseUrl); // throws on invalid
   const b = bridge();
-  if (b?.test) return b.test({ databaseUrl: parsed.raw });
+  if (b?.test) {
+    const r = await b.test({ databaseUrl: parsed.raw });
+    return { success: r.success, db: r.db, version: r.version, error: r.error, code: r.code };
+  }
   // Web: only Neon-compatible endpoints are directly routable (no TCP in
   // browsers). Any other provider rides the same-origin relay when one
   // answers the health probe; otherwise the honest capability error stands.
