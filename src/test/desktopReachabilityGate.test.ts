@@ -10,8 +10,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  * static-analysis failures, and the direction that hurts is always the same - a
  * raw statement on the desktop that nothing reports.
  *
- * So this gate analyses no text. It installs a bridge, which is the only thing
- * isElectronPg() looks at, and hands the adapter a spy. A function that reaches
+ * So this gate analyses no text. It installs a bridge and pg mode — the two
+ * things isElectronPg() routes on — and hands the adapter a spy. A function that reaches
  * raw SQL on the desktop calls the spy, because there the adapter's query
  * forwards straight to the legacy _exec channel. A function that routes through
  * typed RPC returns without touching it.

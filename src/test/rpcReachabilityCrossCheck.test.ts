@@ -7,8 +7,8 @@ import { join } from 'node:path';
  * measurements of the same property, sharing no code.
  *
  * `desktopRawSqlGate` reads the source and reasons about control flow with
- * regexes. This file installs a bridge - the only thing isElectronPg() looks at -
- * and hands the adapter a spy, so a function that reaches raw SQL on the desktop
+ * regexes. This file installs a bridge with pg mode — the two things
+ * isElectronPg() routes on — and hands the adapter a spy, so a function that reaches raw SQL on the desktop
  * is observed doing it. The desktop adapter's `query` forwards straight to the
  * legacy `_exec` channel, so touching the spy IS the finding.
  *

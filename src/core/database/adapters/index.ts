@@ -35,7 +35,20 @@ function isElectron(): boolean {
 }
 
 function isElectronPg(): boolean {
-  return typeof window !== 'undefined' && !!(window as { electronDB?: { ping?: unknown } }).electronDB?.ping;
+  // ROUTING predicate, not mere bridge detection: renderer traffic goes
+  // through the main-process PG pool only when the bridge exists AND
+  // server-PG mode is selected. Mere bridge presence (desktop running the
+  // local PGlite database) must NOT divert traffic to a main process that
+  // holds no session for this database — that mismatch surfaced as
+  // "Authentication required" on saves while reads looked fine.
+  // Mirrors auth/api.ts mainAuthBridge: authentication follows the data.
+  if (typeof window === 'undefined' || !(window as { electronDB?: { ping?: unknown } }).electronDB?.ping) return false;
+  try {
+    if (typeof getDbMode !== 'function' || getDbMode() !== 'pg') return false;
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 let adapter: DbAdapter | null = null;
@@ -129,7 +142,9 @@ async function acquireDbAdapter(): Promise<DbAdapter> {
     }
   }
 
-  // 2. PostgreSQL via Electron IPC (desktop production)
+  // 2. PostgreSQL via Electron IPC (desktop + server-PG mode; the gate
+  //    already verified bridge presence and mode, so a main session exists
+  //    for this database by construction — see mainAuthBridge).
   if (isElectronPg()) {
     try {
       const { electronPgAdapter } = await import('./electronPgAdapter');

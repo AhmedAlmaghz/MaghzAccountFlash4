@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   ping: vi.fn(async () => ({ success: true, db: 'PGlite (local)' })),
@@ -13,7 +13,7 @@ vi.mock('./pgliteAdapter', () => ({
   runPgliteMigrations: mocks.runMigrations,
 }));
 
-import { getDbAdapter } from './index';
+import { getDbAdapter, isElectronPg } from './index';
 
 describe('getDbAdapter — ping cache', () => {
   beforeEach(() => {
@@ -61,5 +61,47 @@ describe('getDbAdapter — ping cache', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('isElectronPg — mode-aware routing (desktop auth-required regression)', () => {
+  beforeEach(() => {
+    try {
+      localStorage.removeItem('maghzaccount-db-mode');
+    } catch { /* ignore */ }
+    delete (window as unknown as Record<string, unknown>).electronDB;
+  });
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).electronDB;
+    try {
+      localStorage.removeItem('maghzaccount-db-mode');
+    } catch { /* ignore */ }
+  });
+
+  it('is false without a bridge even in pg mode', () => {
+    try {
+      localStorage.setItem('maghzaccount-db-mode', 'pg');
+    } catch { /* ignore */ }
+    expect(isElectronPg()).toBe(false);
+  });
+
+  it('is false with a bridge but local-PGlite mode (no main session exists there)', () => {
+    (window as unknown as Record<string, unknown>).electronDB = { ping: async () => ({ success: true }) };
+    try {
+      localStorage.setItem('maghzaccount-db-mode', 'pglite');
+    } catch { /* ignore */ }
+    // Routing renderer traffic to the main process here produced
+    // "Authentication required" on saves: the main pool holds no session
+    // for a database it never authenticated against.
+    expect(isElectronPg()).toBe(false);
+  });
+
+  it('is true only with a bridge AND server-PG mode', () => {
+    (window as unknown as Record<string, unknown>).electronDB = { ping: async () => ({ success: true }) };
+    try {
+      localStorage.setItem('maghzaccount-db-mode', 'pg');
+    } catch { /* ignore */ }
+    expect(isElectronPg()).toBe(true);
   });
 });
