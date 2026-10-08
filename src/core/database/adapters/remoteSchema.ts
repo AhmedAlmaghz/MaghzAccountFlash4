@@ -1,5 +1,6 @@
 import type { DbAdapter } from './types';
-import { getBundledMigrations, splitMigrationStatements, MIGRATION_TRACKING_TABLE } from './pgliteAdapter';
+import { getBundledMigrations, MIGRATION_TRACKING_TABLE } from './pgliteAdapter';
+import { splitMigrationStatements } from '@root/api/_lib/dbCore.js';
 
 /**
  * Whether a failure looks like a cold/waking remote (Neon scale-to-zero,

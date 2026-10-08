@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { DbAdapter } from './types';
 import { ensureRemoteSchema, isWakeRetryableError } from './remoteSchema';
-import { getBundledMigrations, splitMigrationStatements } from './pgliteAdapter';
+import { splitMigrationStatements } from '@root/api/_lib/dbCore.js';
+import { getBundledMigrations } from './pgliteAdapter';
 
 function makeAdapter(log: string[], opts?: { failOn?: (sql: string) => string | null; tracked?: Set<string> }) {
   const tracked = opts?.tracked ?? new Set<string>();

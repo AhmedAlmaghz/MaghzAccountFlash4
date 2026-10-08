@@ -83,7 +83,7 @@ describe('relayHandler — routing and parsing', () => {
   });
 
   it('parses URLs like the client parser (host/port/db/user/ssl)', () => {
-    const { parseRelayUrl } = handlerWith(makeFake()).__test;
+    const { parseDbUrl: parseRelayUrl } = handlerWith(makeFake()).__test;
     const p = parseRelayUrl('postgresql://u:p@db.x.supabase.co:6543/postgres');
     expect(p).toMatchObject({ host: 'db.x.supabase.co', port: 6543, database: 'postgres', user: 'u', ssl: true });
     expect(parseRelayUrl('postgres://u:p@localhost/mydb').ssl).toBe(false);

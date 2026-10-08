@@ -1,6 +1,9 @@
-import { pbkdf2Sync, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
 import path from 'path';
+// Single-source password hashing (api/_lib/dbPasswords.js) — same envelope
+// every runtime reads.
+import { hashPasswordNode } from '../api/_lib/dbPasswords.js';
 
 /**
  * Comprehensive demo data seeder for PostgreSQL
@@ -13,14 +16,6 @@ import path from 'path';
  *   - All multi-tenant tables filter on company_id
  *   - All created_by/updated_by are set to the admin user if available
  */
-
-const PBKDF2_ITERATIONS = 100000;
-const SALT_LENGTH = 32;
-function hashPasswordNode(password) {
-  const salt = randomBytes(SALT_LENGTH).toString('hex');
-  const hash = pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256').toString('hex');
-  return `pbkdf2:${PBKDF2_ITERATIONS}:${salt}:${hash}`;
-}
 
 // Strong random fallback so no hardcoded default password ever exists.
 function crypto_randPassword() {

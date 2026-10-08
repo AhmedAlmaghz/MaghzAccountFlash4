@@ -45,6 +45,16 @@ export interface SavedConnectionMeta {
 
 const DEFAULT_PG_PORT = 5432;
 
+// Single-source parsing lives in api/_lib/dbCore.js (runtime-neutral plain
+// JS shared with the Electron main process and the relay). This module keeps
+// the typed public surface and the UI-level helpers; every behavior below
+// delegates so the three URL parsers can never drift again.
+import {
+  detectProvider as detectProviderCore,
+  parseDbUrl,
+  redactDatabaseUrl as redactDatabaseUrlCore,
+} from '@root/api/_lib/dbCore.js';
+
 function trimInvisible(v: string): string {
   return v.replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
 }
@@ -54,11 +64,7 @@ function trimInvisible(v: string): string {
  * managed vendors before the localhost/generic fallbacks.
  */
 export function detectProvider(host: string): ConnectionProvider {
-  const h = host.trim().toLowerCase();
-  if (/(^|\.)neon\.tech$/.test(h)) return 'neon';
-  if (/(^|\.)supabase\.(co|in|net)$/.test(h) || h.endsWith('.supabase.co')) return 'supabase';
-  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return 'localhost';
-  return 'generic';
+  return detectProviderCore(host) as ConnectionProvider;
 }
 
 /**
@@ -71,36 +77,17 @@ export function detectProvider(host: string): ConnectionProvider {
  * let the caller map it to an i18n key).
  */
 export function parseDatabaseUrl(url: string): ParsedConnection {
-  const raw = trimInvisible(url || '');
-  if (!raw) throw new Error('DATABASE_URL is empty');
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    throw new Error('DATABASE_URL is not a valid URL');
-  }
-  const scheme = u.protocol.replace(/:$/, '').toLowerCase();
-  if (scheme !== 'postgres' && scheme !== 'postgresql') {
-    throw new Error('URL must start with postgres:// or postgresql://');
-  }
-  const host = u.hostname;
-  if (!host) throw new Error('URL is missing a host');
-  const port = u.port ? Number(u.port) : DEFAULT_PG_PORT;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('URL has an invalid port');
-  }
-  const database = decodeURIComponent(u.pathname.replace(/^\//, ''));
-  if (!database) throw new Error('URL is missing a database name');
-  const user = decodeURIComponent(u.username || '');
-  if (!user) throw new Error('URL is missing a user');
-  const password = u.password ? decodeURIComponent(u.password) : '';
-  const sslMode = (u.searchParams.get('sslmode') || '').toLowerCase();
-  // Local hosts default to plain TCP; everything else defaults to TLS
-  // (Neon/Supabase/GCP all terminate TLS — best practice, verified certs).
-  const isLocal = detectProvider(host) === 'localhost';
-  const ssl = sslMode === 'disable' || sslMode === 'allow' ? false : true;
-  const effectiveSsl = sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full' ? true : isLocal ? false : ssl;
-  return { raw, host, port, database, user, password, ssl: effectiveSsl, provider: detectProvider(host) };
+  const parsed = parseDbUrl(url);
+  return {
+    raw: parsed.raw,
+    host: parsed.host,
+    port: parsed.port,
+    database: parsed.database,
+    user: parsed.user,
+    password: parsed.password,
+    ssl: parsed.ssl,
+    provider: parsed.provider as ConnectionProvider,
+  };
 }
 
 /** Validate without throwing — for form UX. */
@@ -117,13 +104,7 @@ export function validateDatabaseUrl(url: string): { ok: boolean; error?: string;
  * connection stays recognizable: `postgres://user:****@host:5432/db`.
  */
 export function redactDatabaseUrl(url: string): string {
-  try {
-    const u = new URL(trimInvisible(url));
-    if (u.password) u.password = '****';
-    return u.toString();
-  } catch {
-    return '****';
-  }
+  return redactDatabaseUrlCore(url);
 }
 
 /** Rebuild a URL from parts (used by the advanced host/port form). */

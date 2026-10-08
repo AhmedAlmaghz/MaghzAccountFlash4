@@ -3,11 +3,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   issueRelayToken,
   verifyRelayToken,
-  verifyRelayPassword,
   createLoginLimiter,
-  dbFingerprint,
   tokenSecret,
 } from './relayAuth.js';
+import { verifyPasswordNode as verifyRelayPassword, dbFingerprint } from './dbPasswords.js';
 
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
 

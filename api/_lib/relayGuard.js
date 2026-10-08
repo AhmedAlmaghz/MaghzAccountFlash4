@@ -24,6 +24,8 @@
  * must be mirrored in the other or CI fails.
  */
 
+import { normalizeIdempotent } from './dbCore.js';
+
 const FALLBACK_PERMISSIONS = {
   manager: [
     'core.view', 'accounting.view', 'accounting.create', 'accounting.edit', 'accounting.post',
@@ -438,33 +440,6 @@ function classifyRelayTarget(host, addresses, { allowPrivate = false } = {}) {
     }
   }
   return { ok: true };
-}
-
-/**
- * Idempotency normalization for migration replay (mirrors
- * electron/migrationRunner.js + pgliteAdapter.normalizeIdempotent): bare
- * CREATE TABLE/INDEX gains IF NOT EXISTS, ADD CONSTRAINT is wrapped in a
- * guarded DO block. The bundled files stay clean; guards attach at load.
- */
-function normalizeIdempotent(rawSql) {
-  let sql = String(rawSql || '');
-  sql = sql.replace(/\bCREATE TABLE (?!IF NOT EXISTS)/g, 'CREATE TABLE IF NOT EXISTS ');
-  sql = sql.replace(/\bCREATE UNIQUE INDEX (?!IF NOT EXISTS)/g, 'CREATE UNIQUE INDEX IF NOT EXISTS ');
-  sql = sql.replace(/\bCREATE INDEX (?!IF NOT EXISTS)/g, 'CREATE INDEX IF NOT EXISTS ');
-  const constraintRe = /^ALTER TABLE (?:ONLY )?("[^"]+"|[\w.]+)\s+ADD CONSTRAINT\s+("[^"]+"|[\w.]+)([^;]*);/gm;
-  const guarded = [];
-  let last = 0;
-  let m;
-  while ((m = constraintRe.exec(sql)) !== null) {
-    const conname = m[2].replace(/"/g, '');
-    guarded.push(sql.slice(last, m.index));
-    guarded.push(
-      `DO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${conname}') THEN\n    ALTER TABLE ${m[1]} ADD CONSTRAINT ${m[2]}${m[3]};\n  END IF;\nEND $$;`,
-    );
-    last = m.index + m[0].length;
-  }
-  guarded.push(sql.slice(last));
-  return guarded.join('\n');
 }
 
 export {

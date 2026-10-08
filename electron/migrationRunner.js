@@ -2,6 +2,7 @@ import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { normalizeIdempotent } from '../api/_lib/dbCore.js';
 
 const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
@@ -23,47 +24,9 @@ const __dirname = path.dirname(__filename);
  * migration idempotent (CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS /
  * WHERE NOT EXISTS guards — enforced by drizzle/migrations.test.ts), so
  * replaying over a partially-migrated database safely heals drift.
- */
-/**
- * Normalize a generated migration into an idempotent one.
- *
- * drizzle-kit emits bare `CREATE TABLE` / `CREATE INDEX` / `ALTER TABLE ...
- * ADD CONSTRAINT`, which break when replayed over an existing database (the
- * whole point of our self-healing sync). Repo convention requires every
- * migration to be safely re-runnable, so we normalize in-memory at load time:
- *   - CREATE TABLE / INDEX / UNIQUE INDEX → add IF NOT EXISTS
- *   - ALTER TABLE ... ADD CONSTRAINT <name> → wrapped in a DO $$ guard keyed
- *     on the constraint name.
- */
-function normalizeIdempotent(rawSql) {
-  let sql = rawSql;
-
-  // Tables & indexes
-  sql = sql.replace(/\bCREATE TABLE (?!IF NOT EXISTS)/g, 'CREATE TABLE IF NOT EXISTS ');
-  sql = sql.replace(/\bCREATE UNIQUE INDEX (?!IF NOT EXISTS)/g, 'CREATE UNIQUE INDEX IF NOT EXISTS ');
-  sql = sql.replace(/\bCREATE INDEX (?!IF NOT EXISTS)/g, 'CREATE INDEX IF NOT EXISTS ');
-
-  // Constraints: wrap each ADD CONSTRAINT in an existence-guarded DO block.
-  // Matches both drizzle-kit forms:
-  //   ALTER TABLE ONLY "t"    ADD CONSTRAINT "c" FOREIGN KEY ...
-  //   ALTER TABLE "t"         ADD CONSTRAINT "c" FOREIGN KEY ...
-  const constraintRe = /^ALTER TABLE (?:ONLY )?("[^"]+"|[\w.]+)\s+ADD CONSTRAINT\s+("[^"]+"|[\w.]+)([^;]*);/gm;
-  const guarded = [];
-  let last = 0;
-  let m;
-  while ((m = constraintRe.exec(sql)) !== null) {
-    const conname = m[2].replace(/"/g, '');
-    guarded.push(sql.slice(last, m.index));
-    guarded.push(
-      `DO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${conname}') THEN\n    ALTER TABLE ${m[1]} ADD CONSTRAINT ${m[2]}${m[3]};\n  END IF;\nEND $$;`
-    );
-    last = m.index + m[0].length;
-  }
-  guarded.push(sql.slice(last));
-  sql = guarded.join('\n');
-
-  return sql;
-}
+  */
+// Migration-text normalization lives in api/_lib/dbCore.js (single source
+// shared with the relay and the renderer) — see the import above.
 
 /**
  * Run schema sync. Accepts an optional connection config override (used by

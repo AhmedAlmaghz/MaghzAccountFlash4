@@ -13,7 +13,10 @@
  * touching the network.
  */
 
-import { createHmac, pbkdf2Sync, timingSafeEqual, createHash, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { dbFingerprint } from './dbPasswords.js';
+
+export { dbFingerprint };
 
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 const LOGIN_LIMIT_PER_WINDOW = 5;
@@ -48,14 +51,6 @@ function tokenSecret(env) {
     }
   }
   return { secret: randomBytes(32).toString('hex'), ephemeral: true };
-}
-
-function normalizeDbUrl(raw) {
-  return String(raw || '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
-}
-
-function dbFingerprint(rawUrl) {
-  return createHash('sha256').update(normalizeDbUrl(rawUrl)).digest('hex');
 }
 
 function signToken(payload, secret) {
@@ -107,28 +102,6 @@ function verifyRelayToken(token, databaseUrl, env, now = Date.now()) {
   }
 }
 
-/**
- * Password verification for the `pbkdf2:iterations:salt:hex` envelope the
- * app writes (see electron/dbHandler.js verifyPasswordNode — same format).
- */
-function verifyRelayPassword(password, storedHash) {
-  const parts = typeof storedHash === 'string' ? storedHash.split(':') : [];
-  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
-  const iterations = Number(parts[1]);
-  const salt = parts[2];
-  const expected = parts[3];
-  if (!Number.isInteger(iterations) || iterations < 100000 || !/^[a-f0-9]+$/i.test(salt) || !/^[a-f0-9]+$/i.test(expected)) return false;
-  let actual;
-  try {
-    actual = pbkdf2Sync(String(password), salt, iterations, expected.length / 2, 'sha256');
-  } catch {
-    return false;
-  }
-  const expBuf = Buffer.from(expected, 'hex');
-  if (actual.length !== expBuf.length) return false;
-  return timingSafeEqual(actual, expBuf);
-}
-
 /** Sliding-window login limiter keyed by (clientIp, username). */
 function createLoginLimiter({ limit = LOGIN_LIMIT_PER_WINDOW, windowMs = LOGIN_WINDOW_MS, lockoutMs = LOGIN_LOCKOUT_MS, now = () => Date.now() } = {}) {
   const buckets = new Map();
@@ -163,10 +136,7 @@ function createLoginLimiter({ limit = LOGIN_LIMIT_PER_WINDOW, windowMs = LOGIN_W
 export {
   TOKEN_TTL_MS,
   tokenSecret,
-  normalizeDbUrl,
-  dbFingerprint,
   issueRelayToken,
   verifyRelayToken,
-  verifyRelayPassword,
   createLoginLimiter,
 };

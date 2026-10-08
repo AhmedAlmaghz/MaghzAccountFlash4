@@ -136,17 +136,80 @@ describe('db IPC shape parity (CI)', () => {
     }
   });
 
-  it('main URL parser mirrors connection.ts provider + SSL contract', () => {
-    // connection.ts is the single source of truth; parseDbUrl is its manual
-    // mirror (the main process cannot import TS). Any branch added on one
-    // side must exist on the other or remote connections break silently.
+  it('URL parsing has ONE source: every runtime imports api/_lib/dbCore.js', () => {
+    // The old world had three hand-mirrors (connection.ts, dbHandler.js,
+    // relayHandler.js) plus a behavior-parity test. Now there is one
+    // implementation; this gate fails loudly if anyone reintroduces a
+    // local `function parseDbUrl|parseDatabaseUrl|normalizeIdempotent`
+    // definition or a manual provider/SSL branch.
+    const relay = read('api/_lib/relayHandler.js');
+    const guard = read('api/_lib/relayGuard.js');
+    const migrationRunner = read('electron/migrationRunner.js');
+    const seed = read('electron/seedDemoData.js');
     const conn = read('src/core/database/connection.ts');
-    for (const needle of ['neon', 'supabase', 'localhost', 'sslmode']) {
-      expect(conn, `connection.ts lost: ${needle}`).toMatch(new RegExp(needle));
-      expect(main, `dbHandler parseDbUrl lost: ${needle}`).toMatch(new RegExp(needle));
+    const pglite = read('src/core/database/adapters/pgliteAdapter.ts');
+    for (const [name, src] of [
+      ['dbHandler', main],
+      ['relayHandler', relay],
+      ['migrationRunner', migrationRunner],
+      ['seedDemoData', seed],
+      ['connection.ts', conn],
+      ['pgliteAdapter', pglite],
+    ]) {
+      // A delegating wrapper (same name, body calls the shared import) is
+      // fine; what is forbidden is a local implementation that constructs
+      // URLs itself — that is the drift that broke remote connections.
+      const localParsers = [...src.matchAll(/function parse(?:DbUrl|DatabaseUrl)\s*\([^)]*\)\s*\{([\s\S]{0,2000}?)\n\}/g)];
+      for (const m of localParsers) {
+        expect(m[1], `${name} reintroduced a local URL parser`).not.toMatch(/new URL\(/);
+      }
+      expect(src, `${name} reintroduced local migration normalization`).not.toMatch(/function normalizeIdempotent\s*\(/);
     }
-    // verify-* must pin the chain on both sides.
-    expect(main).toMatch(/verify-ca.*verify-full|strictVerify/);
-    expect(conn).toMatch(/verify-ca/);
+    for (const [name, src, spec] of [
+      ['dbHandler', main, 'dbCore.js'],
+      ['relayHandler', relay, 'dbCore.js'],
+      ['relayGuard', guard, 'dbCore.js'],
+      ['migrationRunner', migrationRunner, 'dbCore.js'],
+      ['seedDemoData', seed, 'dbPasswords.js'],
+      ['relayAuth', read('api/_lib/relayAuth.js'), 'dbPasswords.js'],
+    ]) {
+      expect(src, `${name} must consume the shared core`).toContain(spec);
+    }
+    // No local password-hash implementations remain outside dbPasswords.
+    // (verifyAdminPassword is a different function — credential checking,
+    // not hashing — and is intentionally not matched.)
+    for (const [name, src] of [
+      ['dbHandler', main],
+      ['seedDemoData', seed],
+      ['relayAuth', read('api/_lib/relayAuth.js')],
+    ]) {
+      expect(src, `${name} reintroduced local password hashing`).not.toMatch(
+        /function (hashPasswordNode|verifyPasswordNode|verifyRelayPassword|hashPassword)\s*\(/,
+      );
+    }
+  });
+
+  it('dbCore parses every provider contract (behavior battery)', async () => {
+    const { parseDbUrl, detectProvider, poolConfigFromParsed, redactDatabaseUrl } = await import('../api/_lib/dbCore.js');
+    expect(parseDbUrl('postgres://u:p@ep-x.aws.neon.tech:5432/db?sslmode=require')).toMatchObject({
+      host: 'ep-x.aws.neon.tech', port: 5432, database: 'db', user: 'u', ssl: true, provider: 'neon',
+    });
+    expect(parseDbUrl('postgresql://postgres:secret@db.xyz.supabase.co/postgres')).toMatchObject({
+      port: 5432, provider: 'supabase', ssl: true,
+    });
+    expect(parseDbUrl('postgres://maghz:pw@localhost:5433/app?sslmode=disable')).toMatchObject({
+      host: 'localhost', port: 5433, ssl: false, provider: 'localhost',
+    });
+    expect(parseDbUrl('postgres://u:p@10.0.0.5/db').provider).toBe('generic');
+    expect(() => parseDbUrl('mysql://u:p@h/db')).toThrow(/postgres:\/\//);
+    expect(() => parseDbUrl('postgres://u:p@h:0/db')).toThrow(/port/);
+    expect(detectProvider('NEON.TECH')).toBe('neon');
+    expect(detectProvider('db.a.supabase.in')).toBe('supabase');
+    const cfg = poolConfigFromParsed(parseDbUrl('postgres://u:p@h/db?sslmode=verify-full'));
+    expect(cfg).toMatchObject({ ssl: { rejectUnauthorized: true }, max: 20 });
+    expect(poolConfigFromParsed(parseDbUrl('postgres://u:p@localhost/db'), { max: 5, statementTimeoutMs: 1 })).toMatchObject({
+      max: 5, statement_timeout: 1,
+    });
+    expect(redactDatabaseUrl('postgres://u:secret@h/db')).not.toContain('secret');
   });
 });

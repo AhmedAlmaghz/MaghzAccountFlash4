@@ -1,17 +1,14 @@
 import { ipcMain, app, safeStorage } from 'electron';
 import pg from 'pg';
-import { randomBytes, pbkdf2Sync, timingSafeEqual, createHash } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { seedComprehensiveDemoData } from './seedDemoData.js';
-
-const SALT_LENGTH = 32;
-const PBKDF2_ITERATIONS = 100000;
-function hashPasswordNode(password) {
-  const salt = randomBytes(SALT_LENGTH).toString('hex');
-  const hash = pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256').toString('hex');
-  return `pbkdf2:${PBKDF2_ITERATIONS}:${salt}:${hash}`;
-}
+// Single-source database primitives (URL parsing, pool config, password
+// hashing) live in api/_lib/dbCore.js + dbPasswords.js — this file consumes
+// them like every other runtime instead of mirroring them.
+import { parseDbUrl, poolConfigFromParsed } from '../api/_lib/dbCore.js';
+import { hashPasswordNode, verifyPasswordNode } from '../api/_lib/dbPasswords.js';
 
 // Generate a strong random password (20 chars, mixed sets) when the operator
 // does not supply one — so no known default credential ever exists.
@@ -48,17 +45,6 @@ function ensureSessionSweeper() {
   sessionSweepTimer = setInterval(sweepExpiredSessions, SESSION_SWEEP_INTERVAL_MS);
   if (typeof sessionSweepTimer.unref === 'function') sessionSweepTimer.unref();
   return sessionSweepTimer;
-}
-
-function verifyPasswordNode(password, storedHash) {
-  const parts = typeof storedHash === 'string' ? storedHash.split(':') : [];
-  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
-  const iterations = Number(parts[1]);
-  const salt = parts[2];
-  const expected = parts[3];
-  if (!Number.isInteger(iterations) || iterations < 100000 || !/^[a-f0-9]+$/i.test(salt) || !/^[a-f0-9]+$/i.test(expected)) return false;
-  const actual = pbkdf2Sync(password, salt, iterations, expected.length / 2, 'sha256').toString('hex');
-  return timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex'));
 }
 
 function validateNewPassword(password) {
@@ -1045,66 +1031,6 @@ function decryptConnSecret(stored) {
   } catch {
     return null;
   }
-}
-
-/**
- * Parse a postgres connection string (mirrors src/core/database/connection.ts
- * parseDatabaseUrl — keep both in sync; the main process cannot import TS).
- */
-function parseDbUrl(raw) {
-  const s = String(raw ?? '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
-  if (!s) throw new Error('DATABASE_URL is empty');
-  let u;
-  try {
-    u = new URL(s);
-  } catch {
-    throw new Error('DATABASE_URL is not a valid URL');
-  }
-  const scheme = u.protocol.replace(/:$/, '').toLowerCase();
-  if (scheme !== 'postgres' && scheme !== 'postgresql') {
-    throw new Error('URL must start with postgres:// or postgresql://');
-  }
-  if (!u.hostname) throw new Error('URL is missing a host');
-  const port = u.port ? Number(u.port) : 5432;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('URL has an invalid port');
-  const database = decodeURIComponent(u.pathname.replace(/^\//, ''));
-  if (!database) throw new Error('URL is missing a database name');
-  const user = decodeURIComponent(u.username || '');
-  if (!user) throw new Error('URL is missing a user');
-  const password = u.password ? decodeURIComponent(u.password) : '';
-  const sslMode = (u.searchParams.get('sslmode') || '').toLowerCase();
-  const h = u.hostname.toLowerCase();
-  const isLocal = h === 'localhost' || h === '127.0.0.1' || h === '::1';
-  let ssl;
-  if (sslMode === 'disable' || sslMode === 'allow') ssl = false;
-  else if (sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full') ssl = true;
-  else ssl = !isLocal;
-  const strictVerify = sslMode === 'verify-ca' || sslMode === 'verify-full';
-  let provider = 'generic';
-  if (/(^|\.)neon\.tech$/.test(h)) provider = 'neon';
-  else if (/(^|\.)supabase\.(co|in|net)$/.test(h)) provider = 'supabase';
-  else if (isLocal) provider = 'localhost';
-  return { raw: s, host: u.hostname, port, database, user, password, ssl, strictVerify, provider };
-}
-
-/**
- * libpq-compatible SSL mapping: `require` (and the remote default) means
- * encrypted transport without CA pinning; `verify-*` pins the chain;
- * `disable` (and the localhost default) means plain TCP. This matches what
- * `psql` does with the same URL, so a URL that works in psql works here.
- */
-function poolConfigFromParsed(p, timeoutMs = 30000) {
-  return {
-    host: p.host,
-    port: p.port,
-    database: p.database,
-    user: p.user,
-    password: p.password,
-    ssl: p.ssl ? (p.strictVerify ? { rejectUnauthorized: true } : { require: true, rejectUnauthorized: false }) : undefined,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: timeoutMs,
-  };
 }
 
 function attachPoolGuard(next) {

@@ -4,15 +4,18 @@ import { Card, Button, Input, Can } from '@/core/ui/components';
 import { getDbAdapter, getDbMode, setDbMode, type DbMode, isElectron, getTransportMode, setTransportMode, type PgliteTransportMode } from '@/core/database/adapters';
 import {
   listRemoteConnections,
-  saveRemoteConnection,
   deleteRemoteConnection,
   getStoredActiveRemoteId,
   setStoredActiveRemoteId,
-  testRemoteConnection,
   type VaultConnectionMeta,
 } from '@/core/database/connectionVault';
 import { validateDatabaseUrl, buildDatabaseUrl, providerLabel, resolveDriver } from '@/core/database/connection';
-import { isRelayAvailable } from '@/core/database/relayClient';
+import {
+  testDatabaseUrl,
+  saveDatabaseUrl,
+  describeSetupError,
+} from '@/core/database/databaseSetup';
+import { useRelayStatus } from '@/core/database/useRelayStatus';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 
@@ -53,7 +56,7 @@ export const DatabaseSettingsPage: React.FC = () => {
   const [isFormSaving, setIsFormSaving] = useState(false);
   // Same-origin relay probe (web only): decides whether non-Neon remotes
   // are routable. Null = still probing (fail-closed until known).
-  const [relayUp, setRelayUp] = useState<boolean | null>(null);
+  const relayUp = useRelayStatus(!isDesktop);
 
   const refresh = useCallback(async () => {
     try {
@@ -67,15 +70,6 @@ export const DatabaseSettingsPage: React.FC = () => {
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    if (isDesktop) return;
-    let cancelled = false;
-    isRelayAvailable()
-      .then((r) => { if (!cancelled) setRelayUp(r.up); })
-      .catch(() => { if (!cancelled) setRelayUp(false); });
-    return () => { cancelled = true; };
-  }, [isDesktop]);
 
   const detected = validateDatabaseUrl(connUrl);
   const webBlocked = !isDesktop && detected.ok && detected.parsed && resolveDriver(detected.parsed.provider, 'web') === null && relayUp !== true;
@@ -91,22 +85,18 @@ export const DatabaseSettingsPage: React.FC = () => {
   };
 
   // Stable backend codes map to guidance (never raw prose matching).
-  const mapDbError = (error?: string, code?: string, fallback?: string): string => {
-    if (code === 'setup-locked') return t('settings.database.setupLocked');
-    if (error === 'webTcpUnsupported') return t('settings.database.webTcpDesc');
-    if (error === 'relayBlockedTarget') return t('settings.database.relayBlockedTarget');
-    return error || fallback || t('settings.database.connectionFailed');
-  };
-
+  const mapDbError = (error?: string, code?: string, fallback?: string): string =>
+    describeSetupError(t, { error, code }, fallback || 'settings.database.connectionFailed');
   const handleTestUrl = async () => {
     setIsTesting(true);
     setTestResult(null);
     setFormError('');
     try {
-      const r = await testRemoteConnection(connUrl);
-      if (r.success) {        setTestResult({ ok: true, message: `${t('settings.database.connected')}${r.db ? ` — ${r.db}` : ''}` });
+      const r = await testDatabaseUrl(connUrl);
+      if (r.ok) {
+        setTestResult({ ok: true, message: `${t('settings.database.connected')}${r.db ? ` — ${r.db}` : ''}` });
       } else {
-        setTestResult({ ok: false, message: mapDbError(r.error, r.code) });
+        setTestResult({ ok: false, message: mapDbError(r.error) });
       }
     } catch (err) {
       setTestResult({ ok: false, message: err instanceof Error ? err.message : t('settings.database.connectionFailed') });
@@ -123,8 +113,8 @@ export const DatabaseSettingsPage: React.FC = () => {
       if (advanced && !url) {
         url = buildDatabaseUrl({ host: parts.host, port: parts.port, database: parts.database, user: parts.user, password: parts.password, ssl: parts.ssl });
       }
-      const saved = await saveRemoteConnection({ name: connName, databaseUrl: url });
-      if (!saved.success || !saved.connection) {
+      const saved = await saveDatabaseUrl(connName, url);
+      if (!saved.ok || !saved.connectionId) {
         throw new Error(mapDbError(saved.error, saved.code, t('settings.database.saveError')));
       }
       addToast('success', t('settings.database.connSaved'));
@@ -136,7 +126,7 @@ export const DatabaseSettingsPage: React.FC = () => {
       await refresh();
       // First connection becomes active automatically.
       if (!getStoredActiveRemoteId()) {
-        await handleActivate(saved.connection.id, true);
+        await handleActivate(saved.connectionId, true);
       }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : t('settings.database.saveError'));

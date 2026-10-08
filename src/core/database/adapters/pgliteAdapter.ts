@@ -5,6 +5,7 @@ import type { DbTransport } from './pgliteTransport';
 import { getTransportMode } from './transportMode';
 import { getWorkerTransport } from './pgliteWorkerTransport';
 import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
+import { normalizeIdempotent } from '@root/api/_lib/dbCore.js';
 
 /**
  * PGlite (PostgreSQL WASM) Adapter
@@ -112,34 +113,8 @@ const MIGRATIONS: { name: string; sql: string }[] = [
  * The result is cached so subsequent calls are no-ops (avoids 24
  * SELECT checks on every query — a major PGlite performance win).
  */
-/**
- * Normalize a generated migration into an idempotent one so replaying the
- * baseline over an existing browser database (IndexedDB persists across
- * reloads) never crashes on pre-existing tables/constraints.
- * Mirrors electron/migrationRunner.js — keep both in sync.
- */
-function normalizeIdempotent(rawSql: string): string {
-  let sql = rawSql;
-
-  sql = sql.replace(/\bCREATE TABLE (?!IF NOT EXISTS)/g, 'CREATE TABLE IF NOT EXISTS ');
-  sql = sql.replace(/\bCREATE UNIQUE INDEX (?!IF NOT EXISTS)/g, 'CREATE UNIQUE INDEX IF NOT EXISTS ');
-  sql = sql.replace(/\bCREATE INDEX (?!IF NOT EXISTS)/g, 'CREATE INDEX IF NOT EXISTS ');
-
-  const constraintRe = /^ALTER TABLE (?:ONLY )?("[^"]+"|[\w.]+)\s+ADD CONSTRAINT\s+("[^"]+"|[\w.]+)([^;]*);/gm;
-  const guarded: string[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = constraintRe.exec(sql)) !== null) {
-    const conname = m[2].replace(/"/g, '');
-    guarded.push(sql.slice(last, m.index));
-    guarded.push(
-      `DO $$ BEGIN\n  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${conname}') THEN\n    ALTER TABLE ${m[1]} ADD CONSTRAINT ${m[2]}${m[3]};\n  END IF;\nEND $$;`
-    );
-    last = m.index + m[0].length;
-  }
-  guarded.push(sql.slice(last));
-  return guarded.join('\n');
-}
+// Text normalization lives in api/_lib/dbCore.js (single source shared with
+// the main process, the relay and the renderer) — see getBundledMigrations.
 
 let migrationsPromise: Promise<{ success: boolean; error?: string }> | null = null;
 
@@ -1700,20 +1675,6 @@ export async function withoutInternalMigration<T>(fn: () => Promise<T>): Promise
 /** Bundled schema with idempotency guards applied (mirrors the PGlite boot). */
 export function getBundledMigrations(): { name: string; sql: string }[] {
   return MIGRATIONS.map((m) => ({ name: m.name, sql: normalizeIdempotent(m.sql) }));
-}
-
-/**
- * Split a migration file into single statements. The HTTP query endpoint
- * executes one statement per call, so multi-statement files must be split
- * on the drizzle breakpoint marker (same convention as
- * electron/migrationRunner.js). DO-blocks stay intact — they contain no
- * breakpoint markers.
- */
-export function splitMigrationStatements(sql: string): string[] {
-  return sql
-    .split('--> statement-breakpoint')
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 /** Migration-tracking table shared by every backend (idempotent replays). */

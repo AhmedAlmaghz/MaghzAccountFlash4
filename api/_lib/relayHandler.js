@@ -29,17 +29,22 @@
 import {
   assertRelaySql,
   classifyRelayTarget,
-  normalizeIdempotent,
   FORBIDDEN_STATEMENT_PATTERN,
 } from './relayGuard.js';
 import {
+  parseDbUrl,
+  poolConfigFromParsed,
+  normalizeIdempotent,
+  splitMigrationStatements,
+} from './dbCore.js';
+import {
   issueRelayToken,
   verifyRelayToken,
-  verifyRelayPassword,
   createLoginLimiter,
   dbFingerprint,
   tokenSecret,
 } from './relayAuth.js';
+import { verifyPasswordNode } from './dbPasswords.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
@@ -80,58 +85,6 @@ function redactSecrets(text, secrets) {
     if (s && s.length >= 4 && out.includes(s)) out = out.split(s).join('****');
   }
   return out;
-}
-
-/** Minimal server-side URL parse (independent of client input validation). */
-function parseRelayUrl(raw) {
-  const s = String(raw || '').replace(/^[\uFEFF\s]+|[\s\r]+$/g, '');
-  if (!s) throw Object.assign(new Error('DATABASE_URL is empty'), { code: 'invalid-url' });
-  let u;
-  try {
-    u = new URL(s);
-  } catch {
-    throw Object.assign(new Error('DATABASE_URL is not a valid URL'), { code: 'invalid-url' });
-  }
-  const scheme = u.protocol.replace(/:$/, '').toLowerCase();
-  if (scheme !== 'postgres' && scheme !== 'postgresql') {
-    throw Object.assign(new Error('URL must start with postgres:// or postgresql://'), { code: 'invalid-url' });
-  }
-  if (!u.hostname) throw Object.assign(new Error('URL is missing a host'), { code: 'invalid-url' });
-  const port = u.port ? Number(u.port) : 5432;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw Object.assign(new Error('URL has an invalid port'), { code: 'invalid-url' });
-  }
-  const database = decodeURIComponent(u.pathname.replace(/^\//, ''));
-  if (!database) throw Object.assign(new Error('URL is missing a database name'), { code: 'invalid-url' });
-  const user = decodeURIComponent(u.username || '');
-  if (!user) throw Object.assign(new Error('URL is missing a user'), { code: 'invalid-url' });
-  const password = u.password ? decodeURIComponent(u.password) : '';
-  const sslMode = (u.searchParams.get('sslmode') || '').toLowerCase();
-  const isLocal = u.hostname.toLowerCase() === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1';
-  let ssl;
-  if (sslMode === 'disable' || sslMode === 'allow') ssl = false;
-  else if (sslMode === 'require' || sslMode === 'verify-ca' || sslMode === 'verify-full') ssl = true;
-  else ssl = !isLocal;
-  const strictVerify = sslMode === 'verify-ca' || sslMode === 'verify-full';
-  return { raw: s, host: u.hostname, port, database, user, password, ssl, strictVerify };
-}
-
-function poolConfigFromParsed(p) {
-  return {
-    host: p.host,
-    port: p.port,
-    database: p.database,
-    user: p.user,
-    password: p.password,
-    ssl: p.ssl ? (p.strictVerify ? { rejectUnauthorized: true } : { require: true, rejectUnauthorized: false }) : undefined,
-    max: 5,
-    idleTimeoutMillis: 30000,
-    // Suspended serverless computes (Neon scale-to-zero) need a full wake
-    // cycle before the first byte flows — fail fast here and every cold
-    // start becomes a hard error instead of a slow success.
-    connectionTimeoutMillis: 30000,
-    statement_timeout: STATEMENT_TIMEOUT_MS,
-  };
 }
 
 /**
@@ -219,7 +172,7 @@ function createRelayHandler(deps = {}) {
     if (!PoolFactory) {
       throw new Error('relay pool factory unavailable');
     }
-    const pool = PoolFactory(poolConfigFromParsed(parsed));
+    const pool = PoolFactory(poolConfigFromParsed(parsed, { timeoutMs: 30000, max: 5, statementTimeoutMs: STATEMENT_TIMEOUT_MS }));
     pools.set(key, { pool, lastUsed: now() });
     if (pools.size > 20) {
       let oldest = null;
@@ -266,7 +219,7 @@ function createRelayHandler(deps = {}) {
   async function actionPingdb(body) {
     let parsed;
     try {
-      parsed = parseRelayUrl(body.databaseUrl);
+      parsed = parseDbUrl(body.databaseUrl);
     } catch (e) {
       return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
     }
@@ -320,7 +273,7 @@ function createRelayHandler(deps = {}) {
     }
     let parsed;
     try {
-      parsed = parseRelayUrl(body.databaseUrl);
+      parsed = parseDbUrl(body.databaseUrl);
     } catch (e) {
       return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
     }
@@ -337,7 +290,7 @@ function createRelayHandler(deps = {}) {
         'SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, password_hash FROM users WHERE username = $1',
         [username.trim()],
       ));
-      const row = (result.rows || []).find((r) => r.is_active && verifyRelayPassword(password, r.password_hash));
+      const row = (result.rows || []).find((r) => r.is_active && verifyPasswordNode(password, r.password_hash));
       if (!row) {
         loginLimiter.recordFailure(clientIp, username);
         return { status: 200, body: { success: false, code: 'bad-credentials', error: 'invalid username or password' } };
@@ -450,7 +403,7 @@ function createRelayHandler(deps = {}) {
     const raw = typeof body.databaseUrl === 'string' ? body.databaseUrl : '';
     let parsed;
     try {
-      parsed = parseRelayUrl(raw);
+      parsed = parseDbUrl(raw);
     } catch (e) {
       return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
     }
@@ -485,7 +438,7 @@ function createRelayHandler(deps = {}) {
     const raw = typeof body.databaseUrl === 'string' ? body.databaseUrl : '';
     let parsed;
     try {
-      parsed = parseRelayUrl(raw);
+      parsed = parseDbUrl(raw);
     } catch (e) {
       return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
     }
@@ -538,7 +491,7 @@ function createRelayHandler(deps = {}) {
     const raw = typeof body.databaseUrl === 'string' ? body.databaseUrl : '';
     let parsed;
     try {
-      parsed = parseRelayUrl(raw);
+      parsed = parseDbUrl(raw);
     } catch (e) {
       return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
     }
@@ -573,7 +526,7 @@ function createRelayHandler(deps = {}) {
         const seen = await pool.query('SELECT 1 FROM __pglite_migrations WHERE name = $1 LIMIT 1', [file.name]);
         if ((seen.rows || []).length > 0) continue;
       try {
-        for (const stmt of splitStatements(file.sql)) {
+        for (const stmt of splitMigrationStatements(file.sql)) {
           await withWakeRetry(() => pool.query(normalizeIdempotent(stmt)));
         }
       } catch (e) {
@@ -604,13 +557,6 @@ function createRelayHandler(deps = {}) {
       .map((f) => ({ name: f.replace(/\.sql$/, ''), sql: fs.readFileSync(path.join(dir, f), 'utf8') }));
   }
 
-  function splitStatements(sql) {
-    return String(sql || '')
-      .split('--> statement-breakpoint')
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
   /**
    * Full database reset (onboarding "start fresh"). Mirrors the desktop
    * db:clear-all channel: requires explicit confirm plus valid ADMIN
@@ -622,7 +568,7 @@ function createRelayHandler(deps = {}) {
     const raw = typeof body.databaseUrl === 'string' ? body.databaseUrl : '';
     let parsed;
     try {
-      parsed = parseRelayUrl(raw);
+      parsed = parseDbUrl(raw);
     } catch (e) {
       return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
     }
@@ -651,7 +597,7 @@ function createRelayHandler(deps = {}) {
         'SELECT id, company_id, role, is_active, password_hash FROM users WHERE username = $1',
         [username.trim()],
       );
-      const row = (found.rows || []).find((r) => r.is_active && verifyRelayPassword(password, r.password_hash));
+      const row = (found.rows || []).find((r) => r.is_active && verifyPasswordNode(password, r.password_hash));
       if (!row || (row.role !== 'admin' && row.role !== 'super_admin')) {
         loginLimiter.recordFailure(clientIp, username);
         return { status: 200, body: { success: false, code: 'bad-credentials', error: 'invalid username or password' } };
@@ -710,7 +656,7 @@ function createRelayHandler(deps = {}) {
   return {
     handle,
     privateTargetsAllowed: () => privateTargetsAllowed(env),
-    __test: { parseRelayUrl, poolConfigFromParsed, splitStatements },
+    __test: { parseDbUrl, poolConfigFromParsed, splitMigrationStatements },
   };
 }
 

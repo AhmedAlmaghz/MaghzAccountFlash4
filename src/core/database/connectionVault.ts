@@ -273,7 +273,9 @@ export async function findRemoteConnection(id: string): Promise<VaultConnectionM
   return all.find((c) => c.id === id) ?? null;
 }
 
-/** Test a URL without saving. Electron tests via main TCP; web tests Neon HTTP. */
+/** Test a URL without saving. Desktop probes via main TCP; web probes Neon
+ * directly and every other provider through the relay (or refuses honestly
+ * when no relay answers). */
 export async function testRemoteConnection(
   databaseUrl: string,
 ): Promise<{ success: boolean; db?: string; version?: string; error?: string; code?: string }> {

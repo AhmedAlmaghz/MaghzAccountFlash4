@@ -24,6 +24,7 @@ import { useAppStore, detectDeviceLanguage } from '@/core/store';
 import { Button, Input, Card } from '@/core/ui/components';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { getDbAdapter } from '@/core/database/adapters';
+import { useRelayStatus } from '@/core/database/useRelayStatus';
 
 const getSteps = (t: (key: string) => string) => [
   { id: 0, title: t('onboarding.welcome'), description: t('onboarding.welcomeDesc') },
@@ -374,7 +375,8 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
   const [urlParsedNote, setUrlParsedNote] = useState('');
   const [urlProvider, setUrlProvider] = useState<string | null>(null);
   const isDesktop = typeof window !== 'undefined' && !!(window as { electronEnv?: { isElectron?: boolean } }).electronEnv?.isElectron;
-  const webBlocked = !isDesktop && dbMode === 'pg' && !!urlInput.trim() && urlProvider !== null && urlProvider !== 'neon';
+  const relayUp = useRelayStatus(!isDesktop && dbMode === 'pg');
+  const webBlocked = !isDesktop && dbMode === 'pg' && !!urlInput.trim() && urlProvider !== null && urlProvider !== 'neon' && relayUp !== true;
 
   const handleUrlChange = async (raw: string) => {
     setUrlInput(raw);
@@ -412,14 +414,14 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
     if (dbMode === 'pg' && effectiveUrl) {
       setProcessing(true, t('onboarding.testingConnection'));
       try {
-        const { testRemoteConnection } = await import('@/core/database/connectionVault');
-        const result = await testRemoteConnection(effectiveUrl);
-        if (result.success) {
+        const { testDatabaseUrl, describeSetupError } = await import('@/core/database/databaseSetup');
+        const result = await testDatabaseUrl(effectiveUrl);
+        if (result.ok) {
           setTestStatus('success');
           setTestMessage(t('onboarding.connectedTo', { db: result.db || 'PostgreSQL', version: (result.version || '').split(' ')[0] }));
         } else {
           setTestStatus('error');
-          setTestMessage(result.error === 'webTcpUnsupported' ? t('settings.database.webTcpDesc') : (result.error || t('onboarding.connectionFailed')));
+          setTestMessage(describeSetupError(t, result, 'onboarding.connectionFailed'));
         }
       } catch (err) {
         setTestStatus('error');
@@ -488,16 +490,11 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
     const effectiveUrl = (urlInput.trim() || dbConfig.databaseUrl || '').trim();
     if (dbMode === 'pg' && effectiveUrl) {
       try {
-        const { saveRemoteConnection, setStoredActiveRemoteId } = await import('@/core/database/connectionVault');
-        const { parseDatabaseUrl } = await import('@/core/database/connection');
-        // Validate before saving — surfaces "invalid URL" immediately
-        parseDatabaseUrl(effectiveUrl);
-        const saved = await saveRemoteConnection({ name: 'Onboarding', databaseUrl: effectiveUrl });
-        if (!saved.success || !saved.connection) {
-          const key = (saved as { error?: string }).error === 'webTcpUnsupported' ? 'settings.database.webTcpDesc' : null;
-          throw new Error(key ? t(key) : ((saved as { error?: string }).error || t('onboarding.connectionFailed')));
+        const { saveAndActivateDatabase, describeSetupError } = await import('@/core/database/databaseSetup');
+        const saved = await saveAndActivateDatabase('Onboarding', effectiveUrl);
+        if (!saved.ok || !saved.connectionId) {
+          throw new Error(describeSetupError(t, saved, 'onboarding.connectionFailed'));
         }
-        setStoredActiveRemoteId(saved.connection.id);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         return;
@@ -817,7 +814,7 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
     setProcessing(true, seedOption === 'default' ? t('onboarding.seedingDefault') : t('onboarding.seedingDemo'));
 
     try {
-      // Defensive: if the user tested a Neon URL but the vault wasn't persisted
+      // Defensive: if the user tested a URL but the vault wasn't persisted
       // (e.g. direct navigation to step 4), ensure the DB mode's vault is
       // populated from the onboarding store before acquiring the adapter.
       try {
@@ -825,12 +822,8 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
         const mode = getDbMode();
         const rawUrl = (useOnboardingStore.getState().dbConfig.databaseUrl || '').trim();
         if (mode === 'pg' && rawUrl) {
-          const { getActiveRemoteUrl, saveRemoteConnection, setStoredActiveRemoteId } = await import('@/core/database/connectionVault');
-          const active = await getActiveRemoteUrl();
-          if (!active) {
-            const saved = await saveRemoteConnection({ name: 'Onboarding', databaseUrl: rawUrl });
-            if (saved.success && saved.connection) setStoredActiveRemoteId(saved.connection.id);
-          }
+          const { ensureVaultPopulated } = await import('@/core/database/databaseSetup');
+          await ensureVaultPopulated('Onboarding', rawUrl);
         }
       } catch { /* best-effort */ }
 
