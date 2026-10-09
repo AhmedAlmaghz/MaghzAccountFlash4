@@ -71,6 +71,8 @@
       "dist/**/*",
       "electron/**/*",
       "drizzle/**/*",
+      "api/_lib/dbCore.js",
+      "api/_lib/dbPasswords.js",
       "package.json"
     ],
     "win": {
