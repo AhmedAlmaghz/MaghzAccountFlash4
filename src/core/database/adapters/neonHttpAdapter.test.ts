@@ -6,7 +6,7 @@ vi.mock('@neondatabase/serverless', () => ({
   neon: (...args: unknown[]) => mockNeon(...args),
 }));
 
-import { neonHttpAdapter, configureNeonHttp, resetNeonHttp } from './neonHttpAdapter';
+import { neonHttpAdapter, configureNeonHttp, resetNeonHttp, applyMigrateTimeout, MIGRATE_TIMEOUT_MS } from './neonHttpAdapter';
 
 const URL = 'postgres://user:s3cret@ep-x.aws.neon.tech:5432/appdb';
 
@@ -27,6 +27,17 @@ beforeEach(() => {
 describe('configureNeonHttp', () => {
   it('rejects empty input', () => {
     expect(() => configureNeonHttp('  ')).toThrow(/empty/);
+  });
+  it('rebinds only when the url or the timeout budget changes', async () => {
+    mockNeon.mockReturnValue(fakeSql(async () => []));
+    configureNeonHttp(URL);
+    configureNeonHttp(URL);
+    expect(mockNeon).toHaveBeenCalledTimes(1);
+    applyMigrateTimeout();
+    expect(mockNeon).toHaveBeenCalledTimes(2);
+    expect(MIGRATE_TIMEOUT_MS).toBe(120_000);
+    const opts = mockNeon.mock.calls[1][1] as Record<string, unknown>;
+    expect(opts).toHaveProperty('fetchOptions');
   });
   it('unconfigured adapter fails with guidance, not a crash', async () => {
     const r = await neonHttpAdapter.query('SELECT 1');

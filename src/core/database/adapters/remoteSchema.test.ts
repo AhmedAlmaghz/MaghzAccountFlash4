@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { DbAdapter } from './types';
-import { ensureRemoteSchema, isWakeRetryableError } from './remoteSchema';
+import { ensureRemoteSchema, isWakeRetryableError, wakeRemoteDatabase } from './remoteSchema';
 import { splitMigrationStatements } from '@root/api/_lib/dbCore.js';
 import { getBundledMigrations } from './pgliteAdapter';
 
@@ -112,7 +112,8 @@ describe('isWakeRetryableError + cold-start retries', () => {
     const r = await ensureRemoteSchema(adapter);
     expect(r.success).toBe(true);
     expect(calls).toBeGreaterThan(2);
-  }, 30000);
+    // Real 4s+12s sleeps: 60s budget so a loaded machine cannot flake it.
+  }, 60000);
 
   it('fails fast on auth errors without burning retries', async () => {
     let calls = 0;
@@ -126,5 +127,50 @@ describe('isWakeRetryableError + cold-start retries', () => {
     expect(r.success).toBe(false);
     expect(r.error).toBe('password authentication failed');
     expect(calls).toBe(1);
+  });
+
+  it('wakes the compute before replaying (warmup is the first query)', async () => {
+    const log: string[] = [];
+    let calls = 0;
+    const adapter = {
+      query: vi.fn(async (sql: string, _params?: unknown[]) => {
+        log.push(sql.slice(0, 60));
+        calls++;
+        // Cold compute: the first two touches time out, then it is awake.
+        if (calls <= 2) return { success: false, error: 'TimeoutError: signal timed out' };
+        if (sql.startsWith('SELECT 1 FROM')) return { success: true, rows: [] };
+        if (sql.startsWith('INSERT INTO')) return { success: true, rows: [] };
+        return { success: true, rows: [] };
+      }),
+    } as unknown as Pick<DbAdapter, 'query'>;
+    const r = await ensureRemoteSchema(adapter);
+    expect(r.success).toBe(true);
+    expect(log[0]).toBe('SELECT 1');
+    // Real 5s+10s sleeps: 60s budget so a loaded machine cannot flake it.
+  }, 60000);
+
+  it('reports an unwakeable database instead of a migration failure', async () => {
+    const adapter = {
+      query: vi.fn(async () => ({ success: false, error: 'TimeoutError: signal timed out' })),
+    } as unknown as Pick<DbAdapter, 'query'>;
+    // Tiny budget keeps the test fast; production uses ~65s of sleep.
+    const w = await wakeRemoteDatabase(adapter, [1, 1]);
+    expect(w.success).toBe(false);
+    expect(w.error).toMatch(/timed out/);
+    const r = await ensureRemoteSchema(adapter, undefined, [1, 1]);
+    expect(r.success).toBe(false);
+    expect(r.applied).toBe(0);
+    expect(r.error).toMatch(/did not wake up/);
+  });
+
+  it('names the failing statement, not just the file', async () => {
+    const log: string[] = [];
+    const r = await ensureRemoteSchema(
+      makeAdapter(log, {
+        failOn: (sql) => (sql.includes('CREATE TABLE') && !sql.includes('__pglite_migrations') ? 'boom' : null),
+      }),
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/\(statement: CREATE TABLE/);
   });
 });

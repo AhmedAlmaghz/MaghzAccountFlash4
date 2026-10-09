@@ -26,12 +26,22 @@ type NeonSql = NeonQueryFunction<false, false>;
 
 let sql: NeonSql | null = null;
 let activeUrl = '';
+let activeTimeoutMs = 0;
+
+/**
+ * Fetch budget for one-time setup (schema replay + seed). The replay is
+ * hundreds of sequential HTTPS round-trips against a compute that may
+ * still be waking; the interactive 60s cap below turns that into a
+ * TimeoutError inside 0000_init. Seeding happens once per database —
+ * waiting beats failing.
+ */
+export const MIGRATE_TIMEOUT_MS = 120_000;
 
 /** (Re)bind the adapter to a connection string. Throws on empty input. */
 export function configureNeonHttp(databaseUrl: string, timeoutMs = 60000): void {
   const url = (databaseUrl || '').trim();
   if (!url) throw new Error('DATABASE_URL is empty');
-  if (url !== activeUrl || !sql) {
+  if (url !== activeUrl || !sql || timeoutMs !== activeTimeoutMs) {
     sql = neon(url, {
       disableWarningInBrowsers: true,
       // Suspended Neon computes need a full wake cycle (tens of seconds)
@@ -40,13 +50,20 @@ export function configureNeonHttp(databaseUrl: string, timeoutMs = 60000): void 
       fetchOptions: { signal: AbortSignal.timeout(timeoutMs) },
     });
     activeUrl = url;
+    activeTimeoutMs = timeoutMs;
   }
+}
+
+/** Raise the fetch budget for one-time setup. No-op before configure. */
+export function applyMigrateTimeout(): void {
+  if (activeUrl) configureNeonHttp(activeUrl, MIGRATE_TIMEOUT_MS);
 }
 
 /** Forget the bound connection (tests + explicit disconnect). */
 export function resetNeonHttp(): void {
   sql = null;
   activeUrl = '';
+  activeTimeoutMs = 0;
 }
 
 function requireSql(): { ok: true; fn: NeonSql } | { ok: false; error: string } {
@@ -357,12 +374,14 @@ export const neonHttpAdapter: DbAdapter = {
   },
 
   async seedDefault(adminPassword?: string, company?: CompanySeedProfile) {
+    applyMigrateTimeout();
     const schema = await ensureRemoteSchema(this);
     if (!schema.success) return { success: false, error: schema.error };
     return withoutInternalMigration(() => pgliteAdapter.seedDefault.call(neonHttpAdapter, adminPassword, company));
   },
 
   async seedDemo(adminPassword?: string, company?: CompanySeedProfile) {
+    applyMigrateTimeout();
     const schema = await ensureRemoteSchema(this);
     if (!schema.success) return { success: false, error: schema.error };
     return withoutInternalMigration(() => pgliteAdapter.seedDemo.call(neonHttpAdapter, adminPassword, company));

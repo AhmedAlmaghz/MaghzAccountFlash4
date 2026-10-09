@@ -28,7 +28,7 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
 
 /** per-module ceilings, measured 2026-09-24 (see AI_AUDIT_AND_FIX_PLAN.md) */
 const CEILINGS: Record<string, number> = {
-  core: 99,
+  core: 100,
   accounting: 84,
   hr: 68,
   manufacturing: 58,
@@ -54,7 +54,10 @@ const CEILINGS: Record<string, number> = {
 // keeps its rpcPath() branches). No new desktop-only raw path.
 // (Note: the per-module table actually summed to 666 at HEAD, so the 663
 // total was already stale by 3; this sets the honest total 666 + 10 = 676.)
-const TOTAL_CEILING = 676;
+// Raised 676 -> 677 for the cold-start warmup: one `SELECT 1` in
+// remoteSchema.wakeRemoteDatabase (core), so a waking remote fails with
+// "did not wake up" instead of a bare TimeoutError inside 0000_init.
+const TOTAL_CEILING = 677;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

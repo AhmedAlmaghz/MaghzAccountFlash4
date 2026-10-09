@@ -69,8 +69,13 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
  * remoteSchema wake-retry refactor in the same window deliberately keeps
  * `adapter.query` text at every call site (thunk form) so this counter
  * keeps seeing those four statements — see queryWithWakeRetry.
+ *
+ * Raised 370 -> 371 for the cold-start warmup: ensureRemoteSchema now opens
+ * with one `SELECT 1` (wakeRemoteDatabase) so a waking Neon fails with
+ * "did not wake up" instead of dying inside 0000_init with a bare
+ * TimeoutError. One honest statement, counted here like the other four.
  */
-const CEILING = 370;
+const CEILING = 371;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -116,7 +121,7 @@ const BASELINE: Record<string, number> = {
   'src/core/utils/stockPolicy.ts': 5,
   'src/core/api.ts': 4,
   'src/core/backup/backupService.ts': 4,
-  'src/core/database/adapters/remoteSchema.ts': 4,
+  'src/core/database/adapters/remoteSchema.ts': 5,
   'src/core/utils/openingBalance.ts': 4,
   'src/modules/reports/LeadConversionReport.tsx': 4,
   'src/modules/reports/StockValuationReport.tsx': 4,
