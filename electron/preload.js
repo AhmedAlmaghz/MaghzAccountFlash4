@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('electronAuth', {
 // main process applies the same authorization guards to both paths.
 contextBridge.exposeInMainWorld('electronDB', {
   ping: () => ipcRenderer.invoke('db:ping'),
+  probeServer: () => ipcRenderer.invoke('db:probe-server'),
   _exec: (sql, params = []) => ipcRenderer.invoke('db:internal-query', { sql, params, sessionToken }),
   _execBatch: (queries) => ipcRenderer.invoke('db:internal-transaction', { queries, sessionToken }),
   testConnection: (config) => ipcRenderer.invoke('db:test-connection', { ...(config || {}), sessionToken }),

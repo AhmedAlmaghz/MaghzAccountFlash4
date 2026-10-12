@@ -378,6 +378,22 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
   const relayUp = useRelayStatus(!isDesktop && dbMode === 'pg');
   const webBlocked = !isDesktop && dbMode === 'pg' && !!urlInput.trim() && urlProvider !== null && urlProvider !== 'neon' && relayUp !== true;
 
+  // Pre-select the server card when one answers (desktop only). Local state
+  // only — nothing is pinned until Next (which writes the explicit flag),
+  // so switching back to PGlite and continuing keeps the user's own choice.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { probeServerDatabase } = await import('@/core/database/adapters');
+        const r = await probeServerDatabase();
+        if (!cancelled && r.reachable) setDbMode('pg');
+      } catch { /* probe is best-effort; PGlite stays pre-selected */ }
+    })();
+    return () => { cancelled = true; };
+  }, [isDesktop]);
+
   const handleUrlChange = async (raw: string) => {
     setUrlInput(raw);
     setUrlParsedNote('');
@@ -432,7 +448,10 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
     }
 
     if (dbMode === 'pglite') {
-      // Test PGlite (local PostgreSQL WASM)
+      // Test PGlite (local PostgreSQL WASM). setDbMode (not the explicit
+      // variant) — testing is not choosing: handleNext is what pins the mode,
+      // and pinning it here would silently override auto-detection for a user
+      // who only clicked "test".
       setProcessing(true, t('onboarding.testingConnection'));
       try {
         const { getDbAdapter, setDbMode: setStoredMode } = await import('@/core/database/adapters');
@@ -504,14 +523,13 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
       return;
     }
     try {
-      const { setDbMode: setStoredMode } = await import('@/core/database/adapters');
+      // Explicit: the user just picked a backend in the wizard, so pin it
+      // against auto-detection (which would otherwise re-route a fresh
+      // install back to any server it can find). setDbModeExplicit writes the
+      // mode AND the flag; the adapter cache invalidates itself because
+      // adapterMode is compared against the mode on the next acquire.
+      const { setDbModeExplicit: setStoredMode } = await import('@/core/database/adapters');
       setStoredMode(dbMode);
-    } catch { /* ignore */ }
-    // Clear any stale adapter so the next getDbAdapter() re-evaluates mode + vault
-    try {
-      const { setDbMode: _ } = await import('@/core/database/adapters');
-      // force re-ping by resetting lastPingAt via mode change — adapter cache
-      // checks adapterMode === mode, so switching mode already invalidates it
     } catch { /* ignore */ }
     onNext();
   };

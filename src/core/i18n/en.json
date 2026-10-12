@@ -3384,6 +3384,8 @@
       "connSaved": "Connection saved",
       "connDeleted": "Connection deleted",
       "connActivated": "Remote connection activated",
+      "connActivateFailed": "Could not activate the connection — stayed on the current database.",
+      "serverDetected": "PostgreSQL server detected ({{db}}) — pick the PostgreSQL card below to connect.",
       "connEmpty": "No saved connections yet — add the first one with a DATABASE_URL.",
       "webTcpDesc": "Browsers cannot open TCP sockets — this provider (Supabase/self-hosted/local) only works in the desktop app. On web, use Neon.",
       "relayChecking": "Checking the fallback channel…",

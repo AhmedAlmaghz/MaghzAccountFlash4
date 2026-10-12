@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Database, Server, HardDrive, CheckCircle, XCircle, RefreshCw, Save, Plus, Trash2, Eye, EyeOff, Globe, MonitorSmartphone } from 'lucide-react';
 import { Card, Button, Input, Can } from '@/core/ui/components';
-import { getDbAdapter, getDbMode, setDbMode, type DbMode, isElectron, getTransportMode, setTransportMode, type PgliteTransportMode } from '@/core/database/adapters';
+import { getDbAdapter, getDbMode, setDbModeExplicit, type DbMode, isElectron, getTransportMode, setTransportMode, type PgliteTransportMode } from '@/core/database/adapters';
 import {
   listRemoteConnections,
   deleteRemoteConnection,
@@ -58,6 +58,26 @@ export const DatabaseSettingsPage: React.FC = () => {
   // are routable. Null = still probing (fail-closed until known).
   const relayUp = useRelayStatus(!isDesktop);
 
+  // Desktop only: is a server database actually there? A "detected" banner
+  // tells the user the PostgreSQL card will really connect — previously a
+  // working server was invisible and the app looked PGlite-only. String =
+  // null while probing, '' when nothing is there.
+  const [serverHint, setServerHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isDesktop) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { probeServerDatabase } = await import('@/core/database/adapters');
+        const r = await probeServerDatabase();
+        if (!cancelled) setServerHint(r.reachable ? (r.db || r.source) : '');
+      } catch {
+        if (!cancelled) setServerHint('');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isDesktop]);
+
   const refresh = useCallback(async () => {
     try {
       setConnections(await listRemoteConnections());
@@ -74,13 +94,23 @@ export const DatabaseSettingsPage: React.FC = () => {
   const detected = validateDatabaseUrl(connUrl);
   const webBlocked = !isDesktop && detected.ok && detected.parsed && resolveDriver(detected.parsed.provider, 'web') === null && relayUp !== true;
 
-  const syncActiveToDesktop = async (id: string | null) => {
+  /**
+   * Mirror the active connection into the main-process vault on desktop.
+   *
+   * The failure is SURFACED, not swallowed: silently ignoring it was how a
+   * switch could report success while the pool kept pointing at the old
+   * database (the renderer pointer moved, the main process never did).
+   * The caller maps the stable code through describeSetupError.
+   */
+  const syncActiveToDesktop = async (id: string | null): Promise<void> => {
     setStoredActiveRemoteId(id);
-    try {
-      const b = (window as { electronDB?: { connections?: { setActive?: (p: { id: string | null }) => Promise<{ success: boolean; error?: string }> } } }).electronDB?.connections;
-      if (b?.setActive) await b.setActive({ id });
-    } catch {
-      /* main sync best-effort; reload re-reads the vault */
+    const b = (window as { electronDB?: { connections?: { setActive?: (p: { id: string | null }) => Promise<{ success: boolean; error?: string; code?: string }> } } }).electronDB?.connections;
+    if (!b?.setActive) return;
+    const r = await b.setActive({ id });
+    if (!r?.success) {
+      const err = new Error(r?.error || t('settings.database.connActivateFailed'));
+      (err as Error & { code?: string }).code = r?.code;
+      throw err;
     }
   };
 
@@ -136,21 +166,30 @@ export const DatabaseSettingsPage: React.FC = () => {
   };
 
   const handleActivate = async (id: string, silent = false) => {
-    await syncActiveToDesktop(id);
-    setDbMode('pg');
+    try {
+      await syncActiveToDesktop(id);
+    } catch (err) {
+      // The pool did NOT move. Keep the stored mode as-is and tell the user
+      // why, rather than reloading into a database they did not choose.
+      addToast('error', mapDbError((err as { message?: string })?.message, (err as { code?: string })?.code, t('settings.database.connActivateFailed')));
+      return;
+    }
+    setDbModeExplicit('pg');
     setMode('pg');
     await refresh();
     if (!silent) {
       addToast('success', t('settings.database.connActivated'));
-      setTimeout(() => window.location.reload(), 800);
-    } else {
-      setTimeout(() => window.location.reload(), 800);
     }
+    setTimeout(() => window.location.reload(), 800);
   };
 
   const handleUseLocal = async () => {
-    await syncActiveToDesktop(null);
-    setDbMode('pglite');
+    try {
+      await syncActiveToDesktop(null);
+    } catch {
+      /* no bridge (web) — the localStorage pointer is the whole story there */
+    }
+    setDbModeExplicit('pglite');
     setMode('pglite');
     setTimeout(() => window.location.reload(), 800);
   };
@@ -159,7 +198,7 @@ export const DatabaseSettingsPage: React.FC = () => {
     await deleteRemoteConnection(id);
     addToast('success', t('settings.database.connDeleted'));
     if (getStoredActiveRemoteId() === id) {
-      setDbMode('pglite');
+      setDbModeExplicit('pglite');
       setMode('pglite');
     }
     await refresh();
@@ -204,7 +243,7 @@ export const DatabaseSettingsPage: React.FC = () => {
         setIsSaving(false);
         return;
       }
-      setDbMode(mode);
+      setDbModeExplicit(mode);
       setTransportMode(transport);
       addToast('success', t('settings.database.saved'));
       setTimeout(() => window.location.reload(), 800);
@@ -225,6 +264,12 @@ export const DatabaseSettingsPage: React.FC = () => {
       </div>
 
       {/* Mode selection */}
+      {serverHint ? (
+        <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-3 rounded-lg">
+          <CheckCircle size={18} />
+          <span className="text-sm font-medium" dir="auto">{t('settings.database.serverDetected', { db: serverHint })}</span>
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <button
           onClick={() => setMode('pglite')}

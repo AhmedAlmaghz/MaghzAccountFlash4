@@ -398,6 +398,43 @@ async function assertOnboardingAllowed(event, sessionToken) {
 }
 
 /**
+ * Vault-channel gate (saved connections: list/save/remove/set-active).
+ *
+ * Deliberately OPEN without a session. These channels manage WHERE the pool
+ * points on this machine — they never return row data and never hand out a
+ * secret:
+ *   - list → metadata only (host/user/database; the secret stays encrypted)
+ *   - save → persists a URL the renderer already holds (the user pasted it)
+ *   - remove → deletes a local entry
+ *   - set-active → repoints the pool; every subsequent DATA access still
+ *     needs a session (db:internal-query, db:rpc:*, auth:*) and logging in
+ *     to the new target needs its own valid credentials there.
+ * Pointing the app at an attacker server harvests nothing by itself: the
+ * victim's real database is untouched, and reading anything requires a
+ * login the attacker cannot forge. (A renderer already running attacker
+ * code can keylog anyway — the vault gate was never that boundary.)
+ * The vault file itself is per-OS-user (app.getPath('userData')), so one
+ * machine user's repointing cannot move another's.
+ *
+ * The strict gate made this a deadlock: a fresh install runs PGlite, so the
+ * renderer never calls electronAuth.login (mainAuthBridge returns null below
+ * mode 'pg') and the preload sessionToken stays null. With no session and a
+ * server already holding a company, assertOnboardingAllowed threw
+ * 'setup-locked' — so the one action that ESCAPES PGlite required the
+ * session that only leaving PGlite can create. Verified on desktop with a
+ * configured .env.local pointing at a seeded database.
+ *
+ * Mutating the DATABASE ITSELF (db:update-config, db:clear-all, db:seed-*)
+ * keeps the strict admin-or-fresh gate: those write rows, not just a target.
+ */
+async function assertVaultAllowed(event, sessionToken) {
+  const session = getSession(event.sender.id, sessionToken);
+  // Any live session is identified; without one this is the bootstrap move
+  // out of PGlite and is allowed by construction (see note above).
+  return session || null;
+}
+
+/**
  * Stable denial envelope for onboarding-gated channels: the renderer maps
  * `code` (not prose) to guidance — e.g. `setup-locked` tells the settings
  * UI to ask for an admin server login instead of showing a dead end.
@@ -936,6 +973,26 @@ function getOptionalEnv(key, fallback = '') {
  *  (same host/credentials/SSL) as the working application connection. */
 let activeDbConfig = null;
 
+/** Which input configured the live pool: a saved vault URL, .env.local, or none. */
+let activePoolSource = 'none';
+
+/**
+ * Is a server database CONFIGURED at all? The env branch of createPool()
+ * fills in `localhost` defaults, so "pool exists" says nothing — the check
+ * is whether a real database/user was supplied or the vault holds an
+ * active connection. Without this the probe would claim every machine has a
+ * server and auto-route desktop installs to a dead localhost pool.
+ */
+function serverConfigured() {
+  if (activePoolSource === 'vault') return true;
+  return !!getOptionalEnv('DB_NAME') || !!getOptionalEnv('DB_USER');
+}
+
+/** 'vault' | 'env' | 'none' — metadata only, safe to cross IPC. */
+function poolConfigSource() {
+  return activePoolSource;
+}
+
 // Create database connection pool.
 //
 // Packaged builds ship WITHOUT .env.local (dev-only file), so the env is
@@ -959,6 +1016,7 @@ function createPool() {
   if (!getOptionalEnv('DB_HOST')) {
     console.warn('[DB] No PostgreSQL configured (.env.local absent) — local PGlite database will serve the app.');
   }
+  activePoolSource = 'env';
   activeDbConfig = {
     host: getOptionalEnv('DB_HOST', 'localhost'),
     port: parseInt(getOptionalEnv('DB_PORT', '5432'), 10) || 5432,
@@ -1063,6 +1121,7 @@ function rebuildPoolFromVault() {
         /* ignore */
       }
     }
+    activePoolSource = 'vault';
     activeDbConfig = poolConfigFromParsed(parsed);
     pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
     return true;
@@ -1095,6 +1154,32 @@ export function registerDatabaseHandlers() {
       return { success: true, time: result.rows[0].time, db: result.rows[0].db };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * Is a SERVER database actually available? Read-only, session-free (same
+   * posture as db:ping — it reveals nothing beyond which database answers),
+   * and it never returns a secret: only `current_database()` plus WHICH
+   * source configured the pool.
+   *
+   * The renderer's mode default is 'pglite' and nothing in src/ can read
+   * DB_HOST — .env.local lives in the MAIN process only, so the renderer was
+   * structurally unable to know a server existed. This channel closes that
+   * gap: reachable server + no explicit user choice => route to PG.
+   */
+  ipcMain.handle('db:probe-server', async () => {
+    const source = poolConfigSource();
+    if (!serverConfigured()) {
+      return { success: true, configured: false, reachable: false, source: 'none' };
+    }
+    try {
+      const client = await pool.connect();
+      const result = await client.query('SELECT current_database() as db');
+      client.release();
+      return { success: true, configured: true, reachable: true, source, db: result.rows[0].db };
+    } catch (err) {
+      return { success: true, configured: true, reachable: false, source, error: err.message };
     }
   });
 
@@ -8669,6 +8754,7 @@ export function registerOnboardingHandlers() {
         }
       }
       activeDbConfig = poolConfigFromParsed(parsed, 5000);
+      activePoolSource = 'vault';
       pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
       return { success: true, connectionId: entry.id };
     } catch (err) {
@@ -8677,9 +8763,12 @@ export function registerOnboardingHandlers() {
   });
 
   // ─── Saved connections vault (metadata only crosses IPC) ──────────────
+  // Gate: assertVaultAllowed — see its note. Switching the pool target is
+  // not a privileged data mutation, and a strict gate deadlocked the very
+  // screen that exists to leave PGlite behind.
   ipcMain.handle('db:connections-list', async (event, { sessionToken } = {}) => {
     try {
-      await assertOnboardingAllowed(event, sessionToken);
+      await assertVaultAllowed(event, sessionToken);
     } catch (err) {
       return gateDenied(err);
     }
@@ -8689,7 +8778,7 @@ export function registerOnboardingHandlers() {
 
   ipcMain.handle('db:connections-save', async (event, { sessionToken, id, name, databaseUrl } = {}) => {
     try {
-      await assertOnboardingAllowed(event, sessionToken);
+      await assertVaultAllowed(event, sessionToken);
     } catch (err) {
       return gateDenied(err);
     }
@@ -8728,7 +8817,7 @@ export function registerOnboardingHandlers() {
 
   ipcMain.handle('db:connections-remove', async (event, { sessionToken, id } = {}) => {
     try {
-      await assertOnboardingAllowed(event, sessionToken);
+      await assertVaultAllowed(event, sessionToken);
     } catch (err) {
       return gateDenied(err);
     }
@@ -8752,7 +8841,7 @@ export function registerOnboardingHandlers() {
 
   ipcMain.handle('db:connections-set-active', async (event, { sessionToken, id } = {}) => {
     try {
-      await assertOnboardingAllowed(event, sessionToken);
+      await assertVaultAllowed(event, sessionToken);
     } catch (err) {
       return gateDenied(err);
     }

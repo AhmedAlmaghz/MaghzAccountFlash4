@@ -10,7 +10,7 @@ import { initAuth } from './modules/auth/store';
 import { AlertTriangle, HardDrive, RefreshCw } from 'lucide-react';
 import { Button, ErrorBoundary } from './core/ui/components';
 import { useTranslation } from './core/i18n/useTranslation';
-import { setDbMode } from './core/database/adapters';
+import { setDbModeExplicit } from './core/database/adapters';
 import { isEmptyDatabaseResult } from './app/emptyDb';
 
 // Direction/language are owned by the app store (imported above): the saved
@@ -84,7 +84,11 @@ function DbErrorScreen({ onRetry, detail }: { onRetry: () => void; detail?: stri
             variant="secondary"
             leftIcon={<HardDrive size={16} />}
             onClick={() => {
-              setDbMode('pglite');
+              // Explicit: this is the user overriding auto-detection, so it
+              // must pin the choice. Without the flag, auto-routing would
+              // pull the app straight back to a reachable server on reload —
+              // and this button exists precisely because that server failed.
+              setDbModeExplicit('pglite');
               window.location.reload();
             }}
           >
@@ -114,6 +118,7 @@ function markStartup(phase: string): void {
 }
 
 function App() {
+  const { t } = useTranslation();
   const setDbStatus = useAppStore((state) => state.setDbStatus);
   const setActiveCompany = useAppStore((state) => state.setActiveCompany);
   const completed = useOnboardingStore((state) => state.completed);
@@ -188,7 +193,19 @@ function App() {
           setDbError(true);
           // The REAL error text — this is what turns "no database" from a
           // mystery into a diagnosable report (migration name, lock, quota).
-          setDbErrorDetail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+          // Capability failures (web without a routable remote) are mapped to
+          // Arabic guidance by stable code instead of the English prose.
+          const code = (err as { code?: string; name?: string })?.code;
+          const guidance =
+            code === 'no-remote-connection' ? t('settings.database.connEmpty')
+            : code === 'non-neon-on-web' ? t('settings.database.webTcpDesc')
+            : code === 'invalid-remote-url' ? t('settings.database.connectionFailed')
+            : null;
+          setDbErrorDetail(
+            guidance
+              ? `${guidance}${err instanceof Error && err.message ? ` (${err.message})` : ''}`
+              : err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+          );
           markStartup('db-error');
         }
       }
@@ -197,7 +214,7 @@ function App() {
     initDb();
 
     return () => { cancelled = true; };
-  }, [completed, retryKey, setDbStatus, setActiveCompany]);
+  }, [completed, retryKey, setDbStatus, setActiveCompany, t]);
 
   if (!completed) {
     return <OnboardingWizard />;

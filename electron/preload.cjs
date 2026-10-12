@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('electronAuth', {
 // for adapters not yet migrated and are guarded in the main process.
 contextBridge.exposeInMainWorld('electronDB', {
   ping: () => ipcRenderer.invoke('db:ping'),
+  probeServer: () => ipcRenderer.invoke('db:probe-server'),
   testConnection: (config) => ipcRenderer.invoke('db:test-connection', { ...(config || {}), sessionToken }),
   updateConfig: (config) => ipcRenderer.invoke('db:update-config', { ...(config || {}), sessionToken }),
   seedDefault: (adminPassword, company) => ipcRenderer.invoke('db:seed-default', { sessionToken, adminPassword, company }),

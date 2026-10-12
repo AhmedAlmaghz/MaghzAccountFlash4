@@ -64,6 +64,116 @@ describe('getDbAdapter — ping cache', () => {
   });
 });
 
+describe('auto-routing — server detection on fresh desktop installs', () => {
+  const MODE_KEY = 'maghzaccount-db-mode';
+  const EXPLICIT_KEY = 'maghzaccount-db-mode-explicit';
+  const ONBOARDING_KEY = 'maghzaccount-onboarding';
+
+  function cleanStorage() {
+    try {
+      localStorage.removeItem(MODE_KEY);
+      localStorage.removeItem(EXPLICIT_KEY);
+      localStorage.removeItem(ONBOARDING_KEY);
+    } catch { /* ignore */ }
+    delete (window as unknown as Record<string, unknown>).electronDB;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanStorage();
+  });
+
+  afterEach(() => {
+    cleanStorage();
+  });
+
+  async function freshIndex() {
+    vi.resetModules();
+    return import('./index');
+  }
+
+  function bridge(probe: { configured: boolean; reachable: boolean; source: string; db?: string }) {
+    (window as unknown as Record<string, unknown>).electronDB = {
+      ping: async () => ({ success: true }),
+      probeServer: async () => ({ success: true, ...probe }),
+    };
+  }
+
+  it('routes a fresh install to a reachable server and persists the verdict (not the explicit flag)', async () => {
+    bridge({ configured: true, reachable: true, source: 'env', db: 'MaghzAccountFlash35' });
+    const fresh = await freshIndex();
+    const adapter = await fresh.getDbAdapter();
+    expect(adapter).toBeTruthy();
+    // PGlite was never booted…
+    expect(mocks.ping).not.toHaveBeenCalled();
+    // …and every mode reader (auth bridge, AI settings, relay check) now
+    // agrees with the live adapter.
+    expect(localStorage.getItem(MODE_KEY)).toBe('pg');
+    expect(localStorage.getItem(EXPLICIT_KEY)).toBeNull();
+  });
+
+  it('stays on PGlite when no server is configured (today’s behaviour, byte for byte)', async () => {
+    bridge({ configured: false, reachable: false, source: 'none' });
+    const fresh = await freshIndex();
+    await fresh.getDbAdapter();
+    expect(mocks.ping).toHaveBeenCalled();
+    expect(localStorage.getItem(MODE_KEY)).toBeNull();
+  });
+
+  it('stays on PGlite when the env server is down (ambient hints never brick)', async () => {
+    bridge({ configured: true, reachable: false, source: 'env' });
+    const fresh = await freshIndex();
+    await fresh.getDbAdapter();
+    expect(mocks.ping).toHaveBeenCalled();
+    expect(localStorage.getItem(MODE_KEY)).toBeNull();
+  });
+
+  it('an explicit user choice pins the backend — a later server never overrides it', async () => {
+    bridge({ configured: true, reachable: true, source: 'env', db: 'MaghzAccountFlash35' });
+    try {
+      localStorage.setItem(MODE_KEY, 'pglite');
+      localStorage.setItem(EXPLICIT_KEY, '1');
+    } catch { /* ignore */ }
+    const fresh = await freshIndex();
+    await fresh.getDbAdapter();
+    expect(mocks.ping).toHaveBeenCalled();
+    expect(localStorage.getItem(MODE_KEY)).toBe('pglite');
+  });
+
+  it('never auto-routes an existing PGlite install, even when a server appears', async () => {
+    bridge({ configured: true, reachable: true, source: 'env', db: 'MaghzAccountFlash35' });
+    try {
+      // zustand-persist envelope shape: { state: { completed }, version }
+      localStorage.setItem(ONBOARDING_KEY, JSON.stringify({ state: { completed: true }, version: 0 }));
+    } catch { /* ignore */ }
+    const fresh = await freshIndex();
+    await fresh.getDbAdapter();
+    expect(mocks.ping).toHaveBeenCalled();
+    expect(localStorage.getItem(MODE_KEY)).toBeNull();
+  });
+
+  it('a saved vault connection that is down surfaces pg mode (honest error, no silent PGlite)', async () => {
+    bridge({ configured: true, reachable: false, source: 'vault' });
+    const fresh = await freshIndex();
+    await fresh.getDbAdapter();
+    // The user saved this connection in Settings: they meant it, so the
+    // ladder must attempt the server path (which fails honestly downstream)
+    // instead of quietly moving the company to another database.
+    expect(localStorage.getItem(MODE_KEY)).toBe('pg');
+    expect(mocks.ping).not.toHaveBeenCalled();
+  });
+
+  it('an unreadable onboarding envelope fails closed toward PGlite', async () => {
+    bridge({ configured: true, reachable: true, source: 'env', db: 'MaghzAccountFlash35' });
+    try {
+      localStorage.setItem(ONBOARDING_KEY, 'not-json{{{');
+    } catch { /* ignore */ }
+    const fresh = await freshIndex();
+    await fresh.getDbAdapter();
+    expect(mocks.ping).toHaveBeenCalled();
+  });
+});
+
 describe('isElectronPg — mode-aware routing (desktop auth-required regression)', () => {
   beforeEach(() => {
     try {

@@ -343,6 +343,8 @@ export interface ElectronDB extends PreloadDB {
 
 interface PreloadDB {
   ping(): Promise<{ success: boolean; message?: string; db?: string }>;
+  /** Read-only existence probe for a configured server (see index.ts). */
+  probeServer?(): Promise<{ success: boolean; configured: boolean; reachable: boolean; source: 'vault' | 'env' | 'none'; db?: string; error?: string }>;
   _exec(sql: string, params?: unknown[]): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   _execBatch(queries: { sql: string; params?: unknown[] }[]): Promise<{ success: boolean; results?: unknown[][]; error?: string }>;
 }

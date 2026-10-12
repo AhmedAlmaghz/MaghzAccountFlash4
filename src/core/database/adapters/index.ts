@@ -15,6 +15,16 @@ import type { DbAdapter } from './types';
 export type DbMode = 'pglite' | 'pg';
 
 const DB_MODE_KEY = 'maghzaccount-db-mode';
+/**
+ * Has the user ever CHOSEN a backend? Until they do, auto-detection may
+ * route a fresh install to a reachable server (the packaged desktop build
+ * had no way to know one existed — DB_* lives in the main process and no
+ * src/ code could read it, so a configured .env.local server stayed
+ * invisible and the app always ran PGlite). One explicit pick — including
+ * the "use PGlite" button on the DB-error screen — pins the choice forever,
+ * so auto-routing can never override a deliberate decision.
+ */
+const DB_MODE_EXPLICIT_KEY = 'maghzaccount-db-mode-explicit';
 
 export function getDbMode(): DbMode {
   try {
@@ -24,9 +34,51 @@ export function getDbMode(): DbMode {
   return 'pglite';
 }
 
+/** True once the user picked a backend themselves (auto-routing then stops). */
+export function isDbModeExplicit(): boolean {
+  try {
+    return localStorage.getItem(DB_MODE_EXPLICIT_KEY) === '1';
+  } catch {
+    /* localStorage unavailable → treat as auto so a server still routes */
+    return false;
+  }
+}
+
+/**
+ * Fresh install? Auto-routing must NEVER yank an existing PGlite user onto a
+ * server that merely appeared later (a fresh local PostgreSQL, a new tunnel):
+ * they would boot into an empty database and reasonably conclude their data
+ * was gone — while it sits untouched in IndexedDB. Only a machine that never
+ * finished onboarding may be routed automatically; everyone else switches
+ * deliberately from Settings → Database (whose vault gate no longer
+ * deadlocks that move).
+ *
+ * Read straight from the persisted zustand envelope instead of importing the
+ * store: adapters stay independent of the store layer, and any unreadable or
+ * future-shaped value fails closed toward "not fresh" (today's behaviour).
+ */
+function isFreshInstall(): boolean {
+  try {
+    const raw = localStorage.getItem('maghzaccount-onboarding');
+    if (!raw) return true;
+    const parsed = JSON.parse(raw) as { state?: { completed?: unknown } };
+    return parsed?.state?.completed !== true;
+  } catch {
+    return false;
+  }
+}
+
 export function setDbMode(mode: DbMode): void {
   try {
     localStorage.setItem(DB_MODE_KEY, mode);
+  } catch { /* ignore */ }
+}
+
+/** Record a deliberate user choice and pin it against auto-detection. */
+export function setDbModeExplicit(mode: DbMode): void {
+  setDbMode(mode);
+  try {
+    localStorage.setItem(DB_MODE_EXPLICIT_KEY, '1');
   } catch { /* ignore */ }
 }
 
@@ -34,7 +86,7 @@ function isElectron(): boolean {
   return typeof window !== 'undefined' && !!(window as { electronEnv?: { isElectron?: boolean } }).electronEnv?.isElectron;
 }
 
-function isElectronPg(): boolean {
+function isElectronPg(effectiveMode?: DbMode): boolean {
   // ROUTING predicate, not mere bridge detection: renderer traffic goes
   // through the main-process PG pool only when the bridge exists AND
   // server-PG mode is selected. Mere bridge presence (desktop running the
@@ -42,9 +94,14 @@ function isElectronPg(): boolean {
   // holds no session for this database — that mismatch surfaced as
   // "Authentication required" on saves while reads looked fine.
   // Mirrors auth/api.ts mainAuthBridge: authentication follows the data.
+  //
+  // `effectiveMode` lets the caller pass the mode it already resolved (the
+  // ladder probes for a server before re-reading localStorage); omitting it
+  // keeps the original stored-flag behaviour for every other call site.
   if (typeof window === 'undefined' || !(window as { electronDB?: { ping?: unknown } }).electronDB?.ping) return false;
   try {
-    if (typeof getDbMode !== 'function' || getDbMode() !== 'pg') return false;
+    const mode = effectiveMode ?? (typeof getDbMode !== 'function' ? null : getDbMode());
+    if (mode !== 'pg') return false;
   } catch {
     return false;
   }
@@ -99,13 +156,94 @@ export async function getDbAdapter(): Promise<DbAdapter> {
   }
 }
 
+/**
+ * Desktop only: ask the main process whether a server database is configured
+ * AND reachable. Read-only (no session token — same posture as db:ping) and
+ * secret-free: the answer is a boolean plus current_database() and which
+ * source configured the pool.
+ *
+ * Never throws and never blocks the ladder: any doubt answers "no server",
+ * which leaves today's PGlite behaviour exactly as it was.
+ *
+ * Exported for the Settings → Database screen, which shows a "server
+ * detected" hint so the user knows the PostgreSQL card will actually work.
+ */
+export async function probeServerDatabase(): Promise<{ configured: boolean; reachable: boolean; db?: string; source: string }> {
+  const none = { configured: false, reachable: false, source: 'none' };
+  try {
+    if (typeof window === 'undefined') return none;
+    const db = (window as { electronDB?: { probeServer?: () => Promise<{ configured: boolean; reachable: boolean; source: string; db?: string }> } }).electronDB;
+    if (!db?.probeServer) return none;
+    const r = await db.probeServer();
+    if (!r || !r.configured) return none;
+    // `configured` alone is not enough: createPool() fills localhost
+    // defaults, so every desktop looks configured until a query proves
+    // otherwise. Only a real connection counts as reachable.
+    return { configured: true, reachable: !!r.reachable, source: r.source, db: r.db };
+  } catch {
+    return none;
+  }
+}
+
+/**
+ * Resolve the backend for this session.
+ *
+ * The stored default is 'pglite' and NOTHING in src/ could see a server:
+ * DB_* is loaded in the main process only, so a perfectly working local or
+ * cloud PostgreSQL was structurally invisible and the app always ran PGlite.
+ * Probe the main process instead — but only while the user has never chosen
+ * a backend by hand.
+ *
+ * The verdict is PERSISTED (never the "explicit" flag) so every consumer that
+ * reads the mode — auth's mainAuthBridge, the AI settings reader, the relay
+ * check — agrees with the adapter actually in use. Without that, auth would
+ * route to the renderer while the adapter was the main-process pool, and
+ * every login came back "Authentication required".
+ *
+ * Fresh installs only (see isFreshInstall): an existing PGlite user keeps
+ * their database even if a server appears later; they move deliberately
+ * from Settings → Database.
+ *
+ * Failure posture differs by source, because the two mean different things:
+ *   - vault (the user saved this connection in Settings): they meant it, so
+ *     an unreachable server must surface as an honest error rather than
+ *     silently moving the company onto a different database.
+ *   - env (.env.local, ambient/dev config): not reachable → stay on PGlite,
+ *     exactly today's behaviour, so an ambient hint can never brick a
+ *     machine whose server happens to be down.
+ */
+function resolveAutoMode(probe: { configured: boolean; reachable: boolean; db?: string; source: string }): DbMode {
+  if (!probe.configured) return 'pglite';
+  if (!probe.reachable) return probe.source === 'vault' ? 'pg' : 'pglite';
+  console.log(`[DB Adapter] Server database detected (${probe.source}${probe.db ? `: ${probe.db}` : ''}) — using PostgreSQL.`);
+  return 'pg';
+}
+
 async function acquireDbAdapter(): Promise<DbAdapter> {
-  const mode = getDbMode();
+  let mode = getDbMode();
 
   // E2E always uses the HTTP bridge — PGlite would create an empty
   // in-browser database with no seeded data (the e2e Vite config sets
   // VITE_E2E=1).
   const isE2E = (import.meta as { env?: { VITE_E2E?: string } }).env?.VITE_E2E === '1';
+
+  // Auto-routing (desktop): the stored default is 'pglite' and NOTHING in
+  // src/ could see a server — DB_* is loaded in the main process only, so a
+  // working local/cloud PostgreSQL was structurally invisible and the app
+  // always ran PGlite. Ask the main process instead, and prefer the server
+  // ONLY while the user has never chosen a backend themselves AND the
+  // machine never finished onboarding (fresh installs only — see
+  // isFreshInstall).
+  if (mode === 'pglite' && !isE2E && !isDbModeExplicit() && isFreshInstall() && typeof window !== 'undefined' && (window as { electronDB?: unknown }).electronDB) {
+    const probed = resolveAutoMode(await probeServerDatabase());
+    if (probed !== mode) {
+      // Persist so auth/AI/relay agree with the live adapter (see
+      // resolveAutoMode). setDbMode — NOT setDbModeExplicit: this is still
+      // the app's own inference, so removing the server restores PGlite.
+      setDbMode(probed);
+      mode = probed;
+    }
+  }
 
   // Reuse existing working adapter if mode hasn't changed
   if (adapter && adapterMode === mode) {
@@ -145,7 +283,11 @@ async function acquireDbAdapter(): Promise<DbAdapter> {
   // 2. PostgreSQL via Electron IPC (desktop + server-PG mode; the gate
   //    already verified bridge presence and mode, so a main session exists
   //    for this database by construction — see mainAuthBridge).
-  if (isElectronPg()) {
+  //
+  //    `mode` is passed explicitly: after auto-routing the stored flag still
+  //    says 'pglite', so re-reading localStorage here would reject the very
+  //    server the probe just found.
+  if (isElectronPg(mode)) {
     try {
       const { electronPgAdapter } = await import('./electronPgAdapter');
       const ping = await electronPgAdapter.ping();
@@ -163,7 +305,12 @@ async function acquireDbAdapter(): Promise<DbAdapter> {
 
   // 3. PostgreSQL via HTTP bridge (web mode with a backend API)
   //    The e2e bridge (vite-e2e-plugin) implements this same interface.
-  if (typeof window !== 'undefined' && (window as { electronDB?: { ping?: unknown } }).electronDB?.ping) {
+  //
+  //    Mode-gated like step 2, NOT on bridge presence: db:ping needs no
+  //    session, so on a desktop install whose PGlite boot failed this branch
+  //    used to bind the renderer to a main-process pool it holds no session
+  //    for — every save then failed with "Authentication required".
+  if (mode === 'pg' && typeof window !== 'undefined' && (window as { electronDB?: { ping?: unknown } }).electronDB?.ping) {
     try {
       const { electronPgAdapter } = await import('./electronPgAdapter');
       const ping = await electronPgAdapter.ping();
