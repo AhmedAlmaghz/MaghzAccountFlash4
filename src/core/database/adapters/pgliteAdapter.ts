@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { DbAdapter, CompanySeedProfile } from './types';
+import type { DbAdapter, CompanySeedProfile, SeedUserOptions } from './types';
 import { mainThreadTransport } from './pgliteTransport';
 import type { DbTransport } from './pgliteTransport';
 import { getTransportMode } from './transportMode';
@@ -215,6 +215,18 @@ function randomPassword(): string {
   let out = '';
   for (let i = 0; i < 20; i++) out += chars[bytes[i] % chars.length];
   return out;
+}
+
+/**
+ * Single source for the seed-password rule: a caller-supplied password of
+ * 8+ chars is honoured, anything shorter/absent becomes a generated one.
+ * The relay bootstrap needs the FINAL password before the shared seed runs
+ * (it must log in as admin mid-seed), so the rule lives here instead of
+ * being duplicated in the relay adapter.
+ */
+export function resolveSeedAdminPassword(input?: string): { provided: boolean; finalPassword: string } {
+  const provided = typeof input === 'string' && input.length >= 8;
+  return { provided, finalPassword: provided ? (input as string) : randomPassword() };
 }
 
 const ACCOUNTS: Array<{
@@ -1526,7 +1538,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async seedDefault(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
+async seedDefault(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile, opts?: SeedUserOptions) {
     try {
       // Ensure migrations are applied (skipped when a remote adapter drives
       // the seed after ensuring the schema itself — see
@@ -1541,13 +1553,26 @@ export const pgliteAdapter: DbAdapter = {
         }
       }
 
-      // Use provided password if >= 8 chars, otherwise generate a random one
-      const provided = typeof adminPassword === 'string' && adminPassword.length >= 8;
-      const finalPassword = provided ? adminPassword as string : randomPassword();
-      const passwordHash = await hashPassword(finalPassword);
+      const { provided, finalPassword } = resolveSeedAdminPassword(adminPassword);
 
-      // Create company + admin user
-      const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
+      // Relay-bootstrap split (SeedUserOptions): the relay guard bans
+      // password_hash on the client channel, so company + users are created
+      // server-side first and the remainder runs authenticated. All other
+      // backends take the legacy inline path.
+      let companyId: string;
+      let adminId: string;
+      let passwordHash = '';
+      if (opts?.skipUsers) {
+        if (!opts.companyId || !opts.adminId) {
+          return { success: false, error: 'skipUsers requires companyId and adminId' };
+        }
+        companyId = opts.companyId;
+        adminId = opts.adminId;
+      } else {
+        // Create company + admin user
+        passwordHash = await hashPassword(finalPassword);
+        ({ companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash));
+      }
 
       // Onboarding profile wins over seed defaults when supplied
       await applySeedCompanyProfile.call(this, companyId, company);
@@ -1570,7 +1595,12 @@ export const pgliteAdapter: DbAdapter = {
       await seedDefaultAccounts.call(this, companyId, codeToId);
       await seedProductCategories.call(this, companyId);
       await seedRoles.call(this, companyId);
-      await seedAccountantUser.call(this, companyId, passwordHash);
+      // Relay-bootstrap split: the accountant already exists server-side
+      // (bootstrap-users); its INSERT carries password_hash, which the relay
+      // guard refuses on the client channel.
+      if (!opts?.skipUsers) {
+        await seedAccountantUser.call(this, companyId, passwordHash);
+      }
 
       return {
         success: true,
@@ -1583,7 +1613,7 @@ export const pgliteAdapter: DbAdapter = {
     }
   },
 
-  async seedDemo(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile) {
+  async seedDemo(this: DbAdapter, adminPassword?: string, company?: CompanySeedProfile, opts?: SeedUserOptions) {
     try {
       // Ensure migrations are applied (see skip note on seedDefault). Retry once
       // on transient IDB failure — same logic as seedDefault.
@@ -1596,13 +1626,24 @@ export const pgliteAdapter: DbAdapter = {
         }
       }
 
-      // Use provided password if >= 8 chars, otherwise generate a random one
-      const provided = typeof adminPassword === 'string' && adminPassword.length >= 8;
-      const finalPassword = provided ? adminPassword as string : randomPassword();
-      const passwordHash = await hashPassword(finalPassword);
+      const { provided, finalPassword } = resolveSeedAdminPassword(adminPassword);
 
-      // Create company + admin user
-      const { companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash);
+      // Relay-bootstrap split (see seedDefault): skip company + users when
+      // the relay created them server-side first.
+      let companyId: string;
+      let adminId: string;
+      let passwordHash = '';
+      if (opts?.skipUsers) {
+        if (!opts.companyId || !opts.adminId) {
+          return { success: false, error: 'skipUsers requires companyId and adminId' };
+        }
+        companyId = opts.companyId;
+        adminId = opts.adminId;
+      } else {
+        // Create company + admin user
+        passwordHash = await hashPassword(finalPassword);
+        ({ companyId, adminId } = await seedCompanyAndAdmin.call(this, passwordHash));
+      }
 
       // Onboarding profile wins over seed defaults when supplied
       await applySeedCompanyProfile.call(this, companyId, company);
@@ -1610,9 +1651,12 @@ export const pgliteAdapter: DbAdapter = {
       // Seed chart of accounts (required for any accounting operation)
       const codeToId = await seedChartOfAccounts.call(this, companyId);
 
-      // System roles + default accountant user
+      // System roles + default accountant user (skipped under the relay
+      // bootstrap split — created server-side; see seedDefault).
       await seedRoles.call(this, companyId);
-      await seedAccountantUser.call(this, companyId, passwordHash);
+      if (!opts?.skipUsers) {
+        await seedAccountantUser.call(this, companyId, passwordHash);
+      }
 
       // Seed master data in dependency order
       await seedCurrencies.call(this, companyId, adminId);

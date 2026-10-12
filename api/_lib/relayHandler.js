@@ -44,7 +44,7 @@ import {
   dbFingerprint,
   tokenSecret,
 } from './relayAuth.js';
-import { verifyPasswordNode } from './dbPasswords.js';
+import { hashPasswordNode, verifyPasswordNode } from './dbPasswords.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
@@ -617,6 +617,96 @@ function createRelayHandler(deps = {}) {
     }
   }
 
+  /**
+   * Bootstrap company + users on a FRESH database (web onboarding over the
+   * relay: Supabase, self-hosted, …).
+   *
+   * Why a bespoke action instead of raw SQL: the relay guard bans
+   * `password_hash` absolutely (account-takeover surface), so the shared
+   * seed's user INSERTs can never travel the client channel — not even with
+   * an admin JWT. Like `migrate`/`reset`, this action composes its own fixed
+   * parameterized statements server-side and is gated on freshness: it
+   * succeeds only while `users` is empty (checked AND locked inside one
+   * transaction, so concurrent bootstraps cannot double-create).
+   *
+   * The renderer flow is: migrate → bootstrap-users → relayLogin(admin) →
+   * remainder of the shared seed under the admin JWT (which the guard
+   * accepts: module writes + tenant scoping, proven by relaySeedGuard.test).
+   * Usernames are fixed ('admin'/'accountant') to match the seed constants
+   * the rest of the app (and the login screen) expects.
+   */
+  async function actionBootstrapUsers(body) {
+    const raw = typeof body.databaseUrl === 'string' ? body.databaseUrl : '';
+    let parsed;
+    try {
+      parsed = parseDbUrl(raw);
+    } catch (e) {
+      return { status: 400, body: { success: false, code: 'invalid-url', error: e.message } };
+    }
+    const gate = await guardedTarget(parsed);
+    if (!gate.ok) return { status: 403, body: { success: false, code: gate.code, error: gate.error } };
+    const adminPassword = typeof body.adminPassword === 'string' ? body.adminPassword : '';
+    if (!adminPassword || adminPassword.length < 8 || adminPassword.length > 1024) {
+      return { status: 400, body: { success: false, code: 'bad-request', error: 'admin password of 8+ characters required' } };
+    }
+    let pool;
+    try {
+      pool = getPool(parsed);
+    } catch (e) {
+      return { status: 500, body: { success: false, code: 'unavailable', error: 'relay pool unavailable' } };
+    }
+    const client = await pool.connect().catch(() => null);
+    if (!client) return { status: 502, body: { success: false, code: 'unreachable', error: 'database unreachable' } };
+    try {
+      await client.query('BEGIN');
+      // Serialize concurrent bootstraps: the writer lock makes the
+      // emptiness check below atomic against a second caller.
+      await client.query('LOCK TABLE users IN EXCLUSIVE MODE');
+      const existing = await client.query('SELECT count(*)::int AS n FROM users');
+      if (Number(existing.rows?.[0]?.n ?? 1) !== 0) {
+        await client.query('ROLLBACK');
+        return { status: 403, body: { success: false, code: 'already-bootstrapped', error: 'database already has users — sign in instead' } };
+      }
+      const fiscalYearStart = `${new Date().getFullYear()}-01-01`;
+      const companyRes = await client.query(
+        `INSERT INTO companies (name, name_en, currency, tax_number, address, phone, email, date_format, decimal_places, calendar, fiscal_year_start)
+         VALUES ('الشركة الرئيسية', 'Main Company', 'YER', '', '', '', '', 'yyyy-MM-dd', 2, 'gregorian', $1)
+         RETURNING id`,
+        [fiscalYearStart],
+      );
+      const companyId = companyRes.rows?.[0]?.id;
+      if (!companyId) throw new Error('company insert returned no id');
+      const adminRes = await client.query(
+        `INSERT INTO users (company_id, username, email, full_name, password_hash, role, is_active)
+         VALUES ($1::uuid, 'admin', 'admin@demo.ye', 'مدير النظام', $2, 'admin', TRUE)
+         RETURNING id`,
+        [companyId, hashPasswordNode(adminPassword)],
+      );
+      const adminId = adminRes.rows?.[0]?.id;
+      if (!adminId) throw new Error('admin insert returned no id');
+      // Same credential as the admin out of the box (mirrors the shared
+      // seed's seedAccountantUser): one password for the operator to remember.
+      await client.query(
+        `INSERT INTO users (company_id, username, email, full_name, password_hash, role, is_active)
+         SELECT $1::uuid, 'accountant', 'accountant@demo.ye', 'محاسب الشركة', $2, 'accountant', TRUE
+         WHERE NOT EXISTS (SELECT 1 FROM users WHERE company_id = $1::uuid AND username = 'accountant')`,
+        [companyId, hashPasswordNode(adminPassword)],
+      );
+      await client.query('COMMIT');
+      return { status: 200, body: { success: true, companyId: String(companyId), adminId: String(adminId) } };
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      // A missing users table (migrate not run yet) is a usage error, not a
+      // crash: the renderer always migrates before bootstrapping.
+      if (err && (err.code === '42P01' || /relation .* does not exist/i.test(String((err && err.message) || '')))) {
+        return { status: 200, body: { success: false, code: 'schema-missing', error: 'schema not migrated — run setup migration first' } };
+      }
+      return { status: 200, body: failure(err, [parsed.password, adminPassword]) };
+    } finally {
+      client.release();
+    }
+  }
+
   async function handle({ method, body, headers, clientIp }) {
     const raw = body && typeof body === 'object' ? body : {};
     const upper = String(method || 'GET').toUpperCase();
@@ -649,6 +739,7 @@ function createRelayHandler(deps = {}) {
     if (action === 'query') return actionQuery(raw);
     if (action === 'transaction') return actionTransaction(raw);
     if (action === 'migrate') return actionMigrate(raw);
+    if (action === 'bootstrap-users') return actionBootstrapUsers(raw);
     if (action === 'reset') return actionReset(raw, ip);
     return { status: 400, body: { success: false, code: 'bad-request', error: 'unknown action' } };
   }

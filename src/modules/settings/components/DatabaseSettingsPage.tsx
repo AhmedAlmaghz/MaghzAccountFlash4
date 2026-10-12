@@ -417,6 +417,9 @@ export const DatabaseSettingsPage: React.FC = () => {
                       {providerLabel(detected.parsed.provider)} · <span dir="ltr">{detected.parsed.host}/{detected.parsed.database}</span>
                     </p>
                   )}
+                  {detected.ok && detected.parsed?.provider === 'supabase' && detected.parsed.port === 5432 && (
+                    <p className="text-xs text-sky-600 dark:text-sky-400 mt-1">{t('settings.database.poolerHint')}</p>
+                  )}
                   {webBlocked && <p className="text-xs text-amber-600 mt-1">{t('settings.database.webTcpDesc')}</p>}
                   <button onClick={() => setAdvanced(true)} className="text-xs text-primary-600 hover:underline mt-1">
                     {t('settings.database.connAdvanced')}

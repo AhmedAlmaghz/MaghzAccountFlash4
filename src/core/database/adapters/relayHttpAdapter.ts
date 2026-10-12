@@ -276,21 +276,57 @@ export const relayHttpAdapter: DbAdapter = {
 
   async seedDefault(adminPassword?: string, company?: CompanySeedProfile) {
     // Schema first through the relay migrate action (admin JWT, or none on
-    // a fresh database), then the idempotent seed DML — never DDL-by-client.
+    // a fresh database), then users server-side (the guard bans
+    // password_hash on the client channel), then the remainder of the shared
+    // seed under an admin JWT obtained mid-seed. Without the split, seeding
+    // dies on the first statement after the admin insert: users is non-empty
+    // so the fresh bypass closes and every later statement is denied.
     const u = await activeUrl();
     if (!u.ok) return { success: false, error: u.error };
-    const { relayCall } = await import('../relayClient');
+    const { relayCall, relayLogin } = await import('../relayClient');
+    const { resolveSeedAdminPassword } = await import('./pgliteAdapter');
     const migrated = await relayCall('migrate', { databaseUrl: u.url });
     if (!migrated.success) return { success: false, error: migrated.error };
-    return withoutInternalMigration(() => pgliteAdapter.seedDefault.call(relayHttpAdapter, adminPassword, company));
+    const { provided, finalPassword } = resolveSeedAdminPassword(adminPassword);
+    const boot = await relayCall('bootstrap-users', { databaseUrl: u.url, adminPassword: finalPassword });
+    if (!boot.success || !boot.companyId || !boot.adminId) {
+      return { success: false, error: boot.error || 'Failed to bootstrap company users' };
+    }
+    const login = await relayLogin(u.url, 'admin', finalPassword);
+    if (!login.success) return { success: false, error: login.error || 'Admin login after bootstrap failed' };
+    const seeded = await withoutInternalMigration(() =>
+      pgliteAdapter.seedDefault.call(relayHttpAdapter, finalPassword, company, {
+        skipUsers: true,
+        companyId: boot.companyId as string,
+        adminId: boot.adminId as string,
+      }),
+    );
+    if (!seeded.success) return seeded;
+    return { ...seeded, adminPassword: provided ? undefined : finalPassword };
   },
 
   async seedDemo(adminPassword?: string, company?: CompanySeedProfile) {
     const u = await activeUrl();
     if (!u.ok) return { success: false, error: u.error };
-    const { relayCall } = await import('../relayClient');
+    const { relayCall, relayLogin } = await import('../relayClient');
+    const { resolveSeedAdminPassword } = await import('./pgliteAdapter');
     const migrated = await relayCall('migrate', { databaseUrl: u.url });
     if (!migrated.success) return { success: false, error: migrated.error };
-    return withoutInternalMigration(() => pgliteAdapter.seedDemo.call(relayHttpAdapter, adminPassword, company));
+    const { provided, finalPassword } = resolveSeedAdminPassword(adminPassword);
+    const boot = await relayCall('bootstrap-users', { databaseUrl: u.url, adminPassword: finalPassword });
+    if (!boot.success || !boot.companyId || !boot.adminId) {
+      return { success: false, error: boot.error || 'Failed to bootstrap company users' };
+    }
+    const login = await relayLogin(u.url, 'admin', finalPassword);
+    if (!login.success) return { success: false, error: login.error || 'Admin login after bootstrap failed' };
+    const seeded = await withoutInternalMigration(() =>
+      pgliteAdapter.seedDemo.call(relayHttpAdapter, finalPassword, company, {
+        skipUsers: true,
+        companyId: boot.companyId as string,
+        adminId: boot.adminId as string,
+      }),
+    );
+    if (!seeded.success) return seeded;
+    return { ...seeded, adminPassword: provided ? undefined : finalPassword };
   },
 };

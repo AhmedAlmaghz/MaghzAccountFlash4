@@ -85,6 +85,9 @@ function parseDbUrl(raw) {
  * legacy timeout number (second positional arg, as the main process always
  * passed) or an options bag. `statement_timeout` is opt-in (the relay sets
  * it; the desktop pool leaves server-side statement timing alone).
+ * `keepAlive: true` enables TCP keepalives — best practice for WAN/cloud
+ * pools where NAT and firewalls silently drop idle connections; localhost
+ * pools keep the pg default (off).
  */
 function poolConfigFromParsed(p, timeoutMsOrOpts = 30000) {
   const opts = typeof timeoutMsOrOpts === 'number' ? { timeoutMs: timeoutMsOrOpts } : (timeoutMsOrOpts || {});
@@ -102,6 +105,10 @@ function poolConfigFromParsed(p, timeoutMsOrOpts = 30000) {
     connectionTimeoutMillis,
   };
   if (opts.statementTimeoutMs) cfg.statement_timeout = Number(opts.statementTimeoutMs);
+  if (opts.keepAlive) {
+    cfg.keepAlive = true;
+    cfg.keepAliveInitialDelayMillis = Number(opts.keepAliveInitialDelayMillis) || 10000;
+  }
   return cfg;
 }
 

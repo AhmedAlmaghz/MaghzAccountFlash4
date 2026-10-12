@@ -16,6 +16,10 @@
  *   POST /api/db { action:'transaction', databaseUrl, token, queries[] }
  *   POST /api/db { action:'migrate', databaseUrl, token }
  *        (admin JWT only — replays the bundled drizzle files server-side)
+ *   POST /api/db { action:'bootstrap-users', databaseUrl, adminPassword }
+ *        (fresh DBs only — creates company + admin/accountant server-side;
+ *        the relay guard bans password_hash on the client channel, so user
+ *        creation cannot travel as client SQL)
  *
  * Security: stateless HMAC JWT bound to one database (8h TTL, login rate
  * limits), per-statement SQL authorization (api/_lib/relayGuard.js — the

@@ -603,6 +603,9 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
             />
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('onboarding.databaseUrlHint')}</p>
             {urlParsedNote && <p className="text-xs text-emerald-600 mt-1">{urlParsedNote}</p>}
+            {urlProvider === 'supabase' && (dbConfig.port || '') === '5432' && (
+              <p className="text-xs text-sky-600 dark:text-sky-400 mt-1">{t('settings.database.poolerHint')}</p>
+            )}
             {webBlocked && <p className="text-xs text-amber-600 mt-1">{t('settings.database.webTcpDesc')}</p>}
             {!isDesktop && dbMode === 'pg' && !urlInput.trim() && (
               <p className="text-xs text-slate-500 mt-1">{t('settings.database.remoteWebNote')}</p>

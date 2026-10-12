@@ -179,14 +179,17 @@ export interface RelayCallResult {
   truncated?: boolean;
   db?: string;
   version?: string;
+  /** bootstrap-users: ids of the server-created company + admin. */
+  companyId?: string;
+  adminId?: string;
   error?: string;
   code?: string;
   errorCode?: string;
 }
 
-/** Authenticated relay call (query / transaction / migrate / reset / pingdb). */
+/** Authenticated relay call (query / transaction / migrate / bootstrap-users / reset / pingdb). */
 export async function relayCall(
-  action: 'query' | 'transaction' | 'migrate' | 'reset' | 'pingdb',
+  action: 'query' | 'transaction' | 'migrate' | 'bootstrap-users' | 'reset' | 'pingdb',
   payload: Record<string, unknown>,
 ): Promise<RelayCallResult> {
   try {
@@ -211,6 +214,8 @@ export async function relayCall(
       truncated: record.truncated === true ? true : undefined,
       db: typeof record.db === 'string' ? record.db : undefined,
       version: typeof record.version === 'string' ? record.version : undefined,
+      companyId: typeof record.companyId === 'string' ? record.companyId : undefined,
+      adminId: typeof record.adminId === 'string' ? record.adminId : undefined,
       error: typeof record.error === 'string' ? record.error : undefined,
       code: typeof record.code === 'string' ? record.code : undefined,
       errorCode: typeof record.errorCode === 'string' ? record.errorCode : undefined,

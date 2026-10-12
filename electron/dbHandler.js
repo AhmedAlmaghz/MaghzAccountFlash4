@@ -993,6 +993,19 @@ function poolConfigSource() {
   return activePoolSource;
 }
 
+/**
+ * WAN hardening options for cloud pool targets. Localhost keeps pg
+ * defaults; anything else gets a server-side statement cap (a stalled WAN
+ * query must fail, never hang the UI forever) and TCP keepalives (NAT and
+ * cloud firewalls silently drop idle connections, which then fail only when
+ * reused). Opt-in per call site — the relay and the test path pass their
+ * own budgets and are untouched.
+ */
+function cloudPoolOpts(parsed) {
+  if (!parsed || parsed.provider === 'localhost') return {};
+  return { statementTimeoutMs: 60000, keepAlive: true, keepAliveInitialDelayMillis: 10000 };
+}
+
 // Create database connection pool.
 //
 // Packaged builds ship WITHOUT .env.local (dev-only file), so the env is
@@ -1122,7 +1135,11 @@ function rebuildPoolFromVault() {
       }
     }
     activePoolSource = 'vault';
-    activeDbConfig = poolConfigFromParsed(parsed);
+    // WAN hardening for cloud targets (Supabase/Neon/…): a server-side
+    // statement cap so a stalled query fails instead of hanging the UI
+    // forever, plus TCP keepalives against NAT/firewall idle drops.
+    // Localhost keeps pg defaults (zero behavior change there).
+    activeDbConfig = poolConfigFromParsed(parsed, cloudPoolOpts(parsed));
     pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
     return true;
   } catch (err) {
@@ -1146,15 +1163,29 @@ export function registerDatabaseHandlers() {
   if (!pool) createPool();
 
   // Test connection
+  // Wake tolerance: a sleeping serverless compute (Neon scale-to-zero)
+  // fails the first touch with a timeout, then answers. One retry on
+  // timeout-class errors only — auth/DNS/SSL failures return immediately,
+  // because retrying a wrong password only wastes the user's time.
+  const isWakeClassError = (err) =>
+    /ETIMEDOUT|timeout|ECONNRESET|ECONNREFUSED|EPIPE|connection terminated|remaining connection slots|too many clients/i.test(
+      err instanceof Error ? err.message : String(err),
+    );
+  const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   ipcMain.handle('db:ping', async () => {
-    try {
-      const client = await pool.connect();
-      const result = await client.query('SELECT NOW() as time, current_database() as db');
-      client.release();
-      return { success: true, time: result.rows[0].time, db: result.rows[0].db };
-    } catch (err) {
-      return { success: false, error: err.message };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await sleepMs(4000);
+      try {
+        const client = await pool.connect();
+        const result = await client.query('SELECT NOW() as time, current_database() as db');
+        client.release();
+        return { success: true, time: result.rows[0].time, db: result.rows[0].db };
+      } catch (err) {
+        if (attempt === 0 && isWakeClassError(err)) continue;
+        return { success: false, error: err.message };
+      }
     }
+    return { success: false, error: 'unreachable' };
   });
 
   /**
@@ -1173,14 +1204,22 @@ export function registerDatabaseHandlers() {
     if (!serverConfigured()) {
       return { success: true, configured: false, reachable: false, source: 'none' };
     }
-    try {
-      const client = await pool.connect();
-      const result = await client.query('SELECT current_database() as db');
-      client.release();
-      return { success: true, configured: true, reachable: true, source, db: result.rows[0].db };
-    } catch (err) {
-      return { success: true, configured: true, reachable: false, source, error: err.message };
+    // Same wake tolerance as db:ping: a cold serverless compute answers on
+    // the second touch. Without this, auto-routing reads every sleeping
+    // Neon as absent and the app boots PGlite despite a live server.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await sleepMs(4000);
+      try {
+        const client = await pool.connect();
+        const result = await client.query('SELECT current_database() as db');
+        client.release();
+        return { success: true, configured: true, reachable: true, source, db: result.rows[0].db };
+      } catch (err) {
+        if (attempt === 0 && isWakeClassError(err)) continue;
+        return { success: true, configured: true, reachable: false, source, error: err.message };
+      }
     }
+    return { success: true, configured: true, reachable: false, source, error: 'unreachable' };
   });
 
   const FORBIDDEN_SQL_PATTERNS = [
@@ -8637,15 +8676,19 @@ export function registerOnboardingHandlers() {
       if (config && config.databaseUrl) {
         poolCfg = poolConfigFromParsed(parseDbUrl(config.databaseUrl), 30000);
       } else {
-        poolCfg = {
-          host: (config && config.host) || 'localhost',
-          port: parseInt((config && config.port) || '5432', 10) || 5432,
-          database: (config && config.database) || 'postgres',
-          user: (config && config.user) || 'postgres',
-          password: (config && config.password) || '',
-          connectionTimeoutMillis: 30000,
-          max: 2,
-        };
+        // Legacy parts form: rebuild a URL first so libpq SSL semantics
+        // apply (a cloud host without an explicit sslmode must still use
+        // TLS — the old manual object connected plain TCP and failed).
+        const host = (config && config.host) || 'localhost';
+        const port = parseInt((config && config.port) || '5432', 10) || 5432;
+        const database = (config && config.database) || 'MaghzAccountFlash35';
+        const user = (config && config.user) || 'maghz';
+        const password = (config && config.password) || '';
+        const sslSuffix = config && config.ssl === false ? '?sslmode=disable' : '';
+        const rawUrl =
+          `postgres://${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ''}` +
+          `@${host}:${port}/${encodeURIComponent(database)}${sslSuffix}`;
+        poolCfg = poolConfigFromParsed(parseDbUrl(rawUrl), { timeoutMs: 30000, max: 2 });
       }
     } catch (err) {
       return { success: false, error: err.message };
@@ -8753,7 +8796,7 @@ export function registerOnboardingHandlers() {
           /* ignore */
         }
       }
-      activeDbConfig = poolConfigFromParsed(parsed, 5000);
+      activeDbConfig = poolConfigFromParsed(parsed, { ...cloudPoolOpts(parsed), timeoutMs: 5000 });
       activePoolSource = 'vault';
       pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
       return { success: true, connectionId: entry.id };
@@ -8938,6 +8981,16 @@ export function registerOnboardingHandlers() {
   ipcMain.handle('db:seed-default', async (event, { sessionToken, adminPassword, company } = {}) => {
     try {
       await assertOnboardingAllowed(event, sessionToken);
+      // Fresh cloud databases have no tables yet: ensure the schema first.
+      // (The _exec self-heal only covers query paths, not these bespoke
+      // handlers.) The runner is idempotent and no-ops when current, so this
+      // is safe on populated databases too.
+      try {
+        const { runDrizzleMigrations } = await import('./migrationRunner.js');
+        await runDrizzleMigrations(activeDbConfig ? { ...activeDbConfig } : undefined);
+      } catch (err) {
+        return { success: false, error: `Schema setup failed: ${err.message}` };
+      }
       const result = await seedInitialData(adminPassword, company);
       const companyId = typeof result === 'string' ? result : result?.companyId;
       const effectivePassword = typeof result === 'string' ? undefined : result?.adminPassword;
@@ -8963,6 +9016,13 @@ export function registerOnboardingHandlers() {
   ipcMain.handle('db:seed-demo', async (event, { sessionToken, adminPassword, company } = {}) => {
     try {
       await assertOnboardingAllowed(event, sessionToken);
+      // Same fresh-database schema ensure as db:seed-default above.
+      try {
+        const { runDrizzleMigrations } = await import('./migrationRunner.js');
+        await runDrizzleMigrations(activeDbConfig ? { ...activeDbConfig } : undefined);
+      } catch (err) {
+        return { success: false, error: `Schema setup failed: ${err.message}` };
+      }
       const companyCheck = await pool.query('SELECT id FROM companies LIMIT 1');
       let companyId;
       let effectivePassword;

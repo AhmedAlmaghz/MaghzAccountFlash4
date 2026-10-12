@@ -60,8 +60,23 @@ export interface DbAdapter {
   // the legacy host/port parts are converted to a URL by the receiver.
   updateConfig(config: { host?: string; port?: number | string; database?: string; user?: string; password?: string; databaseUrl?: string }): Promise<{ success: boolean; connectionId?: string; error?: string }>;
   clearAll(payload?: { confirm?: boolean; username?: string; password?: string }): Promise<{ success: boolean; error?: string }>;
-  seedDefault(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
-  seedDemo(adminPassword?: string, company?: CompanySeedProfile): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
+  seedDefault(adminPassword?: string, company?: CompanySeedProfile, opts?: SeedUserOptions): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
+  seedDemo(adminPassword?: string, company?: CompanySeedProfile, opts?: SeedUserOptions): Promise<{ success: boolean; companyId?: string; adminPassword?: string; error?: string }>;
+}
+
+/**
+ * Relay-bootstrap split: the relay guard bans `password_hash` on the client
+ * channel absolutely, so user creation cannot travel as client SQL. The
+ * relay creates company + admin/accountant server-side (bootstrap-users
+ * action), logs in, then runs the shared seed with `skipUsers` — every later
+ * statement is ordinary tenant-scoped DML the guard accepts. All other
+ * backends omit `opts` and take the legacy path (company + users inline).
+ */
+export interface SeedUserOptions {
+  /** Skip seedCompanyAndAdmin + seedAccountantUser; use the given ids. */
+  skipUsers?: boolean;
+  companyId?: string;
+  adminId?: string;
 }
 
 /**
