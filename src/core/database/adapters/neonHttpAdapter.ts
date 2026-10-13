@@ -2,7 +2,7 @@
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 import type { DbAdapter, CompanySeedProfile } from './types';
 import { normalizeRow, pgliteAdapter, withoutInternalMigration } from './pgliteAdapter';
-import { ensureRemoteSchema } from './remoteSchema';
+import { ensureRemoteSchema, isWakeRetryableError } from './remoteSchema';
 import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 /**
@@ -31,11 +31,12 @@ let activeTimeoutMs = 0;
 /**
  * Fetch budget for one-time setup (schema replay + seed). The replay is
  * hundreds of sequential HTTPS round-trips against a compute that may
- * still be waking; the interactive 60s cap below turns that into a
- * TimeoutError inside 0000_init. Seeding happens once per database —
+ * still be waking; a cold Neon routinely needs over two minutes before the
+ * first statement lands, and the interactive 60s cap below turns that into
+ * a TimeoutError inside 0000_init. Seeding happens once per database —
  * waiting beats failing.
  */
-export const MIGRATE_TIMEOUT_MS = 120_000;
+export const MIGRATE_TIMEOUT_MS = 180_000;
 
 /** (Re)bind the adapter to a connection string. Throws on empty input. */
 export function configureNeonHttp(databaseUrl: string, timeoutMs = 60000): void {
@@ -94,20 +95,78 @@ function neonErrorMessage(err: unknown): string {
  * A Neon failure is a PostgreSQL failure with the same SQLSTATEs, so it gets
  * the same sentence — with the secret-redacting message as the fallback for
  * anything the table does not recognise.
+ *
+ * Diagnostics are NEVER swallowed: the sentence stays first (clean toasts),
+ * but the SQLSTATE/constraint/table (or a redacted raw snippet when the
+ * driver did not parse them) rides along in parentheses. A bare sentence
+ * like "خطأ في قاعدة البيانات" on a failed migration names nothing and
+ * wastes a whole debug round-trip — this is what turned a trivial constraint
+ * failure into a mystery during Neon onboarding.
  */
 function neonFailure(err: unknown): { success: false; error: string; errorCode?: string } {
   const failure = classifyPgFailure(err);
-  return failure
-    ? { success: false, error: pgFailureMessage(failure), errorCode: failure.code }
-    : { success: false, error: neonErrorMessage(err) };
+  if (!failure) return { success: false, error: neonErrorMessage(err) };
+  const parts = [failure.constraint, failure.table, failure.pgCode].filter(
+    (p): p is string => typeof p === 'string' && p.length > 0,
+  );
+  const detail = parts.length > 0 ? parts.join(' · ') : neonErrorMessage(failure.message).slice(0, 160);
+  return { success: false, error: `${pgFailureMessage(failure)} (${detail})`, errorCode: failure.code };
+}
+
+/**
+ * Interactive-path resilience for serverless Postgres (Neon scale-to-zero
+ * over high-latency links): the compute sleeps after minutes idle, and the
+ * first touch pays the whole wake cycle inside one fetch budget.
+ *
+ * Two cooperating mechanisms, both bounded and best-effort:
+ *  - kickWarmup: after 4 idle minutes, fire one `SELECT 1` WITHOUT waiting —
+ *    the wake happens in parallel with the real work instead of inside it.
+ *  - guardedCall: a SINGLE retry on transport-class failures only (cold wake,
+ *    reset sockets, timeouts — matched by isWakeRetryableError, the same
+ *    classifier the migrate path uses). A PG error means the server ANSWERED
+ *    and must never replay: replaying an applied write would double-post it,
+ *    exactly as a manual retry by the user would. Timeouts overwhelmingly
+ *    happen pre-execution (connect/wake), so the retry converts a dead
+ *    save-button into a slow one — strictly better than the status quo.
+ */
+const WARM_IDLE_MS = 4 * 60 * 1000;
+const INTERACTIVE_RETRY_PAUSE_MS = 2000;
+let lastOkAt = 0;
+
+function kickWarmup(fn: NeonSql): void {
+  const now = Date.now();
+  if (now - lastOkAt < WARM_IDLE_MS) return;
+  void Promise.resolve()
+    .then(() => fn.query('SELECT 1'))
+    .then(() => {
+      lastOkAt = Date.now();
+    })
+    .catch(() => {
+      /* cold compute still waking; the real call carries its own retry */
+    });
+}
+
+async function guardedCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    const out = await fn();
+    lastOkAt = Date.now();
+    return out;
+  } catch (err) {
+    if (!isWakeRetryableError(err)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, INTERACTIVE_RETRY_PAUSE_MS));
+    const out = await fn();
+    lastOkAt = Date.now();
+    return out;
+  }
 }
 
 export const neonHttpAdapter: DbAdapter = {
   async ping() {
     const s = requireSql();
     if (!s.ok) return { success: false, message: s.error };
+    kickWarmup(s.fn);
     try {
-      const rows = (await s.fn.query('SELECT current_database() AS db, version() AS version')) as unknown as Record<string, unknown>[];
+      const rows = (await guardedCall(() => s.fn.query('SELECT current_database() AS db, version() AS version'))) as unknown as Record<string, unknown>[];
       return { success: true, db: String(rows?.[0]?.db ?? 'neon') };
     } catch (err) {
       return { success: false, message: neonErrorMessage(err) };
@@ -117,8 +176,9 @@ export const neonHttpAdapter: DbAdapter = {
   async query<T = any>(sqlText: string, params?: any[]) {
     const s = requireSql();
     if (!s.ok) return { success: false, error: s.error };
+    kickWarmup(s.fn);
     try {
-      const rows = (await s.fn.query(sqlText, params ?? [])) as unknown as Record<string, unknown>[];
+      const rows = (await guardedCall(() => s.fn.query(sqlText, params ?? []))) as unknown as Record<string, unknown>[];
       return { success: true, rows: (rows ?? []).map(normalizeRow) as unknown as T[] };
     } catch (err) {
       return neonFailure(err);
@@ -128,10 +188,11 @@ export const neonHttpAdapter: DbAdapter = {
   async transaction(queries: { sql: string; params?: any[] }[]) {
     const s = requireSql();
     if (!s.ok) return { success: false, error: s.error };
+    kickWarmup(s.fn);
     try {
       // One HTTPS round-trip, one non-interactive Postgres transaction.
-      const results = (await s.fn.transaction(
-        queries.map((q) => s.fn.query(q.sql, q.params ?? [])),
+      const results = (await guardedCall(() =>
+        s.fn.transaction(queries.map((q) => s.fn.query(q.sql, q.params ?? []))),
       )) as unknown as Record<string, unknown>[][];
       return {
         success: true,

@@ -162,8 +162,17 @@ function dbRelayPlugin() {
   };
 }
 
-export default defineConfig({
-  base: './',
+export default defineConfig(({ mode }) => ({
+  // Web builds (Vercel) MUST use root-absolute asset URLs: with base './',
+  // a refresh at /settings/company resolves ./assets/* to
+  // /settings/assets/*, which does not exist on disk — Vercel falls back to
+  // index.html for the .js request, the module parse fails and React never
+  // mounts (white screen; only going home recovers, because '/' resolves
+  // ./assets/* correctly). The desktop build keeps './' because Electron
+  // loads dist/index.html over file://, where '/' would resolve to
+  // file:///assets and break everything. electron:build passes
+  // --mode electron (cross-platform, no new deps); every other build is web.
+  base: mode === 'electron' ? './' : '/',
   plugins: [react(), versionJsonPlugin(), jevRelayPlugin(), dbRelayPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
@@ -192,4 +201,4 @@ export default defineConfig({
     },
     chunkSizeWarningLimit: 1000,
   },
-})
+}))

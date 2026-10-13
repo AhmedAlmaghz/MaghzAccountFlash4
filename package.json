@@ -1,7 +1,7 @@
 {
   "name": "MaghzERP",
   "private": true,
-  "version": "0.26.22",
+  "version": "0.26.23",
   "author": "Ahmed Almaghz",
   "publisher": "MaghzAI",
   "keywords": [
@@ -51,8 +51,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",
-    "electron:build": "npm run build && electron-builder",
-    "electron:build:local": "set CSC_IDENTITY_AUTO_DISCOVERY=false && npm run build && npx electron-builder --win dir --config.directories.output=release-local",
+    "electron:build": "npm run build -- --mode electron && electron-builder",
+    "electron:build:local": "set CSC_IDENTITY_AUTO_DISCOVERY=false && npm run build -- --mode electron && npx electron-builder --win dir --config.directories.output=release-local",
     "db:reset": "node electron/resetDatabase.js",
     "db:reset:force": "node electron/resetDatabase.js --yes --force",
     "db:check": "drizzle-kit check --config drizzle.config.ts",

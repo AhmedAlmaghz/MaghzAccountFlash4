@@ -35,7 +35,9 @@ describe('configureNeonHttp', () => {
     expect(mockNeon).toHaveBeenCalledTimes(1);
     applyMigrateTimeout();
     expect(mockNeon).toHaveBeenCalledTimes(2);
-    expect(MIGRATE_TIMEOUT_MS).toBe(120_000);
+    // Cold Neon routinely needs over two minutes on first touch: the setup
+    // budget must clear that or every cold migrate dies as TimeoutError.
+    expect(MIGRATE_TIMEOUT_MS).toBe(180_000);
     const opts = mockNeon.mock.calls[1][1] as Record<string, unknown>;
     expect(opts).toHaveProperty('fetchOptions');
   });
@@ -159,5 +161,82 @@ describe('seedDefault', () => {
     const r = await neonHttpAdapter.seedDefault('admin1234');
     expect(r.success).toBe(false);
     expect(r.error).toBeTruthy();
+    // Slow by design: the wake ladder sleeps through its budget (plus one
+    // 2s adapter retry per probe) before admitting defeat. Pin the budget
+    // explicitly so CI fails on hangs instead of the default 5s timeout.
+  }, 120000);
+});
+
+describe('cold-start resilience (interactive path)', () => {
+  // The module stamps activity on every success, so one leading success
+  // suppresses the background warmup below and keeps call counts exact.
+  async function prewarm() {
+    mockNeon.mockReturnValue(fakeSql(async () => [{ ok: 1 }]));
+    configureNeonHttp(URL);
+    await neonHttpAdapter.query('SELECT 1');
+  }
+
+  async function rebind(fn: ReturnType<typeof fakeSql>) {
+    resetNeonHttp();
+    mockNeon.mockReturnValue(fn);
+    configureNeonHttp(URL);
+  }
+
+  it('retries once on timeout then succeeds', async () => {
+    await prewarm();
+    let calls = 0;
+    const fn = fakeSql(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('TimeoutError: signal timed out');
+      return [{ ok: 1 }];
+    });
+    await rebind(fn);
+    const r = await neonHttpAdapter.query('SELECT 2');
+    expect(r.success).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it('never replays PG errors (fail fast, exactly once)', async () => {
+    await prewarm();
+    let calls = 0;
+    const fn = fakeSql(async () => {
+      calls += 1;
+      throw new Error('duplicate key value violates unique constraint "u"');
+    });
+    await rebind(fn);
+    const r = await neonHttpAdapter.query('INSERT INTO t VALUES (1)');
+    expect(r.success).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it('retries a timed-out transaction batch once', async () => {
+    await prewarm();
+    let calls = 0;
+    const fn = fakeSql(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('fetch failed');
+      return [];
+    });
+    await rebind(fn);
+    const r = await neonHttpAdapter.transaction([{ sql: 'SELECT 1' }]);
+    expect(r.success).toBe(true);
+    expect(fn.transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('warms an idle compute in the background without delaying the real query', async () => {
+    vi.resetModules();
+    const fresh = await import('./neonHttpAdapter');
+    const seen: string[] = [];
+    mockNeon.mockReturnValue(
+      fakeSql(async (s: string) => {
+        seen.push(s);
+        return [{ db: 'appdb' }];
+      }),
+    );
+    fresh.configureNeonHttp(URL);
+    const r = await fresh.neonHttpAdapter.ping();
+    expect(r.success).toBe(true);
+    expect(seen).toContain('SELECT 1');
+    expect(seen.some((s) => s.includes('current_database'))).toBe(true);
   });
 });

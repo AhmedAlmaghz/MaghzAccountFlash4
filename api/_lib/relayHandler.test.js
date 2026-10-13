@@ -104,6 +104,49 @@ describe('relayHandler — pingdb', () => {
     expect(await prod.handle({ method: 'POST', body: { action: 'pingdb', databaseUrl: URL }, headers: {}, clientIp: '1.1.1.1' }))
       .toMatchObject({ status: 403 });
   });
+
+  // Stable failure codes (not prose): the renderer maps each to Arabic
+  // guidance, so a Supabase DNS failure must never surface as a generic
+  // "unreachable" the UI cannot distinguish from a timeout.
+  it('reports dns-failed when the host does not resolve', async () => {
+    const h = createRelayHandler({
+      env: ENV,
+      pgPool: () => makeFake(),
+      dnsLookup: async () => { throw new Error('getaddrinfo ENOTFOUND db.example.com'); },
+    });
+    const r = await h.handle({ method: 'POST', body: { action: 'pingdb', databaseUrl: URL }, headers: {}, clientIp: '1.1.1.1' });
+    expect(r.body).toMatchObject({ success: false, code: 'dns-failed' });
+  });
+
+  it('reports auth-failed for bad credentials without retrying', async () => {
+    const badAuth = makeFake();
+    const origConnect = badAuth.connect;
+    badAuth.connect = async () => {
+      const client = await origConnect();
+      const origQuery = client.query;
+      client.query = async () => { throw new Error('password authentication failed for user "u"'); };
+      return client;
+    };
+    const h = createRelayHandler({
+      env: ENV,
+      pgPool: () => badAuth,
+      dnsLookup: async () => ['93.184.216.34'],
+    });
+    const r = await h.handle({ method: 'POST', body: { action: 'pingdb', databaseUrl: URL }, headers: {}, clientIp: '1.1.1.1' });
+    expect(r.body).toMatchObject({ success: false, code: 'auth-failed' });
+  });
+
+  it('reports timeout after the wake budget is exhausted', async () => {
+    const slow = makeFake();
+    slow.connect = async () => { throw new Error('TimeoutError: signal timed out'); };
+    const h = createRelayHandler({
+      env: ENV,
+      pgPool: () => slow,
+      dnsLookup: async () => ['93.184.216.34'],
+    });
+    const r = await h.handle({ method: 'POST', body: { action: 'pingdb', databaseUrl: URL }, headers: {}, clientIp: '1.1.1.1' });
+    expect(r.body).toMatchObject({ success: false, code: 'timeout' });
+  }, 90000);
 });
 
 describe('relayHandler — login', () => {  const pwHash = hashPw('admin1234');

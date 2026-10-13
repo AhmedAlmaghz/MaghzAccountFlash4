@@ -126,7 +126,7 @@ export const DatabaseSettingsPage: React.FC = () => {
       if (r.ok) {
         setTestResult({ ok: true, message: `${t('settings.database.connected')}${r.db ? ` — ${r.db}` : ''}` });
       } else {
-        setTestResult({ ok: false, message: mapDbError(r.error) });
+        setTestResult({ ok: false, message: mapDbError(r.error, r.code) });
       }
     } catch (err) {
       setTestResult({ ok: false, message: err instanceof Error ? err.message : t('settings.database.connectionFailed') });

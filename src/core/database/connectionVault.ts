@@ -294,7 +294,9 @@ export async function testRemoteConnection(
       if ((await isRelayAvailable()).up) {
         const r = await relayCall('pingdb', { databaseUrl: parsed.raw });
         if (r.success) return { success: true, db: r.db, version: r.version };
-        return { success: false, error: r.code === 'blocked-target' ? 'relayBlockedTarget' : (r.error || 'connectionFailed') };
+        // Stable relay codes (dns-failed/timeout/auth-failed/…) travel in
+        // `code` for i18n mapping; the English `error` stays as detail.
+        return { success: false, error: r.code === 'blocked-target' ? 'relayBlockedTarget' : (r.error || 'connectionFailed'), code: r.code };
       }
     } catch {
       /* probe/call failed — fall through to the capability error */

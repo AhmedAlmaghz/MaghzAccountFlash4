@@ -128,6 +128,9 @@ export function describeSetupError(
   const code = outcome?.code;
   const error = outcome?.error;
   if (code === 'setup-locked') return t('settings.database.setupLocked');
+  if (code === 'dns-failed') return t('settings.database.dnsFailed');
+  if (code === 'timeout') return t('settings.database.timeoutHit');
+  if (code === 'auth-failed') return t('settings.database.authFailed');
   if (error === 'webTcpUnsupported') return t('settings.database.webTcpDesc');
   if (error === 'relayBlockedTarget') return t('settings.database.relayBlockedTarget');
   return error || t(fallbackKey);

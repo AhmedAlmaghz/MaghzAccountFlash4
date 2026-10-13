@@ -192,7 +192,7 @@ function createRelayHandler(deps = {}) {
     try {
       addresses = await resolveAddresses(parsed.host);
     } catch {
-      return { ok: false, code: 'unreachable', error: 'host does not resolve' };
+      return { ok: false, code: 'dns-failed', error: 'host does not resolve' };
     }
     const verdict = classifyRelayTarget(parsed.host, addresses, { allowPrivate: privateTargetsAllowed(env) });
     if (!verdict.ok) return { ok: false, code: 'blocked-target', error: verdict.reason };
@@ -244,11 +244,14 @@ function createRelayHandler(deps = {}) {
       return { status: 200, body: { success: true, db: result.rows[0].db, version: result.rows[0].version } };
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
+      // Stable sub-codes (not prose): the renderer maps each to Arabic
+      // guidance. A DNS failure on a Supabase-style host almost always means
+      // a mistyped project ref or a paused/deleted project — never a timeout.
       if (/ENOTFOUND|getaddrinfo/i.test(raw)) {
-        return { status: 200, body: { success: false, code: 'unreachable', error: 'host does not resolve — verify the host and that the project is active' } };
+        return { status: 200, body: { success: false, code: 'dns-failed', error: 'host does not resolve — verify the host spelling and that the project is active' } };
       }
       if (/ETIMEDOUT|timeout/i.test(raw)) {
-        return { status: 200, body: { success: false, code: 'unreachable', error: 'connection timed out — check network, firewall and port' } };
+        return { status: 200, body: { success: false, code: 'timeout', error: 'connection timed out — check network, firewall and port' } };
       }
       if (/password authentication failed|28P01/i.test(raw)) {
         return { status: 200, body: { success: false, code: 'auth-failed', error: 'authentication failed — check user and password' } };
