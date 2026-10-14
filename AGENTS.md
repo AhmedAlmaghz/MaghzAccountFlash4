@@ -5020,8 +5020,7 @@ npx drizzle-kit migrate
 - **التحقق**: 3 اختبارات انحدار جديدة + 173 اختباراً للوحدات المتأثرة + البوابات الإحصائية خضراء.
 - **القاعدة الذهبية**: **بوابة التوجيه واحدة** — أي `isElectronPg()` جديد يجب أن يمر عبر البوابة الموحدة، لا عبر فحص `window.electronDB` مباشرة؛ والانحراف الثاني (mainAuthBridge مقابل التوافق) يُكشف بنفس الاختبارات.
 
-### إصلاح بوابات CI الأربع (v0.26.x)
-- **العرض**: CI أحمر — 8 اختبارات في 4 بوابات (`childReplacement` 4 + `desktopRawSql` 1 + `rawSqlRatchet` 1 + `docsVersion` 2).
+### إصلاح بوابات CI الأربع (v0.26.x)- **العرض**: CI أحمر — 8 اختبارات في 4 بوابات (`childReplacement` 4 + `desktopRawSql` 1 + `rawSqlRatchet` 1 + `docsVersion` 2).
 - **الجذور والإصلاحات**:
   1. `childReplacementGate` علة منصات قديمة: `absPath.replace(cwd + '\\')` لا-op على لينكس ← مفاتيح مطلقة لا تطابق شيئاً. **الحل**: `relative(cwd, p).split(sep).join('/')`.
   2. `desktopRawSqlGate` (367 مقابل 375): فرق −8 = **−5 هجرة حقيقية** (فواتير المشتريات إلى RPC — مثبت حياً) + **−3 تمويه** (لَفّ `ensureRemoteSchema` في helper أخفى النص عن العدّاد). **الحل**: السقف 375←370 + purchases 24←19 بتوثيق متعمد + الـ retry بصيغة thunk تُبقي نص `adapter.query` ظاهراً.
@@ -5074,8 +5073,7 @@ npx drizzle-kit migrate
 - **مصفوفة الأونبوردينج المثبتة**: محلي PGlite (بذر محلي) | سطح مكتب محلي/سحابي (اختبار + vault + `seedInitialData` بالملف الشخصي + دخول رئيسي) | ويب Neon (فحص + `ensureRemoteSchema` + بذر مشترك) | ويب relay (migrate + bootstrap-users + دخول + بقية البذر) — `applyOnboardingCompany` و`updateConfig` عند الإنهاء best-effort بلا كسر في كل المسارات.
 - **التحقق**: `tsc -b` صفر ✓ | `eslint` صفر/صفر ✓.
 
-### تشريح أعطال السحابة على الويب — Supabase DNS + ابتلاع خطأ Neon (v0.26.x)
-- **العرض**: Supabase ترفض بـ `host does not resolve`؛ وNeon يفشل الترحيل مرتين: مرة بجملة عامة بلا تفاصيل (`خطأ في قاعدة البيانات (statement: DO $$ …)`) ومرة بـ `TimeoutError: signal timed out`.
+### تشريح أعطال السحابة على الويب — Supabase DNS + ابتلاع خطأ Neon (v0.26.x)- **العرض**: Supabase ترفض بـ `host does not resolve`؛ وNeon يفشل الترحيل مرتين: مرة بجملة عامة بلا تفاصيل (`خطأ في قاعدة البيانات (statement: DO $$ …)`) ومرة بـ `TimeoutError: signal timed out`.
 - **الجذور المؤكدة بالقراءة**:
   1. `neonFailure` كان يُسقط التشخيص: يُرجع الجملة العربية فقط ويتجاهل `constraint/table/pgCode/message` — أي عطل ترحيل حقيقي يصبح لغزاً.
   2. `MIGRATE_TIMEOUT_MS` كان 120s — والـ Neon البارد يتجاوزها أحياناً قبل أول statement.
@@ -5119,3 +5117,29 @@ npx drizzle-kit migrate
 - **للمستخدم المتأثر**: أي exe مبني من `v0.26.23` بهذا العيب — أعد البناء (`electron:build:local` لمجلد مباشر أو `electron:build` لمثبت) وأعد التثبيت. لا فقدان بيانات (المشكلة عرض فقط).
 - **القاعدة الذهبية المضافة**:
   - **`dist/` واحد لا يخدم هدفين**: أي `base` مشروط يستلزم بوابة تثبّت أن كل مسار بناء يمرر الوضع الصحيح — الفشل صامت حتى التثبيت.
+
+### فرز إخفاقات CI الخمسة — عقد البذر + staging خارج الجذر (v0.26.x)
+- **العرض**: `Test Files 3 failed` — اثنان في `relaySeedGuard`، واثنان `docsVersionGate`، وواحد `packagingGate` staging.
+- **1. عقد البذر (خطأ حقيقي، من عملي)**: `import { seedDefault }` — لكنهما دالتا كائن على `pgliteAdapter` لا صادرات مستقلة (الوحيد المصدَّر منفرداً هو `withoutInternalMigration`) ⇒ `undefined.call`. **لم يكشفه `tsc -b` لأن `tsconfig.app.json` يستثني `*.test.ts`، ولا eslint.** **الإصلاح**: `pgliteAdapter.seedDefault/seedDemo.call(...)`.
+- **2. إثبات حي بدل التخمين**: عمال vitest ميتة محلياً، فبُني harness عبر `esbuild --bundle` (aliases + `loader:.sql=text` + external للـ WASM) وشُغّل البذر الحقيقي ضد الحارس الحقيقي: `seedDefault` نظيف 168/168، و`seedDemo` رفض 32 سطراً (`product_product_categories` بلا إثبات أب + `product_units` بلا `company_id` لكل جدول). **الإصلاح**: إثبات ذاتي داخل SQL نفسه (EXISTS على الأب + `company_id = $N` لكل جدول مذكور) — مكافئ دلالياً (uuid PKs)، وبعدها 257/257 نظيفة. درس `createProduct` التشغيلي (سطر 1416) تُرك عمداً: مسار relay له نسخة CTE خاصة سليمة.
+- **3. staging خارج الجذر**: آلية النسخ سليمة محلياً (أُثبتت)، لكن تحميل vitest لملفات خارج جذر المشروع (`/tmp`) هش — نُقل الـ stage إلى `node_modules/.cache` (مهمل + داخل الجذر) مع `existsSync` تشخيصي يفرّق فشل النسخ عن فشل الاستيراد.
+- **4. `docsVersionGate` (2)**: أحمر مسبقاً ومتعمد بتوجيه المستخدم (AGENTS سطر 5029) — لم يُمس.
+- **التحقق**: `tsc -b` صفر ✓ | `eslint --max-warnings=0` صفر ✓ | الهarness الحي: 425 statement عبر الحارس الحقيقي بلا رفض ✓.
+- **القواعد الذهبية المضافة**:
+  - **ملفات الاختبار خارج `tsc -b`**: أي `import { x }` غير موجود في `*.test.ts` لا يُكشف إلا في CI — راجع الاستيرادات يدوياً لكل ملف اختبار جديد.
+  - **الحارس يفحص النص لا النية**: JOIN يحمل `company_id` لا يغني عن `company_id = $N` صريح لكل جدول — المنطق الانتقالي (transitive) لا يفهمه أي regex.
+  - **مرحلة الاختبار داخل الجذر دائماً**: أي stage مؤقت تحت `node_modules/.cache` (مهمل افتراضياً) لا في `/tmp`.
+
+### سطح المكتب يرفض PG + التبديل يرمي للأونبوردينج بدل الدخول (v0.26.x)
+- **العرض**: (1) سطح المكتب لا يقبل أي قاعدة غير PGlite، (2) تغيير القاعدة من الإعدادات يعيد معالج الإعداد لا صفحة الدخول (عكس الويب).
+- **الجذر المؤكد بالقراءة**: `db:rpc:core.getCompany` مشتق من الجلسة، والتوكن يعيش في closure الـ preload فقط — يموت مع كل reload (`getSession` بلا توكن + webContents جديد = لا جلسة). المحوّل كان يطوي `Authentication required` إلى `No company found` ⇒ `main.tsx` يرى `isEmptyDatabaseResult` ⇒ `reset()` ⇒ معالج الإعداد. PGlite بلا جلسات أصلاً فينجو، والويب عنده JWT في sessionStorage فينجو — لهذا بدا العطل خاصاً بسطح المكتب.
+- **الحل (4 طبقات)**:
+  1. ثبات التوكن عبر reload في `preload.cjs/js` (استعادة عند التقييم + حفظ عند الدخول + مسح عند الخروج، `maghz-session-token` — نفس وضعية JWT الـ relay) — مع TTL المنزلق/المطلق القائم في العملية الرئيسية.
+  2. مسح كل الجلسات عند تغيّر هدف الـ pool (`createPool` + `db:update-config`): جلسة موثقة على DB-A لا يجوز أن تخوّل استعلامات DB-B (companyId قديم يحدد نطاق صفوف جديدة) — التبديل يُرجع حتماً لصفحة الدخول.
+  3. قناة `db:has-company` بلا جلسة (boolean فقط، كشف القيمة مثل `db:ping`) + `getCompany` يحفظ خطأ المصادقة ويستشيرها: موجودة ⇒ `Authentication required` (⇒ الدخول)، فارغة ⇒ `No company found` (⇒ الإعداد). `main.tsx` بلا تغيير (يفحص النص الحرفي أصلاً).
+  4. شارة `vaultUnhealthy` في الإعدادات (متوازنة ar/en): vault يسمّي اتصالاً نشطاً والـ pool من غيره (سر غير قابل للفك) ⇒ تحذير بدل قاعدة صامتة خاطئة.
+- **اختبارات**: `electron/dbSession.test.js` (إسقاط الجلسات عند set-active/update-config + has-company الثلاثية، بتشغيل حقيقي لـ dbHandler بـ mocks) + `electron/preload.session.test.js` (ثبات/استعادة/مسح التوكن للتوأمين) + `electronPgAdapter.test.ts` (الحفاظ على Auth مقابل الفراغ مقابل الجسر القديم).
+- **القواعد الذهبية المضافة**:
+  - **الجلسة التي لا تنجو من reload ليست جلسة**: أي توكن في الذاكرة فقط يُفقد عند أول `location.reload()` — والتمهيد بعد التبديل يعتمد عليه حتماً. الثبات في sessionStorage + انتهاء خادمي = العقد الصحيح.
+  - **تبديل الهدف يُسقط الهوية**: أي `companyId` مخزّن في جلسة ينتمي لقاعدة أخرى بعد التبديل — امسح الكل وأعد التوثيق، لا ترحّل.
+  - **لا تطوِ خطأ المصادقة في "لا بيانات"**: كل `No X found` يُرجَع عند فشل التوثيق هو reset مدمّر ينتظر أول reload — افصل الحالتين بقناة عدّ صريحة.

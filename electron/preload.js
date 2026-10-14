@@ -1,13 +1,35 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 // Kept in the isolated preload world; the renderer never receives this token.
+// It ALSO lives in sessionStorage so it survives renderer reloads — the
+// closure alone dies on every reload, which is exactly when the app needs
+// the session most (boot-time getCompany landed in onboarding instead of
+// login because the token was gone). sessionStorage dies with the window,
+// matching the web relay JWT posture (maghzaccount-relay-token); the main
+// process still enforces sliding + absolute TTL, so a stored token is dead
+// weight past expiry.
+const SESSION_STORAGE_KEY = 'maghz-session-token';
 let sessionToken = null;
+try {
+  sessionToken = sessionStorage.getItem(SESSION_STORAGE_KEY);
+} catch {
+  /* storage unavailable — memory-only, same as before */
+}
+function persistSessionToken(token) {
+  sessionToken = token || null;
+  try {
+    if (token) sessionStorage.setItem(SESSION_STORAGE_KEY, token);
+    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 contextBridge.exposeInMainWorld('electronAuth', {
   login: async (credentials) => {
     const result = await ipcRenderer.invoke('auth:login', credentials);
     if (result?.success && result.sessionToken) {
-      sessionToken = result.sessionToken;
+      persistSessionToken(result.sessionToken);
       delete result.sessionToken;
     }
     return result;
@@ -15,7 +37,7 @@ contextBridge.exposeInMainWorld('electronAuth', {
   getSession: () => ipcRenderer.invoke('auth:get-session', { sessionToken }),
   logout: async () => {
     const result = await ipcRenderer.invoke('auth:logout', { sessionToken });
-    sessionToken = null;
+    persistSessionToken(null);
     return result;
   },
   listUsers: () => ipcRenderer.invoke('auth:list-users', { sessionToken }),

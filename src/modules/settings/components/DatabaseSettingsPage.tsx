@@ -63,6 +63,11 @@ export const DatabaseSettingsPage: React.FC = () => {
   // working server was invisible and the app looked PGlite-only. String =
   // null while probing, '' when nothing is there.
   const [serverHint, setServerHint] = useState<string | null>(null);
+  // Where the main-process pool REALLY points (vault vs env fallback). When
+  // the vault names an active connection but the pool serves something else
+  // (unreadable secret, keychain hiccup), the app silently uses the wrong
+  // database — surfacing it beats debugging phantom "empty database" states.
+  const [poolSource, setPoolSource] = useState<string | null>(null);
   useEffect(() => {
     if (!isDesktop) return;
     let cancelled = false;
@@ -70,9 +75,14 @@ export const DatabaseSettingsPage: React.FC = () => {
       try {
         const { probeServerDatabase } = await import('@/core/database/adapters');
         const r = await probeServerDatabase();
-        if (!cancelled) setServerHint(r.reachable ? (r.db || r.source) : '');
+        if (cancelled) return;
+        setServerHint(r.reachable ? (r.db || r.source) : '');
+        setPoolSource(r.source);
       } catch {
-        if (!cancelled) setServerHint('');
+        if (!cancelled) {
+          setServerHint('');
+          setPoolSource(null);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -268,6 +278,12 @@ export const DatabaseSettingsPage: React.FC = () => {
         <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-3 rounded-lg">
           <CheckCircle size={18} />
           <span className="text-sm font-medium" dir="auto">{t('settings.database.serverDetected', { db: serverHint })}</span>
+        </div>
+      ) : null}
+      {activeRemoteId && poolSource && poolSource !== 'vault' ? (
+        <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded-lg">
+          <XCircle size={18} />
+          <span className="text-sm font-medium" dir="auto">{t('settings.database.vaultUnhealthy')}</span>
         </div>
       ) : null}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

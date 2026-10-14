@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdirSync, copyFileSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
-import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 /**
@@ -65,22 +64,35 @@ describe('packaging gate (electron asar contents)', () => {
     expect(FILES).toContain('api/_lib/dbPasswords.js');
   });
 
-  it('seedDemoData + migrationRunner import cleanly in the packaged layout', async () => {    // Fidelity rule: the stage contains ONLY what build.files covers — the
+  it('seedDemoData + migrationRunner import cleanly in the packaged layout', async () => {
+    // Fidelity rule: the stage contains ONLY what build.files covers — the
     // test stages through the same list the packager reads, so deleting an
     // entry reproduces the production ERR_MODULE_NOT_FOUND here.
-    const stage = join(tmpdir(), `maghz-pack-gate-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+    //
+    // Location rule: the stage lives INSIDE the repo (node_modules/.cache,
+    // always gitignored) — never os.tmpdir(). A stage outside the project
+    // root loads fine under plain node but fails under the vitest module
+    // runner, which only serves files inside its fs scope; that produced a
+    // bare ERR_MODULE_NOT_FOUND for a file that was provably copied.
+    const stage = join(ROOT, 'node_modules', '.cache', `maghz-pack-gate-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+    const staged = [
+      'electron/seedDemoData.js',
+      'electron/migrationRunner.js',
+      'api/_lib/dbCore.js',
+      'api/_lib/dbPasswords.js',
+    ];
     try {
-      for (const rel of [
-        'electron/seedDemoData.js',
-        'electron/migrationRunner.js',
-        'api/_lib/dbCore.js',
-        'api/_lib/dbPasswords.js',
-      ]) {
+      for (const rel of staged) {
         if (!coveredByFiles(rel)) continue;
         const dest = join(stage, rel);
         mkdirSync(dirname(dest), { recursive: true });
         copyFileSync(join(ROOT, rel), dest);
       }
+      const missing = staged.filter((rel) => !existsSync(join(stage, rel)));
+      expect(
+        missing,
+        `staging failed (not an import problem): these files never landed in the stage — check coverage list and copy step, not the modules: ${missing.join(', ')}`,
+      ).toEqual([]);
       const seed = await import(pathToFileURL(join(stage, 'electron/seedDemoData.js')).href);
       expect(typeof seed.seedComprehensiveDemoData).toBe('function');
       const mig = await import(pathToFileURL(join(stage, 'electron/migrationRunner.js')).href);

@@ -1021,6 +1021,18 @@ function createPool() {
   // A saved DATABASE_URL (Settings → Database) wins over everything —
   // this is what makes the desktop app work on machines that never had
   // a .env.local, across restarts.
+  //
+  // Pool target change invalidates EVERY main-process session: sessions
+  // carry user/role/companyId authenticated against the OLD database, and
+  // letting them authorize queries on the NEW one is cross-database
+  // confusion (a companyId from DB-A scoping rows in DB-B). The user simply
+  // logs in again against the new target — which is also the UX the
+  // database-switch screen promises (back to login, not onboarding).
+  // Startup calls this too, when the map is necessarily empty (no-op).
+  if (sessions.size > 0) {
+    console.log(`[DB] Pool target (re)built — dropping ${sessions.size} stale session(s); re-login required.`);
+    sessions.clear();
+  }
   try {
     if (rebuildPoolFromVault()) return pool;
   } catch {
@@ -1186,6 +1198,23 @@ export function registerDatabaseHandlers() {
       }
     }
     return { success: false, error: 'unreachable' };
+  });
+
+  /**
+   * Sessionless company-existence probe. The session-scoped
+   * db:rpc:core.getCompany cannot distinguish "empty database" from "no
+   * session" (both fail) — and the boot layer MUST distinguish them: empty
+   * means onboarding, populated means the login page. Returns a bare
+   * boolean, never row data (same sensitivity as db:ping's database name,
+   * and the onboarding gate already branches on this fact).
+   */
+  ipcMain.handle('db:has-company', async () => {
+    try {
+      const res = await pool.query('SELECT 1 FROM companies LIMIT 1');
+      return { success: true, exists: res.rows.length > 0 };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 
   /**
@@ -8799,6 +8828,7 @@ export function registerOnboardingHandlers() {
       activeDbConfig = poolConfigFromParsed(parsed, { ...cloudPoolOpts(parsed), timeoutMs: 5000 });
       activePoolSource = 'vault';
       pool = attachPoolGuard(new Pool({ ...activeDbConfig }));
+      if (sessions.size > 0) sessions.clear(); // pool target changed — stale sessions must not authorize the new DB
       return { success: true, connectionId: entry.id };
     } catch (err) {
       return { success: false, error: err.message };

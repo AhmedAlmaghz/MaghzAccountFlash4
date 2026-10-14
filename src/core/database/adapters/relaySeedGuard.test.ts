@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import { assertRelaySql } from '@root/api/_lib/relayGuard.js';
-import {
-  seedDefault,
-  seedDemo,
-  withoutInternalMigration,
-} from './pgliteAdapter';
+import { pgliteAdapter, withoutInternalMigration } from './pgliteAdapter';
 
 /**
  * CONTRACT: every statement the shared seed emits AFTER the relay
@@ -80,7 +76,7 @@ describe('relay seed guard contract', () => {
   it('seedDefault remainder (skipUsers) passes the relay guard statement by statement', async () => {
     const mock = recordingAdapter();
     const r = await withoutInternalMigration(() =>
-      seedDefault.call(
+      pgliteAdapter.seedDefault.call(
         mock as never,
         'admin1234',
         undefined,
@@ -94,7 +90,7 @@ describe('relay seed guard contract', () => {
   it('seedDemo remainder (skipUsers) passes the relay guard statement by statement', async () => {
     const mock = recordingAdapter();
     const r = await withoutInternalMigration(() =>
-      seedDemo.call(
+      pgliteAdapter.seedDemo.call(
         mock as never,
         'admin1234',
         undefined,

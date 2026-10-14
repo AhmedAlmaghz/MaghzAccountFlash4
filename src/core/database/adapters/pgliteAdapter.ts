@@ -959,10 +959,14 @@ async function seedProducts(
       productIdByCode.set(p.code, id);
       if (foodCatId) {
         await this.query(
+          // Parent-proofed for guarded channels (relay): the link table
+          // carries no company_id, so the EXISTS on products proves the
+          // tenant scope. Semantically identical — product ids are uuid PKs.
           `INSERT INTO product_product_categories (product_id, category_id)
            SELECT $1::uuid, $2::uuid
-           WHERE NOT EXISTS (SELECT 1 FROM product_product_categories WHERE product_id = $1::uuid AND category_id = $2::uuid)`,
-          [id, foodCatId]
+           WHERE EXISTS (SELECT 1 FROM products WHERE id = $1::uuid AND company_id = $3::uuid)
+             AND NOT EXISTS (SELECT 1 FROM product_product_categories WHERE product_id = $1::uuid AND category_id = $2::uuid)`,
+          [id, foodCatId, companyId]
         );
       }
     }
@@ -976,13 +980,16 @@ async function seedProductUnits(
   productIdByCode: Map<string, string>
 ): Promise<void> {
   // Base row per product (mirrors migration 0021 backfill for seed-inserted rows).
+  // Every table in the SELECT carries its own company_id predicate: guarded
+  // channels (relay) cannot do transitive reasoning through
+  // `u.company_id = p.company_id`, and the link subquery proves the target.
   for (const [, productId] of productIdByCode) {
     await this.query(
       `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
        SELECT p.company_id, p.id, u.id, 1, COALESCE(p.sale_price, 0), COALESCE(p.cost_price, 0), true, true, true
          FROM products p JOIN units u ON u.company_id = p.company_id AND (u.name_ar = p.unit OR u.code = p.unit)
-        WHERE p.id = $1::uuid AND p.company_id = $2::uuid
-          AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id)`,
+        WHERE p.id = $1::uuid AND p.company_id = $2::uuid AND u.company_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.company_id = $2::uuid)`,
       [productId, companyId]
     );
   }
@@ -1006,7 +1013,7 @@ async function seedProductUnits(
       `INSERT INTO product_units (company_id, product_id, unit_id, factor, sale_price, purchase_price, is_base, is_default_sale, is_default_purchase)
        SELECT $1::uuid, $2::uuid, u.id, $3::numeric, $4::numeric, $5::numeric, false, $6, $7
          FROM units u WHERE u.company_id = $1::uuid AND u.code = $8::text
-         AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = $2::uuid AND pu.unit_id = u.id)`,
+         AND NOT EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = $2::uuid AND pu.unit_id = u.id AND pu.company_id = $1::uuid)`,
       [companyId, pid, d.factor, d.sale, d.purchase, d.defSale, d.defPurch, d.unitCode]
     );
   }

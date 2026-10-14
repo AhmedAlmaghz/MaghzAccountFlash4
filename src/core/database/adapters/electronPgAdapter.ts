@@ -344,7 +344,9 @@ export interface ElectronDB extends PreloadDB {
 interface PreloadDB {
   ping(): Promise<{ success: boolean; message?: string; db?: string }>;
   /** Read-only existence probe for a configured server (see index.ts). */
-  probeServer?(): Promise<{ success: boolean; configured: boolean; reachable: boolean; source: 'vault' | 'env' | 'none'; db?: string; error?: string }>;
+  probeServer?(): Promise<{ success: boolean; configured: boolean; reachable: boolean; source: string; db?: string; error?: string }>;
+  /** Sessionless company-existence probe (boot routing only, never row data). */
+  hasCompany?(): Promise<{ success: boolean; exists?: boolean; error?: string }>;
   _exec(sql: string, params?: unknown[]): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   _execBatch(queries: { sql: string; params?: unknown[] }[]): Promise<{ success: boolean; results?: unknown[][]; error?: string }>;
 }
@@ -570,10 +572,30 @@ export const electronPgAdapter: DbAdapter = {
     // Typed RPC (Phase 4 slice 3) — the main process derives the company id
     // from the authenticated session, closing the cross-tenant read of the
     // legacy `SELECT * FROM companies LIMIT 1`.
+    //
+    // The auth failure is PRESERVED, never folded into 'No company found':
+    // after a reload/DB-switch there is often no session yet, and the boot
+    // layer must tell "populated database, go log in" apart from "empty
+    // database, start onboarding" (the old fold sent every logged-out boot
+    // into the wizard). The sessionless hasCompany probe answers exactly
+    // that question.
     const raw = await getRPC().getCompany({});
     const result = normalizeResult(raw);
     if (result.success && result.rows && result.rows.length > 0) {
       return { success: true, data: result.rows[0] };
+    }
+    const rawError = !result.success
+      ? String((result as { error?: unknown }).error || '')
+      : '';
+    if (/authentication required/i.test(rawError)) {
+      try {
+        const probe = await getDB().hasCompany?.();
+        if (probe && probe.success && probe.exists) {
+          return { success: false, error: 'Authentication required' };
+        }
+      } catch {
+        /* probe unavailable — fall through to the legacy mapping below */
+      }
     }
     return { success: false, error: 'No company found' };
   },

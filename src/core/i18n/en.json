@@ -3390,6 +3390,7 @@
       "dnsFailed": "Hostname does not resolve — check the URL spelling and that the project is active (not paused or deleted) in the provider dashboard. For Supabase try the Pooler URL (6543).",
       "timeoutHit": "Timed out with no response — the database may be waking (wait a minute and retry) or a firewall/port may block it.",
       "authFailed": "Authentication failed — check the username and password in DATABASE_URL.",
+      "vaultUnhealthy": "The saved active connection is unreadable (decryption failed) — the app is currently using a different database. Re-save the connection below.",
       "connEmpty": "No saved connections yet — add the first one with a DATABASE_URL.",
       "webTcpDesc": "Browsers cannot open TCP sockets — this provider (Supabase/self-hosted/local) only works in the desktop app. On web, use Neon.",
       "relayChecking": "Checking the fallback channel…",
