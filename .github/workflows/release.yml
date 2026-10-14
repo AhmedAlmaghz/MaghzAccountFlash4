@@ -33,7 +33,12 @@ jobs:
         run: npm ci
 
       - name: Build renderer (tsc + vite)
-        run: npm run build
+        # Electron loads dist/index.html over file://, where root-absolute
+        # asset URLs (/assets/…) resolve to file:///assets and 404 (white
+        # screen). The electron build MUST use base './' via --mode electron;
+        # plain `npm run build` is the WEB build (base '/') and must never be
+        # packaged into the exe. See vite.config.ts.
+        run: npm run build -- --mode electron
 
       - name: Resolve tag version
         shell: pwsh

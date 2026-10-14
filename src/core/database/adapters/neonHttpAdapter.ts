@@ -3,6 +3,7 @@ import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 import type { DbAdapter, CompanySeedProfile } from './types';
 import { normalizeRow, pgliteAdapter, withoutInternalMigration } from './pgliteAdapter';
 import { ensureRemoteSchema, isWakeRetryableError } from './remoteSchema';
+import { withQueryTimeout } from './pgliteTransport';
 import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 /**
@@ -43,13 +44,14 @@ export function configureNeonHttp(databaseUrl: string, timeoutMs = 60000): void 
   const url = (databaseUrl || '').trim();
   if (!url) throw new Error('DATABASE_URL is empty');
   if (url !== activeUrl || !sql || timeoutMs !== activeTimeoutMs) {
-    sql = neon(url, {
-      disableWarningInBrowsers: true,
-      // Suspended Neon computes need a full wake cycle (tens of seconds)
-      // before the first byte flows — a short cap turns every cold start
-      // into a TimeoutError. 60s default; setup paths retry on top of it.
-      fetchOptions: { signal: AbortSignal.timeout(timeoutMs) },
-    });
+    // NOTE: no AbortSignal here — DELIBERATELY. An AbortSignal.timeout()
+    // created once at configure time expires once and then aborts EVERY
+    // later fetch instantly ("TimeoutError: signal timed out" on all
+    // operations ~60s after load, fixed only by reload). The driver spreads
+    // this object into every fetch, so a single deadline poisons the whole
+    // session. Budgets are enforced per call below (fresh deadline each
+    // time) via withQueryTimeout instead.
+    sql = neon(url, { disableWarningInBrowsers: true });
     activeUrl = url;
     activeTimeoutMs = timeoutMs;
   }
@@ -146,15 +148,19 @@ function kickWarmup(fn: NeonSql): void {
     });
 }
 
-async function guardedCall<T>(fn: () => Promise<T>): Promise<T> {
+async function guardedCall<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  // Fresh deadline on EVERY call (see configureNeonHttp): a shared
+  // AbortSignal can never expire mid-session again.
+  const budget = activeTimeoutMs > 0 ? activeTimeoutMs : 60000;
+  const run = () => withQueryTimeout(fn(), budget, label);
   try {
-    const out = await fn();
+    const out = await run();
     lastOkAt = Date.now();
     return out;
   } catch (err) {
     if (!isWakeRetryableError(err)) throw err;
     await new Promise((resolve) => setTimeout(resolve, INTERACTIVE_RETRY_PAUSE_MS));
-    const out = await fn();
+    const out = await run();
     lastOkAt = Date.now();
     return out;
   }
@@ -166,7 +172,10 @@ export const neonHttpAdapter: DbAdapter = {
     if (!s.ok) return { success: false, message: s.error };
     kickWarmup(s.fn);
     try {
-      const rows = (await guardedCall(() => s.fn.query('SELECT current_database() AS db, version() AS version'))) as unknown as Record<string, unknown>[];
+      const rows = (await guardedCall(
+        () => s.fn.query('SELECT current_database() AS db, version() AS version'),
+        'Neon ping',
+      )) as unknown as Record<string, unknown>[];
       return { success: true, db: String(rows?.[0]?.db ?? 'neon') };
     } catch (err) {
       return { success: false, message: neonErrorMessage(err) };
@@ -178,7 +187,7 @@ export const neonHttpAdapter: DbAdapter = {
     if (!s.ok) return { success: false, error: s.error };
     kickWarmup(s.fn);
     try {
-      const rows = (await guardedCall(() => s.fn.query(sqlText, params ?? []))) as unknown as Record<string, unknown>[];
+      const rows = (await guardedCall(() => s.fn.query(sqlText, params ?? []), 'Neon query')) as unknown as Record<string, unknown>[];
       return { success: true, rows: (rows ?? []).map(normalizeRow) as unknown as T[] };
     } catch (err) {
       return neonFailure(err);
@@ -191,8 +200,9 @@ export const neonHttpAdapter: DbAdapter = {
     kickWarmup(s.fn);
     try {
       // One HTTPS round-trip, one non-interactive Postgres transaction.
-      const results = (await guardedCall(() =>
-        s.fn.transaction(queries.map((q) => s.fn.query(q.sql, q.params ?? []))),
+      const results = (await guardedCall(
+        () => s.fn.transaction(queries.map((q) => s.fn.query(q.sql, q.params ?? []))),
+        'Neon transaction',
       )) as unknown as Record<string, unknown>[][];
       return {
         success: true,

@@ -38,8 +38,12 @@ describe('configureNeonHttp', () => {
     // Cold Neon routinely needs over two minutes on first touch: the setup
     // budget must clear that or every cold migrate dies as TimeoutError.
     expect(MIGRATE_TIMEOUT_MS).toBe(180_000);
+    // ...but the budget must NEVER ride into the driver as a shared
+    // AbortSignal: one expiring signal aborts every later fetch instantly
+    // ("TimeoutError: signal timed out" ~60s after load, fixed only by
+    // reload). Deadlines are enforced per call by the adapter instead.
     const opts = mockNeon.mock.calls[1][1] as Record<string, unknown>;
-    expect(opts).toHaveProperty('fetchOptions');
+    expect(JSON.stringify(opts)).not.toContain('signal');
   });
   it('unconfigured adapter fails with guidance, not a crash', async () => {
     const r = await neonHttpAdapter.query('SELECT 1');
@@ -238,5 +242,21 @@ describe('cold-start resilience (interactive path)', () => {
     expect(r.success).toBe(true);
     expect(seen).toContain('SELECT 1');
     expect(seen.some((s) => s.includes('current_database'))).toBe(true);
+  });
+
+  it('hands the driver no expiring signal (per-call deadlines instead)', async () => {
+    // Regression lock for the 60s wall: the driver used to receive ONE
+    // AbortSignal.timeout() at configure time, then aborted EVERY later
+    // fetch instantly ("TimeoutError: signal timed out" until reload).
+    // A cooperative mock cannot reproduce the expiry, so this pins the
+    // contract directly: no signal object may cross into driver config.
+    mockNeon.mockReturnValue(fakeSql(async () => [{ ok: 1 }]));
+    configureNeonHttp(URL);
+    expect(mockNeon).toHaveBeenCalledTimes(1);
+    const opts = mockNeon.mock.calls[0][1] as { fetchOptions?: { signal?: unknown } };
+    expect(opts?.fetchOptions?.signal).toBeUndefined();
+    // ...while ordinary queries still flow through the fresh per-call budget.
+    const r = await neonHttpAdapter.query('SELECT 1');
+    expect(r.success).toBe(true);
   });
 });

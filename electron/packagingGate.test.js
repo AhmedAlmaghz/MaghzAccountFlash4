@@ -65,8 +65,7 @@ describe('packaging gate (electron asar contents)', () => {
     expect(FILES).toContain('api/_lib/dbPasswords.js');
   });
 
-  it('seedDemoData + migrationRunner import cleanly in the packaged layout', async () => {
-    // Fidelity rule: the stage contains ONLY what build.files covers — the
+  it('seedDemoData + migrationRunner import cleanly in the packaged layout', async () => {    // Fidelity rule: the stage contains ONLY what build.files covers — the
     // test stages through the same list the packager reads, so deleting an
     // entry reproduces the production ERR_MODULE_NOT_FOUND here.
     const stage = join(tmpdir(), `maghz-pack-gate-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
@@ -94,5 +93,50 @@ describe('packaging gate (electron asar contents)', () => {
     } finally {
       rmSync(stage, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Renderer-base gate: the desktop exe loads dist/index.html over file://,
+ * where root-absolute asset URLs (/assets/…) resolve to file:///assets and
+ * 404 — a white screen on launch. The web build needs base '/' (deep-route
+ * refresh at /settings/company resolves ./assets/* to /settings/assets/*,
+ * same white screen). One dist cannot serve both, so the base is chosen by
+ * vite mode: electron builds MUST pass --mode electron (base './'), the
+ * plain web build MUST NOT (base '/').
+ *
+ * This broke silently once already (v0.26.23 shipped a web-based dist inside
+ * the exe): the failure is invisible until install, so it is pinned here in
+ * the same static style as the asar-contents checks above.
+ */
+describe('renderer base mode (desktop file:// vs web)', () => {
+  it("vite base is conditional on mode ('./' electron, '/' web)", () => {
+    const cfg = readFileSync(join(ROOT, 'vite.config.ts'), 'utf8');
+    expect(cfg, 'vite base must branch on mode').toMatch(/base:\s*mode\s*===\s*['"]electron['"]\s*\?\s*['"]\.\/['"]\s*:\s*['"]\/['"]/);
+  });
+
+  it('every electron build path passes --mode electron', () => {
+    const scripts = pkg.scripts || {};
+    for (const name of Object.keys(scripts).filter((s) => s.startsWith('electron:build'))) {
+      expect(String(scripts[name]), `${name} must build the renderer with --mode electron`).toMatch(/--mode\s+electron/);
+    }
+    expect(
+      Object.keys(scripts).filter((s) => s.startsWith('electron:build')).length,
+      'no electron:build script found to guard',
+    ).toBeGreaterThan(0);
+  });
+
+  it('the plain web build stays mode-free (base \'/\')', () => {
+    const build = String((pkg.scripts || {}).build || '');
+    expect(build, 'plain `npm run build` is the web build and must not set a mode').not.toMatch(/--mode/);
+  });
+
+  it('the release workflow builds the packaged renderer in electron mode', () => {
+    const yml = readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8');
+    const lines = yml.split('\n');
+    const idx = lines.findIndex((l) => /Build renderer/.test(l));
+    expect(idx, 'release workflow lost its renderer-build step').toBeGreaterThan(-1);
+    const step = lines.slice(idx, idx + 8).join('\n');
+    expect(step, 'release must package an electron-mode (base ./) renderer, never the web dist').toMatch(/--mode\s+electron/);
   });
 });
