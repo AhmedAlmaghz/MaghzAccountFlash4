@@ -60,7 +60,10 @@ const INTENT_TO_PREFIXES: Record<JevIntent, readonly string[]> = {
 };
 
 const ALWAYS_ON = [
-  'app.list_pages', 'app.navigate', 'core.get_company_info',
+  'app.list_pages', 'app.navigate',
+  // Tool discovery — mirrors toolRouter.ts (see its comment).
+  'app.find_tools',
+  'core.get_company_info',
   'ai.batch_status', 'ai.classify_document', 'ai.enqueue_batch', 'ai.preview_batch',
   'ai.resume_batch', 'ai.clear_queue',
   'ai.remember_fact', 'ai.recall_facts', 'ai.forget_fact',

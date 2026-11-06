@@ -2,6 +2,8 @@ import type { ToolDefinition } from '../types';
 import type { Permission } from '@/modules/auth/types';
 import { useAuthStore } from '@/modules/auth/store';
 import { navigateTo } from '../engine/navigationBridge';
+import { getVisibleTools } from './registry';
+import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
 
 /**
  * Navigation tools — the assistant can open any page in the app for the user.
@@ -146,4 +148,155 @@ export const navigationTools: ToolDefinition[] = [
       return { navigated: true, page: page.labelAr, path: page.path };
     },
   },
+  {
+    name: 'app.find_tools',
+    labelAr: 'البحث عن أداة',
+    descriptionAr:
+      'يبحث في كل أدوات النظام المتاحة للمستخدم (بالمعنى العربي مثل "راتب" أو "تسوية مخزون"، أو بالاسم الإنجليزي مثل payroll / create_bom) ويعيد أفضل الأدوات مع مخطط معاملاتها الكامل. ' +
+      'استخدمه عندما لا تجد الأداة التي تحتاجها في قائمتك المعلنة، أو عند الشك في اسم أداة — ثم استدعِ الأداة الناتجة باسمها مباشرة في دورك التالي. ' +
+      'لبحث الكيانات (عميل/مورد/منتج/حساب) استخدم ai.resolve_entities، وللصفحات app.list_pages.',
+    permission: 'core.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'كلمة أو عبارة البحث (مثال: "إجازة"، "تسوية مخزون"، "payroll")' },
+        limit: { type: 'number', description: 'عدد النتائج (افتراضي 5، أقصى 10)' },
+      },
+      required: ['query'],
+    },
+    execute: async (args) => {
+      const query = String(args.query ?? '').trim();
+      const rawLimit = Number(args.limit);
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 10) : 5;
+      // RBAC: discovery only ever looks at tools this user may execute —
+      // same filter the router applies. Never widens the surface.
+      const visible = getVisibleTools().filter((t) => t.name !== 'app.find_tools');
+
+      if (!query) {
+        const domains = new Map<string, number>();
+        for (const t of visible) {
+          const domain = t.name.split('.')[0] || t.name;
+          domains.set(domain, (domains.get(domain) ?? 0) + 1);
+        }
+        return {
+          visibleCount: visible.length,
+          domains: [...domains.entries()]
+            .map(([domain, count]) => ({ domain, count }))
+            .sort((a, b) => b.count - a.count),
+          hint: 'مرّر كلمة مفتاحية في query (مثل: راتب، إجازة، فاتورة شراء، تسوية مخزون، payroll) للعثور على الأداة المناسبة.',
+        };
+      }
+
+      const scored = visible
+        .map((t) => ({ tool: t, score: scoreToolForQuery(query, t) }))
+        .sort((a, b) => b.score - a.score);
+      const matches = scored.filter((s) => s.score >= 0.35).slice(0, limit);
+
+      if (matches.length === 0) {
+        // Near misses beat a dead end: the model sees the closest real names
+        // and can broaden its keyword or conclude honestly.
+        return {
+          query,
+          found: 0,
+          visibleCount: visible.length,
+          matches: [],
+          nearMisses: scored
+            .filter((s) => s.score > 0)
+            .slice(0, 3)
+            .map((s) => ({ name: s.tool.name, labelAr: s.tool.labelAr })),
+          hint: 'لا توجد أداة مطابقة — جرّب كلمة أعم (مثل "فاتورة" بدل "فاتورة يوليو"), أو app.list_pages لصفحات النظام.',
+        };
+      }
+
+      return {
+        query,
+        found: matches.length,
+        visibleCount: visible.length,
+        matches: matches.map(({ tool: t, score }) => ({
+          name: t.name,
+          labelAr: t.labelAr,
+          dangerLevel: t.dangerLevel,
+          descriptionAr: t.descriptionAr,
+          parameters: t.parameters,
+          score: Math.round(score * 100) / 100,
+        })),
+        toolNames: matches.map(({ tool: t }) => t.name),
+        note: 'الأدوات أعلاه أصبحت ضمن أدواتك المعلنة في الدورة التالية — استدعِ الأداة باسمها ومعاملاتها مباشرة.',
+      };
+    },
+  },
 ];
+
+/** Arabic definite-article strip for token comparison ("الرواتب" ↔ "راتب"). */
+function stripDefiniteArticle(token: string): string {
+  return token.length > 3 && token.startsWith('ال') ? token.slice(2) : token;
+}
+
+/**
+ * Score one tool against a free-text query (0–1).
+ *
+ * Signals, strongest first: exact name/label, name substring, whole query
+ * token equal to a name segment (`hr.get_payroll_runs` ↔ "payroll"), label
+ * substring, then token-vs-token fuzzy similarity. Whole-field Levenshtein
+ * drowns short Arabic tokens in long labels ("راتب" vs "مسير الرواتب"), so
+ * tokens are ALSO compared pairwise — both sides stripped of the definite
+ * article, since "الرواتب" never substring-matches "راتب".
+ */
+export function scoreToolForQuery(
+  rawQuery: string,
+  tool: Pick<ToolDefinition, 'name' | 'labelAr' | 'descriptionAr'>,
+): number {
+  const q = normalizeArabic(rawQuery);
+  if (!q) return 0;
+  const name = normalizeArabic(tool.name);
+  const label = normalizeArabic(tool.labelAr);
+  const desc = normalizeArabic(tool.descriptionAr);
+
+  if (name === q || label === q) return 1;
+
+  const tokens = [...new Set(q.split(/\s+/).filter(Boolean))];
+  const nameSegments = name.split(/[._\s]+/).filter(Boolean);
+
+  let best = 0;
+  if (name.includes(q)) best = Math.max(best, 0.95);
+  if (tokens.some((t) => t.length >= 3 && nameSegments.includes(t))) best = Math.max(best, 0.9);
+  if (label.includes(q)) best = Math.max(best, 0.85);
+
+  for (const field of [label, name, desc]) {
+    best = Math.max(best, fuzzyMatchScore(q, field));
+  }
+
+  const fieldTokens = new Set<string>();
+  for (const field of [label, desc]) {
+    for (const t of field.split(/\s+/)) {
+      fieldTokens.add(t);
+      fieldTokens.add(stripDefiniteArticle(t));
+    }
+  }
+  for (const t of nameSegments) {
+    fieldTokens.add(t);
+    fieldTokens.add(stripDefiniteArticle(t));
+  }
+  for (const rawToken of tokens) {
+    const token = stripDefiniteArticle(rawToken);
+    if (token.length < 3) continue;
+    for (const fieldToken of fieldTokens) {
+      if (fieldToken.length < 3) continue;
+      const s = fuzzyMatchScore(token, fieldToken);
+      if (s > best) best = s;
+    }
+  }
+  return best;
+}
+
+/**
+ * Names of the tools an `app.find_tools` result discovered — the engine
+ * feeds them into adaptive expansion so they are advertised next cycle.
+ * Pure + defensive: any shape producing no string names yields [].
+ */
+export function discoveredToolNamesFromResult(result: unknown): string[] {
+  const names = (result as { toolNames?: unknown } | null | undefined)?.toolNames;
+  if (!Array.isArray(names)) return [];
+  return names.filter((n): n is string => typeof n === 'string' && n.length > 0);
+}

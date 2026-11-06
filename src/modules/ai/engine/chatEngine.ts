@@ -5,6 +5,7 @@ import { aiPersistence } from '../api/persistence';
 import { useAiStore } from '../store';
 import { getVisibleTools, toLlmTools } from '../tools/registry';
 import { ensureToolsRegistered } from '../tools/index';
+import { discoveredToolNamesFromResult } from '../tools/navigationTools';
 import { routeToolsForCycle } from './toolRouter';
 import { jevRouteToolsForCycle } from '../jev/jevToolRouter';
 import { recordJevMetric, recordJevRoute, estimateJevCost } from '../jev/jevMetrics';
@@ -2070,6 +2071,16 @@ class ChatEngine {
           : `خطأ: ${outcome.error}${outcome.errorClass ? `\n${renderErrorGuidance(outcome.errorClass)}` : ''}`,
         tool_call_id: tc.id,
       });
+
+      // Tool discovery (app.find_tools): the model explicitly asked for
+      // these tools — their names ride adaptive expansion into the NEXT
+      // cycle (the result also carries full schemas, so even a cap-sliced
+      // name is callable knowledge, not a dead end).
+      if (outcome.ok && tc.name === 'app.find_tools') {
+        for (const name of discoveredToolNamesFromResult(outcome.result)) {
+          if (resolveTool(name)) this.extraAdvertisedTools.add(name);
+        }
+      }
     }
 
     // Every finished tool call is forward progress (matters to the stall

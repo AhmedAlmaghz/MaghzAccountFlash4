@@ -33,6 +33,10 @@ const ALWAYS_ON_TOOLS: readonly string[] = [
   // navigation + meta
   'app.list_pages',
   'app.navigate',
+  // Tool discovery: the model can always search the (permission-filtered)
+  // registry it cannot see in full — discovered names ride adaptive
+  // expansion into the next cycle (chatEngine.runToolCalls).
+  'app.find_tools',
   'core.get_company_info',
   'ai.batch_status',
   'ai.classify_document',

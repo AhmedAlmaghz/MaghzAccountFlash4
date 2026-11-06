@@ -72,4 +72,31 @@ describe('summarizeResult — empty-search fallback visibility', () => {
     const s = summarizeResult({ total: 1500 });
     expect(s).toContain('ر.ي');
   });
+
+  it('renders the tool-discovery card as names+labels, not schema dumps', () => {
+    const s = summarizeResult({
+      query: 'راتب',
+      found: 1,
+      toolNames: ['hr.get_payroll_runs'],
+      matches: [
+        { name: 'hr.get_payroll_runs', labelAr: 'مسير الرواتب', dangerLevel: 'read', parameters: { type: 'object' } },
+      ],
+      note: 'الأدوات أعلاه أصبحت ضمن أدواتك المعلنة.',
+    });
+    expect(s).toContain('مسير الرواتب');
+    expect(s).toContain('hr.get_payroll_runs');
+    expect(s).not.toContain('parameters');
+    expect(s).not.toContain('[object Object]');
+  });
+
+  it('renders the empty-query discovery browse summary', () => {
+    const s = summarizeResult({
+      visibleCount: 2,
+      domains: [{ domain: 'sales', count: 1 }, { domain: 'inventory', count: 1 }],
+      hint: 'مرّر كلمة مفتاحية في query للعثور على الأداة المناسبة.',
+    });
+    expect(s).toContain('2 أداة متاحة');
+    expect(s).toContain('sales (1)');
+    expect(s).toContain('query');
+  });
 });

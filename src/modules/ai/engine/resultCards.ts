@@ -221,6 +221,29 @@ export function summarizeResult(result: unknown): string {
       return `❌ ${String(obj.error ?? 'فشلت العملية')}`;
     }
 
+    // ── Tool discovery (app.find_tools) ─────────────────────────────
+    // The match payload carries full JSON schemas (for the model) — dumping
+    // them into the card table is noise. The user sees names + labels.
+    if (Array.isArray(obj.toolNames) && Array.isArray(obj.matches)) {
+      const names = obj.toolNames as string[];
+      if (names.length === 0) {
+        return `🔍 لا توجد أداة مطابقة${obj.hint ? `\n\n💡 ${String(obj.hint)}` : ''}`;
+      }
+      const lines = (obj.matches as Record<string, unknown>[]).map(
+        (m, i) => `${i + 1}. ${String(m.labelAr ?? m.name)} (${String(m.name)})`,
+      );
+      return `🔍 أدوات مطابقة (${names.length}):\n${lines.join('\n')}${obj.note ? `\n\n💡 ${String(obj.note)}` : ''}`;
+    }
+
+    // ── Tool discovery browse (empty query) ─────────────────────────
+    if (Array.isArray(obj.domains) && typeof obj.hint === 'string') {
+      const domainLine = (obj.domains as Record<string, unknown>[])
+        .slice(0, 8)
+        .map((d) => `${String(d.domain)} (${String(d.count)})`)
+        .join('، ');
+      return `📚 ${String(obj.visibleCount ?? '')} أداة متاحة: ${domainLine}\n\n💡 ${obj.hint}`;
+    }
+
     // ── Search results with matches ─────────────────────────────────
     if ('matches' in obj && Array.isArray(obj.matches)) {
       const { matches, totalMatches, suggestion } = obj as {

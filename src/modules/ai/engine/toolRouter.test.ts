@@ -33,7 +33,7 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     // Always-on core (search unification 2026-09-24: jev.search_all is the
     // ONLY always-on search path; search.* ride their domain groups)
     const core = [
-      'app.list_pages', 'app.navigate', 'core.get_company_info',
+      'app.list_pages', 'app.navigate', 'app.find_tools', 'core.get_company_info',
       'ai.batch_status', 'ai.classify_document', 'ai.enqueue_batch', 'ai.resume_batch',
       'ai.clear_queue',
       'jev.search_all',
@@ -53,9 +53,10 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
     seedRegistry();
     const routed = routeToolsForCycle([userMsg('مرحبا')]);
     expect(routed.routedByIntent).toBe(false);
-    // 'مرحبا' matches no keyword → only always-on (10 registered above);
-    // search.* verification tools stay out (reachable via adaptive expansion)
-    expect(routed.tools.length).toBe(10);
+    // 'مرحبا' matches no keyword → only always-on (11 registered above,
+    // incl. app.find_tools); search.* verification tools stay out
+    // (reachable via adaptive expansion).
+    expect(routed.tools.length).toBe(11);
     expect(routed.dropped).toBe(0);
     expect(routed.tools.every((t) => getVisibleTools().some((v) => v.name === t.name))).toBe(true);
   });
@@ -212,7 +213,7 @@ describe('toolRouter — dynamic tool routing (Phase 0.1 / Stage-3 gate)', () =>
         userMsg('تمام'),
       ]);
       expect(routed.routedByIntent).toBe(false);
-      expect(routed.tools.length).toBe(10);
+      expect(routed.tools.length).toBe(11);
     });
   });
 });
