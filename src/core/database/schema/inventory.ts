@@ -37,6 +37,8 @@ export const products = pgTable('products', {
   openingStockQty: numeric('opening_stock_qty', { precision: 18, scale: 4 }).notNull().default('0'),
   openingWarehouseId: uuid('opening_warehouse_id'),
   openingStockPosted: boolean('opening_stock_posted').notNull().default(false),
+  /** YYYY-MM-DD — when the opening stock was posted (orders JE/FIFO/statements). */
+  openingDate: date('opening_date'),
   createdBy: uuid('created_by'),
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

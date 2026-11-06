@@ -18,9 +18,10 @@ import type {
 import { getDbMode } from '@/core/database/adapters';
 
 /**
- * Renderer-side client for the AI Harness IPC bridge (window.electronAI).
- * The bridge is exposed by electron/preload.cjs; outside Electron (web/e2e
- * without a shim) the module degrades gracefully via isAvailable().
+ * Renderer-side client for the AI Harness bridge.
+ * Desktop → window.electronAI (only when the active DB mode is `pg`);
+ * otherwise → the in-browser bridge (PGlite). Every method returns an honest
+ * `{ success: false, error }` when neither transport can serve it.
  */
 
 interface IpcResult<T> {
@@ -90,7 +91,7 @@ interface ElectronAI {
   saveSession: (payload: AiSaveSessionPayload) => Promise<IpcResult<{ sessionId: string }>>;
   renameSession: (payload: { sessionId: string; title: string; companyId: string; userId: string }) => Promise<IpcResult<void>>;
   deleteSession: (payload: { companyId: string; userId: string; sessionId: string }) => Promise<IpcResult<void>>;
-  purgeOldSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<{ purged: number; retentionDays: number }>>;
+  purgeOldSessions: (payload: { companyId: string; userId: string }) => Promise<IpcResult<{ purged: number; purgedBatches?: number; retentionDays: number; keptForever?: boolean }>>;
   batchCreate: (payload: {
     companyId: string; userId: string; title?: string | null; kind?: string;
     sessionId?: string | null; items: JobBatchItemInput[];
@@ -190,10 +191,6 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
     return null;
   }
 }export const aiApi = {
-  isAvailable(): boolean {
-    return bridge() !== null;
-  },
-
   async getConfig(companyId: string): Promise<IpcResult<AiPublicConfig>> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
@@ -389,7 +386,7 @@ async function getEffectiveBridge(): Promise<ElectronAI | null> {
    * Called opportunistically when the chat page opens — transcripts carry
    * customer names/balances and must not linger forever.
    */
-  async purgeOldSessions(companyId: string, userId: string): Promise<IpcResult<{ purged: number; retentionDays: number }>> {
+  async purgeOldSessions(companyId: string, userId: string): Promise<IpcResult<{ purged: number; purgedBatches?: number; retentionDays: number; keptForever?: boolean }>> {
     const b = await getEffectiveBridge();
     if (!b) return { success: false, error: NOT_AVAILABLE };
     return b.purgeOldSessions({ companyId, userId });

@@ -14,7 +14,6 @@ import {
   pct,
   dateRange,
   BASE_AMOUNT_SUM,
-  BASE_VOUCHER_SUM,
 } from './reportCommon';
 
 const EMPTY_PARAMS: Record<string, unknown> = { type: 'object', properties: {} };
@@ -340,7 +339,7 @@ export const reportTools: ToolDefinition[] = [
   {
     name: 'accounting.cash_flow',
     labelAr: 'قائمة التدفقات النقدية',
-    descriptionAr: 'يعرض قائمة التدفقات النقدية لفترة: التدفقات الداخلة (المبيعات، سندات القبض) والخارجة (المشتريات، سندات الصرف).',
+    descriptionAr: 'يعرض التدفقات النقدية الفعلية لفترة من حركة حسابات النقدية/البنوك (111*) في القيود المرحّلة — وليس من إجمالي الفواتير الآجلة. يشمل المبيعات النقدية وسندات القبض والصرف والمصروفات المدفوعة.',
     permission: 'accounting.view',
     dangerLevel: 'read',
     parameters: {
@@ -354,31 +353,29 @@ export const reportTools: ToolDefinition[] = [
       const { from, to } = dateRange(args.startDate as string | undefined, args.endDate as string | undefined);
       
 
-      const [salesRes, purchasesRes, receiptsRes, paymentsRes] = await Promise.all([
-        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS total FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
-        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS total FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, from, to]),
-        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS total FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
-        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS total FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, from, to]),
-      ]);
-
-      const salesIn = num(salesRes.rows?.[0]?.total || 0);
-      const purchasesOut = num(purchasesRes.rows?.[0]?.total || 0);
-      const receiptsIn = num(receiptsRes.rows?.[0]?.total || 0);
-      const paymentsOut = num(paymentsRes.rows?.[0]?.total || 0);
-
+      // REAL cash flow: movements on the cash/bank accounts (111*) in POSTED
+      // journal entries. The old tool summed ACCRUAL invoice totals under a
+      // "cash flow" label — an unpaid invoice is not cash — and double-counted
+      // a purchase settled by a payment voucher. This matches the IAS-7 Cash
+      // Flow page's opening/closing cash movement basis.
+      const res = await guardedQuery(
+        `SELECT COALESCE(SUM(je.debit), 0) AS inflow, COALESCE(SUM(je.credit), 0) AS outflow
+           FROM journal_entries je
+           JOIN transactions t ON t.id = je.transaction_id
+           JOIN accounts a ON a.id = je.account_id
+          WHERE je.company_id = $1::uuid AND t.status = 'posted'
+            AND t.date::date BETWEEN $2 AND $3 AND a.code LIKE '111%'`,
+        [ctx.companyId, from, to],
+      );
+      if (!res.success) return { error: res.error || 'فشل جلب الحركة النقدية' };
+      const cashIn = num(res.rows?.[0]?.inflow || 0);
+      const cashOut = num(res.rows?.[0]?.outflow || 0);
       return {
         period: { from, to },
-        cashInflows: {
-          salesInvoices: Math.round(salesIn * 100) / 100,
-          receiptVouchers: Math.round(receiptsIn * 100) / 100,
-          total: Math.round((salesIn + receiptsIn) * 100) / 100,
-        },
-        cashOutflows: {
-          purchaseInvoices: Math.round(purchasesOut * 100) / 100,
-          paymentVouchers: Math.round(paymentsOut * 100) / 100,
-          total: Math.round((purchasesOut + paymentsOut) * 100) / 100,
-        },
-        netCashFlow: Math.round((salesIn + receiptsIn - purchasesOut - paymentsOut) * 100) / 100,
+        cashInflows: { total: Math.round(cashIn * 100) / 100 },
+        cashOutflows: { total: Math.round(cashOut * 100) / 100 },
+        netCashFlow: Math.round((cashIn - cashOut) * 100) / 100,
+        basis: 'cash_accounts_111 (posted journal entries)',
       };
     },
   },
@@ -1722,35 +1719,55 @@ export const reportTools: ToolDefinition[] = [
         const lowStockRes = await guardedQuery(`SELECT COUNT(*)::int AS count FROM stock WHERE company_id = $1::uuid AND quantity <= min_stock_alert`, [ctx.companyId]);
         return { lowStockCount: num(lowStockRes.rows?.[0]?.count || 0) };
       })();
-      const [salesRes, purchasesRes, receiptsRes, paymentsRes, productRes, customerRes, supplierRes, hrKpiRes, manufacturingRes] = await Promise.all([
+      // PROFIT & CASH FROM THE LEDGER — never from document headers.
+      // The old block computed `expenses = purchases + payments` (double counts
+      // a purchase settled by a voucher) and `netProfit = revenue − expenses`,
+      // then labelled accrual invoice totals as "cash flow". One source of
+      // truth: POSTED journal entries (revenue 4*, expenses 5*, cash 111*).
+      const pnlSql = `
+        SELECT
+          COALESCE(SUM(CASE WHEN a.code LIKE '4%' THEN je.credit - je.debit ELSE 0 END), 0) AS revenue,
+          COALESCE(SUM(CASE WHEN a.code LIKE '5%' THEN je.debit - je.credit ELSE 0 END), 0) AS expenses
+        FROM journal_entries je
+        JOIN transactions t ON t.id = je.transaction_id
+        JOIN accounts a ON a.id = je.account_id
+        WHERE je.company_id = $1::uuid AND t.status = 'posted'
+          AND t.date::date BETWEEN $2 AND $3`;
+      const cashSql = `
+        SELECT COALESCE(SUM(je.debit), 0) AS inflow, COALESCE(SUM(je.credit), 0) AS outflow
+        FROM journal_entries je
+        JOIN transactions t ON t.id = je.transaction_id
+        JOIN accounts a ON a.id = je.account_id
+        WHERE je.company_id = $1::uuid AND t.status = 'posted'
+          AND t.date::date BETWEEN $2 AND $3 AND a.code LIKE '111%'`;
+      const [salesRes, pnlRes, cashRes, productRes, customerRes, supplierRes, hrKpiRes, manufacturingRes] = await Promise.all([
         guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS revenue, COUNT(*)::int AS count FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
-        guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, fromDate, today]),
-        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS amount FROM receipt_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
-        guardedQuery(`SELECT ${BASE_VOUCHER_SUM} AS amount FROM payment_vouchers WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3 AND status = 'posted'`, [ctx.companyId, fromDate, today]),
+        guardedQuery(pnlSql, [ctx.companyId, fromDate, today]),
+        guardedQuery(cashSql, [ctx.companyId, fromDate, today]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM customers WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM suppliers WHERE company_id = $1::uuid`, [ctx.companyId]),
         canSeeHr ? hrApi.getHrKpis(ctx.companyId) : Promise.resolve({ success: false } as { success: boolean; data?: Record<string, unknown> }),
         canSeeManufacturing ? manufacturingApi.getManufacturingKpis(ctx.companyId) : Promise.resolve({ success: false } as { success: boolean; data?: Record<string, unknown> }),
       ]);
+      if (!pnlRes.success) return { error: pnlRes.error || 'فشل حساب الأرباح من القيود' };
+      if (!cashRes.success) return { error: cashRes.error || 'فشل حساب الحركة النقدية' };
 
-      const revenue = num(salesRes.rows?.[0]?.revenue || 0);
+      const invoiceTotal = num(salesRes.rows?.[0]?.revenue || 0);
       const invoiceCount = num(salesRes.rows?.[0]?.count || 0);
-      const purchases = num(purchasesRes.rows?.[0]?.amount || 0);
-      const receipts = num(receiptsRes.rows?.[0]?.amount || 0);
-      const payments = num(paymentsRes.rows?.[0]?.amount || 0);
-      const expenses = purchases + payments;
+      const revenue = num(pnlRes.rows?.[0]?.revenue || 0);
+      const expenses = num(pnlRes.rows?.[0]?.expenses || 0);
+      const cashIn = num(cashRes.rows?.[0]?.inflow || 0);
+      const cashOut = num(cashRes.rows?.[0]?.outflow || 0);
 
-      // Previous period comparison
+      // Previous period comparison — same ledger basis.
       let prevRevenue = 0;
       let prevExpenses = 0;
       if (comparePrevious) {
-        const [prevSalesRes, prevPurchRes] = await Promise.all([
-          guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS revenue FROM sales_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
-          guardedQuery(`SELECT ${BASE_AMOUNT_SUM} AS amount FROM purchase_invoices WHERE company_id = $1::uuid AND date BETWEEN $2 AND $3 AND status != 'cancelled'`, [ctx.companyId, prevFromDate, prevToDate]),
-        ]);
-        prevRevenue = num(prevSalesRes.rows?.[0]?.revenue || 0);
-        prevExpenses = num(prevPurchRes.rows?.[0]?.amount || 0);
+        const prevPnl = await guardedQuery(pnlSql, [ctx.companyId, prevFromDate, prevToDate]);
+        if (!prevPnl.success) return { error: prevPnl.error || 'فشل مقارنة الفترة السابقة' };
+        prevRevenue = num(prevPnl.rows?.[0]?.revenue || 0);
+        prevExpenses = num(prevPnl.rows?.[0]?.expenses || 0);
       }
 
       return {
@@ -1761,11 +1778,14 @@ export const reportTools: ToolDefinition[] = [
           netProfit: Math.round((revenue - expenses) * 100) / 100,
           revenueChange: comparePrevious && prevRevenue > 0 ? Math.round(((revenue - prevRevenue) / prevRevenue) * 10000) / 100 : undefined,
           expenseChange: comparePrevious && prevExpenses > 0 ? Math.round(((expenses - prevExpenses) / prevExpenses) * 10000) / 100 : undefined,
+          basis: 'journal_entries_posted (revenue 4*, expenses 5*)',
         },
-        sales: { invoiceCount, averageInvoice: invoiceCount > 0 ? Math.round(revenue / invoiceCount * 100) / 100 : 0 },
+        sales: { invoiceCount, averageInvoice: invoiceCount > 0 ? Math.round(invoiceTotal / invoiceCount * 100) / 100 : 0 },
         cashFlow: {
-          inflows: Math.round((revenue + receipts) * 100) / 100,
-          outflows: Math.round(expenses * 100) / 100,
+          inflows: Math.round(cashIn * 100) / 100,
+          outflows: Math.round(cashOut * 100) / 100,
+          net: Math.round((cashIn - cashOut) * 100) / 100,
+          basis: 'cash_accounts_111 (posted journal entries)',
         },
         counts: {
           products: num(productRes.rows?.[0]?.count || 0),

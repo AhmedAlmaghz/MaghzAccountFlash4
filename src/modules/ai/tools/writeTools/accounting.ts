@@ -2,9 +2,12 @@ import type { ToolDefinition } from '../../types';
 import { getNextDocumentNumber, getCashBoxes } from '@/core/api';
 import type { CashBox } from '@/core/types';
 import { accountingApi } from '@/modules/accounting/api';
+import { salesApi } from '@/modules/sales/api';
+import { purchasesApi } from '@/modules/purchases/api';
 import type { Account } from '@/modules/accounting/types';
 import { getDefaultAccountId } from '@/core/utils/journalEntryGenerator';
 import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
+import { guardedQuery } from '../reportCommon';
 import {
   num,
   str,
@@ -194,6 +197,8 @@ export const accountingWriteTools: ToolDefinition[] = [
       properties: {
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
         amount: { type: 'number', description: 'المبلغ المقبوض' },
+        invoiceId: { type: 'string', description: 'معرف فاتورة المبيعات المراد تخصيص الدفعة لها (اختياري — ابحث بـ search.sales_invoices). عند تمريره يُحدَّث paid_amount/hالة الفاتورة والأعمار تلقائياً' },
+        amountApplied: { type: 'number', description: 'المبلغ المخصص للفاتورة (اختياري — افتراضياً كامل المستحق أو مقدار السند أيهما أقل). لا يتجاوز المبلغ المقبوض ولا المستحق' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يحدد حساب الخزنة التي يُرحل عليها القيد' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
@@ -202,7 +207,7 @@ export const accountingWriteTools: ToolDefinition[] = [
       },
       required: ['customerId', 'amount'],
     },
-    summarizeArgs: (a) => `إنشاء سند قبض مرحّل بمبلغ ${a.amount} (${a.paymentMethod === 'bank' ? 'بنك' : a.paymentMethod === 'check' ? 'شيك' : 'نقداً'})`,
+    summarizeArgs: (a) => `إنشاء سند قبض مرحّل بمبلغ ${a.amount}${a.invoiceId ? ` — مخصص لفاتورة ${String(a.invoiceId).slice(0, 8)}…` : ' (على الحساب)'} (${a.paymentMethod === 'bank' ? 'بنك' : a.paymentMethod === 'check' ? 'شيك' : 'نقداً'})`,
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
       const amount = num(args.amount);
@@ -212,6 +217,43 @@ export const accountingWriteTools: ToolDefinition[] = [
       if (method && !['cash', 'bank', 'check'].includes(method)) return { error: 'طريقة دفع غير صحيحة' };
       const reference = str(args.reference);
       const notesCombined = [str(args.notes), reference ? `مرجع ورقي: ${reference}` : undefined].filter(Boolean).join(' | ');
+
+      // Payment allocation: linking a receipt to an invoice is what updates
+      // paid_amount + the invoice status + AR aging. The old tool always sent
+      // amountApplied: 0, so "customer paid INV-0001" silently left the
+      // invoice outstanding while only the party balance moved.
+      const invoiceId = str(args.invoiceId);
+      let amountApplied = 0;
+      let invoiceNumber: string | undefined;
+      if (invoiceId) {
+        const outstandingRes = await salesApi.getOutstandingInvoicesForCustomer(ctx.companyId, customerId);
+        const invoice = outstandingRes.success
+          ? (outstandingRes.data || []).find((i) => i.id === invoiceId)
+          : undefined;
+        if (!invoice) {
+          return {
+            error: 'الفاتورة غير موجودة ضمن مستحقات هذا العميل (قد تكون مدفوعة أو لا تخصّه) — تحقق منها بـ search.sales_invoices أو أنشئ السند على الحساب بدون invoiceId',
+          };
+        }
+        invoiceNumber = invoice.invoiceNumber;
+        const outstanding = Math.max(
+          0,
+          Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0),
+        );
+        const asked = args.amountApplied !== undefined ? num(args.amountApplied) : 0;
+        amountApplied = asked > 0 ? asked : Math.min(amount, outstanding);
+        if (amountApplied <= 0) {
+          return { error: `الفاتورة ${invoiceNumber} مسددة بالكامل — لا مبلغ متبقٍ لتخصيصه` };
+        }
+        if (amountApplied > amount + 0.01) {
+          return { error: `المبلغ المخصص (${amountApplied}) يتجاوز مبلغ السند (${amount})` };
+        }
+        if (amountApplied > outstanding + 0.01) {
+          return { error: `المبلغ المخصص (${amountApplied}) يتجاوز مستحق الفاتورة ${invoiceNumber} (${outstanding})` };
+        }
+      } else if (num(args.amountApplied) > 0) {
+        return { error: 'amountApplied يتطلب invoiceId — للدفعة على الحساب اترك الحقلين فارغين' };
+      }
 
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'receipt_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
@@ -225,7 +267,8 @@ export const accountingWriteTools: ToolDefinition[] = [
           customerId,
           customerName: '',
           amount,
-          amountApplied: 0,
+          ...(invoiceId ? { invoiceId } : {}),
+          amountApplied,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
           cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
@@ -236,7 +279,9 @@ export const accountingWriteTools: ToolDefinition[] = [
       if (!res.success) return { error: res.error || 'فشل إنشاء السند' };
       return {
         created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
-        journalPosted: true, note: 'القيد المزدوج أُنشئ ورصيد العميل خُفِّض تلقائياً', ...(reference ? { reference } : {}),
+        journalPosted: true,
+        ...(invoiceId ? { invoiceId, invoiceNumber, amountApplied, note: `المبلغ طُبِّق على الفاتورة ${invoiceNumber} — حُدِّث المتبقي وحالة السداد تلقائياً` } : { note: 'دفعة على الحساب: القيد المزدوج أُنشئ ورصيد العميل خُفِّض تلقائياً' }),
+        ...(reference ? { reference } : {}),
       };
     },
   },
@@ -253,6 +298,8 @@ export const accountingWriteTools: ToolDefinition[] = [
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers) — إلزامي ما لم يُمرَّر expenseAccountId' },
         expenseAccountId: { type: 'string', description: 'حساب المصروف للمصروفات المباشرة بلا مورد (من search.accounts — يُستنتج من البيان ثم الافتراضي عند غيابه)' },
         amount: { type: 'number', description: 'المبلغ المدفوع' },
+        invoiceId: { type: 'string', description: 'معرف فاتورة المشتريات المراد تخصيص الدفعة لها (اختياري — للموردين فقط، ابحث بـ search.purchase_invoices). عند تمريره يُحدَّث paid_amount/حالة الفاتورة والأعمار تلقائياً' },
+        amountApplied: { type: 'number', description: 'المبلغ المخصص للفاتورة (اختياري — افتراضياً كامل المستحق أو مقدار السند أيهما أقل). لا يتجاوز المبلغ المدفوع ولا المستحق' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — يُستنتج من البيان ثم الافتراضية عند غيابه' },
         date: { type: 'string', description: 'تاريخ السند YYYY-MM-DD (افتراضي اليوم)' },
         paymentMethod: { type: 'string', enum: ['cash', 'bank', 'check'], description: 'طريقة الدفع (افتراضي cash)' },
@@ -305,6 +352,44 @@ export const accountingWriteTools: ToolDefinition[] = [
       }
       if (!supplierId && !expenseAccountId) return { error: 'supplierId أو expenseAccountId مطلوب' };
 
+      // Payment allocation (purchase side): same contract as the receipt tool
+      // — only a linked invoice can move paid_amount/status/AP aging.
+      const invoiceId = str(args.invoiceId);
+      let amountApplied = 0;
+      let invoiceNumber: string | undefined;
+      if (invoiceId) {
+        if (!supplierId) {
+          return { error: 'invoiceId متاح لسندات الموردين فقط — المصروف المباشر لا يُخصَّص لفاتورة مشتريات' };
+        }
+        const outstandingRes = await purchasesApi.getOutstandingInvoicesForSupplier(ctx.companyId, supplierId);
+        const invoice = outstandingRes.success
+          ? (outstandingRes.data || []).find((i) => i.id === invoiceId)
+          : undefined;
+        if (!invoice) {
+          return {
+            error: 'الفاتورة غير موجودة ضمن مستحقات هذا المورد (قد تكون مدفوعة أو لا تخصّه) — تحقق منها بـ search.purchase_invoices أو أنشئ السند على الحساب بدون invoiceId',
+          };
+        }
+        invoiceNumber = invoice.invoiceNumber;
+        const outstanding = Math.max(
+          0,
+          Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0),
+        );
+        const asked = args.amountApplied !== undefined ? num(args.amountApplied) : 0;
+        amountApplied = asked > 0 ? asked : Math.min(amount, outstanding);
+        if (amountApplied <= 0) {
+          return { error: `الفاتورة ${invoiceNumber} مسددة بالكامل — لا مبلغ متبقٍ لتخصيصه` };
+        }
+        if (amountApplied > amount + 0.01) {
+          return { error: `المبلغ المخصص (${amountApplied}) يتجاوز مبلغ السند (${amount})` };
+        }
+        if (amountApplied > outstanding + 0.01) {
+          return { error: `المبلغ المخصص (${amountApplied}) يتجاوز مستحق الفاتورة ${invoiceNumber} (${outstanding})` };
+        }
+      } else if (num(args.amountApplied) > 0) {
+        return { error: 'amountApplied يتطلب invoiceId — للدفعة على الحساب اترك الحقلين فارغين' };
+      }
+
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'payment_voucher');
       if (!docNumber.success || !docNumber.number) return { error: docNumber.error || 'فشل توليد رقم السند' };
 
@@ -318,7 +403,8 @@ export const accountingWriteTools: ToolDefinition[] = [
           supplierId: supplierId || undefined,
           expenseAccountId: expenseAccountId || undefined,
           amount,
-          amountApplied: 0,
+          ...(invoiceId ? { invoiceId } : {}),
+          amountApplied,
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
           cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
@@ -330,9 +416,13 @@ export const accountingWriteTools: ToolDefinition[] = [
       return {
         created: true, voucherId: res.id, voucherNumber: docNumber.number, amount, status: 'posted',
         journalPosted: true,
-        note: supplierId
-          ? 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً'
-          : expenseNote || 'القيد المزدوج أُنشئ (مدين حساب المصروف / دائن الخزنة)',
+        ...(invoiceId
+          ? { invoiceId, invoiceNumber, amountApplied, note: `المبلغ طُبِّق على الفاتورة ${invoiceNumber} — حُدِّث المتبقي وحالة السداد تلقائياً` }
+          : {
+              note: supplierId
+                ? 'القيد المزدوج أُنشئ ورصيد المورد زاد تلقائياً'
+                : expenseNote || 'القيد المزدوج أُنشئ (مدين حساب المصروف / دائن الخزنة)',
+            }),
         ...(expenseAccountId && !supplierId ? { expenseAccountId } : {}),
         ...(box && box.via !== 'explicit' && box.name ? { cashBoxName: box.name } : {}),
         ...(reference ? { reference } : {}),
@@ -537,10 +627,13 @@ export const accountingWriteTools: ToolDefinition[] = [
         nameAr: { type: 'string', description: 'اسم الحساب بالعربية (إلزامي)' },
         nameEn: { type: 'string', description: 'اسم الحساب بالإنجليزية' },
         parentId: { type: 'string', description: 'معرف الحساب الأب' },
-        type: { type: 'string', enum: ['asset', 'liability', 'equity', 'income', 'expense'], description: 'نوع الحساب (افتراضي expense)' },
+        type: { type: 'string', enum: ['asset', 'liability', 'equity', 'revenue', 'expense'], description: 'نوع الحساب (افتراضي expense). استخدم revenue للإيرادات (تُقبل income كبديل)' },
         nature: { type: 'string', enum: ['debit', 'credit'], description: 'طبيعة الحساب (افتراضي debit)' },
         isGroup: { type: 'boolean', description: 'هل هو حساب مجموعي؟' },
-        balance: { type: 'number', description: 'الرصيد الافتتاحي' },
+        openingAmount: { type: 'number', description: 'الرصيد الافتتاحي (يُرحّل تلقائياً عبر حساب الأرصدة الافتتاحية 31201) — يقبل balance كبديل' },
+        balance: { type: 'number', description: 'بديل قديم لـ openingAmount (لا يُكتب مباشرة في الحساب)' },
+        openingDirection: { type: 'string', enum: ['debit', 'credit'], description: 'اتجاه الرصيد الافتتاحي (افتراضي حسب طبيعة الحساب)' },
+        openingDate: { type: 'string', description: 'تاريخ الرصيد الافتتاحي YYYY-MM-DD (اختياري — إن لم يُمرَّر يُستخدم تاريخ الإدخال/اليوم). يقبل الصيغ العربية والهجرية' },
         isActive: { type: 'boolean', description: 'هل الحساب نشط؟ (افتراضي true)' },
       },
       required: ['code', 'nameAr'],
@@ -550,21 +643,60 @@ export const accountingWriteTools: ToolDefinition[] = [
       const code = str(args.code);
       const nameAr = str(args.nameAr);
       if (!code || !nameAr) return { error: 'كود الحساب والاسم بالعربية إلزاميان' };
+      // Opening balance: `openingAmount` is the real field the API posts as a
+      // balanced JE (Dr/Cr against 31201). `balance` is a legacy alias — it
+      // must never be written as a raw mirror column (that would desync the
+      // ledger). Direction defaults to debit (the historical behaviour).
+      const openingAmount = num(args.openingAmount) || num(args.balance);
+      const openingDirection: Account['openingDirection'] =
+        str(args.openingDirection) === 'credit' ? 'credit' : 'debit';
+      // Map the model's vocabulary onto the DB enum: the schema says `income`
+      // while the Account type/DB CHECK say `revenue`. Passing `income`
+      // through used to violate the CHECK constraint (or store a bogus type).
+      const requestedType = str(args.type);
+      const accountType: Account['type'] =
+        requestedType === 'income'
+          ? 'revenue'
+          : requestedType === 'asset' || requestedType === 'liability' ||
+              requestedType === 'equity' || requestedType === 'expense' || requestedType === 'revenue'
+            ? requestedType
+            : 'expense';
       const data: Omit<Account, 'id'> = {
         code,
         nameAr,
         nameEn: str(args.nameEn),
         parentId: str(args.parentId),
-        type: str(args.type) as Account['type'] || 'expense',
+        type: accountType,
         nature: str(args.nature) as Account['nature'] || 'debit',
         isGroup: Boolean(args.isGroup),
-        balance: num(args.balance),
+        balance: 0,
         isActive: args.isActive !== undefined ? Boolean(args.isActive) : true,
         companyId: ctx.companyId,
+        ...(openingAmount > 0
+          ? {
+              openingAmount,
+              openingDirection,
+              ...(str(args.openingDate) ? { openingDate: str(args.openingDate) } : {}),
+            }
+          : {}),
       };
       const res = await accountingApi.createAccount(data, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء الحساب' };
-      return { created: true, accountId: res.id, code, nameAr };
+      return {
+        created: true,
+        accountId: res.id,
+        code,
+        nameAr,
+        ...(openingAmount > 0
+          ? {
+              openingAmount,
+              openingDirection,
+              ...(str(args.openingDate) ? { openingDate: str(args.openingDate) } : {}),
+              openingPosted: !res.warning,
+              ...(res.warning ? { warning: res.warning } : { note: 'الرصيد الافتتاحي رُحّل تلقائياً عبر حساب الأرصدة الافتتاحية' }),
+            }
+          : {}),
+      };
     },
   },
 
@@ -582,7 +714,7 @@ export const accountingWriteTools: ToolDefinition[] = [
         nameEn: { type: 'string', description: 'اسم الحساب بالإنجليزية' },
         code: { type: 'string', description: 'كود الحساب' },
         parentId: { type: 'string', description: 'معرف الحساب الأب' },
-        type: { type: 'string', enum: ['asset', 'liability', 'equity', 'income', 'expense'], description: 'نوع الحساب' },
+        type: { type: 'string', enum: ['asset', 'liability', 'equity', 'revenue', 'expense'], description: 'نوع الحساب (income تُقبل كبديل لـ revenue)' },
         nature: { type: 'string', enum: ['debit', 'credit'], description: 'طبيعة الحساب' },
         isGroup: { type: 'boolean', description: 'هل هو حساب مجموعي؟' },
         isActive: { type: 'boolean', description: 'هل الحساب نشط؟' },
@@ -593,12 +725,33 @@ export const accountingWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const accountId = str(args.accountId);
       if (!accountId) return { error: 'معرف الحساب مطلوب' };
+      // Type/nature define how EVERY historical posting is classified. Once
+      // the account carries journal lines, flipping them reclassifies the past
+      // (revenue↔expense, debit↔credit) with no correction entry. Names and
+      // codes stay editable (reports key on account_id).
+      if (args.type !== undefined || args.nature !== undefined) {
+        const usage = await guardedQuery(
+          `SELECT COUNT(*)::int AS cnt FROM journal_entries WHERE company_id = $1::uuid AND account_id = $2::uuid`,
+          [ctx.companyId, accountId],
+        );
+        if (!usage.success) return { error: usage.error || 'تعذّر التحقق من حركات الحساب' };
+        const postings = Number(usage.rows?.[0]?.cnt || 0);
+        if (postings > 0) {
+          return {
+            error: `لا يمكن تغيير نوع أو طبيعة حساب له ${postings} حركة محاسبية — قد يُعاد تصنيف القيود التاريخية. عدّل الاسم/الكود فقط أو أنشئ حساباً جديداً.`,
+          };
+        }
+      }
       const data: Partial<Account> = {};
       if (args.nameAr !== undefined) data.nameAr = str(args.nameAr);
       if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
       if (args.code !== undefined) data.code = str(args.code);
       if (args.parentId !== undefined) data.parentId = str(args.parentId);
-      if (args.type !== undefined) data.type = str(args.type) as Account['type'];
+      if (args.type !== undefined) {
+        const requestedType = str(args.type);
+        // `income` is a model synonym; the DB enum is `revenue`.
+        data.type = (requestedType === 'income' ? 'revenue' : requestedType) as Account['type'];
+      }
       if (args.nature !== undefined) data.nature = str(args.nature) as Account['nature'];
       if (args.isGroup !== undefined) data.isGroup = Boolean(args.isGroup);
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);

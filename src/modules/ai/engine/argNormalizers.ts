@@ -231,6 +231,10 @@ export function normalizeDateArg(value: unknown, today = new Date()): string | n
 const DATE_ARG_KEYS = new Set([
   'date', 'dueDate', 'expiryDate', 'expectedDate', 'checkDate',
   'fromDate', 'toDate', 'startDate', 'endDate', 'terminationDate',
+  // Opening balances (customers/suppliers/products/accounts): the user may
+  // pass "15 أغسطس 2026" or a Hijri date — normalize once here so every
+  // write tool and API receives YYYY-MM-DD. Omitted ⇒ entry date.
+  'openingDate',
 ]);
 
 /** Argument keys that carry numbers (amounts, quantities, prices…). */

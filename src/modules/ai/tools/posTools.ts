@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../types';
 import { posApi } from '@/modules/pos/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { salesApi } from '@/modules/sales/api';
-import { num, str, round2 } from './writeTools/shared';
+import { getInvoiceTaxConfig, num, str, round2 } from './writeTools/shared';
 import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
 
 /**
@@ -199,7 +199,6 @@ export const posTools: ToolDefinition[] = [
               unitPrice: { type: 'number', description: 'سعر الوحدة' },
               unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون… — بديل لـ unitId، يُحل داخلياً)' },
               discountPercent: { type: 'number', description: 'نسبة الخصم 0-100 (اختياري)' },
-              vatPercent: { type: 'number', description: 'نسبة الضريبة 0-100 (اختياري)' },
             },
             required: ['quantity', 'unitPrice'],
           },
@@ -218,6 +217,19 @@ export const posTools: ToolDefinition[] = [
       const shiftId = str(args.shiftId);
       if (!shiftId) return { error: 'shiftId مطلوب — استخدم pos.get_active_shift أولاً' };
 
+      // VAT is a COMPANY setting, never a model input. The old tool accepted a
+      // per-line `vatPercent` and booked it verbatim — the agent could charge
+      // 0% or 15% regardless of the configured tax jurisdiction. Read the same
+      // source the invoice tools and the POS terminal use. An unreadable rate
+      // fails loudly instead of silently booking zero on a financial document.
+      const tax = await getInvoiceTaxConfig(ctx.companyId);
+      if (tax.vatUnset) {
+        return {
+          error: 'تعذّر قراءة إعدادات ضريبة القيمة المضافة (المعدل/الدولة) — راجع إعدادات الضريبة قبل البيع. لم يُسجَّل شيء.',
+        };
+      }
+      const vatRate = tax.showVat ? tax.vatRate : 0;
+
       const rawLines = args.lines;
       if (!Array.isArray(rawLines) || rawLines.length === 0) {
         return { error: 'يجب تمرير صنف واحد على الأقل في lines' };
@@ -227,6 +239,7 @@ export const posTools: ToolDefinition[] = [
         quantity: number;
         unitPrice: number;
         discountPercent: number;
+        /** Company rate for per-line tax reporting (never model-supplied). */
         vatPercent: number;
         unitId: string | null;
         unitFactor: number;
@@ -243,11 +256,9 @@ export const posTools: ToolDefinition[] = [
         // Unit price defaults to the catalog sale price (data, not invention).
         const unitPrice = row.unitPrice !== undefined ? num(row.unitPrice) : (resolved.salePrice ?? 0);
         const discountPercent = num(row.discountPercent);
-        const vatPercent = num(row.vatPercent);
         if (!(quantity > 0)) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
         if (!(unitPrice >= 0)) return { error: 'سعر الوحدة لا يمكن أن يكون سالباً' };
         if (discountPercent < 0 || discountPercent > 100) return { error: 'نسبة الخصم يجب أن تكون بين 0 و 100' };
-        if (vatPercent < 0 || vatPercent > 100) return { error: 'نسبة الضريبة يجب أن تكون بين 0 و 100' };
         let unitId: string | null = null;
         let unitFactor = 1;
         if (str(row.unitName)) {
@@ -261,7 +272,7 @@ export const posTools: ToolDefinition[] = [
           quantity,
           unitPrice,
           discountPercent,
-          vatPercent,
+          vatPercent: vatRate,
           unitId,
           unitFactor,
           baseQuantity: quantity * unitFactor,
@@ -270,7 +281,9 @@ export const posTools: ToolDefinition[] = [
       }
 
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const vatAmount = round2(lines.reduce((s, l) => s + (l.lineTotal * l.vatPercent) / 100, 0));
+      // Single company rate applied to the net subtotal — identical to the
+      // POS terminal's computeCartTotals and every invoice tool.
+      const vatAmount = round2((subtotal * vatRate) / 100);
       const totalAmount = round2(subtotal + vatAmount);
 
       const cashAmount = num(args.cashAmount);
@@ -321,6 +334,10 @@ export const posTools: ToolDefinition[] = [
         sold: true,
         invoiceId: res.invoiceId,
         receiptNumber: res.receiptNumber,
+        subtotal,
+        vatRate,
+        vatAmount,
+        ...(tax.showVat ? {} : { vatSkipped: true, vatNote: 'ضريبة القيمة المضافة معطلة في إعدادات الشركة (invoice.showVat) — سُجّل البيع بدون ضريبة' }),
         totalAmount,
         cashAmount,
         creditAmount,

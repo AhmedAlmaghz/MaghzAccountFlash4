@@ -37,8 +37,21 @@ const ALWAYS_ON_TOOLS: readonly string[] = [
   'ai.batch_status',
   'ai.classify_document',
   'ai.enqueue_batch',
+  'ai.preview_batch',
   'ai.resume_batch',
   'ai.clear_queue',
+  // Pinned facts: referenced by prompt rules 50 and previously never
+  // advertised — the model had to call a tool whose schema it never saw.
+  'ai.remember_fact',
+  'ai.recall_facts',
+  'ai.forget_fact',
+  // Utility lookups the write rules depend on (rules 26/28/31/36/37). These
+  // are NOT entity discovery (that stays ai.resolve_entities); they resolve
+  // the reference data a write needs (cash box, unit, expense account).
+  'search.cash_boxes',
+  'search.product_units',
+  'search.units',
+  'search.accounts',
   // Unified search is the ONLY always-on search path (session 2026-09-24:
   // advertising search.* next to jev.search_all split the model across two
   // search paths — one LLM turn + one 200-row fetch PER family, up to the

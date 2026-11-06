@@ -120,6 +120,12 @@ export const createAccountSchema = z.object({
   nature: z.enum(['debit', 'credit']),
   isGroup: z.boolean().default(false),
   balance: currencyAmountSchema.default(0),
+  /** Opening balance posted through Opening Balance Equity (31201). */
+  openingAmount: currencyAmountSchema.optional(),
+  openingDirection: z.enum(['debit', 'credit']).optional(),
+  /** YYYY-MM-DD — defaults to the entry date (today) when omitted. */
+  openingDate: dateSchema.optional(),
+  openingBalancePosted: z.boolean().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -191,6 +197,8 @@ export const createCustomerSchema = z.object({
   balance: currencyAmountSchema.default(0),
   openingBalance: currencyAmountSchema.optional(),
   openingBalancePosted: z.boolean().optional(),
+  /** YYYY-MM-DD — defaults to the entry date (today) when omitted. */
+  openingDate: dateSchema.optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -282,6 +290,8 @@ export const createSupplierSchema = z.object({
   balance: currencyAmountSchema.default(0),
   openingBalance: currencyAmountSchema.optional(),
   openingBalancePosted: z.boolean().optional(),
+  /** YYYY-MM-DD — defaults to the entry date (today) when omitted. */
+  openingDate: dateSchema.optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -390,6 +400,8 @@ export const createProductSchema = z.object({
   openingStockQty: currencyAmountSchema.optional(),
   openingWarehouseId: uuidSchema.nullable().optional(),
   openingStockPosted: z.boolean().optional(),
+  /** YYYY-MM-DD — defaults to the entry date (today) when omitted. */
+  openingDate: dateSchema.optional(),
   createdBy: uuidSchema.optional(),
   updatedBy: uuidSchema.optional(),
 });

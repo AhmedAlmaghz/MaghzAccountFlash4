@@ -29,16 +29,22 @@ const sql = readFileSync(join(MIGRATIONS_DIR, baselineFile), 'utf-8');
 
 describe('Migration layout: squashed baseline + additive migrations', () => {
   it('the baseline plus additive migrations only', () => {
-    expect(files).toEqual([baselineFile, '0001_asset_periods.sql']);
+    expect(files).toEqual([
+      baselineFile,
+      '0001_asset_periods.sql',
+      '0002_products_opening_date.sql',
+    ]);
   });
 
   it('journal mirrors the migration files in order', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8'));
-    expect(journal.entries).toHaveLength(2);
+    expect(journal.entries).toHaveLength(3);
     expect(journal.entries[0].tag).toBe('0000_init');
     expect(journal.entries[0].idx).toBe(0);
     expect(journal.entries[1].tag).toBe('0001_asset_periods');
     expect(journal.entries[1].idx).toBe(1);
+    expect(journal.entries[2].tag).toBe('0002_products_opening_date');
+    expect(journal.entries[2].idx).toBe(2);
     expect(journal.dialect).toBe('postgresql');
     // Snapshot must exist for future drizzle-kit generate diffs.
     expect(existsSync(join(MIGRATIONS_DIR, 'meta', '0000_snapshot.json'))).toBe(true);
@@ -138,6 +144,33 @@ describe('0001_asset_periods: additive, idempotent, scoped', () => {
     }
     // No bare ADD COLUMN / ADD CONSTRAINT outside a guard.
     expect(sql1).not.toMatch(/ADD COLUMN "(location|custodian|serial_number|warranty_expiry|notes|period_type)" varchar[^;]*;/);
+  });
+});
+
+describe('0002_products_opening_date: additive and idempotent', () => {
+  const sql2 = readFileSync(join(MIGRATIONS_DIR, '0002_products_opening_date.sql'), 'utf-8');
+
+  it('adds opening_date to products, guarded by IF NOT EXISTS', () => {
+    expect(sql2).toMatch(
+      /ALTER TABLE "products" ADD COLUMN IF NOT EXISTS "opening_date" date;/,
+    );
+  });
+
+  it('is registered in the PGlite migration list', () => {
+    const pglite = readFileSync(
+      join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'),
+      'utf8',
+    );
+    expect(pglite).toMatch(/0002_products_opening_date\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0002_products_opening_date', sql: schemaProductsOpeningDate \}/);
+  });
+
+  it('Drizzle schema mirrors the column', () => {
+    const schema = readFileSync(
+      join(process.cwd(), 'src/core/database/schema/inventory.ts'),
+      'utf8',
+    );
+    expect(schema).toMatch(/openingDate:\s*date\('opening_date'\)/);
   });
 });
 

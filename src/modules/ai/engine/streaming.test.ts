@@ -41,4 +41,25 @@ describe('streaming slice-1 equivalence', () => {
     expect(MAX_COMPLETION_TOKENS).toBe(10240);
     expect(STREAM_TOTAL_TIMEOUT_MS).toBe(120_000);
   });
+
+  it('carries the provider usage from the finish chunk (token budget must work)', () => {
+    const chunks: LlmStreamChunk[] = [
+      { type: 'content', content: 'ok' },
+      {
+        type: 'finish',
+        finishReason: 'stop',
+        usage: { prompt_tokens: 1200, completion_tokens: 80, total_tokens: 1280 },
+      },
+    ];
+    expect(reconstructResponseFromChunks(chunks).usage).toEqual({
+      prompt_tokens: 1200,
+      completion_tokens: 80,
+      total_tokens: 1280,
+    });
+  });
+
+  it('still returns null usage when the provider omits it', () => {
+    const chunks: LlmStreamChunk[] = [{ type: 'content', content: 'ok' }];
+    expect(reconstructResponseFromChunks(chunks).usage).toBeNull();
+  });
 });

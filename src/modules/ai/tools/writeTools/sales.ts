@@ -45,6 +45,7 @@ export const salesWriteTools: ToolDefinition[] = [
         address: { type: 'string' },
         taxNumber: { type: 'string', description: 'الرقم الضريبي' },
         openingBalance: { type: 'number', description: 'الرصيد الافتتاحي المستحق على العميل (يُرحّل تلقائياً عبر حساب الأرصدة الافتتاحية)' },
+        openingDate: { type: 'string', description: 'تاريخ الرصيد الافتتاحي YYYY-MM-DD (اختياري — إن لم يُمرَّر يُستخدم تاريخ الإدخال/اليوم). يقبل أيضاً "15 أغسطس 2026" أو التاريخ الهجري ويُطبَّع تلقائياً' },
         creditLimit: { type: 'number', description: 'الحد الائتماني' },
       },
       required: ['name'],
@@ -64,14 +65,27 @@ export const salesWriteTools: ToolDefinition[] = [
         creditLimit: args.creditLimit !== undefined ? num(args.creditLimit) : undefined,
         balance: 0,
         openingBalance: openingBalance > 0 ? openingBalance : undefined,
+        openingDate: openingBalance > 0 ? str(args.openingDate) : undefined,
         isActive: true,
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء العميل' };
+      // The opening JE may fail AFTER the customer row is created: the API
+      // reports that as `warning` (success + warning). Never claim the
+      // opening balance was posted when it wasn't — the model would tell the
+      // user their books are updated when they are not.
       return {
         created: true,
         customerId: res.id,
         name,
-        ...(openingBalance > 0 ? { openingBalance, openingPosted: true, note: 'الرصيد الافتتاحي رُحّل تلقائياً (مدين المدينين / دائن الأرصدة الافتتاحية)' } : {}),
+        ...(openingBalance > 0
+          ? {
+              openingBalance,
+              openingDate: str(args.openingDate) || undefined,
+              openingPosted: !res.warning,
+              ...(res.warning ? { warning: res.warning } : { note: 'الرصيد الافتتاحي رُحّل تلقائياً (مدين المدينين / دائن الأرصدة الافتتاحية)' }),
+            }
+          : {}),
+        ...(res.warning && openingBalance <= 0 ? { warning: res.warning } : {}),
       };
     },
   },
@@ -441,8 +455,6 @@ export const salesWriteTools: ToolDefinition[] = [
         invoiceId: { type: 'string', description: 'معرف الفاتورة (UUID)' },
         notes: { type: 'string', description: 'ملاحظات جديدة (اختياري)' },
         status: { type: 'string', enum: ['draft', 'cancelled'], description: 'الحالة الجديدة (draft أو cancelled فقط)' },
-        discountAmount: { type: 'number', description: 'مبلغ الخصم الجديد (اختياري)' },
-        paidAmount: { type: 'number', description: 'المبلغ المدفوع الجديد (اختياري)' },
       },
       required: ['invoiceId'],
     },
@@ -450,34 +462,25 @@ export const salesWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const invoiceId = str(args.invoiceId);
       if (!invoiceId) return { error: 'invoiceId مطلوب — استخدم sales.get_invoices أولاً' };
+      // Money fields are intentionally NOT editable through the agent:
+      //  - paidAmount without a receipt moves AR aging without cash/GL;
+      //  - discountAmount cannot be recomputed safely from stored fields
+      //    (discount_amount stores line + header discounts while subtotal is
+      //    already net of line discounts), so the total would desync.
+      // Direct the model to the correct workflows instead of corrupting books.
+      if (args.paidAmount !== undefined || args.discountAmount !== undefined) {
+        return {
+          error:
+            'لا يمكن تعديل المبلغ المدفوع أو الخصم من هذه الأداة (قد تختل أعمار الديون أو يتعارض الإجمالي مع الضريبة). ' +
+            'لتسجيل دفعة استخدم accounting.create_receipt_voucher مع invoiceId وamountApplied، ولتعديل الخصم عدّل الفاتورة من شاشة المبيعات (تعيد حساب الإجمالي تلقائياً).',
+        };
+      }
       const data: Record<string, unknown> = {};
       if (args.notes !== undefined) data.notes = str(args.notes);
       if (args.status !== undefined) {
         const s = str(args.status);
         if (s && !['draft', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون draft أو cancelled' };
         data.status = s;
-      }
-      // P2 fix: amount edits need the CURRENT invoice for range checks —
-      // writing discountAmount without recomputing totalAmount desyncs
-      // (subtotal + VAT − discount ≠ total), and paidAmount > total is an
-      // overpayment the create path already rejects. Guard both here (the
-      // API only guards creation + posted-reduction, not draft updates).
-      if (args.discountAmount !== undefined || args.paidAmount !== undefined) {
-        const cur = await salesApi.getInvoiceById(invoiceId, ctx.companyId);
-        if (!cur.success || !cur.data) return { error: cur.error || 'تعذّر جلب الفاتورة الحالية للتحقق' };
-        const total = Number(cur.data.totalAmount) || 0;
-        if (args.discountAmount !== undefined) {
-          const d = num(args.discountAmount);
-          if (d < 0) return { error: 'مبلغ الخصم لا يمكن أن يكون سالباً' };
-          if (d > total) return { error: `مبلغ الخصم (${d}) يتجاوز إجمالي الفاتورة (${total})` };
-          data.discountAmount = d;
-        }
-        if (args.paidAmount !== undefined) {
-          const p = num(args.paidAmount);
-          if (p < 0) return { error: 'المبلغ المدفوع لا يمكن أن يكون سالباً' };
-          if (p > total) return { error: `المبلغ المدفوع (${p}) يتجاوز إجمالي الفاتورة (${total}) — دفعة زائدة مرفوضة` };
-          data.paidAmount = p;
-        }
       }
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
       const res = await salesApi.updateInvoice(invoiceId, ctx.companyId, data);

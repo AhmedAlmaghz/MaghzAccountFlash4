@@ -284,6 +284,8 @@ export const ChartOfAccounts: React.FC = () => {
   });
   const [openingAmountStr, setOpeningAmountStr] = useState('');
   const [openingDirection, setOpeningDirection] = useState<'debit' | 'credit'>('debit');
+  // User-supplied opening-balance date; empty = entry date (today).
+  const [openingDate, setOpeningDate] = useState('');
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Account | null>(null);
@@ -387,6 +389,11 @@ export const ChartOfAccounts: React.FC = () => {
       balance: 0,
       openingAmount: isEditMode ? undefined : (Number(openingAmountStr) || 0),
       openingDirection,
+      // Only meaningful when an opening amount is actually posted; omitted →
+      // the opening JE uses the entry date (today) exactly as before.
+      openingDate: isEditMode || !(Number(openingAmountStr) > 0)
+        ? undefined
+        : (openingDate.trim() || undefined),
       isActive: formData.isActive ?? true,
     } as Omit<Account, 'id'>;
     let result;
@@ -406,6 +413,7 @@ export const ChartOfAccounts: React.FC = () => {
     setFormData({ type: 'asset', nature: 'debit', isGroup: false, isActive: true });
     setOpeningAmountStr('');
     setOpeningDirection('debit');
+    setOpeningDate('');
     setFormErrors({});
     setIsEditMode(false);
     setEditingId(null);
@@ -900,6 +908,19 @@ export const ChartOfAccounts: React.FC = () => {
                   <option value="debit">{t('openingBalance.debit')}</option>
                   <option value="credit">{t('openingBalance.credit')}</option>
                 </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('openingBalance.dateLabel')}</label>
+                <input
+                  type="date"
+                  disabled={isEditMode}
+                  value={openingDate}
+                  onChange={(e) => setOpeningDate(e.target.value)}
+                  aria-label={t('openingBalance.dateLabel')}
+                  title={t('openingBalance.dateHint')}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+                <p className="mt-1 text-xs text-slate-400">{t('openingBalance.dateHint')}</p>
               </div>
             </div>
             <p className="text-xs text-slate-400">{isEditMode ? t('openingBalance.postedHint') : t('openingBalance.customerHint')}</p>

@@ -35,7 +35,9 @@ export default function AiSettingsPage() {
   const isBrowserMode = typeof window !== 'undefined' && !(window as { electronAI?: unknown }).electronAI;
 
   // Form state
-  const [provider, setProvider] = useState('openai');
+  // Mirrors the real default (Gemini); the load effect overwrites it from the
+  // stored config. The old 'openai' placeholder misled fresh installs.
+  const [provider, setProvider] = useState('gemini');
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -47,7 +49,7 @@ export default function AiSettingsPage() {
   // B2 session token budget (0/empty = unlimited).
   const [tokenBudget, setTokenBudget] = useState('');
   // B3 fallback route (tried once on transient primary failure).
-  const [fbProvider, setFbProvider] = useState('openai');
+  const [fbProvider, setFbProvider] = useState('gemini');
   const [fbBaseUrl, setFbBaseUrl] = useState('');
   const [fbModel, setFbModel] = useState('');
   const [fbApiKey, setFbApiKey] = useState('');

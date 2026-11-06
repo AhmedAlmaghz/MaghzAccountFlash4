@@ -54,7 +54,7 @@ function makeLegacyBridge() {
 const msg = (content: string): LlmMessage => ({ role: 'user', content });
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
-describe('aiApi.startStream â€” per-stream isolation', () => {
+describe('aiApi.startStream — per-stream isolation', () => {
   // jsdom: the bridge is read off the real window object.
   const win = window as unknown as { electronAI?: unknown };
 

@@ -1,4 +1,4 @@
-import { registerTools } from './registry';
+import { getAllTools, registerTools } from './registry';
 import { readTools } from './readTools';
 import { searchTools } from './searchTools';
 import { navigationTools } from './navigationTools';
@@ -24,7 +24,10 @@ import { jevTools } from '../jev/jevTools';
 let registered = false;
 
 export function ensureToolsRegistered(): void {
-  if (registered) return;
+  // The flag alone is not enough: `clearToolRegistry()` (tests, HMR) empties
+  // the Map while the flag stays true, so a later ensure() would be a no-op
+  // and the agent would run with ZERO tools.
+  if (registered && getAllTools().length > 0) return;
   registerTools([...readTools, ...searchTools, ...entityTools, ...navigationTools, ...writeTools, ...hrTools, ...wizardTools, ...reportTools, ...detailedReportTools, ...diagnosticTools, ...batchTools, ...directionTools, ...posTools, ...fixedAssetTools, ...taxTools, ...memoryTools, ...jevTools]);
   registered = true;
 }

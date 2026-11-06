@@ -43,6 +43,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         email: { type: 'string' },
         address: { type: 'string' },
         openingBalance: { type: 'number', description: 'الرصيد الافتتاحي المستحق للمورد (يُرحّل تلقائياً عبر حساب الأرصدة الافتتاحية)' },
+        openingDate: { type: 'string', description: 'تاريخ الرصيد الافتتاحي YYYY-MM-DD (اختياري — إن لم يُمرَّر يُستخدم تاريخ الإدخال/اليوم). يقبل الصيغ العربية والهجرية ويُطبَّع تلقائياً' },
       },
       required: ['name'],
     },
@@ -59,6 +60,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         address: str(args.address),
         balance: 0,
         openingBalance: openingBalance > 0 ? openingBalance : undefined,
+        openingDate: openingBalance > 0 ? str(args.openingDate) : undefined,
         isActive: true,
       }, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل إنشاء المورد' };
@@ -66,7 +68,15 @@ export const purchasesWriteTools: ToolDefinition[] = [
         created: true,
         supplierId: res.id,
         name,
-        ...(openingBalance > 0 ? { openingBalance, openingPosted: true, note: 'الرصيد الافتتاحي رُحّل تلقائياً (مدين الأرصدة الافتتاحية / دائن الدائنين)' } : {}),
+        ...(openingBalance > 0
+          ? {
+              openingBalance,
+              openingDate: str(args.openingDate) || undefined,
+              openingPosted: !res.warning,
+              ...(res.warning ? { warning: res.warning } : { note: 'الرصيد الافتتاحي رُحّل تلقائياً (مدين الأرصدة الافتتاحية / دائن الدائنين)' }),
+            }
+          : {}),
+        ...(res.warning && openingBalance <= 0 ? { warning: res.warning } : {}),
       };
     },
   },
@@ -432,7 +442,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
   {
     name: 'purchases.update_invoice',
     labelAr: 'تعديل فاتورة مشتريات',
-    descriptionAr: 'يُعدّل بيانات فاتورة مشتريات موجودة (ملاحظات، الحالة، الخصم، المبلغ المدفوع). استخدم purchases.get_invoices أولاً لإيجاد invoiceId.',
+    descriptionAr: 'يُعدّل بيانات فاتورة مشتريات موجودة (الملاحظات أو الحالة فقط). لا يعدّل المبالغ المدفوعة أو الخصم (استخدم سند صرف مع invoiceId للدفع، وشاشة المشتريات للخصم). استخدم purchases.get_invoices أولاً لإيجاد invoiceId.',
     permission: 'purchases.edit',
     dangerLevel: 'write',
     parameters: {
@@ -441,8 +451,6 @@ export const purchasesWriteTools: ToolDefinition[] = [
         invoiceId: { type: 'string', description: 'معرف فاتورة المشتريات (UUID)' },
         notes: { type: 'string', description: 'ملاحظات (اختياري)' },
         status: { type: 'string', enum: ['draft', 'cancelled'], description: 'الحالة (اختياري)' },
-        discountAmount: { type: 'number', description: 'قيمة الخصم (اختياري)' },
-        paidAmount: { type: 'number', description: 'المبلغ المدفوع (اختياري)' },
       },
       required: ['invoiceId'],
     },
@@ -450,32 +458,22 @@ export const purchasesWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const invoiceId = str(args.invoiceId);
       if (!invoiceId) return { error: 'invoiceId مطلوب — استخدم purchases.get_invoices أولاً' };
+      // Money fields are not agent-editable (mirror of sales.update_invoice):
+      // paid_amount without a voucher desyncs AP aging from cash/GL, and the
+      // discount cannot be recomputed safely from stored totals.
+      if (args.paidAmount !== undefined || args.discountAmount !== undefined) {
+        return {
+          error:
+            'لا يمكن تعديل المبلغ المدفوع أو الخصم من هذه الأداة (قد تختل أعمار الديون أو يتعارض الإجمالي مع الضريبة). ' +
+            'لتسجيل دفعة استخدم accounting.create_payment_voucher مع invoiceId وamountApplied، ولتعديل الخصم عدّل الفاتورة من شاشة المشتريات (تعيد حساب الإجمالي تلقائياً).',
+        };
+      }
       const data: Record<string, unknown> = {};
       if (args.notes !== undefined) data.notes = str(args.notes);
       if (args.status !== undefined) {
         const s = str(args.status);
         if (s && !['draft', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون draft أو cancelled' };
         data.status = s;
-      }
-      // P2 fix (mirrors sales.update_invoice): range-check amount edits
-      // against the CURRENT invoice — unguarded writes desync totals or
-      // book overpayments the create path rejects.
-      if (args.discountAmount !== undefined || args.paidAmount !== undefined) {
-        const cur = await purchasesApi.getInvoiceById(invoiceId, ctx.companyId);
-        if (!cur.success || !cur.data) return { error: cur.error || 'تعذّر جلب الفاتورة الحالية للتحقق' };
-        const total = Number(cur.data.totalAmount) || 0;
-        if (args.discountAmount !== undefined) {
-          const d = num(args.discountAmount);
-          if (d < 0) return { error: 'مبلغ الخصم لا يمكن أن يكون سالباً' };
-          if (d > total) return { error: `مبلغ الخصم (${d}) يتجاوز إجمالي الفاتورة (${total})` };
-          data.discountAmount = d;
-        }
-        if (args.paidAmount !== undefined) {
-          const p = num(args.paidAmount);
-          if (p < 0) return { error: 'المبلغ المدفوع لا يمكن أن يكون سالباً' };
-          if (p > total) return { error: `المبلغ المدفوع (${p}) يتجاوز إجمالي الفاتورة (${total}) — دفعة زائدة مرفوضة` };
-          data.paidAmount = p;
-        }
       }
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
       const res = await purchasesApi.updateInvoice(invoiceId, ctx.companyId, data);

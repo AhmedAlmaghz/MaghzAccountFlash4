@@ -1363,6 +1363,9 @@ export const searchTools: ToolDefinition[] = [
       const res = await hrApi.getPayrollRunsPaginated(ctx.companyId, 1, 20);
       if (!res.success || !res.data) return { error: res.error || 'فشل البحث' };
       const items = res.data.items || [];
+      // Declared BEFORE toRow: the browse path calls toRow with an empty query,
+      // and a `const` declared later in the same scope is a TDZ ReferenceError.
+      const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
       const toRow = (r: (typeof items)[number]) => ({
         id: r.id,
         title: `${monthNames[(r.month - 1) % 12] || r.month} ${r.year}`,
@@ -1388,7 +1391,6 @@ export const searchTools: ToolDefinition[] = [
           r.status.toLowerCase().includes(query)
         )
         .slice(0, 8);
-      const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
       return {
         matches: matches.map((r) => ({
           id: r.id,

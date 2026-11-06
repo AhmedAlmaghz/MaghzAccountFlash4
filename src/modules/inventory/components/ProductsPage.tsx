@@ -40,6 +40,8 @@ interface FormData {
   reorderPoint: string;
   openingStockQty: string;
   openingWarehouseId: string;
+  /** YYYY-MM-DD; empty = entry date (today). */
+  openingDate: string;
   image: string;
   categoryIds: string[];
   productTypeId: string;
@@ -62,6 +64,7 @@ const initialForm: FormData = {
   reorderPoint: '0',
   openingStockQty: '',
   openingWarehouseId: '',
+  openingDate: '',
   image: '',
   categoryIds: [],
   productTypeId: '',
@@ -158,6 +161,7 @@ export const ProductsPage: React.FC = () => {
       reorderPoint: String(product.reorderPoint ?? 0),
       openingStockQty: product.openingStockPosted ? String(product.openingStockQty ?? '') : '',
       openingWarehouseId: product.openingWarehouseId || '',
+      openingDate: product.openingDate ? String(product.openingDate).slice(0, 10) : '',
       image: product.image || '',
       categoryIds: product.categoryIds || [],
       productTypeId: product.productTypeId || '',
@@ -275,6 +279,11 @@ export const ProductsPage: React.FC = () => {
         productTypeId: formData.productTypeId || undefined,
         openingStockQty: editingId ? undefined : (Number(formData.openingStockQty) || 0),
         openingWarehouseId: editingId ? undefined : (formData.openingWarehouseId || null),
+        // Only meaningful when opening stock is actually posted; empty → the
+        // opening JE/FIFO layer use the entry date (today) as before.
+        openingDate: editingId || !(Number(formData.openingStockQty) > 0)
+          ? undefined
+          : (formData.openingDate.trim() || undefined),
       };
 
       if (editingId) {
@@ -841,6 +850,19 @@ export const ProductsPage: React.FC = () => {
                 ) : (
                   <p className="text-xs text-slate-400 mt-1">{t('openingBalance.stockHint')}</p>
                 )}
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('openingBalance.dateLabel')}</label>
+                <input
+                  type="date"
+                  disabled={!!editingId}
+                  value={formData.openingDate}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, openingDate: e.target.value }))}
+                  aria-label={t('openingBalance.dateLabel')}
+                  title={t('openingBalance.dateHint')}
+                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                />
+                <p className="text-xs text-slate-400 mt-1">{t('openingBalance.dateHint')}</p>
               </div>
             </div>
           </div>

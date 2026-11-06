@@ -15,9 +15,25 @@ vi.mock('@/modules/sales/api', () => ({
 vi.mock('@/modules/inventory/api', () => ({
   inventoryApi: { getProductUnits: vi.fn() },
 }));
+// The checkout tool now takes VAT from company settings (never from the
+// model). Default the fixture to "VAT disabled" so the pre-existing amount
+// expectations stay valid; the VAT-specific tests override it per case.
+vi.mock('./writeTools/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./writeTools/shared')>();
+  return {
+    ...actual,
+    getInvoiceTaxConfig: vi.fn(async () => ({
+      vatRate: 0,
+      showVat: false,
+      showDiscount: true,
+      vatUnset: false,
+    })),
+  };
+});
 
 import { posApi } from '@/modules/pos/api';
 import { posTools } from './posTools';
+import { getInvoiceTaxConfig } from './writeTools/shared';
 import { ALL_PERMISSIONS } from '@/modules/auth/types';
 import type { ToolContext } from '../types';
 
@@ -226,5 +242,60 @@ describe('pos tools contract', () => {
       expect.objectContaining({ customerId: CUSTOMER_ID }),
       ctx.userId,
     );
+  });
+});
+
+describe('pos.checkout_sale — VAT comes from company settings', () => {
+  it('books the configured rate and ignores a model-supplied vatPercent', async () => {
+    vi.mocked(getInvoiceTaxConfig).mockResolvedValueOnce({
+      vatRate: 15,
+      showVat: true,
+      showDiscount: true,
+      vatUnset: false,
+    });
+    vi.mocked(posApi.checkout).mockResolvedValue({ success: true, invoiceId: 'inv-vat', receiptNumber: 'POS-9' });
+
+    const res = (await findTool('pos.checkout_sale').execute(
+      {
+        shiftId: SHIFT_ID,
+        cashBoxId: BOX_ID,
+        // A model that tries to force 0% must NOT succeed.
+        lines: [{ productId: PRODUCT_ID, quantity: 1, unitPrice: 1000, vatPercent: 0 }],
+        cashAmount: 1150,
+        creditAmount: 0,
+      },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(res.sold).toBe(true);
+    expect(res.vatRate).toBe(15);
+    expect(res.vatAmount).toBe(150);
+    expect(vi.mocked(posApi.checkout)).toHaveBeenCalledWith(
+      expect.objectContaining({ vatAmount: 150, totalAmount: 1150 }),
+      ctx.userId,
+    );
+  });
+
+  it('fails loudly (no write) when the VAT settings are unreadable', async () => {
+    vi.mocked(getInvoiceTaxConfig).mockResolvedValueOnce({
+      vatRate: 0,
+      showVat: true,
+      showDiscount: true,
+      vatUnset: true,
+    });
+
+    const res = (await findTool('pos.checkout_sale').execute(
+      {
+        shiftId: SHIFT_ID,
+        cashBoxId: BOX_ID,
+        lines: [{ productId: PRODUCT_ID, quantity: 1, unitPrice: 100 }],
+        cashAmount: 100,
+        creditAmount: 0,
+      },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(String(res.error)).toContain('تعذّر قراءة إعدادات ضريبة');
+    expect(vi.mocked(posApi.checkout)).not.toHaveBeenCalled();
   });
 });

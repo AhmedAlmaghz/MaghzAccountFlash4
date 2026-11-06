@@ -3,6 +3,7 @@ import { coreApi } from '@/modules/core/api';
 import { guardedQuery } from '../reportCommon';
 import { salesApi } from '@/modules/sales/api';
 import { purchasesApi } from '@/modules/purchases/api';
+import { useAppStore } from '@/core/store';
 
 /**
  * Shared helpers for ALL write-tool domains (Phase 77 split). Extracted
@@ -91,6 +92,9 @@ export function summarizeDocLines(label: string, lines: unknown): string {
   );
   const dp = getCompanyDecimalPlaces();
   const totalStr = new Intl.NumberFormat('ar-YE', { minimumFractionDigits: dp, maximumFractionDigits: dp }).format(total);
+  // Approval cards must show the COMPANY currency — the old hardcoded "ر.ي"
+  // mislabeled every USD/SAR/AED invoice the agent proposed.
+  const currencyCode = useAppStore.getState().activeCompany?.currency || 'YER';
   const unitBits: string[] = [];
   for (const l of arr) {
     const un = l?.unitName || l?.unitId;
@@ -98,7 +102,7 @@ export function summarizeDocLines(label: string, lines: unknown): string {
     if (unitBits.length >= 3) break;
   }
   const unitNote = unitBits.length > 0 ? ` — الوحدات: ${unitBits.join('، ')}` : '';
-  return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي${unitNote}`;
+  return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ${currencyCode}${unitNote}`;
 }
 
 /**

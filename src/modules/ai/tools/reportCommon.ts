@@ -36,5 +36,3 @@ export async function guardedQuery(sql: string, params: unknown[]) {
 // Base-currency aggregate expressions — seed/legacy rows have base_currency_amount = 0
 export const BASE_AMOUNT_SUM =
   'COALESCE(SUM(COALESCE(NULLIF(base_currency_amount, 0), total_amount)), 0)';
-export const BASE_VOUCHER_SUM =
-  'COALESCE(SUM(COALESCE(NULLIF(base_currency_amount, 0), amount)), 0)';

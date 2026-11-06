@@ -69,7 +69,9 @@ describe('settings.get_tax_country / settings.set_tax_country', () => {
     const res = (await findTool('settings.get_tax_country').execute({}, ctx)) as Record<string, unknown>;
     expect(vi.mocked(getCompanyTaxContext)).toHaveBeenCalledWith(ctx.companyId);
     expect(res.countryCode).toBe('SA');
-    expect(res.vatRate).toBe(0.15);
+    // Percent unit — matches every invoice tool/form (15, not 0.15).
+    expect(res.vatRate).toBe(15);
+    expect(res.vatRateUnit).toBe('percent');
   });
 
   it('sets a valid country and rejects unknown codes', async () => {

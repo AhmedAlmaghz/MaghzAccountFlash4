@@ -13,6 +13,8 @@ export interface Account {
   openingAmount?: number;
   openingDirection?: 'debit' | 'credit';
   openingBalancePosted?: boolean;
+  /** YYYY-MM-DD — when the opening balance was posted (defaults to the entry date). */
+  openingDate?: string;
   isActive: boolean;
   children?: Account[];
   createdBy?: string;

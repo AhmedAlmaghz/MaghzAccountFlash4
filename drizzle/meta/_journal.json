@@ -15,6 +15,13 @@
       "when": 1795000000000,
       "tag": "0001_asset_periods",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795100000000,
+      "tag": "0002_products_opening_date",
+      "breakpoints": true
     }
   ]
 }

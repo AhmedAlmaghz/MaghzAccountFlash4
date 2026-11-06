@@ -1,4 +1,4 @@
-import { registerSkills } from './registry';
+import { getAllSkills, registerSkills } from './registry';
 import { arabicBusinessWriterSkill } from './arabicBusinessWriter';
 import { accountingExpertiseSkill } from './accountingExpertise';
 import { reportSmartAssistantSkill } from './reportSmartAssistant';
@@ -21,7 +21,9 @@ import { themeDesignerSkill } from './themeDesigner';
 let registered = false;
 
 export function ensureSkillsRegistered(): void {
-  if (registered) return;
+  // Mirror of ensureToolsRegistered: clearSkillRegistry() must not leave the
+  // registry permanently empty behind a stale `registered` flag.
+  if (registered && getAllSkills().length > 0) return;
   registerSkills([
     arabicBusinessWriterSkill,
     accountingExpertiseSkill,

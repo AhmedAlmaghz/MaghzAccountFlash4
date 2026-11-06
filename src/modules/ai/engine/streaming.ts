@@ -42,6 +42,11 @@ export function reconstructResponseFromChunks(chunks: LlmStreamChunk[]): LlmComp
   const indexToKey: Record<number, string> = {};
   let lastThoughtSignature: string | undefined;
   let finishReason: string | null = null;
+  // Token accounting on the PRIMARY path. The transports send usage on the
+  // `finish` chunk (`include_usage: true`), but this reconstructor used to
+  // return `usage: null` unconditionally — the session token budget and the
+  // usage meter therefore stayed at zero for every streamed turn.
+  let usage: LlmCompletionData['usage'] = null;
 
   for (const chunk of chunks) {
     if (chunk.type === 'content' && chunk.content) {
@@ -90,8 +95,9 @@ export function reconstructResponseFromChunks(chunks: LlmStreamChunk[]): LlmComp
       lastThoughtSignature = chunk.thoughtSignature;
     }
 
-    if (chunk.type === 'finish' && chunk.finishReason) {
-      finishReason = chunk.finishReason;
+    if (chunk.type === 'finish') {
+      if (chunk.finishReason) finishReason = chunk.finishReason;
+      if (chunk.usage) usage = chunk.usage;
     }
   }
 
@@ -116,6 +122,6 @@ export function reconstructResponseFromChunks(chunks: LlmStreamChunk[]): LlmComp
     content: content || '',
     toolCalls,
     finishReason,
-    usage: null,
+    usage,
   };
 }

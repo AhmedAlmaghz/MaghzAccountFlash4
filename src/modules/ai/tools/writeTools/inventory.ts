@@ -147,6 +147,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
         sku: { type: 'string', description: 'رمز SKU' },
         openingStockQty: { type: 'number', description: 'كمية المخزون الافتتاحي (تُقيَّم بسعر التكلفة وتُرحّل تلقائياً — يقبل initialStockQuantity كبديل)' },
         initialStockQuantity: { type: 'number', description: 'بديل لـ openingStockQty' },
+        openingDate: { type: 'string', description: 'تاريخ المخزون الافتتاحي YYYY-MM-DD (اختياري — إن لم يُمرَّر يُستخدم تاريخ الإدخال/اليوم). يقبل الصيغ العربية والهجرية ويُطبَّع تلقائياً' },
         minStock: { type: 'number', description: 'حد الطلب/المخزون الأدنى (يقبل minStockLevel كبديل)' },
         minStockLevel: { type: 'number', description: 'بديل لـ minStock' },
         warehouseId: { type: 'string', description: 'مستودع الرصيد الافتتاحي (افتراضي: أول مستودع)' },
@@ -233,7 +234,12 @@ export const inventoryWriteTools: ToolDefinition[] = [
         createdBy: ctx.userId,
         ...(productTypeId ? { productTypeId } : {}),
         ...(openingQty > 0
-          ? { openingStockQty: openingQty, openingWarehouseId }
+          ? {
+              openingStockQty: openingQty,
+              openingWarehouseId,
+              // User-supplied opening date; omitted → entry date (today).
+              ...(str(args.openingDate) ? { openingDate: str(args.openingDate) } : {}),
+            }
           : {}),
       } as Parameters<typeof inventoryApi.createProduct>[0]);
       if (!res.success) return { error: res.error || 'فشل إنشاء المنتج' };
@@ -249,6 +255,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
           ? {
               openingStockQty: openingQty,
               openingValue: round2(openingQty * costPrice),
+              ...(str(args.openingDate) ? { openingDate: str(args.openingDate) } : {}),
               openingPosted: res.openingStockPosted === true,
               note: res.openingStockPosted === true
                 ? 'المخزون الافتتاحي رُحّل فعلياً (مدين المخزون / دائن الأرصدة الافتتاحية)'
@@ -569,6 +576,16 @@ export const inventoryWriteTools: ToolDefinition[] = [
       if (args.reason !== undefined) data.reason = str(args.reason);
       if (args.unitCost !== undefined) data.unitCost = num(args.unitCost);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
+      // A posted adjustment already moved stock + posted the JE. Re-pricing it
+      // afterwards desyncs inventory value from the ledger with no audit trail.
+      const list = await inventoryApi.getStockAdjustments(ctx.companyId);
+      const current = list.success ? (list.data || []).find((a) => a.id === id) : undefined;
+      if (!current) {
+        return { error: 'التسوية غير موجودة في هذه الشركة — استخدم inventory.get_stock_adjustments أولاً' };
+      }
+      if (current.status === 'posted') {
+        return { error: 'لا يمكن تعديل تسوية مرحّلة (غيّرت المخزون وأنشأت قيداً) — أنشئ تسوية عكسية أو تسوية جديدة بدلاً منها' };
+      }
       const res = await inventoryApi.updateStockAdjustment(id, ctx.companyId, data);
       if (!res.success) return { error: res.error || 'فشل تعديل التسوية' };
       return { updated: true, stockAdjustmentId: id };

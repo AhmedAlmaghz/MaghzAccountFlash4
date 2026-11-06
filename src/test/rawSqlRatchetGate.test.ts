@@ -36,7 +36,8 @@ const CEILINGS: Record<string, number> = {
   inventory: 53,
   purchases: 53,
   reports: 47,
-  ai: 46,
+  // 46 -> 47: browser-bridge terminal-batch PII sweep (PGlite local DB only).
+  ai: 47,
   crm: 37,
   pos: 24,
   settings: 22,
@@ -57,7 +58,11 @@ const CEILINGS: Record<string, number> = {
 // Raised 676 -> 677 for the cold-start warmup: one `SELECT 1` in
 // remoteSchema.wakeRemoteDatabase (core), so a waking remote fails with
 // "did not wake up" instead of a bare TimeoutError inside 0000_init.
-const TOTAL_CEILING = 677;
+// Raised 677 -> 678 deliberately (PII retention): the browser bridge now
+// sweeps terminal ai_job_batches alongside transcripts. The bridge runs on
+// PGlite in the renderer, so adapter.query is its only transport — there is no
+// typed RPC for the in-browser DB.
+const TOTAL_CEILING = 678;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

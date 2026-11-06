@@ -13,6 +13,7 @@ import {
   createCashBox,
   updateCashBox,
   deleteCashBox,
+  getCashBoxes,
   createCostCenter,
   updateCostCenter,
   deleteCostCenter,
@@ -378,17 +379,15 @@ export const settingsWriteTools: ToolDefinition[] = [
   {
     name: 'settings.create_cash_box',
     labelAr: 'إضافة صندوق نقدي',
-    descriptionAr: 'يُضيف صندوق نقدي جديد — الاسم (عربي/إنجليزي)، الرصيد الافتتاحي، وصف، حالة التفعيل.',
+    descriptionAr: 'يُضيف صندوق نقدي جديد — الاسم والرصيد الافتتاحي/الحالي وحالة التفعيل.',
     permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        nameAr: { type: 'string', description: 'اسم الصندوق بالعربية' },
+        nameAr: { type: 'string', description: 'اسم الصندوق (إلزامي — يقبل name كبديل)' },
         name: { type: 'string', description: 'بديل لـ nameAr' },
-        nameEn: { type: 'string', description: 'اسم الصندوق بالإنجليزية' },
-        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي', default: 0 },
-        description: { type: 'string', description: 'وصف الصندوق' },
+        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي/الحالي للصندوق', default: 0 },
         isActive: { type: 'boolean', description: 'حالة التفعيل', default: true },
       },
       required: [],
@@ -397,14 +396,19 @@ export const settingsWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const nameAr = str(args.nameAr) ?? str(args.name);
       if (!nameAr) return { error: 'nameAr مطلوب (يقبل name كبديل)' };
-      const data: Record<string, unknown> = { nameAr, companyId: ctx.companyId };
-      if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      data.openingBalance = args.openingBalance !== undefined ? num(args.openingBalance) : 0;
-      if (args.description !== undefined) data.description = str(args.description);
-      data.isActive = args.isActive !== undefined ? Boolean(args.isActive) : true;
-      const res = await createCashBox(data as Parameters<typeof createCashBox>[0]);
+      // The CashBox column is `currentBalance`; the old payload passed
+      // `openingBalance`, which the INSERT never read (the cast hid it) —
+      // every box was created with a null/zero balance while reporting success.
+      const data = {
+        // CashBox has a single `name` column (no name_ar/name_en/description).
+        name: nameAr,
+        companyId: ctx.companyId,
+        currentBalance: args.openingBalance !== undefined ? num(args.openingBalance) : 0,
+        isActive: args.isActive !== undefined ? Boolean(args.isActive) : true,
+      } as Parameters<typeof createCashBox>[0];
+      const res = await createCashBox(data);
       if (!res.success) return { error: res.error || 'فشل إضافة الصندوق النقدي' };
-      return { created: true, id: res.id };
+      return { created: true, id: res.id, currentBalance: data.currentBalance };
     },
   },
 
@@ -412,18 +416,16 @@ export const settingsWriteTools: ToolDefinition[] = [
   {
     name: 'settings.update_cash_box',
     labelAr: 'تعديل صندوق نقدي',
-    descriptionAr: 'يُحدّث صندوق نقدي — الاسم، الرصيد، الوصف، التفعيل. استخدم settings.get_cash_boxes أولاً.',
+    descriptionAr: 'يُحدّث صندوق نقدي — الاسم، الرصيد الحالي، التفعيل (الحقول غير الممررة تبقى كما هي). استخدم settings.get_cash_boxes أولاً.',
     permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
         cashBoxId: { type: 'string', description: 'معرف الصندوق (UUID)' },
-        nameAr: { type: 'string', description: 'الاسم بالعربية' },
+        nameAr: { type: 'string', description: 'الاسم (يقبل name كبديل)' },
         name: { type: 'string', description: 'بديل لـ nameAr' },
-        nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
-        openingBalance: { type: 'number', description: 'الرصيد الافتتاحي' },
-        description: { type: 'string', description: 'الوصف' },
+        openingBalance: { type: 'number', description: 'الرصيد الحالي/الافتتاحي' },
         isActive: { type: 'boolean', description: 'حالة التفعيل' },
       },
       required: ['cashBoxId'],
@@ -434,13 +436,20 @@ export const settingsWriteTools: ToolDefinition[] = [
       if (!cashBoxId) return { error: 'cashBoxId مطلوب — استخدم settings.get_cash_boxes أولاً' };
       const data: Record<string, unknown> = {};
       const updBoxName = str(args.nameAr) ?? str(args.name);
-      if (updBoxName !== undefined) data.nameAr = updBoxName;
-      if (args.nameEn !== undefined) data.nameEn = str(args.nameEn);
-      if (args.openingBalance !== undefined) data.openingBalance = num(args.openingBalance);
-      if (args.description !== undefined) data.description = str(args.description);
+      // CashBox uses `name` (no nameAr/nameEn on the row).
+      if (updBoxName !== undefined) data.name = updBoxName;
+      // `currentBalance` is the real column (see create_cash_box).
+      if (args.openingBalance !== undefined) data.currentBalance = num(args.openingBalance);
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
-      const res = await updateCashBox(cashBoxId, data, ctx.companyId);
+
+      // updateCashBox writes the FULL row: a partial payload would null the
+      // name/code/account. Merge onto the current row first.
+      const boxesRes = await getCashBoxes(ctx.companyId);
+      const existing = boxesRes.success ? boxesRes.data?.find((b) => b.id === cashBoxId) : undefined;
+      if (!existing) return { error: 'الصندوق غير موجود في هذه الشركة — استخدم settings.get_cash_boxes أولاً' };
+      const merged = { ...existing, ...data, companyId: ctx.companyId };
+      const res = await updateCashBox(cashBoxId, merged, ctx.companyId);
       if (!res.success) return { error: res.error || 'فشل تعديل الصندوق النقدي' };
       return { updated: true, cashBoxId };
     },

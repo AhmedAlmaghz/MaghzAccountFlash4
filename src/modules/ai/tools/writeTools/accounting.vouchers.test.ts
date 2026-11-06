@@ -3,9 +3,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/modules/accounting/api', () => ({
   accountingApi: {
     createPaymentVoucher: vi.fn(),
+    createReceiptVoucher: vi.fn(),
     getAccounts: vi.fn(),
     postVoucher: vi.fn(),
   },
+}));
+vi.mock('@/modules/sales/api', () => ({
+  salesApi: { getOutstandingInvoicesForCustomer: vi.fn() },
+}));
+vi.mock('@/modules/purchases/api', () => ({
+  purchasesApi: { getOutstandingInvoicesForSupplier: vi.fn() },
 }));
 vi.mock('@/core/api', () => ({
   getNextDocumentNumber: vi.fn(),
@@ -17,6 +24,8 @@ vi.mock('@/core/utils/journalEntryGenerator', () => ({
 
 import { accountingWriteTools } from './accounting';
 import { accountingApi } from '@/modules/accounting/api';
+import { salesApi } from '@/modules/sales/api';
+import { purchasesApi } from '@/modules/purchases/api';
 import { getNextDocumentNumber, getCashBoxes } from '@/core/api';
 import { getDefaultAccountId } from '@/core/utils/journalEntryGenerator';
 import type { ToolContext } from '../../types';
@@ -203,5 +212,88 @@ describe('accounting.post_*_voucher — real posting pipeline (P0-4 regression)'
     )) as Record<string, unknown>;
     expect(res.posted).toBeUndefined();
     expect(String(res.error)).toContain('رصيد الخزنة لا يكفي');
+  });
+});
+
+describe('accounting.create_*_voucher — payment allocation', () => {
+  const OUTSTANDING = [
+    {
+      id: 'inv-1',
+      invoiceNumber: 'INV-0001',
+      totalAmount: 1000,
+      paidAmount: 200,
+    },
+  ];
+
+  beforeEach(() => {
+    mockedApi.createReceiptVoucher.mockResolvedValue({ success: true, id: 'rv-1' } as never);
+    mockedApi.createPaymentVoucher.mockResolvedValue({ success: true, id: 'pv-1' } as never);
+    vi.mocked(salesApi.getOutstandingInvoicesForCustomer).mockResolvedValue({
+      success: true,
+      data: OUTSTANDING as never,
+    });
+    vi.mocked(purchasesApi.getOutstandingInvoicesForSupplier).mockResolvedValue({
+      success: true,
+      data: OUTSTANDING as never,
+    });
+  });
+
+  it('receipt: applies the outstanding amount by default and links the invoice', async () => {
+    const res = (await findTool('accounting.create_receipt_voucher').execute(
+      { customerId: 'cust-1', amount: 1000, invoiceId: 'inv-1' },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(res.created).toBe(true);
+    expect(res.amountApplied).toBe(800); // 1000 - 200 outstanding, capped by the voucher amount
+    expect(mockedApi.createReceiptVoucher).toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: 'inv-1', amountApplied: 800 }),
+      ctx.userId,
+    );
+  });
+
+  it('receipt: rejects an applied amount above the invoice outstanding', async () => {
+    const res = (await findTool('accounting.create_receipt_voucher').execute(
+      { customerId: 'cust-1', amount: 5000, invoiceId: 'inv-1', amountApplied: 5000 },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(String(res.error)).toContain('يتجاوز مستحق الفاتورة');
+    expect(mockedApi.createReceiptVoucher).not.toHaveBeenCalled();
+  });
+
+  it('receipt: on-account payments stay valid (no invoiceId, amountApplied=0)', async () => {
+    await findTool('accounting.create_receipt_voucher').execute(
+      { customerId: 'cust-1', amount: 300 },
+      ctx,
+    );
+    expect(mockedApi.createReceiptVoucher).toHaveBeenCalledWith(
+      expect.objectContaining({ amountApplied: 0 }),
+      ctx.userId,
+    );
+  });
+
+  it('payment: applies the outstanding amount to a supplier invoice', async () => {
+    const res = (await findTool('accounting.create_payment_voucher').execute(
+      { supplierId: 'sup-1', amount: 800, invoiceId: 'inv-1' },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(res.created).toBe(true);
+    expect(res.amountApplied).toBe(800);
+    expect(mockedApi.createPaymentVoucher).toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: 'inv-1', amountApplied: 800 }),
+      ctx.userId,
+    );
+  });
+
+  it('payment: invoice allocation is rejected for direct-expense vouchers', async () => {
+    const res = (await findTool('accounting.create_payment_voucher').execute(
+      { expenseAccountId: 'acc-net', amount: 100, invoiceId: 'inv-1' },
+      ctx,
+    )) as Record<string, unknown>;
+
+    expect(String(res.error)).toContain('سندات الموردين فقط');
+    expect(mockedApi.createPaymentVoucher).not.toHaveBeenCalled();
   });
 });

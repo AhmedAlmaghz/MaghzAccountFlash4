@@ -100,6 +100,9 @@ const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/opena
 // providerDefaults.test.ts) and the gemini preset in providers.ts.
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const REQUEST_TIMEOUT_MS = 90000;
+// Streaming budget — must stay below the renderer watchdog (120s) and above
+// the plain request budget (see aiHandler.js STREAM_TIMEOUT_MS).
+const STREAM_TIMEOUT_MS = 110000;
 const TEST_TIMEOUT_MS = 30000;
 
 // Same allow-list as aiHandler.js — prevents SSRF / key exfiltration.
@@ -187,6 +190,38 @@ async function deleteAiSetting(companyId: string, key: string): Promise<void> {
 
 function isBrowserDisabled(settings: Record<string, string>): boolean {
   return settings[BROWSER_DISABLED_SETTING] === 'true';
+}
+
+/** Master kill-switch — mirrors the main-process check (`ai.enabled`). */
+function isAiDisabled(settings: Record<string, string>): boolean {
+  return String(settings[ENABLED_SETTING] ?? 'true').toLowerCase() === 'false';
+}
+
+const AI_DISABLED_ERROR = 'الذكاء الاصطناعي معطّل لهذه الشركة — فعّله من إعدادات الذكاء الاصطناعي';
+
+/**
+ * Message-shape guard — mirrors aiHandler.js isValidMessages. The browser
+ * transport used to forward arbitrary payloads to the provider (no cap), so a
+ * runaway history/oversized message cost a paid 400 instead of failing fast.
+ * Non-string content (multimodal parts) is allowed, exactly like main.
+ */
+const SYSTEM_MESSAGE_MAX = 48_000;
+const CONVERSATION_MESSAGE_MAX = 20_000;
+function isValidMessages(messages: unknown): messages is LlmMessage[] {
+  return (
+    Array.isArray(messages) &&
+    messages.length > 0 &&
+    messages.length <= 100 &&
+    messages.every((m) => {
+      const msg = m as { role?: unknown; content?: unknown } | null;
+      return (
+        !!msg &&
+        typeof msg.role === 'string' &&
+        (typeof msg.content !== 'string' ||
+          msg.content.length <= (msg.role === 'system' ? SYSTEM_MESSAGE_MAX : CONVERSATION_MESSAGE_MAX))
+      );
+    })
+  );
 }
 
 type StoredKeyState =
@@ -374,7 +409,8 @@ async function runStream(opts: CallOptions & { streamId?: string }): Promise<voi
 
   const controller = new AbortController();
   trackController(opts.streamId, controller);
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  // Streaming has a longer budget than a plain completion (see STREAM_TIMEOUT_MS).
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? STREAM_TIMEOUT_MS);
   const openStream = async (baseUrl: string, apiKey: string): Promise<Response> =>
     fetch(`${normalizeBaseUrl(baseUrl)}/chat/completions`, {
       method: 'POST',
@@ -810,7 +846,11 @@ export const browserAiBridge = {
     maxTokens?: number;
   }): Promise<{ success: boolean; data?: LlmCompletionData; error?: string }> {
     try {
+      if (!isValidMessages(payload.messages)) {
+        return { success: false, error: 'messages must be a non-empty array (max 100, 20K/48K chars)' };
+      }
       const settings = await readAiSettingsFast(payload.companyId);
+      if (isAiDisabled(settings)) return { success: false, error: AI_DISABLED_ERROR };
       if (isBrowserDisabled(settings)) return { success: false, error: BROWSER_DISABLED_ERROR };
       const { key: apiKey } = await readApiKey(payload.companyId, settings);
       if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
@@ -861,10 +901,18 @@ export const browserAiBridge = {
   }): void {
     void (async () => {
       try {
+        if (!isValidMessages(payload.messages)) {
+          emitDone({ success: false, error: 'messages must be a non-empty array (max 100, 20K/48K chars)' }, payload.streamId);
+          return;
+        }
         // A wedged local DB must never hang the chat silently (no chunks, no
         // done, spinner forever): bound the settings read, then let the
         // provider call's own timeout own the rest of the budget.
         const settings = await readAiSettingsFast(payload.companyId);
+        if (isAiDisabled(settings)) {
+          emitDone({ success: false, error: AI_DISABLED_ERROR }, payload.streamId);
+          return;
+        }
         if (isBrowserDisabled(settings)) {
           emitDone({ success: false, error: BROWSER_DISABLED_ERROR }, payload.streamId);
           return;
@@ -1053,7 +1101,7 @@ export const browserAiBridge = {
   },
 
   /** PII retention — mirrors ai:purge-old-sessions (default 90 days, '0' = keep forever). */
-  async purgeOldSessions(payload: { companyId: string; userId: string }): Promise<{ success: boolean; data?: { purged: number; retentionDays: number; keptForever?: boolean }; error?: string }> {
+  async purgeOldSessions(payload: { companyId: string; userId: string }): Promise<{ success: boolean; data?: { purged: number; purgedBatches?: number; retentionDays: number; keptForever?: boolean }; error?: string }> {
     try {
       const adapter = await getDbAdapter();
       const settings = await readAiSettings(payload.companyId);
@@ -1072,7 +1120,25 @@ export const browserAiBridge = {
       );
       if (!result.success) return { success: false, error: result.error };
       const purged = result.rows ? result.rows.length : 0;
-      return { success: true, data: { purged, retentionDays: retention } };
+      // Batch items carry customer names/amounts/args and are NOT cascaded
+      // from sessions (session_id is SET NULL) — sweep terminal batches too.
+      const batchRes = await adapter.query(
+        `DELETE FROM ai_job_batches
+          WHERE company_id = $1::uuid AND user_id = $2::uuid
+            AND status IN ('done', 'partial', 'cancelled')
+            AND updated_at < NOW() - ($3::int * INTERVAL '1 day')
+         RETURNING id`,
+        [payload.companyId, payload.userId, retention]
+      );
+      if (!batchRes.success) return { success: false, error: batchRes.error };
+      return {
+        success: true,
+        data: {
+          purged,
+          purgedBatches: batchRes.rows ? batchRes.rows.length : 0,
+          retentionDays: retention,
+        },
+      };
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

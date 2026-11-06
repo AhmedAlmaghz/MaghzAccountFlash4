@@ -27,6 +27,8 @@ export interface Product {
   openingStockQty?: number;
   openingWarehouseId?: string | null;
   openingStockPosted?: boolean;
+  /** YYYY-MM-DD — when the opening stock was posted (defaults to the entry date). */
+  openingDate?: string;
   createdBy?: string;
   updatedBy?: string;
 }

@@ -170,11 +170,26 @@ export async function postEmployeeOpening(
  */
 export async function postProductStockOpening(
   companyId: string,
-  opts: { productId: string; productName: string; quantity: number; warehouseId?: string | null; costPrice: number }
+  opts: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    warehouseId?: string | null;
+    costPrice: number;
+    /** YYYY-MM-DD the user assigned to the opening stock; entry date when omitted. */
+    openingDate?: string;
+  }
 ): Promise<EntityOpeningResult> {
   const qty = Math.round(Number(opts.quantity) * 10000) / 10000;
   if (!Number.isFinite(qty) || qty <= 0) return { success: true };
   if (!opts.warehouseId) return { success: false, error: 'يجب اختيار مستودع لمخزون أول المدة' };
+  // One normalized date drives the FIFO layer, the journal entry and the
+  // product stamp — a user-supplied opening date orders statements/aging
+  // exactly where the user expects it; omitting it keeps "entry date".
+  // toDateString uses LOCAL components (never the UTC-midnight trap).
+  const openingDate = toDateString(opts.openingDate ?? new Date())
+    || toDateString(new Date())
+    || new Date().toISOString().split('T')[0];
 
   const valueAmount = Math.round(Number(opts.costPrice || 0) * qty * 100) / 100;
   if (valueAmount <= 0) return { success: false, error: 'قيمة مخزون أول المدة يجب أن تكون أكبر من صفر (تأكد من سعر التكلفة)' };
@@ -187,7 +202,7 @@ export async function postProductStockOpening(
     warehouseId: opts.warehouseId,
     qty,
     unitCost: Number(opts.costPrice) || 0,
-    receivedDate: new Date().toISOString().split('T')[0],
+    receivedDate: openingDate,
     sourceRef: 'OPENING',
   });
 
@@ -221,7 +236,7 @@ export async function postProductStockOpening(
     buildJournalEntryStatement(companyId, {
       reference: 'OPENING',
       description: `رصيد افتتاحي مخزون - ${opts.productName} (${qty})`,
-      date: new Date().toISOString().split('T')[0],
+      date: openingDate,
       totalAmount: valueAmount,
       entries: [
         { accountId: inv, debit: valueAmount, credit: 0, memo: `${opts.productName} (${qty})` },
@@ -231,9 +246,9 @@ export async function postProductStockOpening(
     // 4) stamp the product row
     {
       sql: `UPDATE products SET opening_stock_qty = $1::numeric, opening_warehouse_id = $2::uuid,
-              opening_stock_posted = true, updated_at = NOW()
+              opening_stock_posted = true, opening_date = $5::date, updated_at = NOW()
             WHERE id = $3::uuid AND company_id = $4::uuid`,
-      params: [qty, opts.warehouseId, opts.productId, companyId],
+      params: [qty, opts.warehouseId, opts.productId, companyId, openingDate],
     },
     // 5) FIFO layer for the opening receipt (all methods — see above)
     ...(openingLayer ? [{ sql: openingLayer.sql, params: (openingLayer.params ?? []) as unknown[] }] : []),

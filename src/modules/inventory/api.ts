@@ -240,6 +240,8 @@ export const inventoryApi = {
         quantity: openingQty,
         warehouseId: data.openingWarehouseId || null,
         costPrice: Number(data.costPrice) || 0,
+        // User-supplied opening date; omitted → entry date (today).
+        openingDate: data.openingDate,
       });
       // An explicit fact, not an assumption: callers must never claim the
       // opening stock was posted because a warehouse id was merely supplied.

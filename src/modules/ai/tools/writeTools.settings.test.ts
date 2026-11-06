@@ -4,6 +4,8 @@ vi.mock('@/core/api', () => ({
   createProductType: vi.fn(),
   createUnit: vi.fn(),
   createCashBox: vi.fn(),
+  updateCashBox: vi.fn(),
+  getCashBoxes: vi.fn(),
   createCostCenter: vi.fn(),
 }));
 
@@ -121,13 +123,21 @@ describe('settings tools — RBAC + companyId regression', () => {
       );
     });
 
-    it('settings.create_cash_box forwards companyId to the API', async () => {
+    it('settings.create_cash_box maps nameAr → the real name/currentBalance columns', async () => {
       const tool = findTool('settings.create_cash_box');
       vi.mocked(createCashBox).mockResolvedValue({ success: true, id: 'cb1' } as never);
 
-      await tool!.execute({ nameAr: 'خزنة جيب' }, ctx);
+      await tool!.execute({ nameAr: 'خزنة جيب', openingBalance: 2500 }, ctx);
       expect(createCashBox).toHaveBeenCalledWith(
-        expect.objectContaining({ nameAr: 'خزنة جيب', companyId: ctx.companyId }),
+        expect.objectContaining({
+          name: 'خزنة جيب',
+          currentBalance: 2500,
+          companyId: ctx.companyId,
+        }),
+      );
+      // The old payload used nameAr/openingBalance — columns the INSERT never read.
+      expect(createCashBox).toHaveBeenCalledWith(
+        expect.not.objectContaining({ nameAr: expect.anything() }),
       );
     });
 

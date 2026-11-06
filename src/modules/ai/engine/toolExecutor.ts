@@ -265,14 +265,17 @@ export async function executeToolCall(
       invalidateToolCache();
 
       const user = useAuthStore.getState().user;
+      // recordId must identify the AFFECTED entity, not the tool — an audit
+      // trail keyed by tool name cannot be joined to the document it created.
+      const recordId = extractRecordId(result) ?? name;
       void logAudit({
         userId: ctx.userId,
         username: user?.username,
         action: auditActionFor(name),
         tableName: 'ai_tool_calls',
-        recordId: name,
+        recordId,
         recordLabel: tool.labelAr,
-        newValues: { args: cleanArgs, result: summarizeForAudit(result) },
+        newValues: { tool: name, args: cleanArgs, result: summarizeForAudit(result) },
         companyId: ctx.companyId,
       });
     } else {
@@ -285,6 +288,26 @@ export async function executeToolCall(
     const error = e instanceof Error ? e.message : String(e);
     return { ok: false, error, errorClass: classifyToolError(error) };
   }
+}
+
+/**
+ * Best-effort affected-entity id from a tool result. Creation tools return
+ * `<entity>Id` (customerId, invoiceId…) or `id`; wizards return the strongest
+ * document id. Never throws and never invents an id.
+ */
+function extractRecordId(result: unknown): string | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const r = result as Record<string, unknown>;
+  const preferred = [
+    'invoiceId', 'voucherId', 'returnId', 'quotationId', 'orderId',
+    'productId', 'customerId', 'supplierId', 'employeeId', 'accountId',
+    'workOrderId', 'bomId', 'transactionId', 'paymentId', 'id',
+  ];
+  for (const key of preferred) {
+    const v = r[key];
+    if (typeof v === 'string' && /^[0-9a-fA-F-]{20,}$/.test(v)) return v;
+  }
+  return null;
 }
 
 function summarizeForAudit(result: unknown): unknown {

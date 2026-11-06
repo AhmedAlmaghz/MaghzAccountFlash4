@@ -8567,7 +8567,7 @@ export async function seedInitialData(adminPassword, company) {
     await client.query(`
       INSERT INTO product_types (company_id, name_ar, name_en, code, appears_in_sales, appears_in_purchases, appears_in_inventory, has_stock_tracking)
       VALUES ($1, $2, $3, $4, true, true, true, true) ON CONFLICT DO NOTHING;
-    `, [companyId, 'ط³ظ„ط¹ط© طھط¬ط§ط±ظٹط©', 'Trading Goods', 'TRADE']);
+    `, [companyId, 'سلعة تجارية', 'Trading Goods', 'TRADE']);
 
     // 5c. Seed units
     await client.query(`
@@ -9025,7 +9025,7 @@ export function registerOnboardingHandlers() {
       const companyId = typeof result === 'string' ? result : result?.companyId;
       const effectivePassword = typeof result === 'string' ? undefined : result?.adminPassword;
       if (!companyId) {
-        // Data already exists â€” find the existing company
+        // Data already exists — find the existing company
         const check = await pool.query('SELECT id FROM companies LIMIT 1');
         const existingId = check.rows[0]?.id;
         if (!existingId) {

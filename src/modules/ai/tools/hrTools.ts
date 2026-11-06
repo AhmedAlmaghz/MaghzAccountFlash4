@@ -1,7 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { hrApi } from '@/modules/hr/api';
 import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
-import { normalizeDateArg } from '../engine/argNormalizers';
+import { normalizeDateArg, parseFlexibleNumber } from '../engine/argNormalizers';
 
 /**
  * HR professional tools — built on the professionalized hrApi surface where
@@ -13,8 +13,10 @@ import { normalizeDateArg } from '../engine/argNormalizers';
  */
 
 function num(v: unknown): number {
-  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
+  // Flexible parsing (Arabic-Indic digits, thousands separators, currency
+  // words). The old digit-stripping regex turned "١٢" into 0 — silently
+  // zeroing month/year/overtime in every HR tool.
+  return parseFlexibleNumber(v) ?? 0;
 }
 
 function str(v: unknown): string | undefined {

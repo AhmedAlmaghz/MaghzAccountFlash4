@@ -190,7 +190,7 @@ export const accountingApi = {
     }
   },
 
-  async createAccount(data: Omit<Account, 'id'>, userId: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  async createAccount(data: Omit<Account, 'id'>, userId: string): Promise<{ success: boolean; id?: string; error?: string; warning?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, data.companyId);
       if (!cidValidation.success) return { success: false, error: cidValidation.error };
@@ -218,13 +218,24 @@ export const accountingApi = {
         const openingAmount = Number((data as Partial<Account> & { openingAmount?: number }).openingAmount) || 0;
         if (createdId && openingAmount > 0 && !(data as Partial<Account>).openingBalancePosted) {
           const { postAccountOpeningBalance } = await import('@/core/utils/openingBalance');
-          await postAccountOpeningBalance(data.companyId, {
+          const posted = await postAccountOpeningBalance(data.companyId, {
             accountId: createdId,
             accountCode: data.code,
             accountName: data.nameAr,
             direction: ((data as Partial<Account> & { openingDirection?: string }).openingDirection === 'credit' ? 'credit' : 'debit'),
             amount: openingAmount,
+            // User-supplied opening date; omitted → entry date (today).
+            openingDate: (data as Partial<Account>).openingDate,
           });
+          if (!posted.success) {
+            // The row exists but the books were not updated — report it as a
+            // warning instead of pretending the opening balance landed.
+            return {
+              success: true,
+              id: createdId,
+              warning: `تعذّر ترحيل الرصيد الافتتاحي: ${posted.error || 'سبب غير معروف'}`,
+            };
+          }
         }
         return { success: true, id: createdId };
       }

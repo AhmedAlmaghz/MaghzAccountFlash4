@@ -271,8 +271,16 @@ export const detailedReportTools: ToolDefinition[] = [
       if (typeof args.supplierId === 'string' && args.supplierId) { p.push(args.supplierId); cnd.push(`pi.supplier_id=$${p.length}::uuid`); }
       if (typeof args.createdBy === 'string' && args.createdBy) { p.push(args.createdBy); cnd.push(`pi.created_by=$${p.length}::uuid`); }
       if (typeof args.paymentType === 'string') {
-        if (args.paymentType === 'cash') cnd.push('COALESCE(pi.paid_amount,0) >= pi.total_amount');
-        else if (args.paymentType === 'credit') cnd.push('COALESCE(pi.paid_amount,0) < pi.total_amount');
+        if (args.paymentType === 'cash') {
+          cnd.push('COALESCE(pi.paid_amount,0) >= pi.total_amount');
+        } else if (args.paymentType === 'credit') {
+          // Unpaid in full — includes partials (historical meaning).
+          cnd.push('COALESCE(pi.paid_amount,0) < pi.total_amount');
+        } else if (args.paymentType === 'partial') {
+          // Advertised in the schema but previously a no-op: it returned ALL
+          // invoices. Partial = some money paid, some still outstanding.
+          cnd.push('COALESCE(pi.paid_amount,0) > 0 AND COALESCE(pi.paid_amount,0) < pi.total_amount');
+        }
       }
       if (typeof args.productId === 'string' && args.productId) {
         p.push(args.productId);

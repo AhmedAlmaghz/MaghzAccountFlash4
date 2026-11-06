@@ -101,10 +101,12 @@ function dbFailure(err: unknown): { success: false; error: string; errorCode?: s
 
 import schemaInit from '@root/drizzle/0000_init.sql?raw';
 import schemaAssetPeriods from '@root/drizzle/0001_asset_periods.sql?raw';
+import schemaProductsOpeningDate from '@root/drizzle/0002_products_opening_date.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
   { name: '0001_asset_periods', sql: schemaAssetPeriods },
+  { name: '0002_products_opening_date', sql: schemaProductsOpeningDate },
 ];
 
 /**

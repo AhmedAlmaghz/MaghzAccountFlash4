@@ -33,6 +33,11 @@ const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/opena
 // the gemini preset in providers.ts — enforced by providerDefaults.test.ts).
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const REQUEST_TIMEOUT_MS = 90000;
+// Streaming gets a longer budget than a single completion because a legitimate
+// long report streams for minutes. Must stay BELOW the renderer watchdog
+// (STREAM_TOTAL_TIMEOUT_MS = 120s) so the transport aborts first and the
+// engine's non-streaming fallback still has time to run.
+const STREAM_TIMEOUT_MS = 110000;
 const TEST_TIMEOUT_MS = 30000;
 
 const ENC_PREFIX = 'enc:v1:';
@@ -420,7 +425,8 @@ async function* callChatCompletionStream({
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs ?? REQUEST_TIMEOUT_MS);
+  // Streaming gets its own (longer) budget — see STREAM_TIMEOUT_MS.
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? STREAM_TIMEOUT_MS);
   try {
     const res = await fetch(`${normalizeBaseUrl(baseUrl)}/chat/completions`, {
       method: 'POST',
@@ -794,6 +800,12 @@ export function registerAiHandlers() {
       if (baseUrl !== undefined) await upsertAiSetting(companyId, BASE_URL_SETTING, normalizeBaseUrl(String(baseUrl || DEFAULT_BASE_URL)));
       if (model !== undefined) await upsertAiSetting(companyId, MODEL_SETTING, String(model || DEFAULT_MODEL));
       if (enabled !== undefined) await upsertAiSetting(companyId, ENABLED_SETTING, enabled ? 'true' : 'false');
+      // Browser-mode kill-switch: get-config already reports it and the browser
+      // bridge enforces it, but the desktop save path never persisted it — the
+      // toggle silently reverted on the next load.
+      if (payload.browserDisabled !== undefined) {
+        await upsertAiSetting(companyId, 'ai.browser_disabled', payload.browserDisabled ? 'true' : 'false');
+      }
       if (tokenBudget !== undefined) {
         // 0/null = unlimited. Reject NaN/negatives loudly (mirror browserBridge).
         if (tokenBudget !== null) {
@@ -1230,7 +1242,26 @@ export function registerAiHandlers() {
          RETURNING id`,
         [companyId, userId, retention]
       );
-      return { success: true, data: { purged: res.rows.length, retentionDays: retention } };
+      // Batch rows carry customer names, amounts and tool args. They are not
+      // children of the session (session_id is SET NULL), so deleting
+      // transcripts never removed them — a PII retention hole. Terminal
+      // batches only: a live worker's rows must never be swept.
+      const batchRes = await pool.query(
+        `DELETE FROM ai_job_batches
+          WHERE company_id = $1::uuid AND user_id = $2::uuid
+            AND status IN ('done', 'partial', 'cancelled')
+            AND updated_at < NOW() - ($3::int * INTERVAL '1 day')
+         RETURNING id`,
+        [companyId, userId, retention]
+      );
+      return {
+        success: true,
+        data: {
+          purged: res.rows.length,
+          purgedBatches: batchRes.rows.length,
+          retentionDays: retention,
+        },
+      };
     } catch (err) {
       return { success: false, error: err.message };
     }

@@ -31,7 +31,7 @@ export const taxTools: ToolDefinition[] = [
   {
     name: 'settings.get_tax_country',
     labelAr: 'الدولة الضريبية',
-    descriptionAr: 'يعيد الولاية الضريبية للشركة: كود الدولة ومعدل الضريبة والمنطقة الزمنية — تُستخدم قبل أي حساب ضريبي.',
+    descriptionAr: 'يعيد الولاية الضريبية للشركة: كود الدولة ومعدل الضريبة بالنسبة المئوية (مثال 15 تعني 15%) والمنطقة الزمنية — تُستخدم قبل أي حساب ضريبي. لا تفترض 15% إن كانت الدولة غير محددة.',
     permission: 'settings.view',
     dangerLevel: 'read',
     parameters: {
@@ -40,10 +40,15 @@ export const taxTools: ToolDefinition[] = [
     },
     execute: async (_args, ctx) => {
       const taxCtx = await getCompanyTaxContext(ctx.companyId);
+      // PERCENT unit (15, 5, 14, 0) — every write tool/form treats rates as
+      // percentages. The old payload returned the fraction 0.15 while the
+      // description said "15%", so a model could book a 0.15% invoice.
+      const vatRatePercent = Math.round(Number(taxCtx.profile.vat.standard) * 10000) / 100;
       return {
         countryCode: taxCtx.countryCode,
         timezone: taxCtx.timezone,
-        vatRate: taxCtx.profile.vat.standard,
+        vatRate: vatRatePercent,
+        vatRateUnit: 'percent',
         currency: taxCtx.profile.registration.currency,
       };
     },

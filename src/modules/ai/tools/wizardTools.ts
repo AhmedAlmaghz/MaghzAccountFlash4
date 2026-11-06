@@ -7,7 +7,7 @@ import { purchasesApi } from '@/modules/purchases/api';
 import { crmApi } from '@/modules/crm/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
-import { getInvoiceTaxConfig, computeHeaderDiscount, parseLines, resolveLineUnits, LINES_SCHEMA } from './writeTools/shared';
+import { getInvoiceTaxConfig, computeHeaderDiscount, parseLines, resolveLineUnits, summarizeDocLines, LINES_SCHEMA } from './writeTools/shared';
 
 // ─── Helpers (mirror writeTools.ts) ───────────────────────────────────────
 
@@ -25,28 +25,13 @@ function today(): string {
   return localToday();
 }
 
-import { roundMoney, getCompanyDecimalPlaces } from '@/core/utils/locale';
+import { roundMoney } from '@/core/utils/locale';
 
 // Company-precision rounding (0 allowed) — same contract as writeTools/shared.
 const round2 = (v: number) => roundMoney(v);
 
-/**
- * Rich confirmation summary for document tools: line count + estimated
- * pre-VAT total, so the approval card shows real substance the user can
- * verify before consenting.
- */
-function summarizeDocLines(label: string, lines: unknown): string {
-  const arr = Array.isArray(lines) ? (lines as Array<Record<string, unknown>>) : [];
-  const total = round2(
-    arr.reduce(
-      (s, l) => s + (Number(l?.quantity) || 0) * (Number(l?.unitPrice) || 0) * (1 - (Number(l?.discountPercent) || 0) / 100),
-      0,
-    ),
-  );
-  const dp = getCompanyDecimalPlaces();
-  const totalStr = new Intl.NumberFormat('ar-YE', { minimumFractionDigits: dp, maximumFractionDigits: dp }).format(total);
-  return `${label} — ${arr.length} أصناف — الإجمالي قبل الضريبة ≈ ${totalStr} ر.ي`;
-}
+// Confirmation summaries reuse the single shared implementation (company
+// currency + unit note) — the local copy printed a hardcoded "ر.ي".
 
 /**
  * Multi-step wizard tools. Line parsing + unit resolution come from
