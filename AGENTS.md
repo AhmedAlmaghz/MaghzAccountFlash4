@@ -5143,3 +5143,38 @@ npx drizzle-kit migrate
   - **الجلسة التي لا تنجو من reload ليست جلسة**: أي توكن في الذاكرة فقط يُفقد عند أول `location.reload()` — والتمهيد بعد التبديل يعتمد عليه حتماً. الثبات في sessionStorage + انتهاء خادمي = العقد الصحيح.
   - **تبديل الهدف يُسقط الهوية**: أي `companyId` مخزّن في جلسة ينتمي لقاعدة أخرى بعد التبديل — امسح الكل وأعد التوثيق، لا ترحّل.
   - **لا تطوِ خطأ المصادقة في "لا بيانات"**: كل `No X found` يُرجَع عند فشل التوثيق هو reset مدمّر ينتظر أول reload — افصل الحالتين بقناة عدّ صريحة.
+
+### المرحلة 101: ترميز أدوات القراءة + تواريخ الأرصدة الافتتاحية + إصلاحات P0 من تدقيق الوكيل
+- **P0 — تلف ترميز `readTools.ts`**: الملف كامل (21 أداة) كان mojibake (UTF-8 → cp1256) منذ `fe622b4`، والنموذج يرى `ظ…ط¹ظ„ظˆظ…ط§طھ` بدل «معلومات الشركة». أُصلح بعكس التحويل بايت-بايت (حافظ على إصلاحات P0-6 للصلاحيات وفلتر totalEos) + **بوابة `src/test/encodingGate.test.ts`** تمسح AI/i18n/electron وترفض تسلسلات mojibake و`\uFFFD`.
+- **ميزة تواريخ الأرصدة الافتتاحية (طلب المستخدم)**: تاريخ يمرره المستخدم للعملاء/الموردين/المنتجات/الحسابات، وإذا لم يمرر يُستخدم تاريخ الإدخال (اليوم المحلي):
+  - Migration `0002_products_opening_date.sql` (`products.opening_date date`) + Drizzle + PGlite MIGRATIONS + journal idx=2 + تحديث `migrations.test.ts`.
+  - `postProductStockOpening` يقبل `openingDate` ويستخدمه لطبقة FIFO + تاريخ القيد + ختم `products.opening_date` (وأزيل فخ `toISOString()` UTC).
+  - APIs: `inventory.createProduct` + `accounting.createAccount` (openingAmount/openingDirection/openingDate) + customers/suppliers (كانا يدعمان).
+  - الأدوات: `sales.create_customer`, `purchases.create_supplier`, `inventory.create_product`, `accounting.create_account` تقبل `openingDate`؛ و`argNormalizers` يطبّع `openingDate` (عربي/هجري) في نقطة الاختناق.
+  - الواجهات: حقل تاريخ في `ProductsPage` و`ChartOfAccounts` (العملاء/الموردون كانا جاهزين).
+  - تحقق حي على PG داخل ROLLBACK: العمود + round-trip + SQL التقارير = 6/6.
+- **إصلاحات P0/P1 أخرى**:
+  - `pos.checkout_sale`: الضريبة من `getInvoiceTaxConfig` (كانت من النموذج) + رفض fail-fast عند تعذر القراءة.
+  - السندات: `invoiceId`/`amountApplied` مع default = المستحق + سقوف + تحديث `paid_amount`/الحالة عبر الـ API.
+  - `update_invoice` (مبيعات/مشتريات): أزيل `paidAmount`/`discountAmount` (الدفع عبر السندات، الخصم من الشاشة) — منع فساد الأعمار/الإجمالي.
+  - `settings.create/update_cash_box`: `name` و`currentBalance` الحقيقيان + merge قبل full-row update (كان الاسم/الرصيد يُسقطان بصمت).
+  - `sales/purchases.create_customer/supplier`: نشر `warning` عند فشل قيد الرصيد الافتتاحي (لا ادعاء ترحيل).
+  - `search.payroll_runs`: إصلاح TDZ (`monthNames` قبل `toRow`).
+  - `streaming.reconstructResponseFromChunks`: تراكم `usage` من finish chunk (ميزانية tokens كانت صفراً في البث) + مهلة بث 110s تحت حارس 120s.
+  - البرومبت: تصحيح أسماء أدوات غير موجودة (`read.*` → الأدوات الحقيقية) + **بوابة `systemPrompt.tools.test.ts`** تتحقق أن كل أداة مذكورة مسجّلة.
+  - الموجّه: `ALWAYS_ON` يضم `ai.preview_batch`/الحقائق/بحث الخدمات (cash_boxes/product_units/units/accounts) + توحيد JEV router (إزالة search.* من النوايا).
+  - `reports.dashboard` و`accounting.cash_flow`: من القيود المرحلة (4*/5*/111*) بدل ازدواج الفواتير+السندات وتسمية الاستحقاق "نقدي".
+  - `taxTools`: `vatRate` كنسبة مئوية (15) بدل كسر (0.15) + `vatRateUnit`.
+  - `hrTools.num`: `parseFlexibleNumber` (الأرقام العربية لم تعد صفراً).
+  - `detailedReportTools`: `paymentType='partial'` أصبح يفلتر فعلاً.
+  - الجسر: فرض `ai.enabled` + تحقق رسائل + كنس PII للدفعات + حفظ `browserDisabled` في main.
+  - التدقيق: `recordId` = معرف الكيان من النتيجة، وليس اسم الأداة.
+- **اختبارات جديدة**: `openingBalance.test.ts` (4)، `openingDate` للأدوات (7)، `argNormalizers` (5)، `systemPrompt.tools` (3)، `encodingGate` (2)، توسعة POS VAT (2)، تخصيص السندات (5)، تحديث توقعات tax/streaming/settings/migrations.
+- **التحقق**: `tsc -b` 0 ✓ | `eslint --max-warnings=0` 0 ✓ | **AI كامل 112 ملف / 1098 اختبار ✓** | Tools 34/347 ✓ | Engine 40/487 ✓ | API 9/63 ✓ | Inventory/Accounting/Sales/Purchases/Core 5/269 ✓ | `npm run build` ✓ | `db:check` ✓ | PG smoke 6/6 ✓ | تُرك أحمر عمداً: `docsVersionGate` (Docs 0.26.11) و`tranche9b.routing` (خلل jsdom pre-existing في setter window).
+- **قواعد ذهبية مضافة**:
+  - **التلف الترميزي لا يكسر الاختبارات**: أضف بوابة mojibake — الاختبارات لا تقرأ النص العربي المُعلن للنموذج.
+  - **`String(Date)`/`toISOString()` في أي مسار افتتاحي = انزياح يوم**: استخدم `toDateString` المحلي دائماً (FIFO + JE + الختم).
+  - **تاريخ واحد يقود كل الآثار**: FIFO + القيد + ختم الكيان من نفس `openingDate`؛ وإلا اختلفت التقارير عن القيد.
+  - **حقل مالي في أداة تحديث = بوابة فساد**: لا تعرض `paidAmount`/`discountAmount` على الوكيل؛ الدفع سند والخصم شاشة تعيد الحساب.
+  - **أسماء الأدوات في البرومبت عقد**: كل اسم مذكور يجب أن يكون مسجّلاً — بوابة آلية، لا مراجعة بشرية.
+  - **`adapter.query` ratchet**: أي إضافة في renderer تتطلب رفع السقف بتوثيق مبرر (هنا: كنس PII في جسر المتصفح فقط).
