@@ -1521,9 +1521,11 @@ export const reportTools: ToolDefinition[] = [
           },
         },
         leadToCustomerRate: pct(convertedLeads, totalLeads),
-        opportunityWinRate: (oppsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.count), 0) > 0
-          ? pct(wonOpps, (oppsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.count), 0))
-          : 0,
+        // Win rate over CLOSED deals only (won + lost). The old denominator
+        // was every opportunity including open ones, so the rate dropped as
+        // the pipeline grew — contradicting crm.rep_performance.
+        opportunityWinRate: closedOpps > 0 ? pct(wonOpps, closedOpps) : 0,
+        closedDeals: closedOpps,
       };
     },
   },
