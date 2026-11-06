@@ -809,15 +809,29 @@ export const reportTools: ToolDefinition[] = [
       `, [ctx.companyId]);
 
       if (!res.success) return { error: res.error || 'فشل جلب تقييم المخزون' };
+      // Totals must cover the WHOLE company, not the top-100 display window.
+      // The old code reduced the LIMIT-100 rows and presented them as company
+      // totals — a silently wrong valuation for any catalogue over 100 items.
+      const agg = await guardedQuery(
+        `SELECT
+           COALESCE(SUM(COALESCE(s.quantity, 0) * COALESCE(p.cost_price, 0)), 0) AS total_value,
+           COALESCE(SUM(COALESCE(s.quantity, 0)), 0) AS total_qty,
+           COUNT(DISTINCT p.id)::int AS product_count
+         FROM products p
+         LEFT JOIN stock s ON p.id = s.product_id AND s.company_id = p.company_id
+         WHERE p.company_id = $1::uuid`,
+        [ctx.companyId],
+      );
+      if (!agg.success) return { error: agg.error || 'فشل تجميع تقييم المخزون' };
       const rows = res.rows || [];
-      const totalValue = rows.reduce((s: number, r: Record<string, unknown>) => s + num(r.stock_value), 0);
-      const totalQty = rows.reduce((s: number, r: Record<string, unknown>) => s + num(r.quantity), 0);
-      const productCount = rows.length;
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
 
       return {
-        totalValue: Math.round(totalValue * 100) / 100,
-        totalQuantity: Math.round(totalQty * 100) / 100,
-        productCount,
+        totalValue: Math.round(num(a.total_value) * 100) / 100,
+        totalQuantity: Math.round(num(a.total_qty) * 100) / 100,
+        productCount: num(a.product_count),
+        listedProducts: rows.length,
+        hasMore: num(a.product_count) > rows.length,
         products: rows.slice(0, 50).map((r: Record<string, unknown>) => ({
           name: r.name_ar, code: r.code, sku: r.sku,
           costPrice: num(r.cost_price), salePrice: num(r.sale_price),
@@ -859,23 +873,30 @@ export const reportTools: ToolDefinition[] = [
       if (!res.success) return { error: res.error || 'فشل جلب حركة المخزون' };
       const rows = res.rows || [];
 
-      const typeSummary: Record<string, { count: number; totalQty: number }> = {};
-      for (const r of rows) {
-        // P1 fix: signed adjustment directions settle by SIGN (shortages
-        // subtract) — the old code lumped every adjustment as +qty.
-        const t = String(r.type || 'unknown');
-        const signedQty = t === 'in' || t === 'adjustment_in' || t === 'adjustment' ? num(r.quantity) : -num(r.quantity);
-        const entry = typeSummary[t] || { count: 0, totalQty: 0 };
-        entry.count += 1; entry.totalQty += signedQty;
-        typeSummary[t] = entry;
-      }
+      // Aggregates over the WHOLE period (the list above is a 200-row page).
+      const agg = await guardedQuery(
+        `SELECT type,
+                COUNT(*)::int AS cnt,
+                COALESCE(SUM(CASE WHEN type IN ('in', 'adjustment_in', 'adjustment')
+                                  THEN quantity ELSE -quantity END), 0) AS qty
+           FROM stock_movements
+          WHERE company_id = $1::uuid AND created_at::date BETWEEN $2 AND $3
+          GROUP BY type`,
+        [ctx.companyId, from, to],
+      );
+      if (!agg.success) return { error: agg.error || 'فشل تجميع حركة المخزون' };
+      const aggRows = (agg.rows || []) as Array<Record<string, unknown>>;
+      const totalMovements = aggRows.reduce((s, r) => s + num(r.cnt), 0);
 
       return {
         period: { from, to },
-        totalMovements: rows.length,
-        byType: Object.entries(typeSummary).map(([type, d]) => ({
-          type, count: d.count, totalQuantity: Math.round(d.totalQty * 100) / 100,
-          percentage: pct(d.count, rows.length),
+        totalMovements,
+        listedMovements: rows.length,
+        byType: aggRows.map((r) => ({
+          type: String(r.type || 'unknown'),
+          count: num(r.cnt),
+          totalQuantity: Math.round(num(r.qty) * 100) / 100,
+          percentage: pct(num(r.cnt), totalMovements),
         })),
         movements: rows.slice(0, 100).map((r: Record<string, unknown>) => ({
           date: r.created_at, type: r.type,
@@ -1009,9 +1030,11 @@ export const reportTools: ToolDefinition[] = [
     execute: async (_args, ctx) => {
       
 
-      const [kpiRes, warehouseRes, prodRes, catRes] = await Promise.all([
+      const [kpiRes, warehouseRes, countRes, prodRes, catRes] = await Promise.all([
         inventoryApi.getInventoryKpis(ctx.companyId),
         guardedQuery(`SELECT COUNT(*)::int AS count FROM warehouses WHERE company_id = $1::uuid`, [ctx.companyId]),
+        // Separate COUNT — the product list below is a TOP-20 display window.
+        guardedQuery(`SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1::uuid`, [ctx.companyId]),
         guardedQuery(`
           SELECT p.name_ar, p.code, p.sale_price, p.cost_price,
                  COALESCE(s.quantity, 0) AS qty,
@@ -1037,7 +1060,7 @@ export const reportTools: ToolDefinition[] = [
         stockValue: kpi ? Math.round(kpi.stockValue * 100) / 100 : 0,
         lowStockItems: kpi?.lowStockItems || 0,
         warehouseCount: num(warehouseRes.rows?.[0]?.count || 0),
-        productCount: (prodRes.rows || []).length,
+        productCount: num(countRes.rows?.[0]?.count || 0),
         topProducts: (prodRes.rows || []).slice(0, 10).map((r: Record<string, unknown>) => ({
           name: r.name_ar, code: r.code, qty: num(r.qty), value: Math.round(num(r.value) * 100) / 100,
         })),

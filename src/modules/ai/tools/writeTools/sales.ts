@@ -380,7 +380,7 @@ export const salesWriteTools: ToolDefinition[] = [
   {
     name: 'sales.update_customer',
     labelAr: 'تعديل عميل',
-    descriptionAr: 'يُعدّل بيانات عميل موجود (الاسم، الهاتف، البريد، العنوان، الرقم الضريبي، الحد الائتماني، الرصيد، الحالة). استخدم search.customers أولاً لإيجاد customerId.',
+    descriptionAr: 'يُعدّل بيانات عميل موجود (الاسم، الهاتف، البريد، العنوان، الرقم الضريبي، الحد الائتماني، الحالة). الرصيد محسوب من الدفتر ولا يُكتب مباشرة. استخدم search.customers أولاً لإيجاد customerId.',
     permission: 'sales.edit',
     dangerLevel: 'write',
     parameters: {
@@ -393,7 +393,6 @@ export const salesWriteTools: ToolDefinition[] = [
         address: { type: 'string', description: 'العنوان (اختياري)' },
         taxNumber: { type: 'string', description: 'الرقم الضريبي (اختياري)' },
         creditLimit: { type: 'number', description: 'الحد الائتماني (اختياري)' },
-        balance: { type: 'number', description: 'الرصيد الافتتاحي (اختياري)' },
         isActive: { type: 'boolean', description: 'نشط/غير نشط (اختياري)' },
       },
       required: ['customerId'],
@@ -402,6 +401,16 @@ export const salesWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const customerId = str(args.customerId);
       if (!customerId) return { error: 'customerId مطلوب — استخدم search.customers أولاً' };
+      // `balance` is a ledger-derived snapshot (statements/aging compute it).
+      // Writing the legacy mirror here changed nothing the user sees and
+      // desynced the column from the books.
+      if (args.balance !== undefined) {
+        return {
+          error:
+            'رصيد العميل محسوب من الفواتير والسندات ولا يُعدّل يدوياً من هذه الأداة. ' +
+            'لتغيير الرصيد سجّل فاتورة/سنداً، أو عدّل الرصيد الافتتاحي عند الإنشاء قبل الترحيل.',
+        };
+      }
       const data: Record<string, unknown> = {};
       if (args.name !== undefined) data.name = str(args.name);
       if (args.phone !== undefined) data.phone = str(args.phone);
@@ -409,7 +418,6 @@ export const salesWriteTools: ToolDefinition[] = [
       if (args.address !== undefined) data.address = str(args.address);
       if (args.taxNumber !== undefined) data.taxNumber = str(args.taxNumber);
       if (args.creditLimit !== undefined) data.creditLimit = num(args.creditLimit);
-      if (args.balance !== undefined) data.balance = num(args.balance);
       if (args.isActive !== undefined) data.isActive = Boolean(args.isActive);
       if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل' };
       const res = await salesApi.updateCustomer(customerId, ctx.companyId, data);

@@ -231,6 +231,8 @@ export function normalizeDateArg(value: unknown, today = new Date()): string | n
 const DATE_ARG_KEYS = new Set([
   'date', 'dueDate', 'expiryDate', 'expectedDate', 'checkDate',
   'fromDate', 'toDate', 'startDate', 'endDate', 'terminationDate',
+  // CRM activity log — used to reach PG raw ("12-8") and fail the insert.
+  'activityDate',
   // Opening balances (customers/suppliers/products/accounts): the user may
   // pass "15 أغسطس 2026" or a Hijri date — normalize once here so every
   // write tool and API receives YYYY-MM-DD. Omitted ⇒ entry date.

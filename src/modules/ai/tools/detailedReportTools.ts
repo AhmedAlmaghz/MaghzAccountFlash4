@@ -182,19 +182,40 @@ export const detailedReportTools: ToolDefinition[] = [
       if (typeof args.customerId === 'string' && args.customerId) { params.push(args.customerId); custCond = `AND i.customer_id=$${params.length}::uuid`; }
       let prodCond = '';
       if (typeof args.productId === 'string' && args.productId) { params.push(args.productId); prodCond = `AND sil.product_id=$${params.length}::uuid`; }
+      // Totals over the SAME filter but WITHOUT the display LIMIT — the old
+      // code summed only the returned page and called it totalRevenue.
+      const aggParams: unknown[] = [ctx.companyId, from, to];
+      let aggCust = '';
+      if (typeof args.customerId === 'string' && args.customerId) { aggParams.push(args.customerId); aggCust = `AND i.customer_id=$${aggParams.length}::uuid`; }
+      let aggProd = '';
+      if (typeof args.productId === 'string' && args.productId) { aggParams.push(args.productId); aggProd = `AND sil.product_id=$${aggParams.length}::uuid`; }
+      const aggP = guardedQuery(
+        `SELECT COUNT(DISTINCT p.id)::int AS pcnt, COALESCE(SUM(sil.line_total),0) AS rev
+           FROM sales_invoice_lines sil
+           JOIN sales_invoices i ON sil.invoice_id=i.id
+           JOIN products p ON sil.product_id=p.id
+          WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${aggCust} ${aggProd}`,
+        aggParams,
+      );
       params.push(limit);
-      const res = await guardedQuery(
-        `SELECT p.name_ar AS pname,p.code AS pcode,COALESCE(SUM(sil.quantity),0) AS qty,COALESCE(SUM(sil.line_total),0) AS rev,COUNT(DISTINCT i.customer_id)::int AS ccnt,COUNT(DISTINCT i.id)::int AS icnt FROM sales_invoice_lines sil JOIN sales_invoices i ON sil.invoice_id=i.id JOIN products p ON sil.product_id=p.id WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${custCond} ${prodCond} GROUP BY p.id,p.name_ar,p.code ORDER BY ${sf} ${sDir} LIMIT $${params.length}`, params);
+      const [res, agg] = await Promise.all([
+        guardedQuery(
+          `SELECT p.name_ar AS pname,p.code AS pcode,COALESCE(SUM(sil.quantity),0) AS qty,COALESCE(SUM(sil.line_total),0) AS rev,COUNT(DISTINCT i.customer_id)::int AS ccnt,COUNT(DISTINCT i.id)::int AS icnt FROM sales_invoice_lines sil JOIN sales_invoices i ON sil.invoice_id=i.id JOIN products p ON sil.product_id=p.id WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${custCond} ${prodCond} GROUP BY p.id,p.name_ar,p.code ORDER BY ${sf} ${sDir} LIMIT $${params.length}`, params),
+        aggP,
+      ]);
       if (!res.success) return { error: res.error || 'فشل' };
+      if (!agg.success) return { error: agg.error || 'فشل تجميع المبيعات' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
         product: r.pname, code: r.pcode,
         quantity: Math.round(num(r.qty) * 100) / 100,
         revenue: Math.round(num(r.rev) * 100) / 100,
         customerCount: num(r.ccnt), invoiceCount: num(r.icnt),
       }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
-        period: { from, to }, productCount: rows.length,
-        totalRevenue: Math.round(rows.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+        period: { from, to }, productCount: num(a.pcnt),
+        totalRevenue: Math.round(num(a.rev) * 100) / 100,
+        listedProducts: rows.length,
         products: rows,
       };
     },
@@ -231,13 +252,25 @@ export const detailedReportTools: ToolDefinition[] = [
       `, [ctx.companyId, from, to, limit]);
 
       if (!res.success) return { error: res.error || 'فشل' };
+      // Company-wide totals, independent of the per-user LIMIT.
+      const agg = await guardedQuery(
+        `SELECT COALESCE(SUM(total_amount),0) AS rev, COUNT(*)::int AS icnt
+           FROM sales_invoices
+          WHERE company_id=$1::uuid AND date BETWEEN $2 AND $3 AND status!='cancelled'`,
+        [ctx.companyId, from, to],
+      );
+      if (!agg.success) return { error: agg.error || 'فشل تجميع المبيعات' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
         user: r.full_name, invoices: num(r.icnt),
         revenue: Math.round(num(r.rev) * 100) / 100,
         cash: num(r.cash_cnt), credit: num(r.credit_cnt),
       }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
-        period: { from, to }, totalRevenue: Math.round(rows.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+        period: { from, to },
+        totalRevenue: Math.round(num(a.rev) * 100) / 100,
+        totalInvoices: num(a.icnt),
+        listedUsers: rows.length,
         users: rows,
       };
     },
@@ -417,19 +450,38 @@ export const detailedReportTools: ToolDefinition[] = [
       if (typeof args.supplierId === 'string' && args.supplierId) { params.push(args.supplierId); suppCond = `AND i.supplier_id=$${params.length}::uuid`; }
       let prodCond = '';
       if (typeof args.productId === 'string' && args.productId) { params.push(args.productId); prodCond = `AND pil.product_id=$${params.length}::uuid`; }
+      // Company-wide aggregate over the same filter (no display LIMIT).
+      const aggParams: unknown[] = [ctx.companyId, from, to];
+      let aggSupp = '';
+      if (typeof args.supplierId === 'string' && args.supplierId) { aggParams.push(args.supplierId); aggSupp = `AND i.supplier_id=$${aggParams.length}::uuid`; }
+      let aggProd = '';
+      if (typeof args.productId === 'string' && args.productId) { aggParams.push(args.productId); aggProd = `AND pil.product_id=$${aggParams.length}::uuid`; }
       params.push(limit);
-      const res = await guardedQuery(
-        `SELECT p.name_ar AS pname,p.code AS pcode,COALESCE(SUM(pil.quantity),0) AS qty,COALESCE(SUM(pil.line_total),0) AS val,COUNT(DISTINCT i.supplier_id)::int AS scnt,COUNT(DISTINCT i.id)::int AS icnt FROM purchase_invoice_lines pil JOIN purchase_invoices i ON pil.invoice_id=i.id JOIN products p ON pil.product_id=p.id WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${suppCond} ${prodCond} GROUP BY p.id,p.name_ar,p.code ORDER BY ${sf} ${sDir} LIMIT $${params.length}`, params);
+      const [res, agg] = await Promise.all([
+        guardedQuery(
+          `SELECT p.name_ar AS pname,p.code AS pcode,COALESCE(SUM(pil.quantity),0) AS qty,COALESCE(SUM(pil.line_total),0) AS val,COUNT(DISTINCT i.supplier_id)::int AS scnt,COUNT(DISTINCT i.id)::int AS icnt FROM purchase_invoice_lines pil JOIN purchase_invoices i ON pil.invoice_id=i.id JOIN products p ON pil.product_id=p.id WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${suppCond} ${prodCond} GROUP BY p.id,p.name_ar,p.code ORDER BY ${sf} ${sDir} LIMIT $${params.length}`, params),
+        guardedQuery(
+          `SELECT COUNT(DISTINCT p.id)::int AS pcnt, COALESCE(SUM(pil.line_total),0) AS val
+             FROM purchase_invoice_lines pil
+             JOIN purchase_invoices i ON pil.invoice_id=i.id
+             JOIN products p ON pil.product_id=p.id
+            WHERE i.company_id=$1::uuid AND i.date BETWEEN $2 AND $3 AND i.status!='cancelled' ${aggSupp} ${aggProd}`,
+          aggParams,
+        ),
+      ]);
       if (!res.success) return { error: res.error || 'فشل' };
+      if (!agg.success) return { error: agg.error || 'فشل تجميع المشتريات' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
         product: r.pname, code: r.pcode,
         quantity: Math.round(num(r.qty) * 100) / 100,
         value: Math.round(num(r.val) * 100) / 100,
         supplierCount: num(r.scnt), invoiceCount: num(r.icnt),
       }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
-        period: { from, to }, productCount: rows.length,
-        totalValue: Math.round(rows.reduce((s, r) => s + r.value, 0) * 100) / 100,
+        period: { from, to }, productCount: num(a.pcnt),
+        totalValue: Math.round(num(a.val) * 100) / 100,
+        listedProducts: rows.length,
         products: rows,
       };
     },
@@ -464,13 +516,25 @@ export const detailedReportTools: ToolDefinition[] = [
         ORDER BY val ${sDir} LIMIT $4
       `, [ctx.companyId, from, to, limit]);
       if (!res.success) return { error: res.error || 'فشل' };
+      // Company-wide totals, independent of the per-user LIMIT.
+      const agg = await guardedQuery(
+        `SELECT COALESCE(SUM(total_amount),0) AS val, COUNT(*)::int AS icnt
+           FROM purchase_invoices
+          WHERE company_id=$1::uuid AND date BETWEEN $2 AND $3 AND status!='cancelled'`,
+        [ctx.companyId, from, to],
+      );
+      if (!agg.success) return { error: agg.error || 'فشل تجميع المشتريات' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
         user: r.full_name, invoices: num(r.icnt),
         value: Math.round(num(r.val) * 100) / 100,
         cash: num(r.cash_cnt), credit: num(r.credit_cnt),
       }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
-        period: { from, to }, totalValue: Math.round(rows.reduce((s, r) => s + r.value, 0) * 100) / 100,
+        period: { from, to },
+        totalValue: Math.round(num(a.val) * 100) / 100,
+        totalInvoices: num(a.icnt),
+        listedUsers: rows.length,
         users: rows,
       };
     },
@@ -548,19 +612,35 @@ export const detailedReportTools: ToolDefinition[] = [
       const w = cnd.join(' AND ');
       p.push(limit);
 
-      const res = await guardedQuery(
-        `SELECT p.name_ar AS pname,p.code,p.sku,p.cost_price,p.sale_price,p.is_active,s.quantity,w.name AS wname,(s.quantity * COALESCE(p.cost_price,0)) AS stock_value,(s.quantity <= 0 OR p.is_active = false) AS is_dormant FROM stock s LEFT JOIN products p ON s.product_id=p.id LEFT JOIN warehouses w ON s.warehouse_id=w.id WHERE ${w} ORDER BY ${sf} ${sDir} LIMIT $${p.length}`, p);
+      const aggParams = p.slice(0, -1);
+      const [res, agg] = await Promise.all([
+        guardedQuery(
+          `SELECT p.name_ar AS pname,p.code,p.sku,p.cost_price,p.sale_price,p.is_active,s.quantity,w.name AS wname,(s.quantity * COALESCE(p.cost_price,0)) AS stock_value,(s.quantity <= 0 OR p.is_active = false) AS is_dormant FROM stock s LEFT JOIN products p ON s.product_id=p.id LEFT JOIN warehouses w ON s.warehouse_id=w.id WHERE ${w} ORDER BY ${sf} ${sDir} LIMIT $${p.length}`, p),
+        // Company totals over the FULL filtered set, not the page.
+        guardedQuery(
+          `SELECT COUNT(*)::int AS cnt,
+                  COUNT(*) FILTER (WHERE NOT (s.quantity <= 0 OR p.is_active = false))::int AS active_cnt,
+                  COUNT(*) FILTER (WHERE (s.quantity <= 0 OR p.is_active = false))::int AS dormant_cnt,
+                  COALESCE(SUM(s.quantity * COALESCE(p.cost_price,0)),0) AS val
+             FROM stock s LEFT JOIN products p ON s.product_id=p.id
+            WHERE ${w}`,
+          aggParams,
+        ),
+      ]);
       if (!res.success) return { error: res.error || 'فشل' };
+      if (!agg.success) return { error: agg.error || 'فشل تجميع حالة المخزون' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
         name: r.pname, code: r.code, warehouse: r.wname, quantity: num(r.quantity),
         costPrice: num(r.cost_price), value: Math.round(num(r.stock_value) * 100) / 100,
         isDormant: Boolean(r.is_dormant),
       }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
-        productCount: rows.length,
-        activeCount: rows.filter(r => !r.isDormant).length,
-        dormantCount: rows.filter(r => r.isDormant).length,
-        totalValue: Math.round(rows.reduce((s, r) => s + r.value, 0) * 100) / 100,
+        productCount: num(a.cnt),
+        activeCount: num(a.active_cnt),
+        dormantCount: num(a.dormant_cnt),
+        totalValue: Math.round(num(a.val) * 100) / 100,
+        listedItems: rows.length,
         items: rows,
       };
     },
@@ -582,17 +662,34 @@ export const detailedReportTools: ToolDefinition[] = [
       const sf = ((args.sortField || 'value') === 'quantity') ? 'qty' : (args.sortField === 'count') ? '_n' : 'val';
       const sDir = (args.sortDir === 'asc') ? 'ASC' : 'DESC';
       const limit = Math.min(Math.max(num(args.limit) || 30, 5), 100);
-      const res = await guardedQuery(
-        `SELECT w.id,w.name AS wname,COUNT(DISTINCT s.product_id)::int AS _n,COALESCE(SUM(s.quantity),0) AS qty,COALESCE(SUM(s.quantity * COALESCE(p.cost_price,0)),0) AS val FROM stock s JOIN warehouses w ON s.warehouse_id=w.id LEFT JOIN products p ON s.product_id=p.id WHERE s.company_id=$1::uuid GROUP BY w.id,w.name ORDER BY ${sf} ${sDir} LIMIT $2`, [ctx.companyId, limit]);
+      const [res, agg] = await Promise.all([
+        guardedQuery(
+          `SELECT w.id,w.name AS wname,COUNT(DISTINCT s.product_id)::int AS _n,COALESCE(SUM(s.quantity),0) AS qty,COALESCE(SUM(s.quantity * COALESCE(p.cost_price,0)),0) AS val FROM stock s JOIN warehouses w ON s.warehouse_id=w.id LEFT JOIN products p ON s.product_id=p.id WHERE s.company_id=$1::uuid GROUP BY w.id,w.name ORDER BY ${sf} ${sDir} LIMIT $2`, [ctx.companyId, limit]),
+        // Grand total across ALL warehouses (the list above is a top-N page).
+        guardedQuery(
+          `SELECT COALESCE(SUM(s.quantity),0) AS qty,
+                  COALESCE(SUM(s.quantity * COALESCE(p.cost_price,0)),0) AS val,
+                  COUNT(DISTINCT s.product_id)::int AS cnt
+             FROM stock s LEFT JOIN products p ON s.product_id=p.id
+            WHERE s.company_id=$1::uuid`,
+          [ctx.companyId],
+        ),
+      ]);
       if (!res.success) return { error: res.error || 'فشل' };
+      if (!agg.success) return { error: agg.error || 'فشل تجميع المخزون' };
       const rows = (res.rows || []).map((r: Record<string, unknown>) => ({
         warehouse: r.wname, productCount: num(r._n),
         totalQuantity: Math.round(num(r.qty) * 100) / 100,
         totalValue: Math.round(num(r.val) * 100) / 100,
       }));
+      const a = (agg.rows?.[0] || {}) as Record<string, unknown>;
       return {
         warehouses: rows,
-        grandTotal: { quantity: Math.round(rows.reduce((s, r) => s + r.totalQuantity, 0) * 100) / 100, value: Math.round(rows.reduce((s, r) => s + r.totalValue, 0) * 100) / 100 },
+        grandTotal: {
+          productCount: num(a.cnt),
+          quantity: Math.round(num(a.qty) * 100) / 100,
+          value: Math.round(num(a.val) * 100) / 100,
+        },
       };
     },
   },

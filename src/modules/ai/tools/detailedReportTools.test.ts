@@ -147,6 +147,11 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     })();
   }
 
+  /** The paginated/detail statement — tools also run a totals aggregate. */
+  function detailCall(calls: Array<{ sql: string; params: unknown[] }>) {
+    return calls.find((c) => /ORDER BY /.test(c.sql)) ?? calls[0];
+  }
+
   it('sales.sales_by_user: BETWEEN uses $2/$3 (dates), LIMIT uses $4', async () => {
     const tool = findTool('sales.sales_by_user');
     expect(tool).toBeDefined();
@@ -155,8 +160,7 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({ fromDate: '2026-09-01', toDate: '2026-09-30' }, ctx);
 
     const calls = await captured();
-    expect(calls).toHaveLength(1);
-    const { sql, params } = calls[0];
+    const { sql, params } = detailCall(calls);
     expect(sql).toMatch(/i\.date BETWEEN \$2 AND \$3/);
     expect(sql).toMatch(/LIMIT \$4/);
     // params order: companyId, from, to, limit
@@ -174,8 +178,7 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({ fromDate: '2026-09-01', toDate: '2026-09-30' }, ctx);
 
     const calls = await captured();
-    expect(calls).toHaveLength(1);
-    const { sql, params } = calls[0];
+    const { sql, params } = detailCall(calls);
     expect(sql).toMatch(/pi\.date BETWEEN \$2 AND \$3/);
     expect(sql).toMatch(/LIMIT \$4/);
     expect(params[0]).toBe(ctx.companyId);
@@ -192,10 +195,10 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({}, ctx);
 
     const calls = await captured();
-    expect(calls).toHaveLength(1);
+    const detail = detailCall(calls);
     // SELECT aliases are qty/rev/ccnt/icnt — no total_* ghost.
-    expect(calls[0].sql).toMatch(/ORDER BY rev /);
-    expect(calls[0].sql).not.toMatch(/total_revenue/);
+    expect(detail.sql).toMatch(/ORDER BY rev /);
+    expect(detail.sql).not.toMatch(/total_revenue/);
   });
 
   it('sales.sales_by_product: quantity sort maps to the real `qty` alias', async () => {
@@ -204,7 +207,7 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({ sortField: 'quantity' }, ctx);
 
     const calls = await captured();
-    expect(calls[0].sql).toMatch(/ORDER BY qty /);
+    expect(detailCall(calls).sql).toMatch(/ORDER BY qty /);
   });
 
   it('purchases.purchases_by_product: default sort is the real `val` alias', async () => {
@@ -215,9 +218,9 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({}, ctx);
 
     const calls = await captured();
-    expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toMatch(/ORDER BY val /);
-    expect(calls[0].sql).not.toMatch(/total_value/);
+    const detail = detailCall(calls);
+    expect(detail.sql).toMatch(/ORDER BY val /);
+    expect(detail.sql).not.toMatch(/total_value/);
   });
 
   it('inventory.stock_by_warehouse: default sort is the real `val` alias', async () => {
@@ -228,10 +231,10 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({}, ctx);
 
     const calls = await captured();
-    expect(calls).toHaveLength(1);
     // SELECT aliases are _n/qty/val — no total_*/product_count ghosts.
-    expect(calls[0].sql).toMatch(/ORDER BY val /);
-    expect(calls[0].sql).not.toMatch(/total_quantity|product_count|total_value/);
+    const detail = detailCall(calls);
+    expect(detail.sql).toMatch(/ORDER BY val /);
+    expect(detail.sql).not.toMatch(/total_quantity|product_count|total_value/);
   });
 
   it('inventory.stock_by_warehouse: count sort maps to the real `_n` alias', async () => {
@@ -240,6 +243,6 @@ describe('P0 dead-report-tools regression (placeholders + ORDER-BY aliases)', ()
     await tool!.execute({ sortField: 'count' }, ctx);
 
     const calls = await captured();
-    expect(calls[0].sql).toMatch(/ORDER BY _n /);
+    expect(detailCall(calls).sql).toMatch(/ORDER BY _n /);
   });
 });
