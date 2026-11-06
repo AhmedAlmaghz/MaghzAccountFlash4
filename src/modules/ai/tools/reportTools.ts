@@ -1504,6 +1504,8 @@ export const reportTools: ToolDefinition[] = [
       const totalLeads = (leadsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.count), 0);
       const convertedLeads = num((leadsRes.rows || []).find((r: Record<string, unknown>) => r.status === 'converted')?.count || 0);
       const wonOpps = num((oppsRes.rows || []).find((r: Record<string, unknown>) => r.stage === 'won')?.count || 0);
+      const lostOpps = num((oppsRes.rows || []).find((r: Record<string, unknown>) => r.stage === 'lost')?.count || 0);
+      const closedOpps = wonOpps + lostOpps;
       const totalOppValue = (oppsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.total_value), 0);
 
       return {
@@ -1512,6 +1514,7 @@ export const reportTools: ToolDefinition[] = [
           convertedToCustomer: { count: convertedLeads, rate: pct(convertedLeads, totalLeads) },
           opportunities: { count: (oppsRes.rows || []).reduce((s: number, r: Record<string, unknown>) => s + num(r.count), 0), totalValue: Math.round(totalOppValue * 100) / 100 },
           wonDeals: { count: wonOpps },
+          lostDeals: { count: lostOpps },
           invoices: {
             count: num(invoicesRes.rows?.[0]?.count || 0),
             totalRevenue: Math.round(num(invoicesRes.rows?.[0]?.total_revenue || 0) * 100) / 100,

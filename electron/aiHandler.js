@@ -725,7 +725,8 @@ export function registerAiHandlers() {
       const companyId = auth.session.user.companyId;
       const settings = await readAiSettings(companyId);
       const envKey = process.env.AI_API_KEY || null;
-      const storedKey = settings[KEY_SETTING] ? decryptApiKey(settings[KEY_SETTING]) : null;
+      const storedRaw = settings[KEY_SETTING] || '';
+      const storedKey = storedRaw ? decryptApiKey(storedRaw) : null;
       // Resolution priority (see resolveApiKey): the per-company stored key
       // wins over the shared env fallback — display must reflect that.
       const apiKey = storedKey || envKey;
@@ -741,7 +742,11 @@ export function registerAiHandlers() {
           hasApiKey: Boolean(apiKey),
           maskedKey: maskKey(storedKey || envKey),
           keySource: storedKey ? 'db' : envKey ? 'env' : null,
-          keyStorage: storedKey ? 'encrypted-device' : 'none',
+          // Honest at-rest state: legacy plaintext rows are still readable and
+          // must not be reported as encrypted (the UI warns accordingly).
+          keyStorage: storedRaw
+            ? (storedRaw.startsWith(ENC_PREFIX) ? 'encrypted-device' : 'plaintext-legacy')
+            : 'none',
           browserDisabled: settings['ai.browser_disabled'] === 'true',
           tokenBudget: (() => {
             const n = Number(settings['ai.token_budget_per_session']);
