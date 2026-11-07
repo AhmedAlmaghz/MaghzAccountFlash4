@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { browserAiBridge } from '@/modules/ai/api/browserBridge';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { browserAiBridge, resetAiRateLimiterForTests } from '@/modules/ai/api/browserBridge';
 import { getDbAdapter } from '@/core/database/adapters';
 import { useAuthStore } from '@/modules/auth/store';
 import { webcrypto } from 'node:crypto';
@@ -218,5 +218,248 @@ describe('browser AI bridge (PGlite)', () => {
     const cfg3 = await browserAiBridge.getConfig(companyId);
     expect(cfg3.data?.hasApiKey).toBe(false);
     expect(cfg3.data?.keyStorage).toBe('none');
+  }, 120000);
+});
+
+// ─── Per-user hourly provider-call budget (mirror of aiHandler.js) ──────────
+describe('browser AI bridge rate limiter (per-user hourly provider budget)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  const OK_COMPLETION = () => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+  });
+
+  const SSE_STREAM = () => {
+    const enc = new TextEncoder();
+    const frames = [
+      enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'مرحبا' } }] })}\n\n`),
+      enc.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { total_tokens: 3 } })}\n\n`),
+      enc.encode('data: [DONE]\n\n'),
+    ];
+    let i = 0;
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: async () => (i < frames.length ? { done: false, value: frames[i++] } : { done: true, value: undefined }),
+          releaseLock: () => {},
+        }),
+      },
+    };
+  };
+
+  const HTTP_ERROR = (status: number) => ({
+    ok: false,
+    status,
+    text: async () => JSON.stringify({ error: { message: 'boom' } }),
+  });
+
+  async function setCap(companyId: string, cap: string): Promise<void> {
+    const adapter = await getDbAdapter();
+    await adapter.query(
+      `INSERT INTO settings (company_id, key, value, category)
+       VALUES ($1::uuid, 'ai.rate_limit_hour', $2, 'ai')
+       ON CONFLICT (company_id, key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [companyId, cap],
+    );
+  }
+
+  /** Unique user per test: the limiter is module-level state keyed by userId. */
+  function loginAs(companyId: string, tag: string): void {
+    useAuthStore.getState().login(
+      { id: `rl-${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, companyId, username: `rl_${tag}`, email: 'rl@demo.ye', role: 'admin', isActive: true },
+      []
+    );
+  }
+
+  beforeEach(() => {
+    resetAiRateLimiterForTests();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  afterAll(async () => {
+    // The shared PGlite store outlives this suite — never leak a tiny cap
+    // onto the real browser profile.
+    const adapter = await getDbAdapter();
+    await adapter.query(`DELETE FROM settings WHERE key = 'ai.rate_limit_hour' AND category = 'ai'`, []);
+  });
+
+  it('validation rejections never burn the hourly budget', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    await setCap(companyId, '1');
+    const save = await browserAiBridge.saveConfig({
+      companyId,
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini',
+      apiKey: 'sk-rl-1234567890',
+      enabled: true,
+    });
+    expect(save.success).toBe(true);
+    loginAs(companyId, 'reject');
+
+    // (a) Bad messages → rejected before the gate; must not record.
+    const bad = await browserAiBridge.complete({ companyId, messages: [] });
+    expect(bad.success).toBe(false);
+    expect(bad.error).toContain('messages must be');
+
+    // (b) Browser kill-switch rejection → also free.
+    await adapter.query(
+      `INSERT INTO settings (company_id, key, value, category)
+       VALUES ($1::uuid, 'ai.browser_disabled', 'true', 'ai')
+       ON CONFLICT (company_id, key) DO UPDATE SET value = 'true', updated_at = NOW()`,
+      [companyId],
+    );
+    const disabled = await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'hi' }] });
+    expect(disabled.success).toBe(false);
+    expect(disabled.error).toContain('وضع المتصفح');
+    await adapter.query(`DELETE FROM settings WHERE company_id = $1::uuid AND key = 'ai.browser_disabled'`, [companyId]);
+
+    // Budget untouched → the single allowed real call still succeeds…
+    fetchMock.mockResolvedValue(OK_COMPLETION());
+    const ok = await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'hi' }] });
+    expect(ok.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // …and the NEXT call is rate-limited (the one real call consumed cap=1).
+    const blocked = await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'hi again' }] });
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toContain('انتهت حصة الذكاء الاصطناعي لهذا المستخدم خلال الساعة');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  }, 120000);
+
+  it('blocks with the Arabic budget message once the cap is reached', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    await setCap(companyId, '2');
+    await browserAiBridge.saveConfig({
+      companyId, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-rl-1234567890', enabled: true,
+    });
+    loginAs(companyId, 'cap');
+    fetchMock.mockResolvedValue(OK_COMPLETION());
+
+    expect((await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'a' }] })).success).toBe(true);
+    expect((await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'b' }] })).success).toBe(true);
+
+    const blocked = await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'c' }] });
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toContain('انتهت حصة الذكاء الاصطناعي لهذا المستخدم خلال الساعة');
+    expect(blocked.error).toContain('ai.rate_limit_hour');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 120000);
+
+  it('failed provider calls do not burn the budget', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    await setCap(companyId, '1');
+    await browserAiBridge.saveConfig({
+      companyId, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-rl-1234567890', enabled: true,
+    });
+    loginAs(companyId, 'fail');
+
+    // 500 is NOT transient → fail fast, no failover, no record.
+    fetchMock.mockResolvedValue(HTTP_ERROR(500));
+    expect((await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'a' }] })).success).toBe(false);
+    expect((await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'b' }] })).success).toBe(false);
+
+    // Budget still empty → the first success passes.
+    fetchMock.mockResolvedValue(OK_COMPLETION());
+    expect((await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'c' }] })).success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  }, 120000);
+
+  it("'0' disables the limiter entirely", async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    await setCap(companyId, '0');
+    await browserAiBridge.saveConfig({
+      companyId, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-rl-1234567890', enabled: true,
+    });
+    loginAs(companyId, 'off');
+    fetchMock.mockResolvedValue(OK_COMPLETION());
+
+    for (let i = 0; i < 4; i++) {
+      expect((await browserAiBridge.complete({ companyId, messages: [{ role: 'user', content: 'x' }] })).success).toBe(true);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  }, 120000);
+
+  it('meters the streaming path (the renderer primary route) too', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    await setCap(companyId, '1');
+    await browserAiBridge.saveConfig({
+      companyId, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-rl-1234567890', enabled: true,
+    });
+    loginAs(companyId, 'stream');
+    fetchMock.mockImplementation(async () => SSE_STREAM());
+
+    const sid1 = `rl-s1-${Date.now()}`;
+    const done1 = new Promise<{ success: boolean; error?: string }>((resolve) => {
+      const unsub = browserAiBridge.subscribeStream(sid1, () => {}, (r) => { resolve(r); unsub(); });
+    });
+    browserAiBridge.startStream({ companyId, messages: [{ role: 'user', content: 'hi' }], streamId: sid1 });
+    const r1 = await done1;
+    expect(r1.success).toBe(true);
+
+    // Second stream → gated; the provider is never called again.
+    const sid2 = `rl-s2-${Date.now()}`;
+    const done2 = new Promise<{ success: boolean; error?: string }>((resolve) => {
+      const unsub = browserAiBridge.subscribeStream(sid2, () => {}, (r) => { resolve(r); unsub(); });
+    });
+    browserAiBridge.startStream({ companyId, messages: [{ role: 'user', content: 'hi' }], streamId: sid2 });
+    const r2 = await done2;
+    expect(r2.success).toBe(false);
+    expect(r2.error).toContain('انتهت حصة الذكاء الاصطناعي لهذا المستخدم خلال الساعة');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  }, 120000);
+
+  it('a failed stream (HTTP error) does not burn the streaming budget', async () => {
+    const adapter = await getDbAdapter();
+    const seed = await adapter.seedDefault('admin1234');
+    const companyId = seed.companyId!;
+    await setCap(companyId, '1');
+    await browserAiBridge.saveConfig({
+      companyId, provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: 'sk-rl-1234567890', enabled: true,
+    });
+    loginAs(companyId, 'streamfail');
+
+    fetchMock.mockResolvedValue(HTTP_ERROR(500));
+    const sid1 = `rl-f1-${Date.now()}`;
+    const done1 = new Promise<{ success: boolean; error?: string }>((resolve) => {
+      const unsub = browserAiBridge.subscribeStream(sid1, () => {}, (r) => { resolve(r); unsub(); });
+    });
+    browserAiBridge.startStream({ companyId, messages: [{ role: 'user', content: 'hi' }], streamId: sid1 });
+    const r1 = await done1;
+    expect(r1.success).toBe(false);
+
+    // Budget untouched → the next stream succeeds.
+    fetchMock.mockImplementation(async () => SSE_STREAM());
+    const sid2 = `rl-f2-${Date.now()}`;
+    const done2 = new Promise<{ success: boolean; error?: string }>((resolve) => {
+      const unsub = browserAiBridge.subscribeStream(sid2, () => {}, (r) => { resolve(r); unsub(); });
+    });
+    browserAiBridge.startStream({ companyId, messages: [{ role: 'user', content: 'hi' }], streamId: sid2 });
+    const r2 = await done2;
+    expect(r2.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   }, 120000);
 });

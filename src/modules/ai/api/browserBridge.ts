@@ -72,6 +72,56 @@ function readTokenBudget(settings: Record<string, string>): number | null {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 }
 
+// ─── Provider call budget ────────────────────────────────────────────────────
+// Per-user hourly cap on provider calls (mirror of aiHandler.js). Without it
+// a stuck renderer (or a tool loop that slips past MAX_ITERATIONS in a buggy
+// future) can issue unlimited paid calls from the browser. Default 120/hour;
+// override via the ai.rate_limit_hour setting ('0' disables the limiter).
+// Sliding window of timestamps. Metered paths: complete() + startStream() —
+// the renderer's two real provider-call routes (streaming is the primary).
+const AI_RATE_LIMIT_HOUR = 120;
+const RATE_LIMIT_SETTING = 'ai.rate_limit_hour';
+const userCallLog = new Map<string, number[]>(); // userId → epoch-ms timestamps
+
+function pruneRateLog(userId: string): { log: number[]; now: number } {
+  const now = Date.now();
+  const hourAgo = now - 3_600_000;
+  const log = (userCallLog.get(userId) || []).filter((t) => t > hourAgo);
+  userCallLog.set(userId, log);
+  if (userCallLog.size > 500) {
+    // drop the oldest entries entirely (long-gone sessions)
+    const oldestKey = userCallLog.keys().next().value;
+    if (oldestKey !== undefined) userCallLog.delete(oldestKey);
+  }
+  return { log, now };
+}
+
+function isRateLimited(userId: string | null | undefined, settings: Record<string, string>): boolean {
+  if (!userId) return false; // no identity → nothing to meter against
+  const cap = Number(settings[RATE_LIMIT_SETTING]) || AI_RATE_LIMIT_HOUR;
+  if (cap <= 0) return false; // explicitly disabled
+  const { log } = pruneRateLog(userId);
+  return log.length >= cap;
+}
+
+// Recorded ONLY on successful provider completions — failures, timeouts
+// and validation rejections must not burn the hourly budget.
+function recordProviderCall(userId: string | null | undefined): void {
+  if (!userId) return;
+  const { log, now } = pruneRateLog(userId);
+  log.push(now);
+  userCallLog.set(userId, log);
+}
+
+function rateLimitMessage(): string {
+  return 'انتهت حصة الذكاء الاصطناعي لهذا المستخدم خلال الساعة (120 طلباً) — انتظر قليلاً ثم أعد المحاولة. يمكن للمسؤول رفع الحد من إعدادات ai.rate_limit_hour.';
+}
+
+/** Test-only: clear the per-user call log (module-level state shared across tests). */
+export function resetAiRateLimiterForTests(): void {
+  userCallLog.clear();
+}
+
 /**
  * Resolve the stored fallback trip (B3). The key rides the same device
  * vault as the primary (ciphertext at rest, legacy plaintext honored).
@@ -393,7 +443,12 @@ function untrackController(streamId: string | undefined): void {
   streamControllers.delete(streamId || LEGACY_STREAM_KEY);
 }
 
-async function runStream(opts: CallOptions & { streamId?: string }): Promise<void> {
+/**
+ * Runs an SSE stream to completion. Resolves `true` only when the success
+ * done-event was emitted — failures (HTTP error, timeout, abort, throw)
+ * resolve `false` so the caller does not burn the hourly provider budget.
+ */
+async function runStream(opts: CallOptions & { streamId?: string }): Promise<boolean> {
   const body: Record<string, unknown> = {
     model: opts.model,
     messages: opts.messages,
@@ -450,7 +505,7 @@ async function runStream(opts: CallOptions & { streamId?: string }): Promise<voi
       const text = await res.text().catch(() => '');
       const msg = text?.slice(0, 300) || `HTTP ${res.status}`;
       emitDone({ success: false, error: `LLM provider error (${res.status}): ${msg}` }, opts.streamId);
-      return;
+      return false;
     }
 
     const reader = res.body.getReader();
@@ -531,12 +586,14 @@ async function runStream(opts: CallOptions & { streamId?: string }): Promise<voi
     }
 
     emitDone({ success: true }, opts.streamId);
+    return true;
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
       emitDone({ success: false, error: 'انتهت مهلة الاتصال بمزود الذكاء الاصطناعي (timeout)' }, opts.streamId);
     } else {
       emitDone({ success: false, error: `تعذر الاتصال بمزود الذكاء الاصطناعي: ${(err as Error).message}` }, opts.streamId);
     }
+    return false;
   } finally {
     clearTimeout(timer);
     untrackController(opts.streamId);
@@ -854,6 +911,11 @@ export const browserAiBridge = {
       if (isBrowserDisabled(settings)) return { success: false, error: BROWSER_DISABLED_ERROR };
       const { key: apiKey } = await readApiKey(payload.companyId, settings);
       if (!apiKey) return { success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' };
+      // Per-user hourly provider-call budget (mirror of aiHandler.js): every
+      // rejection above is free — the gate and the record live only on the
+      // real provider-call path below.
+      const userId = useAuthStore.getState().user?.id;
+      if (isRateLimited(userId, settings)) return { success: false, error: rateLimitMessage() };
       const baseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
       const model = settings[MODEL_SETTING] || DEFAULT_MODEL;
 
@@ -866,7 +928,10 @@ export const browserAiBridge = {
         maxTokens: payload.maxTokens,
       };
       const first = await callChatCompletion({ ...attempt, apiKey });
-      if (first.success) return first;
+      if (first.success) {
+        recordProviderCall(userId);
+        return first;
+      }
       // B3 failover: ONE extra attempt on the fallback route when the
       // primary fails transiently (429/503/529/timeout). Auth/model/
       // validation failures fail fast — another provider won't fix them.
@@ -883,6 +948,7 @@ export const browserAiBridge = {
       console.warn(`[ai] failover: primary ${host} failed transiently — retrying once on ${plan.fallback.label}`);
       const second = await callChatCompletion({ ...attempt, ...plan.fallback });
       if (second.success && second.data) {
+        recordProviderCall(userId);
         return { success: true, data: { ...second.data, failoverFrom: host } };
       }
       return second.success ? second : first;
@@ -922,9 +988,17 @@ export const browserAiBridge = {
           emitDone({ success: false, error: 'لم يتم ضبط مفتاح API — افتح إعدادات الذكاء الاصطناعي' }, payload.streamId);
           return;
         }
+        // Per-user hourly provider-call budget (mirror of aiHandler's
+        // ai:start-stream gate): streaming is the renderer's PRIMARY call
+        // path, so it must be metered too.
+        const userId = useAuthStore.getState().user?.id;
+        if (isRateLimited(userId, settings)) {
+          emitDone({ success: false, error: rateLimitMessage() }, payload.streamId);
+          return;
+        }
         const baseUrl = settings[BASE_URL_SETTING] || DEFAULT_BASE_URL;
         const model = settings[MODEL_SETTING] || DEFAULT_MODEL;
-        await runStream({
+        const streamed = await runStream({
           baseUrl,
           apiKey,
           model,
@@ -935,6 +1009,9 @@ export const browserAiBridge = {
           streamId: payload.streamId,
           fallback: await readFallbackConfig(payload.companyId, settings),
         });
+        // Only a stream that actually completed (success done-event) burns
+        // budget — aborted/failed streams are free, exactly like main.
+        if (streamed) recordProviderCall(userId);
       } catch (err) {
         emitDone({ success: false, error: (err as Error).message }, payload.streamId);
       }
