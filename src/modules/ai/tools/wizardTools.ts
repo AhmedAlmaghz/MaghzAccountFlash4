@@ -779,13 +779,12 @@ export const wizardTools: ToolDefinition[] = [
         entries: entries as unknown as import('@/modules/accounting/types').JournalEntry[],
       }, '');
       if (!createRes.success) return { error: createRes.error || 'فشل إنشاء القيد' };
-      // accountingService.postTransaction returns `{ success, transactionId }`
-      // (AccountingService.ts) — `createRes.id` is ALWAYS undefined here, which
-      // made the wizard report failure AFTER the entry was already saved as
-      // POSTED, and the model retried → duplicated posted entries (P0).
-      // Accept both keys defensively; the postTransaction step below is a
-      // no-op for the service (it creates the entry already posted) but is
-      // kept for API paths that genuinely create drafts.
+      // accountingApi.createTransaction (draft path) returns `{ success, id }`.
+      // Historically the service variant returned `transactionId` instead, so
+      // `createRes.id` read as undefined and the wizard reported failure AFTER
+      // the entry was already saved — the model retried → duplicated entries
+      // (P0). Both keys are accepted defensively; the explicit postTransaction
+      // step below flips the draft to posted through the sanctioned gates.
       const transactionId = (createRes as { transactionId?: string; id?: string }).transactionId
         ?? createRes.id;
       if (!transactionId) return { error: 'تم إنشاء القيد لكن لم يُرجع معرف' };

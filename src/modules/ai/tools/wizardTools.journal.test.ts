@@ -43,12 +43,13 @@ const balancedLines = [
 
 /**
  * Regression for the P0 audit finding (2026-09-12):
- * `accounting.create_journal_flow` read `createRes.id`, but
- * `accountingService.postTransaction` returns `{ success, transactionId }`
- * (accounting/api.createTransaction passes it through verbatim). So EVERY
+ * `accounting.create_journal_flow` read `createRes.id`, but the old
+ * service-shaped create returned `{ success, transactionId }` — so EVERY
  * call reported "تم إنشاء القيد لكن لم يُرجع معرف" AFTER the entry was
  * already saved as POSTED — and the model retried → duplicated posted
- * journal entries corrupting the ledger.
+ * journal entries corrupting the ledger. (That service variant was deleted
+ * in Phase 102; the defensive dual-key acceptance below stays as
+ * belt-and-braces against any shape drift.)
  *
  * The fix accepts both keys: `createRes.transactionId ?? createRes.id`.
  */

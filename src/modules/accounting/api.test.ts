@@ -43,16 +43,16 @@ vi.mock('@/core/utils/currencyConverter', () => ({
   YER_CODE: 'YER',
 }));
 
-// Phase 0: the service layer is mocked so createTransaction's posted path
-// (balance-validated service post) is hermetic; the draft path is asserted
-// through the mocked adapter's createTransaction instead.
+// The service layer is mocked (accounting/api.ts reads accountingService for
+// the three report statements). Phase 102 deleted the dead write-side methods
+// from AccountingService — delegation to the service for posting is now
+// structurally impossible, so there is nothing to assert against here.
 vi.mock('./services', () => ({
-  accountingService: { postTransaction: vi.fn() },
+  accountingService: {},
 }));
 
 import { accountingApi } from './api';
 import { getDbAdapter } from '@/core/database/adapters';
-import { accountingService } from './services';
 
 function makeMockAdapter(queryImpl: (sql: string, params: unknown[]) => Promise<{ success: boolean; rows?: unknown[]; error?: string }>) {
   return {
@@ -957,8 +957,6 @@ describe('accountingApi.createTransaction — draft/posted routing (Phase 0)', (
     expect(res.id).toBe('draft-1');
     expect(createTransaction).toHaveBeenCalledTimes(1);
     expect((createTransaction.mock.calls as unknown[][])[0]?.[0] as Record<string, unknown>).toMatchObject({ status: 'draft', companyId: 'comp-1' });
-    // the service (immediate-post path) must NOT run for drafts
-    expect(vi.mocked(accountingService.postTransaction)).not.toHaveBeenCalled();
   });
 
   it('REFUSES status: posted on the generic create path (Phase 2 #5)', async () => {
@@ -971,9 +969,9 @@ describe('accountingApi.createTransaction — draft/posted routing (Phase 0)', (
     // The message must name the sanctioned path — a bare refusal strands callers.
     expect(String(res.error)).toMatch(/draft/i);
     expect(String(res.error)).toMatch(/createAndPostTransaction/);
-    // Nothing may reach the database, and the service must not post behind our back.
+    // Nothing may reach the database (service delegation is structurally
+    // impossible since Phase 102 — the dead write methods were deleted).
     expect(createTransaction).not.toHaveBeenCalled();
-    expect(vi.mocked(accountingService.postTransaction)).not.toHaveBeenCalled();
   });
 
   it('rejects any non-draft status (cancelled included) on create', async () => {
