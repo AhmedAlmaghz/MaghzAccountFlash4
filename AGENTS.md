@@ -5178,3 +5178,21 @@ npx drizzle-kit migrate
   - **حقل مالي في أداة تحديث = بوابة فساد**: لا تعرض `paidAmount`/`discountAmount` على الوكيل؛ الدفع سند والخصم شاشة تعيد الحساب.
   - **أسماء الأدوات في البرومبت عقد**: كل اسم مذكور يجب أن يكون مسجّلاً — بوابة آلية، لا مراجعة بشرية.
   - **`adapter.query` ratchet**: أي إضافة في renderer تتطلب رفع السقف بتوثيق مبرر (هنا: كنس PII في جسر المتصفح فقط).
+
+### المرحلة 102 (v0.26.25): مُحدِّد الحصلة الساعية لجسر المتصفح + مراجعة حصر شركة AccountingService
+- **(b) — المُحدِّد (`4dedaa5`)**: مرآة كاملة لميزانية نداءات المزوّد في `electron/aiHandler.js` على `src/modules/ai/api/browserBridge.ts`:
+  - `AI_RATE_LIMIT_HOUR=120` + `ai.rate_limit_hour` (`'0'`/`<=0` يعطّل) + نافذة منزلقة (Map<userId, epoch-ms[]>) + طرد أقدم مفتاح عند >500 — `pruneRateLog`/`isRateLimited`/`recordProviderCall`/`rateLimitMessage` حرفياً من المرجع.
+  - **المسارات المُقاسة: `complete()` و`startStream()` معاً** — البث هو المسار الأساسي للمحرك في وضع المتصفح (`drainStreaming` أولى و`completeFallback` احتياطي فقط)، فبوابة على `complete()` وحدها كانت زخرفية. `testConnection` بُقي خارج النطاق (فعل إعدادات يدوي لمرة واحدة).
+  - **التسجيل على النجاح فقط**: نجاح النداء الأساسي + نجاح الـ failover (واحد لكل `complete()` لأن نجاح الأساسي يعيد فوراً). الفشل/المهلة/رفض التحقق (رسائل/معطّل/مفتاح مفقود) لا يحرق الحصلة. البث: `runStream` أصبح يعيد `boolean` (true عند done-success فقط) — المهجور/الفاشل مجاني.
+  - بلا هوية (لا مستخدم مسجّل) = تجاوز — لا مفتاح للقياس أصلاً. التصدير `resetAiRateLimiterForTests` للحالة على مستوى الوحدة بين الاختبارات.
+  - 6 اختبارات جديدة (رفض التحقق مجاني، الحظر عند السقف بالرسالة العربية، الفشل لا يحرق، `'0'` يعطّل، مسار البث مُقاس، بث فاشل لا يحرق) — الملف 11/11.
+- **(c) — مراجعة `AccountingService` (`services/AccountingService.ts`): الحكم = حصر سليم على كل المسارات المستخدمة، بلا تغيير كود**:
+  - **المستخدم إنتاجياً = 3 طرق فقط** (`getTrialBalance`/`getBalanceSheet`/`getProfitLoss` — من `accounting/api.ts:1833/1860/1899` + أدوات التقارير `ai/reportTools`). كلها: `companyId` مشتق من الجلسة (`BaseService.getCompanyId` يرمي بلا سياق) + فلتر `a.company_id = $1::uuid` صريح + subquery القيود المرحلة بفلتر `company_id` + بوابة `accounting.view` + حارس `BaseService.query` يفرض ذكر `company_id` في كل SQL (دفاع ثنائي).
+  - **كود ميت (صفر مستدعين — تحقق grep)**: `postTransaction` (المسار الحقيقي `accountingApi.postTransaction`: قلب draft-only + بوابات الفترة/السنة + تحقق توازن + قناة RPC) و`createAccount`/`updateAccount` (المسار الحقيقي في `accounting/api.ts` بعد Phase 51) و`getAccountLedger` (وإذا وُصِل يوماً يخالف قاعدة سطر الافتتاحي — نسخة api.ts هي الحقيقية) و`reverseTransaction` الذي يفوَّض إلى `ImmutableRecordGuard.createReversal` — **الحارس كله ميت انتقالياً** ويعتمد أعمدة غير موجودة (`reversal_of_id`/`reversed_at`/`reversed_by`/`reversal_id`) فيفشل ذرياً في أول INSERT (دفعة معاملة واحدة) — يفشل مغلق لا يفسد بيانات، لكنه فخ لمن يستدعيه؛ العكس الحقيقي في `src/modules/accounting/reversal.ts` (Phase 72).
+- **التحقق**: `tsc -b` 0 ✓ | `eslint` (الملفان) نظيف ✓ | `browserBridge.test.ts` 11/11 ✓ | بوابات `desktopRawSqlGate`+`tenantSourceGate`+`rawSqlRatchetGate` 21/21 ✓ | `vite build` ✓ 1m16s.
+- **قواعد ذهبية مضافة**:
+  - **المُحدِّد الذي يفوّت المسار الأساسي زخرفة**: إذا كان البث هو المسار الأول، فبوابة على المسار الاحتياطي وحده تعطي وهم حماية — قِس الحصلة حيث يحدث النداء المدفوع فعلاً.
+  - **نجاح البث يُعرف من نتيجته لا من انتهائه**: `runStream` void يعني "تسجيل بعد await" يسجّل المهجور والمهلة والفشل — أعد النتيجة (`boolean`) وسجّل على true فقط.
+  - **بلا هوية = بلا قياس**: `isRateLimited(null)` تجاوز مقصود — في الـ renderer المستخدم دائماً موجود خلف ProtectedRoute، والـ e2e/الاختبارات لا تُخنق.
+  - **فشل مرآة ميتة يفشل مغلق لا يفسد**: `ImmutableRecordGuard` يعتمد أعمدة غير موجودة لكن الدفعة معاملة واحدة — أول INSERT يفشل فلا كتابة جزئية ولا ازدواج. الفخ الحقيقي أن الرسالة الواعدة ("This is the proper way") تقود مستخدماً مستقبلياً لمسار ميت — الكود الميت يُحذف لا يُوثَّق.
+  - **مهلة 5s على بوابات تمسح شجرة src = وميض تحت الحمل**: بوابات `desktopRawSql/tenantSource/rawSqlRatchet` تفشل أحياناً بـ `Test timed out in 5000ms` على جهاز مثقل (فشل/نجاح متناوب على نفس الشجرة) — شغّلها بـ `--testTimeout=60000` للحكم، وليست كسراً منطقياً.
