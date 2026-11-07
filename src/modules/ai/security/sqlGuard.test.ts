@@ -23,6 +23,12 @@ describe('sqlGuard', () => {
     const r = assertSqlOperation('SELECT * FROM customers; DROP TABLE customers;');
     expect(r.ok).toBe(false);
   });
+
+  it('rejects a SELECT without company_id tenant scope', () => {
+    const r = assertSqlOperation('SELECT * FROM customers WHERE is_active = true');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('company_id');
+  });
 });
 
 describe('extractTableNames', () => {

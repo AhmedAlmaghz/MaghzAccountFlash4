@@ -1564,7 +1564,6 @@ class ChatEngine {
    */
   private async routeCycleToolsAsync(): Promise<LlmTool[]> {
     const start = Date.now();
-    let jevUsed = false;
     let jevIntent: string | null = null;
     let jevConfidence: number | undefined;
     try {
@@ -1578,7 +1577,6 @@ class ChatEngine {
         'jev-router',
       );
       if (jevRouted && jevRouted.jevUsed) {
-        jevUsed = true;
         jevIntent = String(jevRouted.intent);
         jevConfidence = jevRouted.confidence;
         const latencyMs = Date.now() - start;
@@ -1627,8 +1625,6 @@ class ChatEngine {
         `(routedByIntent=${routed.routedByIntent}); advertised=${routed.tools.length}`,
       );
     }
-    // Record that fallback was used (for metrics)
-    if (jevUsed) void jevUsed;
     return toLlmTools(routed.tools);
   }
 
@@ -1641,13 +1637,19 @@ class ChatEngine {
    * not the others (the swallowed-fallback-answer P1). One definition now.
    */
   private async completeFallback(llmTools: LlmTool[]): Promise<ProviderResponse> {
-    const response = await aiApi.complete({
-      companyId: this.ctx.companyId,
-      messages: this.buildMessages(),
-      tools: llmTools.length > 0 ? llmTools : undefined,
-      temperature: 0.2,
-      maxTokens: MAX_COMPLETION_TOKENS,
-    });
+    const response = await deadlineOr(
+      aiApi.complete({
+        companyId: this.ctx.companyId,
+        messages: this.buildMessages(),
+        tools: llmTools.length > 0 ? llmTools : undefined,
+        temperature: 0.2,
+        maxTokens: MAX_COMPLETION_TOKENS,
+      }) as Promise<ProviderResponse | null>,
+      90000,
+      null,
+      'complete-fallback',
+    );
+    if (!response) throw new Error('مهلة 90 ثانية — المزوّد لم يرد على المسار غير المتدفق');
     this.touchProgress();
     return response;
   }

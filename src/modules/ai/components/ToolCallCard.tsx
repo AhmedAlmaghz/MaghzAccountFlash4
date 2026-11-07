@@ -138,6 +138,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, onConfirm }: 
               'hover:bg-white/60 dark:hover:bg-white/10'
             )}
             aria-label={expanded ? t('ai.card.hideDetails') : t('ai.card.showDetails')}
+            aria-expanded={expanded}
           >
             {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>

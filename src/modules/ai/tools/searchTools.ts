@@ -1530,4 +1530,50 @@ export const searchTools: ToolDefinition[] = [
       };
     },
   },
+  // ─── Settings: Branches (read gap closed 2026-11-07) ─────────────────────
+  {
+    name: 'search.branches',
+    labelAr: 'بحث في الفروع',
+    descriptionAr: 'يبحث في فروع الشركة ويعيد معرف الفرع (id) واسمه. استخدمه قبل أي عملية تحتاج معرف فرع.',
+    permission: 'settings.view',
+    dangerLevel: 'read',
+    parameters: searchParam('اسم الفرع'),
+    execute: async (args, ctx) => {
+      const query = String(args.query || '').trim();
+      const { guardedQuery } = await import('./reportCommon');
+      const res = await guardedQuery('SELECT id, name_ar AS nameAr, name_en AS nameEn, code, is_active AS isActive FROM branches WHERE company_id = $1::uuid', [ctx.companyId]);
+      if (!res.success || !res.rows) return { error: res.error || 'فشل جلب الفروع' };
+      const rows = res.rows as Array<{ id: string; nameAr?: string | null; nameEn?: string | null; code?: string | null; isActive?: boolean }>;
+      const matches = (!query
+        ? rows.slice(0, 8).map((item) => ({ item, score: 1 }))
+        : fuzzySearch(query, rows, (b) => `${b.nameAr || ''} ${b.nameEn || ''}`).slice(0, 8));
+      return {
+        matches: matches.map((m) => ({ id: m.item.id, nameAr: m.item.nameAr, nameEn: m.item.nameEn, code: m.item.code, isActive: m.item.isActive })),
+        totalMatches: matches.length,
+      };
+    },
+  },
+  // ─── Settings: Currencies (read gap closed 2026-11-07) ───────────────────
+  {
+    name: 'search.currencies',
+    labelAr: 'بحث في العملات',
+    descriptionAr: 'يبحث في عملات الشركة ويعيد معرف العملة ورمزها وسعر الصرف. استخدمه للفواتير متعددة العملات.',
+    permission: 'settings.view',
+    dangerLevel: 'read',
+    parameters: searchParam('رمز العملة (YER/USD/SAR) أو اسمها'),
+    execute: async (args, ctx) => {
+      const query = String(args.query || '').trim();
+      const { guardedQuery } = await import('./reportCommon');
+      const res = await guardedQuery('SELECT id, code, name_ar AS nameAr, name_en AS nameEn, rate FROM currencies WHERE company_id = $1::uuid', [ctx.companyId]);
+      if (!res.success || !res.rows) return { error: res.error || 'فشل جلب العملات' };
+      const rows = res.rows as Array<{ id: string; code?: string | null; nameAr?: string | null; nameEn?: string | null; rate?: unknown }>;
+      const matches = (!query
+        ? rows.slice(0, 8).map((item) => ({ item, score: 1 }))
+        : fuzzySearch(query, rows, (c) => `${c.code || ''} ${c.nameAr || ''}`).slice(0, 8));
+      return {
+        matches: matches.map((m) => ({ id: m.item.id, code: m.item.code, nameAr: m.item.nameAr, nameEn: m.item.nameEn, rate: Number(m.item.rate ?? 1) })),
+        totalMatches: matches.length,
+      };
+    },
+  },
 ];

@@ -270,13 +270,13 @@ export const inventoryWriteTools: ToolDefinition[] = [
   {
     name: 'inventory.create_stock_adjustment',
     labelAr: 'تسوية مخزون',
-    descriptionAr: 'ينشئ تسوية مخزون لتصحيح الفرق بين الكمية النظامية والكمية الفعلية. استخدم inventory.get_products أولاً.',
+    descriptionAr: 'ينشئ تسوية مخزون لتصحيح الفرق بين الكمية النظامية والكمية الفعلية. استخدم search.products أولاً.',
     permission: 'inventory.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        productId: { type: 'string', description: 'معرف المنتج (من inventory.get_products)' },
+        productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
         warehouseId: { type: 'string', description: 'معرف المستودع' },
         systemQty: { type: 'number', description: 'الكمية في النظام (بالوحدة المذكورة أو الأساسية)' },
         actualQty: { type: 'number', description: 'الكمية الفعلية — الجرد (بالوحدة المذكورة أو الأساسية)' },
@@ -291,7 +291,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const productId = str(args.productId);
       const warehouseId = str(args.warehouseId);
-      if (!productId) return { error: 'productId مطلوب — استخدم inventory.get_products أولاً' };
+      if (!productId) return { error: 'productId مطلوب — استخدم search.products أولاً' };
       if (!warehouseId) return { error: 'warehouseId مطلوب' };
       // M4: stock_adjustments carries NO unit columns — quantities are BASE.
       // Resolve any named unit here so "جرد 3 كراتين" doesn't book 3 pieces.
@@ -359,13 +359,13 @@ export const inventoryWriteTools: ToolDefinition[] = [
   {
     name: 'inventory.update_product',
     labelAr: 'تعديل منتج',
-    descriptionAr: 'يُحدّث بيانات منتج موجود — الاسم، السعر، الوحدة، الباركود، إلخ. استخدم inventory.get_products أولاً.',
+    descriptionAr: 'يُحدّث بيانات منتج موجود — الاسم، السعر، الوحدة، الباركود، إلخ. استخدم search.products أولاً.',
     permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        productId: { type: 'string', description: 'معرف المنتج (من inventory.get_products)' },
+        productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
         nameAr: { type: 'string', description: 'الاسم بالعربية (يقبل name كبديل)' },
         name: { type: 'string', description: 'بديل لـ nameAr' },
         nameEn: { type: 'string', description: 'الاسم بالإنجليزية' },
@@ -469,13 +469,13 @@ export const inventoryWriteTools: ToolDefinition[] = [
   {
     name: 'inventory.update_warehouse',
     labelAr: 'تعديل مستودع',
-    descriptionAr: 'يُحدّث بيانات مستودع موجود — الاسم، العنوان، حالة التفعيل. استخدم inventory.get_warehouses أولاً.',
+    descriptionAr: 'يُحدّث بيانات مستودع موجود — الاسم، العنوان، حالة التفعيل. استخدم search.warehouses أولاً.',
     permission: 'inventory.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        warehouseId: { type: 'string', description: 'معرف المستودع (من inventory.get_warehouses)' },
+        warehouseId: { type: 'string', description: 'معرف المستودع (من search.warehouses)' },
         name: { type: 'string', description: 'الاسم الجديد' },
         address: { type: 'string', description: 'العنوان الجديد' },
         isActive: { type: 'boolean', description: 'حالة التفعيل' },
@@ -501,7 +501,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
   {
     name: 'inventory.delete_warehouse',
     labelAr: 'حذف مستودع',
-    descriptionAr: 'يحذف مستودعاً. الـ API يرفض حذف المستودعات المرتبطة بحركات مخزون. استخدم inventory.get_warehouses أولاً.',
+    descriptionAr: 'يحذف مستودعاً. الـ API يرفض حذف المستودعات المرتبطة بحركات مخزون. استخدم search.warehouses أولاً.',
     permission: 'inventory.delete',
     dangerLevel: 'write',
     parameters: {
@@ -514,7 +514,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     summarizeArgs: (a) => `حذف مستودع: ${a.warehouseId}`,
     execute: async (args, ctx) => {
       const warehouseId = str(args.warehouseId);
-      if (!warehouseId) return { error: 'warehouseId مطلوب — استخدم inventory.get_warehouses أولاً' };
+      if (!warehouseId) return { error: 'warehouseId مطلوب — استخدم search.warehouses أولاً' };
       const res = await inventoryApi.deleteWarehouse(warehouseId, ctx.companyId);
       if (!res.success) return { error: res.error || 'فشل حذف المستودع' };
       return { deleted: true, warehouseId };
@@ -620,14 +620,14 @@ export const inventoryWriteTools: ToolDefinition[] = [
   {
     name: 'inventory.create_stock_transfer',
     labelAr: 'إنشاء تحويل مخزون',
-    descriptionAr: 'ينشئ تحويل مخزون بين مستودعين مع أصناف وكميات. يجب أن يختلف المستودع المصدر عن الهدف. استخدم inventory.get_warehouses و inventory.get_products أولاً.',
+    descriptionAr: 'ينشئ تحويل مخزون بين مستودعين مع أصناف وكميات. يجب أن يختلف المستودع المصدر عن الهدف. استخدم search.warehouses و search.products أولاً.',
     permission: 'inventory.create',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        fromWarehouseId: { type: 'string', description: 'معرف المستودع المصدر (من inventory.get_warehouses)' },
-        toWarehouseId: { type: 'string', description: 'معرف المستودع الهدف (من inventory.get_warehouses)' },
+        fromWarehouseId: { type: 'string', description: 'معرف المستودع المصدر (من search.warehouses)' },
+        toWarehouseId: { type: 'string', description: 'معرف المستودع الهدف (من search.warehouses)' },
         date: { type: 'string', description: 'تاريخ التحويل YYYY-MM-DD (اختياري)' },
         reference: { type: 'string', description: 'رقم المرجع (اختياري)' },
         notes: { type: 'string', description: 'ملاحظات' },
@@ -637,7 +637,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
           items: {
             type: 'object',
             properties: {
-              productId: { type: 'string', description: 'معرف المنتج (من inventory.get_products)' },
+              productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
               quantity: { type: 'number', description: 'الكمية المنقولة (بالوحدة المذكورة أو الأساسية)' },
               unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري' },
               unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون…) — بديل لـ unitId' },
@@ -655,7 +655,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
     execute: async (args, ctx) => {
       const fromWarehouseId = str(args.fromWarehouseId);
       const toWarehouseId = str(args.toWarehouseId);
-      if (!fromWarehouseId) return { error: 'fromWarehouseId مطلوب — استخدم inventory.get_warehouses أولاً' };
+      if (!fromWarehouseId) return { error: 'fromWarehouseId مطلوب — استخدم search.warehouses أولاً' };
       if (!toWarehouseId) return { error: 'toWarehouseId مطلوب' };
       if (fromWarehouseId === toWarehouseId) return { error: 'المستودع المصدر والهدف يجب أن يكونا مختلفين' };
       const rawLines = args.lines;
@@ -668,7 +668,7 @@ export const inventoryWriteTools: ToolDefinition[] = [
       for (const item of rawLines) {
         const productId = str((item as Record<string, unknown>).productId);
         const quantity = num((item as Record<string, unknown>).quantity);
-        if (!productId) return { error: 'كل صنف يحتاج productId — استخدم inventory.get_products أولاً' };
+        if (!productId) return { error: 'كل صنف يحتاج productId — استخدم search.products أولاً' };
         if (quantity <= 0) return { error: 'الكمية يجب أن تكون أكبر من صفر' };
         const r = item as Record<string, unknown>;
         const unitId = str(r.unitId);

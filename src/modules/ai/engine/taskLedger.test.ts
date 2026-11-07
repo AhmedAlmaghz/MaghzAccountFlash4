@@ -86,14 +86,15 @@ describe('TaskLedger', () => {
   it('keeps the mission plus the two latest follow-up requests', () => {
     const ledger = new TaskLedger();
     ledger.recordRequest(MISSION);
-    ledger.recordRequest('طلب أ: أضف عميلاً اسمه سالم');
-    ledger.recordRequest('طلب ب: أضف مورداً اسمه النور');
-    ledger.recordRequest('طلب ج: أضف عميلاً اسمه الكرامة');
+    // Phase 3 raised MAX_OTHER_REQUESTS 2→10: 12 follow-ups now shed the oldest two.
+    for (let i = 0; i < 12; i++) {
+      ledger.recordRequest(`طلب ${i}: أضف ${i === 11 ? 'عميلاً اسمه الكرامة' : i === 10 ? 'مورداً اسمه النور' : `سجل قديم رقم ${i}`}`);
+    }
     const block = ledger.render() ?? '';
     expect(block).toContain('المهمة الأصلية');
     expect(block).toContain('الكرامة'); // الأحدث
     expect(block).toContain('النور');   // ما قبله
-    expect(block).not.toContain('سالم'); // الوسطى القديمة تُسقط لصالح الأحدث
+    expect(block).not.toContain('سجل قديم رقم 0'); // الأقدم تُسقط لصالح الأحدث
   });
 
   it('records batch outcomes with created entities and feeds the duplicate guard', () => {

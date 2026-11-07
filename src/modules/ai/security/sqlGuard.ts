@@ -6,10 +6,11 @@
  *   - the SQL must be a single, read-only statement (SELECT only);
  *   - the tables it touches must be in the allow-list;
  *   - injection characters (';', comments, subquery control chars) are blocked;
- *   - the query must be tenant-scoped (include `company_id` unless only the
- *     `company_id` filter is present — the caller is still responsible for the
- *     `$N` placeholder, but the guard blocks the statement if it does not
- *     at least mention a scoped business table).
+ *   - tenant scoping is ENFORCED: any query that touches a business table must
+ *     mention `company_id` in its text (its filter is still the caller's
+ *     `$N` placeholder — the guard blocks the statement if `company_id` is
+ *     absent, so a forgotten WHERE can never become a cross-tenant read).
+ *     This mirrors the mandatory `AND company_id = $N` rule from AGENTS.md §4.4.
  */
 
 const AI_ALLOWED_TABLES = [
@@ -97,6 +98,12 @@ export function assertSqlOperation(sql: string): SqlGuardVerdict {
     if (!AI_ALLOWED_TABLES_SET.has(name)) {
       return { ok: false, reason: `table not in allow-list: '${name}'` };
     }
+  }
+
+  // Tenant scoping is enforced, not assumed. Every business table is
+  // company-scoped; a SELECT without `company_id` is a cross-tenant read.
+  if (!/\bcompany_id\b/.test(trimmed)) {
+    return { ok: false, reason: 'missing company_id tenant scope' };
   }
 
   return { ok: true } as { ok: true };

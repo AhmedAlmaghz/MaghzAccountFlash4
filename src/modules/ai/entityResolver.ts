@@ -175,7 +175,7 @@ async function searchAccounts(query: string, companyId: string): Promise<EntityM
 
 // Window fetched per entity type and held in the 30s cache. Large enough for
 // reliable fuzzy correction, small enough to stay a single fast query.
-const ENTITY_FETCH_LIMIT = 50;
+const ENTITY_FETCH_LIMIT = 200;
 
 async function searchCustomers(query: string, companyId: string): Promise<EntityMatch[]> {
   const key = `customers:${companyId}`;

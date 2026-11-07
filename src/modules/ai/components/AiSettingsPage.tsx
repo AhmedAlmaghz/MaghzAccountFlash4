@@ -487,21 +487,27 @@ export default function AiSettingsPage() {
               setEnabled(!enabled);
             }}
           >
-            <div
+            <button
+              type="button"
               role="switch"
               aria-checked={enabled}
+              aria-label={t('ai.settings.enabled')}
+              onClick={(e) => {
+                e.preventDefault();
+                setEnabled(!enabled);
+              }}
               className={cn(
                 'relative w-11 h-6 rounded-full transition-colors shrink-0',
                 enabled ? 'bg-primary-600' : 'bg-zinc-300 dark:bg-zinc-700'
               )}
             >
-              <div
+              <span
                 className={cn(
                   'absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all',
                   enabled ? 'start-6' : 'start-1'
                 )}
               />
-            </div>
+            </button>
             <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{t('ai.settings.enabled')}</span>
           </label>
 

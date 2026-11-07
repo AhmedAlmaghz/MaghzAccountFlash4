@@ -30,7 +30,8 @@ describe('summarizer — progressive context digest', () => {
     const many = Array.from({ length: 100 }, (_, i) => user(`طلب طويل جداً رقم ${i} مع نصوص إضافية للتعبئة ${'x'.repeat(100)}`));
     const digest = extractiveDigest(many);
     expect(digest).not.toBeNull();
-    expect(digest!.length).toBeLessThanOrEqual(1600);
+    // Phase 3 raised MAX_DIGEST_CHARS 1500→2500 — the bound moved with it.
+    expect(digest!.length).toBeLessThanOrEqual(2600);
     expect(digest).toContain('اقتُطع');
   });
 

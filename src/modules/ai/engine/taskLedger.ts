@@ -24,11 +24,13 @@ import type { ChatMessage } from '../types';
 // ─── ميزانية الحقن في برومبت النظام (أحرف) ─────────────────────────────────
 // سقف رسالة النظام في aiHandler.js هو 48000 حرف والبرومبت الأساسي 22-29 ألف —
 // 8000 تترك هامشاً آمناً على المسارين (Electron IPC + المتصفح).
-export const LEDGER_MAX_CHARS = 8000;
+// Phase 3 (2026-11-07): 8000→11000 (هامش 37000+ للبرومبت) + requests 3→10
+// + outcomes 8→32 حتى لا تختفي الجلسات الطويلة (40 بندًا).
+export const LEDGER_MAX_CHARS = 11000;
 const FIRST_REQUEST_MAX = 4500;
 const OTHER_REQUEST_MAX = 1200;
-const MAX_OTHER_REQUESTS = 2;
-const MAX_OUTCOMES = 8;
+const MAX_OTHER_REQUESTS = 10;
+const MAX_OUTCOMES = 32;
 const OUTCOME_LINE_MAX = 340;
 const MAX_ENTITIES_PER_OUTCOME = 14;
 

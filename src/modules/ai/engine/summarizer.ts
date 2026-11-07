@@ -18,8 +18,8 @@ import { llmTextOf, stripUntrustedFences } from './llmParts';
  *      the extractive digest. The digest is capped and stable.
  */
 
-const MAX_DIGEST_CHARS = 1500;
-const MAX_DIGEST_LINES = 40;
+const MAX_DIGEST_CHARS = 2500;
+const MAX_DIGEST_LINES = 60;
 
 /** Compact one message into ≤1 digest line (or skip it). */
 function digestLine(m: LlmMessage): string | null {
@@ -33,7 +33,7 @@ function digestLine(m: LlmMessage): string | null {
     const stripped = text
       .replace(/<<<BEGIN_ATTACHMENT[\s\S]*?<<<END_ATTACHMENT>>>/g, '[مرفق]')
       .trim();
-    const ask = stripped.slice(0, 120);
+    const ask = stripped.slice(0, 600);
     return ask ? `👤 طلب: ${ask}` : null;
   }
   if (m.role === 'assistant') {
@@ -41,14 +41,14 @@ function digestLine(m: LlmMessage): string | null {
     const text = llmTextOf(m.content).replace(/\s+/g, ' ').trim();
     if (!text) return null;
     // Keep only lines that look like conclusions/numbers — not prose.
-    const meaningful = text.length <= 200 ? text : text.slice(0, 200);
+    const meaningful = text.length <= 500 ? text : text.slice(0, 500);
     return `🤖 رد: ${meaningful}`;
   }
   if (m.role === 'tool') {
     // Executed tool outcome — the strongest memory (documents/IDs created).
     // Fence markers are stripped (readability); the line stays a capped
     // extractive quote, never executed content.
-    const clean = stripUntrustedFences(llmTextOf(m.content)).replace(/\s+/g, ' ').slice(0, 140);
+    const clean = stripUntrustedFences(llmTextOf(m.content)).replace(/\s+/g, ' ').slice(0, 400);
     return `🔧 نتيجة أداة: ${clean}`;
   }
   return null;

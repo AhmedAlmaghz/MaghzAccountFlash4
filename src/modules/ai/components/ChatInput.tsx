@@ -527,6 +527,7 @@ export const ChatInput = memo(function ChatInput({ onSend, onStop, disabled, isP
         onKeyDown={handleKeyDown}
         rows={1}
         disabled={disabled || isProcessing}
+        aria-label={t('ai.inputPlaceholder')}
         placeholder={speech.isListening ? t('ai.voice.listening') : t('ai.inputPlaceholder')}
         className={cn(
           'flex-1 resize-none rounded-2xl border px-4 py-2.5 text-base sm:text-sm transition-colors overflow-hidden leading-normal',

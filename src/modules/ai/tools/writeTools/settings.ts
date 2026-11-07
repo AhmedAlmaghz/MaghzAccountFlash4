@@ -89,13 +89,13 @@ export const settingsWriteTools: ToolDefinition[] = [
   {
     name: 'settings.update_branch',
     labelAr: 'تعديل فرع',
-    descriptionAr: 'يُحدّث بيانات فرع — الاسم، العنوان، الهاتف، حالة التفعيل. استخدم settings.get_branches أولاً.',
+    descriptionAr: 'يُحدّث بيانات فرع — الاسم، العنوان، الهاتف، حالة التفعيل. استخدم search.branches أولاً.',
     permission: 'settings.edit',
     dangerLevel: 'write',
     parameters: {
       type: 'object',
       properties: {
-        branchId: { type: 'string', description: 'معرف الفرع (من settings.get_branches)' },
+        branchId: { type: 'string', description: 'معرف الفرع (من search.branches)' },
         name: { type: 'string', description: 'الاسم الجديد' },
         address: { type: 'string', description: 'العنوان الجديد' },
         phone: { type: 'string', description: 'رقم الهاتف الجديد' },
