@@ -2,6 +2,7 @@ import type { ToolDefinition } from '../../types';
 import { salesApi } from '@/modules/sales/api';
 import { getNextDocumentNumber } from '@/core/api';
 import { crmApi } from '@/modules/crm/api';
+import { salesWriteTools } from './sales';
 import {
   num,
   str,
@@ -719,9 +720,10 @@ export const crmWriteTools: ToolDefinition[] = [
   {
     name: 'crm.create_customer',
     labelAr: 'إنشاء عميل',
-    descriptionAr: 'ينشئ عميلاً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان، رقم ضريبي).',
+    descriptionAr: 'ينشئ عميلاً جديداً بالاسم وبيانات اختيارية (هاتف، بريد، عنوان، رقم ضريبي). نفس المنطق كـ sales.create_customer (القانون) — صلاحية crm.create.',
     permission: 'crm.create',
     dangerLevel: 'write',
+    route: '/sales/customers',
     parameters: {
       type: 'object',
       properties: {
@@ -735,6 +737,8 @@ export const crmWriteTools: ToolDefinition[] = [
     },
     summarizeArgs: (a) => `إنشاء عميل جديد: ${a.name}`,
     execute: async (args, ctx) => {
+      const canonical = salesWriteTools.find((t) => t.name === 'sales.create_customer');
+      if (canonical) return canonical.execute(args, ctx);
       const name = str(args.name);
       if (!name) return { error: 'اسم العميل مطلوب' };
       const docNumber = await getNextDocumentNumber(ctx.companyId, 'customer');

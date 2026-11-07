@@ -22,6 +22,11 @@ async function guardedQuery(sql: string, params: unknown[]): Promise<{ success: 
  * Read-only tools (dangerLevel: 'read') — execute immediately without
  * confirmation. Results are intentionally compact (field-picked, row-capped)
  * to keep LLM context small.
+ *
+ * Folding note (2026-11-07 audit): summary aggregates canonically belong to
+ * reportTools.ts (32 tools). These 21 remain for backward compat (`read.*` +
+ * summary reads) — new summaries go in reportTools, reads stay here only when
+ * they are single-row lookups.
  */
 
 const EMPTY_PARAMS: Record<string, unknown> = { type: 'object', properties: {} };

@@ -62,6 +62,10 @@ const CEILINGS: Record<string, number> = {
 // sweeps terminal ai_job_batches alongside transcripts. The bridge runs on
 // PGlite in the renderer, so adapter.query is its only transport — there is no
 // typed RPC for the in-browser DB.
+// Re-affirmed 678 (2026-11-07 audit, v0.27.0): the new read/write tools
+// (search.branches/currencies/departments/fixed_assets, convert/post/shift
+// tools) go through guardedQuery (SELECT allow-list + tenant scope) or the
+// module APIs (typed RPC on desktop) — zero new raw renderer statements.
 const TOTAL_CEILING = 678;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

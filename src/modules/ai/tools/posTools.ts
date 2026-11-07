@@ -344,4 +344,64 @@ export const posTools: ToolDefinition[] = [
       };
     },
   },
+
+  // ─── WRITE: Open shift (was missing — agent could only sell on a live shift) ──
+  {
+    name: 'pos.open_shift',
+    labelAr: 'فتح وردية نقطة بيع',
+    descriptionAr: 'يفتح وردية نقطة بيع جديدة للكاشير الحالي مع صندوق ورصيد افتتاحي. وردية واحدة مفتوحة لكل كاشير.',
+    permission: 'pos.create',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        cashBoxId: { type: 'string', description: 'معرف صندوق الكاشير (من search.cash_boxes)' },
+        openingAmount: { type: 'number', description: 'رصيد الافتتاح النقدي' },
+      },
+      required: ['cashBoxId', 'openingAmount'],
+    },
+    summarizeArgs: (a) => `فتح وردية — صندوق: ${String((a as Record<string, unknown>).cashBoxId ?? '').slice(0, 8)}… — افتتاحي: ${num((a as Record<string, unknown>).openingAmount)}`,
+    execute: async (args, ctx) => {
+      const cashBoxId = str(args.cashBoxId);
+      if (!cashBoxId) return { error: 'cashBoxId مطلوب — استخدم search.cash_boxes أولاً' };
+      const openingAmount = num(args.openingAmount);
+      if (!(openingAmount >= 0)) return { error: 'openingAmount لا يمكن أن يكون سالباً' };
+      const res = await posApi.openShift(ctx.companyId, cashBoxId, openingAmount, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل فتح الوردية (قد توجد وردية مفتوحة)' };
+      return { opened: true, shiftId: res.id };
+    },
+  },
+
+  // ─── WRITE: Close shift (difference posts automatically) ──────────────────
+  {
+    name: 'pos.close_shift',
+    labelAr: 'إغلاق وردية نقطة بيع',
+    descriptionAr: 'يغلق وردية نقطة بيع بعد الجرد الفعلي — يحسب المتوقع والفرق ويرحّل قيد الفرق تلقائياً.',
+    permission: 'pos.post',
+    dangerLevel: 'write',
+    parameters: {
+      type: 'object',
+      properties: {
+        shiftId: { type: 'string', description: 'معرف الوردية (من pos.get_active_shift — اختياري للمفتوحة)' },
+        countedAmount: { type: 'number', description: 'المبلغ الفعلي الموجود في الدرج' },
+        notes: { type: 'string', description: 'ملاحظات الإغلاق (اختياري)' },
+      },
+      required: ['countedAmount'],
+    },
+    summarizeArgs: (a) => `إغلاق وردية — الفعلي: ${num((a as Record<string, unknown>).countedAmount)}`,
+    execute: async (args, ctx) => {
+      let shiftId = str(args.shiftId);
+      if (!shiftId) {
+        const active = await posApi.getActiveShift(ctx.companyId, ctx.userId);
+        if (!active.success) return { error: active.error || 'فشل جلب الوردية المفتوحة' };
+        if (!active.data) return { error: 'لا توجد وردية مفتوحة' };
+        shiftId = active.data.id;
+      }
+      const countedAmount = num(args.countedAmount);
+      if (!(countedAmount >= 0)) return { error: 'countedAmount لا يمكن أن يكون سالباً' };
+      const res = await posApi.closeShift(ctx.companyId, shiftId, countedAmount, str(args.notes), ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل إغلاق الوردية' };
+      return { closed: true, shiftId, expectedAmount: res.data?.expectedAmount, difference: res.data?.difference };
+    },
+  },
 ];

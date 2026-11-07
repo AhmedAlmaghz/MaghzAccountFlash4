@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../types';
 import { fixedAssetsApi } from '@/modules/accounting/assets';
 import { num, str } from './writeTools/shared';
 import { localToday } from '../engine/dateUtils';
-import { normalizeArabic, fuzzyMatchScore } from '@/core/utils/normalizeArabic';
+import { normalizeArabic } from '@/core/utils/normalizeArabic';
 import { normalizeDateArg } from '../engine/argNormalizers';
 
 /**
@@ -17,55 +17,6 @@ import { normalizeDateArg } from '../engine/argNormalizers';
 const METHODS = ['straight_line', 'declining_balance'] as const;
 
 export const fixedAssetTools: ToolDefinition[] = [
-  {
-    name: 'search.fixed_assets',
-    labelAr: 'بحث عن أصل ثابت',
-    descriptionAr: 'يبحث في الأصول الثابتة بالاسم أو الرمز ويعيد معرفها (id) وقيمتها الدفترية وحالتها. استخدمه قبل الاستبعاد أو الإهلاك.',
-    permission: 'accounting.view',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'اسم الأصل أو رمزه (فارغ = تصفح الأحدث)' },
-      },
-    },
-    execute: async (args, ctx) => {
-      const query = typeof args.query === 'string' ? args.query.trim() : '';
-      const res = await fixedAssetsApi.getFixedAssets(ctx.companyId);
-      if (!res.success) return { error: res.error || 'فشل جلب الأصول الثابتة' };
-      const list = res.data ?? [];
-      const toRow = (a: (typeof list)[number]) => ({
-        id: a.id,
-        code: a.code,
-        name: a.nameAr,
-        category: a.category,
-        cost: a.cost,
-        netBookValue: a.netBookValue,
-        status: a.status,
-      });
-      if (!query) {
-        const head = list.slice(0, 8).map(toRow);
-        return {
-          matches: head,
-          totalMatches: head.length,
-          suggestion: 'عرض أول الأصول لأن البحث كان فارغاً — مرّر اسماً أدق في query للتضييق',
-        };
-      }
-      const nq = normalizeArabic(query);
-      const scored = list
-        .map((a) => ({
-          a,
-          s: fuzzyMatchScore(nq, `${a.nameAr ?? ''} ${a.code ?? ''}`),
-        }))
-        .filter((x) => x.s >= 0.35)
-        .sort((x, y) => y.s - x.s)
-        .slice(0, 8);
-      return {
-        matches: scored.map((x) => toRow(x.a)),
-        totalMatches: scored.length,
-      };
-    },
-  },
   {
     name: 'accounting.list_fixed_assets',
     labelAr: 'قائمة الأصول الثابتة',

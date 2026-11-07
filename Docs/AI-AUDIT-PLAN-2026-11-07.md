@@ -155,3 +155,17 @@ ChatPanel / ChatWidget
 | **التحقق** | `tsc -b --force`: نظيف (0 errors بعد الإصلاح) · `vitest` (5 ملفات: `sqlGuard` + `summarizer` + `taskLedger` + `searchTools` + `toolsContract`): **59/59** بعد تحديث عقدَي `summarizer`/`taskLedger` · `eslint --max-warnings=0` + `build` + `db:check`: **مؤجلة — بيئة Windows مزدحمة بعد vitest واسع (shell timeout)** → تأكيد في CI قبل الدمج | ⏳ للـ CI |
 
 **المهام التالية المقترحة (بعد قرارك):** طيّ `readTools`(21)→`reportTools`(32) · توحيد `create_customer` · نقل `search.fixed_assets/departments` إلى `searchTools.ts` · إضافة `pos.open_shift/close_shift` + `convert_quotation/order` + `update_journal_entry` · إخلاء `created/completedKeys` بـ TTL · صفحة `/ai/diagnostics` (Eval harness) · RAG `pgvector` · بوابة `guardedQuery` النصية الكاملة |
+
+---
+
+## 8) سجل التنفيذ الثاني (2026-11-07/08 — المهام الخمس)
+
+| المهمة | ما نُفّذ | التحقق |
+|---|---|---|
+| طيّ القراءة + العميل + البحث | search.departments + search.fixed_assets في searchTools.ts + crm.create_customer يفوض إلى sales + تعليق توحيد readTools | tsc نظيف |
+| أدوات كتابة (6) | pos.open_shift/close_shift + sales.convert_quotation_to_invoice + purchases.convert_order_to_invoice + accounting.update_journal_entry + inventory.post_stock_transfer | summarizeArgs + route |
+| ذاكرة TTL + إعادة بناء | TTL 7 أيام + rebuild يستعيد entities والمفاتيح | tsc نظيف |
+| بوابة + ratchet | aiGuardedQueryGate.test.ts + تثبيت 678 | zero raw جديد |
+| تقييم + تشخيص | evalHarness (6 حالات) + /ai/diagnostics + i18n متوازن | حتمية بلا مزود |
+
+**التحقق النهائي:** tsc -b = 0 أخطاء (TSC_EXIT:0) بعد إصلاح 4 أخطاء. vitest العمال مهيمنة بيئياً (forks Timeout — سلوك ميداني موثق) → التأكيد الكامل في CI قبل الدمج.

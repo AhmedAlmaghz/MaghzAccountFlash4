@@ -44,37 +44,6 @@ async function findPayrollRun(
 }
 
 /**
- * Token-aware fuzzy search (same pattern as searchTools.fuzzySearch): the full
- * query or any individual token (≥2 chars) must score ≥ threshold against the
- * item's key — multi-word Arabic requests match per-token while exact hits rank
- * highest. Returns best-first matches capped at `limit`.
- */
-function fuzzySearch<T>(
-  query: string,
-  items: T[],
-  keyFn: (item: T) => string,
-  limit = 8,
-  threshold = 0.35,
-): Array<{ item: T; score: number }> {
-  const nq = normalizeArabic(query);
-  if (!nq) return [];
-  const tokens = [...new Set(nq.split(/\s+/).filter((tk) => tk.length >= 2))];
-  return items
-    .map((item) => {
-      const key = normalizeArabic(keyFn(item));
-      let best = fuzzyMatchScore(nq, key);
-      for (const tk of tokens) {
-        const s = fuzzyMatchScore(tk, key);
-        if (s > best) best = s;
-      }
-      return { item, score: best };
-    })
-    .filter((m) => m.score >= threshold)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
-}
-
-/**
  * Infinity is not JSON-serializable (becomes null over IPC/LLM boundaries) —
  * uncapped balances report null entitled/remaining with uncapped: true.
  */
@@ -485,53 +454,6 @@ export const hrTools: ToolDefinition[] = [
       const res = await hrApi.deletePayrollRun(id, ctx.companyId, ctx.userId);
       if (!res.success) return { error: res.error || 'فشل حذف المسير (المسيرات المرحّلة لا تُحذف)' };
       return { deleted: true, payrollRunId: id };
-    },
-  },
-
-  // ─── READ: Search departments ──────────────────────────────────────────
-  {
-    name: 'search.departments',
-    labelAr: 'البحث في الأقسام',
-    descriptionAr: 'يبحث في أقسام الشركة بالاسم أو اسم المدير — يرجع المعرف وعدد الموظفين المرتبطين. استخدمه قبل أي عملية على قسم.',
-    permission: 'hr.view',
-    dangerLevel: 'read',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'اسم القسم أو المدير (نص حر)' },
-      },
-      required: ['query'],
-    },
-    execute: async (args, ctx) => {
-      const query = str(args.query);
-      const res = await hrApi.getDepartments(ctx.companyId);
-      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأقسام' };
-      const toRow = (d: { id: string; name: string; managerName?: string; employeeCount?: number }) => ({
-        id: d.id,
-        name: d.name,
-        managerName: d.managerName,
-        employeeCount: d.employeeCount,
-      });
-      // Empty query browses the head (live 2026-10-02: empty searches looped).
-      if (!query) {
-        const head = (res.data as unknown[]).slice(0, 8);
-        return {
-          departments: head.map((d) => toRow(d as { id: string; name: string })),
-          suggestion: 'عرض أول الأقسام لأن البحث كان فارغاً — مرّر اسماً أدق في query للتضييق',
-        };
-      }
-      const matches = fuzzySearch(query, res.data, (d) => `${d.name} ${d.managerName ?? ''}`);
-      if (matches.length === 0) {
-        return { departments: [], note: 'لا توجد أقسام مطابقة — جرّب اسماً أدق أو أضف القسم عبر hr.create_department' };
-      }
-      return {
-        departments: matches.map((m) => ({
-          id: m.item.id,
-          name: m.item.name,
-          managerName: m.item.managerName,
-          employeeCount: m.item.employeeCount,
-        })),
-      };
     },
   },
 

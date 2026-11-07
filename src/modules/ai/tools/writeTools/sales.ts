@@ -638,4 +638,35 @@ export const salesWriteTools: ToolDefinition[] = [
       return { deleted: true, returnId };
     },
   },
+  // ─── Sales: Convert quotation to invoice (missing write tool) ─────────────
+  {
+    name: 'sales.convert_quotation_to_invoice',
+    labelAr: 'تحويل عرض سعر إلى فاتورة',
+    descriptionAr: 'يحوّل عرض أسعار قبول (draft/sent/accepted) إلى فاتورة مبيعات مسودة. العرض يتحول إلى converted بعد النجاح.',
+    permission: 'sales.post',
+    dangerLevel: 'write',
+    route: '/sales/quotations',
+    parameters: {
+      type: 'object',
+      properties: { quotationId: { type: 'string', description: 'معرف عرض السعر (من search.quotations)' } },
+      required: ['quotationId'],
+    },
+    summarizeArgs: (a) => `تحويل عرض سعر إلى فاتورة: ${String((a as Record<string, unknown>).quotationId ?? '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const quotationId = str(args.quotationId);
+      if (!quotationId) return { error: 'quotationId مطلوب — استخدم search.quotations أولاً' };
+      const q = await salesApi.getQuotationById(quotationId, ctx.companyId);
+      if (!q.success || !q.data) return { error: q.error || 'عرض السعر غير موجود' };
+      const { date, ...rest } = q.data as unknown as Record<string, unknown>;
+      const invoiceData = {
+        ...rest,
+        companyId: ctx.companyId,
+        date: typeof date === 'string' ? date : today(),
+        lines: [],
+      } as never;
+      const res = await salesApi.convertQuotationToInvoice(quotationId, ctx.companyId, invoiceData, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل التحويل (قد يكون محوّلاً مسبقاً)' };
+      return { converted: true, quotationId, invoiceId: res.id };
+    },
+  },
 ];

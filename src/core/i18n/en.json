@@ -345,7 +345,10 @@
     "diagnostics": {
       "copy": "Copy diagnostics for support",
       "copied": "Diagnostics copied (no private data) — paste into the ticket",
-      "copyFailed": "Copy failed — copy the visible error message instead"
+      "copyFailed": "Copy failed — copy the visible error message instead",
+      "title": "Agent diagnostics & evaluation",
+      "run": "Run evaluation",
+      "empty": "Press “Run evaluation” to check deterministic contracts (no provider call)."
     },
     "stalledRecovered": "The assistant stopped responding for a while so it was reset automatically — please resend your request",
     "showOlder": "Show older messages ({{count}})",

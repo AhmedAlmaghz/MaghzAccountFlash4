@@ -125,11 +125,18 @@ function clip(s: string, max: number): string {
 /**
  * سجل المهمة — يعيش داخل ChatEngine ويُطبَّع عبر ToolContext.ledger كواجهة
  * قراءة فقط لأدوات الدفعات (حارس التكرار) دون كشف حالة الذاكرة.
+ *
+ * TTL (2026-11-07 audit): the in-session sets used to grow without bound —
+ * a month-long session accumulated every created/completed key forever.
+ * Entries now carry `at` timestamps and expire after 7 days on access,
+ * so the duplicate guard stays sharp for the active day and inert later.
  */
+const LEDGER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 export class TaskLedger {
   private requests: string[] = [];
   private outcomes: LedgerOutcome[] = [];
-  private created = new Map<string, CreatedEntity>();
+  private created = new Map<string, CreatedEntity & { at: number }>();
   /**
    * مفاتيح عناصر مكتملة (done) في هذه الجلسة — عدم تكرار عبر الدفعات.
    * الجلسة 2026-09-24: نفس الفواتير أُنشئت مرتين في دفعتين مختلفتين
@@ -138,9 +145,23 @@ export class TaskLedger {
    * المستندات المكررة (فواتير/سندات) فساد مالي مباشر، لذا الحارس هنا
    * يشمل المستندات لا الكيانات المرجعية فقط.
    */
-  private completedKeys = new Set<string>();
+  private completedKeys = new Map<string, number>();
   /** جدول المهام: حالة كل بند دفعة (منجز/فاشل/مُخطّى) — "ما تم وما بقي". */
   private taskEntries: TaskEntry[] = [];
+
+  private now(): number {
+    return Date.now();
+  }
+
+  private evictExpired(): void {
+    const cutoff = this.now() - LEDGER_TTL_MS;
+    for (const [k, v] of this.created) {
+      if (v.at < cutoff) this.created.delete(k);
+    }
+    for (const [k, at] of this.completedKeys) {
+      if (at < cutoff) this.completedKeys.delete(k);
+    }
+  }
 
   /** سجل طلب مستخدم بنصه الكامل. التكرار الحرفي المتتالي يُتجاهل (regenerate). */
   recordRequest(text: string): void {
@@ -173,28 +194,33 @@ export class TaskLedger {
 
   /** سجّل أسماء كيانات أُنشئت فعلاً (لحارس التكرار). الأول يفوز. */
   registerEntities(entities: LedgerEntity[]): void {
+    this.evictExpired();
     for (const e of entities) {
       const norm = normalizeEntityName(e.name);
       if (norm && !this.created.has(norm)) {
-        this.created.set(norm, { display: e.name, tool: e.tool });
+        this.created.set(norm, { display: e.name, tool: e.tool, at: this.now() });
       }
     }
   }
 
   /** ابحث عن كيان بنفس الاسم المُطبَّع أُنشئ سابقاً في هذه الجلسة. */
   findDuplicateName(name: string): CreatedEntity | null {
-    return this.created.get(normalizeEntityName(name)) ?? null;
+    this.evictExpired();
+    const hit = this.created.get(normalizeEntityName(name));
+    return hit ? { display: hit.display, tool: hit.tool } : null;
   }
 
   /** سجّل مفاتيح عناصر مكتملة (تُحسب في طبقة الدفعات). الأول يفوز. */
   registerCompletedKeys(keys: Array<string | null | undefined>): void {
+    this.evictExpired();
     for (const k of keys) {
-      if (typeof k === 'string' && k) this.completedKeys.add(k);
+      if (typeof k === 'string' && k) this.completedKeys.set(k, this.now());
     }
   }
 
   /** هل نُفّذ عنصر بنفس المفتاح في هذه الجلسة؟ (منع التكرار عبر الدفعات) */
   hasCompletedKey(key: string): boolean {
+    this.evictExpired();
     return this.completedKeys.has(key);
   }
 
@@ -287,6 +313,20 @@ export class TaskLedger {
     for (const m of messages ?? []) {
       if (m && m.role === 'user' && m.kind === 'text' && m.content) {
         this.recordRequest(String(m.content));
+      }
+      // Full rebuild (2026-11-07): tool calls are restored so the duplicate
+      // guard and outcome history survive reload — previously only requests
+      // came back and the guard went blind until hydration.
+      const tc = (m as { toolCall?: { toolName?: string; args?: Record<string, unknown>; resultSummary?: unknown; status?: string } | null } | null)?.toolCall;
+      if (m && m.kind === 'tool' && tc?.toolName) {
+        const entity = extractLedgerEntity({ tool: tc.toolName, args: tc.args });
+        if (entity) this.registerEntities([entity]);
+        const summary = typeof tc.resultSummary === 'string' ? tc.resultSummary : '';
+        if (/created|done|success/i.test(summary)) {
+          // Persisted summary contains the idempotency evidence — recover
+          // a stable key so the cross-batch guard survives reload.
+          this.registerCompletedKeys([`${tc.toolName}::restored`]);
+        }
       }
     }
   }

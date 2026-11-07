@@ -1105,4 +1105,37 @@ export const accountingWriteTools: ToolDefinition[] = [
       return { depreciated: true, year, month, posted: res.data?.posted || 0, total: res.data?.total || 0 };
     },
   },
+  // ─── Accounting: Update draft journal entry (draft-only, server-guarded) ────
+  {
+    name: 'accounting.update_journal_entry',
+    labelAr: 'تعديل قيد مسودة',
+    descriptionAr: 'يُعدّل قيداً مسودة فقط (المرحّل مرفوض — يُعكس بقيد عكسي). بيانات ناقصة = تعديل جزئي؛ سطور كاملة = بديلة متوازنة.',
+    permission: 'accounting.edit',
+    dangerLevel: 'write',
+    route: '/accounting/journal',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'معرف القيد (UUID)' },
+        notes: { type: 'string', description: 'البيان (اختياري)' },
+        date: { type: 'string', description: 'التاريخ YYYY-MM-DD (اختياري)' },
+        entries: { type: 'array', description: 'سطور بديلة كاملة (accountId/debit/credit) — اختياري' },
+      },
+      required: ['id'],
+    },
+    summarizeArgs: (a) => `تعديل قيد: ${String((a as Record<string, unknown>).id ?? '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const id = str(args.id);
+      if (!id) return { error: 'id مطلوب — استخدم search.journal_entries أولاً' };
+      const data: Record<string, unknown> = {};
+      if (str(args.notes)) data.notes = str(args.notes);
+      if (str(args.date)) data.date = str(args.date);
+      if (Array.isArray(args.entries)) data.entries = args.entries;
+      if (Object.keys(data).length === 0) return { error: 'يجب تمرير حقل واحد على الأقل للتعديل (notes/date/entries)' };
+      const { accountingApi } = await import('@/modules/accounting/api');
+      const res = await accountingApi.updateTransaction(id, ctx.companyId, ctx.userId, data as never);
+      if (!res.success) return { error: res.error || 'فشل تعديل القيد (المرحّل ممنوع)' };
+      return { updated: true, id };
+    },
+  },
 ];

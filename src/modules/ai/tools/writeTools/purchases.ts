@@ -645,4 +645,26 @@ export const purchasesWriteTools: ToolDefinition[] = [
       return { deleted: true, supplierId };
     },
   },
+  // ─── Purchases: Convert order to invoice (missing write tool) ─────────────
+  {
+    name: 'purchases.convert_order_to_invoice',
+    labelAr: 'تحويل أمر شراء إلى فاتورة',
+    descriptionAr: 'يحوّل أمر شراء مفتوح (draft/sent/partially_received/received) إلى فاتورة مشتريات مسودة. الأمر يتحول إلى invoiced بعد النجاح.',
+    permission: 'purchases.edit',
+    dangerLevel: 'write',
+    route: '/purchases/orders',
+    parameters: {
+      type: 'object',
+      properties: { orderId: { type: 'string', description: 'معرف أمر الشراء (من search.purchase_orders)' } },
+      required: ['orderId'],
+    },
+    summarizeArgs: (a) => `تحويل أمر شراء إلى فاتورة: ${String((a as Record<string, unknown>).orderId ?? '').slice(0, 8)}…`,
+    execute: async (args, ctx) => {
+      const orderId = str(args.orderId);
+      if (!orderId) return { error: 'orderId مطلوب — استخدم search.purchase_orders أولاً' };
+      const res = await purchasesApi.convertOrderToInvoice(orderId, ctx.companyId, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل التحويل (قد يكون محوّلاً مسبقاً)' };
+      return { converted: true, orderId, invoiceId: res.id };
+    },
+  },
 ];

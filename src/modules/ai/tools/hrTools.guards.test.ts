@@ -13,6 +13,7 @@ vi.mock('@/modules/hr/api', () => ({
 }));
 
 import { hrTools } from './hrTools';
+import { searchTools } from './searchTools';
 import { hrApi } from '@/modules/hr/api';
 import type { ToolContext } from '../types';
 
@@ -22,7 +23,7 @@ const ctx: ToolContext = {
 };
 
 function findTool(name: string) {
-  const t = hrTools.find((x) => x.name === name);
+  const t = hrTools.find((x) => x.name === name) ?? searchTools.find((x) => x.name === name);
   if (!t || !t.execute) throw new Error(`tool ${name} not found`);
   return t as unknown as {
     execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;

@@ -98,6 +98,7 @@ const ActivitiesPage = React.lazy(() => import('@/modules/crm/components/Activit
 // AI pages
 const AiChatPage = React.lazy(() => import('@/modules/ai/components/AiChatPage'));
 const AiSettingsPage = React.lazy(() => import('@/modules/ai/components/AiSettingsPage'));
+const AiDiagnosticsPage = React.lazy(() => import('@/modules/ai/components/AiDiagnosticsPage'));
 
 // Settings with nested routes
 const SettingsLayout = React.lazy(() => import('@/modules/core/components/SettingsPage'));
@@ -323,6 +324,7 @@ export const AppRouter: React.FC = () => {
             {/* AI Chat */}
             <Route element={<PermissionRoute module="ai" />}>
               <Route path="/ai" element={withSuspense(AiChatPage)} />
+              <Route path="/ai/diagnostics" element={withSuspense(AiDiagnosticsPage)} />
             </Route>
 
             {/* POS management pages (inside the app shell) */}

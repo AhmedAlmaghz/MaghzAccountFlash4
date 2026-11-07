@@ -5,6 +5,7 @@ import { inventoryApi } from '@/modules/inventory/api';
 import { accountingApi } from '@/modules/accounting/api';
 import { crmApi } from '@/modules/crm/api';
 import { hrApi } from '@/modules/hr/api';
+import { fixedAssetsApi } from '@/modules/accounting/assets';
 import { manufacturingApi } from '@/modules/manufacturing/api';
 import type { Account } from '@/modules/accounting/types';
 import * as settingsApi from '@/core/api';
@@ -1574,6 +1575,62 @@ export const searchTools: ToolDefinition[] = [
         matches: matches.map((m) => ({ id: m.item.id, code: m.item.code, nameAr: m.item.nameAr, nameEn: m.item.nameEn, rate: Number(m.item.rate ?? 1) })),
         totalMatches: matches.length,
       };
+    },
+  },
+  // ─── HR: Departments (moved from hrTools.ts — canonical search home) ─────
+  {
+    name: 'search.departments',
+    labelAr: 'البحث في الأقسام',
+    descriptionAr: 'يبحث في أقسام الشركة بالاسم أو اسم المدير — يرجع المعرف وعدد الموظفين المرتبطين. استخدمه قبل أي عملية على قسم.',
+    permission: 'hr.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'اسم القسم أو المدير (نص حر)' } },
+      required: ['query'],
+    },
+    execute: async (args, ctx) => {
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      const res = await hrApi.getDepartments(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأقسام' };
+      if (!query) {
+        return {
+          departments: (res.data as unknown[]).slice(0, 8),
+          suggestion: browseHint('الأقسام'),
+        };
+      }
+      const matches = fuzzySearch(query, res.data, (d) => `${d.name} ${d.managerName ?? ''}`);
+      if (matches.length === 0) {
+        return { departments: [], note: 'لا توجد أقسام مطابقة — جرّب اسماً أدق أو أضف القسم عبر hr.create_department' };
+      }
+      return {
+        departments: matches.map((m) => ({ id: m.item.id, name: m.item.name, managerName: m.item.managerName, employeeCount: m.item.employeeCount })),
+      };
+    },
+  },
+  // ─── Fixed Assets (moved from fixedAssetTools.ts — canonical search home) ──
+  {
+    name: 'search.fixed_assets',
+    labelAr: 'بحث عن أصل ثابت',
+    descriptionAr: 'يبحث في الأصول الثابتة بالاسم أو الرمز ويعيد معرفها (id) وقيمتها الدفترية وحالتها. استخدمه قبل الاستبعاد أو الإهلاك.',
+    permission: 'accounting.view',
+    dangerLevel: 'read',
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'اسم الأصل أو رمزه (فارغ = تصفح الأحدث)' } },
+    },
+    execute: async (args, ctx) => {
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      const res = await fixedAssetsApi.getFixedAssets(ctx.companyId);
+      if (!res.success || !res.data) return { error: res.error || 'فشل جلب الأصول الثابتة' };
+      const list = res.data;
+      const toRow = (a: (typeof list)[number]) => ({ id: a.id, code: a.code, name: a.nameAr, category: a.category, cost: a.cost, netBookValue: a.netBookValue, status: a.status });
+      if (!query) {
+        const head = list.slice(0, 8).map(toRow);
+        return { matches: head, totalMatches: head.length, suggestion: browseHint('الأصول الثابتة') };
+      }
+      const matches = fuzzySearch(query, list, (a) => `${a.nameAr ?? ''} ${a.code ?? ''}`).slice(0, 8);
+      return { matches: matches.map((m) => toRow(m.item)), totalMatches: matches.length };
     },
   },
 ];

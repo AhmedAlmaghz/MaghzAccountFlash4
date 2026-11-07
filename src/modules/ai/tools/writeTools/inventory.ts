@@ -955,4 +955,43 @@ export const inventoryWriteTools: ToolDefinition[] = [
       return { deleted: true, unitRowId };
     },
   },
+  // ─── Inventory: Post stock transfer (create+approve as one write tool) ──────
+  {
+    name: 'inventory.post_stock_transfer',
+    labelAr: 'ترحيل تحويل مخزني',
+    descriptionAr: 'ينشئ تحويل مخزون بين مستودعين ويعتمده (completed). المستودعان مختلفان حتماً.',
+    permission: 'inventory.edit',
+    dangerLevel: 'write',
+    route: '/inventory/transfers',
+    parameters: {
+      type: 'object',
+      properties: {
+        fromWarehouseId: { type: 'string', description: 'معرف المستودع المصدر (من search.warehouses)' },
+        toWarehouseId: { type: 'string', description: 'معرف المستودع الهدف (من search.warehouses)' },
+        date: { type: 'string', description: 'تاريخ التحويل YYYY-MM-DD (اختياري — افتراضي اليوم)' },
+        lines: { type: 'array', description: 'أصناف التحويل [{productId, quantity}]' },
+      },
+      required: ['fromWarehouseId', 'toWarehouseId', 'lines'],
+    },
+    summarizeArgs: (a) => `تحويل مخزني: ${String((a as Record<string, unknown>).fromWarehouseId ?? '').slice(0, 8)}… ← ${String((a as Record<string, unknown>).toWarehouseId ?? '').slice(0, 8)}… (${Array.isArray((a as Record<string, unknown>).lines) ? ((a as Record<string, unknown>).lines as unknown[]).length : 0} أصناف)`,
+    execute: async (args, ctx) => {
+      const fromWarehouseId = str(args.fromWarehouseId);
+      const toWarehouseId = str(args.toWarehouseId);
+      if (!fromWarehouseId || !toWarehouseId) return { error: 'fromWarehouseId/toWarehouseId مطلوبان — استخدم search.warehouses أولاً' };
+      if (fromWarehouseId === toWarehouseId) return { error: 'المستودع المصدر والهدف لا يمكن أن يكونا واحداً' };
+      const lines = Array.isArray(args.lines) ? args.lines : [];
+      if (lines.length === 0) return { error: 'يجب تمرير صنف واحد على الأقل في lines' };
+      const res = await inventoryApi.createStockTransfer({
+        companyId: ctx.companyId,
+        fromWarehouseId,
+        toWarehouseId,
+        date: str(args.date) || localToday(),
+        transferNumber: '',
+        status: 'completed',
+        lines: lines as never,
+      } as never, ctx.userId);
+      if (!res.success) return { error: res.error || 'فشل إنشاء التحويل' };
+      return { posted: true, transferId: res.id };
+    },
+  },
 ];
