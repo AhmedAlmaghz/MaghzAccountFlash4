@@ -28,7 +28,7 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
 
 /** per-module ceilings, measured 2026-09-24 (see AI_AUDIT_AND_FIX_PLAN.md) */
 const CEILINGS: Record<string, number> = {
-  core: 100,
+  core: 101,
   accounting: 84,
   hr: 68,
   manufacturing: 58,
@@ -37,7 +37,10 @@ const CEILINGS: Record<string, number> = {
   purchases: 53,
   reports: 47,
   // 46 -> 47: browser-bridge terminal-batch PII sweep (PGlite local DB only).
-  ai: 47,
+  // 47 -> 45 (v0.28.1): wizardTools' two `adapter.query` stock pre-checks
+  // moved behind `guardedQuery` — the wrapper's single adapter.query in
+  // reportCommon counts once (was 2 raw calls in wizardTools).
+  ai: 45,
   crm: 37,
   pos: 24,
   settings: 22,
@@ -66,7 +69,16 @@ const CEILINGS: Record<string, number> = {
 // (search.branches/currencies/departments/fixed_assets, convert/post/shift
 // tools) go through guardedQuery (SELECT allow-list + tenant scope) or the
 // module APIs (typed RPC on desktop) — zero new raw renderer statements.
-const TOTAL_CEILING = 678;
+// Raised 678 -> 679 (v0.28.1, backup-restore contract): applyRestore
+// resolves user references against the TARGET database before the restore
+// transaction — one `SELECT id FROM users WHERE company_id = $1` in
+// backupService.ts (core). Users are never restored, so
+// created_by/assigned_to must resolve against the preserved accounts;
+// dangling ids are re-attributed to the restoring user.
+// Lowered 679 -> 677: wizardTools' two `adapter.query` stock pre-checks
+// moved behind `guardedQuery` (ai guardedQuery gate) — they remain counted
+// once inside reportCommon, net −2 raw renderer statements.
+const TOTAL_CEILING = 677;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

@@ -8,6 +8,7 @@ import { crmApi } from '@/modules/crm/api';
 import { inventoryApi } from '@/modules/inventory/api';
 import { getNextDocumentNumber } from '@/core/api';
 import { getInvoiceTaxConfig, computeHeaderDiscount, parseLines, resolveLineUnits, summarizeDocLines, LINES_SCHEMA } from './writeTools/shared';
+import { guardedQuery } from './reportCommon';
 
 // ─── Helpers (mirror writeTools.ts) ───────────────────────────────────────
 
@@ -509,16 +510,8 @@ export const wizardTools: ToolDefinition[] = [
         }
       }
 
-      // Use the internal adapter directly for this multi-step operation
-      const { getDbAdapter } = await import('@/core/database/adapters');
-      const adapter = await getDbAdapter();
-
-      // Friendly pre-check with an atomic floor: SELECT-then-UPDATE races
-      // (concurrent transfers / manufacturing issues) could drive stock
-      // negative, so completeStockTransfer ALSO enforces the floor INSIDE
-      // its transaction (guard SELECT aborts everything on shortfall) —
-      // this message is just the early, readable refusal.
-      const srcCheck = await adapter.query(
+      // Use guardedQuery (SELECT allow-list + tenant scope) for the stock checks.
+      const srcCheck = await guardedQuery(
         'SELECT quantity FROM stock WHERE product_id = $1::uuid AND warehouse_id = $2::uuid AND company_id = $3::uuid',
         [productId, fromWarehouseId, ctx.companyId]
       );
@@ -558,7 +551,7 @@ export const wizardTools: ToolDefinition[] = [
         // pre-check above); anything else passes through verbatim.
         const rawErr = doneRes.error || 'سبب غير معروف';
         if (/division by zero/i.test(rawErr)) {
-          const fresh = await adapter.query(
+          const fresh = await guardedQuery(
             'SELECT quantity FROM stock WHERE product_id = $1::uuid AND warehouse_id = $2::uuid AND company_id = $3::uuid',
             [productId, fromWarehouseId, ctx.companyId]
           );

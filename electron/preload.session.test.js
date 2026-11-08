@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const holder = { exposed: {}, calls: [] };
 
-vi.mock('electron', () => ({
+const mockElectron = {
   contextBridge: {
     exposeInMainWorld: (name, api) => {
       holder.exposed[name] = api;
@@ -30,12 +30,25 @@ vi.mock('electron', () => ({
       return { success: true, rows: [] };
     },
   },
-}));
+};
+
+vi.mock('electron', () => mockElectron);
+
+// vitest 5: `require('electron')` inside the CJS preload bypasses vi.mock
+// (externalized deps go through the native require). The native require
+// DOES honor require.cache, so pre-seed it with the same mock object.
+async function seedElectronRequireCache() {
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const entry = req.resolve('electron');
+  req.cache[entry] = { exports: mockElectron, loaded: true };
+}
 
 const TOKEN_KEY = 'maghz-session-token';
 
 async function loadPreload(rel) {
   vi.resetModules();
+  await seedElectronRequireCache();
   holder.exposed = {};
   holder.calls = [];
   sessionStorage.clear();
@@ -74,6 +87,7 @@ for (const rel of ['./preload.cjs', './preload.js']) {
     it('restores a stored token at evaluation (the reload path)', async () => {
       sessionStorage.setItem(TOKEN_KEY, 'tok-restored');
       vi.resetModules();
+      await seedElectronRequireCache();
       holder.exposed = {};
       holder.calls = [];
       await import(rel);

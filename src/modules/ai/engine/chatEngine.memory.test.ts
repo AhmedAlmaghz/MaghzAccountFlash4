@@ -230,9 +230,13 @@ describe('ChatEngine memory — restoreHistorySync', () => {
 
     const payload = mocks.complete.mock.calls[mocks.complete.mock.calls.length - 1][0];
     const history = payload.messages as Array<{ role: string; content: string | null }>;
-    // التأكد من المشكلة القديمة: الطلب الأصلي خارج نافذة الرسائل المرسلة
+    // التأكد من المشكلة القديمة: الطلب الأصلي خارج نافذة الرسائل المرسلة.
+    // ملحوظة: اللُّخْصِيص التدرجي (summarizer.ts) يضغط البادئة المسقطة في
+    // رسالة "سجل مُختصر" — هذا تصميم مقصود (ذاكرة أعمال)، لذا يُستثنى من
+    // الفحص؛ المطلوب أن المهمة الأصلية خارج نافذة الرسائل الحقيقية.
     const missionInMessageWindow = history
       .slice(1)
+      .filter((m) => !(typeof m.content === 'string' && m.content.includes('سجل مُختصر لبداية الجلسة')))
       .some((m) => typeof m.content === 'string' && m.content.includes('سويت مون صغير'));
     expect(missionInMessageWindow).toBe(false);
     // الإصلاح: برومبت النظام يحمل المهمة كاملة عبر سجل المهمة الدائم

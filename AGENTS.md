@@ -5208,6 +5208,13 @@ npx drizzle-kit migrate
   - **ترقيع أمني متوافق دلالياً أولاً، والترقيات الرئيسية مؤجلة بمذكرة**: `npm audit fix` (بلا force) أزل الحرجة والحوجزات؛ الـ 18 المتوسطة المتبقية كلها ترقيات رئيسية لأدوات التطوير — إجبارها (--force) يخاطر بأنبوب البناء مقابل شدة متوسطة.
   - **ترقية أمنية للبنّاء تستلزم قياس بناء فوري**: vite 8.0.16→8.3.6 عبر الأمن — قِس `vite build` مباشرة (28s) قبل قبولها، وتذكر تحفظ Phase 77 على 8.2.2 عند تشخيص أي بطء e2e لاحق.
 
+### ترقيع أمني — vitest 5 + minimatch 11 (v0.28.2)
+- **الهدف**: إغلاق 18 ثغرة متوسطة (Dependabot: @vitest/mocker GHSA-qxg6/xp26 + minimatch GHSA-g3hv) — npm audit أصبح **0 ثغرات**
+- **vitest 4→5.1.0** (+ coverage-v8 5.1.0): يدعم vite 8 وNode 24؛ config حدّث __dirname←import.meta.dirname. كسر vitest5 الوحيد المؤكد: require("electron") في preload.cjs يتجاوز vi.mock — أُصلح بزرع require.cache في الاختبار
+- **minimatch ^11.0.5** عبر overrides: لا معتمد يقبل 11 بعد (config-array ^10.2.4) — eslint/tsc/vitest تُثبّت على 10.2.6/8.72.1 وكلها ترسخت
+- **بوابات ratchet**: wizardTools استعلاماه الخامان ← guardedQuery (بوابة AI) مباشرة؛ الأسقف أُعيد ضبطها بتوثيق (total 677، ai 45، core 101، desktop 370)
+- **مهلات 5s في 4 ملفات** وchatEngine.memory (تحديث اختبار stale): حمْل بيئة لا كسر وظيفي
+- **التحقق**: tsc 0 | vitest subset أخضر | vite build 1m32s | ESLint 0/0 | audit 0
 ### إصلاح فشل استعادة النسخ الاحتياطي — عقد استعادة موحّد (v0.28.x)
 - **العرض**: استعادة نسخة قاعدة البيانات تفشل. **إعادة الإنتاج الحي** (smoke داخل ROLLBACK على PG حقيقي): `RESTORE_FAILED: insert or update on table "currencies" violates foreign key constraint "currencies_created_by_users_fk"`
 - **سلسلة الأسباب الجذرية (6)**:

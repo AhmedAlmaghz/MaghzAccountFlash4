@@ -74,8 +74,19 @@ const RAW = /adapter\.(query|transaction|createTransaction)\s*(<[^()]*?>)?\s*\(/
  * with one `SELECT 1` (wakeRemoteDatabase) so a waking Neon fails with
  * "did not wake up" instead of dying inside 0000_init with a bare
  * TimeoutError. One honest statement, counted here like the other four.
+ *
+ * Raised 371 -> 372 with the backup-restore contract (v0.28.1): applyRestore
+ * now resolves user references against the TARGET database before the
+ * restore transaction — one `SELECT id FROM users WHERE company_id = $1`
+ * in backupService.ts (users are never restored, so created_by/assigned_to
+ * must resolve against the preserved accounts; dangling ids are
+ * re-attributed to the restoring user).
+ * Lowered 372 -> 370: wizardTools' two `adapter.query` stock pre-checks
+ * moved behind `guardedQuery` (ai guardedQuery gate) — net −2 desktop-
+ * reachable raw statements (the wrapper lives in reportCommon, already
+ * counted once).
  */
-const CEILING = 371;
+const CEILING = 370;
 
 /**
  * Guard idioms, each paired with the test that proves the guard actually holds.
@@ -120,7 +131,7 @@ const BASELINE: Record<string, number> = {
   'src/modules/settings/components/VatSettingsPage.tsx': 6,
   'src/core/utils/stockPolicy.ts': 5,
   'src/core/api.ts': 4,
-  'src/core/backup/backupService.ts': 4,
+  'src/core/backup/backupService.ts': 5,
   'src/core/database/adapters/remoteSchema.ts': 5,
   'src/core/utils/openingBalance.ts': 4,
   'src/modules/reports/LeadConversionReport.tsx': 4,
@@ -132,7 +143,6 @@ const BASELINE: Record<string, number> = {
   'src/modules/manufacturing/components/ProductionCostReport.tsx': 3,
   'src/modules/reports/StockMovementReport.tsx': 3,
   'src/core/services/BaseService.ts': 2,
-  'src/modules/ai/tools/wizardTools.ts': 2,
   'src/modules/manufacturing/components/VarianceAnalysisReport.tsx': 2,
   'src/modules/pos/components/PosSettingsPage.tsx': 2,
   'src/modules/reports/LowStockAlertReport.tsx': 2,
