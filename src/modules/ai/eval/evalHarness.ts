@@ -64,7 +64,7 @@ export async function runEvalHarness(): Promise<EvalReport> {
         const { crmWriteTools } = await import('../tools/writeTools/crm');
         const t = crmWriteTools.find((x: ToolDefinition) => x.name === 'crm.create_customer');
         const desc = String(t?.descriptionAr ?? '');
-        return { pass: !!t && desc.includes('sales.create_customer'), detail: !!t ? desc.slice(0, 80) : 'tool missing' };
+        return { pass: t !== undefined && desc.includes('sales.create_customer'), detail: t ? desc.slice(0, 80) : 'tool missing' };
       },
     },
     {
