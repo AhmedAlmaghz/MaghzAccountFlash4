@@ -7,10 +7,13 @@
  */
 
 import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
+import { useAuthStore } from '@/modules/auth/store';
 import {
   ALL_PLANNED_TABLES,
   BACKUP_MIME_TYPE,
   DELETE_ORDER,
+  INSERT_ORDER,
+  RESTORE_SKIP_TABLES,
   buildBackupFileName,
 } from './backupTables';
 import {
@@ -56,6 +59,10 @@ export async function readBackupRows(companyId: string): Promise<{ tables: Table
       const res = await adapter.query(sql, [companyId]);
       if (res.success && res.rows) {
         tables[plan.table] = res.rows as Record<string, unknown>[];
+        // Relay-backed adapters cap result rows — a silently truncated backup
+        // would restore incomplete data. Surface it loudly instead.
+        const truncated = (res as { truncated?: boolean }).truncated;
+        if (truncated) warnings.push(`${plan.table}: row cap reached — backup is incomplete (relay limit)`);
       } else {
         warnings.push(`${plan.table}: ${res.error || 'skipped'}`);
       }
@@ -77,12 +84,34 @@ export async function applyRestore(
     if (!res.success) throw new Error(res.error || 'Restore failed');
     return { restored: res.restored ?? 0, warnings: res.warnings ?? [] };
   }
-  const { statements, warnings } = composeRestoreBatch(companyId, tables);
-  if (statements.length === 0) return { restored: 0, warnings };
   const adapter = await getDbAdapter();
+  // Users are never restored, so user references (created_by, assigned_to, …)
+  // must resolve against the TARGET's existing users. Dangling ids are
+  // re-attributed to the user performing the restore.
+  const knownUserIds = new Set<string>();
+  try {
+    const res = await adapter.query<{ id: string }>(
+      'SELECT id FROM users WHERE company_id = $1',
+      [companyId],
+    );
+    for (const row of res.rows ?? []) knownUserIds.add(String(row.id));
+  } catch {
+    // Unresolvable → every reference falls back to the restoring user.
+  }
+  const fallbackUserId = useAuthStore.getState().user?.id ?? null;
+  const { statements, warnings } = composeRestoreBatch(companyId, tables, {
+    knownUserIds,
+    fallbackUserId,
+  });
+  if (statements.length === 0) return { restored: 0, warnings };
   const res = await adapter.transaction(statements.map((s) => ({ sql: s.sql, params: s.params })));
   if (!res.success) throw new Error(res.error || 'Restore transaction failed');
-  const restored = Object.values(tables).reduce((n, rows) => n + (Array.isArray(rows) ? rows.length : 0), 0);
+  // Honest count: only planned, non-excluded tables actually got restored.
+  const restored = INSERT_ORDER.reduce((n, plan) => {
+    if (RESTORE_SKIP_TABLES.includes(plan.table)) return n;
+    const rows = tables[plan.table];
+    return n + (Array.isArray(rows) ? rows.length : 0);
+  }, 0);
   return { restored, warnings };
 }
 

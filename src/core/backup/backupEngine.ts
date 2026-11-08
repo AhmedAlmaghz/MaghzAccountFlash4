@@ -13,8 +13,12 @@
 
 import {
   ALL_PLANNED_TABLES,
+  DELETE_ORDER,
   INSERT_ORDER,
+  RESTORE_SKIP_TABLES,
+  RESTORE_UPSERT_TABLES,
   SECRET_COLUMNS,
+  USER_REF_COLUMNS,
   isSafeIdentifier,
   type PlannedTable,
 } from './backupTables';
@@ -366,22 +370,71 @@ export function deleteForScope(plan: PlannedTable): { sql: string } {
 }
 
 /**
- * Full restore batch for one company: DELETEs in FK-safe order, then
- * INSERTs in reverse. Unknown tables and unsafe columns are skipped
- * (reported via `warnings`) — a backup file is untrusted input.
+ * Full restore batch for one company. Best-practice restore contract
+ * (mirrored by the main-process `db:restore-company` handler):
+ *
+ * 1. Wipe EVERY planned table (not just payload-present ones) so restoring an
+ *    older backup cannot leave stale rows that hit RESTRICT FKs.
+ * 2. `users` is never restored — identity/security data; the target's users
+ *    are preserved (RESTORE_SKIP_TABLES).
+ * 3. `companies` is upserted, never deleted — deleting it would CASCADE-wipe
+ *    every user account (RESTORE_UPSERT_TABLES).
+ * 4. User references (created_by / assigned_to / …) are resolved against the
+ *    target's existing users; dangling ids are re-attributed to the restoring
+ *    user (USER_REF_COLUMNS).
+ *
+ * Unknown tables and unsafe columns are skipped (reported via `warnings`) —
+ * a backup file is untrusted input.
  */
+export interface RestoreOptions {
+  /** User ids that exist in the target database (users are never restored). */
+  knownUserIds?: ReadonlySet<string>;
+  /** Re-attribute dangling user references to this user (the restorer). */
+  fallbackUserId?: string | null;
+}
+
+function resolveUserRef(value: unknown, options: RestoreOptions): unknown {
+  if (value === null || value === undefined || value === '') return null;
+  const id = String(value);
+  if (options.knownUserIds?.has(id)) return id;
+  return options.fallbackUserId ?? null;
+}
+
 export function composeRestoreBatch(
   companyId: string,
   tables: TablesMap,
+  options: RestoreOptions = {},
 ): { statements: SqlStatement[]; warnings: string[] } {
   const statements: SqlStatement[] = [];
   const warnings: string[] = [];
 
-  for (const plan of INSERT_ORDER) {
-    const rows = tables[plan.table];
-    if (!rows) continue;
+  // Safety valve: a payload with no planned table at all (garbage/foreign
+  // file) must not wipe the database. decodeBackup already verified the
+  // envelope, so real backups always contain at least `companies`.
+  const plannedPayload = INSERT_ORDER.filter((p) => Array.isArray(tables[p.table]));
+  if (plannedPayload.length === 0) {
+    const unknown = Object.keys(tables).map((t) => `${t}: unknown table, skipped`);
+    return { statements: [], warnings: unknown.length > 0 ? unknown : ['no restorable tables in backup'] };
+  }
+
+  // DELETE phase: wipe every planned table in FK-safe order (children →
+  // documents → masters). DELETE_ORDER is the canonical delete order — using
+  // INSERT_ORDER here would delete `units` before `product_units` (RESTRICT)
+  // and fail identically. This runs BEFORE any insert so old backups missing
+  // newer tables cannot leave RESTRICT-referenced rows behind.
+  for (const plan of DELETE_ORDER) {
+    if (RESTORE_SKIP_TABLES.includes(plan.table)) continue;
+    if (RESTORE_UPSERT_TABLES.includes(plan.table)) continue;
     statements.push({ ...deleteForScope(plan), params: [companyId] });
-    if (rows.length === 0) continue;
+  }
+  if (Array.isArray(tables.users)) {
+    warnings.push('users: identity data is never restored; existing users were preserved');
+  }
+
+  for (const plan of plannedPayload) {
+    const rows = tables[plan.table] as Record<string, unknown>[];
+    if (RESTORE_SKIP_TABLES.includes(plan.table)) continue;
+    if (rows.length === 0) continue; // empty table — already wiped above
 
     const columns = Array.from(
       new Set(rows.flatMap((r) => Object.keys(r)).filter((c) => isSafeIdentifier(c))),
@@ -390,21 +443,30 @@ export function composeRestoreBatch(
       warnings.push(`${plan.table}: no safe columns, skipped`);
       continue;
     }
+    const userRefs = USER_REF_COLUMNS[plan.table] ?? [];
+    const isUpsert = RESTORE_UPSERT_TABLES.includes(plan.table);
     // One multi-row INSERT per chunk keeps huge restores to few statements.
     // Chunk at 500 rows so a single statement never grows unbounded.
     const CHUNK_ROWS = 500;
     const cols = columns.join(', ');
+    const setClause = columns.filter((c) => c !== 'id');
+    const conflictClause = isUpsert
+      ? setClause.length > 0
+        ? ` ON CONFLICT (id) DO UPDATE SET ${setClause.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}`
+        : ' ON CONFLICT (id) DO NOTHING'
+      : '';
     for (let start = 0; start < rows.length; start += CHUNK_ROWS) {
       const params: unknown[] = [];
       const groups = rows.slice(start, start + CHUNK_ROWS).map((row) => {
         const placeholders = columns.map((col) => {
-          params.push(toSqlValue((row as Record<string, unknown>)[col]));
+          const raw = (row as Record<string, unknown>)[col];
+          params.push(userRefs.includes(col) ? resolveUserRef(raw, options) : toSqlValue(raw));
           return `$${params.length}`;
         });
         return `(${placeholders.join(', ')})`;
       });
       statements.push({
-        sql: `INSERT INTO ${plan.table} (${cols}) VALUES ${groups.join(', ')}`,
+        sql: `INSERT INTO ${plan.table} (${cols}) VALUES ${groups.join(', ')}${conflictClause}`,
         params,
       });
     }

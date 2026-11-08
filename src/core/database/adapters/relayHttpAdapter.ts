@@ -52,7 +52,13 @@ export const relayHttpAdapter: DbAdapter = {
     try {
       const r = await relayCall('query', { databaseUrl: u.url, sql: sqlText, params: params ?? [] });
       if (!r.success) return { success: false, error: r.error, errorCode: r.errorCode };
-      return { success: true, rows: ((r.rows ?? []).map(normalizeRow) as unknown as T[]) };
+      // `truncated` surfaces the relay's row cap so callers (e.g. backup
+      // reads) can warn instead of silently producing incomplete data.
+      return {
+        success: true,
+        rows: ((r.rows ?? []).map(normalizeRow) as unknown as T[]),
+        truncated: (r as { truncated?: boolean }).truncated === true,
+      };
     } catch (err) {
       return relayFailure(err);
     }

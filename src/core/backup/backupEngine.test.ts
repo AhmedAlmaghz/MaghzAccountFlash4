@@ -157,4 +157,66 @@ describe('SQL composers (whitelisted identifiers, parameterized values)', () => 
     expect(statements).toEqual([]);
     expect(warnings).toEqual(['banks: unknown table, skipped']);
   });
+
+  it('never emits user INSERT/DELETE statements (identity data stays in the target)', () => {
+    const { statements, warnings } = composeRestoreBatch(
+      'co1',
+      { users: [{ id: 'u1', username: 'admin', password_hash: 'x' }], customers: SAMPLE.customers },
+      { knownUserIds: new Set(['u1']), fallbackUserId: 'admin2' },
+    );
+    expect(statements.some((s) => /INSERT INTO users\b/.test(s.sql))).toBe(false);
+    expect(statements.some((s) => /DELETE FROM users\b/.test(s.sql))).toBe(false);
+    expect(warnings.some((w) => w.startsWith('users:'))).toBe(true);
+  });
+
+  it('upserts the company row instead of deleting it (users CASCADE protection)', () => {
+    const tables = { companies: [{ id: 'co1', name: 'شركة', created_by: 'u1' }] };
+    const { statements } = composeRestoreBatch('co1', tables, {
+      knownUserIds: new Set(['u1']),
+      fallbackUserId: 'restorer',
+    });
+    const companyInserts = statements.filter((s) => /INSERT INTO companies\b/.test(s.sql));
+    expect(companyInserts.length).toBe(1);
+    expect(companyInserts[0].sql).toContain('ON CONFLICT (id) DO UPDATE SET');
+    expect(statements.some((s) => /DELETE FROM companies\b/.test(s.sql))).toBe(false);
+  });
+
+  it('resolves user references against the target users and re-attributes dangling ones', () => {
+    const tables = {
+      currencies: [
+        { id: 'cur1', company_id: 'co1', code: 'YER', created_by: 'known-user' },
+        { id: 'cur2', company_id: 'co1', code: 'USD', created_by: 'deleted-user' },
+      ],
+    };
+    const { statements } = composeRestoreBatch('co1', tables, {
+      knownUserIds: new Set(['known-user']),
+      fallbackUserId: 'restorer',
+    });
+    const insert = statements.find((s) => /INSERT INTO currencies\b/.test(s.sql));
+    expect(insert).toBeDefined();
+    // known id kept verbatim; dangling id re-attributed to the restorer
+    expect(insert!.params).toContain('known-user');
+    expect(insert!.params).toContain('restorer');
+    expect(insert!.params).not.toContain('deleted-user');
+  });
+
+  it('wipes every planned table even when absent from the payload (old backups)', () => {
+    // A pre-POS backup lacks pos_payments/pos_shifts — restore must still
+    // delete them so stale RESTRICT-referenced rows cannot block the DELETE
+    // of sales_invoices.
+    const { statements } = composeRestoreBatch('co1', { customers: SAMPLE.customers });
+    const deleteTables = statements
+      .filter((s) => s.sql.startsWith('DELETE'))
+      .map((s) => s.sql.match(/DELETE FROM (\w+)/)?.[1]);
+    expect(deleteTables).toContain('pos_payments');
+    expect(deleteTables).toContain('pos_shifts');
+    expect(deleteTables).toContain('receipt_vouchers');
+    expect(deleteTables).not.toContain('users');
+    expect(deleteTables).not.toContain('companies');
+  });
+
+  it('refuses to wipe anything for a payload with no planned tables', () => {
+    const { statements } = composeRestoreBatch('co1', { not_a_table: [{ x: 1 }] });
+    expect(statements).toEqual([]);
+  });
 });

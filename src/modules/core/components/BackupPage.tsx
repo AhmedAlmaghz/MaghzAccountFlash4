@@ -21,7 +21,7 @@ import { useAuthStore } from '@/modules/auth/store';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
-import { BackupError, decodeBackup, encodeBackup } from '@/core/backup/backupEngine';
+import { decodeBackup, encodeBackup, parseEnvelopeFile, type DecodedBackup } from '@/core/backup/backupEngine';
 import { BACKUP_FILE_EXTENSION, buildBackupFileName } from '@/core/backup/backupTables';
 import {
   applyRestore,
@@ -95,6 +95,7 @@ export const BackupPage: React.FC = () => {
     tables: number;
     rows: number;
     encrypted: boolean;
+    payloadVerified: boolean;
   } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BackupHistoryEntry | null>(null);
@@ -237,27 +238,28 @@ export const BackupPage: React.FC = () => {
   // ------------------------------------------------------------- restore
   const inspectRestoreText = async (name: string, text: string, pwd?: string) => {
     try {
-      // Decode WITHOUT password first to learn whether one is needed.
-      let decoded;
-      try {
-        decoded = await decodeBackup(text);
-      } catch (e) {
-        if (e instanceof BackupError && e.code === 'PASSWORD_REQUIRED' && pwd) {
-          decoded = await decodeBackup(text, pwd);
-        } else {
-          throw e;
-        }
-      }
-      if (decoded.manifest.companyId !== companyId) {
+      // The manifest lives OUTSIDE the encrypted payload — readable without
+      // the password. Parse it first so an encrypted backup shows its summary
+      // and the password field (previously a deadlock: PASSWORD_REQUIRED
+      // aborted before the summary was set, so the field never appeared).
+      const envelope = parseEnvelopeFile(text);
+      if (envelope.manifest.companyId !== companyId) {
         throw new Error(t('settings.backup.companyMismatch'));
+      }
+      let decoded: DecodedBackup | null = null;
+      if (!envelope.manifest.encrypted) {
+        decoded = await decodeBackup(text);
+      } else if (pwd) {
+        decoded = await decodeBackup(text, pwd); // throws WRONG_PASSWORD on mismatch
       }
       setRestoreText({ name, text });
       setRestoreSummary({
-        companyName: decoded.manifest.companyName,
-        createdAt: decoded.manifest.createdAt,
-        tables: Object.keys(decoded.manifest.tables).length,
-        rows: decoded.manifest.totalRows,
-        encrypted: decoded.manifest.encrypted,
+        companyName: envelope.manifest.companyName,
+        createdAt: envelope.manifest.createdAt,
+        tables: Object.keys(envelope.manifest.tables).length,
+        rows: envelope.manifest.totalRows,
+        encrypted: envelope.manifest.encrypted,
+        payloadVerified: !!decoded,
       });
     } catch (err) {
       setRestoreText(null);
@@ -299,6 +301,10 @@ export const BackupPage: React.FC = () => {
 
   const handleConfirmRestore = async () => {
     if (!restoreText || !companyId) return;
+    if (restoreSummary?.encrypted && !restorePassword) {
+      addToast('error', t('settings.backup.passwordRequired'));
+      return;
+    }
     setConfirmRestore(false);
     setBusy('restoring');
     try {
@@ -626,7 +632,9 @@ export const BackupPage: React.FC = () => {
             <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10 p-4 space-y-1 text-sm">
               <p className="flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-300">
                 <ShieldCheck size={16} />
-                {t('settings.backup.verifyOk')}
+                {restoreSummary.payloadVerified || !restoreSummary.encrypted
+                  ? t('settings.backup.verifyOk')
+                  : t('settings.backup.encryptedHint')}
               </p>
               <p className="text-slate-600 dark:text-slate-300">
                 {t('settings.backup.manifestSummary', {

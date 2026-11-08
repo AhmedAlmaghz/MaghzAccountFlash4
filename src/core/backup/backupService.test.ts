@@ -41,7 +41,7 @@ describe('readBackupRows (adapter fallback)', () => {
 });
 
 describe('applyRestore (adapter fallback)', () => {
-  it('runs the composed batch as one transaction', async () => {
+  it('runs the composed batch as one transaction (wipe-all, users preserved)', async () => {
     const { transaction } = mockAdapter(
       async () => ({ success: true, rows: [] }),
       async () => ({ success: true }),
@@ -50,12 +50,39 @@ describe('applyRestore (adapter fallback)', () => {
       customers: [{ id: 'c1', company_id: 'co1', name: 'x' }],
       mystery_table: [{ id: 'm1' }],
     });
-    expect(res.restored).toBe(2);
+    // honest count: only planned tables (customers=1) — mystery_table is skipped
+    expect(res.restored).toBe(1);
     expect(res.warnings).toEqual(['mystery_table: unknown table, skipped']);
     expect(transaction).toHaveBeenCalledTimes(1);
     const [batch] = transaction.mock.calls[0] as { sql: string; params?: unknown[] }[][];
-    expect(batch[0].sql).toMatch(/^DELETE FROM customers/);
-    expect(batch[1].sql).toMatch(/^INSERT INTO customers/);
+    // the wipe phase covers EVERY planned table (old-backup safety), in
+    // FK-safe DELETE_ORDER — and never touches users/companies
+    const deletes = batch.filter((s) => s.sql.startsWith('DELETE')).map((s) => s.sql);
+    expect(deletes.some((sql) => sql.startsWith('DELETE FROM customers'))).toBe(true);
+    expect(deletes.some((sql) => sql.startsWith('DELETE FROM pos_payments'))).toBe(true);
+    expect(deletes.some((sql) => sql.startsWith('DELETE FROM users'))).toBe(false);
+    expect(deletes.some((sql) => sql.startsWith('DELETE FROM companies'))).toBe(false);
+    const insIdx = batch.findIndex((s) => s.sql.startsWith('INSERT INTO customers'));
+    const delIdx = batch.findIndex((s) => s.sql.startsWith('DELETE FROM customers'));
+    expect(delIdx).toBeGreaterThanOrEqual(0);
+    expect(delIdx).toBeLessThan(insIdx);
+  });
+
+  it('resolves user references against the target users (users lookup precedes the transaction)', async () => {
+    const { query, transaction } = mockAdapter(
+      async (sql) => (sql.includes('FROM users') ? { success: true, rows: [{ id: 'admin-1' }] } : { success: true, rows: [] }),
+      async () => ({ success: true }),
+    );
+    await applyRestore('co1', {
+      currencies: [{ id: 'cur1', company_id: 'co1', code: 'YER', created_by: 'gone-user' }],
+    });
+    expect(query).toHaveBeenCalledWith('SELECT id FROM users WHERE company_id = $1', ['co1']);
+    expect(query.mock.invocationCallOrder[0]).toBeLessThan(transaction.mock.invocationCallOrder[0]);
+    const [batch] = transaction.mock.calls[0] as { sql: string; params: unknown[] }[][];
+    const insert = batch.find((s) => s.sql.startsWith('INSERT INTO currencies'));
+    expect(insert).toBeDefined();
+    // dangling created_by re-attributed… no auth user in tests → null
+    expect(insert!.params).not.toContain('gone-user');
   });
 
   it('surfaces transaction failures as errors', async () => {

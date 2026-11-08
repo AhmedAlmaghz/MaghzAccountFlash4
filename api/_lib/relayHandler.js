@@ -53,10 +53,19 @@ const { Pool } = pg;
 
 const RELAY_VERSION = '1';
 const STATEMENT_TIMEOUT_MS = 30000;
-const MAX_ROWS = 5000;
+// Backup reads dump whole company tables — a 5000-row cap silently truncated
+// them (an incomplete backup that fails to restore later). 50k keeps the DoS
+// guard while covering real accounting datasets; MAX_JSON_BYTES still bounds
+// the response.
+const MAX_ROWS = 50000;
 const MAX_JSON_BYTES = 8 * 1024 * 1024;
-const MAX_BODY_BYTES = 10 * 1024 * 1024;
-const MAX_TX_STATEMENTS = 200;
+// Restore payloads carry the full backup as parameterized INSERTs — 10MB cut
+// off legitimate restores. Note: Vercel's own serverless body limit (~4.5MB)
+// still bounds the hosted relay; self-hosted/local twins get full headroom.
+const MAX_BODY_BYTES = 64 * 1024 * 1024;
+// A company restore emits ~69 DELETEs + one INSERT per 500-row chunk per
+// table — 200 statements rejected real restores.
+const MAX_TX_STATEMENTS = 1200;
 const PINGDB_LIMIT_PER_MIN = 20;
 
 const PG_STATE_CODES = {

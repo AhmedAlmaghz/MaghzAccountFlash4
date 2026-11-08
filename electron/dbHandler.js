@@ -7794,10 +7794,6 @@ export function registerAuthHandlers() {
     });
   }
 
-  function backupRowsContainUserCredentials(rows) {
-    return Array.isArray(rows) && rows.some((row) => row && typeof row === 'object' && !Array.isArray(row) && Object.prototype.hasOwnProperty.call(row, 'password_hash'));
-  }
-
   function assertNoSensitiveBackupFields(table, row) {
     const sensitive = SENSITIVE_BACKUP_COLUMNS[table] || [];
     if (!row || typeof row !== 'object' || Array.isArray(row)) return;
@@ -7833,9 +7829,63 @@ export function registerAuthHandlers() {
     return String(left || '').toLowerCase() === String(right || '').toLowerCase();
   }
 
+  // Columns that reference users (mirrors USER_REF_COLUMNS in
+  // src/core/backup/backupTables.ts — parity test keeps them in sync).
+  // Users are never restored, so any reference to a user missing from the
+  // target database must be resolved before insert or the FK kills the whole
+  // restore (e.g. currencies_created_by_users_fk).
+  const RESTORE_USER_REF_COLUMNS = {
+    accounts: ['created_by', 'updated_by'],
+    activities: ['assigned_to', 'created_by', 'updated_by'],
+    ai_chat_sessions: ['user_id'],
+    ai_job_batches: ['user_id'],
+    attendance: ['created_by', 'updated_by'],
+    audit_logs: ['user_id'],
+    boms: ['created_by', 'updated_by'],
+    branches: ['created_by', 'updated_by'],
+    cash_boxes: ['created_by', 'updated_by'],
+    companies: ['created_by', 'updated_by'],
+    currencies: ['created_by', 'updated_by'],
+    customers: ['created_by', 'updated_by'],
+    departments: ['created_by', 'updated_by'],
+    document_sequences: ['updated_by'],
+    employees: ['created_by', 'updated_by'],
+    end_of_service: ['created_by', 'updated_by'],
+    fixed_assets: ['created_by', 'updated_by'],
+    journal_entries: ['created_by', 'updated_by'],
+    leads: ['assigned_to', 'created_by', 'updated_by'],
+    leaves: ['approved_by', 'created_by', 'updated_by'],
+    opportunities: ['assigned_to', 'created_by', 'updated_by'],
+    payment_vouchers: ['created_by', 'updated_by'],
+    payroll_components: ['created_by', 'updated_by'],
+    payroll_runs: ['created_by', 'updated_by'],
+    pos_payments: ['created_by', 'updated_by'],
+    pos_shifts: ['user_id', 'created_by', 'updated_by'],
+    product_types: ['created_by', 'updated_by'],
+    products: ['created_by', 'updated_by'],
+    purchase_invoices: ['created_by', 'updated_by'],
+    purchase_orders: ['created_by', 'updated_by'],
+    purchase_returns: ['created_by', 'updated_by'],
+    quotations: ['created_by', 'updated_by'],
+    receipt_vouchers: ['created_by', 'updated_by'],
+    sales_invoices: ['created_by', 'updated_by'],
+    sales_returns: ['created_by', 'updated_by'],
+    stock_adjustments: ['approved_by', 'created_by', 'updated_by'],
+    stock_movements: ['created_by', 'updated_by'],
+    suppliers: ['created_by', 'updated_by'],
+    tasks: ['assigned_to', 'created_by', 'updated_by'],
+    transactions: ['created_by', 'updated_by'],
+    warehouse_transfers: ['created_by', 'updated_by'],
+    warehouses: ['created_by', 'updated_by'],
+    work_orders: ['created_by', 'updated_by'],
+  };
+  const RESTORE_SKIP_TABLES = ['users'];
+  const RESTORE_UPSERT_TABLES = ['companies'];
+
   async function validateBackupRows(tables, companyId, client) {
     const planByTable = new Map(BACKUP_PLAN.map((entry) => [entry.table, entry]));
     for (const [table, rows] of Object.entries(tables)) {
+      if (RESTORE_SKIP_TABLES.includes(table)) continue; // users are never restored
       const entry = planByTable.get(table);
       if (!entry) continue;
       if (!Array.isArray(rows)) throw new Error(`Invalid backup rows: ${table}`);
@@ -7924,18 +7974,39 @@ export function registerAuthHandlers() {
       const warnings = [];
       const manifestWarning = validateBackupManifest(manifest, tables, companyId);
       if (manifestWarning) warnings.push(manifestWarning);
+      // Safety valve: a payload with no planned table at all (garbage/foreign
+      // file) must not wipe the database.
+      const plannedTables = BACKUP_PLAN.filter((entry) => Array.isArray(tables[entry.table]));
+      if (plannedTables.length === 0) {
+        return { success: false, error: 'Backup payload contains no restorable tables' };
+      }
       client = await pool.connect();
       await validateBackupRows(tables, companyId, client);
+      // Users are never restored — references resolve against the target's
+      // existing users; dangling ids are re-attributed to the restorer.
+      const knownUserIds = new Set(
+        (await client.query('SELECT id FROM users WHERE company_id = $1', [companyId])).rows.map((r) => String(r.id)),
+      );
+      let usersWarningShown = false;
+      const usersWarning = () => {
+        if (!usersWarningShown) {
+          warnings.push('users: identity data is never restored; existing users were preserved');
+          usersWarningShown = true;
+        }
+      };
       let restored = 0;
       await client.query('BEGIN');
       try {
-        // DELETEs in FK-safe order (children → documents → masters → company).
+        // DELETEs in FK-safe order for EVERY planned table (children →
+        // documents → masters → company). Wiping tables absent from the
+        // payload matters for older backups: stale rows in newer tables would
+        // otherwise hit RESTRICT FKs and kill the restore.
         for (const entry of BACKUP_PLAN) {
-          if (!(entry.table in tables)) continue;
-          if (entry.table === 'users' && !backupRowsContainUserCredentials(tables.users)) {
-            warnings.push('users: password hashes are intentionally excluded; existing users were preserved');
+          if (RESTORE_SKIP_TABLES.includes(entry.table)) {
+            if (Array.isArray(tables[entry.table])) usersWarning();
             continue;
           }
+          if (RESTORE_UPSERT_TABLES.includes(entry.table)) continue; // upserted below
           const { scope } = entry;
           if (scope.type === 'company') {
             await client.query(`DELETE FROM ${entry.table} WHERE company_id = $1`, [companyId]);
@@ -7955,8 +8026,8 @@ export function registerAuthHandlers() {
           if (!entry) throw new Error(`BACKUP_INSERT_ORDER references unplanned table: ${table}`);
           const rows = tables[table];
           if (!Array.isArray(rows) || rows.length === 0) continue;
-          if (entry.table === 'users' && !backupRowsContainUserCredentials(rows)) {
-            warnings.push('users: password hashes are intentionally excluded; existing users were preserved');
+          if (RESTORE_SKIP_TABLES.includes(entry.table)) {
+            usersWarning();
             continue;
           }
           const sensitive = SENSITIVE_BACKUP_COLUMNS[entry.table] || [];
@@ -7967,23 +8038,42 @@ export function registerAuthHandlers() {
             warnings.push(`${entry.table}: no safe columns, skipped`);
             continue;
           }
+          const userRefs = RESTORE_USER_REF_COLUMNS[entry.table] || [];
+          const resolveUserRef = (v) => {
+            if (v === null || v === undefined || v === '') return null;
+            const id = String(v);
+            if (knownUserIds.has(id)) return id;
+            return session.user.id; // re-attribute to the restoring user
+          };
           const toValue = (v) => {
             if (v === undefined) return null;
             if (v instanceof Date) return v.toISOString();
             if (v !== null && typeof v === 'object') return JSON.stringify(v);
             return v;
           };
+          // `companies` is upserted, never deleted: deleting it would
+          // CASCADE-wipe every user account (users.company_id → companies).
+          const isUpsert = RESTORE_UPSERT_TABLES.includes(entry.table);
+          const setClause = columns.filter((c) => c !== 'id');
+          const conflictClause = isUpsert
+            ? setClause.length > 0
+              ? ` ON CONFLICT (id) DO UPDATE SET ${setClause.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}`
+              : ' ON CONFLICT (id) DO NOTHING'
+            : '';
           const CHUNK = 500;
           for (let start = 0; start < rows.length; start += CHUNK) {
             const params = [];
             const groups = rows.slice(start, start + CHUNK).map((row) => {
               const placeholders = columns.map((col) => {
-                params.push(toValue(row[col]));
+                params.push(userRefs.includes(col) ? resolveUserRef(row[col]) : toValue(row[col]));
                 return `$${params.length}`;
               });
               return `(${placeholders.join(', ')})`;
             });
-            await client.query(`INSERT INTO ${entry.table} (${columns.join(', ')}) VALUES ${groups.join(', ')}`, params);
+            await client.query(
+              `INSERT INTO ${entry.table} (${columns.join(', ')}) VALUES ${groups.join(', ')}${conflictClause}`,
+              params
+            );
           }
           restored += rows.length;
         }

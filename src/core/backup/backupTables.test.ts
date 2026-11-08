@@ -7,6 +7,9 @@ import {
   DELETE_ORDER,
   INSERT_ORDER,
   RETIRED_TABLES,
+  RESTORE_SKIP_TABLES,
+  RESTORE_UPSERT_TABLES,
+  USER_REF_COLUMNS,
   buildBackupFileName,
   isSafeIdentifier,
 } from './backupTables';
@@ -150,5 +153,53 @@ describe('main-process parity (electron/dbHandler.js BACKUP_PLAN)', () => {
     expect(block).not.toBeNull();
     const tables = [...block![1].matchAll(/'([\w]+)'/g)].map((m) => m[1]);
     expect(tables).toEqual(INSERT_ORDER.map((p) => p.table));
+  });
+});
+
+describe('restore contract parity (electron/dbHandler.js)', () => {
+  function readHandler(): string {
+    return readFileSync(join(process.cwd(), 'electron/dbHandler.js'), 'utf-8');
+  }
+
+  it('user-reference columns match the handler mirror exactly', () => {
+    const handler = readHandler();
+    const block = handler.match(/const RESTORE_USER_REF_COLUMNS = \{([\s\S]*?)\n {2}\};/);
+    expect(block).not.toBeNull();
+    const handlerRefs: Record<string, string[]> = {};
+    for (const m of block![1].matchAll(/(\w+): \[([^\]]*)\]/g)) {
+      handlerRefs[m[1]] = [...m[2].matchAll(/'(\w+)'/g)].map((x) => x[1]);
+    }
+    expect(handlerRefs).toEqual(USER_REF_COLUMNS);
+  });
+
+  it('restore skip/upsert tables match the handler mirror', () => {
+    const handler = readHandler();
+    expect(handler).toContain("const RESTORE_SKIP_TABLES = ['users']");
+    expect(handler).toContain("const RESTORE_UPSERT_TABLES = ['companies']");
+    expect(RESTORE_SKIP_TABLES).toEqual(['users']);
+    expect(RESTORE_UPSERT_TABLES).toEqual(['companies']);
+  });
+
+  it('skipped/upsert tables are planned tables with safe ref columns', () => {
+    const planned = new Set(ALL_PLANNED_TABLES);
+    for (const table of [...RESTORE_SKIP_TABLES, ...RESTORE_UPSERT_TABLES]) {
+      expect(planned.has(table)).toBe(true);
+    }
+    for (const [table, columns] of Object.entries(USER_REF_COLUMNS)) {
+      expect(planned.has(table)).toBe(true);
+      expect(columns.length).toBeGreaterThan(0);
+      for (const column of columns) expect(isSafeIdentifier(column)).toBe(true);
+    }
+  });
+
+  it('the handler never deletes the company row during restore (CASCADE kills users)', () => {
+    const handler = readHandler();
+    const restoreBlock = handler.match(/ipcMain\.handle\('db:restore-company'[\s\S]*?\n {2}\}\);/);
+    expect(restoreBlock).not.toBeNull();
+    // The delete loop must skip both users and companies; the insert loop
+    // must contain the companies ON CONFLICT upsert.
+    expect(restoreBlock![0]).toContain('RESTORE_SKIP_TABLES.includes(entry.table)');
+    expect(restoreBlock![0]).toContain('RESTORE_UPSERT_TABLES.includes(entry.table)');
+    expect(restoreBlock![0]).toContain('ON CONFLICT (id) DO UPDATE SET');
   });
 });

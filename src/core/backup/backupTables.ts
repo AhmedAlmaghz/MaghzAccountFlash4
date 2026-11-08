@@ -214,12 +214,87 @@ export const ALL_PLANNED_TABLES: string[] = DELETE_ORDER.map((p) => p.table);
 export const RETIRED_TABLES = ['banks', 'calls', 'crm_activities'];
 
 /**
- * Secret columns stripped from the envelope unless it is encrypted.
- * A restored user with NULL password_hash cannot log in until an admin
- * resets the password — documented in the restore dialog.
+ * Secret columns stripped from the envelope unless it is encrypted. A restored
+ * user with NULL password_hash cannot log in until an admin resets the
+ * password — documented in the restore dialog.
  */
 export const SECRET_COLUMNS: Record<string, string[]> = {
   users: ['password_hash'],
+};
+
+/**
+ * Tables excluded from RESTORE (still captured in the backup for reference).
+ *
+ * `users` is identity/security data: restoring it would resurrect old
+ * passwords, revert role changes made after the backup, and delete the
+ * logged-in account mid-session (users.company_id → companies CASCADE). The
+ * existing users of the target database are always preserved.
+ */
+export const RESTORE_SKIP_TABLES: readonly string[] = ['users'];
+
+/**
+ * Tables restored by UPSERT instead of delete+insert.
+ *
+ * `companies` must never be DELETEd during restore: `users.company_id →
+ * companies ON DELETE CASCADE` would wipe every user account. The company row
+ * is upserted (INSERT … ON CONFLICT (id) DO UPDATE) instead.
+ */
+export const RESTORE_UPSERT_TABLES: readonly string[] = ['companies'];
+
+/**
+ * Columns that reference `users` (per the live FK graph in
+ * drizzle/0000_init.sql). Users are never restored, so any reference to a user
+ * missing from the target database must be resolved before insert or the FK
+ * kills the whole restore (e.g. `currencies_created_by_users_fk` — currencies
+ * are inserted BEFORE users in INSERT_ORDER and carry created_by).
+ *
+ * Mirrored in electron/dbHandler.js (RESTORE_USER_REF_COLUMNS) — a parity test
+ * keeps the two copies in sync.
+ */
+export const USER_REF_COLUMNS: Record<string, string[]> = {
+  accounts: ['created_by', 'updated_by'],
+  activities: ['assigned_to', 'created_by', 'updated_by'],
+  ai_chat_sessions: ['user_id'],
+  ai_job_batches: ['user_id'],
+  attendance: ['created_by', 'updated_by'],
+  audit_logs: ['user_id'],
+  boms: ['created_by', 'updated_by'],
+  branches: ['created_by', 'updated_by'],
+  cash_boxes: ['created_by', 'updated_by'],
+  companies: ['created_by', 'updated_by'],
+  currencies: ['created_by', 'updated_by'],
+  customers: ['created_by', 'updated_by'],
+  departments: ['created_by', 'updated_by'],
+  document_sequences: ['updated_by'],
+  employees: ['created_by', 'updated_by'],
+  end_of_service: ['created_by', 'updated_by'],
+  fixed_assets: ['created_by', 'updated_by'],
+  journal_entries: ['created_by', 'updated_by'],
+  leads: ['assigned_to', 'created_by', 'updated_by'],
+  leaves: ['approved_by', 'created_by', 'updated_by'],
+  opportunities: ['assigned_to', 'created_by', 'updated_by'],
+  payment_vouchers: ['created_by', 'updated_by'],
+  payroll_components: ['created_by', 'updated_by'],
+  payroll_runs: ['created_by', 'updated_by'],
+  pos_payments: ['created_by', 'updated_by'],
+  pos_shifts: ['user_id', 'created_by', 'updated_by'],
+  product_types: ['created_by', 'updated_by'],
+  products: ['created_by', 'updated_by'],
+  purchase_invoices: ['created_by', 'updated_by'],
+  purchase_orders: ['created_by', 'updated_by'],
+  purchase_returns: ['created_by', 'updated_by'],
+  quotations: ['created_by', 'updated_by'],
+  receipt_vouchers: ['created_by', 'updated_by'],
+  sales_invoices: ['created_by', 'updated_by'],
+  sales_returns: ['created_by', 'updated_by'],
+  stock_adjustments: ['approved_by', 'created_by', 'updated_by'],
+  stock_movements: ['created_by', 'updated_by'],
+  suppliers: ['created_by', 'updated_by'],
+  tasks: ['assigned_to', 'created_by', 'updated_by'],
+  transactions: ['created_by', 'updated_by'],
+  warehouse_transfers: ['created_by', 'updated_by'],
+  warehouses: ['created_by', 'updated_by'],
+  work_orders: ['created_by', 'updated_by'],
 };
 
 /** SQL identifier guard — backup files are untrusted input. */
