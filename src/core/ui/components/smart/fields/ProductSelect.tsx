@@ -20,6 +20,16 @@ export interface ProductSelectProps {
    */
   onProductChange?: (product: Product) => void;
   placeholder?: string;
+  /**
+   * Label to display when the selected product is not in the loaded option
+   * list (a restored draft, or a document loaded before the list arrived).
+   * Without it the trigger falls back to the placeholder and the row looks
+   * EMPTY even though it carries a product.
+   */
+  selectedLabel?: string;
+  selectedSublabel?: string;
+  /** Extra attributes forwarded to the select trigger (data-* hooks). */
+  triggerProps?: Record<string, string>;
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -52,6 +62,9 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
   onChange,
   onProductChange,
   placeholder,
+  selectedLabel,
+  selectedSublabel,
+  triggerProps,
   disabled,
   size,
   className,
@@ -170,7 +183,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
     }
     const withSelected = missingSelected.length ? [...missingSelected, ...filtered] : filtered;
 
-    return withSelected.map((p) => {
+    const productOptions = withSelected.map((p) => {
       const type = productTypes.find((tt) => tt.id === p.productTypeId);
       const typeLabel = type ? ` • ${type.nameAr}` : '';
       const meta: Array<{ label: string; value: string }> = [];
@@ -196,7 +209,16 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
         disabled: !p.isActive,
       } as SmartSelectItem;
     });
-  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, manufacturingRole, formatCurrency, t, value, multiple, knownMap]);
+
+    // A restored draft / a document loaded from the server carries the
+    // product name but the product is not in the fetched 25 — without a
+    // synthetic option the trigger would show the PLACEHOLDER and the row
+    // would look empty.
+    if (selectedLabel && typeof value === 'string' && value && !productOptions.some((o) => o.id === value)) {
+      return [{ id: value, label: selectedLabel, sublabel: selectedSublabel }, ...productOptions];
+    }
+    return productOptions;
+  }, [products, productTypes, showPrice, showStock, showBarcode, module, categoryId, manufacturingRole, formatCurrency, t, value, multiple, knownMap, selectedLabel, selectedSublabel]);
 
   // Client-side fallback filter with normalizeArabic is handled by SmartSelect when serverSearch=false,
   // but we have already server-filtered. Keep serverSearch=true to avoid double-filtering on 25 items,
@@ -215,6 +237,7 @@ export const ProductSelect: React.FC<ProductSelectProps> = ({
       options={options}
       isLoading={isLoading}
       placeholder={resolvedPlaceholder}
+      triggerProps={triggerProps}
       searchPlaceholder={t('select.product.search')}
       emptyMessage={t('select.product.empty')}
       disabled={disabled}

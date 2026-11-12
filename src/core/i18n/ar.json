@@ -259,7 +259,7 @@
     },
     "manufacturing": {
       "title": "التصنيع",
-      "boms": "فاتير المواد",
+      "boms": "فاتورة المواد",
       "workOrders": "أوامر التشغيل",
       "costReport": "تحليل التكاليف",
       "varianceReport": "تحليل الانحرافات"
@@ -1200,7 +1200,13 @@
       "schedCharge": "قسط الشهر",
       "salvageBelowCost": "القيمة التخريدية يجب أن تكون أقل من التكلفة",
       "exportError": "تعذر تصدير سجل الأصول",
-      "registerTitle": "سجل الأصول الثابتة"
+      "registerTitle": "سجل الأصول الثابتة",
+      "custodian": "العهدة",
+      "location": "الموقع",
+      "nameEn": "الاسم بالإنجليزية",
+      "notes": "ملاحظات",
+      "serialNumber": "الرقم التسلسلي",
+      "warrantyExpiry": "انتهاء الضمان"
     },
     "month": "الشهر",
     "ledger": {
@@ -1298,6 +1304,14 @@
       "receiptClientSection": "العميل والربط",
       "checkNumberPlaceholder": "رقم الشيك",
       "notesPlaceholder": "ملاحظات إضافية..."
+    },
+    "account": "الحساب",
+    "journal": {
+      "balance": "ميزان القيد",
+      "balanced": "متوازن",
+      "unbalanced": "غير متوازن",
+      "difference": "الفرق",
+      "accountRequired": "يجب اختيار حساب لكل سطر"
     }
   },
   "inventory": {
@@ -1316,7 +1330,8 @@
       "editDesc": "تعديل بيانات المنتج",
       "createDesc": "إضافة منتج جديد — الحقول المميزة بـ * مطلوبة",
       "requiredFields": "* حقول مطلوبة",
-      "mediaSection": "الصورة والباركود"
+      "mediaSection": "الصورة والباركود",
+      "nameAr": "اسم المنتج بالعربية"
     },
     "warehouses": "المستودعات",
     "stock": {
@@ -1778,7 +1793,8 @@
       "postedHint": "مرحل",
       "totalHint": "إجمالي",
       "collectedHint": "محصل",
-      "pendingHint": "بانتظار الترحيل"
+      "pendingHint": "بانتظار الترحيل",
+      "total": "الإجمالي"
     },
     "quotation": {
       "new": "عرض سعر جديد",
@@ -1873,6 +1889,10 @@
       "open": "فتح",
       "tipsTitle": "نصائح المبيعات",
       "tipsDesc": "تابع الفواتير المسودة يومياً، ورحّلها لإنشاء القيود تلقائياً، واستخدم عروض الأسعار لتحويلها إلى فواتير بضغطة واحدة، وراقب مردودات العملاء وأثرها المخزني."
+    },
+    "payment": {
+      "cash": "نقداً",
+      "credit": "آجل"
     }
   },
   "purchases": {
@@ -2020,7 +2040,8 @@
       "updated": "تم تحديث فاتورة المشتريات بنجاح",
       "deleted": "تم حذف فاتورة المشتريات",
       "posted": "تم ترحيل فاتورة المشتريات بنجاح",
-      "outstanding": "المستحق للموردين"
+      "outstanding": "المستحق للموردين",
+      "productRequired": "يجب اختيار منتج لكل سطر"
     },
     "order": {
       "new": "أمر شراء جديد",
@@ -2157,15 +2178,22 @@
       "negativeValuesError": "لا يمكن إدخال قيم سالبة — الكميات والتكاليف يجب أن تكون ≥ 0",
       "plannedDatesTitle": "الجدول الزمني المخطط",
       "actualDatesTitle": "الجدول الزمني الفعلي",
-      "costBreakdown": "تفاصيل التكلفة"
+      "costBreakdown": "تفاصيل التكلفة",
+      "batchNumber": "رقم الدفعة",
+      "batches": "عدد الدفعات",
+      "cancel": "إلغاء الأمر",
+      "complete": "إكمال الأمر",
+      "producedQuantity": "الكمية المنتجة",
+      "product": "اختر المنتج",
+      "start": "بدء التشغيل"
     },
     "bom": {
-      "title": "فاتير المواد",
-      "subtitle": "إدارة فاتير المواد (BOM) للمنتجات",
+      "title": "فاتورة المواد",
+      "subtitle": "إدارة فاتورة المواد (BOM) للمنتجات",
       "filterByStatus": "تصفية حسب الحالة",
       "newBom": "فاتورة مواد جديدة",
       "editBom": "تعديل فاتورة المواد",
-      "emptyTitle": "لا توجد فاتير مواد",
+      "emptyTitle": "لا توجد فواتير مواد",
       "emptyDescription": "يمكنك إنشاء فاتورة مواد جديدة الآن",
       "details": "تفاصيل فاتورة المواد",
       "deleteTitle": "حذف فاتورة المواد",
@@ -2179,8 +2207,8 @@
       "totalCost": "التكلفة الإجمالية",
       "total": "الإجمالي",
       "estimatedCost": "التكلفة التقديرية",
-      "searchPlaceholder": "بحث في فاتير المواد...",
-      "totalCount": "إجمالي الفاتير",
+      "searchPlaceholder": "بحث في فواتير المواد...",
+      "totalCount": "إجمالي الفواتير",
       "avgCost": "متوسط التكلفة",
       "availabilityTitle": "حاسبة توفر الخامات",
       "plannedQty": "الكمية المخططة",
@@ -2197,7 +2225,9 @@
       "maxBatches": "أقصى دفعات قابلة للإنتاج",
       "created": "تم إنشاء شجرة المواد بنجاح",
       "updated": "تم تحديث شجرة المواد بنجاح",
-      "requiredFields": "يرجى اختيار المنتج النهائي وإضافة مادة واحدة على الأقل"
+      "requiredFields": "يرجى اختيار المنتج النهائي وإضافة مادة واحدة على الأقل",
+      "finishedProduct": "اختر المنتج النهائي",
+      "outputQuantity": "كمية الإنتاج"
     },
     "production": "الإنتاج",
     "costs": {
@@ -2237,11 +2267,11 @@
     "noWorkOrders": "لا توجد أوامر تشغيل لإنشاء التقرير",
     "page": {
       "title": "التصنيع",
-      "subtitle": "إدارة الإنتاج وفاتير المواد"
+      "subtitle": "إدارة الإنتاج وفواتير المواد"
     },
     "tabs": {
       "workOrders": "أوامر التشغيل",
-      "boms": "فاتير المواد",
+      "boms": "فاتورة المواد",
       "costReport": "تحليل التكاليف",
       "varianceReport": "تحليل الانحرافات"
     },
@@ -3268,7 +3298,8 @@
     "sortDir": "اتجاه الترتيب",
     "desc": "تنازلي",
     "asc": "تصاعدي",
-    "rows": "صف"
+    "rows": "صف",
+    "loadError": "تعذّر تحميل التقرير"
   },
   "settings": {
     "pageTitle": "الإعدادات",
@@ -4099,6 +4130,19 @@
     "usePglite": "استخدام PGlite محلي (دون خادم)",
     "confirm": "تأكيد",
     "back": "رجوع",
+    "quantity": "الكمية",
+    "unitPrice": "سعر الوحدة",
+    "unit": "الوحدة",
+    "total": "الإجمالي",
+    "subtotal": "المجموع الفرعي",
+    "grandTotal": "الإجمالي النهائي",
+    "delete": "حذف",
+    "addLine": "إضافة سطر",
+    "noLines": "لا توجد بنود",
+    "baseUnit": "الوحدة الأساسية",
+    "unsavedChanges": "تغييرات غير محفوظة",
+    "unsavedChangesDesc": "لديك تغييرات غير محفوظة. مغادرة بدون حفظ؟",
+    "leave": "مغادرة",
     "view": "عرض",
     "preview": "معاينة",
     "actions": "إجراءات",
@@ -4112,7 +4156,20 @@
     "search": "بحث",
     "more": "المزيد",
     "excel": "Excel",
-    "pdf": "PDF"
+    "pdf": "PDF",
+    "address": "العنوان",
+    "credit": "دائن",
+    "date": "التاريخ",
+    "debit": "مدين",
+    "dueDate": "تاريخ الاستحقاق",
+    "edit": "تعديل",
+    "email": "البريد الإلكتروني",
+    "notes": "ملاحظات",
+    "notesPlaceholder": "اكتب ملاحظات…",
+    "paymentType": "نوع الدفع",
+    "phone": "الهاتف",
+    "post": "ترحيل",
+    "reference": "المرجع"
   },
   "pagination": {
     "first": "الأولى",
@@ -4597,6 +4654,7 @@
     "categories": "الفئات",
     "allCategories": "الكل",
     "cart": "السلة",
+    "products": "المنتجات",
     "emptyCart": "السلة فارغة",
     "emptyCartDesc": "امسح باركود منتج أو اختر من الشبكة",
     "customer": "عميل",

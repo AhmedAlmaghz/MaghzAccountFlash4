@@ -1,12 +1,18 @@
 import { test, expect } from './fixtures/auth';
 import { loginAs } from './fixtures/auth';
 
+/**
+ * Payment allocation flow (end-to-end).
+ *
+ * The voucher editors are FULL PAGES (phase 104) — the specs drive the
+ * editor route directly instead of opening (and closing) a modal.
+ */
 test.describe('Payment Allocation Flow (end-to-end)', () => {
   test.beforeEach(async ({ page }) => {
     await loginAs(page);
   });
 
-  test('create sales invoice, then create receipt voucher with invoice allocation', async ({ page }) => {
+  test('sales invoices list shows the seeded invoices', async ({ page }) => {
     // Step 1: Navigate to sales invoices and verify the page loads
     await page.goto('/sales/invoices');
     await expect(page.locator('text=فواتير المبيعات').first()).toBeVisible({ timeout: 15_000 });
@@ -23,47 +29,31 @@ test.describe('Payment Allocation Flow (end-to-end)', () => {
     void firstInvoiceCell;
   });
 
-  test('create receipt voucher - modal has customer select and amount field', async ({ page }) => {
-    await page.goto('/accounting/receipt-vouchers');
-    await expect(page.getByText(/سندات|سند|Voucher|Receipt/i).first()).toBeVisible({ timeout: 15_000 });
+  test('receipt voucher editor has customer select and amount field', async ({ page }) => {
+    await page.goto('/accounting/receipt-vouchers/new');
+    await page.waitForLoadState('networkidle', { timeout: 15_000 });
 
-    // two buttons share the label (header CTA + empty-state CTA) — use the first
-    const createBtn = page.getByRole('button', { name: /سند قبض جديد|New Receipt/i }).first();
-    await expect(createBtn).toBeVisible({ timeout: 10_000 });
-    await createBtn.click();
-
-    const modalHeading = page.getByRole('heading', { name: /سند قبض جديد|New Receipt/i });
-    await expect(modalHeading).toBeVisible({ timeout: 10_000 });
+    const heading = page.getByRole('heading', { name: /سند قبض جديد|New Receipt/i });
+    await expect(heading).toBeVisible({ timeout: 15_000 });
 
     const customerLabel = page.getByText(/العميل|Customer/i).first();
     await expect(customerLabel).toBeVisible();
 
     const amountInput = page.locator('input[type="number"]').first();
     await expect(amountInput).toBeVisible();
-
-    await page.keyboard.press('Escape');
-    await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
   });
 
-  test('create payment voucher - modal has supplier select and amount field', async ({ page }) => {
-    await page.goto('/accounting/payment-vouchers');
-    await expect(page.getByText(/سندات|سند|Voucher|Payment/i).first()).toBeVisible({ timeout: 15_000 });
+  test('payment voucher editor has supplier select and amount field', async ({ page }) => {
+    await page.goto('/accounting/payment-vouchers/new');
+    await page.waitForLoadState('networkidle', { timeout: 15_000 });
 
-    // two buttons share the label (header CTA + empty-state CTA) — use the first
-    const createBtn = page.getByRole('button', { name: /سند صرف جديد|New Payment/i }).first();
-    await expect(createBtn).toBeVisible({ timeout: 10_000 });
-    await createBtn.click();
-
-    const modalHeading = page.getByRole('heading', { name: /سند صرف جديد|New Payment/i });
-    await expect(modalHeading).toBeVisible({ timeout: 10_000 });
+    const heading = page.getByRole('heading', { name: /سند صرف جديد|New Payment/i });
+    await expect(heading).toBeVisible({ timeout: 15_000 });
 
     const supplierLabel = page.getByText(/المورد|Supplier/i).first();
     await expect(supplierLabel).toBeVisible();
 
     const amountInput = page.locator('input[type="number"]').first();
     await expect(amountInput).toBeVisible();
-
-    await page.keyboard.press('Escape');
-    await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
   });
 });

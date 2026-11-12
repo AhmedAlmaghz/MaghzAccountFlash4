@@ -21,3 +21,5 @@ export { StatsGrid } from './patterns/StatsGrid';
 export { FilterBar } from './patterns/FilterBar';
 export { ChartCard } from './patterns/ChartCard';
 export { getChartColors, getChartTheme } from './patterns/chartTheme';
+export { DocumentItemsGrid, DocumentPageShell, TotalsPanel } from './document';
+export type { DocumentLine } from './document';

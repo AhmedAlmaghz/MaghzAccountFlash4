@@ -1,10 +1,8 @@
-import React, { useState, useMemo, useRef } from 'react';
-import { BookOpen, Plus, Save, Send, Undo2, X } from 'lucide-react';
-import { Card, Button, Input, Modal, Table, PageHeader } from '@/core/ui/components';
+﻿import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { BookOpen, Plus, Send, Undo2 } from 'lucide-react';
+import { Card, Button, Modal, Table, PageHeader } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
-import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
-import { receiptVoucherFingerprint, paymentVoucherFingerprint, journalEntryFingerprint, detectDocumentDuplicates, detectVoucherDuplicate, detectJournalDuplicate } from '@/core/utils/documentDuplicate';
-import { AccountSelect } from '@/core/ui/components/smart';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { useTransactionsPaginated } from '../hooks/useAccounting';
 import { accountingApi } from '../api';
@@ -14,192 +12,35 @@ import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { printDocument } from '@/core/utils/printDocument';
-import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
 import { Can } from '@/core/ui/components/PermissionGate';
-import { cn } from '@/core/utils';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { YER_CODE } from '@/core/utils/currencyConverter';
 import { useUserMap } from '@/core/utils/useUserMap';
-import type { Transaction, JournalEntry as JournalEntryType } from '../types';
+import type { Transaction } from '../types';
 import { useToastStore } from '@/core/store/toastStore';
-
-// keep fingerprint helpers referenced (task requires importing all six — only detectJournalDuplicate is used here)
-void receiptVoucherFingerprint; void paymentVoucherFingerprint; void journalEntryFingerprint; void detectDocumentDuplicates; void detectVoucherDuplicate;
-
-interface EntryLine {
-  accountId: string;
-  debit: number;
-  credit: number;
-  memo: string;
-}
-
-const emptyLine = (): EntryLine => ({ accountId: '', debit: 0, credit: 0, memo: '' });
 
 export const JournalEntriesPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore(state => state.activeCompany);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const txFilters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
-  const { transactions, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, post, remove, reload } = useTransactionsPaginated(activeCompany?.id || '', txFilters);
+  const { transactions, total, page, pageSize, isLoading, goToPage, changePageSize, post, remove, reload } = useTransactionsPaginated(activeCompany?.id || '', txFilters);
   const currentUser = useAuthStore((s) => s.user);
-  const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
   const { getUserName } = useUserMap();
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
-  
-  const [entries, setEntries] = useState<EntryLine[]>([emptyLine(), emptyLine()]);
-  const [reference, setReference] = useState('');
-  const [description, setDescription] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [isSaving, setIsSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
   const [reverseTx, setReverseTx] = useState<Transaction | null>(null);
-  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
-  const [docDuplicateInput, setDocDuplicateInput] = useState('');
-  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
-  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
-  const docDuplicateConfirmedRef = useRef(false);
-  const pendingStatusRef = useRef<'draft' | 'posted'>('draft');
 
-  const totalDebit = useMemo(() => entries.reduce((sum, e) => sum + (Number(e.debit) || 0), 0), [entries]);
-  const totalCredit = useMemo(() => entries.reduce((sum, e) => sum + (Number(e.credit) || 0), 0), [entries]);
-  const isBalanced = totalDebit === totalCredit && totalDebit > 0;
-
-  const addEntry = () => setEntries(prev => [...prev, emptyLine()]);
-  const removeEntry = (index: number) => setEntries(prev => prev.length > 2 ? prev.filter((_, i) => i !== index) : prev);
-  const updateEntry = (index: number, field: keyof EntryLine, value: string | number) => {
-    setEntries(prev => prev.map((e, i) => i === index ? { ...e, [field]: value } : e));
-  };
-
-  const resetForm = () => {
-    setEntries([emptyLine(), emptyLine()]);
-    setReference('');
-    setDescription('');
-    setDate(new Date().toISOString().split('T')[0]);
-    setIsEditMode(false);
-    setEditingId(null);
-  };
-
-  const handleSave = async (status: 'draft' | 'posted') => {
-    if (!activeCompany) return;
-    if (status === 'posted' && !isBalanced) return;
-
-    pendingStatusRef.current = status;
-    setIsSaving(true);
-    let ref = reference;
-    if (!isEditMode && activeCompany.id) {
-      const seq = await getNextNumber('journal_voucher', activeCompany.id);
-      if (seq.success && seq.number) {
-        ref = seq.number;
-      }
-    }
-
-    const payload = {
-      companyId: activeCompany.id,
-      date,
-      reference: ref,
-      description,
-      totalAmount: totalDebit,
-      status,
-      entries: entries.filter(e => e.accountId).map(e => ({
-        id: crypto.randomUUID(),
-        transactionId: editingId || '',
-        accountId: e.accountId,
-        debit: Number(e.debit) || 0,
-        credit: Number(e.credit) || 0,
-        memo: e.memo,
-      })) as JournalEntryType[],
-    };
-
-    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
-    if (!docDuplicateConfirmedRef.current) {
-      try {
-        const existingRes = await accountingApi.getTransactionsPaginated(activeCompany.id, 1, 200);
-        const rawList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: Transaction[] })?.items ?? (existingRes.data as unknown as Transaction[]) ?? []) : []) as Transaction[];
-        const existingListForDup = rawList.map((tx) => ({
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ...(tx as any),
-          // detectJournalDuplicate expects `lines`; Transaction stores `entries` — provide alias for fingerprint
-          lines: (tx as unknown as { entries?: unknown[] }).entries ?? (tx as unknown as { lines?: unknown[] }).lines ?? [],
-        }));
-        const dup = detectJournalDuplicate(
-          { date: payload.date, description: payload.description, lines: payload.entries.map((e) => ({ accountId: e.accountId, debit: e.debit, credit: e.credit })) },
-          existingListForDup as never,
-          editingId || undefined,
-        );
-        if (dup.exactMatch) {
-          const doc = dup.exactMatch as unknown as Transaction;
-          setDocDuplicateInput(`${payload.date} • ${payload.description || ''}`);
-          setDocDuplicateExact({ name: doc.reference || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
-          setDocDuplicateNear([]);
-          setDocDuplicateOpen(true);
-          setIsSaving(false);
-          return;
-        }
-        if (dup.nearMatches.length > 0) {
-          setDocDuplicateInput(`${payload.date} • ${payload.description || ''}`);
-          setDocDuplicateNear(
-            dup.nearMatches.map((m) => {
-              const d = m.item as unknown as Transaction;
-              return { name: d.reference || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
-            }),
-          );
-          setDocDuplicateExact(null);
-          setDocDuplicateOpen(true);
-          setIsSaving(false);
-          return;
-        }
-      } catch {
-        /* فشل الفحص لا يمنع الحفظ */
-      }
-    }
-    docDuplicateConfirmedRef.current = false;
-
-    let result;
-    if (isEditMode && editingId) {
-      result = await update(editingId, payload);
-    } else {
-      result = await create(payload as Omit<Transaction, 'id'>);
-    }
-
-    if (result.success) {
-      setIsModalOpen(false);
-      resetForm();
-      addToast('success', t(isEditMode ? 'accounting.transaction.updated' : 'accounting.transaction.created'));
-    } else {
-      addToast('error', result.error || t('common.error'));
-    }
-    setIsSaving(false);
-  };
-
-  const handleEdit = async (tx: Transaction) => {
-    setEditingId(tx.id);
-    setIsEditMode(true);
-    setDate(tx.date);
-    setReference(tx.reference || '');
-    setDescription(tx.description || '');
-    setEntries([emptyLine(), emptyLine()]);
-    setIsModalOpen(true);
-
-    if (!activeCompany) return;
-    const result = await accountingApi.getTransactionById(tx.id, activeCompany.id);
-    if (result.success && result.data && result.data.entries.length > 0) {
-      setEntries(result.data.entries.map(e => ({
-        accountId: e.accountId,
-        debit: Number(e.debit) || 0,
-        credit: Number(e.credit) || 0,
-        memo: e.memo || '',
-      })));
-    }
+  const handleEdit = (tx: Transaction) => {
+    navigate(`/accounting/journal/${tx.id}`);
   };
 
   const handlePost = async (tx: Transaction) => {
@@ -336,7 +177,7 @@ export const JournalEntriesPage: React.FC = () => {
               <option value="posted">{t('accounting.posted')}</option>
             </select>
             <Can action="create" module="accounting">
-              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsModalOpen(true); }}>
+              <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => navigate("/accounting/journal/new")}>
                 {t('accounting.newJournalEntry')}
               </Button>
             </Can>
@@ -360,118 +201,6 @@ export const JournalEntriesPage: React.FC = () => {
           onPageSizeChange={changePageSize}
         />
       </Card>
-
-      {/* Create/Edit Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={isEditMode ? t('accounting.editJournalEntry') : t('accounting.newJournalEntry')}
-        size="xl"
-        footer={
-          <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)} disabled={isSaving}>{t('cancel')}</Button>
-            <Button 
-              variant="secondary" 
-              leftIcon={<Save size={16} />} 
-              onClick={() => handleSave('draft')}
-              isLoading={isSaving}
-            >
-              {t('accounting.saveDraft')}
-            </Button>
-            <Button 
-              variant="primary" 
-              leftIcon={<Send size={16} />} 
-              onClick={() => handleSave('posted')}
-              disabled={!isBalanced}
-              isLoading={isSaving}
-            >
-              {t('accounting.postEntry')}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <Input label={t('accounting.date')} type="date" value={date} onChange={e => setDate(e.target.value)} />
-            <Input label={t('accounting.reference')} value={reference} onChange={e => setReference(e.target.value)} />
-            <Input label={t('accounting.description')} value={description} onChange={e => setDescription(e.target.value)} />
-          </div>
-          
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-slate-50 dark:bg-slate-800">
-                <tr>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right">{t('accounting.accountName')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-28">{t('accounting.debit')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right w-28">{t('accounting.credit')}</th>
-                  <th className="text-xs font-semibold text-slate-500 p-2 text-right">{t('accounting.memo')}</th>
-                  <th className="w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry, idx) => (
-                  <tr key={idx} className="border-t border-slate-200 dark:border-slate-700">
-                    <td className="p-2">
-                      <AccountSelect
-                        companyId={activeCompany?.id || ''}
-                        value={entry.accountId || ''}
-                        onChange={v => updateEntry(idx, 'accountId', v || '')}
-                        size="sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <Input 
-                        type="number" 
-                        value={String(entry.debit || '')}
-                        onChange={e => updateEntry(idx, 'debit', Number(e.target.value))}
-                        size="sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <Input 
-                        type="number"
-                        value={String(entry.credit || '')}
-                        onChange={e => updateEntry(idx, 'credit', Number(e.target.value))}
-                        size="sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <Input 
-                        value={entry.memo || ''}
-                        onChange={e => updateEntry(idx, 'memo', e.target.value)}
-                        size="sm"
-                      />
-                    </td>
-                    <td className="p-2">
-                      <button onClick={() => removeEntry(idx)} className="text-rose-500 hover:text-rose-700">
-                        <X size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-slate-50 dark:bg-slate-800 font-semibold">
-                <tr>
-                  <td className="p-2 text-right">{t('accounting.totalDebit')} / {t('accounting.totalCredit')}</td>
-                  <td className={cn('p-2 text-right', totalDebit !== totalCredit ? 'text-danger-600' : '')}>
-                    {formatCurrency(totalDebit)}
-                  </td>
-                  <td className={cn('p-2 text-right', totalDebit !== totalCredit ? 'text-danger-600' : '')}>
-                    {formatCurrency(totalCredit)}
-                  </td>
-                  <td colSpan={2} />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-          
-          <Button variant="secondary" onClick={addEntry} size="sm">+ {t('accounting.addLine')}</Button>
-          
-          {!isBalanced && entries.length > 1 && (
-            <p className="text-danger-600 text-sm">{t('accounting.unbalancedEntry')}: {t('accounting.difference')} = {formatCurrency(totalDebit - totalCredit)}</p>
-          )}
-        </div>
-      </Modal>
 
       {/* Detail View Modal */}
       <Modal
@@ -555,24 +284,9 @@ export const JournalEntriesPage: React.FC = () => {
         docLabel={reverseTx?.reference || reverseTx?.id || ''}
         onConfirm={handleReverseConfirm}
       />
-
-      <DuplicateWarningDialog
-        isOpen={docDuplicateOpen}
-        onClose={() => setDocDuplicateOpen(false)}
-        onConfirm={() => {
-          docDuplicateConfirmedRef.current = true;
-          setDocDuplicateOpen(false);
-          void handleSave(pendingStatusRef.current);
-        }}
-        inputName={docDuplicateInput}
-        entityLabel={t('accounting.journalEntries')}
-        exactMatch={docDuplicateExact}
-        nearMatches={docDuplicateNear}
-        isDocument
-        isEdit={!!editingId}
-      />
     </div>
   );
 };
 
 export default JournalEntriesPage;
+

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+﻿import React, { useState, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Users,
   Plus,
@@ -44,6 +45,7 @@ type FormErrors = Partial<Record<'name' | 'phone' | 'email' | 'code', string>>;
 
 export const CustomersPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
   const { formatCurrency } = useFormatters(activeCompany?.id || '');
@@ -99,9 +101,9 @@ export const CustomersPage: React.FC = () => {
   });
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
-  const { getNextNumber } = useDocumentSequence();
+  const { getNextNumber } = useDocumentSequence(); void getNextNumber;
 
-  // Duplicate guard — يمنع صمت التكرار
+  // Duplicate guard â€” ظٹظ…ظ†ط¹ طµظ…طھ ط§ظ„طھظƒط±ط§ط±
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateInputName, setDuplicateInputName] = useState('');
   const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
@@ -116,37 +118,16 @@ export const CustomersPage: React.FC = () => {
 
   const validateForm = useCallback((): boolean => {
     const errors: FormErrors = {};
-    if (!formData.name.trim()) errors.name = t('validation.required') || 'مطلوب';
+    if (!formData.name.trim()) errors.name = t('validation.required') || 'ظ…ط·ظ„ظˆط¨';
     if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = t('validation.invalidEmail');
     if (formData.phone && formData.phone.length < 7) errors.phone = t('validation.invalidPhone');
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   }, [formData, t]);
 
-  const openCreate = async () => {
-    resetForm();
-    if (activeCompany) {
-      const seq = await getNextNumber('customer', activeCompany.id);
-      if (seq?.number) setFormData((prev) => ({ ...prev, code: seq.number || '' }));
-    }
-    setFormOpen(true);
-  };
+  const openCreate = () => navigate('/sales/customers/new');
   const openEdit = (c: Customer) => {
-    setEditingId(c.id);
-    setFormData({
-      code: c.code || '',
-      name: c.name,
-      phone: c.phone || '',
-      email: c.email || '',
-      address: c.address || '',
-      taxNumber: c.taxNumber || '',
-      creditLimit: String(c.creditLimit || ''),
-      openingBalance: c.openingBalancePosted ? String(c.openingBalance || '') : '',
-      openingDate: c.openingDate ? String(c.openingDate).slice(0, 10) : '',
-      isActive: c.isActive,
-    });
-    setFormErrors({});
-    setFormOpen(true);
+    navigate(`/sales/customers/${c.id}`);
   };
 
   const openDetail = async (c: Customer) => {
@@ -159,7 +140,7 @@ export const CustomersPage: React.FC = () => {
   const handleSave = async () => {
     if (!activeCompany) return;
     if (!validateForm()) {
-      addToast('error', t('validation.required') || 'يرجى تصحيح الحقول المطلوبة');
+      addToast('error', t('validation.required') || 'ظٹط±ط¬ظ‰ طھطµط­ظٹط­ ط§ظ„ط­ظ‚ظˆظ„ ط§ظ„ظ…ط·ظ„ظˆط¨ط©');
       return;
     }
     const inputName = formData.name.trim();
@@ -189,7 +170,7 @@ export const CustomersPage: React.FC = () => {
           }
         }
       } catch {
-        /* فشل الفحص لا يمنع الحفظ */
+        /* ظپط´ظ„ ط§ظ„ظپط­طµ ظ„ط§ ظٹظ…ظ†ط¹ ط§ظ„ط­ظپط¸ */
       }
     }
     duplicateConfirmedRef.current = false;
@@ -252,7 +233,7 @@ export const CustomersPage: React.FC = () => {
   const handleDelete = (c: Customer) => {
     setConfirmConfig({
       title: t('sales.customer.deleteTitle'),
-      message: `${t('sales.customer.deleteConfirm')} "${c.name}"؟`,
+      message: `${t('sales.customer.deleteConfirm')} "${c.name}"طں`,
       variant: 'danger',
       onConfirm: async () => {
         setConfirmOpen(false);
@@ -483,7 +464,7 @@ export const CustomersPage: React.FC = () => {
   );
 
   const totalBalance = useMemo(() => customers.reduce((s, c) => s + (Number(c.balance) || 0), 0), [customers]);
-  // Receivable (positive balances) vs credit (negative) — the CURRENT NET
+  // Receivable (positive balances) vs credit (negative) â€” the CURRENT NET
   // balance is what matters; debit/credit are shown as a breakdown, never
   // summed together (summing cancels real receivables).
   const receivableTotal = useMemo(() => customers.reduce((s, c) => s + Math.max(0, Number(c.balance) || 0), 0), [customers]);
@@ -514,9 +495,9 @@ export const CustomersPage: React.FC = () => {
           <FilterBar
             search={search}
             onSearchChange={setSearch}
-            searchPlaceholder={`${t('search')} — ${t('sales.customer.name')} / ${t('sales.customer.phone')} / ${t('sales.customer.code')}`}
+            searchPlaceholder={`${t('search')} â€” ${t('sales.customer.name')} / ${t('sales.customer.phone')} / ${t('sales.customer.code')}`}
             filterOptions={[
-              { key: 'all', label: t('purchases.filter.all') || 'الكل' },
+              { key: 'all', label: t('purchases.filter.all') || 'ط§ظ„ظƒظ„' },
               { key: 'active', label: t('settings.common.active') },
               { key: 'inactive', label: t('settings.common.inactive') },
             ]}
@@ -538,7 +519,7 @@ export const CustomersPage: React.FC = () => {
           {hasActiveFilter && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <span>
-                {total} {t('sales.customer.invoices')} • {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `• ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
+                {total} {t('sales.customer.invoices')} â€¢ {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `â€¢ ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
               </span>
                 <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
                 {t('sales.filter.clearFilters')}
@@ -556,7 +537,7 @@ export const CustomersPage: React.FC = () => {
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">{t('sales.customer.total')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
               <p className="mt-1 text-xs text-slate-500">
-                {activeCount} {t('settings.common.active')} • {inactiveCount} {t('settings.common.inactive')}
+                {activeCount} {t('settings.common.active')} â€¢ {inactiveCount} {t('settings.common.inactive')}
               </p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-primary-50 dark:bg-primary-900/30 border border-primary-100 dark:border-primary-800 flex items-center justify-center">
@@ -817,8 +798,8 @@ export const CustomersPage: React.FC = () => {
         isOpen={detailOpen}
         onClose={() => setDetailOpen(false)}
         size="xl"
-        title={viewing ? `${t('sales.customer.card')} — ${viewing.name}` : ''}
-        description={viewing ? `${viewing.code || ''} ${viewing.phone ? '• ' + viewing.phone : ''}` : undefined}
+        title={viewing ? `${t('sales.customer.card')} â€” ${viewing.name}` : ''}
+        description={viewing ? `${viewing.code || ''} ${viewing.phone ? 'â€¢ ' + viewing.phone : ''}` : undefined}
       >
         {viewing && (
           <div className="space-y-4">
@@ -1002,7 +983,7 @@ function CustomerStatementTab({ customerId }: { customerId: string }) {
           </Badge>
         ),
       },
-      { key: 'documentNumber', header: t('sales.documentNumber'), width: '140px', render: (row: (typeof rows)[0]) => <span className="font-mono text-xs">{row.documentNumber === 'OPENING' ? '—' : row.documentNumber}</span> },
+      { key: 'documentNumber', header: t('sales.documentNumber'), width: '140px', render: (row: (typeof rows)[0]) => <span className="font-mono text-xs">{row.documentNumber === 'OPENING' ? 'â€”' : row.documentNumber}</span> },
       {
         key: 'debit',
         header: t('accounting.debit'),
@@ -1128,3 +1109,4 @@ function CustomerAgingTab({
 }
 
 export default CustomersPage;
+

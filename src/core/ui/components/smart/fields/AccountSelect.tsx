@@ -2,11 +2,23 @@ import React, { useMemo } from 'react';
 import { SmartSelect, type SmartSelectItem } from '../SmartSelect';
 import { useAccounts } from '@/modules/accounting/hooks/useAccounting';
 import { useTranslation } from '@/core/i18n/useTranslation';
+import type { Account } from '@/modules/accounting/types';
 
 interface AccountSelectProps {
   companyId: string;
   value?: string;
   onChange: (value: string | null) => void;
+  /**
+   * Fired after a pick with the full account object. Callers that need the
+   * account NAME (journal lines, statement exports) must not look it up
+   * again — the id alone carries no label.
+   */
+  onAccountChange?: (account: Account) => void;
+  /**
+   * Label to display when the selected account is not in the loaded option
+   * list (a loaded document whose account list has not arrived yet).
+   */
+  selectedLabel?: string;
   placeholder?: string;
   filterType?: 'all' | 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
   excludeGroups?: boolean;
@@ -16,7 +28,7 @@ interface AccountSelectProps {
 }
 
 export const AccountSelect: React.FC<AccountSelectProps> = ({
-  companyId, value, onChange, placeholder,
+  companyId, value, onChange, onAccountChange, selectedLabel, placeholder,
   filterType = 'all', excludeGroups = true, disabled, size, className,
 }) => {
   const { t } = useTranslation();
@@ -41,18 +53,30 @@ export const AccountSelect: React.FC<AccountSelectProps> = ({
     if (excludeGroups) {
       filtered = filtered.filter(a => !a.isGroup);
     }
-    return filtered.map(a => ({
+    const base = filtered.map(a => ({
       label: `${a.code} - ${a.nameAr}`,
       sublabel: a.nameEn || undefined,
       disabled: !a.isActive,
       ...a,
     })) as SmartSelectItem[];
-  }, [flattenedAccounts, filterType, excludeGroups]);
+    // The loaded document carries the account name but the account may not
+    // be in the fetched list — without a synthetic option the trigger shows
+    // the placeholder and the line looks empty.
+    if (selectedLabel && value && !base.some((a) => a.id === value)) {
+      return [{ id: value, label: selectedLabel }, ...base] as SmartSelectItem[];
+    }
+    return base;
+  }, [flattenedAccounts, filterType, excludeGroups, selectedLabel, value]);
 
   return (
     <SmartSelect
       value={value}
       onChange={(v) => onChange(typeof v === 'string' ? v : null)}
+      onItemSelect={(item) => {
+        if (!onAccountChange) return;
+        const account = flattenedAccounts.find((a) => a.id === item.id);
+        if (account) onAccountChange(account);
+      }}
       options={options}
       isLoading={isLoading}
       placeholder={resolvedPlaceholder}

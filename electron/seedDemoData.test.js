@@ -125,6 +125,24 @@ function makeStatefulClient() {
         return { rows: [{ id }], rowCount: 1 };
       }
 
+      // SELECT <cols> FROM <table> WHERE <col> = $N [AND ...] [ORDER BY ...] [LIMIT N]
+      // The column list may hold more than one column (the seed reads
+      // sale_price AND cost_price for the products), so project the stored
+      // row onto the requested columns instead of assuming a single one.
+      const selCols = trimmed.match(/^SELECT\s+([\w,\s]+?)\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*\$(\d+)/i);
+      if (selCols) {
+        const cols = selCols[1].split(',').map((c) => c.trim()).filter(Boolean);
+        const table = selCols[2];
+        const col = selCols[3];
+        const idx = parseInt(selCols[4], 10) - 1;
+        const rows = getOrCreate(table);
+        const found = rows.find((r) => r[col] === params[idx]);
+        if (!found) return { rows: [], rowCount: 0 };
+        const projected = { id: found.id };
+        for (const c of cols) if (c in found) projected[c] = found[c];
+        return { rows: [projected], rowCount: 1 };
+      }
+
       // SELECT id, ... FROM <table> WHERE <col> = $1 [AND ...] [ORDER BY ...] [LIMIT N]
       const sel = trimmed.match(/SELECT\s+(?:id,\s*\w+|id)\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*\$(\d+)/i);
       if (sel) {

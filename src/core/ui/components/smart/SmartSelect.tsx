@@ -35,6 +35,8 @@ export interface SmartSelectProps<T extends SmartSelectItem> {
   multiple?: boolean;
   disabled?: boolean;
   clearable?: boolean;
+  /** Extra attributes forwarded to the trigger button (e.g. data-* hooks). */
+  triggerProps?: Record<string, string>;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
   renderItem?: (item: T, selected: boolean) => React.ReactNode;
@@ -64,6 +66,7 @@ export function SmartSelect<T extends SmartSelectItem>({
   multiple = false,
   disabled = false,
   clearable = true,
+  triggerProps,
   size = 'md',
   className = '',
   renderItem,
@@ -314,6 +317,7 @@ export function SmartSelect<T extends SmartSelectItem>({
         type="button"
         onClick={() => !disabled && setOpen(!open)}
         disabled={disabled}
+        {...triggerProps}
         className={cn(
           'w-full flex items-center justify-between gap-2 rounded-xl border border-zinc-300 dark:border-zinc-700',
           'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100',

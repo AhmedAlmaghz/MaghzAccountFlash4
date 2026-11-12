@@ -1,6 +1,13 @@
 import { test, expect } from './fixtures/auth';
 import { loginAs } from './fixtures/auth';
 
+/**
+ * The sales module pages.
+ *
+ * Phase 104 replaced the create MODALS with full-page editors, so the
+ * create-button tests now assert the navigation to the editor route and
+ * the editor's own heading instead of a dialog.
+ */
 test.describe('Sales Module - Critical Flows', () => {
   test.beforeEach(async ({ page }) => {
     await loginAs(page);
@@ -33,40 +40,37 @@ test.describe('Sales Module - Critical Flows', () => {
     await expect(page.locator('text=الإجمالي').first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('invoice create modal contains customer/date/currency fields', async ({ page }) => {
-    await page.goto('/sales/invoices');
-    await expect(page.locator('text=فواتير المبيعات').first()).toBeVisible({ timeout: 15_000 });
-    const createBtn = page.locator('button:has-text("فاتورة جديدة")').first();
-    await expect(createBtn).toBeVisible({ timeout: 10_000 });
-    await createBtn.click();
-    const modalTitle = page.locator('text=فاتورة مبيعات جديدة').first();
-    await expect(modalTitle).toBeVisible({ timeout: 10_000 });
+  test('invoice editor contains customer/date/currency fields', async ({ page }) => {
+    await page.goto('/sales/invoices/new');
+    await page.waitForLoadState('networkidle', { timeout: 15_000 });
+
+    const title = page.getByRole('heading', { name: /فاتورة مبيعات/ }).first();
+    await expect(title).toBeVisible({ timeout: 15_000 });
     const hasCustomer = await page.locator('text=العميل').count();
     const hasDate = await page.locator('text=التاريخ').count();
     expect(hasCustomer).toBeGreaterThan(0);
     expect(hasDate).toBeGreaterThan(0);
-    await page.keyboard.press('Escape');
   });
 
-  test('customers page create modal opens', async ({ page }) => {
+  test('customers create button opens the full-page editor', async ({ page }) => {
     await page.goto('/sales/customers');
     await expect(page.locator('text=العملاء').first()).toBeVisible({ timeout: 15_000 });
     const createBtn = page.locator('button:has-text("عميل جديد")').first();
     await expect(createBtn).toBeVisible({ timeout: 10_000 });
     await createBtn.click();
-    const modalTitle = page.locator('h3:has-text("عميل جديد")').first();
-    await expect(modalTitle).toBeVisible({ timeout: 10_000 });
-    await page.keyboard.press('Escape');
+
+    await page.waitForURL(/\/sales\/customers\/new/, { timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: /عميل جديد/ }).first()).toBeVisible({ timeout: 15_000 });
   });
 
-  test('quotations create modal opens', async ({ page }) => {
+  test('quotations create button opens the full-page editor', async ({ page }) => {
     await page.goto('/sales/quotations');
     await expect(page.locator('text=عروض الأسعار').first()).toBeVisible({ timeout: 15_000 });
     const createBtn = page.locator('button:has-text("عرض جديد")').first();
     await expect(createBtn).toBeVisible({ timeout: 10_000 });
     await createBtn.click();
-    const modalTitle = page.locator('h3:has-text("عرض سعر جديد")').first();
-    await expect(modalTitle).toBeVisible({ timeout: 10_000 });
-    await page.keyboard.press('Escape');
+
+    await page.waitForURL(/\/sales\/quotations\/new/, { timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: /عرض سعر جديد/ }).first()).toBeVisible({ timeout: 15_000 });
   });
 });

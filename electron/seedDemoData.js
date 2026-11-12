@@ -831,8 +831,11 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
   for (const c of customerCodes) { const id = await lookupIdByCode('customers', c); if (id) custIds.push({ code: c, id }); }
   const prodInfos = [];
   for (const c of productCodes) {
-    const r = await client.query(`SELECT id, sale_price FROM products WHERE company_id = $1::uuid AND code = $2::text`, [companyId, c]);
-    if (r.rows[0]) prodInfos.push({ code: c, id: r.rows[0].id, price: r.rows[0].sale_price });
+    const r = await client.query(`SELECT id, sale_price, cost_price FROM products WHERE company_id = $1::uuid AND code = $2::text`, [companyId, c]);
+    // cost is carried into the invoice lines as unit_cost — the profit
+    // analysis report computes COGS from qty × unit_cost, so a line without
+    // it makes the whole report read "no data".
+    if (r.rows[0]) prodInfos.push({ code: c, id: r.rows[0].id, price: r.rows[0].sale_price, cost: r.rows[0].cost_price });
   }
   if (custIds.length >= 5 && prodInfos.length >= 9) {
     const sampleInvoices = [
@@ -847,8 +850,8 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
       const vatAmount = Math.round(subtotal * VAT_RATE);
       const totalAmount = subtotal + vatAmount;
       const insRes = await client.query(
-        `INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, subtotal, vat_amount, total_amount, status, notes, created_by, updated_by)
-         SELECT $1::uuid, $2::text, $3::uuid, $4::date, $5::numeric, $6::numeric, $7::numeric, 'posted', 'فاتورة تجريبية', $8::uuid, $8::uuid
+        `INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, subtotal, vat_amount, total_amount, currency_code, exchange_rate, base_currency_amount, status, notes, created_by, updated_by)
+         SELECT $1::uuid, $2::text, $3::uuid, $4::date, $5::numeric, $6::numeric, $7::numeric, 'YER', 1, $7::numeric, 'posted', 'فاتورة تجريبية', $8::uuid, $8::uuid
          WHERE NOT EXISTS (SELECT 1 FROM sales_invoices WHERE company_id = $1::uuid AND invoice_number = $2::text)
          RETURNING id;`,
         [companyId, inv.number, custIds[inv.custIdx].id, inv.date, subtotal, vatAmount, totalAmount, adminId]
@@ -863,9 +866,9 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
           const p = prodInfos[line.prodIdx];
           const lineTotal = parseFloat(p.price) * line.qty;
           await client.query(
-            `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total)
-             VALUES ($1::uuid, $2::uuid, $3::numeric, $4::numeric, 0, 15, $5::numeric);`,
-            [invId, p.id, line.qty, p.price, lineTotal]
+            `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_cost)
+             VALUES ($1::uuid, $2::uuid, $3::numeric, $4::numeric, 0, 15, $5::numeric, 'YER', 1, $5::numeric, $6::numeric);`,
+            [invId, p.id, line.qty, p.price, lineTotal, p.cost]
           );
         }
       }
@@ -922,8 +925,8 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
       const vatAmount = Math.round(subtotal * VAT_RATE);
       const total = subtotal + vatAmount;
       const insRes = await client.query(
-        `INSERT INTO purchase_invoices (company_id, invoice_number, supplier_id, date, subtotal, vat_amount, total_amount, status, notes, created_by, updated_by)
-         SELECT $1::uuid, $2::text, $3::uuid, $4::date, $5::numeric, $6::numeric, $7::numeric, 'posted', 'فاتورة مشتريات تجريبية', $8::uuid, $8::uuid
+        `INSERT INTO purchase_invoices (company_id, invoice_number, supplier_id, date, subtotal, vat_amount, total_amount, currency_code, exchange_rate, base_currency_amount, status, notes, created_by, updated_by)
+         SELECT $1::uuid, $2::text, $3::uuid, $4::date, $5::numeric, $6::numeric, $7::numeric, 'YER', 1, $7::numeric, 'posted', 'فاتورة مشتريات تجريبية', $8::uuid, $8::uuid
          WHERE NOT EXISTS (SELECT 1 FROM purchase_invoices WHERE company_id = $1::uuid AND invoice_number = $2::text)
          RETURNING id;`,
         [companyId, pi.number, supIds[pi.supIdx].id, pi.date, subtotal, vatAmount, total, adminId]
@@ -936,8 +939,8 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
       if (piId) {
         for (const line of pi.lines) {
           await client.query(
-            `INSERT INTO purchase_invoice_lines (invoice_id, product_id, quantity, unit_price, line_total)
-             VALUES ($1::uuid, $2::uuid, $3::numeric, $4::numeric, $5::numeric);`,
+            `INSERT INTO purchase_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total)
+             VALUES ($1::uuid, $2::uuid, $3::numeric, $4::numeric, 0, 15, $5::numeric, 'YER', 1, $5::numeric);`,
             [piId, prodInfos[line.prodIdx].id, line.qty, line.price, line.qty * line.price]
           );
         }

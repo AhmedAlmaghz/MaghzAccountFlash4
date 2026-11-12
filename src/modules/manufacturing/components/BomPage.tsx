@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Eye, GitBranch, Pencil, Plus, Printer, Search, Trash2, Layers, CheckSquare, XCircle, Wallet, Calculator, Factory } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
@@ -6,10 +7,6 @@ import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { ProductSelect } from '@/core/ui/components/smart/fields/ProductSelect';
-import { ProductUnitSelect } from '@/core/ui/components/smart';
-import { toBaseQty } from '@/core/utils/unitConversion';
-import type { ProductUnit } from '@/modules/inventory/types';
 import { useAppStore } from '@/core/store';
 import { useBomsPaginated } from '../hooks/useManufacturing';
 import { useDebouncedValue } from '@/core/hooks/useDebouncedValue';
@@ -20,35 +17,23 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import type { BOM, BOMLine } from '../types';
 
-interface BomFormLine {
-  materialId: string;
-  materialName: string;
-  quantity: number;
-  unitCost: number;
-  /** Display unit factor (base units per 1). Stored qty/cost are base. */
-  unitId?: string;
-  unitFactor?: number;
-  unitName?: string;
-}
-
 export const BomPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const activeCompany = useAppStore((state) => state.activeCompany);
   const companyId = activeCompany?.id || '';
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearch = useDebouncedValue(searchTerm, 300);
   const filters = useMemo(() => ({ search: debouncedSearch || undefined }), [debouncedSearch]);
-  const { items: boms, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useBomsPaginated(companyId, filters);
+  const { items: boms, total, page, pageSize, isLoading, goToPage, changePageSize, remove } = useBomsPaginated(companyId, filters);
   const { formatCurrency } = useFormatters(companyId);
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [editing, setEditing] = useState<BOM | null>(null);
   const [viewing, setViewing] = useState<{ bom: BOM; lines: BOMLine[] } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const addToast = useToastStore((s) => s.addToast);
 
-  // ── Smart availability calculator ────────────────────────────────────
+  // â”€â”€ Smart availability calculator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [calcQty, setCalcQty] = useState('1');
   const [availability, setAvailability] = useState<Awaited<ReturnType<typeof manufacturingApi.getBomAvailability>>['data'] | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -62,7 +47,7 @@ export const BomPage: React.FC = () => {
     else addToast('error', res.error || t('manufacturing.bom.availabilityError'));
   };
 
-  // ── One-click work order from BOM ────────────────────────────────────
+  // â”€â”€ One-click work order from BOM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [isCreatingWo, setIsCreatingWo] = useState(false);
   const createWorkOrderFromBom = async () => {
     if (!viewing) return;
@@ -74,7 +59,7 @@ export const BomPage: React.FC = () => {
         return;
       }
       // Work-order quantity = number of BOM batches; consumption lines must
-      // carry the TOTAL planned quantity (per-batch qty × batches).
+      // carry the TOTAL planned quantity (per-batch qty أ— batches).
       const batches = Math.max(1, Number(calcQty) || 1);
       const lines = viewing.lines.map((l) => ({
         materialId: l.materialId,
@@ -103,60 +88,6 @@ export const BomPage: React.FC = () => {
     }
   };
 
-  const [formData, setFormData] = useState({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '', outputQuantity: '1' });
-  const [lines, setLines] = useState<BomFormLine[]>([{ materialId: '', materialName: '', quantity: 1, unitCost: 0, unitFactor: 1, unitName: undefined }]);
-
-  const estimatedTotal = useMemo(() =>
-    lines.reduce((sum, l) => sum + (l.quantity * l.unitCost), 0),
-  [lines]);
-
-  const resetForm = () => {
-    setFormData({ productId: '', productName: '', version: '1.0', isActive: true, notes: '', totalCost: '', outputQuantity: '1' });
-    setLines([{ materialId: '', materialName: '', quantity: 1, unitCost: 0, unitFactor: 1, unitName: undefined }]);
-    setEditing(null);
-  };
-
-  const openCreate = () => {
-    resetForm();
-    setIsModalOpen(true);
-  };
-
-  const openEdit = async (bom: BOM) => {
-    setEditing(bom);
-    const res = await manufacturingApi.getBomById(bom.id, companyId);
-    if (res.success && res.data) {
-      setFormData({
-        productId: res.data.bom.productId,
-        productName: res.data.bom.productName || bom.productName || '',
-        version: res.data.bom.version,
-        isActive: res.data.bom.isActive,
-        notes: res.data.bom.notes || '',
-        totalCost: res.data.bom.totalCost !== undefined ? String(res.data.bom.totalCost) : '',
-        outputQuantity: String(res.data.bom.outputQuantity ?? 1),
-      });
-      setLines(res.data.lines.map((l) => ({
-        materialId: l.materialId,
-        materialName: l.materialName || l.materialId,
-        quantity: l.quantity,
-        unitCost: l.unitCost || 0,
-        unitFactor: 1,
-        unitName: undefined,
-      })));
-    } else {
-      setFormData({
-        productId: bom.productId,
-        productName: bom.productName || '',
-        version: bom.version,
-        isActive: bom.isActive,
-        notes: bom.notes || '',
-        totalCost: bom.totalCost !== undefined ? String(bom.totalCost) : '',
-        outputQuantity: String(bom.outputQuantity ?? 1),
-      });
-      setLines([]);
-    }
-    setIsModalOpen(true);
-  };
-
   const openView = async (bom: BOM) => {
     const res = await manufacturingApi.getBomById(bom.id, companyId);
     if (res.success && res.data) {
@@ -164,42 +95,6 @@ export const BomPage: React.FC = () => {
       setAvailability(null);
       setCalcQty('1');
       setIsDetailOpen(true);
-    }
-  };
-
-  const handleSave = async () => {
-    const addToast = useToastStore.getState().addToast;
-    const validLines = lines.filter((l) => l.materialId && Number(l.quantity) > 0);
-    if (!formData.productId || validLines.length === 0) {
-      addToast('error', t('manufacturing.bom.requiredFields'));
-      return;
-    }
-    const totalCost = formData.totalCost ? Number(formData.totalCost) : estimatedTotal;
-    const payload = {
-      companyId,
-      productId: formData.productId,
-      version: formData.version,
-      isActive: formData.isActive,
-      outputQuantity: Math.max(Number(formData.outputQuantity) || 1, 0.0001),
-      totalCost,
-      notes: formData.notes || undefined,
-      // Display qty/cost are in the chosen unit — persist base values.
-      lines: validLines.map((l) => {
-        const factor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
-        return {
-          materialId: l.materialId,
-          quantity: toBaseQty(Number(l.quantity), factor),
-          unitCost: Number(l.unitCost) / factor || 0,
-        };
-      }),
-    };
-    const res = editing ? await update(editing.id, payload) : await create(payload);
-    if (res && res.success) {
-      addToast('success', t(editing ? 'manufacturing.bom.updated' : 'manufacturing.bom.created'));
-      setIsModalOpen(false);
-      resetForm();
-    } else {
-      addToast('error', res?.error || t('common.error'));
     }
   };
 
@@ -219,25 +114,6 @@ export const BomPage: React.FC = () => {
     printWindow.document.close();
   };
 
-  const addLine = () => setLines((prev) => [...prev, { materialId: '', materialName: '', quantity: 1, unitCost: 0, unitFactor: 1, unitName: undefined }]);
-  const updateLine = (index: number, field: keyof BomFormLine, value: string | number) => {
-    setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
-  };
-  /**
-   * Unit switch keeps the BASE cost invariant: displayed cost rescales to
-   * the price of one chosen unit, quantity stays as typed (converted at save).
-   */
-  const handleBomUnitChange = (index: number, unit: ProductUnit | null) => {
-    setLines((prev) => prev.map((l, i) => {
-      if (i !== index) return l;
-      const oldFactor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
-      const newFactor = unit?.factor && unit.factor > 0 ? unit.factor : 1;
-      const baseCost = (Number(l.unitCost) || 0) / oldFactor;
-      return { ...l, unitId: unit?.id, unitFactor: newFactor, unitName: unit?.unitName, unitCost: baseCost * newFactor };
-    }));
-  };
-  const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index));
-
   const columns = [
     {
       key: 'productName',
@@ -253,8 +129,8 @@ export const BomPage: React.FC = () => {
     },
     { key: 'version', header: t('manufacturing.table.version'), width: '100px', render: (row: BOM) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border">v{row.version}</span> },
     { key: 'outputQuantity', header: t('manufacturing.form.outputQuantity'), width: '120px', render: (row: BOM) => <span className="tabular-nums font-medium">{row.outputQuantity ?? 1}</span> },
-    { key: 'lines', header: t('manufacturing.table.materials'), width: '100px', render: (_row: BOM) => _row.linesCount !== undefined ? `${_row.linesCount} ${t('manufacturing.bom.material')}` : '—' },
-    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
+    { key: 'lines', header: t('manufacturing.table.materials'), width: '100px', render: (_row: BOM) => _row.linesCount !== undefined ? `${_row.linesCount} ${t('manufacturing.bom.material')}` : 'â€”' },
+    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : 'â€”' },
     { key: 'isActive', header: t('manufacturing.table.status'), width: '110px', render: (row: BOM) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
     { key: 'actions', header: '', width: '140px', render: (row: BOM) => (
       <div className="flex items-center gap-1">
@@ -262,7 +138,7 @@ export const BomPage: React.FC = () => {
           <Eye size={14} />
         </Button>
         <Can action="edit" module="manufacturing">
-          <Button size="sm" variant="ghost" onClick={() => openEdit(row)} title={t('settings.common.edit')} className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20">
+          <Button size="sm" variant="ghost" onClick={() => navigate("/manufacturing/bom/" + row.id)} title={t('settings.common.edit')} className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-900/20">
             <Pencil size={14} />
           </Button>
         </Can>
@@ -301,7 +177,7 @@ export const BomPage: React.FC = () => {
               <p className="text-cyan-100/80 text-base max-w-lg">{t('manufacturing.bom.subtitle')}</p>
             </div>
             <Can action="create" module="manufacturing">
-              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={openCreate} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('manufacturing.bom.newBom')}</Button>
+              <Button variant="secondary" leftIcon={<Plus size={16} />} onClick={() => navigate('/manufacturing/bom/new')} className="bg-white/10 hover:bg-white/20 text-white border-white/20 shrink-0">{t('manufacturing.bom.newBom')}</Button>
             </Can>
           </div>
         </div>
@@ -362,7 +238,7 @@ export const BomPage: React.FC = () => {
           <div className="py-8">
             <EmptyState icon="file" title={t('manufacturing.bom.emptyTitle')} description={t('manufacturing.bom.emptyDescription')} action={
               <Can action="create" module="manufacturing">
-                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={openCreate}>{t('manufacturing.bom.newBom')}</Button>
+                <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => navigate('/manufacturing/bom/new')}>{t('manufacturing.bom.newBom')}</Button>
               </Can>
             } />
           </div>
@@ -387,130 +263,6 @@ export const BomPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Create/Edit Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => { setIsModalOpen(false); resetForm(); }}
-        title={editing ? t('manufacturing.bom.editBom') : t('manufacturing.bom.newBom')}
-        size="3xl"
-        footer={
-          <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => { setIsModalOpen(false); resetForm(); }}>{t('settings.common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSave}>{t('settings.common.save')}</Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.finishedProduct')}</label>
-              <ProductSelect companyId={companyId} manufacturingRole="finished" value={formData.productId} onChange={(v) => setFormData((prev) => ({ ...prev, productId: typeof v === 'string' ? v : '' }))} showBarcode showStock placeholder={t('manufacturing.form.selectFinishedProduct')} />
-            </div>
-            <Input label={t('manufacturing.form.version')} value={formData.version} onChange={(e) => setFormData((prev) => ({ ...prev, version: e.target.value }))} />
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <Input
-              label={t('manufacturing.form.outputQuantity')}
-              type="number"
-              value={formData.outputQuantity}
-              onChange={(e) => setFormData((prev) => ({ ...prev, outputQuantity: e.target.value }))}
-              helperText={t('manufacturing.form.outputQuantityHint')}
-            />
-            <Input
-              label={t('manufacturing.form.totalCost')}
-              type="number"
-              value={formData.totalCost}
-              onChange={(e) => setFormData((prev) => ({ ...prev, totalCost: e.target.value }))}
-              placeholder={String(estimatedTotal)}
-              helperText={t('manufacturing.form.autoCalculatedCost') + ': ' + formatCurrency(estimatedTotal)}
-            />
-            <div className="flex items-end pb-1">
-              <div className="text-xs text-slate-500 bg-slate-50 dark:bg-slate-800 rounded p-2 w-full">
-                {t('manufacturing.form.unitCostPerUnit')}: <span className="font-bold tabular-nums">{formatCurrency(estimatedTotal / Math.max(Number(formData.outputQuantity) || 1, 0.0001))}</span>
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center gap-2 pt-6">
-              <input type="checkbox" id="isActive" checked={formData.isActive} onChange={(e) => setFormData((prev) => ({ ...prev, isActive: e.target.checked }))} className="rounded" />
-              <label htmlFor="isActive" className="text-sm text-slate-700 dark:text-slate-200">{t('settings.common.active')}</label>
-            </div>
-            <Input label={t('manufacturing.form.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t('manufacturing.form.notesPlaceholder')} />
-          </div>
-
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">{t('manufacturing.bom.materials')}</h4>
-            <div className="space-y-2">
-              {lines.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-3">
-                    <ProductSelect
-                      companyId={companyId}
-                      manufacturingRole="material"
-                      value={line.materialId}
-                      onChange={(v) => updateLine(idx, 'materialId', typeof v === 'string' ? v : '')}
-                      onProductChange={(product) =>
-                        setLines((prev) =>
-                          prev.map((l, i) =>
-                            i === idx
-                              ? {
-                                  ...l,
-                                  materialId: product.id,
-                                  materialName: product.nameAr,
-                                  unitCost: l.unitCost ? l.unitCost : Number(product.costPrice) || 0,
-                                  unitId: undefined,
-                                  unitFactor: 1,
-                                  unitName: undefined,
-                                }
-                              : l
-                          )
-                        )
-                      }
-                      showBarcode
-                      showStock
-                      placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input label={idx === 0 ? t('manufacturing.bom.materialName') : ''} value={line.materialName} onChange={(e) => updateLine(idx, 'materialName', e.target.value)} />
-                  </div>
-                  <div className="col-span-2">
-                    <ProductUnitSelect
-                      companyId={companyId}
-                      productId={line.materialId}
-                      value={line.unitId}
-                      onChange={(u) => handleBomUnitChange(idx, u)}
-                      mode="purchase"
-                      size="sm"
-                    />
-                    {(line.unitFactor ?? 1) > 1 && (
-                      <p className="text-[10px] text-slate-400 mt-0.5 tabular-nums">≈ {toBaseQty(line.quantity, line.unitFactor ?? 1)} {t('manufacturing.line.baseEquivalent')}</p>
-                    )}
-                  </div>
-                  <div className="col-span-2">
-                    <Input label={idx === 0 ? t('manufacturing.bom.quantity') : ''} type="number" value={String(line.quantity)} onChange={(e) => updateLine(idx, 'quantity', Number(e.target.value))} />
-                  </div>
-                  <div className="col-span-2">
-                    <Input label={idx === 0 ? t('manufacturing.bom.unitCost') : ''} type="number" value={String(line.unitCost)} onChange={(e) => updateLine(idx, 'unitCost', Number(e.target.value))} />
-                  </div>
-                  {lines.length > 1 && (
-                    <div className="col-span-1">
-                      <Button variant="ghost" size="sm" onClick={() => removeLine(idx)} className="text-rose-600">
-                        <Trash2 size={16} />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <Button variant="secondary" className="mt-3" onClick={addLine}>+ {t('manufacturing.actions.addMaterial')}</Button>
-            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between">
-              <span className="font-semibold text-slate-700 dark:text-slate-200">{t('manufacturing.bom.estimatedCost')}:</span>
-              <span className="font-bold text-primary-600 tabular-nums">{formatCurrency(estimatedTotal)}</span>
-            </div>
-          </div>
-        </div>
-      </Modal>
 
       {/* View/Print Modal */}
       <Modal
@@ -564,10 +316,10 @@ export const BomPage: React.FC = () => {
             />
             <div className="flex justify-between pt-2 border-t border-slate-200 dark:border-slate-700">
               <span className="font-bold text-slate-700 dark:text-slate-200">{t('manufacturing.bom.totalCost')}:</span>
-              <span className="font-bold text-primary-600">{viewing.bom.totalCost !== undefined ? formatCurrency(viewing.bom.totalCost) : formatCurrency(estimatedTotal)}</span>
+              <span className="font-bold text-primary-600">{viewing.bom.totalCost !== undefined ? formatCurrency(viewing.bom.totalCost) : formatCurrency(0)}</span>
             </div>
 
-            {/* ── Smart availability calculator ─────────────────────── */}
+            {/* â”€â”€ Smart availability calculator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-900/10 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Calculator size={16} className="text-cyan-600" />
@@ -647,9 +399,10 @@ function generateBomPrintHtml(bom: BOM, lines: BOMLine[], formatCurrency: (value
   <p><strong>${t('manufacturing.form.product')}:</strong> ${bom.productName || bom.productId}</p>
   <p><strong>${t('manufacturing.form.version')}:</strong> ${bom.version}</p>
   <table><thead><tr><th>#</th><th>${t('manufacturing.bom.materialName')}</th><th>${t('manufacturing.bom.quantity')}</th><th>${t('manufacturing.bom.unitCost')}</th><th>${t('manufacturing.bom.total')}</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="total">${t('manufacturing.bom.totalCost')}: ${bom.totalCost !== undefined ? formatCurrency(bom.totalCost) : '—'} ${t('common.currencyYer')}</div>
+  <div class="total">${t('manufacturing.bom.totalCost')}: ${bom.totalCost !== undefined ? formatCurrency(bom.totalCost) : 'â€”'} ${t('common.currencyYer')}</div>
   <div style="margin-top:32px;text-align:center;font-size:12px;color:#94a3b8">${t('common.printFooter')}</div>
   </div></body></html>`;
 }
 
 export default BomPage;
+

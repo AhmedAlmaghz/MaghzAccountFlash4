@@ -19,6 +19,17 @@ const ONBOARDING_STORAGE = {
     isProcessing: false,
     processingMessage: '',
     error: null,
+    // dbConfig MUST be present: zustand's persist partialize destructures it
+    // (`const { password, databaseUrl, ...safe } = dbConfig`) and throws when
+    // it is undefined — which wiped the stored onboarding state and sent
+    // every e2e run back to the wizard.
+    dbConfig: {
+      host: 'localhost',
+      port: 5432,
+      database: 'MaghzERP',
+      user: 'postgres',
+      ssl: false,
+    },
   },
   version: 0,
 };

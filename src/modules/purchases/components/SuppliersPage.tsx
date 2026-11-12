@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+﻿import React, { useState, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, FileText, Phone, Mail, MapPin, Hash, Info, Clock, Wallet, Truck, UserCheck, Receipt, AlertCircle } from 'lucide-react';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { logAudit } from '@/core/utils/auditLogger';
@@ -50,11 +51,12 @@ const initialForm = (): SupplierForm => ({
 
 export const SuppliersPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
   const user = useAuthStore((state) => state.user);
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
-  const { getNextNumber } = useDocumentSequence();
+  const { getNextNumber } = useDocumentSequence(); void getNextNumber;
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -86,40 +88,19 @@ export const SuppliersPage: React.FC = () => {
 
   const validateForm = useCallback((): boolean => {
     const errors: FormErrors = {};
-    if (!form.name.trim()) errors.name = t('validation.required') || 'مطلوب';
+    if (!form.name.trim()) errors.name = t('validation.required') || 'ظ…ط·ظ„ظˆط¨';
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = t('validation.invalidEmail');
     if (form.phone && form.phone.length < 7) errors.phone = t('validation.invalidPhone');
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   }, [form, t]);
 
-  const openCreate = useCallback(async () => {
-    setEditingId(null);
-    setForm(initialForm());
-    setFormErrors({});
-    if (activeCompany) {
-      const seq = await getNextNumber('supplier', activeCompany.id);
-      if (seq?.number) setForm((prev) => ({ ...prev, code: seq.number || '' }));
-    }
-    setModalOpen(true);
-  }, [activeCompany, getNextNumber]);
-
+  const openCreate = useCallback(() => {
+    navigate('/purchases/suppliers/new');
+  }, [navigate]);
   const openEdit = useCallback((s: Supplier) => {
-    setEditingId(s.id);
-    setForm({
-      name: s.name,
-      code: s.code || '',
-      phone: s.phone || '',
-      email: s.email || '',
-      address: s.address || '',
-      taxNumber: s.taxNumber || '',
-      openingBalance: s.openingBalancePosted ? String(s.openingBalance || '') : '',
-      openingDate: s.openingDate ? String(s.openingDate).slice(0, 10) : '',
-      isActive: s.isActive,
-    });
-    setFormErrors({});
-    setModalOpen(true);
-  }, []);
+    navigate(`/purchases/suppliers/${s.id}`);
+  }, [navigate]);
 
   const openCard = useCallback((s: Supplier) => {
     setSelectedSupplierId(s.id);
@@ -130,7 +111,7 @@ export const SuppliersPage: React.FC = () => {
   const handleSave = useCallback(async () => {
     if (!activeCompany?.id) return;
     if (!validateForm()) {
-      addToast('error', t('validation.required') || 'يرجى تصحيح الحقول');
+      addToast('error', t('validation.required') || 'ظٹط±ط¬ظ‰ طھطµط­ظٹط­ ط§ظ„ط­ظ‚ظˆظ„');
       return;
     }
     const inputName = form.name.trim();
@@ -160,7 +141,7 @@ export const SuppliersPage: React.FC = () => {
           }
         }
       } catch {
-        /* فشل الفحص لا يمنع الحفظ */
+        /* ظپط´ظ„ ط§ظ„ظپط­طµ ظ„ط§ ظٹظ…ظ†ط¹ ط§ظ„ط­ظپط¸ */
       }
     }
     duplicateConfirmedRef.current = false;
@@ -418,7 +399,7 @@ export const SuppliersPage: React.FC = () => {
   );
 
   const totalBalance = useMemo(() => suppliers.reduce((s, sup) => s + (Number(sup.balance) || 0), 0), [suppliers]);
-  // Payable (positive balances) vs credit-to-us (negative) — the CURRENT NET
+  // Payable (positive balances) vs credit-to-us (negative) â€” the CURRENT NET
   // balance is the headline; debit/credit shown as a breakdown, never summed.
   const payableTotal = useMemo(() => suppliers.reduce((s, sup) => s + Math.max(0, Number(sup.balance) || 0), 0), [suppliers]);
   const creditTotal = useMemo(() => suppliers.reduce((s, sup) => s + Math.abs(Math.min(0, Number(sup.balance) || 0)), 0), [suppliers]);
@@ -454,9 +435,9 @@ export const SuppliersPage: React.FC = () => {
       <FilterBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder={`${t('search')} — ${t('purchases.supplier.name')} / ${t('purchases.supplier.phone')} / ${t('purchases.supplier.code')}`}
+        searchPlaceholder={`${t('search')} â€” ${t('purchases.supplier.name')} / ${t('purchases.supplier.phone')} / ${t('purchases.supplier.code')}`}
         filterOptions={[
-          { key: 'all', label: t('purchases.filter.all') || 'الكل' },
+          { key: 'all', label: t('purchases.filter.all') || 'ط§ظ„ظƒظ„' },
           { key: 'active', label: t('settings.common.active') },
           { key: 'inactive', label: t('settings.common.inactive') },
         ]}
@@ -478,7 +459,7 @@ export const SuppliersPage: React.FC = () => {
       {hasActiveFilter && (
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span>
-            {total} {t('purchases.supplier.invoices')} • {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `• ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
+            {total} {t('purchases.supplier.invoices')} â€¢ {search ? `"${search}"` : ''} {statusFilter !== 'all' ? `â€¢ ${statusFilter === 'active' ? t('settings.common.active') : t('settings.common.inactive')}` : ''}
           </span>
           <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="text-primary-600 hover:underline font-medium">
             {t('sales.filter.clearFilters')}
@@ -493,7 +474,7 @@ export const SuppliersPage: React.FC = () => {
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('purchases.supplier.total')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
               <p className="mt-1 text-xs text-slate-500">
-                {activeCount} {t('settings.common.active')} • {inactiveCount} {t('settings.common.inactive')}
+                {activeCount} {t('settings.common.active')} â€¢ {inactiveCount} {t('settings.common.inactive')}
               </p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 flex items-center justify-center">
@@ -680,7 +661,7 @@ export const SuppliersPage: React.FC = () => {
       </Modal>
 
       {/* Supplier Card Modal with Tabs */}
-      <Modal isOpen={cardOpen} title={supplier ? `${t('purchases.supplier.card')} — ${supplier.name}` : t('purchases.supplier.card')} description={supplier ? `${supplier.code || ''} ${supplier.phone ? '• ' + supplier.phone : ''}` : undefined} onClose={() => { setCardOpen(false); setSelectedSupplierId(null); }} size="xl">
+      <Modal isOpen={cardOpen} title={supplier ? `${t('purchases.supplier.card')} â€” ${supplier.name}` : t('purchases.supplier.card')} description={supplier ? `${supplier.code || ''} ${supplier.phone ? 'â€¢ ' + supplier.phone : ''}` : undefined} onClose={() => { setCardOpen(false); setSelectedSupplierId(null); }} size="xl">
         {cardLoading ? (
           <div className="space-y-3">
             <div className="h-10 bg-slate-100 dark:bg-slate-800 rounded-lg animate-pulse" />
@@ -691,7 +672,7 @@ export const SuppliersPage: React.FC = () => {
             <div className="flex gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800 w-fit">
               {(
                 [
-                  { key: 'details', label: t('purchases.supplier.details') || 'التفاصيل', icon: Info },
+                  { key: 'details', label: t('purchases.supplier.details') || 'ط§ظ„طھظپط§طµظٹظ„', icon: Info },
                   { key: 'statement', label: t('purchases.supplier.statement'), icon: FileText },
                   { key: 'aging', label: t('purchases.supplier.aging'), icon: Clock },
                 ] as { key: TabKey; label: string; icon: typeof Info }[]
@@ -801,7 +782,7 @@ export const SuppliersPage: React.FC = () => {
                           {statement.map((r) => (
                             <tr key={r.id} className={r.type === 'opening' ? 'bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700' : 'border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'}>
                               <td className="px-3 py-2.5 tabular-nums text-xs whitespace-nowrap">{r.date ? formatDate(r.date) : '-'}</td>
-                              <td className="px-3 py-2.5 font-mono text-xs">{r.type === 'opening' ? '—' : r.documentNumber}</td>
+                              <td className="px-3 py-2.5 font-mono text-xs">{r.type === 'opening' ? 'â€”' : r.documentNumber}</td>
                               <td className="px-3 py-2.5 max-w-[180px] truncate" title={r.description}>{r.type === 'opening' ? <span className="font-bold text-primary-700 dark:text-primary-300">{r.description}</span> : (r.description || r.type)}</td>
                               <td className="px-3 py-2.5 text-end tabular-nums">{Number(r.debit || 0) > 0 ? <span className="text-amber-700 font-medium">{formatCurrency(r.debit || 0)}</span> : <span className="text-slate-300">-</span>}</td>
                               <td className="px-3 py-2.5 text-end tabular-nums">{Number(r.credit || 0) > 0 ? <span className="text-emerald-700 font-medium">{formatCurrency(r.credit || 0)}</span> : <span className="text-slate-300">-</span>}</td>
@@ -901,3 +882,4 @@ export const SuppliersPage: React.FC = () => {
 };
 
 export default SuppliersPage;
+

@@ -1,27 +1,20 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { FileText, Plus, CheckSquare, Trash2, Printer, Download, Paperclip, X, Wallet, TrendingUp, Layers,
-ShoppingCart, CheckCircle2, Clock, Undo2 } from 'lucide-react';
-import { Card, Button, Table, Input, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FileText, Plus, CheckSquare, Printer, Download, Wallet, CheckCircle2, Clock,
+ShoppingCart, Undo2 } from 'lucide-react';
+import { Card, Button, Table, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
-import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
-import { detectSalesInvoiceDuplicate } from '@/core/utils/documentDuplicate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { CustomerSelect, ProductSelect, CurrencySelect, CashBoxSelect } from '@/core/ui/components/smart';
 import { useInvoicesPaginated } from '../hooks/useSales';
 import { useAppStore } from '@/core/store';
 import { useToastStore } from '@/core/store/toastStore';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
-import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
 import { useFormatters } from '@/core/utils/useFormatters';
-import { roundMoney } from '@/core/utils/locale';
 import { useUserMap } from '@/core/utils/useUserMap';
-import { useCurrencyDisplay } from '@/core/utils/useCurrencyDisplay';
-import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
-import { YER_CODE } from '@/core/utils/currencyConverter';
 import { printDocument } from '@/core/utils/printDocument';
 import { todayIso } from '@/core/utils/aging';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
@@ -31,28 +24,11 @@ import { ReverseDialog } from '@/modules/accounting/components/ReverseDialog';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useOwnerFilter } from '@/core/utils/useOwnerFilter';
 import { OwnerFilterToggle } from '@/core/ui/components/OwnerFilterToggle';
-import { ProductUnitSelect } from '@/core/ui/components/smart';
-import { toBaseQty } from '@/core/utils/unitConversion';
-import type { ProductUnit } from '@/modules/inventory/types';
-import type { SalesInvoice, SalesInvoiceLine, InvoiceAttachment } from '../types';
-import type { Product } from '@/modules/inventory/types';
-
-interface InvoiceLineForm {
-  productId: string;
-  productName: string;
-  quantity: number;
-  /** Chosen product_units row id + frozen factor + base qty (stock truth). */
-  unitId?: string;
-  unitFactor?: number;
-  baseQuantity?: number;
-  unitName?: string;
-  unitPrice: number;
-  discountPercent: number;
-  vatPercent: number;
-}
+import type { SalesInvoice } from '../types';
 
 export const InvoicesPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const STATUS_FLOW = useMemo(() => ({
     draft: t('sales.status.draft'),
@@ -74,8 +50,6 @@ export const InvoicesPage: React.FC = () => {
     isLoading,
     goToPage,
     changePageSize,
-    create,
-    update,
     remove,
     post,
     reload,
@@ -83,17 +57,12 @@ export const InvoicesPage: React.FC = () => {
     createdBy: isOwnOnly ? currentUser?.id : undefined,
     status: statusFilter || undefined,
   }), [isOwnOnly, currentUser?.id, statusFilter]));
-  const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
-  const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
+  const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
   const { getUserName } = useUserMap();
-  const { currencies, defaultCurrency } = useCurrencyDisplay();
-  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
-  const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
+  const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || 'YER';
 
-  const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<SalesInvoice | null>(null);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -113,370 +82,19 @@ export const InvoicesPage: React.FC = () => {
       addToast('error', res.error || t('common.error'));
     }
   };
-  const [saving, setSaving] = useState(false);
-  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
-  const [docDuplicateInput, setDocDuplicateInput] = useState('');
-  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
-  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
-  const docDuplicateConfirmedRef = useRef(false);
-
-  const defaultLine = useCallback((): InvoiceLineForm => ({
-    productId: '', productName: '', quantity: 1, unitId: undefined, unitFactor: 1, baseQuantity: 1, unitName: undefined, unitPrice: 0, discountPercent: 0, vatPercent: settings?.vatRate || 15,
-  }), [settings?.vatRate]);
-
-  const [header, setHeader] = useState({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: '', notes: '' });
-  const [currencyCode, setCurrencyCode] = useState<string>(defaultCurrency?.code || YER_CODE);
-  const [exchangeRate, setExchangeRate] = useState<number>(1);
-  const [lines, setLines] = useState<InvoiceLineForm[]>([defaultLine()]);
-  const [attachments, setAttachments] = useState<InvoiceAttachment[]>([]);
-  const [invoiceDiscount, setInvoiceDiscount] = useState(0);
-  const [invoiceDiscountType, setInvoiceDiscountType] = useState<'amount' | 'percent'>('amount');
-  // Cache of each line-product's units (fed by ProductUnitSelect) so unit
-  // switches can tell auto-filled prices apart from manual entries.
-  const [lineUnitsCache, setLineUnitsCache] = useState<Record<string, ProductUnit[]>>({});
-  const cacheProductUnits = useCallback((productId: string, units: ProductUnit[]) => {
-    setLineUnitsCache((prev) => (prev[productId] === units ? prev : { ...prev, [productId]: units }));
-  }, []);
   const showDiscount = settings?.invoiceShowDiscount ?? true;
-  const showVat = settings?.invoiceShowVat ?? true;
 
-  const resetForm = useCallback(() => {
-    setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
-    setCurrencyCode(defaultCurrency?.code || YER_CODE);
-    setExchangeRate(1);
-    setLines([defaultLine()]);
-    setAttachments([]);
-    setInvoiceDiscount(0);
-    setInvoiceDiscountType('amount');
-    setEditingId(null);
-  }, [defaultLine, defaultCurrency?.code, defaultCashBoxId]);
+  // Full-page editor (DocumentPageShell + DocumentItemsGrid) replaces the
+  // 4xl modal — deep-linkable, mobile-friendly, no crushed line grid.
+  const openCreate = useCallback(() => {
+    navigate('/sales/invoices/new');
+  }, [navigate]);
 
-  const handleCurrencyChange = useCallback((code: string | null) => {
-    if (!code) {
-      setCurrencyCode(YER_CODE);
-      setExchangeRate(1);
-      return;
-    }
-    setCurrencyCode(code);
-    const c = currencies.find((x) => x.code === code);
-    setExchangeRate(c ? c.exchangeRate : 1);
-  }, [currencies]);
 
-  const openCreate = useCallback(async () => {
-    resetForm();
-    if (activeCompany?.id) {
-      const seq = await getNextNumber('sales_invoice', activeCompany.id);
-      if (seq.success && seq.number) {
-        setFormOpen(true);
-        return;
-      }
-    }
-    setFormOpen(true);
-  }, [activeCompany?.id, getNextNumber, resetForm]);
-
-  const openEdit = useCallback((invoice: SalesInvoice) => {
-    if (invoice.status !== 'draft') return;
-    setEditingId(invoice.id);
-    setHeader({
-      customerId: invoice.customerId,
-      date: invoice.date,
-      dueDate: invoice.dueDate || '',
-      paymentType: invoice.paymentType || 'credit',
-      cashBoxId: invoice.cashBoxId || '',
-      notes: invoice.notes || '',
-    });
-    setCurrencyCode(invoice.currencyCode || YER_CODE);
-    setExchangeRate(invoice.exchangeRate ?? 1);
-    setLines(invoice.lines.map(l => ({
-      productId: l.productId,
-      productName: l.productName || l.productId,
-      quantity: l.quantity,
-      unitId: l.unitId,
-      unitFactor: l.unitFactor ?? 1,
-      baseQuantity: l.baseQuantity ?? l.quantity,
-      unitName: l.unitName || l.unit,
-      unitPrice: l.unitPrice,
-      discountPercent: l.discountPercent,
-      vatPercent: l.vatPercent,
-    })));
-    setAttachments(invoice.attachments ?? []);
-    // Invoice-level discount under subtotal — derive from stored discountAmount if visible
-    if (showDiscount && invoice.discountAmount) {
-      setInvoiceDiscount(invoice.discountAmount);
-      setInvoiceDiscountType('amount');
-    } else {
-      setInvoiceDiscount(0);
-    }
-    setFormOpen(true);
-  }, [showDiscount]);
-
-  // Paginated rows carry lines: [] — refetch the full document so the edit
-  // form shows its products instead of an empty list.
-  const handleEditRow = async (invoice: SalesInvoice) => {
-    let full = invoice;
-    if ((!invoice.lines || invoice.lines.length === 0) && activeCompany?.id) {
-      const res = await salesApi.getInvoiceById(invoice.id, activeCompany.id);
-      if (res.success && res.data && res.data.lines.length > 0) full = res.data;
-    }
-    openEdit(full);
-  };
-
-  const addLine = () => setLines(prev => [...prev, defaultLine()]);
-  const removeLine = (idx: number) => setLines(prev => prev.filter((_, i) => i !== idx));
-  const updateLine = (idx: number, field: keyof InvoiceLineForm, value: string | number) => {
-    setLines(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
-      if (field === 'productId' && typeof value === 'string') {
-        next[idx].productName = value;
-      }
-      // Keep the base quantity in sync — stock postings consume it, never
-      // the display quantity.
-      if (field === 'quantity' && typeof value === 'number') {
-        next[idx].baseQuantity = toBaseQty(value, next[idx].unitFactor ?? 1);
-      }
-      return next;
-    });
-  };
-
-  /**
-   * When the user picks a product from the dropdown, reset the unit choice
-   * (ProductUnitSelect auto-picks the default sale unit, which then prices
-   * the line via handleUnitChange). If the line was previously empty
-   * (price = 0) seed the base sale price immediately so the row never
-   * flashes a zero price while units load.
-   */
-  const handleProductChange = useCallback((idx: number, product: Product) => {
-    setLines(prev => {
-      const next = [...prev];
-      const current = next[idx];
-      next[idx] = {
-        ...current,
-        productName: product.nameAr,
-        unitId: undefined,
-        unitFactor: 1,
-        baseQuantity: current.quantity,
-        unitName: undefined,
-        unitPrice: current.unitPrice > 0 ? current.unitPrice : product.salePrice,
-      };
-      return next;
-    });
-  }, []);
-
-  /**
-   * Unit switch: adopt the unit's own sale price unless the user typed a
-   * custom price (i.e. current price matches no known unit price for this
-   * product). Base quantity is always recomputed.
-   */
-  const handleUnitChange = useCallback((idx: number, unit: ProductUnit | null) => {
-    setLines(prev => {
-      const next = [...prev];
-      const current = next[idx];
-      const known = lineUnitsCache[current.productId] || [];
-      const isAutoPrice = current.unitPrice === 0 || known.some((u) => u.salePrice === current.unitPrice);
-      next[idx] = {
-        ...current,
-        unitId: unit?.id,
-        unitFactor: unit?.factor ?? 1,
-        baseQuantity: toBaseQty(current.quantity, unit?.factor ?? 1),
-        unitName: unit?.unitName,
-        unitPrice: unit && isAutoPrice ? unit.salePrice : current.unitPrice,
-      };
-      return next;
-    });
-  }, [lineUnitsCache]);
-
-  const calculations = useMemo(() => {
-    const lineDiscountTotal = showDiscount ? lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
-    const subtotalBeforeInvoiceDiscount = lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (showDiscount ? (1 - l.discountPercent / 100) : 1)), 0);
-    const invoiceDiscountAmount = showDiscount
-      ? (invoiceDiscountType === 'percent' ? subtotalBeforeInvoiceDiscount * (invoiceDiscount / 100) : invoiceDiscount)
-      : 0;
-    const cappedInvoiceDiscount = Math.min(invoiceDiscountAmount, subtotalBeforeInvoiceDiscount);
-    const netSubtotal = subtotalBeforeInvoiceDiscount - cappedInvoiceDiscount;
-    const totalDiscountAmount = lineDiscountTotal + cappedInvoiceDiscount;
-    const vatRate = settings?.vatRate ?? 15;
-    const vatAmount = showVat ? netSubtotal * (vatRate / 100) : 0;
-    const totalAmount = netSubtotal + vatAmount;
-    return {
-      subtotal: roundMoney(subtotalBeforeInvoiceDiscount, dp),
-      vatAmount: roundMoney(vatAmount, dp),
-      discountAmount: roundMoney(totalDiscountAmount, dp),
-      invoiceDiscountAmount: roundMoney(cappedInvoiceDiscount, dp),
-      totalAmount: roundMoney(totalAmount, dp),
-      vatRate,
-    };
-  }, [lines, invoiceDiscount, invoiceDiscountType, showDiscount, showVat, settings?.vatRate, dp]);
-
-  const buildInvoicePayload = (invoiceNumber: string): Omit<SalesInvoice, 'id'> => {
-    const mappedLines: SalesInvoiceLine[] = lines.map(l => {
-      const effectiveDiscount = showDiscount ? l.discountPercent : 0;
-      const lineNet = l.quantity * l.unitPrice * (1 - effectiveDiscount / 100);
-      // VAT is now invoice-level when showVat is enabled; line VAT is ignored in that mode
-      const lineVat = showVat ? 0 : lineNet * (l.vatPercent / 100);
-      const lineTotal = roundMoney(lineNet + lineVat, dp);
-      return {
-        productId: l.productId,
-        productName: l.productName,
-        quantity: l.quantity,
-        unitId: l.unitId,
-        unitFactor: l.unitFactor ?? 1,
-        baseQuantity: toBaseQty(l.quantity, l.unitFactor ?? 1),
-        unitName: l.unitName,
-        unitPrice: l.unitPrice,
-        discountPercent: effectiveDiscount,
-        vatPercent: showVat ? 0 : l.vatPercent,
-        lineTotal,
-        currencyCode,
-        exchangeRate,
-        baseCurrencyLineTotal: roundMoney(lineTotal * exchangeRate, dp),
-      };
-    });
-    // When VAT is invoice-level, totals already include it; line totals are net, so add invoice VAT back via payload totals
-    const payloadSubtotal = calculations.subtotal;
-    const payloadDiscount = calculations.discountAmount;
-    const payloadVat = calculations.vatAmount;
-    const payloadTotal = calculations.totalAmount;
-    return {
-      companyId: activeCompany!.id,
-      invoiceNumber,
-      customerId: header.customerId,
-      date: header.date,
-      dueDate: header.dueDate || undefined,
-      subtotal: payloadSubtotal,
-      discountAmount: payloadDiscount,
-      vatAmount: payloadVat,
-      totalAmount: payloadTotal,
-      paidAmount: 0,
-      currencyCode,
-      exchangeRate,
-      baseCurrencyAmount: payloadTotal * exchangeRate,
-      baseCurrencyPaid: 0,
-      paymentType: header.paymentType || 'credit',
-      cashBoxId: header.paymentType === 'cash' ? (header.cashBoxId || undefined) : undefined,
-      status: 'draft',
-      notes: header.notes,
-      attachments,
-      lines: mappedLines,
-    };
-  };
-
-  const handleAttachmentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      addToast('error', t('sales.invoice.attachmentTooLarge') || t('common.error'));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-      if (!dataUrl) return;
-      const attachment: InvoiceAttachment = {
-        id: crypto.randomUUID(),
-        name: file.name,
-        contentType: file.type || 'application/octet-stream',
-        size: file.size,
-        dataUrl,
-      };
-      setAttachments(prev => [...prev, attachment]);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removeAttachment = (id: string) => {
-    setAttachments(prev => prev.filter(a => a.id !== id));
-  };
-
-  const handleSave = async () => {
-    if (!header.customerId || lines.length === 0 || !activeCompany?.id) return;
-    if (lines.some(l => !l.productId)) {
-      addToast('error', t('sales.invoice.productRequired') || t('common.error'));
-      return;
-    }
-    if (lines.some(l => l.quantity <= 0)) {
-      addToast('error', t('sales.invoice.quantityPositive') || t('common.error'));
-      return;
-    }
-    setSaving(true);
-    let invoiceNumber: string;
-    if (editingId) {
-      const existing = invoices.find(i => i.id === editingId);
-      invoiceNumber = existing?.invoiceNumber || '';
-    } else {
-      const seq = await getNextNumber('sales_invoice', activeCompany.id);
-      if (!seq.success || !seq.number) {
-        addToast('error', seq.error || t('sales.invoice.numberError'));
-        setSaving(false);
-        return;
-      }
-      invoiceNumber = seq.number;
-    }
-    const payload = buildInvoicePayload(invoiceNumber);
-    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
-    if (!docDuplicateConfirmedRef.current) {
-      try {
-        const existingRes = await salesApi.getInvoicesPaginated(activeCompany.id, 1, 200);
-        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: SalesInvoice[] })?.items ?? (existingRes.data as unknown as SalesInvoice[]) ?? []) : []) as SalesInvoice[];
-        const inputForFp = {
-          customerId: payload.customerId,
-          date: payload.date,
-          currencyCode: payload.currencyCode,
-          totalAmount: payload.totalAmount,
-          discountAmount: payload.discountAmount,
-          vatAmount: payload.vatAmount,
-          lines: payload.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice, discountPercent: l.discountPercent })),
-        };
-        const dup = detectSalesInvoiceDuplicate(inputForFp as never, existingList as never, editingId || undefined);
-        if (dup.exactMatch) {
-          const doc = dup.exactMatch as unknown as SalesInvoice;
-          setDocDuplicateInput(`${payload.customerId} • ${payload.date} • ${payload.totalAmount}`);
-          setDocDuplicateExact({ name: doc.invoiceNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.totalAmount}` });
-          setDocDuplicateNear([]);
-          setDocDuplicateOpen(true);
-          setSaving(false);
-          return;
-        }
-        if (dup.nearMatches.length > 0) {
-          setDocDuplicateInput(`${payload.customerId} • ${payload.date}`);
-          setDocDuplicateNear(
-            dup.nearMatches.map((m) => {
-              const d = m.item as unknown as SalesInvoice;
-              return { name: d.invoiceNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.totalAmount}`, score: m.score };
-            }),
-          );
-          setDocDuplicateExact(null);
-          setDocDuplicateOpen(true);
-          setSaving(false);
-          return;
-        }
-      } catch {
-        /* فشل الفحص لا يمنع الحفظ */
-      }
-    }
-    docDuplicateConfirmedRef.current = false;
-    if (editingId) {
-      const res = await update(editingId, { ...payload, status: 'draft' });
-      if (res.success) {
-        await logAudit({ userId: currentUser?.id || 'system', action: 'update', tableName: 'sales_invoices', recordId: editingId, companyId: activeCompany.id, newValues: payload });
-        addToast('success', t('sales.invoice.updated'));
-      } else {
-        addToast('error', res.error || t('common.error'));
-      }
-    } else {
-      const res = await create(payload);
-      if (res.success && res.id) {
-        await logAudit({ userId: currentUser?.id || 'system', action: 'create', tableName: 'sales_invoices', recordId: res.id, companyId: activeCompany.id, newValues: payload });
-        addToast('success', t('sales.invoice.created'));
-      } else {
-        addToast('error', res.error || t('common.error'));
-      }
-    }
-    setSaving(false);
-    setFormOpen(false);
-    resetForm();
-  };
+  // Paginated rows carry lines: [] — the editor page refetches by id.
+  const handleEditRow = useCallback((invoice: SalesInvoice) => {
+    navigate(`/sales/invoices/${invoice.id}`);
+  }, [navigate]);
 
   const handleDelete = (invoice: SalesInvoice) => {
     if (invoice.status !== 'draft') return;
@@ -608,7 +226,7 @@ export const InvoicesPage: React.FC = () => {
       date: i.date,
       dueDate: i.dueDate || '-',
       paymentType: i.paymentType === 'cash' ? t('sales.invoice.cash') : t('sales.invoice.credit'),
-      currencyCode: i.currencyCode || YER_CODE,
+      currencyCode: i.currencyCode || '',
       status: STATUS_FLOW[i.status] || i.status,
       subtotal: i.subtotal,
       ...(showDiscount ? { discountAmount: i.discountAmount } : {}),
@@ -865,281 +483,6 @@ export const InvoicesPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Form Modal — Modern Full-Featured Invoice Editor */}
-      <Modal isOpen={formOpen} onClose={() => { setFormOpen(false); resetForm(); }} size="4xl" title={editingId ? (t('sales.invoice.edit')) : (t('sales.invoice.new'))}>
-        <div className="space-y-4 p-1">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.customer.title')}</label>
-              <CustomerSelect companyId={activeCompany?.id || ''} value={header.customerId} onChange={v => setHeader(prev => ({ ...prev, customerId: v || '' }))} />
-            </div>
-            <Input label={t('sales.date')} type="date" value={header.date} onChange={e => setHeader(prev => ({ ...prev, date: e.target.value }))} />
-            <Input label={t('sales.dueDate')} type="date" value={header.dueDate} onChange={e => setHeader(prev => ({ ...prev, dueDate: e.target.value }))} />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.invoice.paymentType')}</label>
-              <select
-                value={header.paymentType || 'credit'}
-                onChange={e => {
-                  const newType = e.target.value;
-                  setHeader(prev => ({
-                    ...prev,
-                    paymentType: newType,
-                    cashBoxId: newType === 'cash' ? (prev.cashBoxId || defaultCashBoxId || '') : '',
-                  }));
-                }}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
-                aria-label={t('sales.invoice.paymentType')}
-              >
-                <option value="credit">{t('sales.invoice.credit')}</option>
-                <option value="cash">{t('sales.invoice.cash')}</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.currency')}</label>
-              <CurrencySelect companyId={activeCompany?.id || ''} value={currencyCode} onChange={handleCurrencyChange} />
-            </div>
-            <Input
-              label={t('sales.exchangeRate')}
-              type="number"
-              min={0}
-              step="0.0001"
-              value={String(exchangeRate)}
-              onChange={e => setExchangeRate(Number(e.target.value) || 1)}
-            />
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.baseCurrency')}</label>
-              <div className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-md text-sm font-medium text-slate-700 dark:text-slate-200">
-                {formatCurrency(calculations.totalAmount * exchangeRate)} <span className="text-slate-500">{currencySymbol}</span>
-              </div>
-            </div>
-          </div>
-
-          {header.paymentType === 'cash' && (
-            <div>
-  <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
-  <CashBoxSelect companyId={activeCompany?.id || ''} value={header.cashBoxId || ''} onChange={v => setHeader(prev => ({ ...prev, cashBoxId: v || '' }))} />
-  {defaultCashBoxId && header.cashBoxId === defaultCashBoxId && (
-    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-  )}
-</div>
-          )}
-
-          {/* ===== Enlarged Modern Items Section — The Heart of the Invoice ===== */}
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-white dark:bg-slate-900">
-            <div className="bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 px-4 py-3 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-                  <Layers size={18} className="text-primary-600 dark:text-primary-400" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
-                    {t('sales.invoice.lines')}
-                    <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{lines.length} {t('sales.itemsCount')}</span>
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{t('sales.invoice.linesDesc') || 'أضف المنتجات والكميات — الأسعار تُملأ تلقائياً'}</p>
-                </div>
-              </div>
-              <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
-            </div>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
-                    <th className="px-4 py-3 text-right font-semibold w-[36%]">{t('inventory.productName')}</th>
-                    <th className="px-3 py-3 text-center font-semibold w-32">{t('sales.line.unit')}</th>
-                    <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
-                    <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
-                    {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
-                    <th className="px-4 py-3 text-right font-semibold w-32">{t('sales.total')}</th>
-                    <th className="px-2 py-3 w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {lines.map((line, idx) => {
-                    const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
-                    const lineTotal = lineNet;
-                    return (
-                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors group">
-                        <td className="px-3 py-3">
-                          <ProductSelect
-                            companyId={activeCompany?.id || ''}
-                            value={line.productId}
-                            onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))}
-                            onProductChange={(p) => handleProductChange(idx, p)}
-                            showStock
-                            showBarcode
-                            size="sm"
-                            module="sales"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <ProductUnitSelect
-                            companyId={activeCompany?.id || ''}
-                            productId={line.productId}
-                            value={line.unitId}
-                            onChange={(u) => handleUnitChange(idx, u)}
-                            onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
-                            mode="sale"
-                            size="sm"
-                          />
-                          {(line.unitFactor ?? 1) > 1 && (
-                            <p className="text-[10px] text-slate-400 text-center mt-0.5 tabular-nums">≈ {line.baseQuantity} {t('sales.line.baseEquivalent')}</p>
-                          )}
-                        </td>
-                        <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" /></td>
-                        <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" /></td>
-                        {showDiscount && <td className="px-3 py-2"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" /></td>}
-                        <td className="px-4 py-3 text-right font-bold text-slate-900 dark:text-slate-50 tabular-nums bg-slate-50/50 dark:bg-slate-800/30">{formatCurrency(lineTotal)}</td>
-                        <td className="px-2 py-2"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="opacity-60 group-hover:opacity-100 hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {/* Mobile line-items cards */}
-            <div className="md:hidden space-y-3 p-3">
-              {lines.map((line, idx) => {
-                const lineNet = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
-                const lineTotal = lineNet;
-                return (
-                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
-                    <ProductSelect
-                      companyId={activeCompany?.id || ''}
-                      value={line.productId}
-                      onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))}
-                      onProductChange={(p) => handleProductChange(idx, p)}
-                      showStock
-                      showBarcode
-                      size="sm"
-                      module="sales"
-                    />
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
-                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
-                    </div>
-                    <ProductUnitSelect
-                      companyId={activeCompany?.id || ''}
-                      productId={line.productId}
-                      value={line.unitId}
-                      onChange={(u) => handleUnitChange(idx, u)}
-                      onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
-                      mode="sale"
-                      size="sm"
-                    />
-                    {showDiscount && <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" />}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
-                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {lines.length === 0 && (
-              <div className="py-12 text-center text-slate-400">
-                <Layers size={32} className="mx-auto mb-2 opacity-30" />
-                <p className="text-sm">{t('sales.invoice.emptyLines') || 'لا توجد سطور — أضف منتجاً للبدء'}</p>
-              </div>
-            )}
-          </div>
-
-          {/* ===== Modern Totals Card — Discount under Subtotal per Settings ===== */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-3">
-              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(prev => ({ ...prev, notes: e.target.value }))} placeholder={t('sales.notesPlaceholder') || 'ملاحظات إضافية للفاتورة...'} />
-              <p className="text-xs text-slate-400 mt-2 flex items-center gap-1"><Paperclip size={12} /> {t('sales.invoice.notesHint') || 'ستظهر الملاحظات في الطباعة وكشف الحساب'}</p>
-            </div>
-            <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
-              <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
-                <span className="text-sm font-semibold flex items-center gap-2"><Wallet size={16} /> {t('sales.invoice.summary')}</span>
-                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} {t('sales.itemsCount')}</span>
-              </div>
-              <div className="p-4 space-y-3 text-sm">
-                <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
-                  <span className="text-slate-600 dark:text-slate-300 flex items-center gap-2"><Layers size={14} className="text-slate-400" /> {t('sales.subtotal')}</span>
-                  <span className="font-semibold tabular-nums">{formatCurrency(calculations.subtotal)}</span>
-                </div>
-                {showDiscount && (
-                  <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-amber-900 dark:text-amber-100 flex items-center gap-1.5">٪ {t('sales.discount')}</span>
-                      <div className="flex items-center gap-1 bg-white dark:bg-slate-800 rounded-full p-1 border">
-                        <button onClick={() => setInvoiceDiscountType('amount')} className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${invoiceDiscountType === 'amount' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow' : 'text-slate-600'}`}>{currencySymbol}</button>
-                        <button onClick={() => setInvoiceDiscountType('percent')} className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${invoiceDiscountType === 'percent' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow' : 'text-slate-600'}`}>%</button>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Input type="number" min={0} max={invoiceDiscountType === 'percent' ? 100 : undefined} value={String(invoiceDiscount)} onChange={e => setInvoiceDiscount(Math.max(0, Number(e.target.value) || 0))} placeholder="0" size="sm" className="flex-1" />
-                      <div className="px-3 py-2 bg-white dark:bg-slate-800 rounded-lg border text-sm font-bold tabular-nums min-w-[110px] text-center text-amber-700 dark:text-amber-300">
-                        -{formatCurrency(calculations.invoiceDiscountAmount)}
-                      </div>
-                    </div>
-                    {invoiceDiscount > 0 && (
-                      <p className="text-xs text-amber-700 dark:text-amber-300">
-                        {invoiceDiscountType === 'percent' ? `${invoiceDiscount}% ${t('sales.discount')} = ${formatCurrency(calculations.invoiceDiscountAmount)}` : `${t('sales.discount')} ${formatCurrency(calculations.invoiceDiscountAmount)}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-                {showVat ? (
-                  <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
-                    <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                      {t('sales.vat')} <span className="text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full">{calculations.vatRate}%</span>
-                    </span>
-                    <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{formatCurrency(calculations.vatAmount)}</span>
-                  </div>
-                ) : (
-                  <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700 opacity-60">
-                    <span className="text-slate-500 text-xs">{t('sales.vat')} — {t('settings.vat.disabled') || 'غير مفعّل'}</span>
-                    <span className="text-xs">{formatCurrency(0)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center pt-2">
-                  <span className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2"><TrendingUp size={16} className="text-primary-600" /> {t('sales.total')}</span>
-                  <span className="text-xl font-black tabular-nums text-primary-600 dark:text-primary-400">{formatCurrency(calculations.totalAmount)}</span>
-                </div>
-                <p className="text-xs text-slate-400 text-center pt-2 border-t border-slate-100 dark:border-slate-700">
-                  {currencySymbol} {t('sales.baseCurrency')} • {formatCurrency(calculations.totalAmount * exchangeRate)} {t('sales.invoice.baseTotal') || 'بالأساسية'}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">{t('sales.invoice.attachments')}</label>
-              <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-slate-300 dark:border-slate-600 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
-                <Paperclip size={14} />
-                <span>{t('sales.invoice.addAttachment')}</span>
-                <input type="file" className="hidden" onChange={handleAttachmentChange} />
-             </label>
-           </div>
-            {attachments.length > 0 && (
-              <ul className="space-y-1">
-                {attachments.map(att => (
-                  <li key={att.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-md text-sm">
-                    <a href={att.dataUrl} download={att.name} className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:underline truncate">
-                      <FileText size={14} />
-                      <span className="truncate">{att.name}</span>
-                      <span className="text-xs text-slate-500">({Math.round(att.size / 1024)} KB)</span>
-                   </a>
-                    <Button size="sm" variant="ghost" onClick={() => removeAttachment(att.id)} leftIcon={<X size={14} className="text-rose-500" />} aria-label={t('delete')} />
-                 </li>
-                ))}
-             </ul>
-            )}
-         </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-            <Button variant="secondary" onClick={() => { setFormOpen(false); resetForm(); }}>{t('cancel')}</Button>
-            <Button onClick={handleSave} isLoading={saving} leftIcon={<CheckSquare size={16} />}>{editingId ? (t('save')) : (t('sales.invoice.saveDraft'))}</Button>
-          </div>
-        </div>
-      </Modal>
 
       {/* Detail Modal */}
       <Modal isOpen={detailOpen} onClose={() => setDetailOpen(false)} size="lg" title={`${t('sales.invoice.details')} - ${viewing?.invoiceNumber}`}>
@@ -1253,22 +596,6 @@ export const InvoicesPage: React.FC = () => {
           docLabel={reverseRow?.invoiceNumber || ''}
           onConfirm={handleReverseConfirm}
         />
-
-      <DuplicateWarningDialog
-        isOpen={docDuplicateOpen}
-        onClose={() => setDocDuplicateOpen(false)}
-        onConfirm={() => {
-          docDuplicateConfirmedRef.current = true;
-          setDocDuplicateOpen(false);
-          void handleSave();
-        }}
-        inputName={docDuplicateInput}
-        entityLabel={t('sales.invoices')}
-        exactMatch={docDuplicateExact}
-        nearMatches={docDuplicateNear}
-        isDocument
-        isEdit={!!editingId}
-      />
     </div>
   );
 };

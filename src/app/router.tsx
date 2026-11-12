@@ -47,11 +47,15 @@ const CashFlowPage = React.lazy(() => import('@/modules/accounting/components/Ca
 const ReceiptVouchersPage = React.lazy(() => import('@/modules/accounting/components/ReceiptVouchersPage'));
 const PaymentVouchersPage = React.lazy(() => import('@/modules/accounting/components/PaymentVouchersPage'));
 const AccountLedgerPage = React.lazy(() => import('@/modules/accounting/components/AccountLedgerPage'));
+const JournalEntryEditorPage = React.lazy(() => import('@/modules/accounting/components/JournalEntryEditorPage'));
+const ReceiptVoucherEditorPage = React.lazy(() => import('@/modules/accounting/components/VoucherEditorPage').then((m) => ({ default: m.ReceiptVoucherEditorPage })));
+const PaymentVoucherEditorPage = React.lazy(() => import('@/modules/accounting/components/VoucherEditorPage').then((m) => ({ default: m.PaymentVoucherEditorPage })));
 const YearEndClosePage = React.lazy(() => import('@/modules/accounting/components/YearEndClosePage'));
 const FixedAssetsPage = React.lazy(() => import('@/modules/accounting/components/FixedAssetsPage'));
 
 // Inventory sub-pages
 const ProductsPage = React.lazy(() => import('@/modules/inventory/components/ProductsPage'));
+const ProductEditorPage = React.lazy(() => import('@/modules/inventory/components/ProductEditorPage'));
 const WarehousesPage = React.lazy(() => import('@/modules/inventory/components/WarehousesPage'));
   const InventoryTransactionsPage = React.lazy(() => import('@/modules/inventory/components/InventoryTransactionsPage'));
   const StockAdjustmentPage = React.lazy(() => import('@/modules/inventory/components/StockAdjustmentPage'));
@@ -59,7 +63,11 @@ const WarehousesPage = React.lazy(() => import('@/modules/inventory/components/W
 
   // Sales sub-pages
 const InvoicesPage = React.lazy(() => import('@/modules/sales/components/InvoicesPage'));
+const SalesInvoiceEditorPage = React.lazy(() => import('@/modules/sales/components/SalesInvoiceEditorPage'));
+const QuotationEditorPage = React.lazy(() => import('@/modules/sales/components/QuotationEditorPage'));
+const SalesReturnEditorPage = React.lazy(() => import('@/modules/sales/components/SalesReturnEditorPage'));
 const CustomersPage = React.lazy(() => import('@/modules/sales/components/CustomersPage'));
+const CustomerEditorPage = React.lazy(() => import('@/modules/sales/components/CustomerEditorPage'));
 const QuotationsPage = React.lazy(() => import('@/modules/sales/components/QuotationsPage'));
 const SalesReturnsPage = React.lazy(() => import('@/modules/sales/components/SalesReturnsPage'));
 
@@ -71,12 +79,18 @@ const PosReportsPage = React.lazy(() => import('@/modules/pos/components/PosRepo
 
 // Purchases sub-pages
 const PurchaseInvoicesPage = React.lazy(() => import('@/modules/purchases/components/PurchaseInvoicesPage'));
+const PurchaseInvoiceEditorPage = React.lazy(() => import('@/modules/purchases/components/PurchaseInvoiceEditorPage'));
+const PurchaseOrderEditorPage = React.lazy(() => import('@/modules/purchases/components/PurchaseOrderEditorPage'));
+const PurchaseReturnEditorPage = React.lazy(() => import('@/modules/purchases/components/PurchaseReturnEditorPage'));
 const PurchaseOrdersPage = React.lazy(() => import('@/modules/purchases/components/PurchaseOrdersPage'));
 const SuppliersPage = React.lazy(() => import('@/modules/purchases/components/SuppliersPage'));
+const SupplierEditorPage = React.lazy(() => import('@/modules/purchases/components/SupplierEditorPage'));
 const PurchaseReturnsPage = React.lazy(() => import('@/modules/purchases/components/PurchaseReturnsPage'));
 
 // Manufacturing sub-pages
 const WorkOrdersPage = React.lazy(() => import('@/modules/manufacturing/components/WorkOrdersPage'));
+const BomEditorPage = React.lazy(() => import('@/modules/manufacturing/components/BomEditorPage'));
+const WorkOrderEditorPage = React.lazy(() => import('@/modules/manufacturing/components/WorkOrderEditorPage'));
 const BomPage = React.lazy(() => import('@/modules/manufacturing/components/BomPage'));
 const ProductionCostReport = React.lazy(() => import('@/modules/manufacturing/components/ProductionCostReport'));
 const VarianceAnalysisReport = React.lazy(() => import('@/modules/manufacturing/components/VarianceAnalysisReport'));
@@ -188,12 +202,18 @@ export const AppRouter: React.FC = () => {
               <Route path="/accounting" element={withSuspense(AccountingPage)}>
                 <Route path="chart" element={withSuspense(ChartOfAccounts)} />
                 <Route path="journal" element={withSuspense(JournalEntriesPage)} />
+                <Route path="journal/new" element={withSuspense(JournalEntryEditorPage)} />
+                <Route path="journal/:id" element={withSuspense(JournalEntryEditorPage)} />
                 <Route path="trial" element={withSuspense(TrialBalancePage)} />
                 <Route path="balance" element={withSuspense(BalanceSheetPage)} />
                 <Route path="profit" element={withSuspense(ProfitLossPage)} />
                 <Route path="cashflow" element={withSuspense(CashFlowPage)} />
                 <Route path="receipt-vouchers" element={withSuspense(ReceiptVouchersPage)} />
+                <Route path="receipt-vouchers/new" element={withSuspense(ReceiptVoucherEditorPage)} />
+                <Route path="receipt-vouchers/:id" element={withSuspense(ReceiptVoucherEditorPage)} />
                 <Route path="payment-vouchers" element={withSuspense(PaymentVouchersPage)} />
+                <Route path="payment-vouchers/new" element={withSuspense(PaymentVoucherEditorPage)} />
+                <Route path="payment-vouchers/:id" element={withSuspense(PaymentVoucherEditorPage)} />
                 <Route path="ledger" element={withSuspense(AccountLedgerPage)} />
                 <Route path="year-end" element={withSuspense(YearEndClosePage)} />
                 <Route path="fixed-assets" element={withSuspense(FixedAssetsPage)} />
@@ -204,6 +224,8 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="inventory" />}>
               <Route path="/inventory" element={withSuspense(InventoryPage)}>
                 <Route path="products" element={withSuspense(ProductsPage)} />
+                <Route path="products/new" element={withSuspense(ProductEditorPage)} />
+                <Route path="products/:id" element={withSuspense(ProductEditorPage)} />
                 <Route path="warehouses" element={withSuspense(WarehousesPage)} />
                 <Route path="stock" element={withSuspense(StockPage)} />
                 <Route path="transactions" element={withSuspense(InventoryTransactionsPage)} />
@@ -215,9 +237,17 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="sales" />}>
               <Route path="/sales" element={withSuspense(SalesPage)}>
                 <Route path="invoices" element={withSuspense(InvoicesPage)} />
+                <Route path="invoices/new" element={withSuspense(SalesInvoiceEditorPage)} />
+                <Route path="invoices/:id" element={withSuspense(SalesInvoiceEditorPage)} />
                 <Route path="customers" element={withSuspense(CustomersPage)} />
+                <Route path="customers/new" element={withSuspense(CustomerEditorPage)} />
+                <Route path="customers/:id" element={withSuspense(CustomerEditorPage)} />
                 <Route path="quotations" element={withSuspense(QuotationsPage)} />
+                <Route path="quotations/new" element={withSuspense(QuotationEditorPage)} />
+                <Route path="quotations/:id" element={withSuspense(QuotationEditorPage)} />
                 <Route path="returns" element={withSuspense(SalesReturnsPage)} />
+                <Route path="returns/new" element={withSuspense(SalesReturnEditorPage)} />
+                <Route path="returns/:id" element={withSuspense(SalesReturnEditorPage)} />
               </Route>
             </Route>
 
@@ -225,9 +255,17 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="purchases" />}>
               <Route path="/purchases" element={withSuspense(PurchasesPage)}>
                 <Route path="invoices" element={withSuspense(PurchaseInvoicesPage)} />
+                <Route path="invoices/new" element={withSuspense(PurchaseInvoiceEditorPage)} />
+                <Route path="invoices/:id" element={withSuspense(PurchaseInvoiceEditorPage)} />
                 <Route path="orders" element={withSuspense(PurchaseOrdersPage)} />
+                <Route path="orders/new" element={withSuspense(PurchaseOrderEditorPage)} />
+                <Route path="orders/:id" element={withSuspense(PurchaseOrderEditorPage)} />
                 <Route path="suppliers" element={withSuspense(SuppliersPage)} />
+                <Route path="suppliers/new" element={withSuspense(SupplierEditorPage)} />
+                <Route path="suppliers/:id" element={withSuspense(SupplierEditorPage)} />
                 <Route path="returns" element={withSuspense(PurchaseReturnsPage)} />
+                <Route path="returns/new" element={withSuspense(PurchaseReturnEditorPage)} />
+                <Route path="returns/:id" element={withSuspense(PurchaseReturnEditorPage)} />
               </Route>
             </Route>
 
@@ -235,7 +273,11 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="manufacturing" />}>
               <Route path="/manufacturing" element={withSuspense(ManufacturingPage)}>
                 <Route path="work-orders" element={withSuspense(WorkOrdersPage)} />
+                <Route path="work-orders/new" element={withSuspense(WorkOrderEditorPage)} />
+                <Route path="work-orders/:id" element={withSuspense(WorkOrderEditorPage)} />
                 <Route path="bom" element={withSuspense(BomPage)} />
+                <Route path="bom/new" element={withSuspense(BomEditorPage)} />
+                <Route path="bom/:id" element={withSuspense(BomEditorPage)} />
                 <Route path="cost-report" element={withSuspense(ProductionCostReport)} />
                 <Route path="variance-report" element={withSuspense(VarianceAnalysisReport)} />
               </Route>

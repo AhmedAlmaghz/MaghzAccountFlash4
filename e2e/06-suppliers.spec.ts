@@ -1,6 +1,10 @@
 import { test, expect } from './fixtures/auth';
 import { loginAs } from './fixtures/auth';
 
+/**
+ * The supplier editor is a FULL PAGE (phase 104) — there is no create
+ * modal and nothing to close any more.
+ */
 test.describe('Supplier', () => {
   test('create supplier and verify in table', async ({ page }) => {
     await loginAs(page);
@@ -19,22 +23,24 @@ test.describe('Supplier', () => {
     await page.goto('/purchases/suppliers');
     await expect(page.getByRole('heading', { name: /الموردين/i }).first()).toBeVisible({ timeout: 15_000 });
 
-    const createBtn = page.getByRole('button', { name: /مورد جديد/i });
+    const createBtn = page.getByRole('button', { name: /مورد جديد/i }).first();
     await expect(createBtn).toBeVisible({ timeout: 10_000 });
     await createBtn.click();
 
-    const modalHeading = page.getByRole('heading', { name: /مورد جديد/i, exact: false });
-    await expect(modalHeading).toBeVisible({ timeout: 10_000 });
+    // The editor is a page at /purchases/suppliers/new.
+    await page.waitForURL(/\/purchases\/suppliers\/new/, { timeout: 15_000 });
+    const editorHeading = page.getByRole('heading', { name: /مورد جديد/i }).first();
+    await expect(editorHeading).toBeVisible({ timeout: 15_000 });
 
-    const modalPanel = page.getByRole('heading', { name: /مورد جديد/i }).locator('..').locator('..').locator('..');
-    await modalPanel.getByLabel(/الاسم/i).first().fill('مورد اختبار e2e');
-    await modalPanel.getByLabel(/الهاتف/i).first().fill('777000000');
+    await page.getByLabel(/^الاسم/).first().fill('مورد اختبار e2e');
+    await page.getByLabel(/^الهاتف/).first().fill('777000000');
 
-    const saveBtn = page.getByRole('button', { name: /إنشاء/i });
-    await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
+    const saveBtn = page.getByRole('button', { name: /إنشاء|حفظ/ }).first();
+    await expect(saveBtn).toBeEnabled({ timeout: 10_000 });
     await saveBtn.click();
 
-    await expect(modalHeading).not.toBeVisible({ timeout: 5_000 });
+    // Back on the list, the new supplier is in the table.
+    await page.waitForURL(/\/purchases\/suppliers$/, { timeout: 15_000 });
     // Scope to the visible desktop table — mobile cards render first in DOM
     await expect(page.locator('table').getByText('مورد اختبار e2e').first()).toBeVisible({ timeout: 15_000 });
   });

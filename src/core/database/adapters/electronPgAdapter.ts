@@ -437,7 +437,11 @@ function withFailureClassification(surface: Record<string, unknown>): ElectronRp
       continue;
     }
     out[name] = async (...args: unknown[]) => {
-      const result = await (fn as (...a: unknown[]) => Promise<unknown>)(...args);
+      // apply(surface, …) — NOT a bare call: a surface method may use `this`
+      // to reach its own helpers (e.g. the e2e bridge's `this._cid()`).
+      // A detached call loses the receiver and throws "this._cid is not a
+      // function" — the wrapper must be transparent.
+      const result = await (fn as (...a: unknown[]) => Promise<unknown>).apply(surface, args);
       if (typeof result !== 'object' || result === null) return result;
       const failure = classifyPgFailure(result);
       if (!failure) return result;
@@ -465,20 +469,27 @@ function getRPC(): ElectronRpcSurface {
     if (!acc || !inv || !ctc || !crm || !mfg || !hr || !sales || !pos || !tax || !purchases || !audit || !core) {
       throw new Error('electronDB typed RPC surface not available (accounting/inventory/contacts/crm/manufacturing/hr/sales/pos/tax/purchases/audit/core)');
     }
-    return withFailureClassification({
-      ...acc,
-      ...inv,
-      ...ctc,
-      ...crm,
-      ...mfg,
-      ...hr,
-      ...sales,
-      ...pos,
-      ...tax,
-      ...purchases,
-      ...audit,
-      ...core,
-    });
+    // Wrap each surface SEPARATELY and only then merge them.
+    //
+    // A surface method may use `this` to reach its own helpers (the e2e
+    // bridge's `this._cid()`). Spreading the surfaces into one object first
+    // replaces the receiver with the merged object, which does NOT carry
+    // `_cid` — the call then dies with "this._cid is not a function".
+    // Wrapping per surface keeps the original receiver intact.
+    return {
+      ...withFailureClassification(acc),
+      ...withFailureClassification(inv),
+      ...withFailureClassification(ctc),
+      ...withFailureClassification(crm),
+      ...withFailureClassification(mfg),
+      ...withFailureClassification(hr),
+      ...withFailureClassification(sales),
+      ...withFailureClassification(pos),
+      ...withFailureClassification(tax),
+      ...withFailureClassification(purchases),
+      ...withFailureClassification(audit),
+      ...withFailureClassification(core),
+    } as ElectronRpcSurface;
   }
   throw new Error('electronDB not available');
 }

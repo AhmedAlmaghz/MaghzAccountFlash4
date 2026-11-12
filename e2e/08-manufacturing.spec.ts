@@ -8,7 +8,7 @@ test.describe('Manufacturing', () => {
 
     await expect(page.locator('text=التصنيع').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('text=أوامر التشغيل').first()).toBeVisible();
-    await expect(page.locator('text=فاتير المواد').first()).toBeVisible();
+    await expect(page.locator('text=فاتورة المواد').first()).toBeVisible();
     await expect(page.locator('text=تحليل التكاليف').first()).toBeVisible();
   });
 
@@ -35,6 +35,6 @@ test.describe('Manufacturing', () => {
 
     await page.locator('nav >> text=التصنيع').first().click();
     await expect(page.locator('text=أوامر التشغيل').first()).toBeVisible();
-    await expect(page.locator('text=فاتير المواد').first()).toBeVisible();
+    await expect(page.locator('text=فاتورة المواد').first()).toBeVisible();
   });
 });

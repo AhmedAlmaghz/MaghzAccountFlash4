@@ -13,11 +13,17 @@ import {
 export function useCurrencies(companyId: string) {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  // `isLoading` starts false (the fetch has not begun yet), so it cannot
+  // tell "not fetched" from "fetched nothing". Editors that derive values
+  // from the currency list need that distinction to know when their form
+  // is fully hydrated.
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) {
       setCurrencies([]);
       setIsLoading(false);
+      setLoaded(true);
       return;
     }
     setIsLoading(true);
@@ -54,6 +60,7 @@ export function useCurrencies(companyId: string) {
       setCurrencies([]);
     } finally {
       setIsLoading(false);
+      setLoaded(true);
     }
   }, [companyId]);
 
@@ -61,12 +68,12 @@ export function useCurrencies(companyId: string) {
     load();
   }, [load]);
 
-  return { currencies, isLoading, reload: load };
+  return { currencies, isLoading, loaded, reload: load };
 }
 
 export function useCurrencyDisplay() {
   const activeCompany = useAppStore((state) => state.activeCompany);
-  const { currencies, isLoading, reload } = useCurrencies(activeCompany?.id || '');
+  const { currencies, isLoading, loaded, reload } = useCurrencies(activeCompany?.id || '');
 
   const defaultCurrency = getDefaultCurrency(currencies);
 
@@ -107,6 +114,8 @@ export function useCurrencyDisplay() {
     currencies,
     defaultCurrency,
     isLoading,
+    /** True once the currency list has been fetched (even when it is empty). */
+    currenciesLoaded: loaded,
     reload,
     formatWithCurrency,
     convert,

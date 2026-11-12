@@ -1,0 +1,281 @@
+import React, { useCallback } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { ProductSelect, ProductUnitSelect } from '@/core/ui/components/smart';
+import { Input } from '../Input';
+import { Button } from '../Button';
+import { useTranslation } from '@/core/i18n/useTranslation';
+import type { Product, ProductUnit } from '@/modules/inventory/types';
+
+export interface DocumentLine {
+  productId: string;
+  productName: string;
+  productCode?: string;
+  unitId?: string;
+  unitFactor?: number;
+  baseQuantity?: number;
+  unitName?: string;
+  quantity: number;
+  unitPrice: number;
+  discountPercent: number;
+  vatPercent: number;
+}
+
+export interface DocumentItemsGridProps {
+  companyId: string;
+  lines: DocumentLine[];
+  onChange: (lines: DocumentLine[]) => void;
+  showDiscount?: boolean;
+  showVat?: boolean;
+  priceType?: 'sale' | 'cost';
+  showUnit?: boolean;
+  disabled?: boolean;
+}
+
+export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
+  companyId,
+  lines,
+  onChange,
+  showDiscount = true,
+  showVat = true,
+  priceType = 'sale',
+  showUnit = true,
+  disabled = false,
+}) => {
+  const { t } = useTranslation();
+
+  const updateLine = useCallback(
+    (index: number, patch: Partial<DocumentLine>) => {
+      if (disabled) return;
+      const next = lines.map((l, i) => (i === index ? { ...l, ...patch } : l));
+      onChange(next);
+    },
+    [disabled, lines, onChange]
+  );
+
+  const removeLine = useCallback(
+    (index: number) => {
+      if (disabled) return;
+      onChange(lines.filter((_, i) => i !== index));
+    },
+    [disabled, lines, onChange]
+  );
+
+  const addLine = useCallback(() => {
+    if (disabled) return;
+    onChange([
+      ...lines,
+      {
+        productId: '',
+        productName: '',
+        quantity: 1,
+        unitPrice: 0,
+        discountPercent: 0,
+        vatPercent: 0,
+        unitFactor: 1,
+      },
+    ]);
+  }, [disabled, lines, onChange]);
+
+  const handleProductChange = useCallback(
+    (index: number, product: Product | null) => {
+      if (!product) {
+        updateLine(index, { productId: '', productName: '' });
+        return;
+      }
+      const current = lines[index];
+      const price = current.unitPrice > 0 ? current.unitPrice : priceType === 'sale' ? product.salePrice ?? 0 : product.costPrice ?? 0;
+      updateLine(index, {
+        productId: product.id,
+        productName: product.nameAr,
+        productCode: product.code,
+        unitPrice: price,
+      });
+    },
+    [lines, priceType, updateLine]
+  );
+
+  const handleUnitsLoad = useCallback(
+    (index: number, units: ProductUnit[]) => {
+      if (disabled) return;
+      const line = lines[index];
+      if (!line || line.unitId || units.length === 0) return;
+      const def = units.find((u) => (priceType === 'sale' ? u.isDefaultSale : u.isDefaultPurchase)) ?? units.find((u) => u.isBase) ?? units[0];
+      if (!def) return;
+      updateLine(index, {
+        unitId: def.id,
+        unitFactor: def.factor || 1,
+        unitName: def.unitName ?? def.unitCode,
+        baseQuantity: (def.factor || 1) * (line.quantity || 1),
+      });
+    },
+    [disabled, lines, priceType, updateLine]
+  );
+
+  // Keyboard flow: Enter inside a line moves to the NEXT line's product
+  // field (like a spreadsheet) instead of submitting the whole form.
+  const focusNextProduct = useCallback(
+    (index: number) => {
+      const next = index + 1;
+      if (next >= lines.length) {
+        // No next row — create one and focus it on the next tick.
+        addLine();
+        window.setTimeout(() => {
+          document.querySelector<HTMLElement>(`[data-line-product="${next}"]`)?.focus();
+        }, 0);
+        return;
+      }
+      document.querySelector<HTMLElement>(`[data-line-product="${next}"]`)?.focus();
+    },
+    [lines.length, addLine]
+  );
+
+  const onRowKeyDown = useCallback(
+    (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      focusNextProduct(index);
+    },
+    [focusNextProduct]
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="hidden md:grid md:grid-cols-12 gap-2 text-xs font-semibold text-zinc-500 px-2 uppercase tracking-wide">
+        <div className="col-span-4">{t('inventory.products.nameAr')}</div>
+        {showUnit && <div className="col-span-2">{t('common.unit')}</div>}
+        <div className="col-span-1 text-center">{t('common.quantity')}</div>
+        <div className="col-span-2">{t('common.unitPrice')}</div>
+        {showDiscount && <div className="col-span-1 text-center">{t('sales.discount')}</div>}
+        {showVat && <div className="col-span-1 text-center">{t('pos.vat')}</div>}
+        <div className="col-span-1 text-end">{t('common.total')}</div>
+      </div>
+
+      <div className="space-y-2 md:space-y-1">
+        {lines.map((line, index) => {
+          const lineTotal = Math.max(0, line.unitPrice * line.quantity * (1 - (line.discountPercent || 0) / 100));
+          return (
+            <div
+              key={index}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 md:p-2 md:grid md:grid-cols-12 md:gap-2 md:items-center md:hover:border-primary-300 transition"
+            >
+              <div className="md:col-span-4 flex items-start gap-2">
+                <span className="hidden md:inline-flex items-center justify-center w-6 h-9 shrink-0 text-xs font-semibold text-zinc-400 tabular-nums">
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <ProductSelect
+                    companyId={companyId}
+                    value={line.productId || undefined}
+                    onChange={() => { /* handled by onProductChange */ }}
+                    onProductChange={(p) => handleProductChange(index, p)}
+                    showStock
+                    showBarcode
+                    placeholder={t('inventory.products.nameAr')}
+                    selectedLabel={line.productName || undefined}
+                    selectedSublabel={line.productCode}
+                    triggerProps={{ 'data-line-product': String(index) }}
+                  />
+                </div>
+              </div>
+
+              {showUnit && (
+                <div className="md:col-span-2 mt-2 md:mt-0">
+                  <ProductUnitSelect
+                    companyId={companyId}
+                    productId={line.productId || ''}
+                    value={line.unitId}
+                    onChange={(u) => updateLine(index, { unitId: u?.id, unitFactor: u?.factor ?? 1, unitName: u?.unitName ?? u?.unitCode, baseQuantity: u ? u.factor * line.quantity : line.baseQuantity })}
+                    onUnitsLoad={(units) => handleUnitsLoad(index, units)}
+                    placeholder={t('common.unit')}
+                  />
+                </div>
+              )}
+
+              <div className="md:col-span-1 mt-2 md:mt-0">
+                <Input
+                  type="number"
+                  min={0}
+                  value={String(line.quantity)}
+                  onChange={(e) => updateLine(index, { quantity: Number(e.target.value) || 0 })}
+                  onKeyDown={(e) => onRowKeyDown(index, e)}
+                  size="sm"
+                  className="text-center"
+                  aria-label={t('common.quantity')}
+                />
+              </div>
+
+              <div className="md:col-span-2 mt-2 md:mt-0">
+                <Input
+                  type="number"
+                  min={0}
+                  value={String(line.unitPrice)}
+                  onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
+                  onKeyDown={(e) => onRowKeyDown(index, e)}
+                  size="sm"
+                  aria-label={t('common.unitPrice')}
+                />
+              </div>
+
+              {showDiscount && (
+                <div className="md:col-span-1 mt-2 md:mt-0">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={String(line.discountPercent)}
+                    onChange={(e) => updateLine(index, { discountPercent: Number(e.target.value) || 0 })}
+                    size="sm"
+                    className="text-center"
+                    aria-label={t('sales.discount')}
+                  />
+                </div>
+              )}
+
+              {showVat && (
+                <div className="md:col-span-1 mt-2 md:mt-0">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={String(line.vatPercent)}
+                    onChange={(e) => updateLine(index, { vatPercent: Number(e.target.value) || 0 })}
+                    size="sm"
+                    className="text-center"
+                    aria-label={t('pos.vat')}
+                  />
+                </div>
+              )}
+
+              <div className="md:col-span-1 mt-2 md:mt-0 flex items-center justify-between md:justify-end gap-2">
+                <span className="md:hidden text-xs text-zinc-500 font-semibold tabular-nums">{lineTotal.toFixed(2)}</span>
+                <span className="hidden md:block text-sm font-semibold tabular-nums">{lineTotal.toFixed(2)}</span>
+                <button
+                  type="button"
+                  onClick={() => removeLine(index)}
+                  disabled={disabled}
+                  aria-label={t('common.delete')}
+                  className="p-2 rounded-lg text-zinc-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition min-h-11 min-w-11 flex items-center justify-center"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+
+              {showUnit && line.unitFactor && line.unitFactor !== 1 && (
+                <div className="md:col-span-12 text-xs text-zinc-400 px-1">
+                  ≈ {(line.quantity * (line.unitFactor || 1)).toFixed(2)} {t('common.baseUnit')}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <Button type="button" variant="outline" size="sm" leftIcon={<Plus size={16} />} onClick={addLine} disabled={disabled} block>
+        {t('common.addLine')}
+      </Button>
+
+      {lines.length === 0 && (
+        <p className="text-center text-sm text-zinc-400 py-6">{t('common.noLines')}</p>
+      )}
+    </div>
+  );
+};

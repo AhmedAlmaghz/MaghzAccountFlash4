@@ -1,13 +1,13 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Tag, Plus, FileText, CheckSquare, Trash2, Printer, ArrowRightLeft, Layers, Sparkles, Download } from 'lucide-react';
-import { Card, Button, Table, Input, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+﻿import React, { useState, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Tag, Plus, FileText, CheckSquare, Printer, ArrowRightLeft, Sparkles, Download } from 'lucide-react';
+import { Card, Button, Table, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { salesQuotationFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { CustomerSelect, ProductSelect, CashBoxSelect, ProductUnitSelect } from '@/core/ui/components/smart';
 import { useQuotationsPaginated } from '../hooks/useSales';
 import { salesApi } from '../api';
 import { useAppStore } from '@/core/store';
@@ -27,8 +27,8 @@ import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useToastStore } from '@/core/store/toastStore';
 import type { Quotation } from '../types';
-import type { Product } from '@/modules/inventory/types';
 import { toBaseQty } from '@/core/utils/unitConversion';
+void toBaseQty;
 import type { ProductUnit } from '@/modules/inventory/types';
 
 interface QuotationLineForm {
@@ -46,6 +46,7 @@ interface QuotationLineForm {
 
 export const QuotationsPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const STATUS_FLOW = useMemo(() => ({
     draft: t('sales.status.draft'),
@@ -85,15 +86,15 @@ export const QuotationsPage: React.FC = () => {
   const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
   const { formatCurrency, formatDate, decimalPlaces: dp } = useFormatters(activeCompany?.id || '');
 
-  const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Quotation | null>(null);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmConfig, setConfirmConfig] = useState<{ title: string; message: string; onConfirm: () => void; variant?: 'danger' | 'warning' | 'info'; confirmText?: string } | null>(null);
 
   const [saving, setSaving] = useState(false);
+  void saving;
   const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
   const [docDuplicateInput, setDocDuplicateInput] = useState('');
   const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
@@ -110,107 +111,36 @@ export const QuotationsPage: React.FC = () => {
   const cacheProductUnits = useCallback((productId: string, units: ProductUnit[]) => {
     setLineUnitsCache((prev) => (prev[productId] === units ? prev : { ...prev, [productId]: units }));
   }, []);
+  void lineUnitsCache;
+  void cacheProductUnits;
   const showDiscount = settings?.invoiceShowDiscount ?? true;
   const showVat = settings?.invoiceShowVat ?? true;
 
   const defaultLine = (): QuotationLineForm => ({ productId: '', productName: '', quantity: 1, unitId: undefined, unitFactor: 1, baseQuantity: 1, unitName: undefined, unitPrice: 0, discountPercent: 0 });
 
-  const resetForm = useCallback(() => {
+  void ((): void => {
     setHeader({ customerId: '', date: new Date().toISOString().split('T')[0], expiryDate: '', paymentType: 'credit', cashBoxId: defaultCashBoxId || '', notes: '' });
     setLines([defaultLine()]);
     setInvoiceDiscount(0);
     setInvoiceDiscountType('amount');
-    setEditingId(null);
-  }, [defaultCashBoxId]);
+  });
 
-  const openCreate = useCallback(async () => {
-    resetForm();
-    setFormOpen(true);
-  }, [resetForm]);
+  const openCreate = useCallback(() => {
+    navigate('/sales/quotations/new');
+  }, [navigate]);
 
-  const openEdit = useCallback((q: Quotation) => {
-    if (q.status === 'converted') return;
-    setEditingId(q.id);
-    setLines(q.lines.map(l => ({
-      productId: l.productId,
-      productName: l.productName || l.productId,
-      quantity: l.quantity,
-      unitId: l.unitId,
-      unitFactor: l.unitFactor ?? 1,
-      baseQuantity: l.baseQuantity ?? l.quantity,
-      unitName: l.unitName || l.unit,
-      unitPrice: l.unitPrice,
-      discountPercent: l.discountPercent,
-    })));
-    setFormOpen(true);
-  }, []);
-
-  // Paginated rows carry lines: [] — refetch the full document so the edit
-  // form shows its products instead of an empty list.
-  const handleEditRow = async (q: Quotation) => {
-    let full = q;
-    if ((!q.lines || q.lines.length === 0) && activeCompany?.id) {
-      const res = await salesApi.getQuotationById(q.id, activeCompany.id);
-      if (res.success && res.data && res.data.lines.length > 0) full = res.data;
-    }
-    openEdit(full);
+  // Paginated rows carry lines: [] — the editor page refetches by id.
+  const handleEditRow = (q: Quotation) => {
+    navigate(`/sales/quotations/${q.id}`);
   };
 
-  const addLine = () => setLines(prev => [...prev, defaultLine()]);
-  const removeLine = (idx: number) => setLines(prev => prev.filter((_, i) => i !== idx));
-  const updateLine = (idx: number, field: keyof QuotationLineForm, value: string | number) => {
-    setLines(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
-      if (field === 'productId' && typeof value === 'string') next[idx].productName = value;
-      // Keep the base quantity in sync — stock postings consume it, never
-      // the display quantity.
-      if (field === 'quantity' && typeof value === 'number') {
-        next[idx].baseQuantity = toBaseQty(value, next[idx].unitFactor ?? 1);
-      }
-      return next;
-    });
-  };
 
-  const handleProductChange = useCallback((idx: number, product: Product) => {
-    setLines(prev => {
-      const next = [...prev];
-      const current = next[idx];
-      next[idx] = {
-        ...current,
-        productName: product.nameAr,
-        unitId: undefined,
-        unitFactor: 1,
-        baseQuantity: current.quantity,
-        unitName: undefined,
-        unitPrice: current.unitPrice > 0 ? current.unitPrice : product.salePrice,
-      };
-      return next;
-    });
-  }, []);
 
   /**
    * Unit switch: adopt the unit's own sale price unless the user typed a
    * custom price (i.e. current price matches no known unit price for this
    * product). Base quantity is always recomputed.
    */
-  const handleUnitChange = useCallback((idx: number, unit: ProductUnit | null) => {
-    setLines(prev => {
-      const next = [...prev];
-      const current = next[idx];
-      const known = lineUnitsCache[current.productId] || [];
-      const isAutoPrice = current.unitPrice === 0 || known.some((u) => u.salePrice === current.unitPrice);
-      next[idx] = {
-        ...current,
-        unitId: unit?.id,
-        unitFactor: unit?.factor ?? 1,
-        baseQuantity: toBaseQty(current.quantity, unit?.factor ?? 1),
-        unitName: unit?.unitName,
-        unitPrice: unit && isAutoPrice ? unit.salePrice : current.unitPrice,
-      };
-      return next;
-    });
-  }, [lineUnitsCache]);
 
   const calculations = useMemo(() => {
     const lineDiscountTotal = showDiscount ? lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (l.discountPercent / 100)), 0) : 0;
@@ -354,8 +284,6 @@ export const QuotationsPage: React.FC = () => {
       }
     }
     setSaving(false);
-    setFormOpen(false);
-    resetForm();
   };
 
   const handleDelete = (q: Quotation) => {
@@ -686,195 +614,6 @@ export const QuotationsPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Form Modal — Modern Quotation Editor */}
-      <Modal isOpen={formOpen} onClose={() => { setFormOpen(false); resetForm(); }} size="4xl" title={editingId ? (t('sales.quotation.edit')) : (t('sales.quotation.new'))}>
-        <div className="space-y-4 p-1">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.customer.title')}</label>
-              <CustomerSelect companyId={activeCompany?.id || ''} value={header.customerId} onChange={v => setHeader(p => ({ ...p, customerId: v || '' }))} />
-            </div>
-            <Input label={t('sales.date')} type="date" value={header.date} onChange={e => setHeader(p => ({ ...p, date: e.target.value }))} />
-            <Input label={t('sales.quotation.expiry')} type="date" value={header.expiryDate} onChange={e => setHeader(p => ({ ...p, expiryDate: e.target.value }))} />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('sales.quotation.paymentType')}</label>
-              <select
-                value={header.paymentType || 'credit'}
-                onChange={e => {
-                  const newType = e.target.value;
-                  setHeader(p => ({
-                    ...p,
-                    paymentType: newType,
-                    cashBoxId: newType === 'cash' ? (p.cashBoxId || defaultCashBoxId || '') : '',
-                  }));
-                }}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
-                aria-label={t('sales.quotation.paymentType')}
-              >
-                <option value="credit">{t('sales.invoice.credit')}</option>
-                <option value="cash">{t('sales.invoice.cash')}</option>
-              </select>
-            </div>
-          </div>
-
-          {header.paymentType === 'cash' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('accounting.cashBox')}</label>
-                <CashBoxSelect companyId={activeCompany?.id || ''} value={header.cashBoxId || ''} onChange={v => setHeader(p => ({ ...p, cashBoxId: v || '' }))} />
-                {defaultCashBoxId && header.cashBoxId === defaultCashBoxId && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">★ {t('accounting.defaultSelected')}</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Enlarged Modern Items — Quotations */}
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-white dark:bg-slate-900">
-            <div className="bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 px-4 py-3 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                  <Layers size={18} className="text-violet-600 dark:text-violet-400" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
-                    {t('sales.invoice.lines')}
-                    <span className="text-xs font-normal bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border">{lines.length} {t('sales.itemsCount')}</span>
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{t('sales.quotation.linesDesc')}</p>
-                </div>
-              </div>
-              <Button size="sm" onClick={addLine} leftIcon={<Plus size={14} />} className="shadow-sm">{t('sales.invoice.addLine')}</Button>
-            </div>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase tracking-wider">
-                    <th className="px-4 py-3 text-right font-semibold w-[36%]">{t('inventory.productName')}</th>
-                    <th className="px-3 py-3 text-center font-semibold w-32">{t('sales.line.unit')}</th>
-                    <th className="px-3 py-3 text-center font-semibold w-24">{t('inventory.quantity')}</th>
-                    <th className="px-3 py-3 text-right font-semibold w-32">{t('inventory.unitPrice')}</th>
-                    {showDiscount && <th className="px-3 py-3 text-center font-semibold w-24">{t('sales.discount')} %</th>}
-                    <th className="px-4 py-3 text-right font-semibold w-32">{t('sales.total')}</th>
-                    <th className="px-2 py-3 w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {lines.map((line, idx) => {
-                    const lineTotal = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
-                    return (
-                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors group">
-                        <td className="px-3 py-3"><ProductSelect companyId={activeCompany?.id || ''} value={line.productId} onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))} onProductChange={(p) => handleProductChange(idx, p)} showBarcode showStock size="sm" module="sales" /></td>
-                        <td className="px-2 py-2">
-                          <ProductUnitSelect
-                            companyId={activeCompany?.id || ''}
-                            productId={line.productId}
-                            value={line.unitId}
-                            onChange={(u) => handleUnitChange(idx, u)}
-                            onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
-                            mode="sale"
-                            size="sm"
-                          />
-                          {(line.unitFactor ?? 1) > 1 && (
-                            <p className="text-[10px] text-slate-400 text-center mt-0.5 tabular-nums">≈ {line.baseQuantity} {t('sales.line.baseEquivalent')}</p>
-                          )}
-                        </td>
-                        <td className="px-3 py-2"><Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" /></td>
-                        <td className="px-3 py-2"><Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" /></td>
-                        {showDiscount && <td className="px-3 py-2"><Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" /></td>}
-                        <td className="px-4 py-3 text-right font-bold tabular-nums bg-slate-50/50 dark:bg-slate-800/30">{formatCurrency(lineTotal)}</td>
-                        <td className="px-2 py-2"><Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="opacity-60 group-hover:opacity-100 hover:bg-rose-50" leftIcon={<Trash2 size={14} className="text-rose-500" />} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {/* Mobile line-items cards */}
-            <div className="md:hidden space-y-3 p-3">
-              {lines.map((line, idx) => {
-                const lineTotal = line.quantity * line.unitPrice * (showDiscount ? (1 - line.discountPercent / 100) : 1);
-                return (
-                  <div key={idx} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-4 space-y-3">
-                    <ProductSelect
-                      companyId={activeCompany?.id || ''}
-                      value={line.productId}
-                      onChange={v => updateLine(idx, 'productId', Array.isArray(v) ? (v[0] || '') : (v || ''))}
-                      onProductChange={(p) => handleProductChange(idx, p)}
-                      showBarcode
-                      showStock
-                      size="sm"
-                      module="sales"
-                    />
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input type="number" min={1} value={String(line.quantity)} onChange={e => updateLine(idx, 'quantity', Number(e.target.value))} size="sm" className="text-center font-medium" />
-                      <Input type="number" min={0} value={String(line.unitPrice)} onChange={e => updateLine(idx, 'unitPrice', Number(e.target.value))} size="sm" className="text-right tabular-nums" />
-                    </div>
-                    <ProductUnitSelect
-                      companyId={activeCompany?.id || ''}
-                      productId={line.productId}
-                      value={line.unitId}
-                      onChange={(u) => handleUnitChange(idx, u)}
-                      onUnitsLoad={(units) => line.productId && cacheProductUnits(line.productId, units)}
-                      mode="sale"
-                      size="sm"
-                    />
-                    {showDiscount && <Input type="number" min={0} max={100} value={String(line.discountPercent)} onChange={e => updateLine(idx, 'discountPercent', Number(e.target.value))} size="sm" className="text-center" />}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-zinc-900 dark:text-zinc-50 tabular-nums">{formatCurrency(lineTotal)}</span>
-                      <Button size="sm" variant="ghost" onClick={() => removeLine(idx)} className="hover:bg-rose-50 dark:hover:bg-rose-900/20" leftIcon={<Trash2 size={14} className="text-rose-500" />} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-3">
-              <Input label={t('sales.notes')} value={header.notes} onChange={e => setHeader(p => ({ ...p, notes: e.target.value }))} placeholder={t('sales.quotation.notesPlaceholder')} />
-            </div>
-            <div className="lg:col-span-2 order-first lg:order-last rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50">
-              <div className="px-4 py-3 bg-slate-900 dark:bg-slate-800 text-white flex items-center justify-between">
-                <span className="text-sm font-semibold">{t('sales.quotation.summary')}</span>
-                <span className="text-xs bg-white/15 px-2 py-1 rounded-full">{lines.length} {t('sales.quotation.itemUnit')}</span>
-              </div>
-              <div className="p-4 space-y-2 text-sm">
-                <div className="flex justify-between py-2 border-b border-dashed border-slate-200 dark:border-slate-700"><span className="text-slate-600 dark:text-slate-300">{t('sales.subtotal')}</span><span className="font-semibold tabular-nums">{formatCurrency(calculations.subtotal)}</span></div>
-                {showDiscount && (
-                  <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-amber-900 dark:text-amber-100">٪ {t('sales.discount')}</span>
-                      <div className="flex gap-1 bg-white dark:bg-slate-800 rounded-full p-1 border">
-                        <button onClick={() => setInvoiceDiscountType('amount')} className={`px-2.5 py-1 rounded-full text-xs font-medium ${invoiceDiscountType === 'amount' ? 'bg-slate-900 text-white shadow' : 'text-slate-600'}`}>{currencySymbol}</button>
-                        <button onClick={() => setInvoiceDiscountType('percent')} className={`px-2.5 py-1 rounded-full text-xs font-medium ${invoiceDiscountType === 'percent' ? 'bg-slate-900 text-white shadow' : 'text-slate-600'}`}>%</button>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Input type="number" min={0} value={String(invoiceDiscount)} onChange={e => setInvoiceDiscount(Math.max(0, Number(e.target.value) || 0))} size="sm" className="flex-1" />
-                      <div className="px-3 py-2 bg-white dark:bg-slate-800 rounded-lg border text-sm font-bold min-w-[110px] text-center text-amber-700">-{formatCurrency(calculations.invoiceDiscountAmount)}</div>
-                    </div>
-                  </div>
-                )}
-                {showVat ? (
-                  <div className="flex justify-between py-2 border-b border-dashed border-slate-200 dark:border-slate-700"><span className="text-slate-600 dark:text-slate-300 flex items-center gap-1">{t('sales.vat')} <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{calculations.vatRate}%</span></span><span className="font-semibold text-emerald-700">{formatCurrency(calculations.vatAmount)}</span></div>
-                ) : (
-                  <div className="flex justify-between py-2 border-b border-dashed opacity-60 text-xs"><span>{t('sales.vat')} — غير مفعّل</span><span>{formatCurrency(0)}</span></div>
-                )}
-                <div className="flex justify-between items-center pt-2"><span className="font-black text-slate-900 dark:text-white">{t('sales.total')}</span><span className="text-xl font-black text-violet-600">{formatCurrency(calculations.totalAmount)}</span></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-            <Button variant="secondary" onClick={() => { setFormOpen(false); resetForm(); }}>{t('cancel')}</Button>
-            <Button onClick={handleSave} isLoading={saving} leftIcon={<CheckSquare size={16} />}>{editingId ? (t('save')) : (t('create'))}</Button>
-          </div>
-        </div>
-      </Modal>
 
       {/* Detail Modal */}
       <Modal isOpen={detailOpen} onClose={() => setDetailOpen(false)} size="lg" title={`${t('sales.quotation.details')} - ${viewing?.quotationNumber}`}>
@@ -946,3 +685,4 @@ export const QuotationsPage: React.FC = () => {
 };
 
 export default QuotationsPage;
+

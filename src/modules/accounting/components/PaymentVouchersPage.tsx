@@ -1,26 +1,18 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { CreditCard, Plus, CheckSquare, Truck, Hash, Wallet, Landmark, FileText, Receipt, Paperclip, AlertCircle,
-Building2, Undo2 } from 'lucide-react';
+﻿import React, { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { CreditCard, Plus, CheckSquare, Hash, Wallet, Landmark, FileText, Receipt, Paperclip, Undo2 } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
-import { Card, Button, Modal, Input, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
+import { Card, Button, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
-import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
-import { receiptVoucherFingerprint, paymentVoucherFingerprint, journalEntryFingerprint, detectDocumentDuplicates, detectVoucherDuplicate, detectJournalDuplicate } from '@/core/utils/documentDuplicate';
-import { SupplierSelect, CashBoxSelect, AccountSelect, CurrencySelect } from '@/core/ui/components/smart';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePaymentVouchersPaginated } from '../hooks/useAccounting';
-import { useOutstandingInvoicesForSupplier } from '@/modules/purchases/hooks/usePurchases';
 import { accountingApi } from '../api';
 import { reverseVoucher } from '../reversal';
 import { ReverseDialog } from './ReverseDialog';
-import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import { useSettings } from '@/core/utils/useSettings';
-import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { useFormatters } from '@/core/utils/useFormatters';
-import { YER_CODE } from '@/core/utils/currencyConverter';
-import { useCurrencyDisplay } from '@/core/utils/useCurrencyDisplay';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { useUserMap } from '@/core/utils/useUserMap';
@@ -29,13 +21,9 @@ import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { PaymentVoucher } from '../types';
 import { useToastStore } from '@/core/store/toastStore';
 
-// keep fingerprint helpers referenced (task requires importing all six — only detectVoucherDuplicate is used here)
-void receiptVoucherFingerprint; void paymentVoucherFingerprint; void journalEntryFingerprint; void detectDocumentDuplicates; void detectJournalDuplicate;
-
-type FormErrors = Partial<Record<'amount' | 'supplier' | 'date', string>>;
-
 export const PaymentVouchersPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const addToast = useToastStore((s) => s.addToast);
   const activeCompany = useAppStore((state) => state.activeCompany);
   const user = useAuthStore((state) => state.user);
@@ -46,7 +34,7 @@ export const PaymentVouchersPage: React.FC = () => {
     () => ({ status: statusFilter || undefined, search: search || undefined, paymentMethod: methodFilter || undefined }),
     [statusFilter, search, methodFilter],
   );
-  const { vouchers, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, reload } =
+  const { vouchers, total, page, pageSize, isLoading, goToPage, changePageSize, update, remove, reload } =
       usePaymentVouchersPaginated(activeCompany?.id || '', voucherFilters);
   const [reverseRow, setReverseRow] = useState<PaymentVoucher | null>(null);
 
@@ -61,42 +49,13 @@ export const PaymentVouchersPage: React.FC = () => {
       addToast('error', res.error || t('common.error'));
     }
   };
-  const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(activeCompany?.id || '');
   const { formatCurrency, formatDate } = useFormatters(activeCompany?.id || '');
-  const { currencies, defaultCurrency } = useCurrencyDisplay();
-  const { defaultCashBoxId } = useDefaultPaymentAccounts(activeCompany?.id || '');
-  const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || YER_CODE;
   const { getUserName } = useUserMap();
+  const currencySymbol = settings?.defaultCurrency || activeCompany?.currency || 'YER';
 
   const [postingId, setPostingId] = useState<string | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<Partial<PaymentVoucher> & { amountApplied?: number; baseCurrencyApplied?: number; invoiceId?: string }>({
-    paymentMethod: 'cash',
-    status: 'draft',
-    date: new Date().toISOString().split('T')[0],
-  });
-  const [formErrors, setFormErrors] = useState<FormErrors>({});
-  const { invoices: outstandingInvoices, isLoading: invoicesLoading } = useOutstandingInvoicesForSupplier(activeCompany?.id || '', form.supplierId || '');
   const [confirmDelete, setConfirmDelete] = useState<PaymentVoucher | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [docDuplicateOpen, setDocDuplicateOpen] = useState(false);
-  const [docDuplicateInput, setDocDuplicateInput] = useState('');
-  const [docDuplicateExact, setDocDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
-  const [docDuplicateNear, setDocDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
-  const docDuplicateConfirmedRef = useRef(false);
-
-  const validateForm = useCallback((): boolean => {
-    const e: FormErrors = {};
-    if (!form.amount || Number(form.amount) <= 0) e.amount = t('accounting.enterAmount') || 'مبلغ غير صحيح';
-    if (!form.supplierId && !form.expenseAccountId) e.supplier = t('accounting.selectSupplierOrExpense') || 'مطلوب مورد أو حساب مصروف';
-    if (!form.date) e.date = t('validation.required') || 'مطلوب';
-    if (form.invoiceId && Number(form.amountApplied || 0) > Number(form.amount || 0)) e.amount = t('accounting.voucher.appliedExceeds');
-    setFormErrors(e);
-    return Object.keys(e).length === 0;
-  }, [form, t]);
 
   const handlePrint = useCallback(
     (voucher: PaymentVoucher) => {
@@ -157,132 +116,12 @@ export const PaymentVouchersPage: React.FC = () => {
     }
   };
 
-  const handleSave = async () => {
-    if (!activeCompany?.id) return;
-    if (!validateForm()) {
-      addToast('error', t('accounting.voucher.fixFields'));
-      return;
-    }
-    setIsSaving(true);
-    let voucherNumber = form.voucherNumber || '';
-    if (!isEditMode || !editingId) {
-      const seq = await getNextNumber('payment_voucher', activeCompany.id);
-      if (!seq.success || !seq.number) {
-        addToast('error', seq.error || t('accounting.voucherNumberError'));
-        setIsSaving(false);
-        return;
-      }
-      voucherNumber = seq.number;
-    }
-
-    const payload = {
-      companyId: activeCompany.id,
-      voucherNumber,
-      date: form.date || new Date().toISOString().split('T')[0],
-      supplierId: form.supplierId || undefined,
-      supplierName: form.supplierName || '',
-      invoiceId: form.invoiceId || undefined,
-      expenseAccountId: form.expenseAccountId || undefined,
-      amount: Number(form.amount) || 0,
-      amountApplied: form.invoiceId ? Number(form.amountApplied) || 0 : 0,
-      currencyCode: form.currencyCode || YER_CODE,
-      exchangeRate: form.exchangeRate ?? 1,
-      baseCurrencyAmount: (Number(form.amount) || 0) * (form.exchangeRate ?? 1),
-      baseCurrencyApplied: form.invoiceId ? (Number(form.amountApplied) || 0) * (form.exchangeRate ?? 1) : 0,
-      paymentMethod: form.paymentMethod || 'cash',
-      cashBoxId: form.cashBoxId || undefined,
-      checkNumber: form.checkNumber || undefined,
-      checkDate: form.checkDate || undefined,
-      notes: form.notes || '',
-      status: (form.status || 'draft') as 'draft' | 'posted' | 'cancelled',
-    };
-
-    // ── حارس تكرار المستند — بصمة كاملة (حظر تام) + قريب (تحذير) ──
-    if (!docDuplicateConfirmedRef.current) {
-      try {
-        const existingRes = await accountingApi.getPaymentVouchersPaginated(activeCompany.id, 1, 200);
-        const existingList = (existingRes.success && existingRes.data ? ((existingRes.data as unknown as { items?: PaymentVoucher[] })?.items ?? (existingRes.data as unknown as PaymentVoucher[]) ?? []) : []) as PaymentVoucher[];
-        const partyId = payload.supplierId || payload.expenseAccountId;
-        const dup = detectVoucherDuplicate(
-          { partyId, date: payload.date, amount: payload.amount, currencyCode: payload.currencyCode, paymentMethod: payload.paymentMethod },
-          existingList as never,
-          editingId || undefined,
-        );
-        if (dup.exactMatch) {
-          const doc = dup.exactMatch as unknown as PaymentVoucher;
-          setDocDuplicateInput(`${partyId || ''} • ${payload.date} • ${payload.amount}`);
-          setDocDuplicateExact({ name: doc.voucherNumber || String(doc.id).slice(0, 8), code: `${doc.date} • ${doc.amount}` });
-          setDocDuplicateNear([]);
-          setDocDuplicateOpen(true);
-          setIsSaving(false);
-          return;
-        }
-        if (dup.nearMatches.length > 0) {
-          setDocDuplicateInput(`${partyId || ''} • ${payload.date}`);
-          setDocDuplicateNear(
-            dup.nearMatches.map((m) => {
-              const d = m.item as unknown as PaymentVoucher;
-              return { name: d.voucherNumber || String(d.id).slice(0, 8), code: `${d.date} • ${d.amount}`, score: m.score };
-            }),
-          );
-          setDocDuplicateExact(null);
-          setDocDuplicateOpen(true);
-          setIsSaving(false);
-          return;
-        }
-      } catch {
-        /* فشل الفحص لا يمنع الحفظ */
-      }
-    }
-    docDuplicateConfirmedRef.current = false;
-
-    let result;
-    if (isEditMode && editingId) result = await update(editingId, payload);
-    else result = await create(payload);
-
-    setIsSaving(false);
-    if (result?.success) {
-      addToast('success', t(isEditMode ? 'accounting.paymentVoucher.updated' : 'accounting.paymentVoucher.created'));
-      setIsOpen(false);
-      resetForm();
-    } else {
-      addToast('error', result?.error || t('common.error'));
-    }
-  };
-
-  const handleCurrencyChange = (code: string | null) => {
-    if (!code) {
-      setForm((prev) => ({ ...prev, currencyCode: YER_CODE, exchangeRate: 1 }));
-      return;
-    }
-    const c = currencies.find((x) => x.code === code);
-    setForm((prev) => ({ ...prev, currencyCode: code, exchangeRate: c ? c.exchangeRate : 1 }));
-  };
-
-  const resetForm = () => {
-    setForm({
-      paymentMethod: 'cash',
-      status: 'draft',
-      date: new Date().toISOString().split('T')[0],
-      currencyCode: defaultCurrency?.code || YER_CODE,
-      exchangeRate: 1,
-      cashBoxId: defaultCashBoxId || undefined,
-    });
-    setFormErrors({});
-    setIsEditMode(false);
-    setEditingId(null);
-  };
-
   const handleEdit = (voucher: PaymentVoucher) => {
     if (voucher.status === 'posted') {
       addToast('error', t('accounting.voucher.postedLocked'));
       return;
     }
-    setForm({ ...voucher });
-    setEditingId(voucher.id);
-    setIsEditMode(true);
-    setFormErrors({});
-    setIsOpen(true);
+    navigate(`/accounting/payment-vouchers/${voucher.id}`);
   };
 
   const handleExportExcel = useCallback(() => {
@@ -381,8 +220,8 @@ export const PaymentVouchersPage: React.FC = () => {
           <div className="text-end">
             <p className="font-bold tabular-nums text-slate-900 dark:text-slate-100">{formatCurrency(row.amount)}</p>
             <p className="text-[11px] text-slate-500 flex items-center justify-end gap-1">
-              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border text-[10px]">{row.currencyCode || YER_CODE}</span>
-              {row.invoiceId ? <span className="text-amber-600">• {t('accounting.voucher.linked')}</span> : null}
+              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border text-[10px]">{row.currencyCode || 'YER'}</span>
+              {row.invoiceId ? <span className="text-amber-600">â€¢ {t('accounting.voucher.linked')}</span> : null}
             </p>
           </div>
         ),
@@ -476,7 +315,7 @@ export const PaymentVouchersPage: React.FC = () => {
         subtitle={t('accounting.voucher.paymentSubtitle')}
         actions={
           <Can action="create" module="accounting">
-            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }} className="shadow-sm">
+            <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => navigate('/accounting/payment-vouchers/new')} className="shadow-sm">
               {t('accounting.newPaymentVoucher')}
             </Button>
           </Can>
@@ -487,7 +326,7 @@ export const PaymentVouchersPage: React.FC = () => {
       <FilterBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder={`${t('search')} — ${t('accounting.voucherNumber')} / ${t('accounting.supplier')}`}
+        searchPlaceholder={`${t('search')} â€” ${t('accounting.voucherNumber')} / ${t('accounting.supplier')}`}
         filterOptions={[
           { key: '', label: t('accounting.all') },
           { key: 'draft', label: t('accounting.draft') },
@@ -525,7 +364,7 @@ export const PaymentVouchersPage: React.FC = () => {
       {hasActiveFilter && (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span>
-              {total} {t('accounting.voucher.unit')} • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter === 'draft' ? t('accounting.voucher.draft') : statusFilter === 'cancelled' ? t('accounting.voucher.cancelled') : t('accounting.voucher.posted')}` : ''} {methodFilter ? `• ${methodFilter === 'cash' ? t('accounting.voucher.methodCash') : methodFilter === 'bank' ? t('accounting.voucher.methodBank') : t('accounting.voucher.methodCheck')}` : ''}
+              {total} {t('accounting.voucher.unit')} â€¢ {search ? `"${search}"` : ''} {statusFilter ? `â€¢ ${statusFilter === 'draft' ? t('accounting.voucher.draft') : statusFilter === 'cancelled' ? t('accounting.voucher.cancelled') : t('accounting.voucher.posted')}` : ''} {methodFilter ? `â€¢ ${methodFilter === 'cash' ? t('accounting.voucher.methodCash') : methodFilter === 'bank' ? t('accounting.voucher.methodBank') : t('accounting.voucher.methodCheck')}` : ''}
           </span>
               <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
                 {t('sales.filter.clearFilters')}
@@ -539,7 +378,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalCashPayments')}</p>
               <p className="mt-1 text-2xl font-bold text-rose-600 dark:text-rose-400 tabular-nums">{formatCurrency(totalCash)}</p>
-              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • {t('accounting.voucher.postedCash')}</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} â€¢ {t('accounting.voucher.postedCash')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 flex items-center justify-center">
               <Wallet size={20} className="text-rose-600 dark:text-rose-400" />
@@ -552,7 +391,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalBankPayments')}</p>
               <p className="mt-1 text-2xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totalBank)}</p>
-              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • {t('accounting.voucher.postedBank')}</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} â€¢ {t('accounting.voucher.postedBank')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 flex items-center justify-center">
               <Landmark size={20} className="text-blue-600 dark:text-blue-400" />
@@ -565,7 +404,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.voucherCount')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
-              <p className="text-xs text-slate-500 mt-1">{draftCount} {t('accounting.voucher.draft')} • {total - draftCount} {t('accounting.voucher.posted')}</p>
+              <p className="text-xs text-slate-500 mt-1">{draftCount} {t('accounting.voucher.draft')} â€¢ {total - draftCount} {t('accounting.voucher.posted')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
               <FileText size={20} className="text-slate-600 dark:text-slate-400" />
@@ -595,7 +434,7 @@ export const PaymentVouchersPage: React.FC = () => {
                 </Button>
                 ) : (
                   <Can action="create" module="accounting">
-                    <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => { resetForm(); setIsOpen(true); }}>
+                    <Button variant="primary" leftIcon={<Plus size={16} />} onClick={() => navigate('/accounting/payment-vouchers/new')}>
                       {t('accounting.newPaymentVoucher')}
                     </Button>
                   </Can>
@@ -613,193 +452,6 @@ export const PaymentVouchersPage: React.FC = () => {
         )}
       </Card>
 
-      <Modal
-        isOpen={isOpen}
-        title={isEditMode ? t('accounting.editVoucher') : t('accounting.newPaymentVoucher')}
-        description={isEditMode ? t('accounting.voucher.paymentEditDesc') : t('accounting.voucher.paymentCreateDesc')}
-        onClose={() => {
-          setIsOpen(false);
-          resetForm();
-        }}
-        size="xl"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
-              <AlertCircle size={12} /> {t('accounting.voucher.requiredFields')}
-            </p>
-            <div className="flex gap-2 ml-auto">
-              <Button variant="secondary" onClick={() => { setIsOpen(false); resetForm(); }}>
-                {t('cancel')}
-              </Button>
-              <Button onClick={handleSave} isLoading={isSaving} leftIcon={<CheckSquare size={16} />}>
-                {t('save')}
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Hash size={12} /> {t('accounting.voucher.docSection')}
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Input label={`${t('accounting.voucherNumber')} (${t('accounting.voucher.auto')})`} value={form.voucherNumber || ''} onChange={(e) => setForm({ ...form, voucherNumber: e.target.value })} placeholder={t('accounting.voucher.auto')} helperText={!isEditMode ? t('accounting.voucher.autoHint') : undefined} />
-              <Input label={`${t('accounting.date')} *`} type="date" value={form.date || ''} onChange={(e) => setForm({ ...form, date: e.target.value })} error={formErrors.date} required />
-              <div>
-                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.status')}</label>
-                <div className="h-[42px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 flex items-center px-3">
-                  <StatusBadge status={(form.status as string) || 'draft'} size="sm" />
-                  <span className="ml-auto text-xs text-slate-500">{form.status === 'posted' ? t('accounting.voucher.posted') : t('accounting.voucher.draft')}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Truck size={12} /> {t('accounting.voucher.beneficiary')}
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
-                  <Building2 size={12} /> {t('accounting.supplier')}
-                </label>
-                <SupplierSelect companyId={activeCompany?.id || ''} value={form.supplierId || ''} onChange={(v) => setForm({ ...form, supplierId: v || '', invoiceId: undefined, amountApplied: 0 })} />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.expenseAccount')}</label>
-                <AccountSelect companyId={activeCompany?.id || ''} value={form.expenseAccountId || ''} onChange={(v) => setForm({ ...form, expenseAccountId: v || '' })} filterType="expense" placeholder={t('accounting.selectExpenseAccount')} />
-              </div>
-            </div>
-            {formErrors.supplier && <p className="text-xs text-rose-600 mt-2 flex items-center gap-1"><AlertCircle size={12} />{formErrors.supplier}</p>}
-            {!formErrors.supplier && <p className="text-xs text-slate-500 mt-2">{t('accounting.voucher.supplierHint')}</p>}
-
-            {form.supplierId && (
-              <div className="mt-4">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1.5">
-                  <Paperclip size={12} /> {t('accounting.applyToInvoice')}
-                </label>
-                <select
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-                  value={form.invoiceId || ''}
-                  onChange={(e) => {
-                    const newInvoiceId = e.target.value || undefined;
-                    setForm((prev) => {
-                      const selectedInvoice = outstandingInvoices.find((inv) => inv.id === newInvoiceId);
-                      const newAmountApplied = selectedInvoice ? Math.max(0, (selectedInvoice.totalAmount || 0) - (selectedInvoice.paidAmount || 0)) : 0;
-                      return { ...prev, invoiceId: newInvoiceId, amountApplied: newInvoiceId ? newAmountApplied : 0 };
-                    });
-                  }}
-                  disabled={invoicesLoading}
-                  aria-label={t('accounting.applyToInvoice')}
-                >
-                  <option value="">{t('accounting.onAccount')}</option>
-                  {outstandingInvoices.map((inv) => {
-                    const outstanding = (inv.totalAmount || 0) - (inv.paidAmount || 0);
-                    return (
-                      <option key={inv.id} value={inv.id}>
-                        {inv.invoiceNumber} — {formatCurrency(outstanding)} {inv.currencyCode || ''} • {inv.date ? formatDate(inv.date) : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-                {form.invoiceId ? (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
-                    <CheckSquare size={12} /> {t('accounting.amountWillBeApplied')} — {formatCurrency(Number(form.amountApplied) || 0)}
-                  </p>
-                ) : (
-                  <p className="text-xs text-slate-500 mt-1">{t('accounting.voucher.onAccountHint')}</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2">
-              <Wallet size={12} /> {t('accounting.voucher.amountSection')}
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Input label={`${t('accounting.amount')} *`} type="number" min={0} step="0.01" value={String(form.amount || '')} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} error={formErrors.amount} required />
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('sales.currency')}</label>
-                <CurrencySelect companyId={activeCompany?.id || ''} value={form.currencyCode || YER_CODE} onChange={handleCurrencyChange} />
-              </div>
-              <Input label={t('sales.exchangeRate')} type="number" min={0} step="0.0001" value={String(form.exchangeRate ?? 1)} onChange={(e) => setForm({ ...form, exchangeRate: Number(e.target.value) || 1 })} />
-            </div>
-            <div className="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2.5 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">{t('sales.baseCurrency')}</span>
-              <span className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                {formatCurrency((Number(form.amount) || 0) * (form.exchangeRate ?? 1))} <span className="text-xs font-normal text-slate-500">{currencySymbol}</span>
-              </span>
-            </div>
-          </div>
-
-          <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3">{t('accounting.voucher.paymentMethodTitle')}</h4>
-            <div className="grid grid-cols-3 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-800">
-              {(
-                [
-                  { v: 'cash', l: t('accounting.cash'), icon: Wallet },
-                  { v: 'bank', l: t('accounting.bank'), icon: Landmark },
-                  { v: 'check', l: t('accounting.check'), icon: FileText },
-                ] as const
-              ).map((o) => {
-                const Icon = o.icon;
-                const active = form.paymentMethod === o.v;
-                return (
-                  <button
-                    key={o.v}
-                    onClick={() =>
-                      setForm({
-                        ...form,
-                        paymentMethod: o.v,
-                                                cashBoxId: o.v === 'cash' ? form.cashBoxId || defaultCashBoxId || undefined : undefined,
-                        checkNumber: o.v === 'check' ? form.checkNumber : undefined,
-                        checkDate: o.v === 'check' ? form.checkDate : undefined,
-                      })
-                    }
-                    className={`flex flex-col items-center gap-1.5 py-3 rounded-lg text-sm font-medium border transition ${active ? 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 shadow-sm text-slate-900 dark:text-slate-100' : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'}`}
-                  >
-                    <Icon size={18} className={active ? 'text-primary-600' : 'text-slate-400'} />
-                    {o.l}
-                  </button>
-                );
-              })}
-            </div>
-            {/* Treasury location — shown for ALL payment methods (النقدية والخزائن) */}
-            <div className="mt-4">
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('accounting.cashBox')}</label>
-              <CashBoxSelect companyId={activeCompany?.id || ''} value={form.cashBoxId || ''} onChange={(v) => setForm({ ...form, cashBoxId: v || '' })} />
-              {defaultCashBoxId && form.cashBoxId === defaultCashBoxId && <p className="text-xs text-emerald-600 mt-1">★ {t('accounting.defaultSelected')}</p>}
-            </div>
-            {form.paymentMethod === 'check' && (
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Input label={t('accounting.checkNumber')} value={form.checkNumber || ''} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} placeholder={t('accounting.voucher.checkNumberPlaceholder')} />
-                <Input label={t('accounting.checkDate')} type="date" value={form.checkDate || ''} onChange={(e) => setForm({ ...form, checkDate: e.target.value })} />
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold text-slate-500 mb-1.5 block">{t('accounting.notes')}</label>
-            <textarea
-              value={form.notes || ''}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              placeholder={t('accounting.voucher.notesPlaceholder')}
-              rows={2}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-50 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition resize-none"
-            />
-          </div>
-        </div>
-      </Modal>
-
       <ConfirmDialog
         isOpen={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
@@ -812,7 +464,7 @@ export const PaymentVouchersPage: React.FC = () => {
           }
         }}
         title={t('delete')}
-        message={`${t('accounting.deletePaymentVoucherConfirm')} "${confirmDelete?.voucherNumber}"؟`}
+        message={`${t('accounting.deletePaymentVoucherConfirm')} "${confirmDelete?.voucherNumber}"طں`}
         variant="danger"
       />
 
@@ -823,23 +475,10 @@ export const PaymentVouchersPage: React.FC = () => {
         onConfirm={handleReverseConfirm}
       />
 
-      <DuplicateWarningDialog
-        isOpen={docDuplicateOpen}
-        onClose={() => setDocDuplicateOpen(false)}
-        onConfirm={() => {
-          docDuplicateConfirmedRef.current = true;
-          setDocDuplicateOpen(false);
-          void handleSave();
-        }}
-        inputName={docDuplicateInput}
-        entityLabel={t('accounting.paymentVouchers')}
-        exactMatch={docDuplicateExact}
-        nearMatches={docDuplicateNear}
-        isDocument
-        isEdit={!!editingId}
-      />
     </div>
   );
 };
 
 export default PaymentVouchersPage;
+
+

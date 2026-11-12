@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { PieChart, FileDown, Filter, RotateCcw } from 'lucide-react';
+import { PieChart, FileDown, Filter, RotateCcw, AlertCircle } from 'lucide-react';
 import { Card, Button, Table, PageHeader } from '@/core/ui/components';
 import { EmptyState } from '@/core/ui/components/EmptyState';
 import { CurrencyBreakdown } from '@/core/ui/components/CurrencyBreakdown';
@@ -93,7 +93,7 @@ export const ProfitAnalysisReport: React.FC = () => {
   const [currentPeriod, setCurrentPeriod] = useState<PeriodData | null>(null);
   const [previousPeriod, setPreviousPeriod] = useState<PeriodData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [_error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [fromDate, setFromDate] = useState('');
@@ -445,6 +445,20 @@ export const ProfitAnalysisReport: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
+      </div>
+    );
+  }
+
+  if (error) {
+    // A failed query must NOT look like "no data" — that sends the user
+    // hunting for missing documents instead of reading the real reason.
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center max-w-lg">
+          <AlertCircle size={48} className="mx-auto mb-4 text-danger-500" />
+          <p className="text-lg font-medium text-slate-700 dark:text-slate-200">{t('reports.loadError')}</p>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 break-words" dir="ltr">{error}</p>
+        </div>
       </div>
     );
   }

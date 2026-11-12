@@ -359,7 +359,7 @@ function SidebarItem({ item, sidebarOpen, onNavigate }: { item: MenuItem; sideba
                   e.stopPropagation();
                   setIsExpanded(!isExpanded);
                 }}
-                className="rounded-md p-1 text-current opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500"
+                className="rounded-md p-1 min-h-9 min-w-9 flex items-center justify-center text-current opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-2 focus-visible:outline-primary-500"
               >
                 <ChevronDown
                   size={14}

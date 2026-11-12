@@ -1200,7 +1200,13 @@
       "schedCharge": "Month charge",
       "salvageBelowCost": "Salvage value must be below cost",
       "exportError": "Could not export the asset register",
-      "registerTitle": "Fixed asset register"
+      "registerTitle": "Fixed asset register",
+      "custodian": "Custodian",
+      "location": "Location",
+      "nameEn": "Name (English)",
+      "notes": "Notes",
+      "serialNumber": "Serial Number",
+      "warrantyExpiry": "Warranty Expiry"
     },
     "month": "Month",
     "ledger": {
@@ -1298,6 +1304,14 @@
       "receiptClientSection": "Customer & linkage",
       "checkNumberPlaceholder": "Cheque number",
       "notesPlaceholder": "Additional notes…"
+    },
+    "account": "Account",
+    "journal": {
+      "balance": "Entry Balance",
+      "balanced": "Balanced",
+      "unbalanced": "Unbalanced",
+      "difference": "Difference",
+      "accountRequired": "An account must be selected for every line"
     }
   },
   "inventory": {
@@ -1316,7 +1330,8 @@
       "editDesc": "Edit product details",
       "createDesc": "Add a new product — * fields are required",
       "requiredFields": "* required fields",
-      "mediaSection": "Photo & barcode"
+      "mediaSection": "Photo & barcode",
+      "nameAr": "Product Name (Arabic)"
     },
     "warehouses": "Warehouses",
     "stock": {
@@ -1778,7 +1793,8 @@
       "postedHint": "Posted",
       "totalHint": "Total",
       "collectedHint": "Collected",
-      "pendingHint": "Pending posting"
+      "pendingHint": "Pending posting",
+      "total": "Total"
     },
     "quotation": {
       "new": "New Quotation",
@@ -1873,6 +1889,10 @@
       "open": "Open",
       "tipsTitle": "Sales tips",
       "tipsDesc": "Follow draft invoices daily, post them to auto-create entries, use quotations for one-click invoicing, and watch customer returns and their stock impact."
+    },
+    "payment": {
+      "cash": "Cash",
+      "credit": "Credit"
     }
   },
   "purchases": {
@@ -2020,7 +2040,8 @@
       "updated": "Purchase invoice updated successfully",
       "deleted": "Purchase invoice deleted",
       "posted": "Purchase invoice posted successfully",
-      "outstanding": "Outstanding to Suppliers"
+      "outstanding": "Outstanding to Suppliers",
+      "productRequired": "A product must be selected for every line"
     },
     "order": {
       "new": "New Purchase Order",
@@ -2157,7 +2178,14 @@
       "negativeValuesError": "Negative values are not allowed — quantities and costs must be ≥ 0",
       "plannedDatesTitle": "Planned Schedule",
       "actualDatesTitle": "Actual Schedule",
-      "costBreakdown": "Cost Breakdown"
+      "costBreakdown": "Cost Breakdown",
+      "batchNumber": "Batch Number",
+      "batches": "Batches",
+      "cancel": "Cancel Order",
+      "complete": "Complete Order",
+      "producedQuantity": "Produced Quantity",
+      "product": "Select Product",
+      "start": "Start Production"
     },
     "bom": {
       "title": "Bill of Materials",
@@ -2197,7 +2225,9 @@
       "maxBatches": "Max Producible Batches",
       "created": "BOM created successfully",
       "updated": "BOM updated successfully",
-      "requiredFields": "Please select a finished product and add at least one material"
+      "requiredFields": "Please select a finished product and add at least one material",
+      "finishedProduct": "Select the finished product",
+      "outputQuantity": "Output Quantity"
     },
     "production": "Production",
     "costs": {
@@ -3268,7 +3298,8 @@
     "sortDir": "Sort direction",
     "desc": "Descending",
     "asc": "Ascending",
-    "rows": "rows"
+    "rows": "rows",
+    "loadError": "Could not load the report"
   },
   "settings": {
     "pageTitle": "Settings",
@@ -4099,6 +4130,19 @@
     "usePglite": "Use PGlite local (no server)",
     "confirm": "Confirm",
     "back": "Back",
+    "quantity": "Quantity",
+    "unitPrice": "Unit price",
+    "unit": "Unit",
+    "total": "Total",
+    "subtotal": "Subtotal",
+    "grandTotal": "Grand total",
+    "delete": "Delete",
+    "addLine": "Add line",
+    "noLines": "No lines",
+    "baseUnit": "Base unit",
+    "unsavedChanges": "Unsaved changes",
+    "unsavedChangesDesc": "You have unsaved changes. Leave without saving?",
+    "leave": "Leave",
     "view": "View",
     "preview": "Preview",
     "actions": "Actions",
@@ -4112,7 +4156,20 @@
     "search": "Search",
     "more": "more",
     "excel": "Excel",
-    "pdf": "PDF"
+    "pdf": "PDF",
+    "address": "Address",
+    "credit": "Credit",
+    "date": "Date",
+    "debit": "Debit",
+    "dueDate": "Due Date",
+    "edit": "Edit",
+    "email": "Email",
+    "notes": "Notes",
+    "notesPlaceholder": "Add notes…",
+    "paymentType": "Payment Type",
+    "phone": "Phone",
+    "post": "Post",
+    "reference": "Reference"
   },
   "pagination": {
     "first": "First",
@@ -4597,6 +4654,7 @@
     "categories": "Categories",
     "allCategories": "All",
     "cart": "Cart",
+    "products": "Products",
     "emptyCart": "Cart is empty",
     "emptyCartDesc": "Scan a product barcode or pick from the grid",
     "customer": "Customer",

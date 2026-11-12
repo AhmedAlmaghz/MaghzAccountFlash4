@@ -1,16 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Wrench, Plus, Trash2, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2, Factory, XCircle, RotateCcw, UserCog } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Wrench, Plus, ArrowRight, FileBarChart, Printer, Layers, ClipboardList, PlayCircle, CheckCircle2, Factory, XCircle, RotateCcw } from 'lucide-react';
 import { Card, Button, Input, Modal, Table } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { ProductSelect } from '@/core/ui/components/smart/fields/ProductSelect';
-import { EmployeeSelect } from '@/core/ui/components/smart/fields/EmployeeSelect';
 import { WarehouseSelect } from '@/core/ui/components/smart';
-import { ProductUnitSelect } from '@/core/ui/components/smart';
-import { toBaseQty } from '@/core/utils/unitConversion';
 import { useToastStore } from '@/core/store/toastStore';
 import { useAppStore } from '@/core/store';
 import { useWorkOrdersPaginated, useWorkOrderVariance } from '../hooks/useManufacturing';
@@ -18,36 +15,23 @@ import { manufacturingApi } from '../api';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { Can } from '@/core/ui/components/PermissionGate';
 import { useTranslation } from '@/core/i18n/useTranslation';
-import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
 import type { WorkOrder, WorkOrderLine } from '../types';
-
-interface WorkOrderFormLine {
-  materialId: string;
-  plannedQuantity: number;
-  unitCost: number;
-  /** Display unit (base values persisted, converted at save). */
-  unitId?: string;
-  unitFactor?: number;
-  unitName?: string;
-}
 
 const STATUS_FLOW: WorkOrder['status'][] = ['planned', 'in_progress', 'completed', 'cancelled'];
 void STATUS_FLOW;
 
 export const WorkOrdersPage: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const activeCompany = useAppStore((state) => state.activeCompany);
   const companyId = activeCompany?.id || '';
   const [statusFilter, setStatusFilter] = useState('');
   const filters = useMemo(() => ({ status: statusFilter || undefined }), [statusFilter]);
-  const { items: workOrders, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove, changeStatus } = useWorkOrdersPaginated(companyId, filters);
+  const { items: workOrders, total, page, pageSize, isLoading, goToPage, changePageSize, remove, changeStatus } = useWorkOrdersPaginated(companyId, filters);
   const { formatCurrency } = useFormatters(companyId);
-  const { getNextNumber } = useDocumentSequence();
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isVarianceOpen, setIsVarianceOpen] = useState(false);
-  const [editing, setEditing] = useState<WorkOrder | null>(null);
   const [viewing, setViewing] = useState<{ workOrder: WorkOrder; lines: WorkOrderLine[] } | null>(null);
   const [selectedVarianceId, setSelectedVarianceId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -102,108 +86,10 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
     }
   };
 
-  const [formData, setFormData] = useState({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: '', plannedEndDate: '', notes: '', batchNumber: '', supervisorId: '' });
-  const [availableBoms, setAvailableBoms] = useState<{ id: string; version: string; totalCost?: number; outputQuantity?: number }[]>([]);
-  // Per-batch material quantities of the selected BOM (base, before × batches).
-  const [bomBaseLines, setBomBaseLines] = useState<WorkOrderFormLine[] | null>(null);
-  const [bomOutputQuantity, setBomOutputQuantity] = useState<number>(1);
-  const [lines, setLines] = useState<WorkOrderFormLine[]>([{ materialId: '', plannedQuantity: 1, unitCost: 0, unitId: undefined, unitFactor: 1, unitName: undefined }]);
-  // Production costs (labor / energy / packaging / other) — capitalized on completion.
-  const [productionCosts, setProductionCosts] = useState<{ category: 'labor' | 'energy' | 'packaging' | 'other'; description: string; amount: string }[]>([
-    { category: 'labor', description: '', amount: '' },
-    { category: 'energy', description: '', amount: '' },
-    { category: 'packaging', description: '', amount: '' },
-    { category: 'other', description: '', amount: '' },
-  ]);
+  const openCreate = () => navigate('/manufacturing/work-orders/new');
 
-  // ── Live cost computation (server recomputes the same formula on save) ──
-  const materialsTotal = useMemo(
-    () => Math.round(lines.reduce((s, l) => s + ((Number(l.plannedQuantity) || 0) * (Number(l.unitCost) || 0)), 0) * 100) / 100,
-    [lines]
-  );
-
-  const productionCostsTotal = useMemo(
-    () => Math.round(productionCosts.reduce((s, c) => s + (Number(c.amount) || 0), 0) * 100) / 100,
-    [productionCosts]
-  );
-
-  const grandTotal = useMemo(
-    () => Math.round((materialsTotal + productionCostsTotal) * 100) / 100,
-    [materialsTotal, productionCostsTotal]
-  );
-
-  const batches = Math.max(Number(formData.quantity) || 0, 0);
-  const expectedProduction = useMemo(
-    () => Math.round(batches * bomOutputQuantity * 10000) / 10000,
-    [batches, bomOutputQuantity]
-  );
-
-  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
-
-  const resetForm = () => {
-    setFormData({ orderNumber: '', productId: '', bomId: '', quantity: '1', plannedStartDate: today, plannedEndDate: today, notes: '', batchNumber: '', supervisorId: '' });
-    setAvailableBoms([]);
-    setBomBaseLines(null);
-    setBomOutputQuantity(1);
-    setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0, unitId: undefined, unitFactor: 1, unitName: undefined }]);
-    setProductionCosts([
-      { category: 'labor', description: '', amount: '' },
-      { category: 'energy', description: '', amount: '' },
-      { category: 'packaging', description: '', amount: '' },
-      { category: 'other', description: '', amount: '' },
-    ]);
-    setEditing(null);
-  };
-
-  const openCreate = async () => {
-    resetForm();
-    const seq = await getNextNumber('work_order', companyId);
-    // Auto-generate the lot number up front so the user sees it before saving.
-    const bn = await manufacturingApi.getNextBatchNumber(companyId);
-    setFormData((prev) => ({
-      ...prev,
-      orderNumber: seq?.number || 'WO-00001',
-      batchNumber: bn?.success && bn.number ? bn.number : prev.batchNumber,
-    }));
-    setIsModalOpen(true);
-  };
-
-  const openEdit = async (wo: WorkOrder) => {
-    setEditing(wo);
-    setFormData({
-      orderNumber: wo.orderNumber,
-      productId: wo.productId,
-      bomId: wo.bomId || '',
-      quantity: String(wo.quantity),
-      plannedStartDate: wo.plannedStartDate || today,
-      plannedEndDate: wo.plannedEndDate || today,
-      notes: wo.notes || '',
-      batchNumber: wo.batchNumber || '',
-      supervisorId: wo.supervisorId || '',
-    });
-    const res = await manufacturingApi.getWorkOrderById(wo.id, companyId);
-    if (res.success && res.data) {
-      // Stored values are base — display starts at factor 1.
-      setLines(res.data.lines.map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost || 0, unitId: undefined, unitFactor: 1, unitName: undefined })));
-      const pcs = res.data.workOrder.productionCosts || [];
-      setProductionCosts([
-        { category: 'labor', description: pcs.find((c) => c.category === 'labor')?.description || '', amount: pcs.find((c) => c.category === 'labor') ? String(pcs.find((c) => c.category === 'labor')!.amount) : '' },
-        { category: 'energy', description: pcs.find((c) => c.category === 'energy')?.description || '', amount: pcs.find((c) => c.category === 'energy') ? String(pcs.find((c) => c.category === 'energy')!.amount) : '' },
-        { category: 'packaging', description: pcs.find((c) => c.category === 'packaging')?.description || '', amount: pcs.find((c) => c.category === 'packaging') ? String(pcs.find((c) => c.category === 'packaging')!.amount) : '' },
-        { category: 'other', description: pcs.find((c) => c.category === 'other')?.description || '', amount: pcs.find((c) => c.category === 'other') ? String(pcs.find((c) => c.category === 'other')!.amount) : '' },
-      ]);
-      const bomsRes = await manufacturingApi.getBoms(companyId);
-      if (bomsRes.success && bomsRes.data) {
-        setAvailableBoms(bomsRes.data.filter((b) => b.productId === wo.productId));
-        if (wo.bomId) {
-          const selected = bomsRes.data.find((b) => b.id === wo.bomId);
-          setBomOutputQuantity(selected?.outputQuantity ?? 1);
-        }
-      }
-    } else {
-      setLines([]);
-    }
-    setIsModalOpen(true);
+  const openEdit = (wo: WorkOrder) => {
+    navigate(`/manufacturing/work-orders/${wo.id}`);
   };
 
   const openView = async (wo: WorkOrder) => {
@@ -217,56 +103,6 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
   const openVariance = (id: string) => {
     setSelectedVarianceId(id);
     setIsVarianceOpen(true);
-  };
-
-  const handleSave = async () => {
-    const addToast = useToastStore.getState().addToast;
-    if (!formData.orderNumber || !formData.productId || !formData.quantity || Number(formData.quantity) <= 0) {
-      addToast('error', t('manufacturing.workOrders.requiredFields'));
-      return;
-    }
-    // Date validation (best practice): a schedule must make sense —
-    // the planned end can never be before the planned start.
-    if (formData.plannedStartDate && formData.plannedEndDate && formData.plannedEndDate < formData.plannedStartDate) {
-      addToast('error', t('manufacturing.workOrders.invalidDates'));
-      return;
-    }
-    const pcs = productionCosts
-      .filter((c) => Number(c.amount) > 0)
-      .map((c) => ({ category: c.category, description: c.description || undefined, amount: Number(c.amount) }));
-    const payload = {
-      companyId,
-      orderNumber: formData.orderNumber,
-      productId: formData.productId,
-      bomId: formData.bomId || undefined,
-      quantity: Number(formData.quantity) || 0,
-      status: (editing ? editing.status : 'planned') as WorkOrder['status'],
-      plannedStartDate: formData.plannedStartDate || undefined,
-      plannedEndDate: formData.plannedEndDate || undefined,
-      batchNumber: formData.batchNumber || undefined,
-      supervisorId: formData.supervisorId || undefined,
-      productionCosts: pcs,
-      notes: formData.notes || undefined,
-      // totalCost is computed SERVER-SIDE (materials + production costs) —
-      // the same formula the live card shows. No client override.
-      // Empty default rows (materialId = '') must be excluded — zod rejects ''
-      // as a uuid and the whole save fails silently otherwise.
-      // Display qty/cost are in the chosen unit — persist base values.
-      lines: lines
-        .filter((l) => l.materialId && Number(l.plannedQuantity) > 0)
-        .map((l) => {
-          const factor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
-          return { materialId: l.materialId, plannedQuantity: toBaseQty(Number(l.plannedQuantity), factor), unitCost: (Number(l.unitCost) || 0) / factor };
-        }),
-    };
-    const res = editing ? await update(editing.id, payload) : await create(payload);
-    if (res && res.success) {
-      addToast('success', t(editing ? 'manufacturing.workOrders.updated' : 'manufacturing.workOrders.created'));
-      setIsModalOpen(false);
-      resetForm();
-    } else {
-      addToast('error', res?.error || t('common.error'));
-    }
   };
 
   const handleDelete = async () => {
@@ -557,230 +393,6 @@ const [completionLines, setCompletionLines] = useState<{ id: string; materialNam
           </>
         )}
       </Card>
-
-      {/* Create/Edit Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => { setIsModalOpen(false); resetForm(); }}
-        title={editing ? t('manufacturing.workOrders.editWorkOrder') : t('manufacturing.workOrders.newWorkOrder')}
-        size="3xl"
-        footer={
-          <div className="flex items-center gap-2 justify-end w-full">
-            <Button variant="secondary" onClick={() => { setIsModalOpen(false); resetForm(); }}>{t('settings.common.cancel')}</Button>
-            <Button variant="primary" onClick={handleSave}>{t('settings.common.save')}</Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Input label={t('manufacturing.workOrders.orderNumber')} value={formData.orderNumber} onChange={(e) => setFormData((prev) => ({ ...prev, orderNumber: e.target.value }))} />
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.product')}</label>
-              <ProductSelect companyId={companyId} manufacturingRole="finished" value={formData.productId} onChange={async (v) => {
-                const productId = typeof v === 'string' ? v : '';
-                setFormData((prev) => ({ ...prev, productId, bomId: '' }));
-                if (productId) {
-                  const res = await manufacturingApi.getBoms(companyId);
-                  if (res.success && res.data) setAvailableBoms(res.data.filter((b) => b.productId === productId));
-                  else setAvailableBoms([]);
-                } else {
-                  setAvailableBoms([]);
-                }
-              }} placeholder={t('manufacturing.form.selectProduct')} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.form.bom')}</label>
-              <select value={formData.bomId} onChange={async (e) => {
-                const bomId = e.target.value;
-                setFormData((prev) => ({ ...prev, bomId }));
-                if (bomId) {
-                  const res = await manufacturingApi.getBomById(bomId, companyId);
-                  if (res.success && res.data) {
-                    const { bom, lines } = res.data;
-                    const outQty = Math.max(Number(bom.outputQuantity) || 1, 0.0001);
-                    setBomOutputQuantity(outQty);
-                    const base = lines.map((l) => ({ materialId: l.materialId, plannedQuantity: Number(l.quantity), unitCost: Number(l.unitCost || 0), unitId: undefined, unitFactor: 1, unitName: undefined }));
-                    setBomBaseLines(base);
-                    const n = Math.max(Number(formData.quantity) || 1, 1);
-                    setLines(base.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
-                  }
-                } else {
-                  setBomBaseLines(null);
-                  setBomOutputQuantity(1);
-                  setLines([{ materialId: '', plannedQuantity: 1, unitCost: 0, unitId: undefined, unitFactor: 1, unitName: undefined }]);
-                }
-              }} disabled={availableBoms.length === 0} className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
-                <option value="">{availableBoms.length === 0 ? t('manufacturing.workOrders.noBom') : t('manufacturing.workOrders.withoutBom')}</option>
-                {availableBoms.map((b) => (
-                  <option key={b.id} value={b.id}>{t('manufacturing.form.version')} {b.version} ({b.outputQuantity ?? 1} {t('manufacturing.bom.unit')})</option>
-                ))}
-              </select>
-            </div>
-            <Input
-              label={t('manufacturing.table.batches')}
-              type="number"
-              min={1}
-              value={formData.quantity}
-              onChange={(e) => {
-                const val = e.target.value;
-                setFormData((prev) => ({ ...prev, quantity: val }));
-                const n = Math.max(Number(val) || 1, 1);
-                if (bomBaseLines) {
-                  setLines(bomBaseLines.map((l) => ({ ...l, plannedQuantity: Math.round(l.plannedQuantity * n * 10000) / 10000 })));
-                }
-              }}
-              helperText={t('manufacturing.workOrders.batchesHint')}
-            />
-          </div>
-          {formData.bomId && (
-            <div className="rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 px-3 py-2 text-sm text-teal-800 dark:text-teal-300 flex items-center gap-2">
-              <Factory size={14} />
-              {t('manufacturing.workOrders.expectedProduction')}: <span className="font-bold tabular-nums">{expectedProduction}</span>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <Input label={t('manufacturing.workOrders.plannedStartDate')} type="date" value={formData.plannedStartDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedStartDate: e.target.value }))} />
-            <Input label={t('manufacturing.workOrders.plannedEndDate')} type="date" min={formData.plannedStartDate || undefined} value={formData.plannedEndDate} onChange={(e) => setFormData((prev) => ({ ...prev, plannedEndDate: e.target.value }))} />
-          </div>
-          {formData.plannedStartDate && formData.plannedEndDate && formData.plannedEndDate < formData.plannedStartDate && (
-            <p className="text-xs text-rose-600 font-medium">{t('manufacturing.workOrders.invalidDates')}</p>
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1"><UserCog size={13} /> {t('manufacturing.workOrders.supervisor')}</label>
-              <EmployeeSelect companyId={companyId} value={formData.supervisorId || undefined} onChange={(v) => setFormData((prev) => ({ ...prev, supervisorId: typeof v === 'string' ? v : '' }))} placeholder={t('manufacturing.workOrders.selectSupervisor')} />
-            </div>
-            <Input
-              label={t('manufacturing.table.batchNumber')}
-              value={formData.batchNumber}
-              onChange={(e) => setFormData((prev) => ({ ...prev, batchNumber: e.target.value }))}
-              placeholder={t('manufacturing.workOrders.batchAutoHint')}
-              helperText={t('manufacturing.workOrders.batchFormatHint')}
-            />
-          </div>
-
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">{t('manufacturing.workOrders.productionCosts')}</h4>
-            <p className="text-xs text-slate-500 mb-3">{t('manufacturing.workOrders.productionCostsHint')}</p>
-            <div className="space-y-2">
-              {productionCosts.map((pc, idx) => (
-                <div key={pc.category} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-3">
-                    <span className="block text-sm font-medium text-slate-600 dark:text-slate-300 pb-2">
-                      {pc.category === 'labor' ? t('manufacturing.costs.labor') : pc.category === 'energy' ? t('manufacturing.costs.energy') : pc.category === 'packaging' ? t('manufacturing.costs.packaging') : t('manufacturing.costs.other')}
-                    </span>
-                  </div>
-                  <div className="col-span-6">
-                    <Input
-                      label={idx === 0 ? t('manufacturing.costs.description') : ''}
-                      value={pc.description}
-                      onChange={(e) => setProductionCosts((prev) => prev.map((c, i) => i === idx ? { ...c, description: e.target.value } : c))}
-                      placeholder={t('manufacturing.costs.descriptionPlaceholder')}
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    <Input
-                      label={idx === 0 ? t('manufacturing.costs.amount') : ''}
-                      type="number"
-                      min={0}
-                      value={pc.amount}
-                      onChange={(e) => setProductionCosts((prev) => prev.map((c, i) => i === idx ? { ...c, amount: e.target.value } : c))}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex justify-between">
-              <span className="font-semibold text-slate-700 dark:text-slate-200">{t('manufacturing.costs.total')}:</span>
-              <span className="font-bold text-amber-600 tabular-nums">{formatCurrency(productionCostsTotal)}</span>
-            </div>
-          </div>
-
-          <Input label={t('manufacturing.form.notes')} value={formData.notes} onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))} placeholder={t('manufacturing.form.notesPlaceholder')} />
-
-          <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">{t('manufacturing.workOrders.plannedMaterials')}</h4>
-            <div className="space-y-2">
-              {lines.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                  <div className="col-span-4">
-                    <ProductSelect
-                      companyId={companyId}
-                      manufacturingRole="material"
-                      value={line.materialId}
-                      onChange={(v) => setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, materialId: typeof v === 'string' ? v : '', unitId: undefined, unitFactor: 1, unitName: undefined } : l)))}
-                      onProductChange={(product) =>
-                        setLines((prev) =>
-                          prev.map((l, i) =>
-                            i === idx ? { ...l, materialId: product.id, unitCost: l.unitCost ? l.unitCost : Number(product.costPrice) || 0, unitId: undefined, unitFactor: 1, unitName: undefined } : l
-                          )
-                        )
-                      }
-                      showBarcode
-                      showStock
-                      placeholder={idx === 0 ? t('manufacturing.bom.selectMaterial') : ''}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <ProductUnitSelect
-                      companyId={companyId}
-                      productId={line.materialId}
-                      value={line.unitId}
-                      onChange={(u) =>
-                        setLines((prev) => prev.map((l, i) => {
-                          if (i !== idx) return l;
-                          const oldFactor = l.unitFactor && l.unitFactor > 0 ? l.unitFactor : 1;
-                          const newFactor = u?.factor && u.factor > 0 ? u.factor : 1;
-                          const baseCost = (Number(l.unitCost) || 0) / oldFactor;
-                          return { ...l, unitId: u?.id, unitFactor: newFactor, unitName: u?.unitName, unitCost: baseCost * newFactor };
-                        }))
-                      }
-                      mode="purchase"
-                      size="sm"
-                    />
-                    {(line.unitFactor ?? 1) > 1 && (
-                      <p className="text-[10px] text-slate-400 mt-0.5 tabular-nums">≈ {toBaseQty(line.plannedQuantity, line.unitFactor ?? 1)} {t('manufacturing.line.baseEquivalent')}</p>
-                    )}
-                  </div>
-                  <div className="col-span-2">
-                    <Input label={idx === 0 ? t('manufacturing.bom.quantity') : ''} type="number" value={String(line.plannedQuantity)} onChange={(e) => setLines((prev) => prev.map((l, i) => i === idx ? { ...l, plannedQuantity: Number(e.target.value) } : l))} />
-                  </div>
-                  <div className="col-span-3">
-                    <Input label={idx === 0 ? t('manufacturing.bom.unitCost') : ''} type="number" value={String(line.unitCost)} onChange={(e) => setLines((prev) => prev.map((l, i) => i === idx ? { ...l, unitCost: Number(e.target.value) } : l))} />
-                  </div>
-                  {lines.length > 1 && (
-                    <div className="col-span-1">
-                      <Button variant="ghost" size="sm" onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))} className="text-rose-600">
-                        <Trash2 size={16} />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <Button variant="secondary" className="mt-3" onClick={() => setLines((prev) => [...prev, { materialId: '', plannedQuantity: 1, unitCost: 0 }])}>+ {t('manufacturing.actions.addMaterial')}</Button>
-          </div>
-
-          {/* Live auto-total card (server recomputes the same formula on save) */}
-          <div className="rounded-xl border border-teal-200 dark:border-teal-800 bg-gradient-to-br from-teal-50 to-emerald-50 dark:from-teal-900/20 dark:to-emerald-900/20 p-4 space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-600 dark:text-slate-300">{t('manufacturing.workOrders.materialsCost')}</span>
-              <span className="font-semibold tabular-nums">{formatCurrency(materialsTotal)}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-600 dark:text-slate-300">{t('manufacturing.workOrders.productionCostsTotal')}</span>
-              <span className="font-semibold tabular-nums">{formatCurrency(productionCostsTotal)}</span>
-            </div>
-            <div className="border-t border-teal-200 dark:border-teal-800 pt-2 flex items-center justify-between">
-              <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5"><Factory size={15} className="text-teal-600" /> {t('manufacturing.workOrders.autoTotalCost')}</span>
-              <span className="text-lg font-extrabold tabular-nums text-teal-700 dark:text-teal-300">{formatCurrency(grandTotal)}</span>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('manufacturing.workOrders.autoTotalHint')}</p>
-          </div>
-        </div>
-      </Modal>
 
       {/* Detail Modal */}
       <Modal

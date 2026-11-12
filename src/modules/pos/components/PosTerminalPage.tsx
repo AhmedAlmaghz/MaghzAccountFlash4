@@ -243,6 +243,10 @@ export const PosTerminalPage: React.FC = () => {
 
   // ── Held carts dialog ──
   const [heldOpen, setHeldOpen] = useState(false);
+  // Mobile view: on small screens the terminal switches between the
+  // product grid and the cart (full-screen), instead of cramming both
+  // side-by-side. Desktop always shows both (flex row).
+  const [mobileView, setMobileView] = useState<'products' | 'cart'>('products');
 
   // ── Payment modal ──
   const [payOpen, setPayOpen] = useState(false);
@@ -510,6 +514,7 @@ export const PosTerminalPage: React.FC = () => {
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { void handleScanOrEnter(search); setSearch(''); } }}
               placeholder={t('pos.searchPlaceholder')}
+              aria-label={t('pos.searchPlaceholder')}
               className="w-full min-h-11 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 ps-9 pe-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
               autoFocus
             />
@@ -532,10 +537,12 @@ export const PosTerminalPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Body: product grid (main) + cart (side) */}
-      <div className="flex-1 flex min-h-0">
+      {/* Body: product grid (main) + cart (side).
+          Desktop (sm+): side-by-side. Mobile: one pane at a time,
+          switched by the bottom tab bar — full width, no squeeze. */}
+      <div className="flex-1 flex min-h-0 flex-col sm:flex-row">
         {/* Product grid */}
-        <main className="flex-1 min-w-0 overflow-y-auto p-3">
+        <main className={`flex-1 min-w-0 overflow-y-auto p-3 pb-24 sm:pb-3 ${mobileView === 'cart' ? 'hidden sm:block' : 'block'}`}>
           {productsLoading ? (
             <div className="flex items-center justify-center h-full text-zinc-400">
               <Loader2 className="animate-spin" size={28} />
@@ -577,8 +584,8 @@ export const PosTerminalPage: React.FC = () => {
           )}
         </main>
 
-        {/* Cart panel */}
-        <aside className="w-full max-w-xs shrink-0 border-s border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col">
+        {/* Cart panel — full-pane on mobile, sidebar on desktop */}
+        <aside className={`${mobileView === 'cart' ? 'flex' : 'hidden'} sm:flex w-full sm:max-w-xs shrink-0 sm:border-s border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex-col`} aria-label={t('pos.cart')}>
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-800">
             <div className="flex items-center gap-1.5 font-semibold text-sm">
               <ShoppingCart size={16} />
@@ -654,6 +661,36 @@ export const PosTerminalPage: React.FC = () => {
           </div>
         </aside>
       </div>
+
+      {/* Mobile bottom tab bar — products / cart switch + pay shortcut.
+          Hidden on sm+ where both panes are visible side-by-side. */}
+      <nav className="sm:hidden sticky bottom-0 z-30 grid grid-cols-2 border-t border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur pb-[max(env(safe-area-inset-bottom),0.5rem)]" aria-label={t('pos.cart')}>
+        <button
+          type="button"
+          onClick={() => setMobileView('products')}
+          aria-pressed={mobileView === 'products'}
+          className={`flex flex-col items-center gap-0.5 py-2.5 min-h-14 text-xs font-semibold transition ${mobileView === 'products' ? 'text-primary-700 dark:text-primary-400' : 'text-zinc-500'}`}
+        >
+          <ScanBarcode size={20} />
+          <span>{t('pos.products')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileView('cart')}
+          aria-pressed={mobileView === 'cart'}
+          className={`flex flex-col items-center gap-0.5 py-2.5 min-h-14 text-xs font-semibold transition ${mobileView === 'cart' ? 'text-primary-700 dark:text-primary-400' : 'text-zinc-500'}`}
+        >
+          <span className="relative">
+            <ShoppingCart size={20} />
+            {totals.itemsCount > 0 && (
+              <span className="absolute -top-1.5 -end-2 rounded-full bg-primary-600 text-white text-[10px] font-bold px-1.5 py-0.5 min-w-5 text-center">
+                {totals.itemsCount}
+              </span>
+            )}
+          </span>
+          <span>{t('pos.cart')} · {formatCurrency(totals.totalAmount)}</span>
+        </button>
+      </nav>
 
       {/* Payment modal */}
       <Modal isOpen={payOpen} onClose={() => setPayOpen(false)} title={t('pos.payment')} size="sm">

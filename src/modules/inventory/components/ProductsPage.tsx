@@ -1,75 +1,22 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { Package, Plus, Upload, Camera, X, Hash, RefreshCw, FileText, Receipt, Layers, Tag, TrendingUp, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Package, Plus, FileText, Receipt, Layers, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { Card, Button, Modal, Table, Pagination, Can, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { EmptyState } from '@/core/ui/components/EmptyState';
-import { UnitSelect, ProductTypeSelect } from '@/core/ui/components/smart';
-import { useProductsPaginated, useProductCategories, useWarehouses } from '../hooks/useInventory';
-import { useProductTypes, useDocumentSequences } from '@/core/hooks/useSettings';
+import { useProductsPaginated, useProductCategories } from '../hooks/useInventory';
+import { useProductTypes } from '@/core/hooks/useSettings';
 import type { ProductType } from '@/core/types';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
-import { barcodeScanner } from '@/core/utils/barcodeScanner';
 import { logAudit } from '@/core/utils/auditLogger';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useToastStore } from '@/core/store/toastStore';
-import { getNextDocumentNumber } from '@/core/api';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import type { Product } from '../types';
-import { ProductUnitsSection } from './ProductUnitsSection';
-import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
-import { detectDuplicates, buildCompositeName } from '@/core/utils/duplicateDetection';
-import { inventoryApi } from '../api';
-
-interface FormData {
-  code: string;
-  codeAuto: boolean;
-  nameAr: string;
-  nameEn: string;
-  barcode: string;
-  sku: string;
-  unit: string;
-  costPrice: string;
-  standardCost: string;
-  salePrice: string;
-  minStock: string;
-  maxStock: string;
-  reorderPoint: string;
-  openingStockQty: string;
-  openingWarehouseId: string;
-  /** YYYY-MM-DD; empty = entry date (today). */
-  openingDate: string;
-  image: string;
-  categoryIds: string[];
-  productTypeId: string;
-  isActive: boolean;
-}
-
-const initialForm: FormData = {
-  code: '',
-  codeAuto: true,
-  nameAr: '',
-  nameEn: '',
-  barcode: '',
-  sku: '',
-  unit: '',
-  costPrice: '0',
-  standardCost: '',
-  salePrice: '0',
-  minStock: '0',
-  maxStock: '0',
-  reorderPoint: '0',
-  openingStockQty: '',
-  openingWarehouseId: '',
-  openingDate: '',
-  image: '',
-  categoryIds: [],
-  productTypeId: '',
-  isActive: true,
-};
 
 export const ProductsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -77,6 +24,7 @@ export const ProductsPage: React.FC = () => {
   const activeCompany = useAppStore((state) => state.activeCompany);
   const user = useAuthStore((state) => state.user);
   const companyId = activeCompany?.id || '';
+  const navigate = useNavigate();
 
   const [filterTypeId, setFilterTypeId] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -84,29 +32,15 @@ export const ProductsPage: React.FC = () => {
     productTypeId: filterTypeId || undefined,
     search: searchTerm || undefined,
   }), [filterTypeId, searchTerm]);
-  const { products, total, page, pageSize, isLoading, goToPage, changePageSize, create, update, remove } = useProductsPaginated(companyId, productFilters);
+  const { products, total, page, pageSize, isLoading, goToPage, changePageSize, remove } = useProductsPaginated(companyId, productFilters);
   const { categories } = useProductCategories(companyId);
   const { types: productTypes } = useProductTypes(companyId);
-  const { warehouses } = useWarehouses(companyId);
   const { formatCurrency } = useFormatters(companyId);
-  const { peekNextNumber } = useDocumentSequences(companyId);
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [formData, setFormData] = useState<FormData>(initialForm);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
-  const [scanning, setScanning] = useState(false);
   const [filterCategoryId, setFilterCategoryId] = useState<string>('');
-  const [saving, setSaving] = useState(false);
-  const [codePreview, setCodePreview] = useState<string>('');
-  const [duplicateOpen, setDuplicateOpen] = useState(false);
-  const [duplicateInputName, setDuplicateInputName] = useState('');
-  const [duplicateExact, setDuplicateExact] = useState<{ name: string; code?: string } | null>(null);
-  const [duplicateNear, setDuplicateNear] = useState<Array<{ name: string; code?: string; score: number }>>([]);
-  const duplicateConfirmedRef = useRef(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   const filteredProducts = useMemo(() => products.filter((p) => {
     if (!filterCategoryId) return true;
@@ -122,197 +56,18 @@ export const ProductsPage: React.FC = () => {
 
   const hasFilters = !!(searchTerm || filterTypeId || filterCategoryId);
 
-  const refreshCodePreview = useCallback(async () => {
-    if (!companyId) return;
-    const result = await peekNextNumber('product');
-    if (result.success && result.number) {
-      setCodePreview(result.number);
-      setFormData((prev) => (prev.codeAuto ? { ...prev, code: result.number! } : prev));
-    }
-  }, [companyId, peekNextNumber]);
-
-  useEffect(() => {
-    if (isModalOpen && !editingId) {
-      refreshCodePreview();
-    }
-  }, [isModalOpen, editingId, refreshCodePreview]);
-
   const handleOpenCreate = useCallback(() => {
-    setFormData(initialForm);
-    setEditingId(null);
-    setCodePreview('');
-    setIsModalOpen(true);
-  }, []);
+    navigate('/inventory/products/new');
+  }, [navigate]);
 
   const handleOpenEdit = useCallback((product: Product) => {
-    setFormData({
-      code: product.code,
-      codeAuto: false,
-      nameAr: product.nameAr,
-      nameEn: product.nameEn || '',
-      barcode: product.barcode || '',
-      sku: product.sku || '',
-      unit: product.unit || '',
-      costPrice: String(product.costPrice),
-      standardCost: product.standardCost !== null && product.standardCost !== undefined ? String(product.standardCost) : '',
-      salePrice: String(product.salePrice),
-      minStock: String(product.minStock ?? 0),
-      maxStock: String(product.maxStock ?? 0),
-      reorderPoint: String(product.reorderPoint ?? 0),
-      openingStockQty: product.openingStockPosted ? String(product.openingStockQty ?? '') : '',
-      openingWarehouseId: product.openingWarehouseId || '',
-      openingDate: product.openingDate ? String(product.openingDate).slice(0, 10) : '',
-      image: product.image || '',
-      categoryIds: product.categoryIds || [],
-      productTypeId: product.productTypeId || '',
-      isActive: product.isActive,
-    });
-    setEditingId(product.id);
-    setIsModalOpen(true);
-  }, []);
+    navigate(`/inventory/products/${product.id}`);
+  }, [navigate]);
 
   const handleViewDetail = useCallback((product: Product) => {
     setDetailProduct(product);
     setIsDetailOpen(true);
   }, []);
-
-  const stopBarcodeScan = useCallback(() => {
-    setScanning(false);
-    barcodeScanner.stopCamera();
-  }, []);
-
-  const closeModal = useCallback(() => {
-    setIsModalOpen(false);
-    stopBarcodeScan();
-    setFormData(initialForm);
-    setEditingId(null);
-    setCodePreview('');
-  }, [stopBarcodeScan]);
-
-  const handleSave = async () => {
-    if (!activeCompany) return;
-    if (!formData.nameAr.trim()) {
-      addToast('error', t('inventory.errors.nameRequired'));
-      return;
-    }
-    if (!formData.unit.trim()) {
-      addToast('error', t('inventory.errors.unitRequired'));
-      return;
-    }
-    const inputName = formData.nameAr.trim();
-    if (!duplicateConfirmedRef.current && inputName) {
-      try {
-        const allRes = await inventoryApi.getProducts(activeCompany.id);
-        if (allRes.success && allRes.data) {
-          const result = detectDuplicates(inputName, allRes.data as Product[], (p) => buildCompositeName(p.nameAr, p.nameEn), {
-            excludeId: editingId || undefined,
-            getId: (p) => p.id,
-            getCode: (p) => p.code || p.barcode || p.sku,
-            nearThreshold: 0.85,
-          });
-          // أيضاً فحص الكود المدخل يدوياً (إن لم يكن تلقائياً)
-          let codeDuplicate: typeof result.exactMatch | null = null;
-          if (!formData.codeAuto && formData.code.trim()) {
-            const codeRes = detectDuplicates(formData.code.trim(), allRes.data as Product[], (p) => p.code || '', {
-              excludeId: editingId || undefined,
-              getId: (p) => p.id,
-              nearThreshold: 0.9,
-            });
-            if (codeRes.exactMatch) codeDuplicate = codeRes.exactMatch;
-          }
-          const exactToShow = codeDuplicate ?? result.exactMatch;
-          if (exactToShow) {
-            setDuplicateInputName(codeDuplicate ? formData.code.trim() : inputName);
-            setDuplicateExact({ name: exactToShow.matchedName, code: exactToShow.matchedCode });
-            setDuplicateNear([]);
-            setDuplicateOpen(true);
-            return;
-          }
-          if (result.nearMatches.length > 0) {
-            setDuplicateInputName(inputName);
-            setDuplicateExact(null);
-            setDuplicateNear(result.nearMatches.map((m) => ({ name: m.matchedName, code: m.matchedCode, score: m.score })));
-            setDuplicateOpen(true);
-            return;
-          }
-        }
-      } catch {
-        /* فشل الفحص لا يمنع الحفظ */
-      }
-    }
-    duplicateConfirmedRef.current = false;
-    setSaving(true);
-    try {
-      let finalCode = formData.code.trim();
-      if (!editingId && formData.codeAuto) {
-        const result = await getNextDocumentNumber(activeCompany.id, 'product');
-        if (result.success && result.number) {
-          finalCode = result.number;
-        } else {
-          addToast('error', result.error || t('inventory.errors.codeGenerationFailed'));
-          setSaving(false);
-          return;
-        }
-      } else if (!editingId && !finalCode) {
-        addToast('error', t('inventory.errors.codeRequired'));
-        setSaving(false);
-        return;
-      }
-
-      const payload = {
-        companyId: activeCompany.id,
-        code: finalCode,
-        nameAr: formData.nameAr.trim(),
-        nameEn: formData.nameEn.trim() || undefined,
-        barcode: formData.barcode.trim() || undefined,
-        sku: formData.sku.trim() || undefined,
-        unit: formData.unit,
-        costPrice: Number(formData.costPrice) || 0,
-        standardCost: formData.standardCost.trim() === '' ? undefined : Number(formData.standardCost) || 0,
-        salePrice: Number(formData.salePrice) || 0,
-        isActive: formData.isActive,
-        image: formData.image || undefined,
-        minStock: Number(formData.minStock) || undefined,
-        maxStock: Number(formData.maxStock) || undefined,
-        reorderPoint: Number(formData.reorderPoint) || undefined,
-        categoryIds: formData.categoryIds.length > 0 ? formData.categoryIds : undefined,
-        productTypeId: formData.productTypeId || undefined,
-        openingStockQty: editingId ? undefined : (Number(formData.openingStockQty) || 0),
-        openingWarehouseId: editingId ? undefined : (formData.openingWarehouseId || null),
-        // Only meaningful when opening stock is actually posted; empty → the
-        // opening JE/FIFO layer use the entry date (today) as before.
-        openingDate: editingId || !(Number(formData.openingStockQty) > 0)
-          ? undefined
-          : (formData.openingDate.trim() || undefined),
-      };
-
-      if (editingId) {
-        const result = await update(editingId, payload);
-        if (result.success) {
-          await logAudit({ userId: user?.id || '', action: 'update', tableName: 'products', recordId: editingId, companyId: activeCompany.id });
-          addToast('success', t('inventory.product.updated'));
-          closeModal();
-        } else {
-          addToast('error', result.error || t('common.error'));
-        }
-      } else {
-        const result = await create(payload);
-        if (result.success) {
-          await logAudit({ userId: user?.id || '', action: 'create', tableName: 'products', recordId: result.id || '', companyId: activeCompany.id });
-          // The product row exists, but a follow-up step may not have landed
-          // (categories / base unit / opening-stock journal entry). Saying
-          // "created" and hiding that is the failure this warning exists for.
-          if (result.warning) addToast('warning', result.warning);
-          else addToast('success', t('inventory.product.created'));
-          closeModal();
-        } else {
-          addToast('error', result.error || t('common.error'));
-        }
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     if (!activeCompany) return;
@@ -324,60 +79,6 @@ export const ProductsPage: React.FC = () => {
       addToast('error', result.error || t('common.error'));
     }
     setConfirmDelete(null);
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      addToast('error', t('inventory.errors.imageTooLarge'));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFormData((prev) => ({ ...prev, image: reader.result as string }));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const startBarcodeScan = useCallback(async () => {
-    if (!videoRef.current) return;
-    setScanning(true);
-    try {
-      await barcodeScanner.startCameraScan(
-        videoRef.current,
-        (result) => {
-          setFormData((prev) => ({ ...prev, barcode: result.barcode }));
-          setScanning(false);
-          barcodeScanner.stopCamera();
-        },
-      );
-    } catch {
-      setScanning(false);
-      addToast('error', t('inventory.errors.cameraFailed'));
-    }
-  }, [addToast, t]);
-
-  const toggleCategory = (catId: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      categoryIds: prev.categoryIds.includes(catId)
-        ? prev.categoryIds.filter((id) => id !== catId)
-        : [...prev.categoryIds, catId],
-    }));
-  };
-
-  const handleUnitChange = (value: string | null) => {
-    setFormData((prev) => ({ ...prev, unit: value || '' }));
-  };
-
-  const handleCodeAutoToggle = (auto: boolean) => {
-    setFormData((prev) => {
-      if (auto) {
-        return { ...prev, codeAuto: true, code: codePreview };
-      }
-      return { ...prev, codeAuto: false };
-    });
   };
 
   const handleExportExcel = () => {
@@ -646,244 +347,6 @@ export const ProductsPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Create/Edit Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={closeModal}
-        title={editingId ? t('inventory.editProduct') : t('inventory.newProduct')}
-        description={editingId ? t('inventory.products.editDesc') : t('inventory.products.createDesc')}
-        size="xl"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <p className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5"><AlertCircle size={12} /> {t('inventory.products.requiredFields')}</p>
-            <div className="flex gap-2 ml-auto">
-              <Button variant="secondary" onClick={closeModal} disabled={saving}>{t('cancel')}</Button>
-              <Button variant="primary" onClick={handleSave} isLoading={saving}>{t('save')}</Button>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><Package size={12} /> {t('inventory.products.mediaSection')}</h4>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex items-center gap-4">
-                <div className="relative shrink-0">
-                  {formData.image ? (
-                    <img src={formData.image} alt="product" className="w-20 h-20 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-sm" />
-                  ) : (
-                    <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center border border-slate-200 dark:border-slate-700">
-                      <Package size={24} className="text-slate-400" />
-                    </div>
-                  )}
-                  <label className="absolute -bottom-2 -right-2 w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center cursor-pointer shadow hover:bg-primary-700 transition">
-                    <Upload size={14} className="text-white" />
-                    <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                  </label>
-                </div>
-                <div className="text-xs text-slate-500 leading-relaxed hidden sm:block">
-                  <p className="font-medium text-slate-700 dark:text-slate-300">صورة المنتج</p>
-                  <p>اختيارية • حتى 2MB</p>
-                  <p>JPG, PNG</p>
-                </div>
-              </div>
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.barcode')}</label>
-                  <div className="flex gap-1.5">
-                    <input type="text" value={formData.barcode} onChange={(e) => setFormData((prev) => ({ ...prev, barcode: e.target.value }))} className="flex-1 h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono" placeholder={t('inventory.barcodePlaceholder')} />
-                    {!scanning ? (
-                      <Button variant="secondary" size="sm" onClick={startBarcodeScan} title={t('inventory.scanBarcode')} className="h-10 w-10 p-0"><Camera size={14} /></Button>
-                    ) : (
-                      <Button variant="danger" size="sm" onClick={stopBarcodeScan} title={t('inventory.stopScan')} className="h-10 w-10 p-0"><X size={14} /></Button>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.sku')}</label>
-                  <input type="text" value={formData.sku} onChange={(e) => setFormData((prev) => ({ ...prev, sku: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono" placeholder={t('inventory.skuPlaceholder')} />
-                </div>
-              </div>
-            </div>
-            {scanning && (
-              <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-black mt-3">
-                <video ref={videoRef} className="w-full h-48 object-cover" playsInline muted />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-48 h-24 border-2 border-primary-400 rounded-lg opacity-60" />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><Hash size={12} /> البيانات الأساسية</h4>
-            <div className="grid grid-cols-12 gap-3">
-              <div className="col-span-12 sm:col-span-4">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-2">
-                  {t('inventory.productCode')}
-                  {!editingId && (
-                    <button type="button" onClick={() => handleCodeAutoToggle(!formData.codeAuto)} className={`text-[10px] px-2 py-0.5 rounded-full border transition ${formData.codeAuto ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 border-primary-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                      {formData.codeAuto ? <><RefreshCw size={10} className="inline mr-1" />{t('inventory.autoNumber')}</> : t('inventory.manual')}
-                    </button>
-                  )}
-                </label>
-                <div className="flex gap-1.5">
-                  <input type="text" value={formData.code} onChange={(e) => setFormData((prev) => ({ ...prev, code: e.target.value, codeAuto: false }))} disabled={!editingId && formData.codeAuto} className="flex-1 h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono disabled:bg-slate-50 dark:disabled:bg-slate-800/50 disabled:text-slate-500" placeholder={formData.codeAuto ? codePreview : t('inventory.codePlaceholder')} />
-                  {!editingId && formData.codeAuto && (
-                    <Button variant="ghost" size="sm" onClick={refreshCodePreview} title={t('inventory.refreshCode')} className="h-10 w-10 p-0"><RefreshCw size={14} /></Button>
-                  )}
-                </div>
-                {formData.codeAuto && !editingId && codePreview && <p className="text-xs text-slate-500 mt-1">{t('inventory.nextCodeWillBe')}: <span className="font-mono text-primary-600 font-bold">{codePreview}</span></p>}
-              </div>
-              <div className="col-span-12 sm:col-span-5">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.productName')} <span className="text-rose-500">*</span></label>
-                <input type="text" value={formData.nameAr} onChange={(e) => setFormData((prev) => ({ ...prev, nameAr: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm" placeholder={t('inventory.productNamePlaceholder')} required />
-              </div>
-              <div className="col-span-12 sm:col-span-3">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.unitName')} <span className="text-rose-500">*</span></label>
-                <UnitSelect companyId={companyId} value={formData.unit} onChange={handleUnitChange} size="sm" />
-              </div>
-            </div>
-            <div className="mt-4">
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.nameEnglish')}</label>
-              <input type="text" value={formData.nameEn} onChange={(e) => setFormData((prev) => ({ ...prev, nameEn: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm" placeholder={t('inventory.nameEnglishPlaceholder')} dir="ltr" />
-            </div>
-            <div className="mt-4">
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5"><Tag size={12} className="inline mr-1" />{t('inventory.productType')}</label>
-              <ProductTypeSelect companyId={companyId} value={formData.productTypeId} onChange={(v) => setFormData((prev) => ({ ...prev, productTypeId: v || '' }))} size="sm" />
-            </div>
-          </div>
-
-          <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-          <div>
-            <h4 className="text-xs font-bold tracking-wider uppercase text-slate-500 mb-3 flex items-center gap-2"><TrendingUp size={12} /> التسعير والحالة</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.costPrice')}</label>
-                <input type="number" step="0.01" min="0" value={formData.costPrice} onChange={(e) => setFormData((prev) => ({ ...prev, costPrice: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.standardCost')}</label>
-                <input type="number" step="0.01" min="0" placeholder={formData.costPrice} value={formData.standardCost} onChange={(e) => setFormData((prev) => ({ ...prev, standardCost: e.target.value }))} title={t('inventory.standardCostHint')} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.salePrice')}</label>
-                <input type="number" step="0.01" min="0" value={formData.salePrice} onChange={(e) => setFormData((prev) => ({ ...prev, salePrice: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums font-semibold" />
-              </div>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition h-10 mt-6">
-                <input type="checkbox" checked={formData.isActive} onChange={(e) => setFormData((prev) => ({ ...prev, isActive: e.target.checked }))} className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t('inventory.active')}</span>
-                <Badge className={`ml-auto border text-xs ${formData.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-200 text-slate-600 border-slate-300'}`}>{formData.isActive ? 'نشط' : 'موقوف'}</Badge>
-              </label>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.minStock')}</label>
-              <input type="number" step="0.01" min="0" value={formData.minStock} onChange={(e) => setFormData((prev) => ({ ...prev, minStock: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.maxStock')}</label>
-              <input type="number" step="0.01" min="0" value={formData.maxStock} onChange={(e) => setFormData((prev) => ({ ...prev, maxStock: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.reorderPoint')}</label>
-              <input type="number" step="0.01" min="0" value={formData.reorderPoint} onChange={(e) => setFormData((prev) => ({ ...prev, reorderPoint: e.target.value }))} className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums" />
-            </div>
-          </div>
-
-          {/* Multi-unit: manageable only once the product exists (edit mode).
-              The base unit row is auto-created with the product. */}
-          {editingId ? (
-            <ProductUnitsSection
-              companyId={companyId}
-              productId={editingId}
-              baseSalePrice={Number(formData.salePrice) || 0}
-              basePurchasePrice={Number(formData.costPrice) || 0}
-            />
-          ) : null}
-
-          {/* Opening stock (create mode only) */}
-          <div className="rounded-xl border border-dashed border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-900/10 p-4 space-y-3">
-            <p className="text-xs font-bold tracking-wider uppercase text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-              <Package size={12} /> {t('openingBalance.stockSection')}
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('openingBalance.stockQty')}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  disabled={!!editingId}
-                  value={formData.openingStockQty}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, openingStockQty: e.target.value }))}
-                  placeholder="0"
-                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm tabular-nums disabled:opacity-60 disabled:cursor-not-allowed"
-                />
-                {Number(formData.openingStockQty) > 0 && (
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-                    {t('openingBalance.stockValue')}: <span className="font-bold tabular-nums">{formatCurrency(Number(formData.openingStockQty) * (Number(formData.costPrice) || 0))}</span>
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('inventory.selectWarehouseLabel')}</label>
-                <select
-                  value={formData.openingWarehouseId}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, openingWarehouseId: e.target.value }))}
-                  disabled={!!editingId}
-                  aria-label={t('inventory.selectWarehouseLabel')}
-                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <option value="">{t('inventory.selectWarehouseLabel')}</option>
-                  {warehouses.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                  ))}
-                </select>
-                {editingId ? (
-                  <p className="text-xs text-slate-400 mt-1">{t('openingBalance.postedHint')}</p>
-                ) : (
-                  <p className="text-xs text-slate-400 mt-1">{t('openingBalance.stockHint')}</p>
-                )}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">{t('openingBalance.dateLabel')}</label>
-                <input
-                  type="date"
-                  disabled={!!editingId}
-                  value={formData.openingDate}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, openingDate: e.target.value }))}
-                  aria-label={t('openingBalance.dateLabel')}
-                  title={t('openingBalance.dateHint')}
-                  className="w-full h-10 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                />
-                <p className="text-xs text-slate-400 mt-1">{t('openingBalance.dateHint')}</p>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-2 flex items-center gap-2"><Layers size={12} /> {t('inventory.categories')}</label>
-            {categories.length === 0 ? (
-              <p className="text-sm text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border border-dashed">{t('inventory.noCategoriesAvailable')}</p>
-            ) : (
-              <div className="flex flex-wrap gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
-                {categories.map((cat) => (
-                  <button key={cat.id} type="button" onClick={() => toggleCategory(cat.id)} className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${formData.categoryIds.includes(cat.id) ? 'bg-primary-600 text-white border-primary-600 shadow-sm' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-100'}`}>
-                    {cat.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
-
       {/* Detail Modal */}
       <Modal
         isOpen={isDetailOpen}
@@ -956,21 +419,6 @@ export const ProductsPage: React.FC = () => {
       </Modal>
 
       <ConfirmDialog isOpen={!!confirmDelete} onClose={() => setConfirmDelete(null)} onConfirm={() => confirmDelete && handleDelete(confirmDelete)} title={t('delete')} message={t('inventory.deleteConfirm')} variant="danger" />
-
-      <DuplicateWarningDialog
-        isOpen={duplicateOpen}
-        onClose={() => setDuplicateOpen(false)}
-        onConfirm={() => {
-          duplicateConfirmedRef.current = true;
-          setDuplicateOpen(false);
-          void handleSave();
-        }}
-        inputName={duplicateInputName}
-        entityLabel={t('inventory.products.title')}
-        exactMatch={duplicateExact}
-        nearMatches={duplicateNear}
-        isEdit={!!editingId}
-      />
     </div>
   );
 };
