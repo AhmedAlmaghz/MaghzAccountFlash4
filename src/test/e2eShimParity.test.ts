@@ -1,13 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import {
+  extractShimCode,
+  parseShimCode,
+  checkStaticParamCounts,
+} from '../../scripts/shimChecks.mjs';
 
 /**
  * Parity gate for the e2e bridge shim (e2e/vite-e2e-plugin.ts).
  *
  * The shim is the app's substitute for the main process in the browser. It
- * drifted from production in three ways that made whole screens silently
- * empty or unwritable:
+ * drifted from production in four ways that made whole screens silently
+ * empty, unwritable, or simply dead:
  *
  *  1. the paged reads answered with the old `COUNT(*) OVER()` shape, which
  *     has no `has_row` column — splitPagedRpcRows() dropped every row;
@@ -15,9 +20,14 @@ import { resolve } from 'node:path';
  *     used `this._cid()` at all (an arrow captures `this` lexically, so it
  *     never sees the called object);
  *  3. a query passed a different number of parameters than it had
- *     placeholders — PostgreSQL rejects the statement and the write fails.
+ *     placeholders — PostgreSQL rejects the statement and the write fails;
+ *  4. a SQL literal lost its escaping backslash, so the whole shim stopped
+ *     PARSING — `window.electronDB` was then never defined and every page
+ *     showed "cannot connect to the database" with no hint about the cause.
  *
- * These are cheap to check statically, so they are checked here.
+ * The analysis lives in `scripts/shimChecks.mjs`, shared with the
+ * plain-node CLIs — the CLI and this gate once carried DIFFERENT logic for
+ * the same rule, so each missed what the other caught.
  */
 
 const SHIM_PATH = resolve(process.cwd(), 'e2e/vite-e2e-plugin.ts');
@@ -41,28 +51,6 @@ function surfaceBlock(name: string): string {
     }
   }
   return '';
-}
-
-/** Count the top-level entries of a params array literal. */
-function countParams(src: string): number {
-  let depth = 0;
-  let count = 0;
-  let inStr: string | null = null;
-  let sawValue = false;
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    if (inStr) {
-      if (c === '\\') { i++; continue; }
-      if (c === inStr) inStr = null;
-      continue;
-    }
-    if (c === "'" || c === '"' || c === '`') { inStr = c; sawValue = true; continue; }
-    if (c === '(' || c === '[' || c === '{') { depth++; continue; }
-    if (c === ')' || c === ']' || c === '}') { depth--; continue; }
-    if (c === ',' && depth === 0) { count++; continue; }
-    if (!/\s/.test(c)) sawValue = true;
-  }
-  return sawValue ? count + 1 : 0;
 }
 
 describe('e2e bridge shim parity', () => {
@@ -93,32 +81,20 @@ describe('e2e bridge shim parity', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('every static query passes as many params as it has placeholders', () => {
-    const problems: string[] = [];
-    const re = /post\(\s*(["'`])([\s\S]*?)\1\s*,\s*\[/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(shimBody)) !== null) {
-      const sql = m[2];
-      // Dynamic SQL (built by concatenation) cannot be counted statically.
-      if (/'\s*\+|\+\s*'|\+\(/.test(sql)) continue;
+  it('the generated shim PARSES (a lost escape kills the whole bridge)', () => {
+    const code = extractShimCode(shim);
+    const result = parseShimCode(code);
+    expect(
+      result.ok ? '' : `${result.error}\n${(result.context ?? []).join('\n')}`,
+    ).toBe('');
+  });
 
-      const arrStart = m.index + m[0].length - 1;
-      let depth = 0;
-      let end = arrStart;
-      for (let i = arrStart; i < shimBody.length; i++) {
-        if (shimBody[i] === '[') depth++;
-        else if (shimBody[i] === ']') { depth--; if (depth === 0) { end = i; break; } }
-      }
-      const params = countParams(shimBody.slice(arrStart + 1, end));
-      const placeholders = new Set((sql.match(/\$(\d+)/g) || []).map((x) => Number(x.slice(1))));
-      const max = placeholders.size ? Math.max(...placeholders) : 0;
-      if (params !== max) {
-        const before = shimBody.slice(Math.max(0, m.index - 500), m.index);
-        const names = [...before.matchAll(/([A-Za-z0-9_]+)\s*:\s*(?:async\s+)?(?:function\s*)?\(/g)];
-        problems.push(`${names.length ? names[names.length - 1][1] : '?'}: ${max} placeholders vs ${params} params`);
-      }
-    }
-    expect(problems).toEqual([]);
+  it('every static query passes as many params as it has placeholders', () => {
+    const { problems } = checkStaticParamCounts(shimBody);
+    expect(
+      problems.map((p) => `${p.method}: ${p.placeholders} placeholders vs ${p.params} params — ${p.sql}`),
+      'a query whose parameter count does not match its placeholders is rejected by PostgreSQL',
+    ).toEqual([]);
   });
 
   it('normalizes the window-count paged shape to the production has_row shape', () => {

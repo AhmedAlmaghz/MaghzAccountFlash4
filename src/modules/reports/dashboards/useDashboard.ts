@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getDbAdapter } from '@/core/database/adapters';
+import { cachedPromise, invalidateQueryCache } from '@/core/utils/queryCache';
 import type { DbAdapter } from '@/core/database/adapters/types';
 import { aggregateCustomerAging, parseOutstandingRows, type CustomerAging } from '@/core/utils/aging';
 import { crmApi } from '@/modules/crm/api';
@@ -114,11 +115,19 @@ export function useDashboard(companyId: string, filters: DashboardFilters) {
         const currentRange = getPeriodDates(filters.period, filters.dateRange);
         const prevRange = filters.comparePrevious ? getPreviousPeriodDates(filters.period, filters.dateRange) : null;
 
-        const currentData = await fetchDashboardData(adapter, companyId, currentRange);
+        const currentData = await cachedPromise(
+          `dashboard:${companyId}:current:${rangeKey(currentRange)}`,
+          DASHBOARD_TTL_MS,
+          () => fetchDashboardData(adapter, companyId, currentRange),
+        );
         let previousData: DashboardData | undefined;
 
         if (prevRange) {
-          previousData = await fetchDashboardData(adapter, companyId, prevRange);
+          previousData = await cachedPromise(
+            `dashboard:${companyId}:previous:${rangeKey(prevRange)}`,
+            DASHBOARD_TTL_MS,
+            () => fetchDashboardData(adapter, companyId, prevRange),
+          );
         }
 
         if (!cancelled) {
@@ -140,6 +149,19 @@ export function useDashboard(companyId: string, filters: DashboardFilters) {
   }, [companyId, filters]);
 
   return { data, isLoading };
+}
+
+/** How long a dashboard read stays fresh. */
+const DASHBOARD_TTL_MS = 15_000;
+
+/** A stable key for a date range (the dashboard cache is keyed by it). */
+function rangeKey(range: { from: Date; to: Date }): string {
+  return `${formatDate(range.from)}..${formatDate(range.to)}`;
+}
+
+/** Force the dashboard to re-read (the refresh button calls this). */
+export function invalidateDashboardCache(companyId?: string): void {
+  invalidateQueryCache(companyId ? `dashboard:${companyId}` : 'dashboard:');
 }
 
 // Phase 2 (IAS 21): aging aggregates in BASE currency — document-currency

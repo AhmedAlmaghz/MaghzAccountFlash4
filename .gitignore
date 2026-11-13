@@ -20,6 +20,8 @@ build-output.txt
 lint-output.txt
 test-output.txt
 *-out.txt
+# The reverse-proof scripts leave a backup behind while a defect is injected
+e2e/vite-e2e-plugin.ts.proof.bak
 
 # Electron build output
 release/

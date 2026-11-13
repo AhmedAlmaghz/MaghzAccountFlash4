@@ -58,7 +58,11 @@
     "db:check": "drizzle-kit check --config drizzle.config.ts",
     "preflight": "npm run lint && npx tsc -b && npm run test",
     "e2e:reset": "node electron/resetDatabase.js --yes --force --admin-password admin1234",
-    "db:sync": "node --env-file=.env.local scripts/db-sync.mjs"
+    "db:sync": "node --env-file=.env.local scripts/db-sync.mjs",
+    "check:shim": "node scripts/check-shim-parse.mjs && node scripts/check-shim-params.mjs && node scripts/check-statement-labels.cjs && node scripts/check-shim-integrity.cjs",
+    "check:encoding": "node scripts/check-encoding.mjs",
+    "check:editors": "node scripts/check-editor-payloads.mjs",
+    "check:gates": "npm run check:encoding && npm run check:shim && npm run check:editors"
   },
   "build": {
     "appId": "com.maghzaccount.pro",

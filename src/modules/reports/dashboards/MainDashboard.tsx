@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   TrendingUp, TrendingDown, DollarSign, FileText, Package, ShoppingCart, Users, AlertTriangle,
   Calendar, ChevronDown, Download, FilePlus, BookOpen, PlusCircle, UserPlus, RotateCcw, Factory,
@@ -8,6 +8,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useAppStore } from '@/core/store';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
 import { useDashboard, type PeriodFilter, type DashboardFilters, type DashboardData } from './useDashboard';
+import { cachedPromise } from '@/core/utils/queryCache';
 import {
   MonthlyRevenueChart, TopProductsChart, ArAgingChart, CashFlowChart,
   SalesTrendChart, ProfitTrendChart, CategoryShareChart, OpportunityFunnelChart
@@ -447,19 +448,54 @@ const MainDashboard: React.FC = () => {
   );
 };
 
-function ManufacturingKpiSection({ companyId }: { companyId: string }) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [kpis, setKpis] = useState<{ totalWorkOrders: number; activeOrders: number; completedOrders: number; totalProductionCost: number } | null>(null);
+/**
+ * How long a KPI read stays fresh.
+ */
+const KPI_TTL_MS = 15_000;
+
+/**
+ * Read a KPI bundle once per company.
+ *
+ * Each KPI section used to fetch on mount, and React mounts the tree TWICE
+ * in development — so every counter was read twice (16 extra requests on the
+ * dashboard alone). The shared cache collapses that to one read and also
+ * makes a return visit to the dashboard instant.
+ *
+ * The loader is kept in a ref: it is usually an inline arrow, and a new
+ * reference on every render would re-trigger the effect.
+ */
+function useCachedKpi<T>(
+  key: string,
+  companyId: string,
+  loader: (companyId: string) => Promise<{ success: boolean; data?: T }>,
+): T | null {
+  const [kpis, setKpis] = useState<T | null>(null);
+  const loaderRef = useRef(loader);
+
+  useEffect(() => {
+    loaderRef.current = loader;
+  });
 
   useEffect(() => {
     if (!companyId) return;
     let cancelled = false;
-    manufacturingApi.getManufacturingKpis(companyId).then((res) => {
-      if (!cancelled && res.success && res.data) setKpis(res.data);
-    });
+    cachedPromise(`kpi:${key}:${companyId}`, KPI_TTL_MS, () => loaderRef.current(companyId))
+      .then((res) => {
+        if (!cancelled && res.success && res.data) setKpis(res.data);
+      })
+      .catch(() => {
+        // The widget simply stays hidden — a missing KPI must not break the page.
+      });
     return () => { cancelled = true; };
-  }, [companyId]);
+  }, [companyId, key]);
+
+  return kpis;
+}
+
+function ManufacturingKpiSection({ companyId }: { companyId: string }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const kpis = useCachedKpi('manufacturing', companyId, (id) => manufacturingApi.getManufacturingKpis(id));
 
   if (!kpis) return null;
 
@@ -482,16 +518,7 @@ function ManufacturingKpiSection({ companyId }: { companyId: string }) {
 function PurchasesKpiSection({ companyId }: { companyId: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [kpis, setKpis] = useState<{ totalOrders: number; pendingOrders: number; totalInvoicesValue: number; apOutstanding: number } | null>(null);
-
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    purchasesApi.getPurchasesKpis(companyId).then((res) => {
-      if (!cancelled && res.success && res.data) setKpis(res.data);
-    });
-    return () => { cancelled = true; };
-  }, [companyId]);
+  const kpis = useCachedKpi('purchases', companyId, (id) => purchasesApi.getPurchasesKpis(id));
 
   if (!kpis) return null;
 
@@ -514,16 +541,7 @@ function PurchasesKpiSection({ companyId }: { companyId: string }) {
 function InventoryKpiSection({ companyId }: { companyId: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [kpis, setKpis] = useState<{ stockValue: number; lowStockItems: number; warehouseCount: number; stockMovementsCount: number } | null>(null);
-
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    inventoryApi.getInventoryKpis(companyId).then((res) => {
-      if (!cancelled && res.success && res.data) setKpis(res.data);
-    });
-    return () => { cancelled = true; };
-  }, [companyId]);
+  const kpis = useCachedKpi('inventory', companyId, (id) => inventoryApi.getInventoryKpis(id));
 
   if (!kpis) return null;
 
@@ -546,16 +564,7 @@ function InventoryKpiSection({ companyId }: { companyId: string }) {
 function HrKpiSection({ companyId }: { companyId: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [kpis, setKpis] = useState<{ totalEmployees: number; activeEmployees: number; pendingLeaves: number; totalPayrollAmount: number } | null>(null);
-
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-    hrApi.getHrKpis(companyId).then((res) => {
-      if (!cancelled && res.success && res.data) setKpis(res.data);
-    });
-    return () => { cancelled = true; };
-  }, [companyId]);
+  const kpis = useCachedKpi('hr', companyId, (id) => hrApi.getHrKpis(id));
 
   if (!kpis) return null;
 

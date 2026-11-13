@@ -64,5 +64,62 @@ function post(path, body) {
     const r = await get(route);
     console.log(`${route} -> ${r.status} (${r.ms}ms)`);
   }
+
+  // 4) The HTTP pass above only fetches index.html — it does NOT make vite
+  //    transform the route's JS modules (that happens when the BROWSER asks
+  //    for them). Without this step the FIRST spec of the run pays the whole
+  //    transform cost (recharts alone is hundreds of modules) and blows its
+  //    30s navigation timeout, which looks exactly like a broken app.
+  await warmWithBrowser();
+
   console.log('WARM_READY');
 })();
+
+/** Visit the heavy routes in a real browser so their modules are transformed. */
+async function warmWithBrowser() {
+  let chromium;
+  try {
+    ({ chromium } = require('playwright'));
+  } catch {
+    console.log('(playwright not available — skipped the browser warm-up)');
+    return;
+  }
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch (err) {
+    console.log('(chromium did not start — skipped the browser warm-up:', String(err.message).slice(0, 80), ')');
+    return;
+  }
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('maghzaccount-db-mode', 'pg');
+        localStorage.setItem('maghzaccount-onboarding', JSON.stringify({
+          state: {
+            completed: true, currentStep: 4, seedOption: 'demo', isProcessing: false,
+            processingMessage: '', error: null,
+            companyConfig: { name: 'شركة المغزى للتجارة والصناعة', currency: 'YER' },
+            dbConfig: { host: 'localhost', port: 5432, database: 'MaghzAccountFlash35', user: 'maghz', ssl: false },
+          },
+          version: 0,
+        }));
+      } catch { /* ignore */ }
+    });
+    // The dashboard pulls the heaviest graph (recharts).
+    for (const route of ['/login', '/', '/reports', '/reports/profit-analysis']) {
+      const started = Date.now();
+      try {
+        await page.goto(BASE + route, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+        await page.waitForTimeout(1500);
+        console.log(`warm ${route} -> ${Date.now() - started}ms`);
+      } catch (err) {
+        console.log(`warm ${route} failed: ${String(err.message).slice(0, 80)}`);
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+}

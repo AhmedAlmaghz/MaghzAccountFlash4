@@ -183,6 +183,24 @@ export default defineConfig(({ mode }) => ({
       '@root': path.resolve(__dirname, './'),
     },
   },
+  server: {
+    // Build output is not source: without this, a Gradle/ESLint/Playwright
+    // write into android/build (or dist, test-results, …) makes the dev
+    // server reload the whole app mid-session — which shows up as random
+    // "database connection failed" screens and flaky tests.
+    watch: {
+      ignored: [
+        '**/android/build/**',
+        '**/android/app/build/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/test-results/**',
+        '**/playwright-report/**',
+        '**/node_modules/**',
+        '**/.git/**',
+      ],
+    },
+  },
   build: {
     rollupOptions: {
       output: {

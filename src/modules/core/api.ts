@@ -2,6 +2,7 @@ import { getDbAdapter, isElectronPg } from '@/core/database/adapters';
 import { safeUserId } from '@/core/utils/userIdValidator';
 import { validateInput, companyIdSchema } from '@/core/utils/validation';
 import { mapRows } from '@/core/utils/mapPgRow';
+import { invalidateSettingsCache } from '@/core/utils/useSettings';
 import type { Company, Currency, VatSetting, Branch, Setting } from './types';
 
 // Typed RPC bridge for settings (Phase 4 slice 6). When the Electron IPC
@@ -248,6 +249,10 @@ export const coreApi = {
   async setSetting(data: Omit<Setting, 'id'>): Promise<{ success: boolean; error?: string }> {
     const cidValidation = validateInput(companyIdSchema, data.companyId);
     if (!cidValidation.success) return { success: false, error: cidValidation.error };
+    // The settings cache (see useSettings) serves the VAT rate, the number
+    // format and the default accounts to every mounted component — a write
+    // must drop it or the new value stays invisible until the TTL expires.
+    invalidateSettingsCache(data.companyId);
     if (isElectronPg()) {
       const result = await invokeCoreRpc<Setting>('setSetting', {
         key: data.key,

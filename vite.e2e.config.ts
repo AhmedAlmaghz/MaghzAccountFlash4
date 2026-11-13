@@ -32,4 +32,21 @@ export default defineConfig({
     'import.meta.env.VITE_E2E': JSON.stringify('1'),
     __APP_VERSION__: JSON.stringify(appVersion()),
   },
+  server: {
+    // Keep in sync with vite.config.ts — build output is not source, and a
+    // watcher reload on it breaks the page mid-test (random "database
+    // connection failed" screens).
+    watch: {
+      ignored: [
+        '**/android/build/**',
+        '**/android/app/build/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/test-results/**',
+        '**/playwright-report/**',
+        '**/node_modules/**',
+        '**/.git/**',
+      ],
+    },
+  },
 });
