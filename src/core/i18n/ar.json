@@ -1312,7 +1312,8 @@
       "unbalanced": "غير متوازن",
       "difference": "الفرق",
       "accountRequired": "يجب اختيار حساب لكل سطر"
-    }
+    },
+    "checkNumberRequired": "يرجى إدخال رقم الشيك"
   },
   "inventory": {
     "products": {
@@ -1509,7 +1510,8 @@
     "product": {
       "created": "تم إنشاء المنتج بنجاح",
       "updated": "تم تحديث المنتج بنجاح",
-      "deleted": "تم حذف المنتج بنجاح"
+      "deleted": "تم حذف المنتج بنجاح",
+      "code": "كود المنتج"
     },
     "transaction": {
       "created": "تم إنشاء الحركة بنجاح",
@@ -4169,7 +4171,8 @@
     "paymentType": "نوع الدفع",
     "phone": "الهاتف",
     "post": "ترحيل",
-    "reference": "المرجع"
+    "reference": "المرجع",
+    "or": "أو"
   },
   "pagination": {
     "first": "الأولى",

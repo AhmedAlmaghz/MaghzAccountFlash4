@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Save, Send } from 'lucide-react';
+import { Save, Send, Printer, FileSpreadsheet, FileDown } from 'lucide-react';
 import { Card, Button, Input } from '@/core/ui/components';
 import { DocumentPageShell, DocumentItemsGrid, TotalsPanel, useDocumentEditorGuard, useRestoreDraft, UnsavedChangesDialog, type DocumentLine } from '@/core/ui/components/document';
 import { CustomerSelect, CurrencySelect, CashBoxSelect } from '@/core/ui/components/smart';
@@ -16,6 +16,7 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { roundMoney } from '@/core/utils/locale';
 import { todayIso } from '@/core/utils/aging';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
+import { useDocumentExport, type EditorDocumentData } from '@/core/utils/useDocumentExport';
 import { salesApi } from '../api';
 import type { SalesInvoice } from '../types';
 
@@ -154,6 +155,32 @@ export const SalesInvoiceEditorPage: React.FC = () => {
     return { subtotal: roundMoney(subtotal), discountAmount: 0, vatAmount, totalAmount: roundMoney(subtotal + vatAmount), itemsCount: lines.length };
   }, [lines, settings?.vatRate, settings?.invoiceShowVat]);
 
+  // Print / Excel / PDF from the editor's LIVE state — useful for a draft
+  // preview as well as a loaded invoice (same as the old modal's detail view).
+  const exportData: EditorDocumentData = useMemo(() => ({
+    type: 'sales-invoice',
+    docNumber: docNumber || t('sales.invoice.new'),
+    date,
+    dueDate,
+    partyName: customerName || t('accounting.customer'),
+    partyLabel: t('sales.customer.title'),
+    lines,
+    subtotal: totals.subtotal,
+    discountAmount: totals.discountAmount,
+    vatAmount: totals.vatAmount,
+    totalAmount: totals.totalAmount,
+    notes,
+    currency: activeCompany?.currency,
+    vatRate: settings?.invoiceShowVat === false ? 0 : settings?.vatRate,
+    paymentType,
+    statusBadge: status,
+    company: activeCompany ? {
+      name: activeCompany.name, taxNumber: activeCompany.taxNumber, address: activeCompany.address,
+      phone: activeCompany.phone, email: activeCompany.email, logoUrl: activeCompany.logoUrl,
+    } : undefined,
+  }), [docNumber, t, date, dueDate, customerName, lines, totals, notes, activeCompany, settings?.invoiceShowVat, settings?.vatRate, paymentType, status]);
+  const { onPrint, onExcel, onPdf } = useDocumentExport(exportData, t);
+
   const save = useCallback(
     async (post?: boolean) => {
       if (!companyId) return;
@@ -228,7 +255,17 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   const title = isEdit ? t('sales.invoice.edit') : t('sales.invoice.new');
   const actions = (
     <>
-      <Button variant="secondary" onClick={() => navigate(backPath)}>{t('common.cancel')}</Button>      <Button variant="primary" leftIcon={<Save size={16} />} onClick={() => save(false)} isLoading={saving}>
+      <Button variant="ghost" size="sm" onClick={onPrint} title={t('print.title')} aria-label={t('print.title')}>
+        <Printer size={16} />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onExcel} title={t('common.excel')} aria-label={t('common.excel')}>
+        <FileSpreadsheet size={16} />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onPdf} title={t('common.pdf')} aria-label={t('common.pdf')}>
+        <FileDown size={16} />
+      </Button>
+      <Button variant="secondary" onClick={() => navigate(backPath)}>{t('common.cancel')}</Button>
+      <Button variant="primary" leftIcon={<Save size={16} />} onClick={() => save(false)} isLoading={saving}>
         {t('common.save')}
       </Button>
       {(!isEdit || status === 'draft') && (
@@ -262,19 +299,26 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       summary={<TotalsPanel totals={totals} formatCurrency={formatCurrency} vatRate={settings?.invoiceShowVat === false ? 0 : settings?.vatRate} />}
     >
       <Card className="p-4 sm:p-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">          <CustomerSelect companyId={companyId} value={customerId || undefined} onChange={(v) => setCustomerId(v ?? '')}
-                onCustomerChange={(x) => setCustomerName(x.name)}
-                selectedLabel={customerName || undefined} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold mb-1.5 text-zinc-500 dark:text-zinc-400">{t('sales.customer.title')}</label>
+            <CustomerSelect companyId={companyId} value={customerId || undefined} onChange={(v) => setCustomerId(v ?? '')}
+              onCustomerChange={(x) => setCustomerName(x.name)}
+              selectedLabel={customerName || undefined} />
+          </div>
           <Input label={t('common.date')} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           <Input label={t('common.dueDate')} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-          <CurrencySelect companyId={companyId} value={currencyCode} onChange={(v) => setCurrencyCode(v ?? YER_CODE)} />
-          <Input label={t('sales.exchangeRate')} type="number" value={String(exchangeRate)} onChange={(e) => setExchangeRate(Number(e.target.value) || 1)} />
           <div>
-            <label className="block text-xs font-semibold mb-1.5">{t('common.paymentType')}</label>
+            <label className="block text-xs font-semibold mb-1.5 text-zinc-500 dark:text-zinc-400">{t('common.currency')}</label>
+            <CurrencySelect companyId={companyId} value={currencyCode} onChange={(v) => setCurrencyCode(v ?? YER_CODE)} />
+          </div>
+          <Input label={t('sales.exchangeRate')} type="number" step="any" inputMode="decimal" value={String(exchangeRate)} onChange={(e) => setExchangeRate(Number(e.target.value) || 1)} />
+          <div>
+            <label className="block text-xs font-semibold mb-1.5 text-zinc-500 dark:text-zinc-400">{t('common.paymentType')}</label>
             <select
               value={paymentType}
               onChange={(e) => setPaymentType(e.target.value as 'cash' | 'credit')}
-              className="w-full min-h-11 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-sm"
+              className="w-full min-h-11 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 text-sm"
               aria-label={t('common.paymentType')}
             >
               <option value="credit">{t('sales.payment.credit')}</option>
@@ -282,7 +326,10 @@ export const SalesInvoiceEditorPage: React.FC = () => {
             </select>
           </div>
           {paymentType === 'cash' && (
-            <CashBoxSelect companyId={companyId} value={cashBoxId || undefined} onChange={(v) => setCashBoxId(v ?? '')} />
+            <div>
+              <label className="block text-xs font-semibold mb-1.5 text-zinc-500 dark:text-zinc-400">{t('select.cashBox.placeholder')}</label>
+              <CashBoxSelect companyId={companyId} value={cashBoxId || undefined} onChange={(v) => setCashBoxId(v ?? '')} />
+            </div>
           )}
         </div>
       </Card>

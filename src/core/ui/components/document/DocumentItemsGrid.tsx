@@ -138,16 +138,27 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
     [focusNextProduct]
   );
 
+  // A fixed 12-column track keeps every input a comfortable, EQUAL width and
+  // makes the fields fill the whole container — no more cramped qty/price
+  // cells. The two numeric entry fields (quantity, unit price) get the widest
+  // tracks because they are typed on every row; the computed total is display
+  // only. On phones the grid collapses to stacked, full-width fields.
+  const gridCols = showDiscount && showVat
+    ? 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
+    : showDiscount || showVat
+      ? 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)]'
+      : 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_minmax(0,1fr)]';
+
   return (
     <div className="space-y-2">
-      <div className="hidden md:grid md:grid-cols-12 gap-2 text-xs font-semibold text-zinc-500 px-2 uppercase tracking-wide">
-        <div className="col-span-4">{t('inventory.products.nameAr')}</div>
-        {showUnit && <div className="col-span-2">{t('common.unit')}</div>}
-        <div className="col-span-1 text-center">{t('common.quantity')}</div>
-        <div className="col-span-2">{t('common.unitPrice')}</div>
-        {showDiscount && <div className="col-span-1 text-center">{t('sales.discount')}</div>}
-        {showVat && <div className="col-span-1 text-center">{t('pos.vat')}</div>}
-        <div className="col-span-1 text-end">{t('common.total')}</div>
+      <div className={`hidden md:grid ${gridCols} gap-3 text-xs font-semibold text-zinc-500 dark:text-zinc-400 px-2 uppercase tracking-wide`}>
+        <div>{t('inventory.products.nameAr')}</div>
+        {showUnit && <div>{t('common.unit')}</div>}
+        <div className="text-center">{t('common.quantity')}</div>
+        <div>{t('common.unitPrice')}</div>
+        {showDiscount && <div className="text-center">{t('sales.discount')}</div>}
+        {showVat && <div className="text-center">{t('pos.vat')}</div>}
+        <div className="text-end">{t('common.total')}</div>
       </div>
 
       <div className="space-y-2 md:space-y-1">
@@ -156,9 +167,9 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
           return (
             <div
               key={index}
-              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 md:p-2 md:grid md:grid-cols-12 md:gap-2 md:items-center md:hover:border-primary-300 transition"
+              className={`rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 md:p-2 md:grid ${gridCols} gap-3 md:gap-2 md:items-center md:hover:border-primary-300 transition`}
             >
-              <div className="md:col-span-4 flex items-start gap-2">
+              <div className="flex items-start gap-2 min-w-0">
                 <span className="hidden md:inline-flex items-center justify-center w-6 h-9 shrink-0 text-xs font-semibold text-zinc-400 tabular-nums">
                   {index + 1}
                 </span>
@@ -179,7 +190,7 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
               </div>
 
               {showUnit && (
-                <div className="md:col-span-2 mt-2 md:mt-0">
+                <div className="mt-2 md:mt-0 min-w-0">
                   <ProductUnitSelect
                     companyId={companyId}
                     productId={line.productId || ''}
@@ -191,61 +202,70 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
                 </div>
               )}
 
-              <div className="md:col-span-1 mt-2 md:mt-0">
+              <div className="mt-2 md:mt-0 min-w-0">
                 <Input
                   type="number"
                   min={0}
+                  step="any"
+                  inputMode="decimal"
                   value={String(line.quantity)}
                   onChange={(e) => updateLine(index, { quantity: Number(e.target.value) || 0 })}
                   onKeyDown={(e) => onRowKeyDown(index, e)}
-                  size="sm"
-                  className="text-center"
+                  size="lg"
+                  className="text-center text-base font-semibold tabular-nums"
                   aria-label={t('common.quantity')}
                 />
               </div>
 
-              <div className="md:col-span-2 mt-2 md:mt-0">
+              <div className="mt-2 md:mt-0 min-w-0">
                 <Input
                   type="number"
                   min={0}
+                  step="any"
+                  inputMode="decimal"
                   value={String(line.unitPrice)}
                   onChange={(e) => updateLine(index, { unitPrice: Number(e.target.value) || 0 })}
                   onKeyDown={(e) => onRowKeyDown(index, e)}
-                  size="sm"
+                  size="lg"
+                  className="text-end text-base font-semibold tabular-nums"
                   aria-label={t('common.unitPrice')}
                 />
               </div>
 
               {showDiscount && (
-                <div className="md:col-span-1 mt-2 md:mt-0">
+                <div className="mt-2 md:mt-0 min-w-0">
                   <Input
                     type="number"
                     min={0}
                     max={100}
+                    step="any"
+                    inputMode="decimal"
                     value={String(line.discountPercent)}
                     onChange={(e) => updateLine(index, { discountPercent: Number(e.target.value) || 0 })}
-                    size="sm"
-                    className="text-center"
+                    size="md"
+                    className="text-center tabular-nums"
                     aria-label={t('sales.discount')}
                   />
                 </div>
               )}
 
               {showVat && (
-                <div className="md:col-span-1 mt-2 md:mt-0">
+                <div className="mt-2 md:mt-0 min-w-0">
                   <Input
                     type="number"
                     min={0}
+                    step="any"
+                    inputMode="decimal"
                     value={String(line.vatPercent)}
                     onChange={(e) => updateLine(index, { vatPercent: Number(e.target.value) || 0 })}
-                    size="sm"
-                    className="text-center"
+                    size="md"
+                    className="text-center tabular-nums"
                     aria-label={t('pos.vat')}
                   />
                 </div>
               )}
 
-              <div className="md:col-span-1 mt-2 md:mt-0 flex items-center justify-between md:justify-end gap-2">
+              <div className="mt-2 md:mt-0 min-w-0 flex items-center justify-between md:justify-end gap-2">
                 <span className="md:hidden text-xs text-zinc-500 font-semibold tabular-nums">{lineTotal.toFixed(2)}</span>
                 <span className="hidden md:block text-sm font-semibold tabular-nums">{lineTotal.toFixed(2)}</span>
                 <button
@@ -260,7 +280,7 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
               </div>
 
               {showUnit && line.unitFactor && line.unitFactor !== 1 && (
-                <div className="md:col-span-12 text-xs text-zinc-400 px-1">
+                <div className="md:col-span-full text-xs text-zinc-400 px-1">
                   ≈ {(line.quantity * (line.unitFactor || 1)).toFixed(2)} {t('common.baseUnit')}
                 </div>
               )}

@@ -1312,7 +1312,8 @@
       "unbalanced": "Unbalanced",
       "difference": "Difference",
       "accountRequired": "An account must be selected for every line"
-    }
+    },
+    "checkNumberRequired": "Please enter the check number"
   },
   "inventory": {
     "products": {
@@ -1509,7 +1510,8 @@
     "product": {
       "created": "Product created successfully",
       "updated": "Product updated successfully",
-      "deleted": "Product deleted successfully"
+      "deleted": "Product deleted successfully",
+      "code": "Product code"
     },
     "transaction": {
       "created": "Transaction created successfully",
@@ -4169,7 +4171,8 @@
     "paymentType": "Payment Type",
     "phone": "Phone",
     "post": "Post",
-    "reference": "Reference"
+    "reference": "Reference",
+    "or": "or"
   },
   "pagination": {
     "first": "First",
