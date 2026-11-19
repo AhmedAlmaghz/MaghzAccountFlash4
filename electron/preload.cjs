@@ -61,6 +61,10 @@ contextBridge.exposeInMainWorld('electronAuth', {
 contextBridge.exposeInMainWorld('electronDB', {
   ping: () => ipcRenderer.invoke('db:ping'),
   probeServer: () => ipcRenderer.invoke('db:probe-server'),
+  // Sessionless company-existence probe. Without it the boot layer folds a
+  // "populated database, no session yet" boot into "No company found" and
+  // opens the onboarding wizard — which re-seeds — instead of the login page.
+  hasCompany: () => ipcRenderer.invoke('db:has-company'),
   testConnection: (config) => ipcRenderer.invoke('db:test-connection', { ...(config || {}), sessionToken }),
   updateConfig: (config) => ipcRenderer.invoke('db:update-config', { ...(config || {}), sessionToken }),
   seedDefault: (adminPassword, company) => ipcRenderer.invoke('db:seed-default', { sessionToken, adminPassword, company }),

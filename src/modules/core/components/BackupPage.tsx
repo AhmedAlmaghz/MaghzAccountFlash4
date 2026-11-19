@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   Check,
   Clock,
   Database,
@@ -96,7 +97,12 @@ export const BackupPage: React.FC = () => {
     rows: number;
     encrypted: boolean;
     payloadVerified: boolean;
+    /** True when the backup's company id differs from the active company. */
+    companyIdMismatch: boolean;
+    backupCompanyId: string;
   } | null>(null);
+  /** Explicit "continue anyway" for a cross-company restore. */
+  const [allowCompanyMismatch, setAllowCompanyMismatch] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<BackupHistoryEntry | null>(null);
   const [opfsPickerOpen, setOpfsPickerOpen] = useState(false);
@@ -243,9 +249,11 @@ export const BackupPage: React.FC = () => {
       // and the password field (previously a deadlock: PASSWORD_REQUIRED
       // aborted before the summary was set, so the field never appeared).
       const envelope = parseEnvelopeFile(text);
-      if (envelope.manifest.companyId !== companyId) {
-        throw new Error(t('settings.backup.companyMismatch'));
-      }
+      // A backup from ANOTHER company is a legitimate migration, not a
+      // corruption: warn and let the user choose (continue remaps the data
+      // into the active company; cancel keeps everything as it is). The old
+      // behaviour hard-refused, which made cross-company restores impossible.
+      const companyIdMismatch = !!companyId && envelope.manifest.companyId !== companyId;
       let decoded: DecodedBackup | null = null;
       if (!envelope.manifest.encrypted) {
         decoded = await decodeBackup(text);
@@ -253,6 +261,7 @@ export const BackupPage: React.FC = () => {
         decoded = await decodeBackup(text, pwd); // throws WRONG_PASSWORD on mismatch
       }
       setRestoreText({ name, text });
+      setAllowCompanyMismatch(false);
       setRestoreSummary({
         companyName: envelope.manifest.companyName,
         createdAt: envelope.manifest.createdAt,
@@ -260,10 +269,13 @@ export const BackupPage: React.FC = () => {
         rows: envelope.manifest.totalRows,
         encrypted: envelope.manifest.encrypted,
         payloadVerified: !!decoded,
+        companyIdMismatch,
+        backupCompanyId: envelope.manifest.companyId,
       });
     } catch (err) {
       setRestoreText(null);
       setRestoreSummary(null);
+      setAllowCompanyMismatch(false);
       addToast('error', err instanceof Error ? err.message : t('settings.backup.invalidFile'));
     }
   };
@@ -312,7 +324,11 @@ export const BackupPage: React.FC = () => {
         restoreText.text,
         restoreSummary?.encrypted ? restorePassword || undefined : undefined,
       );
-      const { restored, warnings } = await applyRestore(companyId, tables);
+      // Cross-company restore: the user acknowledged the warning, so the
+      // data is remapped into the ACTIVE company (its profile is preserved).
+      const { restored, warnings } = await applyRestore(companyId, tables, {
+        remapCompanyId: restoreSummary?.companyIdMismatch ? companyId : undefined,
+      });
       await audit('update', companyId, `Restore ${restored} rows from ${restoreText.name}`);
       flash('success', t('settings.backup.restoreSuccess', { rows: restored }));
       addToast('success', t('settings.backup.restoreSuccess', { rows: restored }));
@@ -322,6 +338,7 @@ export const BackupPage: React.FC = () => {
       setRestoreText(null);
       setRestoreSummary(null);
       setRestorePassword('');
+      setAllowCompanyMismatch(false);
       // Reload so every screen re-reads the restored data.
       window.setTimeout(() => window.location.reload(), 1500);
     } catch (err) {
@@ -621,7 +638,11 @@ export const BackupPage: React.FC = () => {
                 leftIcon={<RotateCcw size={16} />}
                 onClick={() => restoreSummary && setConfirmRestore(true)}
                 isLoading={busy === 'restoring'}
-                disabled={!restoreSummary || busy !== 'idle'}
+                disabled={
+                  !restoreSummary ||
+                  busy !== 'idle' ||
+                  (restoreSummary.companyIdMismatch && !allowCompanyMismatch)
+                }
               >
                 {t('settings.backup.restore')}
               </Button>
@@ -657,6 +678,27 @@ export const BackupPage: React.FC = () => {
             </div>
           ) : (
             <p className="text-xs text-slate-400">{t('settings.backup.noFileSelected')}</p>
+          )}
+
+          {restoreSummary?.companyIdMismatch && (
+            <div className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3 text-sm">
+              <p className="flex items-start gap-2 font-semibold text-amber-800 dark:text-amber-300">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                {t('settings.backup.companyMismatchTitle')}
+              </p>
+              <p className="text-amber-800/90 dark:text-amber-200/80">
+                {t('settings.backup.companyMismatchDesc')}
+              </p>
+              <label className="flex items-start gap-2 cursor-pointer text-amber-900 dark:text-amber-200">
+                <input
+                  type="checkbox"
+                  checked={allowCompanyMismatch}
+                  onChange={(e) => setAllowCompanyMismatch(e.target.checked)}
+                  className="mt-1 w-4 h-4 accent-amber-600"
+                />
+                <span>{t('settings.backup.companyMismatchConfirm')}</span>
+              </label>
+            </div>
           )}
         </div>
       </Card>
@@ -873,8 +915,16 @@ export const BackupPage: React.FC = () => {
         onClose={() => setConfirmRestore(false)}
         onConfirm={handleConfirmRestore}
         title={t('settings.backup.restoreConfirmTitle')}
-        message={t('settings.backup.restoreConfirmMessage', { name: restoreText?.name ?? '' })}
-        confirmText={t('settings.backup.restore')}
+        message={
+          restoreSummary?.companyIdMismatch
+            ? `${t('settings.backup.restoreConfirmMessage', { name: restoreText?.name ?? '' })}\n\n${t('settings.backup.companyMismatchWarning')}`
+            : t('settings.backup.restoreConfirmMessage', { name: restoreText?.name ?? '' })
+        }
+        confirmText={
+          restoreSummary?.companyIdMismatch
+            ? t('settings.backup.restoreAnyway')
+            : t('settings.backup.restore')
+        }
         variant="danger"
       />
       <ConfirmDialog

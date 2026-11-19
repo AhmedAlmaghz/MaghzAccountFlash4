@@ -3775,12 +3775,16 @@
       "verifyOk": "File integrity verified (SHA-256 checksum)",
       "encryptedHint": "Encrypted file — enter the password to verify its contents before restoring",
       "manifestSummary": "{{tables}} tables · {{rows}} rows · dated {{date}}",
-      "companyMismatch": "This backup belongs to another company — restore refused",
       "restoreConfirmTitle": "Confirm full restore",
       "restoreConfirmMessage": "Current company data will be replaced with “{{name}}”. Destructive — make sure you have a fresh backup first.",
       "restoreSuccess": "Restore completed ({{rows}} rows) — refreshing screens",
       "successWithWarnings": "Done with {{warnings}} warnings (missing tables skipped)",
-      "historyEmpty": "No backups recorded yet — create your first one above"
+      "historyEmpty": "No backups recorded yet — create your first one above",
+      "companyMismatchTitle": "Warning: this backup is for a different company",
+      "companyMismatchDesc": "The backup’s company id differs from the active company. Continuing remaps the data into your active company and preserves its profile (name, currency and settings).",
+      "companyMismatchConfirm": "Continue despite the company id mismatch",
+      "companyMismatchWarning": "Warning: the backup’s company id differs from the active company — the data will be remapped into your active company.",
+      "restoreAnyway": "Restore anyway"
     },
     "language": "Language",
     "theme": "Theme",

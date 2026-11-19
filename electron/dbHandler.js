@@ -7808,11 +7808,13 @@ export function registerAuthHandlers() {
     return createHash('sha256').update(JSON.stringify(tables)).digest('hex');
   }
 
-  function validateBackupManifest(manifest, tables, companyId) {
+  function validateBackupManifest(manifest, tables, companyId, opts = {}) {
     if (manifest === undefined || manifest === null) return 'Backup manifest is missing; legacy restore accepted.';
     if (typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('Invalid backup manifest');
     if (manifest.version !== 1) throw new Error('Unsupported backup manifest version');
-    if (!sameId(manifest.companyId, companyId)) throw new Error('Cross-company backup manifest rejected');
+    // Cross-company restore (user acknowledged the warning): the manifest's
+    // company id intentionally differs — integrity checks stay, identity check goes.
+    if (!opts.allowCrossCompany && !sameId(manifest.companyId, companyId)) throw new Error('Cross-company backup manifest rejected');
     if (typeof manifest.checksum !== 'string' || manifest.checksum !== backupChecksum(tables)) {
       throw new Error('Backup checksum mismatch');
     }
@@ -7882,7 +7884,7 @@ export function registerAuthHandlers() {
   const RESTORE_SKIP_TABLES = ['users'];
   const RESTORE_UPSERT_TABLES = ['companies'];
 
-  async function validateBackupRows(tables, companyId, client) {
+  async function validateBackupRows(tables, companyId, client, opts = {}) {
     const planByTable = new Map(BACKUP_PLAN.map((entry) => [entry.table, entry]));
     for (const [table, rows] of Object.entries(tables)) {
       if (RESTORE_SKIP_TABLES.includes(table)) continue; // users are never restored
@@ -7896,20 +7898,28 @@ export function registerAuthHandlers() {
       for (const row of rows) {
         if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error(`Invalid backup row: ${table}`);
         assertNoSensitiveBackupFields(table, row);
-        if (entry.scope.type === 'company' && !sameId(row.company_id, companyId)) {
-          throw new Error(`Cross-company row rejected: ${table}`);
-        }
-        if (entry.scope.type === 'single' && !sameId(row[entry.scope.idColumn], companyId)) {
-          throw new Error(`Cross-company row rejected: ${table}`);
+        if (!opts.allowCrossCompany) {
+          if (entry.scope.type === 'company' && !sameId(row.company_id, companyId)) {
+            throw new Error(`Cross-company row rejected: ${table}`);
+          }
+          if (entry.scope.type === 'single' && !sameId(row[entry.scope.idColumn], companyId)) {
+            throw new Error(`Cross-company row rejected: ${table}`);
+          }
         }
         if (entry.scope.type === 'children') {
           const parentId = row[entry.scope.fk];
           if (!parentId) throw new Error(`Missing parent reference: ${table}`);
           parentIds.add(String(parentId));
-          if (row.company_id !== undefined && !sameId(row.company_id, companyId)) {
+          if (!opts.allowCrossCompany && row.company_id !== undefined && !sameId(row.company_id, companyId)) {
             throw new Error(`Cross-company row rejected: ${table}`);
           }
           if (parentRows?.some((parent) => parent && sameId(parent.id, parentId))) continue;
+          // Cross-company rows live in the backup payload only — the DB
+          // fallback (scoped to the TARGET company) can never see them, so
+          // remap mode requires the parent inside the payload itself.
+          if (opts.allowCrossCompany) {
+            throw new Error(`Parent row missing from backup payload: ${table} → ${entry.scope.parent}`);
+          }
           if (!SAFE_IDENT.test(entry.scope.parent)) throw new Error('Unsafe parent reference');
           const ids = [...parentIds];
           const result = await client.query(
@@ -7964,15 +7974,26 @@ export function registerAuthHandlers() {
     }
   });
 
-  ipcMain.handle('db:restore-company', async (event, { sessionToken, tables, manifest } = {}) => {
+  ipcMain.handle('db:restore-company', async (event, { sessionToken, tables, manifest, remapCompanyId } = {}) => {
     let client;
     try {
       const session = getSession(event.sender.id, sessionToken);
       if (!session || !hasPermission(session, 'settings.edit')) return { success: false, error: 'Permission denied' };
       if (!tables || typeof tables !== 'object' || Array.isArray(tables)) return { success: false, error: 'Invalid backup payload' };
       const companyId = session.user.companyId;
+      // Cross-company restore: the target is ALWAYS the session tenant — the
+      // renderer can only remap into the company it is logged into. A remap
+      // id that disagrees with the session fails closed (restoring source
+      // company_ids un-remapped would produce invisible, orphaned data).
+      const remap = remapCompanyId
+        ? sameId(remapCompanyId, companyId)
+          ? companyId
+          : null
+        : null;
+      if (remapCompanyId && !remap) return { success: false, error: 'Invalid remap target' };
+      const remapOpts = { allowCrossCompany: !!remap };
       const warnings = [];
-      const manifestWarning = validateBackupManifest(manifest, tables, companyId);
+      const manifestWarning = validateBackupManifest(manifest, tables, companyId, remapOpts);
       if (manifestWarning) warnings.push(manifestWarning);
       // Safety valve: a payload with no planned table at all (garbage/foreign
       // file) must not wipe the database.
@@ -7981,7 +8002,7 @@ export function registerAuthHandlers() {
         return { success: false, error: 'Backup payload contains no restorable tables' };
       }
       client = await pool.connect();
-      await validateBackupRows(tables, companyId, client);
+      await validateBackupRows(tables, companyId, client, remapOpts);
       // Users are never restored — references resolve against the target's
       // existing users; dangling ids are re-attributed to the restorer.
       const knownUserIds = new Set(
@@ -8030,10 +8051,19 @@ export function registerAuthHandlers() {
             usersWarning();
             continue;
           }
+          // Cross-company restore: the backup's own company row is never
+          // imported — the target company's profile is preserved and every
+          // other row is remapped to it.
+          if (remap && entry.table === 'companies') {
+            warnings.push('companies: target company preserved (backup belongs to a different company)');
+            continue;
+          }
           const sensitive = SENSITIVE_BACKUP_COLUMNS[entry.table] || [];
           const columns = Array.from(
             new Set(rows.flatMap((r) => Object.keys(r || {})).filter((c) => SAFE_IDENT.test(c) && !sensitive.includes(c)))
           );
+          // A remap needs the column present even when rows omit it.
+          if (remap && !columns.includes('company_id')) columns.push('company_id');
           if (columns.length === 0) {
             warnings.push(`${entry.table}: no safe columns, skipped`);
             continue;
@@ -8065,7 +8095,9 @@ export function registerAuthHandlers() {
             const params = [];
             const groups = rows.slice(start, start + CHUNK).map((row) => {
               const placeholders = columns.map((col) => {
-                params.push(userRefs.includes(col) ? resolveUserRef(row[col]) : toValue(row[col]));
+                // Cross-company restore: the row belongs to the TARGET company.
+                const raw = remap && col === 'company_id' ? remap : row[col];
+                params.push(userRefs.includes(col) ? resolveUserRef(raw) : toValue(raw));
                 return `$${params.length}`;
               });
               return `(${placeholders.join(', ')})`;

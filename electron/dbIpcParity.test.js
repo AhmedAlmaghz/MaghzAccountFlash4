@@ -126,6 +126,21 @@ describe('db IPC shape parity (CI)', () => {
     }
   });
 
+  it('preload twins expose the sessionless hasCompany probe (boot routing parity)', () => {
+    // The boot layer (electronPgAdapter.getCompany) calls hasCompany() when
+    // the session-scoped company read fails with "Authentication required"
+    // to tell "populated DB → go log in" apart from "empty DB → onboarding".
+    // If a preload twin omits it, the probe resolves undefined and every
+    // sessionless desktop boot folds into the onboarding wizard (re-seed).
+    for (const file of [CJS, JS]) {
+      const src = read(file);
+      expect(src).toContain("ipcRenderer.invoke('db:has-company')");
+      expect(src).toMatch(/hasCompany:\s*\(\)\s*=>/);
+    }
+    // And the main process keeps answering it.
+    expect(read(MAIN)).toContain("ipcMain.handle('db:has-company'");
+  });
+
   it('preload purchases surfaces expose the invoice write channels (both twins)', () => {
     for (const [name, src] of [['preload.cjs', cjs], ['preload.js', js]]) {
       for (const method of ['createInvoice', 'updateInvoice', 'deleteInvoice']) {

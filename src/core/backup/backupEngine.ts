@@ -391,6 +391,16 @@ export interface RestoreOptions {
   knownUserIds?: ReadonlySet<string>;
   /** Re-attribute dangling user references to this user (the restorer). */
   fallbackUserId?: string | null;
+  /**
+   * Rewrite every restored row's `company_id` to the TARGET company.
+   *
+   * A backup made by company A restored into company B is a legitimate
+   * migration ("load my old backup into this company"), not a corruption —
+   * so the UI warns and lets the user choose. With this set, the data lands
+   * in the company the user is logged into, and the backup's `companies`
+   * row is SKIPPED so the target company's profile is never overwritten.
+   */
+  remapCompanyId?: string;
 }
 
 function resolveUserRef(value: unknown, options: RestoreOptions): unknown {
@@ -436,9 +446,19 @@ export function composeRestoreBatch(
     if (RESTORE_SKIP_TABLES.includes(plan.table)) continue;
     if (rows.length === 0) continue; // empty table — already wiped above
 
+    // Cross-company restore: never import the backup's own company row —
+    // it would overwrite the target company's profile (name, currency, …).
+    // The target company is preserved; every other row is remapped to it.
+    if (options.remapCompanyId && plan.table === 'companies') {
+      warnings.push('companies: target company preserved (backup belongs to a different company)');
+      continue;
+    }
+
     const columns = Array.from(
       new Set(rows.flatMap((r) => Object.keys(r)).filter((c) => isSafeIdentifier(c))),
     );
+    // A remap needs the column present even when the backup's rows omit it.
+    if (options.remapCompanyId && !columns.includes('company_id')) columns.push('company_id');
     if (columns.length === 0) {
       warnings.push(`${plan.table}: no safe columns, skipped`);
       continue;
@@ -460,7 +480,9 @@ export function composeRestoreBatch(
       const groups = rows.slice(start, start + CHUNK_ROWS).map((row) => {
         const placeholders = columns.map((col) => {
           const raw = (row as Record<string, unknown>)[col];
-          params.push(userRefs.includes(col) ? resolveUserRef(raw, options) : toSqlValue(raw));
+          // Cross-company restore: the row belongs to the TARGET company.
+          const value = options.remapCompanyId && col === 'company_id' ? options.remapCompanyId : raw;
+          params.push(userRefs.includes(col) ? resolveUserRef(value, options) : toSqlValue(value));
           return `$${params.length}`;
         });
         return `(${placeholders.join(', ')})`;

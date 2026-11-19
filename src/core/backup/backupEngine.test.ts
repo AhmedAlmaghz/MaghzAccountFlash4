@@ -219,4 +219,44 @@ describe('SQL composers (whitelisted identifiers, parameterized values)', () => 
     const { statements } = composeRestoreBatch('co1', { not_a_table: [{ x: 1 }] });
     expect(statements).toEqual([]);
   });
+
+  it('remapCompanyId rewrites company_id to the target company and preserves the target company row', () => {
+    // Backup taken by company "coA", restored into company "coB".
+    const tables = {
+      companies: [{ id: 'coA', name: 'شركة المصدر', currency: 'USD' }],
+      customers: [{ id: 'c1', company_id: 'coA', name: 'عميل' }],
+    };
+    const { statements, warnings } = composeRestoreBatch('coB', tables, { remapCompanyId: 'coB' });
+
+    // The source company row is never imported (the target's profile stays).
+    expect(statements.some((s) => /INSERT INTO companies\b/.test(s.sql))).toBe(false);
+    expect(warnings.some((w) => w.startsWith('companies:'))).toBe(true);
+
+    // Every other row lands in the TARGET company.
+    const insert = statements.find((s) => /INSERT INTO customers\b/.test(s.sql));
+    expect(insert).toBeDefined();
+    const cidIdx = insert!.sql.match(/INSERT INTO customers \(([^)]+)\)/)?.[1]?.split(',').map((c) => c.trim()).indexOf('company_id');
+    expect(cidIdx).toBeGreaterThanOrEqual(0);
+    expect(insert!.params[cidIdx!]).toBe('coB');
+  });
+
+  it('remapCompanyId adds company_id to rows that omit it (deletes still scope the target)', () => {
+    // Legacy row shape without an explicit company_id — the remap must still
+    // fill it in, otherwise the row is invisible to every company-scoped read.
+    const tables = { customers: [{ id: 'c9', name: 'عميل قديم' }] };
+    const { statements } = composeRestoreBatch('coB', tables, { remapCompanyId: 'coB' });
+    const insert = statements.find((s) => /INSERT INTO customers\b/.test(s.sql));
+    expect(insert).toBeDefined();
+    expect(insert!.sql).toContain('company_id');
+    expect(insert!.params).toContain('coB');
+  });
+
+  it('without remapCompanyId, rows keep their original company ids (same-company restore unchanged)', () => {
+    const tables = { customers: [{ id: 'c1', company_id: 'co1', name: 'عميل' }] };
+    const { statements } = composeRestoreBatch('co1', tables);
+    const insert = statements.find((s) => /INSERT INTO customers\b/.test(s.sql));
+    expect(insert).toBeDefined();
+    expect(insert!.params).toContain('co1');
+    expect(statements.some((s) => /INSERT INTO companies\b/.test(s.sql))).toBe(false);
+  });
 });

@@ -16,6 +16,7 @@ import {
   describeSetupError,
 } from '@/core/database/databaseSetup';
 import { useRelayStatus } from '@/core/database/useRelayStatus';
+import { resetSessionForDatabaseSwitch } from '@/modules/settings/dbSwitchSession';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 
@@ -190,6 +191,9 @@ export const DatabaseSettingsPage: React.FC = () => {
     if (!silent) {
       addToast('success', t('settings.database.connActivated'));
     }
+    // The new database owns its users: log out so the reload lands on the
+    // login page for THAT database instead of reopening onboarding.
+    resetSessionForDatabaseSwitch();
     setTimeout(() => window.location.reload(), 800);
   };
 
@@ -201,6 +205,7 @@ export const DatabaseSettingsPage: React.FC = () => {
     }
     setDbModeExplicit('pglite');
     setMode('pglite');
+    resetSessionForDatabaseSwitch();
     setTimeout(() => window.location.reload(), 800);
   };
 
@@ -210,6 +215,7 @@ export const DatabaseSettingsPage: React.FC = () => {
     if (getStoredActiveRemoteId() === id) {
       setDbModeExplicit('pglite');
       setMode('pglite');
+      resetSessionForDatabaseSwitch();
     }
     await refresh();
   };

@@ -28,7 +28,7 @@ import { loadHistory, newHistoryId, recordHistory } from './backupHistory';
 
 interface ElectronBackupSurface {
   backupCompany?: () => Promise<{ success: boolean; tables?: TablesMap; warnings?: string[]; error?: string }>;
-  restoreCompany?: (payload: { tables: TablesMap }) => Promise<{
+  restoreCompany?: (payload: { tables: TablesMap; remapCompanyId?: string }) => Promise<{
     success: boolean;
     restored?: number;
     warnings?: string[];
@@ -77,10 +77,13 @@ export async function readBackupRows(companyId: string): Promise<{ tables: Table
 export async function applyRestore(
   companyId: string,
   tables: TablesMap,
+  options?: { remapCompanyId?: string },
 ): Promise<{ restored: number; warnings: string[] }> {
   const via = electronBackup();
   if (via?.restoreCompany) {
-    const res = await via.restoreCompany({ tables });
+    // remapCompanyId rides the payload; the main process re-derives the real
+    // target from the session (the renderer can only remap into ITS tenant).
+    const res = await via.restoreCompany({ tables, remapCompanyId: options?.remapCompanyId });
     if (!res.success) throw new Error(res.error || 'Restore failed');
     return { restored: res.restored ?? 0, warnings: res.warnings ?? [] };
   }
@@ -102,6 +105,7 @@ export async function applyRestore(
   const { statements, warnings } = composeRestoreBatch(companyId, tables, {
     knownUserIds,
     fallbackUserId,
+    remapCompanyId: options?.remapCompanyId,
   });
   if (statements.length === 0) return { restored: 0, warnings };
   const res = await adapter.transaction(statements.map((s) => ({ sql: s.sql, params: s.params })));
