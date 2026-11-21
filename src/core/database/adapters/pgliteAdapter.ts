@@ -106,6 +106,7 @@ import schemaSessions from '@root/drizzle/0003_sessions.sql?raw';
 import schemaDocVersionColumns from '@root/drizzle/0004_doc_version_columns.sql?raw';
 import schemaNumberUniques from '@root/drizzle/0005_document_number_uniques.sql?raw';
 import schemaAuditSessionId from '@root/drizzle/0006_audit_session_id.sql?raw';
+import schemaRemoveLineDiscountVat from '@root/drizzle/0007_remove_line_discount_vat.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -115,6 +116,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0004_doc_version_columns', sql: schemaDocVersionColumns },
   { name: '0005_document_number_uniques', sql: schemaNumberUniques },
   { name: '0006_audit_session_id', sql: schemaAuditSessionId },
+  { name: '0007_remove_line_discount_vat', sql: schemaRemoveLineDiscountVat },
 ];
 
 /**

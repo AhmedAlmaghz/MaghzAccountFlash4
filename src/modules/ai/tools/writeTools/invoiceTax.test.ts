@@ -158,36 +158,42 @@ describe('invoice tools obey the company tax flags', () => {
     expect(res.totalAmount).toBe(2000);
     expect(res.vatSkipped).toBe(true);
     const payload = vi.mocked(salesApi.createInvoice).mock.calls[0][0] as {
-      lines: { vatPercent: number }[];
+      lines: Record<string, unknown>[];
       vatAmount: number;
     };
     expect(payload.vatAmount).toBe(0);
-    expect(payload.lines.every((l) => l.vatPercent === 0)).toBe(true);
+    // Phase A-1 (0007): per-line discount/VAT removed — lines carry only
+    // productId/quantity/unitPrice/lineTotal; the invoice head carries VAT.
+    expect(payload.lines.every((l) => !('vatPercent' in l))).toBe(true);
   });
 
-  it('sales.create_invoice applies the rate + discounts when flags are on', async () => {
+  it('sales.create_invoice applies VAT on the invoice head when flags are on', async () => {
     mockInvoiceSettings(true, true);
     const tool = findTool(salesWriteTools as unknown as TestableTool[], 'sales.create_invoice');
     const res = (await tool.execute(
-      { customerId: 'c1', lines: [{ productId: 'p-1', quantity: 2, unitPrice: 1000, discountPercent: 10 }] },
+      { customerId: 'c1', lines: [{ productId: 'p-1', quantity: 2, unitPrice: 1000 }] },
       ctx,
     )) as Record<string, unknown>;
-    expect(res.vatAmount).toBe(270);
-    expect(res.totalAmount).toBe(2070);
+    expect(res.vatAmount).toBe(300);
+    expect(res.totalAmount).toBe(2300);
     expect(res.vatSkipped).toBeUndefined();
+    const payload = vi.mocked(salesApi.createInvoice).mock.calls[0][0] as {
+      lines: Record<string, unknown>[];
+    };
+    expect(payload.lines.every((l) => !('discountPercent' in l) && !('vatPercent' in l))).toBe(true);
   });
 
-  it('sales.create_invoice zeroes line discounts when the company hides them', async () => {
+  it('sales.create_invoice: discount/VAT now live on the invoice head, not the lines', async () => {
     mockInvoiceSettings(true, false);
     const tool = findTool(salesWriteTools as unknown as TestableTool[], 'sales.create_invoice');
     await tool.execute(
-      { customerId: 'c1', lines: [{ productId: 'p-1', quantity: 2, unitPrice: 1000, discountPercent: 50 }] },
+      { customerId: 'c1', lines: [{ productId: 'p-1', quantity: 2, unitPrice: 1000 }] },
       ctx,
     );
     const payload = vi.mocked(salesApi.createInvoice).mock.calls[0][0] as {
-      lines: { discountPercent: number }[];
+      lines: Record<string, unknown>[];
     };
-    expect(payload.lines[0].discountPercent).toBe(0);
+    expect(payload.lines.every((l) => !('discountPercent' in l) && !('vatPercent' in l))).toBe(true);
   });
 
   it('purchases.create_invoice books zero VAT when VAT is off', async () => {

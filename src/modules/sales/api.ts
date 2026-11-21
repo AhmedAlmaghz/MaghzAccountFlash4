@@ -796,16 +796,16 @@ export const salesApi = {
         for (const line of data.lines) {
           const off = params.length;
           const usnap = snapshotLineUnit(line);
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::numeric,$${off + 8}::varchar,$${off + 9}::numeric,$${off + 10}::numeric,$${off + 11}::uuid,$${off + 12}::numeric,$${off + 13}::numeric)`);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::varchar,$${off + 8}::numeric,$${off + 9}::numeric,$${off + 10}::uuid,$${off + 11}::numeric,$${off + 12}::numeric)`);
           const lineCurrencyCode = line.currencyCode || invoiceCurrency;
           const lineExchangeRate = line.exchangeRate ?? invoiceRate;
           const lineBaseTotal = line.baseCurrencyLineTotal ?? (line.lineTotal * lineExchangeRate);
-          params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.vatPercent, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
+          params.push(invoiceId, line.productId, line.quantity, line.unitPrice, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
         // Sale-time cost snapshot (perpetual COGS, IAS 2): resolved live from
         // products inside the same statement — server-side truth, zero new
         // params, no placeholder renumbering. Zeros still backfill at post.
-        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity,unit_cost) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total,v.unit_id,v.unit_factor,v.base_quantity,COALESCE(p.cost_price,0) FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $2::uuid)`;
+        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id,product_id,quantity,unit_price,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity,unit_cost) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total,v.unit_id,v.unit_factor,v.base_quantity,COALESCE(p.cost_price,0) FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $2::uuid)`;
       }
       sql += ' SELECT id FROM inv';
       let result = await adapter.query(sql, params);
@@ -913,14 +913,14 @@ export const salesApi = {
           const lineExchangeRate = line.exchangeRate ?? data.exchangeRate ?? 1;
           const lineBaseTotal = line.baseCurrencyLineTotal ?? (line.lineTotal * lineExchangeRate);
           const usnap = snapshotLineUnit(line);
-          return [id, line.productId, line.quantity, line.unitPrice, line.discountPercent, line.vatPercent, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity];
+          return [id, line.productId, line.quantity, line.unitPrice, line.lineTotal, lineCurrencyCode, lineExchangeRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity];
         });
         // Sale-time cost snapshot (same semantics as createInvoice): resolved
         // live from products — draft edits re-freeze the cost.
         lineParams.push(companyId);
         const costCidIdx = lineParams.length;
         tx.push({
-          sql: `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${costCidIdx}::uuid`,
+          sql: `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues}) v(invoice_id, product_id, quantity, unit_price, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $${costCidIdx}::uuid`,
           params: lineParams,
         });
       }
@@ -1041,21 +1041,12 @@ export const salesApi = {
       // services — but a stocked product with cost_price = 0 deserves review.
       const zeroCostLines = Number(cogsRow.zero_lines) || 0;
 
-      // Explicit discount (gross method): discount_amount stores line +
-      // header discounts while subtotal is net of lines only. The gross
-      // sales figure is recovered from the lines — the invoice-level
-      // discount alone cannot be derived from the header.
+      // Explicit discount (gross method): discount_amount stores the
+      // invoice-level discount; lines have no per-line discount/VAT since
+      // 0007 (discount/tax live on the invoice head: discountPercent/vatAmount).
       const subtotal = Number(inv.subtotal) || 0;
       const discountAmount = Math.round((Number(inv.discount_amount) || 0) * 100) / 100;
-      const lineDiscRes = await adapter.query(
-        `SELECT COALESCE(SUM(quantity * unit_price * COALESCE(discount_percent, 0) / 100), 0) AS line_disc
-           FROM sales_invoice_lines WHERE invoice_id = $1::uuid AND $2::uuid = (SELECT company_id FROM sales_invoices WHERE id = $1::uuid)`,
-        [id, companyId]
-      );
-      if (!lineDiscRes.success) return { success: false, error: lineDiscRes.error };
-      const lineDiscRow = (lineDiscRes.rows?.[0] || {}) as Record<string, unknown>;
-      const lineDiscount = Math.round((Number(lineDiscRow.line_disc) || 0) * 100) / 100;
-      const grossSubtotal = Math.round((subtotal + lineDiscount) * 100) / 100;
+      const grossSubtotal = subtotal;
       // ── Phase 1 (IAS 2): perpetual COGS. Resolve the posting-time unit
       // cost per base unit (method-aware), freeze it on the lines (returns
       // reverse the ORIGINAL cost), and book Dr COGS / Cr Inventory in the
@@ -2135,8 +2126,6 @@ function mapInvoiceLineRow(row: Record<string, unknown>): SalesInvoiceLine {
     unitName: row.unit_name ? String(row.unit_name) : undefined,
     quantity: Number(row.quantity) || 0,
     unitPrice: Number(row.unit_price) || 0,
-    discountPercent: Number(row.discount_percent) || 0,
-    vatPercent: Number(row.vat_percent) || 0,
     lineTotal: Number(row.line_total) || 0,
     unitCost: row.unit_cost !== undefined && row.unit_cost !== null ? Number(row.unit_cost) : 0,
     currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,

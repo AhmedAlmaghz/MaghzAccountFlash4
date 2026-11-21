@@ -181,7 +181,6 @@ export const InvoicesPage: React.FC = () => {
         unit: l.unitName || l.unit,
         quantity: l.quantity,
         unitPrice: l.unitPrice,
-        discount: l.discountPercent,
         total: l.lineTotal,
       })),
       subtotal: invoice.subtotal,
@@ -517,7 +516,6 @@ export const InvoicesPage: React.FC = () => {
                     <th className="px-3 py-2 text-right">{t('select.product.unit')}</th>
                     <th className="px-3 py-2 text-right">{t('inventory.quantity')}</th>
                     <th className="px-3 py-2 text-right">{t('inventory.unitPrice')}</th>
-                    {showDiscount && <th className="px-3 py-2 text-right">{t('sales.discount')} %</th>}
                     <th className="px-3 py-2 text-right">{t('sales.total')}</th>
                   </tr>
                 </thead>
@@ -531,7 +529,6 @@ export const InvoicesPage: React.FC = () => {
                       <td className="px-3 py-2 text-slate-500">{l.unitName || l.unit || '-'}</td>
                       <td className="px-3 py-2">{l.quantity}</td>
                       <td className="px-3 py-2">{formatCurrency(l.unitPrice)}</td>
-                      {showDiscount && <td className="px-3 py-2 text-amber-700 dark:text-amber-300 tabular-nums">{l.discountPercent ? `${l.discountPercent}%` : '—'}</td>}
                       <td className="px-3 py-2 font-medium">{formatCurrency(l.lineTotal)}</td>
                     </tr>
                   ))}

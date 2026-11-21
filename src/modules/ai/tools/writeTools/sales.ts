@@ -136,15 +136,11 @@ export const salesWriteTools: ToolDefinition[] = [
 
       const resolved = await resolveLineUnits(ctx.companyId, 'sale', parsed);
       if ('error' in resolved) return { error: resolved.error };
-      const lines = resolved.map((l) => {
-        const discountPercent = tax.showDiscount ? l.discountPercent : 0;
-        const lineTotal = round2(l.quantity * l.unitPrice * (1 - discountPercent / 100));
-        return { ...l, discountPercent, vatPercent: tax.showVat ? tax.vatRate : 0, lineTotal };
-      });
+      // Phase A-1 (0007): per-line discount/VAT removed — the invoice head
+      // carries discountAmount/vatAmount below.
+      const lines = resolved.map((l) => ({ ...l, lineTotal: round2(l.quantity * l.unitPrice) }));
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-      const lineDiscountTotal = tax.showDiscount
-        ? round2(resolved.reduce((s, l) => s + l.quantity * l.unitPrice * (l.discountPercent / 100), 0))
-        : 0;
+      const lineDiscountTotal = 0;
       // Header discount under the subtotal — same arithmetic as the forms.
       if (num(args.discountPercent) < 0 || num(args.discountAmount) < 0) {
         return { error: 'خصم الفاتورة لا يمكن أن يكون سالباً' };

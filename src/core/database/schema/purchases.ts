@@ -65,8 +65,6 @@ export const purchaseInvoiceLines = pgTable('purchase_invoice_lines', {
   unitFactor: numeric('unit_factor', { precision: 18, scale: 6 }).notNull().default('1'),
   baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
-  discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).notNull().default('0'),
-  vatPercent: numeric('vat_percent', { precision: 5, scale: 2 }).notNull().default('0'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),

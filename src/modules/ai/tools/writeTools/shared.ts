@@ -86,7 +86,7 @@ export function summarizeDocLines(label: string, lines: unknown): string {
   const arr = Array.isArray(lines) ? (lines as Array<Record<string, unknown>>) : [];
   const total = round2(
     arr.reduce(
-      (s, l) => s + (Number(l?.quantity) || 0) * (Number(l?.unitPrice) || 0) * (1 - (Number(l?.discountPercent) || 0) / 100),
+      (s, l) => s + (Number(l?.quantity) || 0) * (Number(l?.unitPrice) || 0),
       0,
     ),
   );
@@ -233,7 +233,6 @@ export interface RawLine {
   productId: string;
   quantity: number;
   unitPrice: number;
-  discountPercent: number;
   /** Optional product_units row id — resolved to a snapshot by resolveLineUnits. */
   unitId?: string;
   /**
@@ -252,7 +251,6 @@ export function parseLines(raw: unknown): RawLine[] | { error: string } {
     const productId = str((item as Record<string, unknown>).productId);
     const quantity = num((item as Record<string, unknown>).quantity);
     const unitPrice = num((item as Record<string, unknown>).unitPrice);
-    const discountPercent = num((item as Record<string, unknown>).discountPercent);
     const unitId = str((item as Record<string, unknown>).unitId);
     const unitName = str((item as Record<string, unknown>).unitName) ?? str((item as Record<string, unknown>).unit);
     if (!productId) return { error: 'كل صنف يحتاج productId — استخدم search.products لإيجاد المنتج' };
@@ -260,7 +258,9 @@ export function parseLines(raw: unknown): RawLine[] | { error: string } {
     if (unitPrice < 0) return { error: 'السعر لا يمكن أن يكون سالباً' };
     if (unitPrice <= 0) return { error: 'سعر الوحدة مطلوب لكل صنف (لا يمكن أن يكون صفراً) — احصل عليه من search.products أو search.product_units' };
     if (unitId && unitName) return { error: 'مرر unitId أو unitName فقط — لا كليهما' };
-    lines.push({ productId, quantity, unitPrice, discountPercent, ...(unitId ? { unitId } : {}), ...(unitName ? { unitName } : {}) });
+    // Phase A-1: per-line discount/VAT removed from invoice lines (0007) —
+    // discount/VAT live on the invoice head (discountPercent/vatAmount).
+    lines.push({ productId, quantity, unitPrice, ...(unitId ? { unitId } : {}), ...(unitName ? { unitName } : {}) });
   }
   return lines;
 }
@@ -274,7 +274,6 @@ export const LINES_SCHEMA = {
       productId: { type: 'string', description: 'معرف المنتج (من search.products)' },
       quantity: { type: 'number', description: 'الكمية بالوحدة المختارة' },
       unitPrice: { type: 'number', description: 'سعر الوحدة المختارة (سعر البيع/الشراء من search.products أو search.product_units)' },
-      discountPercent: { type: 'number', description: 'نسبة الخصم 0-100 (اختياري)' },
       unitId: { type: 'string', description: 'معرف وحدة المنتج (من search.product_units) — اختياري؛ عند تركه تُستخدم الوحدة الافتراضية للمنتج. استخدمه عندما يذكر المستخدم كرتون/درزن/شدة أو أي وحدة غير الأساسية' },
       unitName: { type: 'string', description: 'اسم الوحدة نصاً (كرتون، درزن، شدة…) — بديل لـ unitId؛ يُطابق مع وحدات المنتج ويرفض عند الغموض' },
     },

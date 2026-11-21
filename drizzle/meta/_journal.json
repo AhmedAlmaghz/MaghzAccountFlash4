@@ -50,6 +50,13 @@
       "when": 1795500000000,
       "tag": "0006_audit_session_id",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795550000000,
+      "tag": "0007_remove_line_discount_vat",
+      "breakpoints": true
     }
   ]
 }
