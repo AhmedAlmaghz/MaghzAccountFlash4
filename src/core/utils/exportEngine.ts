@@ -3,6 +3,8 @@ import { formatReportDate, formatReportNumber } from '@/core/reports/formatters'
 import { exportReportHtml } from '@/core/reports/exporters';
 import { getReportBranding } from '@/core/reports/branding';
 import { ARABIC_FONT_NAME, ensureArabicFont, shapeForPdf } from '@/core/reports/arabicPdf';
+import { isDesktopApp, exportReportToPdf } from '@/core/reports/pdf/reportPdfExporter';
+import type { ReportSpec } from '@/core/reports/types';
 
 export interface ExportColumn {
   key: string;
@@ -164,6 +166,25 @@ export async function exportToPDF(
   }
 ): Promise<void> {
   const rows = data as Record<string, unknown>[];
+
+  // Universal engine — Electron: printToPDF → blob download; Web/mobile: jsPDF.
+  // No popups on any platform.
+  if (isDesktopApp()) {
+    const spec: ReportSpec = {
+      columns: columns.map((c) => ({ key: c.key, header: c.header, width: c.width, format: 'text' as const })),
+      rows,
+      meta: {
+        title: options?.title || filename,
+        subtitle: options?.subtitle || getReportBranding().companyName,
+        direction: options?.rtl === false ? 'ltr' : 'rtl',
+      },
+      branding: getReportBranding(),
+      filename,
+    };
+    await exportReportToPdf(spec);
+    return;
+  }
+
   const [jsPDFModule, autoTableModule] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),

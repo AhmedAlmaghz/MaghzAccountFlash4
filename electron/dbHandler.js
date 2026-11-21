@@ -1,4 +1,4 @@
-import { ipcMain, app, safeStorage } from 'electron';
+import { ipcMain, app, safeStorage, BrowserWindow } from 'electron';
 import pg from 'pg';
 import { randomBytes, createHash, randomUUID } from 'crypto';
 import fs from 'fs';
@@ -1331,6 +1331,26 @@ export function registerDatabaseHandlers() {
       return { success: true, hasUsers: res.rows.length > 0 };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  });
+
+  // Universal PDF renderer (Electron): Chromium's native printToPDF — used by
+  // the unified report PDF exporter (no popups, no print dialogs, works the
+  // same as the web path). Renderer downloads the bytes as a Blob.
+  ipcMain.handle('db:print-to-pdf', async (event, { html, filename } = {}) => {
+    try {
+      if (typeof html !== 'string' || !html) return { success: false, error: 'empty-html' };
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return { success: false, error: 'no-window' };
+      const pdf = await win.webContents.printToPDF({
+        margins: { type: 'none' },
+        printBackground: true,
+        landscape: false,
+        scale: 1,
+      });
+      return { success: true, pdf: Buffer.from(pdf).toString('base64'), filename: filename || 'report' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'print-to-pdf-failed' };
     }
   });
 

@@ -1,5 +1,6 @@
 import { escapeHtml } from '@/core/utils/html';
 import { formatDateValue, getCompanyDecimalPlaces } from '@/core/utils/locale';
+import { printHtmlDocument } from '@/core/reports/pdf/reportPdfExporter';
 
 export interface PrintLine {
   description: string;
@@ -120,7 +121,7 @@ function escapeLineBreaks(value: string): string {
   return escapeHtml(value).replaceAll('\n', '<br />');
 }
 
-function generateHtml(data: PrintDocumentData, t?: PrintT): string {
+export function generateHtml(data: PrintDocumentData, t?: PrintT): string {
   // Document labels follow the UI language when the caller passes its t();
   // without it every label falls back to the Arabic original (unchanged output).
   const T = (key: string, fallback: string): string =>
@@ -735,16 +736,10 @@ function generateHtml(data: PrintDocumentData, t?: PrintT): string {
 }
 
 export function printDocument(data: PrintDocumentData, autoPrint = false, t?: PrintT): void {
+  // Universal: Electron → printToPDF → blob download (no popups);
+  // Web/mobile → native print dialog (no popups). The old window.open path
+  // broke on Electron (blocked) and mobile (opens new tab).
   const html = generateHtml(data, t);
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert(t ? t('print.popupBlocked', { default: 'يرجى السماح بفتح النوافذ المنبثقة للطباعة' }) : 'يرجى السماح بفتح النوافذ المنبثقة للطباعة');
-    return;
-  }
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-  if (autoPrint) {
-    setTimeout(() => printWindow.print(), 600);
-  }
+  printHtmlDocument(html, `${data.docNumber || 'document'}.pdf`);
+  void autoPrint; // auto-print now: Electron exports, web prints the dialog
 }

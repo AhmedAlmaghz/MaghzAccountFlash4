@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { exportToExcel, exportToPdf, dataToHtmlTable } from '@/core/utils/export';
+import { exportToPdfFromHtml } from '@/core/reports/pdf/reportPdfExporter';
 
 vi.mock('xlsx', () => ({
   utils: {
@@ -8,6 +9,10 @@ vi.mock('xlsx', () => ({
     book_append_sheet: vi.fn(),
   },
   writeFile: vi.fn(),
+}));
+
+vi.mock('@/core/reports/pdf/reportPdfExporter', () => ({
+  exportToPdfFromHtml: vi.fn(async () => ({ success: true, filename: 'mock.pdf' })),
 }));
 
 describe('export utilities', () => {
@@ -132,72 +137,46 @@ describe('export utilities', () => {
     });
   });
 
-  describe('exportToPdf', () => {
-    it('shows alert when element not found', () => {
+  describe('exportToPdf (universal engine)', () => {
+    it('shows alert when element not found', async () => {
       const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-      exportToPdf('nonexistent', 'report');
+      const res = await exportToPdf('nonexistent', 'report');
       expect(alertSpy).toHaveBeenCalledWith('عنصر التصدير غير موجود');
+      expect(res.success).toBe(false);
       alertSpy.mockRestore();
     });
 
-    it('shows alert when popup blocked', () => {
-      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-      const container = document.createElement('div');
-      container.id = 'export-target';
-      document.body.appendChild(container);
-
-      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-
-      exportToPdf('export-target', 'report');
-      expect(alertSpy).toHaveBeenCalledWith('يرجى السماح بفتح النوافذ المنبثقة للتصدير');
-
-      openSpy.mockRestore();
-      alertSpy.mockRestore();
-      document.body.removeChild(container);
-    });
-
-    it('writes HTML content to new window', () => {
+    it('delegates to the universal engine with the element HTML', async () => {
       const container = document.createElement('div');
       container.id = 'pdf-export';
       container.innerHTML = '<p>Report content</p>';
       document.body.appendChild(container);
 
-      const mockDoc = {
-        write: vi.fn(),
-        close: vi.fn(),
-      };
-      const mockWindow = { document: mockDoc } as unknown as Window;
-      const openSpy = vi.spyOn(window, 'open').mockReturnValue(mockWindow);
+      const mockExport = vi.mocked(exportToPdfFromHtml);
+      mockExport.mockClear();
 
-      exportToPdf('pdf-export', 'my-report', 'تقرير المبيعات');
+      const res = await exportToPdf('pdf-export', 'my-report', 'تقرير المبيعات');
 
-      expect(mockDoc.write).toHaveBeenCalled();
-      const writtenHtml = mockDoc.write.mock.calls[0][0] as string;
-      expect(writtenHtml).toContain('تقرير المبيعات');
-      expect(writtenHtml).toContain('Report content');
-      expect(writtenHtml).toContain('dir="rtl"');
-      expect(writtenHtml).toContain('Cairo');
-      expect(mockDoc.close).toHaveBeenCalled();
+      expect(mockExport).toHaveBeenCalledTimes(1);
+      expect(mockExport.mock.calls[0][0]).toContain('Report content');
+      expect(mockExport.mock.calls[0][1]).toEqual({ filename: 'my-report', title: 'تقرير المبيعات' });
+      expect(res.success).toBe(true);
 
-      openSpy.mockRestore();
       document.body.removeChild(container);
     });
 
-    it('uses filename as title when no title provided', () => {
+    it('uses filename as title when no title provided', async () => {
       const container = document.createElement('div');
       container.id = 'pdf-export-2';
       document.body.appendChild(container);
 
-      const mockDoc = { write: vi.fn(), close: vi.fn() };
-      const mockWindow = { document: mockDoc } as unknown as Window;
-      const openSpy = vi.spyOn(window, 'open').mockReturnValue(mockWindow);
+      const mockExport = vi.mocked(exportToPdfFromHtml);
+      mockExport.mockClear();
 
-      exportToPdf('pdf-export-2', 'invoice-report');
+      await exportToPdf('pdf-export-2', 'invoice-report');
 
-      const writtenHtml = mockDoc.write.mock.calls[0][0] as string;
-      expect(writtenHtml).toContain('invoice-report');
+      expect(mockExport.mock.calls[0][1]).toEqual({ filename: 'invoice-report', title: 'invoice-report' });
 
-      openSpy.mockRestore();
       document.body.removeChild(container);
     });
   });

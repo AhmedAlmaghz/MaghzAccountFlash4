@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('electronDB', {
   // opens the onboarding wizard — which re-seeds — instead of the login page.
   hasCompany: () => ipcRenderer.invoke('db:has-company'),
   hasUsers: () => ipcRenderer.invoke('db:has-users'),
+  printToPdf: (payload) => ipcRenderer.invoke('db:print-to-pdf', payload),
   _exec: (sql, params = []) => ipcRenderer.invoke('db:internal-query', { sql, params, sessionToken }),
   _execBatch: (queries) => ipcRenderer.invoke('db:internal-transaction', { queries, sessionToken }),
   testConnection: (config) => ipcRenderer.invoke('db:test-connection', { ...(config || {}), sessionToken }),
