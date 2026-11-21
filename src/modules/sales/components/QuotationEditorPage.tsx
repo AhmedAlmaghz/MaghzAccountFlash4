@@ -57,6 +57,7 @@ export const QuotationEditorPage: React.FC = () => {
   const [loading, setLoading] = useState(Boolean(id));
   const [status, setStatus] = useState<string>('draft');
   const [docNumber, setDocNumber] = useState('');
+  const [docVersion, setDocVersion] = useState(1);
 
   const backPath = '/sales/quotations';
   const draft = useMemo(() => ({ customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines }), [customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines]);
@@ -94,7 +95,7 @@ export const QuotationEditorPage: React.FC = () => {
       if (cancelled) return;
       setLoading(false);
       if (res?.success && res.data) {
-        const inv = res.data as unknown as { customerId?: string; customer?: { name?: string }; quotationNumber?: string; supplierId?: string; date?: string; dueDate?: string; expiryDate?: string; expectedDate?: string; currencyCode?: string; exchangeRate?: number; paymentType?: string; cashBoxId?: string; notes?: string; reason?: string; status?: string; lines?: Array<{ productId?: string; productName?: string; productCode?: string; unitId?: string; unitFactor?: number; baseQuantity?: number; unitName?: string; quantity?: number; unitPrice?: number; discountPercent?: number; vatPercent?: number }>; };
+        const inv = res.data as unknown as { customerId?: string; customer?: { name?: string }; quotationNumber?: string; supplierId?: string; docVersion?: number; date?: string; dueDate?: string; expiryDate?: string; expectedDate?: string; currencyCode?: string; exchangeRate?: number; paymentType?: string; cashBoxId?: string; notes?: string; reason?: string; status?: string; lines?: Array<{ productId?: string; productName?: string; productCode?: string; unitId?: string; unitFactor?: number; baseQuantity?: number; unitName?: string; quantity?: number; unitPrice?: number; discountPercent?: number; vatPercent?: number }>; };
         setCustomerId(inv.customerId ?? '');
         setCustomerName(inv.customer?.name ?? '');
         setDate(inv.date ?? todayIso());
@@ -106,6 +107,7 @@ export const QuotationEditorPage: React.FC = () => {
         setNotes(inv.notes ?? '');
         setStatus(inv.status ?? 'draft');
         setDocNumber(inv.quotationNumber ?? '');
+        setDocVersion(inv.docVersion ?? 1);
         setLines(
           (inv.lines ?? []).map((l) => ({
             productId: l.productId ?? '',
@@ -161,6 +163,7 @@ export const QuotationEditorPage: React.FC = () => {
       // nothing (no request, no error the user can act on).
       companyId,
       quotationNumber: docNumber,
+      expectedVersion: isEdit ? docVersion : undefined,
         customerId: customerId || undefined,
         date,
         dueDate: dueDate || undefined,
@@ -200,10 +203,15 @@ export const QuotationEditorPage: React.FC = () => {
         void 0;
         navigate(backPath);
       } else {
-        addToast('error', (result?.error as string) || t('common.error'));
+        const errText = String((result?.error as string) || t('common.error'));
+        if (errText.includes('Document was modified by another user')) {
+          addToast('error', t('sales.invoice.docConflict'));
+        } else {
+          addToast('error', errText);
+        }
       }
     },
-    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber]
+    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber, docVersion]
   );
 
   const title = isEdit ? t('sales.quotation.edit') : t('sales.quotation.new');

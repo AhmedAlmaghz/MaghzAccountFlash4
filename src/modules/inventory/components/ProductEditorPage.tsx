@@ -10,6 +10,7 @@ import { useAuthStore } from '@/modules/auth/store';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
+import { toDateString } from '@/core/utils/mapPgRow';
 import { useProductCategories, useWarehouses } from '../hooks/useInventory';
 import { inventoryApi } from '../api';
 import { ProductUnitsSection } from './ProductUnitsSection';
@@ -113,7 +114,7 @@ export const ProductEditorPage: React.FC = () => {
           reorderPoint: String(row.reorder_point ?? '0'),
           openingStockQty: '',
           openingWarehouseId: '',
-          openingDate: row.opening_date ? String(row.opening_date).slice(0, 10) : '',
+          openingDate: row.opening_date ? toDateString(row.opening_date) ?? '' : '',
           isActive: row.is_active !== false,
           categoryIds: ((row.category_ids as unknown) as string[] | undefined) ?? [],
           productTypeId: String(row.product_type_id ?? ''),

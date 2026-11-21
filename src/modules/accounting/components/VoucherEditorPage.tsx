@@ -91,10 +91,10 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
     if (!id || !companyId) return;
     setLoading(true);
     (async () => {
-      const list = isReceipt
-        ? await accountingApi.getReceiptVouchers(companyId)
-        : await accountingApi.getPaymentVouchers(companyId);
-      const row = (list?.data ?? []).find((v) => v.id === id);
+      const res = isReceipt
+        ? await accountingApi.getReceiptVoucherById(companyId, id)
+        : await accountingApi.getPaymentVoucherById(companyId, id);
+      const row = res?.data;
       if (cancelled) return;
       setLoading(false);
       if (row) {

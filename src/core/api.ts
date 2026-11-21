@@ -59,26 +59,23 @@ export async function getNextDocumentNumber(companyId: string, documentType: str
   // Desktop: the increment and the collision check both live in the main
   // process, which also owns the table/number-column maps for documentType.
   // Format stays here — padding/prefix/year substitution is presentation.
+  // Desktop: the increment is atomic on its own (Electron RPC bumps
+  // document_sequences and returns the sequence row); the collision check is
+  // gone — 0005_document_number_uniques.sql rejects duplicates at the DB level.
+  // The legacy path below keeps its own availability loop as a safety net.
   if (isElectronPg() && coreRpc()) {
     const rpc = coreRpc()!;
     for (let attempt = 0; attempt < 10; attempt++) {
-      const res = (await rpc.peekNextDocumentNumber({ documentType })) as RpcEnvelope;
-      if (!res.success || !res.rows?.[0]) {
-        return { success: false, error: `Sequence not found: ${documentType}` };
-      }
-      const rawSeq = res.rows[0];
-      const candidate = formatSequenceNumber({
-        ...mapRows<DocumentSequence>([rawSeq])[0],
-        currentNumber: Number(rawSeq.current_number),
-      });
-      const bump = (await rpc.getNextDocumentNumber({ documentType, candidateNumber: candidate })) as RpcEnvelope;
-      if (!bump.success) {
+      const bump = (await rpc.getNextDocumentNumber({ documentType })) as RpcEnvelope;
+      const rpcRow = bump.rows?.[0];
+      const seq = rpcRow?.sequence ? mapRows<DocumentSequence>([rpcRow.sequence as Record<string, unknown>])[0] : undefined;
+      if (!bump.success || !seq) {
         return { success: false, error: bump.error || `Sequence not found: ${documentType}` };
       }
-      if (bump.rows?.[0]?.available === true) {
-        return { success: true, number: candidate };
-      }
-      // Collision: the number is already taken, loop with the next value.
+      // Allocated number = pre-bump cursor — parity with the legacy path,
+      // which returns current_number - increment_step after its RETURNING bump.
+      const allocated = Number(seq.currentNumber) - (Number(seq.incrementStep) || 1);
+      return { success: true, number: formatSequenceNumber({ ...seq, currentNumber: allocated }) };
     }
     return { success: false, error: 'Could not generate unique document number after 10 attempts' };
   }

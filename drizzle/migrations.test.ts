@@ -33,18 +33,30 @@ describe('Migration layout: squashed baseline + additive migrations', () => {
       baselineFile,
       '0001_asset_periods.sql',
       '0002_products_opening_date.sql',
+      '0003_sessions.sql',
+      '0004_doc_version_columns.sql',
+      '0005_document_number_uniques.sql',
+      '0006_audit_session_id.sql',
     ]);
   });
 
   it('journal mirrors the migration files in order', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8'));
-    expect(journal.entries).toHaveLength(3);
+    expect(journal.entries).toHaveLength(7);
     expect(journal.entries[0].tag).toBe('0000_init');
     expect(journal.entries[0].idx).toBe(0);
     expect(journal.entries[1].tag).toBe('0001_asset_periods');
     expect(journal.entries[1].idx).toBe(1);
     expect(journal.entries[2].tag).toBe('0002_products_opening_date');
     expect(journal.entries[2].idx).toBe(2);
+    expect(journal.entries[3].tag).toBe('0003_sessions');
+    expect(journal.entries[3].idx).toBe(3);
+    expect(journal.entries[4].tag).toBe('0004_doc_version_columns');
+    expect(journal.entries[4].idx).toBe(4);
+    expect(journal.entries[5].tag).toBe('0005_document_number_uniques');
+    expect(journal.entries[5].idx).toBe(5);
+    expect(journal.entries[6].tag).toBe('0006_audit_session_id');
+    expect(journal.entries[6].idx).toBe(6);
     expect(journal.dialect).toBe('postgresql');
     // Snapshot must exist for future drizzle-kit generate diffs.
     expect(existsSync(join(MIGRATIONS_DIR, 'meta', '0000_snapshot.json'))).toBe(true);
@@ -96,6 +108,14 @@ describe('Migration layout: squashed baseline + additive migrations', () => {
     expect(pglite).toMatch(/\{ name: '0000_init', sql: schemaInit \}/);
     expect(pglite).toMatch(/0001_asset_periods\.sql\?raw/);
     expect(pglite).toMatch(/\{ name: '0001_asset_periods', sql: schemaAssetPeriods \}/);
+    expect(pglite).toMatch(/0003_sessions\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0003_sessions', sql: schemaSessions \}/);
+    expect(pglite).toMatch(/0004_doc_version_columns\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0004_doc_version_columns', sql: schemaDocVersionColumns \}/);
+    expect(pglite).toMatch(/0005_document_number_uniques\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0005_document_number_uniques', sql: schemaNumberUniques \}/);
+    expect(pglite).toMatch(/0006_audit_session_id\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0006_audit_session_id', sql: schemaAuditSessionId \}/);
   });
 
   it('every drizzle/*.sql file is registered in PGlite (no orphan migration)', () => {
@@ -144,6 +164,121 @@ describe('0001_asset_periods: additive, idempotent, scoped', () => {
     }
     // No bare ADD COLUMN / ADD CONSTRAINT outside a guard.
     expect(sql1).not.toMatch(/ADD COLUMN "(location|custodian|serial_number|warranty_expiry|notes|period_type)" varchar[^;]*;/);
+  });
+});
+
+describe('0003_sessions: sessions table (multi-user)', () => {
+  const sql3 = readFileSync(join(MIGRATIONS_DIR, '0003_sessions.sql'), 'utf-8');
+
+  it('creates sessions table with token PK + cascade from users', () => {
+    expect(sql3).toMatch(/CREATE TABLE IF NOT EXISTS sessions \(/);
+    expect(sql3).toMatch(/token uuid PRIMARY KEY/);
+    expect(sql3).toMatch(/REFERENCES users\(id\) ON DELETE CASCADE/);
+  });
+
+  it('has partial unique index on (company_id, user_id) for active sessions', () => {
+    expect(sql3).toMatch(/idx_sessions_active.*WHERE revoked_at IS NULL/);
+  });
+
+  it('is registered in the PGlite migration list', () => {
+    const pglite = readFileSync(
+      join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'),
+      'utf8',
+    );
+    expect(pglite).toMatch(/0003_sessions\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0003_sessions', sql: schemaSessions \}/);
+  });
+});
+
+describe('0004_doc_version_columns: optimistic concurrency', () => {
+  const sql4 = readFileSync(join(MIGRATIONS_DIR, '0004_doc_version_columns.sql'), 'utf-8');
+
+  it('adds doc_version to the 13 document tables', () => {
+    for (const t of ['sales_invoices', 'sales_invoice_lines', 'quotations', 'quotation_lines', 'sales_returns', 'sales_return_lines', 'purchase_invoices', 'purchase_invoice_lines', 'purchase_orders', 'purchase_order_lines', 'purchase_returns', 'purchase_return_lines', 'journal_entries']) {
+      expect(sql4).toMatch(new RegExp(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS doc_version integer NOT NULL DEFAULT 1`));
+    }
+  });
+
+  it('is registered in the PGlite migration list', () => {
+    const pglite = readFileSync(
+      join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'),
+      'utf8',
+    );
+    expect(pglite).toMatch(/0004_doc_version_columns\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0004_doc_version_columns', sql: schemaDocVersionColumns \}/);
+  });
+});
+
+describe('0005_document_number_uniques: hard-unique document numbers (Phase 3)', () => {
+  const sql5 = readFileSync(join(MIGRATIONS_DIR, '0005_document_number_uniques.sql'), 'utf-8');
+
+  it('adds UNIQUE (company_id, number) on the 12 document tables', () => {
+    const constraints = [
+      'sales_invoices:uq_sales_invoices_company_invoice_number',
+      'quotations:uq_quotations_company_quotation_number',
+      'sales_returns:uq_sales_returns_company_return_number',
+      'purchase_invoices:uq_purchase_invoices_company_invoice_number',
+      'purchase_orders:uq_purchase_orders_company_order_number',
+      'purchase_returns:uq_purchase_returns_company_return_number',
+      'work_orders:uq_work_orders_company_order_number',
+      'payroll_runs:uq_payroll_runs_company_run_number',
+      'receipt_vouchers:uq_receipt_vouchers_company_voucher_number',
+      'payment_vouchers:uq_payment_vouchers_company_voucher_number',
+      'customers:uq_customers_company_code',
+      'suppliers:uq_suppliers_company_code',
+    ];
+    for (const row of constraints) {
+      const [table, name] = row.split(':');
+      expect(sql5).toMatch(new RegExp(`ALTER TABLE ${table} ADD CONSTRAINT ${name} UNIQUE`));
+    }
+  });
+
+  it('adds UNIQUE (company_id, document_type) on document_sequences', () => {
+    expect(sql5).toMatch(/uq_document_sequences_company_document_type/);
+    expect(sql5).toMatch(/ALTER TABLE document_sequences ADD CONSTRAINT uq_document_sequences_company_document_type UNIQUE/);
+  });
+
+  it('dedupes existing duplicates before adding the UNIQUE constraints', () => {
+    expect((sql5.match(/DELETE FROM sales_invoices WHERE id IN/g) || []).length).toBe(1);
+    expect((sql5.match(/DELETE FROM customers WHERE id IN/g) || []).length).toBe(1);
+    expect((sql5.match(/ROW_NUMBER\(\) OVER \(PARTITION BY company_id, invoice_number ORDER BY id\)/g) || []).length).toBeGreaterThan(0);
+  });
+
+  it('is idempotent (pg_constraint guards around ALTERs, IF EXISTS around dedupes)', () => {
+    expect(sql5).toMatch(/pg_constraint/);
+    // No bare ADD CONSTRAINT without a guard.
+    expect((sql5.match(/ADD CONSTRAINT/g) || []).length).toBe((sql5.match(/pg_constraint/g) || []).length);
+  });
+
+  it('is registered in the PGlite migration list', () => {
+    const pglite = readFileSync(
+      join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'),
+      'utf8',
+    );
+    expect(pglite).toMatch(/0005_document_number_uniques\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0005_document_number_uniques', sql: schemaNumberUniques \}/);
+  });
+});
+
+describe('0006_audit_session_id: audit_logs.session_id (Phase 5)', () => {
+  const sql6 = readFileSync(join(MIGRATIONS_DIR, '0006_audit_session_id.sql'), 'utf-8');
+
+  it('adds audit_logs.session_id uuid column', () => {
+    expect(sql6).toMatch(/ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS session_id uuid;/);
+  });
+
+  it('adds FK to sessions(token) ON DELETE SET NULL', () => {
+    expect(sql6).toMatch(/audit_logs_session_id_fk/);
+    expect(sql6).toMatch(/REFERENCES sessions\(token\) ON DELETE SET NULL/);
+  });
+
+  it('is registered in the PGlite migration list', () => {
+    const pglite = readFileSync(
+      join(process.cwd(), 'src/core/database/adapters/pgliteAdapter.ts'),
+      'utf8',
+    );
+    expect(pglite).toMatch(/0006_audit_session_id\.sql\?raw/);
+    expect(pglite).toMatch(/\{ name: '0006_audit_session_id', sql: schemaAuditSessionId \}/);
   });
 });
 

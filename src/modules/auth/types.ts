@@ -1,3 +1,23 @@
+/**
+ * Сессия (multi-user): описание активной сессии как она существует в
+ * `electron/dbHandler.js` (auth:list-sessions).
+ */
+export interface SessionInfo {
+  token: string;
+  userId: string;
+  username: string;
+  fullName?: string | null;
+  role?: string | null;
+  isActive?: boolean | null;
+  createdAt: number | null;
+  expiresAt: number | null;
+  lastActivityAt: number | null;
+  userAgent?: string | null;
+  ipAddress?: string | null;
+  isExpired: boolean;
+  isCurrent: boolean;
+}
+
 export interface User {
   id: string;
   companyId?: string;
@@ -11,6 +31,7 @@ export interface User {
   branchId?: string | null;
   branchName?: string;
   isActive: boolean;
+  sessionsCount?: number;
   passwordHash?: string;
   lastLoginAt?: string;
   createdAt?: string;

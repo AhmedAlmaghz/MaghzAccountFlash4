@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { User, Permission } from '@/modules/auth/types';
+import type { User, Permission, SessionInfo } from '@/modules/auth/types';
 import { AuditLogger } from '@/core/audit';
 import { disposeAiSession } from '@/modules/ai/engine/sessionBoundary';
 
@@ -116,11 +116,21 @@ interface AuthState {
   isLoading: boolean;
   permissions: Permission[];
   lastActivityAt: number | null;
+  // Мульти-юзер: список юзеров этой компании в рамках окна + активный пользователь.
+  users: User[];
+  activeUserId: string | null;
 
   setUser: (user: User | null) => void;
   updateStoredUser: (user: User) => void;
   login: (user: User, permissions?: Permission[]) => void;
-  logout: () => void;
+  logout: (userId?: string) => void;
+  switchUser: (userId: string, password?: string) => Promise<{ success: boolean; error?: string }>;
+  // Мульти-пользователь (Phase 1/5): список активных сессий штата окна + выход из конкретной сессии.
+  listSessions: () => Promise<{ success: boolean; sessions?: SessionInfo[]; error?: string }>;
+  revokeSession: (targetToken: string) => Promise<{ success: boolean; revoked?: boolean; error?: string }>;
+  refreshSession: () => Promise<{ success: boolean; user?: User | null; permissions?: Permission[]; error?: string }>;
+  isRefreshing: boolean;
+  refreshUsersList: () => Promise<User[]>;
   setLoading: (loading: boolean) => void;
   setPermissions: (permissions: Permission[]) => void;
   hasPermission: (permission: string) => boolean;
@@ -137,6 +147,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: true,
   permissions: [],
   lastActivityAt: null,
+  users: [],
+  activeUserId: null,
+  isRefreshing: false,
 
   setUser: (user) => {
     const previous = get().user;
@@ -162,19 +175,109 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   login: (user, permissions = []) => {
-    set({ user, isAuthenticated: true, isLoading: false, permissions, lastActivityAt: Date.now() });
+    const users = get().users.some((u) => u.id === user.id) ? get().users : [...get().users, user];
+    set({
+      user, isAuthenticated: true, isLoading: false, permissions, lastActivityAt: Date.now(),
+      users, activeUserId: user.id,
+    });
     persistAuth(user, permissions);
     void AuditLogger.logLogin();
+    // Best-effort: refresh the multi-user users list for the Header account dropdown.
+    void get().refreshUsersList().catch(() => { /* non-Electron — ignore */ });
   },
 
-  logout: () => {
-    const user = get().user;
+  logout: (userId?: string) => {
+    const current = get();
+    const targetUserId = userId ?? current.user?.id;
+    const isSwitchAway = targetUserId && current.activeUserId && targetUserId !== current.activeUserId;
+    if (isSwitchAway) {
+      // Switch-away logout: just remove that user from the list (session stays valid).
+      set({ users: current.users.filter((u) => u.id !== targetUserId) });
+      return;
+    }
+    // Full logout: only for the active user.
     void window.electronAuth?.logout();
-    set({ user: null, isAuthenticated: false, isLoading: false, permissions: [], lastActivityAt: null });
+    set({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      permissions: [],
+      lastActivityAt: null,
+      users: [],
+      activeUserId: null,
+    });
     clearPersistedAuth();
     disposeAiSession();
-    if (user) {
+    if (current.user) {
       void AuditLogger.logLogout();
+    }
+  },
+
+  switchUser: async (userId, password) => {
+    const result = await window.electronAuth?.switchUser?.(userId, password);
+    if (result?.success) {
+      const user = result.user as User | null;
+      const permissions = Array.isArray(result.permissions) ? (result.permissions as Permission[]) : [];
+      // setUser handles disposeAiSession() on user change
+      get().setUser(user);
+      set({ permissions, activeUserId: userId, isAuthenticated: true, isLoading: false, lastActivityAt: Date.now() });
+      if (user) {
+        const users = get().users.some((u) => u.id === user.id) ? get().users : [...get().users, user];
+        set({ users });
+        persistAuth(user, permissions);
+      }
+    }
+    return { success: !!result?.success, error: result?.error };
+  },
+
+  listSessions: async () => {
+    try {
+      const res = (await window.electronAuth?.listSessions?.()) as { success?: boolean; sessions?: SessionInfo[]; error?: string } | undefined;
+      return {
+        success: !!res?.success,
+        sessions: Array.isArray(res?.sessions) ? res.sessions : undefined,
+        error: res?.error,
+      };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  revokeSession: async (targetToken: string) => {
+    try {
+      const res = (await window.electronAuth?.revokeSession?.(targetToken)) as { success?: boolean; revoked?: boolean; error?: string } | undefined;
+      return { success: !!res?.success, revoked: res?.revoked, error: res?.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  },
+
+  // Refresh the live user after a role change / deactivation on this user.
+  refreshSession: async () => {
+    try {
+      set({ isRefreshing: true });
+      const res = (await window.electronAuth?.refreshSession?.()) as { success?: boolean; user?: User | null; permissions?: Permission[]; error?: string } | undefined;
+      if (res?.success && res.user) {
+        const permissions = Array.isArray(res.permissions) ? res.permissions : get().permissions;
+        get().setUser(res.user);
+        set({ permissions, lastActivityAt: Date.now() });
+      }
+      return { success: !!res?.success, error: res?.error };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    } finally {
+      set({ isRefreshing: false });
+    }
+  },
+
+  refreshUsersList: async () => {
+    try {
+      const res = await window.electronAuth?.listUsers?.();
+      const users = (res?.data as User[] | undefined) ?? [];
+      if (Array.isArray(users) && users.length > 0) set({ users });
+      return Array.isArray(users) ? users : get().users;
+    } catch {
+      return get().users;
     }
   },
 
@@ -333,7 +436,10 @@ export async function initAuth(): Promise<void> {
       isLoading: false,
       permissions,
       lastActivityAt: lastActivityAt ?? Date.now(),
+      activeUserId: persistedUser.id,
     });
+    // Best-effort multi-user list refresh (Header account dropdown).
+    useAuthStore.getState().refreshUsersList().catch(() => { /* non-Electron — ignore */ });
   } catch {
     clearPersistedAuth();
     disposeAiSession();

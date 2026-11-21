@@ -55,6 +55,7 @@ export interface SalesInvoice {
   baseCurrencyPaid?: number;
   paymentType?: string;
   cashBoxId?: string;
+  docVersion?: number;
   status: 'draft' | 'posted' | 'paid' | 'partially_paid' | 'cancelled';
   notes?: string;
   attachments?: InvoiceAttachment[];
@@ -96,6 +97,7 @@ export interface Quotation {
   id: string;
   companyId: string;
   quotationNumber: string;
+  docVersion?: number;
   customerId: string;
   customer?: Customer;
   date: string;
@@ -133,6 +135,7 @@ export interface SalesReturn {
   id: string;
   companyId: string;
   returnNumber: string;
+  docVersion?: number;
   // Phase 0 fix: the DB column is nullable (standalone returns without a
   // source invoice are legal) — the type must admit undefined instead of
   // forcing mappers into String(null) === "null".

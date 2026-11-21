@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, integer } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 import { products } from './inventory';
 
@@ -51,6 +51,7 @@ export const purchaseInvoices = pgTable('purchase_invoices', {
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Purchase Invoice Lines ───────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export const purchaseInvoiceLines = pgTable('purchase_invoice_lines', {
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyLineTotal: numeric('base_currency_line_total', { precision: 18, scale: 4 }).notNull().default('0'),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Purchase Orders ──────────────────────────────────────────────────────────
@@ -89,6 +91,7 @@ export const purchaseOrders = pgTable('purchase_orders', {
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 export const purchaseOrderLines = pgTable('purchase_order_lines', {
@@ -103,6 +106,7 @@ export const purchaseOrderLines = pgTable('purchase_order_lines', {
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
   receivedQuantity: numeric('received_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Purchase Returns ─────────────────────────────────────────────────────────
@@ -125,6 +129,7 @@ export const purchaseReturns = pgTable('purchase_returns', {
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 export const purchaseReturnLines = pgTable('purchase_return_lines', {
@@ -138,4 +143,5 @@ export const purchaseReturnLines = pgTable('purchase_return_lines', {
   baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  docVersion: integer('doc_version').notNull().default(1),
 });

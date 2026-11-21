@@ -58,6 +58,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   const [loading, setLoading] = useState(Boolean(id));
   const [status, setStatus] = useState<string>('draft');
   const [docNumber, setDocNumber] = useState('');
+  const [docVersion, setDocVersion] = useState(1);
 
   const backPath = '/sales/invoices';
   const draft = useMemo(() => ({ customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines }), [customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines]);
@@ -84,50 +85,45 @@ export const SalesInvoiceEditorPage: React.FC = () => {
     };
   }, [isEdit, companyId, getNextNumber]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadDoc = useCallback(async () => {
     if (!id || !companyId) return;
     setLoading(true);
-    (async () => {
-      const res = await salesApi.getInvoiceById(id, companyId);
-      if (cancelled) return;
-      setLoading(false);
-      if (res?.success && res.data) {
-        const inv = res.data as SalesInvoice;
-        setCustomerId(inv.customerId ?? '');
-        setCustomerName(inv.customer?.name ?? '');
-        setDate(inv.date ?? todayIso());
-        setDueDate(inv.dueDate ?? '');
-        setCurrencyCode(inv.currencyCode ?? YER_CODE);
-        setExchangeRate(inv.exchangeRate ?? 1);
-        setPaymentType(inv.paymentType === 'cash' ? 'cash' : 'credit');
-        setCashBoxId(inv.cashBoxId ?? '');
-        setNotes(inv.notes ?? '');
-        setStatus(inv.status ?? 'draft');
-        setDocNumber(inv.invoiceNumber ?? '');
-        setLines(
-          (inv.lines ?? []).map((l) => ({
-            productId: l.productId,
-            productName: l.productName ?? '',
-            productCode: l.productCode,
-            unitId: l.unitId,
-            unitFactor: l.unitFactor,
-            baseQuantity: l.baseQuantity,
-            unitName: l.unitName,
-            quantity: l.quantity,
-            unitPrice: l.unitPrice,
-            discountPercent: l.discountPercent ?? 0,
-            vatPercent: l.vatPercent ?? 0,
-          }))
-        );
-      } else {
-        addToast('error', res?.error || t('common.noResults'));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const res = await salesApi.getInvoiceById(id, companyId);
+    setLoading(false);
+    if (res?.success && res.data) {
+      const inv = res.data as SalesInvoice;
+      setCustomerId(inv.customerId ?? '');
+      setCustomerName(inv.customer?.name ?? '');
+      setDate(inv.date ?? todayIso());
+      setDueDate(inv.dueDate ?? '');
+      setCurrencyCode(inv.currencyCode ?? YER_CODE);
+      setExchangeRate(inv.exchangeRate ?? 1);
+      setPaymentType(inv.paymentType === 'cash' ? 'cash' : 'credit');
+      setCashBoxId(inv.cashBoxId ?? '');
+      setNotes(inv.notes ?? '');
+      setStatus(inv.status ?? 'draft');
+      setDocNumber(inv.invoiceNumber ?? '');
+      setDocVersion(inv.docVersion ?? 1);
+      setLines(
+        (inv.lines ?? []).map((l) => ({
+          productId: l.productId,
+          productName: l.productName ?? '',
+          productCode: l.productCode,
+          unitId: l.unitId,
+          unitFactor: l.unitFactor,
+          baseQuantity: l.baseQuantity,
+          unitName: l.unitName,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          discountPercent: l.discountPercent ?? 0,
+          vatPercent: l.vatPercent ?? 0,
+        }))
+      );
+    } else {
+      addToast('error', res?.error || t('common.noResults'));
+    }
   }, [id, companyId, addToast, t]);
+  useEffect(() => { void loadDoc(); }, [loadDoc]);
 
   // Restore a previous draft when creating (best-effort, no toast).
   const draftSetters = useMemo(
@@ -204,6 +200,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       // nothing (no request, no error the user can act on).
       companyId,
       invoiceNumber: docNumber,
+      expectedVersion: isEdit ? docVersion : undefined,
         customerId: customerId || undefined,
         date,
         dueDate: dueDate || undefined,
@@ -246,7 +243,15 @@ export const SalesInvoiceEditorPage: React.FC = () => {
         }
         navigate(backPath);
       } else {
-        addToast('error', (result?.error as string) || t('common.error'));
+        const errText = String((result?.error as string) || t('common.error'));
+        if (errText.includes('Document was modified by another user')) {
+          // Optimistic-lock conflict — another user saved the document between
+          // load and save. Toast + refetch so the user re-loads the form.
+          addToast('error', t('sales.invoice.docConflict'));
+          void loadDoc();
+        } else {
+          addToast('error', errText);
+        }
       }
     },
     [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber]

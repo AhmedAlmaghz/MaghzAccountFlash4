@@ -12,6 +12,7 @@ import { useFormatters } from '@/core/utils/useFormatters';
 import { useCurrencies } from '@/core/utils/useCurrencyDisplay';
 import { buildCurrencyBreakdown, type CurrencyBreakdownResult } from '@/core/utils/currencyBreakdown';
 import { YER_CODE } from '@/core/utils/currencyConverter';
+import { toDateString } from '@/core/utils/mapPgRow';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
 
 interface PosSaleRow {
@@ -164,7 +165,7 @@ export const PosReportsPage: React.FC = () => {
             entry = {
               invoiceId: invId,
               invoiceNumber: String(r.invoice_number || ''),
-              date: String(r.date || ''),
+              date: toDateString(r.date) ?? '',
               shiftId: r.shift_id ? String(r.shift_id) : null,
               shiftName: String(r.shift_name || r.shift_id2 || t('pos.shiftNumber')),
               cashierName: String(r.cashier_name || t('reports.unknown')),
@@ -295,7 +296,7 @@ export const PosReportsPage: React.FC = () => {
     const map: Record<string, { revenue: number; cashTotal: number; creditTotal: number; invoiceCount: number; quantity: number; ids: Set<string> }> = {};
     for (const row of filteredData) {
       let key = '';
-      if (groupBy === 'day') key = row.date ? String(row.date).slice(0, 10) : t('reports.unknown');
+      if (groupBy === 'day') key = row.date ? (toDateString(row.date) ?? t('reports.unknown')) : t('reports.unknown');
       else if (groupBy === 'shift') key = row.shiftName || row.shiftId || t('reports.unknown');
       else if (groupBy === 'cashier') key = row.cashierName;
       else if (groupBy === 'product') key = row.productName;
@@ -355,7 +356,7 @@ export const PosReportsPage: React.FC = () => {
     // Daily trend when no grouping
     const dayMap: Record<string, number> = {};
     for (const row of invoiceLevelData) {
-      const day = row.date ? String(row.date).slice(0, 10) : t('reports.unknown');
+      const day = row.date ? (toDateString(row.date) ?? t('reports.unknown')) : t('reports.unknown');
       dayMap[day] = (dayMap[day] || 0) + row.totalAmount;
     }
     return Object.entries(dayMap).sort(([a], [b]) => a.localeCompare(b)).map(([name, revenue]) => ({ name, revenue }));
@@ -619,7 +620,7 @@ export const PosReportsPage: React.FC = () => {
             <Table
               data={filteredData.slice(0, 300)}
               columns={[
-                { key: 'date', header: t('reports.date'), render: (r) => String(r.date).slice(0, 10) },
+                { key: 'date', header: t('reports.date'), render: (r) => toDateString(r.date) ?? '' },
                 { key: 'invoiceNumber', header: t('pos.receiptNumber'), mobile: 'title' as const },
                 { key: 'cashierName', header: t('pos.cashier') },
                 { key: 'customerName', header: t('reports.customer'), mobile: 'subtitle' as const },

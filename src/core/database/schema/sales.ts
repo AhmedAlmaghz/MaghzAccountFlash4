@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, numeric, boolean, date, jsonb, integer } from 'drizzle-orm/pg-core';
 import { companies } from './core';
 import { products } from './inventory';
 
@@ -58,6 +58,8 @@ export const salesInvoices = pgTable('sales_invoices', {
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  // Multi-user optimistic concurrency: expectedVersion on update (409 on mismatch).
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Sales Invoice Lines ──────────────────────────────────────────────────────
@@ -83,6 +85,7 @@ export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyLineTotal: numeric('base_currency_line_total', { precision: 18, scale: 4 }).notNull().default('0'),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Quotations ───────────────────────────────────────────────────────────────
@@ -102,6 +105,7 @@ export const quotations = pgTable('quotations', {
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Quotation Lines ──────────────────────────────────────────────────────────
@@ -116,6 +120,7 @@ export const quotationLines = pgTable('quotation_lines', {
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Sales Returns ────────────────────────────────────────────────────────────
@@ -138,6 +143,7 @@ export const salesReturns = pgTable('sales_returns', {
   updatedBy: uuid('updated_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  docVersion: integer('doc_version').notNull().default(1),
 });
 
 // ─── Sales Return Lines ───────────────────────────────────────────────────────
@@ -151,4 +157,5 @@ export const salesReturnLines = pgTable('sales_return_lines', {
   baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  docVersion: integer('doc_version').notNull().default(1),
 });

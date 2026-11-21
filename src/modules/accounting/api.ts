@@ -714,6 +714,20 @@ export const accountingApi = {
   },
 
   // ─── Receipt Vouchers ─────────────────────────────────────────────────────
+  async getReceiptVoucherById(companyId: string, voucherId: string): Promise<{ success: boolean; data?: ReceiptVoucher; error?: string }> {
+    const res = await this.getReceiptVouchers(companyId);
+    const row = (res.data ?? []).find((v) => v.id === voucherId);
+    if (!row) return { success: false, error: 'Voucher not found' };
+    return { success: true, data: row };
+  },
+
+  async getPaymentVoucherById(companyId: string, voucherId: string): Promise<{ success: boolean; data?: PaymentVoucher; error?: string }> {
+    const res = await this.getPaymentVouchers(companyId);
+    const row = (res.data ?? []).find((v) => v.id === voucherId);
+    if (!row) return { success: false, error: 'Voucher not found' };
+    return { success: true, data: row };
+  },
+
   async getReceiptVouchers(companyId: string, ownedByUserId?: string): Promise<{ success: boolean; data?: ReceiptVoucher[]; error?: string }> {
     try {
       const cidValidation = validateInput(companyIdSchema, companyId);

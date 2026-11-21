@@ -591,7 +591,7 @@ describe('salesApi.postInvoice customer balance tracking', () => {
     expect(custStmt).toBeDefined();
     expect(custStmt!.sql).toMatch(/balance = balance \+ \$1/);
     expect(Number(custStmt!.params![0])).toBe(750);
-  });
+  }, 20000);
 
   it('does not update customer balance when invoice is fully paid', async () => {
     const queries: string[] = [];

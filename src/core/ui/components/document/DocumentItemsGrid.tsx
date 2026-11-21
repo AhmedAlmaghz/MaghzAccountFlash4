@@ -209,7 +209,10 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
                   step="any"
                   inputMode="decimal"
                   value={String(line.quantity)}
-                  onChange={(e) => updateLine(index, { quantity: Number(e.target.value) || 0 })}
+                  onChange={(e) => updateLine(index, {
+                    quantity: Number(e.target.value) || 0,
+                    baseQuantity: (Number(e.target.value) || 0) * (line.unitFactor || 1),
+                  })}
                   onKeyDown={(e) => onRowKeyDown(index, e)}
                   size="lg"
                   className="text-center text-base font-semibold tabular-nums"

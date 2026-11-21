@@ -102,11 +102,19 @@ function dbFailure(err: unknown): { success: false; error: string; errorCode?: s
 import schemaInit from '@root/drizzle/0000_init.sql?raw';
 import schemaAssetPeriods from '@root/drizzle/0001_asset_periods.sql?raw';
 import schemaProductsOpeningDate from '@root/drizzle/0002_products_opening_date.sql?raw';
+import schemaSessions from '@root/drizzle/0003_sessions.sql?raw';
+import schemaDocVersionColumns from '@root/drizzle/0004_doc_version_columns.sql?raw';
+import schemaNumberUniques from '@root/drizzle/0005_document_number_uniques.sql?raw';
+import schemaAuditSessionId from '@root/drizzle/0006_audit_session_id.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
   { name: '0001_asset_periods', sql: schemaAssetPeriods },
   { name: '0002_products_opening_date', sql: schemaProductsOpeningDate },
+  { name: '0003_sessions', sql: schemaSessions },
+  { name: '0004_doc_version_columns', sql: schemaDocVersionColumns },
+  { name: '0005_document_number_uniques', sql: schemaNumberUniques },
+  { name: '0006_audit_session_id', sql: schemaAuditSessionId },
 ];
 
 /**

@@ -22,6 +22,34 @@
       "when": 1795100000000,
       "tag": "0002_products_opening_date",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795200000000,
+      "tag": "0003_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795300000000,
+      "tag": "0004_doc_version_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795400000000,
+      "tag": "0005_document_number_uniques",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795500000000,
+      "tag": "0006_audit_session_id",
+      "breakpoints": true
     }
   ]
 }

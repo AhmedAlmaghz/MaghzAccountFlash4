@@ -25,6 +25,7 @@ export const UsersPage: React.FC = () => {
   const { t } = useTranslation();
   const addToast = useToastStore((s) => s.addToast);
   const [users, setUsers] = useState<User[]>([]);
+  const [sessionCounts, setSessionCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -47,6 +48,21 @@ export const UsersPage: React.FC = () => {
   };
 
   useEffect(() => { loadData(); }, [activeCompany?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sessions (Phase 1/5): count of live sessions per user, refreshed when the
+  // Users table reloads and after role/active changes in handleSave.
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAuth?.listSessions?.()
+      .then((res) => {
+        if (cancelled || !res?.success) return;
+        const map: Record<string, number> = {};
+        for (const s of res.sessions || []) map[s.userId] = (map[s.userId] ?? 0) + 1;
+        setSessionCounts(map);
+      })
+      .catch(() => { /* best-effort column */ });
+    return () => { cancelled = true; };
+  }, [activeCompany?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
     if (!activeCompany?.id || !formData.username) {
@@ -87,6 +103,9 @@ export const UsersPage: React.FC = () => {
         companyId: activeCompany.id,
       });
       setEditingId(null); setNewPassword(''); setFormData({ username: '', email: '', role: 'accountant', isActive: true }); loadData();
+      // Phase 5 (multi-user): a role/active change on the CURRENT user must
+      // take effect immediately — refresh our own session.
+      void useAuthStore.getState().refreshSession();
     } catch {
       addToast('error', t('settings.users.saveError'));
     } finally {
@@ -177,6 +196,7 @@ export const UsersPage: React.FC = () => {
     { key: 'isActive', header: t('settings.users.status'), mobile: 'status' as const, render: (row: User) => (
       <span className={row.isActive ? 'badge-posted' : 'badge-draft'}>{row.isActive ? t('settings.common.active') : t('settings.common.disabled')}</span>
     )},
+    { key: 'sessionsCount', header: t('settings.users.sessions'), mobile: 'hidden' as const, render: (row: User) => sessionCounts[row.id] ?? 0 },
     { key: 'actions', header: '', mobile: 'actions' as const, render: (row: User) => (
       <div className="flex items-center gap-1">
         <Can action="edit" module="settings">

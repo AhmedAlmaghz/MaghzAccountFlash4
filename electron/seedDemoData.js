@@ -539,7 +539,7 @@ export async function seedComprehensiveDemoData(client, companyId, adminPassword
   const sequences = [
     // Sales
     { type: 'sales_invoice',     prefix: 'INV-',  start: 1, current: 0,  pad: 6 },
-    { type: 'sales_return',      prefix: 'SRT-',  start: 1, current: 0,  pad: 4 },
+    { type: 'sales_return', prefix: 'SR-', start: 1, current: 0, pad: 4 },
     { type: 'quotation',         prefix: 'QOT-',  start: 1, current: 0,  pad: 4 },
     // POS
     { type: 'pos_receipt',       prefix: 'POS-',  start: 1, current: 0,  pad: 6 },

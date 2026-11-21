@@ -11,8 +11,11 @@ import {
   Globe,
   Palette,
   ChevronDown,
+  UsersRound,
+  Check,
 } from 'lucide-react';
 import { useAppStore } from '@/core/store';
+import type { User } from '../types';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { useEscapeKey } from '@/core/hooks/useResponsive';
 import { cn } from '@/core/utils';
@@ -20,6 +23,7 @@ import { useAuthStore } from '../store';
 import { UserAvatar } from './UserAvatar';
 import { ProfileModal } from './ProfileModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
+import { SessionsModal } from './SessionsModal';
 
 /**
  * Header user menu — avatar button (photo only) opening name + email,
@@ -31,6 +35,12 @@ export const UserMenu: React.FC = () => {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const users = useAuthStore((s) => s.users);
+  const activeUserId = useAuthStore((s) => s.activeUserId);
+  const switchUser = useAuthStore((s) => s.switchUser);
+  const refreshUsersList = useAuthStore((s) => s.refreshUsersList);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [passwordTarget, setPasswordTarget] = useState<User | null>(null);
   const language = useAppStore((s) => s.language);
   const setLanguage = useAppStore((s) => s.setLanguage);
   const theme = useAppStore((s) => s.theme);
@@ -106,7 +116,7 @@ export const UserMenu: React.FC = () => {
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { void refreshUsersList(); setOpen((v) => !v); }}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t('header.userMenu.openMenu')}
@@ -145,6 +155,74 @@ export const UserMenu: React.FC = () => {
               </span>
             </div>
           </div>
+
+          {/* Мульти-юзер: смена активного пользователя в окне */}
+          {users.length > 1 && (
+            <>
+              <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-1" />
+              <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold text-zinc-400 flex items-center gap-1.5">
+                <UsersRound size={12} aria-hidden />
+                {t('header.userMenu.switchUser')}
+              </p>
+              {users.map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={u.id === activeUserId}
+                  disabled={u.id === activeUserId || !u.isActive}
+                  onClick={async () => {
+                    const res = await switchUser(u.id);
+                    if (res.success) setOpen(false);
+                    else if (res.error?.includes('Password required')) setPasswordTarget(u);
+                  }}
+                  className="flex items-center justify-between gap-2 w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="truncate">{u.fullName || u.username}</span>
+                  {u.id === activeUserId ? (
+                    <Check size={13} aria-hidden className="text-emerald-500" />
+                  ) : (
+                    <span className="text-[10px] px-1 py-0.5 rounded-full bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-semibold">
+                      {u.role || '—'}
+                    </span>
+                  )}
+                </button>
+              ))}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setOpen(false); setSessionsOpen(true); }}
+                className={menuItemClass}
+              >
+                <UsersRound size={16} aria-hidden />
+                {t('header.userMenu.manageSessions')}
+              </button>
+            </>
+          )}
+
+          {passwordTarget && (
+            <>
+              <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-1" />
+              <p className="px-3 pt-1.5 pb-1 text-[11px] font-semibold text-zinc-400 flex items-center gap-1.5">
+                <KeyRound size={12} aria-hidden />
+                {t('header.userMenu.switchUserPassword')}
+              </p>
+              <input
+                id="switch-password"
+                type="password"
+                autoFocus
+                aria-label={t('header.userMenu.switchUserPassword')}
+                onKeyDown={async (e) => {
+                  if (e.key !== 'Enter') return;
+                  const input = e.currentTarget as HTMLInputElement;
+                  const res = await switchUser(passwordTarget.id, input.value);
+                  setPasswordTarget(null);
+                  if (!res.success) void window.alert(res.error || '');
+                }}
+                className="w-full px-3 py-2.5 rounded-xl text-xs border border-zinc-200 dark:border-zinc-700 bg-transparent text-zinc-700 dark:text-zinc-300 placeholder-zinc-400"
+              />
+            </>
+          )}
 
           <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-1" />
 
@@ -261,6 +339,7 @@ export const UserMenu: React.FC = () => {
 
       <ProfileModal isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
       <ChangePasswordModal isOpen={passwordOpen} onClose={() => setPasswordOpen(false)} />
+      <SessionsModal open={sessionsOpen} onClose={() => setSessionsOpen(false)} />
     </div>
   );
 };

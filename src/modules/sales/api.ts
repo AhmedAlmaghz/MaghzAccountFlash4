@@ -94,6 +94,9 @@ function buildArAging(rows: Record<string, unknown>[]): CustomerArAging[] {
   return Array.from(map.values());
 }
 
+const isDuplicateKeyError = (err: string | undefined): boolean =>
+  !!err && /23505|duplicate key|unique constraint/i.test(err);
+
 export const salesApi = {
   // ─── Customers ────────────────────────────────────────────────────────────
   async getCustomers(companyId: string): Promise<{ success: boolean; data?: Customer[]; error?: string }> {
@@ -732,13 +735,29 @@ export const salesApi = {
       const invoiceCurrency = data.currencyCode || YER_CODE;
       const invoiceRate = data.exchangeRate ?? 1;
       if (isElectronPg()) {
-        const result = await invokeSalesRpc('createInvoice', {
+        let result = await invokeSalesRpc('createInvoice', {
           ...data,
           currencyCode: invoiceCurrency,
           exchangeRate: invoiceRate,
           baseCurrencyAmount: data.baseCurrencyAmount ?? (data.totalAmount * invoiceRate),
           baseCurrencyPaid: data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * invoiceRate),
         });
+        let attempts = 0;
+        while (!result.success && attempts < 4 && isDuplicateKeyError(result.error)) {
+          // Phase 3: the DB rejects duplicates (0005_document_number_uniques.sql);
+          // re-peek and retry with a fresh number on a conflict.
+          const num = await getNextDocumentNumber(data.companyId, 'sales_invoice');
+          if (!num.success || !num.number) break;
+          data.invoiceNumber = num.number;
+          result = await invokeSalesRpc('createInvoice', {
+            ...data,
+            currencyCode: invoiceCurrency,
+            exchangeRate: invoiceRate,
+            baseCurrencyAmount: data.baseCurrencyAmount ?? (data.totalAmount * invoiceRate),
+            baseCurrencyPaid: data.baseCurrencyPaid ?? ((data.paidAmount ?? 0) * invoiceRate),
+          });
+          attempts++;
+        }
         return result.success
           ? { success: true, id: firstId(result.rows) }
           : { success: false, error: result.error };
@@ -789,7 +808,18 @@ export const salesApi = {
         sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity,unit_cost) SELECT v.invoice_id,v.product_id,v.quantity,v.unit_price,v.discount_percent,v.vat_percent,v.line_total,v.currency_code,v.exchange_rate,v.base_currency_line_total,v.unit_id,v.unit_factor,v.base_quantity,COALESCE(p.cost_price,0) FROM inv JOIN (VALUES ${lineValues.join(',')}) v(invoice_id,product_id,quantity,unit_price,discount_percent,vat_percent,line_total,currency_code,exchange_rate,base_currency_line_total,unit_id,unit_factor,base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $2::uuid)`;
       }
       sql += ' SELECT id FROM inv';
-      const result = await adapter.query(sql, params);
+      let result = await adapter.query(sql, params);
+      // Phase 3: re-peek + retry on a duplicate (the DB now rejects duplicates
+      // via 0005_document_number_uniques.sql). Invoice number is $3 in params.
+      let attempts = 0;
+      while (!result.success && isDuplicateKeyError(result.error) && attempts < 4) {
+        const num = await getNextDocumentNumber(data.companyId, 'sales_invoice');
+        if (!num.success || !num.number) break;
+        data.invoiceNumber = num.number;
+        (params as unknown[])[2] = num.number;
+        result = await adapter.query(sql, params);
+        attempts++;
+      }
       if (result.success && result.rows?.[0]) {
         return { success: true, id: result.rows[0].id as string };
       }
@@ -799,7 +829,7 @@ export const salesApi = {
     }
   },
 
-  async updateInvoice(id: string, companyId: string, data: Partial<Omit<SalesInvoice, 'id' | 'companyId' | 'lines'>> & { lines?: SalesInvoiceLine[] }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  async updateInvoice(id: string, companyId: string, data: Partial<Omit<SalesInvoice, 'id' | 'companyId' | 'lines'>> & { lines?: SalesInvoiceLine[]; expectedVersion?: number }, _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -808,6 +838,13 @@ export const salesApi = {
         return result.success ? { success: true } : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
+      const expectedVersion = data.expectedVersion;
+      if (expectedVersion != null) {
+        const check = await adapter.query('SELECT doc_version FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+        if (!check.success || Number(check.rows?.[0]?.doc_version) !== expectedVersion) {
+          return { success: false, error: 'Document was modified by another user — reload the form' };
+        }
+      }
       const check = await adapter.query(
         'SELECT status, paid_amount FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid',
         [id, companyId]
@@ -844,7 +881,7 @@ export const salesApi = {
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       if (data.attachments !== undefined) { fields.push(`attachments = $${idx++}::jsonb`); values.push(JSON.stringify(data.attachments ?? [])); }
-      fields.push(`updated_by = $${idx++}::uuid`);
+      fields.push(`updated_by = $${idx++}::uuid`, `doc_version = doc_version + 1`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
       // Header + line replacement now travel in ONE transaction. They used to be
@@ -1412,7 +1449,7 @@ export const salesApi = {
     }
   },
 
-  async updateQuotation(id: string, companyId: string, data: Partial<Omit<Quotation, 'id' | 'companyId' | 'lines'>> & { lines?: QuotationLine[] }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  async updateQuotation(id: string, companyId: string, data: Partial<Omit<Quotation, 'id' | 'companyId' | 'lines'>> & { lines?: QuotationLine[]; expectedVersion?: number }, _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -1421,6 +1458,13 @@ export const salesApi = {
         return result.success ? { success: true } : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
+      const expectedVersion = data.expectedVersion;
+      if (expectedVersion != null) {
+        const check = await adapter.query('SELECT doc_version FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+        if (!check.success || Number(check.rows?.[0]?.doc_version) !== expectedVersion) {
+          return { success: false, error: 'Document was modified by another user — reload the form' };
+        }
+      }
       const fields: string[] = [];
       const values: unknown[] = [];
       let idx = 1;
@@ -1432,6 +1476,7 @@ export const salesApi = {
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
+      fields.push(`doc_version = doc_version + 1`);
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
@@ -1732,7 +1777,7 @@ export const salesApi = {
     }
   },
 
-  async updateReturn(id: string, companyId: string, data: Partial<Omit<SalesReturn, 'id' | 'companyId' | 'lines'>> & { lines?: SalesReturnLine[] }, _userId?: string): Promise<{ success: boolean; error?: string }> {
+  async updateReturn(id: string, companyId: string, data: Partial<Omit<SalesReturn, 'id' | 'companyId' | 'lines'>> & { lines?: SalesReturnLine[]; expectedVersion?: number }, _userId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const idValidation = validateInput(idCompanySchema, { id, companyId });
       if (!idValidation.success) return { success: false, error: idValidation.error };
@@ -1741,6 +1786,13 @@ export const salesApi = {
         return result.success ? { success: true } : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
+      const expectedVersion = data.expectedVersion;
+      if (expectedVersion != null) {
+        const check = await adapter.query('SELECT doc_version FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid', [id, companyId]);
+        if (!check.success || Number(check.rows?.[0]?.doc_version) !== expectedVersion) {
+          return { success: false, error: 'Document was modified by another user — reload the form' };
+        }
+      }
       // P2 fix (mirrors the RPC guard): posted returns already moved stock +
       // JE + party balance — editing lines or flipping status corrupts all
       // three while they stand. Draft edits only (posting via postReturn).
@@ -1773,6 +1825,7 @@ export const salesApi = {
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
+      fields.push(`doc_version = doc_version + 1`);
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
       fields.push(`updated_at = NOW()`);
@@ -2052,6 +2105,7 @@ function mapInvoiceRow(row: Record<string, unknown>): SalesInvoice {
     vatAmount: Number(row.vat_amount) || 0,
     totalAmount: Number(row.total_amount) || 0,
     paidAmount: Number(row.paid_amount) || 0,
+    docVersion: row.doc_version ? Number(row.doc_version) : 1,
     currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,
     exchangeRate: row.exchange_rate !== undefined ? Number(row.exchange_rate) : 1,
     baseCurrencyAmount: row.base_currency_amount !== undefined ? Number(row.base_currency_amount) : 0,
@@ -2096,6 +2150,7 @@ function mapQuotationRow(row: Record<string, unknown>): Quotation {
     id: String(row.id),
     companyId: String(row.company_id),
     quotationNumber: String(row.quotation_number),
+    docVersion: row.doc_version ? Number(row.doc_version) : 1,
     customerId: String(row.customer_id),
     customer: row.customer_name ? { id: String(row.customer_id), companyId: String(row.company_id), name: String(row.customer_name), balance: 0, isActive: true } : undefined,
     date: toDateString(row.date) ?? '',
@@ -2135,6 +2190,7 @@ function mapReturnRow(row: Record<string, unknown>): SalesReturn {
     id: String(row.id),
     companyId: String(row.company_id),
     returnNumber: String(row.return_number),
+    docVersion: row.doc_version ? Number(row.doc_version) : 1,
     // Phase 0 fix: String(null) === "null" — a return without a source
     // invoice mapped its invoiceId to the literal string "null", breaking
     // downstream lookups/filters. NULL stays undefined (mirrors line 1591).
