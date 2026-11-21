@@ -5417,3 +5417,19 @@ npx drizzle-kit migrate
   - **تخطي الشيكات الانتقائي**: وضع الترحيل يتخطى فحوص الهوية العابرة للشركة فقط — الـchecksum وأشكال الصفوف والحقول الحساسة والأب داخل النسخة تبقى مفروضة؛ التساهل الجزئي لا يفتح ثغرة سلامة.
   - **اختيار المستخدم المباشر قبل الفعل المدمّر**: بانر + checkbox + زر معطّل + حوار تأكيد برواية بديلة — التحذير المفرد (toast) لا يصلح لعكس بيانات كاملة.
   - **صف `companies` الوارد لا يُستورد في الترحيل**: ملف الشركة الهدف (الاسم/العملة/الإعدادات) يبقى — البيانات تنتقل، والهوية لا تُستبدل.
+
+### Phase 105b: Backup/Restore "sessions" drift fix + onboarding "existing database, no seed" mode
+- **المستخدم**: إعادة فحص Backup/Restore "من الصفر" — النتيجة: لا خطأ محلي موجود في التدفق الحالي؛ الكل مغطي (round-trip حي على PG محلي داخل ROLLBACK).
+- **Drift المكتشف (vitest أحمر → أخضر)**: `backupTables.test.ts` — جدول `sessions` (drizzle/0003_sessions.sql — مستخدم مفعّل في auth: login/logout/list-sessions/revoke) مفقود من BACKUP_PLAN — أضيف: (1) `DELETE_ORDER` قبل `users`، (2) `BACKUP_INSERT_ORDER` بعد `users`، (3) `USER_REF_COLUMNS` + `RESTORE_USER_REF_COLUMNS` في electron/dbHandler.js (parity).
+- **Dev DB**: `runDrizzleMigrations()` — طبّق migrations — جدول `sessions` الآن موجود؛ backup read = 70 جدول (كان 69).
+- **التحقق الحي**: `scripts/backup-restore-repro.mjs` + `scripts/backup-roundtrip-smoke.mjs` — read→encode→decode→restore حقيقي على `localhost:5432` داخل ROLLBACK.
+- **Onboarding — خيار "اتصال بقاعدة بيانات موجودة (بدون بذر)"**:
+  - `SeedOption = 'none' | 'default' | 'demo' | 'existing'` (onboardingStore).
+  - DatabaseStep: بطاقة 3 (existing) — تم المختار.
+  - Sessionless `db:has-users` (dbHandler + preload.cjs/js + ElectronDB.hasUsers type).
+  - `checkDatabaseHasData()` (databaseSetup.ts): Electron = جسرات `hasCompany`/`hasUsers`، Web = `SELECT count(*) FROM companies/users`.
+  - SeedStep: card existing + auto-check (`handleExistingDatabase`) + حالة (loading/ok/empty/failed) + Next معطّل حتى ok.
+  - `handleFinish`: `existing` → تخطي `applyOnboardingCompany` + `seedDefault/Demo` → `setCompleted + window.location.reload()` → boot → لأن `hasCompany=true` → شاشة تسجيل الدخول.
+  - i18n: +8 keys `onboarding.existingDb*` (AR+EN متوازنة).
+  - Tests: `databaseSetup.test.ts` (8) + `onboardingStore.test.ts` (1) — `vitest run`: 11 files / 79 tests ✓ (backup/BackupPage/adapter/parity).
+- **e2e shim**: `hasUsers` أضيف (vite-e2e-plugin.ts) — `e2eShimParity` + `encodingGate` ✓.

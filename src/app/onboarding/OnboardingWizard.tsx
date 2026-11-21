@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   KeyRound,
   HardDrive,
+  Users,
 } from 'lucide-react';
 import { useOnboardingStore } from '@/core/store/onboardingStore';
 import { useAppStore, detectDeviceLanguage } from '@/core/store';
@@ -48,7 +49,7 @@ export const OnboardingWizard: React.FC = () => {
     }
   }, []);
   const steps = getSteps(t);
-  const { currentStep, setCurrentStep, dbConfig, companyConfig, setCompleted, setProcessing, isProcessing, processingMessage, error, setError } = useOnboardingStore();
+  const { currentStep, setCurrentStep, dbConfig, companyConfig, seedOption, setCompleted, setProcessing, isProcessing, processingMessage, error, setError } = useOnboardingStore();
   const setActiveCompany = useAppStore((state) => state.setActiveCompany);
   const language = useAppStore((state) => state.language);
 
@@ -58,6 +59,16 @@ export const OnboardingWizard: React.FC = () => {
   const handleFinish = async () => {
     setProcessing(true, t('onboarding.saving'));
     setError(null);
+
+    // Existing-database mode: connect + login (no seeding, no company
+    // overwrite). The populated database IS the setup — after reload the
+    // boot layer sees hasCompany=true and lands on the login screen.
+    if (seedOption === 'existing') {
+      setCompleted(true);
+      setProcessing(false);
+      window.location.reload();
+      return;
+    }
 
     try {
       // Persist the wizard's company profile to the database first, so the
@@ -367,7 +378,8 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
 // ─── Step 2: Database ────────────────────────────────────────────────────────
 function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { t } = useTranslation();
-  const { dbConfig, setDbConfig, setError, setProcessing, isProcessing } = useOnboardingStore();
+  const { dbConfig, setDbConfig, setError, setProcessing, isProcessing, seedOption, setSeedOption } = useOnboardingStore();
+  const isExistingSelected = seedOption === 'existing';
   const [dbMode, setDbMode] = useState<'pglite' | 'pg'>('pglite');
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState('');
@@ -545,7 +557,7 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
       </div>
 
       {/* DB mode selection */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button
           onClick={() => setDbMode('pglite')}
           className={`p-4 rounded-xl border-2 text-right transition-all flex items-start gap-3 ${
@@ -576,6 +588,22 @@ function DatabaseStep({ onNext, onBack }: { onNext: () => void; onBack: () => vo
           <div>
             <p className="font-bold text-slate-900 dark:text-slate-100">{t('settings.database.postgres')}</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('settings.database.postgresDesc')}</p>
+          </div>
+        </button>
+        <button
+          onClick={() => setSeedOption('existing')}
+          className={`p-4 rounded-xl border-2 text-right transition-all flex items-start gap-3 ${
+            isExistingSelected
+              ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+          }`}
+        >
+          <div className={`mt-0.5 ${isExistingSelected ? 'text-primary-600' : 'text-slate-400'}`}>
+            <Database size={20} />
+          </div>
+          <div>
+            <p className="font-bold text-slate-900 dark:text-slate-100">{t('onboarding.existingDbOpt')}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('onboarding.existingDbDesc')}</p>
           </div>
         </button>
       </div>
@@ -816,9 +844,47 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   const [seedStatus, setSeedStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [seedMessage, setSeedMessage] = useState('');
   const [generatedPassword, setGeneratedPassword] = useState('');
+  const [existing, setExisting] = useState<{ status: 'idle' | 'loading' | 'ok' | 'empty' | 'failed'; message: string; company?: string | null }>({
+    status: 'idle',
+    message: '',
+    company: null,
+  });
+
+  // Existing-database mode: sessionless probe — connect the target, verify
+  // it has at least one company AND one user (logins need users), no seeding.
+  const handleExistingDatabase = async () => {
+    setExisting({ status: 'loading', message: t('onboarding.existingDbWaiting'), company: null });
+    setError(null);
+    try {
+      const { checkDatabaseHasData } = await import('@/core/database/databaseSetup');
+      const result = await checkDatabaseHasData();
+      if ('error' in result) {
+        setExisting({ status: 'failed', message: t('onboarding.existingDbFailed', { error: result.error }) });
+        return;
+      }
+      if (!result.exists) {
+        setExisting({ status: 'empty', message: t('onboarding.existingDbEmpty') });
+        return;
+      }
+      if (!result.hasUsers) {
+        setExisting({ status: 'empty', message: t('onboarding.existingDbNoUsers') });
+        return;
+      }
+      setExisting({
+        status: 'ok',
+        message: t('onboarding.existingDbReady', { db: result.company || 'PostgreSQL' }),
+        company: result.company,
+      });
+    } catch (err) {
+      setExisting({
+        status: 'failed',
+        message: t('onboarding.existingDbFailed', { error: err instanceof Error ? err.message : String(err) }),
+      });
+    }
+  };
 
   const handleSeedNow = async () => {
-    if (seedOption === 'none') {
+    if (seedOption === 'none' || seedOption === 'existing') {
       onNext();
       return;
     }
@@ -942,7 +1008,47 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
           desc={t('onboarding.dataDemoDesc')}
           onClick={() => setSeedOption('demo')}
         />
+        <SeedOptionCard
+          active={seedOption === 'existing'}
+          icon={<Users size={20} />}
+          title={t('onboarding.existingDbOpt')}
+          desc={t('onboarding.existingDbDesc')}
+          onClick={() => {
+            setSeedOption('existing');
+            void handleExistingDatabase();
+          }}
+        />
       </div>
+
+      {/* Existing-database status (only when the option is active) */}
+      {seedOption === 'existing' && (
+        <div className="space-y-1">
+          {existing.status === 'loading' && (
+            <div className="flex items-center gap-2 text-slate-400 bg-slate-50 dark:bg-slate-900/50 p-3 rounded-lg">
+              <Loader2 size={16} className="animate-spin shrink-0" />
+              <span className="text-sm">{existing.message}</span>
+            </div>
+          )}
+          {existing.status === 'ok' && (
+            <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-lg">
+              <CheckCircle size={18} className="shrink-0" />
+              <span className="text-sm font-medium">{existing.message}</span>
+            </div>
+          )}
+          {existing.status === 'empty' && (
+            <div className="flex items-center gap-2 text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
+              <AlertTriangle size={18} className="shrink-0" />
+              <span className="text-sm font-medium">{existing.message}</span>
+            </div>
+          )}
+          {existing.status === 'failed' && (
+            <div className="flex items-center gap-2 text-rose-600 bg-rose-50 dark:bg-rose-900/20 p-3 rounded-lg">
+              <XCircle size={18} className="shrink-0" />
+              <span className="text-sm font-medium">{existing.message}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {seedStatus === 'success' && (
         <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-lg">
@@ -970,8 +1076,14 @@ function SeedStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }
 
       <div className="flex justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
         <Button variant="secondary" leftIcon={<ArrowLeft size={16} />} onClick={onBack}>{t('back')}</Button>
-        <Button variant="primary" onClick={handleSeedNow} isLoading={isProcessing} leftIcon={<ArrowRight size={16} />}>
-          {seedOption === 'none' ? t('onboarding.skip') : t('onboarding.seedAndNext')}
+        <Button
+          variant="primary"
+          onClick={handleSeedNow}
+          isLoading={isProcessing}
+          disabled={(seedOption === 'existing' && existing.status !== 'ok') || isProcessing}
+          leftIcon={<ArrowRight size={16} />}
+        >
+          {seedOption === 'none' ? t('onboarding.skip') : seedOption === 'existing' ? t('onboarding.existingDbNext') : t('onboarding.seedAndNext')}
         </Button>
       </div>
     </div>
@@ -1002,7 +1114,13 @@ function CompleteStep({ onFinish, onBack }: { onFinish: () => void; onBack: () =
   const { t } = useTranslation();
   const { companyConfig, seedOption } = useOnboardingStore();
 
-  const seedLabel = seedOption === 'none' ? t('onboarding.noDataOpt') : seedOption === 'default' ? t('onboarding.dataDefault') : t('onboarding.dataDemo');
+  const seedLabel = seedOption === 'none'
+    ? t('onboarding.noDataOpt')
+    : seedOption === 'existing'
+      ? t('onboarding.existingDbOpt')
+      : seedOption === 'default'
+        ? t('onboarding.dataDefault')
+        : t('onboarding.dataDemo');
 
   return (
     <div className="space-y-6 text-center">

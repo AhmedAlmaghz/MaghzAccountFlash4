@@ -31,7 +31,7 @@ export interface CompanyConfig {
   taxTimezone?: string;
 }
 
-export type SeedOption = 'none' | 'default' | 'demo';
+export type SeedOption = 'none' | 'default' | 'demo' | 'existing';
 
 interface OnboardingState {
   completed: boolean;

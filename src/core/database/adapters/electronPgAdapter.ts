@@ -1,4 +1,5 @@
 import type { DbAdapter, CompanySeedProfile } from './types';
+import type { SessionInfo } from '@/modules/auth/types';
 import { classifyPgFailure, pgFailureMessage } from '@/core/utils/pgErrors';
 
 export interface ElectronDB extends PreloadDB {
@@ -311,7 +312,7 @@ export interface ElectronDB extends PreloadDB {
     getDocumentSequences(payload?: Record<string, unknown>): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     updateDocumentSequence(payload: { id: string; prefix?: string | null; suffix?: string | null; startingNumber?: number | null; currentNumber?: number | null; incrementStep?: number | null; paddingLength?: number | null; yearReset?: boolean | null; isActive?: boolean | null }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     peekNextDocumentNumber(payload: { documentType: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
-    getNextDocumentNumber(payload: { documentType: string; candidateNumber: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
+    getNextDocumentNumber(payload: { documentType: string }): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
     // Reference data (Phase 0 tranche 7a). Read-only, company from the session,
     // and deliberately without an explicit permission: assertSqlAuthorized
     // already governs these tables exactly as it governed the raw statements.
@@ -347,6 +348,8 @@ interface PreloadDB {
   probeServer?(): Promise<{ success: boolean; configured: boolean; reachable: boolean; source: string; db?: string; error?: string }>;
   /** Sessionless company-existence probe (boot routing only, never row data). */
   hasCompany?(): Promise<{ success: boolean; exists?: boolean; error?: string }>;
+  /** Sessionless multi-user probe (existing-DB onboarding: connect + login, no seeding). */
+  hasUsers?(): Promise<{ success: boolean; hasUsers?: boolean; error?: string }>;
   _exec(sql: string, params?: unknown[]): Promise<{ success: boolean; rows?: Record<string, unknown>[]; error?: string }>;
   _execBatch(queries: { sql: string; params?: unknown[] }[]): Promise<{ success: boolean; results?: unknown[][]; error?: string }>;
 }
@@ -373,6 +376,11 @@ interface ElectronAuth {
   updateRole(id: string, data: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
   deleteRole(id: string): Promise<{ success: boolean; error?: string }>;
   getAuditLogs(filters?: object): Promise<{ success: boolean; data?: Record<string, unknown>[]; error?: string }>;
+  // Мульти-пользователь (Phase 1/5): список активных сессий штата окна + выход из конкретной сессии.
+  listSessions(): Promise<{ success: boolean; sessions?: SessionInfo[]; error?: string }>;
+  switchUser(userId: string, password?: string): Promise<{ success: boolean; user?: ElectronAuthUser; permissions?: string[]; error?: string }>;
+  revokeSession(targetToken: string): Promise<{ success: boolean; revoked?: boolean; error?: string }>;
+  refreshSession(): Promise<{ success: boolean; user?: ElectronAuthUser; permissions?: string[]; error?: string }>;
 }
 
 interface ElectronAuthUser {

@@ -111,6 +111,9 @@ export const DELETE_ORDER: PlannedTable[] = [
   C('units'),
   C('vat_settings'),
   C('document_sequences'),
+  // Multi-user sessions (drizzle/0003_sessions.sql, actively used by auth).
+  // Deleted before users — sessions reference users (ON DELETE CASCADE).
+  C('sessions'),
   C('users'),
   C('roles'),
   C('settings'),
@@ -133,6 +136,7 @@ const INSERT_TABLES = [
   'branches',
   'roles',
   'users',
+  'sessions',
   'departments',
   'accounts',
   'cash_boxes',
@@ -252,6 +256,7 @@ export const RESTORE_UPSERT_TABLES: readonly string[] = ['companies'];
  * keeps the two copies in sync.
  */
 export const USER_REF_COLUMNS: Record<string, string[]> = {
+  sessions: ['user_id'],
   accounts: ['created_by', 'updated_by'],
   activities: ['assigned_to', 'created_by', 'updated_by'],
   ai_chat_sessions: ['user_id'],

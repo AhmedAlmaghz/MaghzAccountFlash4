@@ -48,6 +48,19 @@ contextBridge.exposeInMainWorld('electronAuth', {
   updateProfile: (data) => ipcRenderer.invoke('auth:update-profile', { sessionToken, data }),
   changePassword: (currentPassword, newPassword) => ipcRenderer.invoke('auth:change-password', { sessionToken, currentPassword, newPassword }),
   deleteUser: (id) => ipcRenderer.invoke('auth:delete-user', { sessionToken, id }),
+  // Multi-user session management
+  listSessions: () => ipcRenderer.invoke('auth:list-sessions', { sessionToken }),
+  switchUser: async (userId, password) => {
+    const result = await ipcRenderer.invoke('auth:switch-user', { sessionToken, userId, password });
+    if (result?.success && result.sessionToken) {
+      persistSessionToken(result.sessionToken);
+      sessionToken = result.sessionToken;
+      delete result.sessionToken;
+    }
+    return result;
+  },
+  revokeSession: (targetToken) => ipcRenderer.invoke('auth:revoke-session', { sessionToken, targetToken }),
+  refreshSession: () => ipcRenderer.invoke('auth:refresh-session', { sessionToken }),
   listRoles: () => ipcRenderer.invoke('auth:list-roles', { sessionToken }),
   createRole: (data) => ipcRenderer.invoke('auth:create-role', { sessionToken, data }),
   updateRole: (id, data) => ipcRenderer.invoke('auth:update-role', { sessionToken, id, data }),
@@ -65,6 +78,7 @@ contextBridge.exposeInMainWorld('electronDB', {
   // "populated database, no session yet" boot into "No company found" and
   // opens the onboarding wizard — which re-seeds — instead of the login page.
   hasCompany: () => ipcRenderer.invoke('db:has-company'),
+  hasUsers: () => ipcRenderer.invoke('db:has-users'),
   _exec: (sql, params = []) => ipcRenderer.invoke('db:internal-query', { sql, params, sessionToken }),
   _execBatch: (queries) => ipcRenderer.invoke('db:internal-transaction', { queries, sessionToken }),
   testConnection: (config) => ipcRenderer.invoke('db:test-connection', { ...(config || {}), sessionToken }),

@@ -93,6 +93,66 @@ export async function applyDbMode(mode: DbMode): Promise<void> {
   setDbMode(mode);
 }
 
+// ---------------------------------------------------------------------------
+// Existing-database onboarding check ("connect, then log in — no seed")
+// ---------------------------------------------------------------------------
+
+export interface ExistingDatabaseStatus {
+  /** The database has at least one company row. */
+  exists: boolean;
+  /** The database has at least one user row. */
+  hasUsers: boolean;
+  /** Company display name when known (Electron: null — no session yet). */
+  company: string | null;
+}
+
+type ExistingDatabaseResult = ExistingDatabaseStatus | { error: string };
+
+/**
+ * Sessionless check for "the target database already has data" (multi-user
+ * mode: connect + log in, no seeding).
+ *
+ * Electron: uses the sessionless `db:has-company`/`db:has-users` bridges
+ * (no session exists during onboarding). Web/PGlite/relay: one
+ * adapter.query against the live backend.
+ */
+export async function checkDatabaseHasData(): Promise<ExistingDatabaseResult> {
+  const bridge = (
+    window as unknown as {
+      electronDB?: {
+        hasCompany?: () => Promise<{ success: boolean; exists?: boolean; error?: string }>;
+        hasUsers?: () => Promise<{ success: boolean; hasUsers?: boolean; error?: string }>;
+      };
+    }
+  ).electronDB;
+
+  if (bridge?.hasCompany) {
+    const hasCompany = await bridge.hasCompany();
+    if (!hasCompany.success) return { error: hasCompany.error || 'Connection failed' };
+    const hasUsers = bridge.hasUsers
+      ? await bridge.hasUsers()
+      : { success: false, error: 'hasUsers bridge missing' };
+    if (!hasUsers.success) return { error: hasUsers.error || 'Users check failed' };
+    return { exists: hasCompany.exists === true, hasUsers: hasUsers.hasUsers === true, company: null };
+  }
+
+  const { getDbAdapter } = await import('./adapters');
+  const adapter = await getDbAdapter();
+  const res = await adapter.query<{ name?: string; companies: string | number; user_count: string | number }>(
+    "SELECT COALESCE((SELECT name FROM companies LIMIT 1), '') AS name, " +
+      '(SELECT count(*) FROM companies) AS companies, ' +
+      '(SELECT count(*) FROM users) AS user_count',
+    [],
+  );
+  if (!res.success || !res.rows) return { error: res.error || 'Connection failed' };
+  const row = res.rows[0];
+  return {
+    exists: Number(row?.companies ?? 0) > 0,
+    hasUsers: Number(row?.user_count ?? 0) > 0,
+    company: row?.companies ? row.name || null : null,
+  };
+}
+
 /**
  * Seed-step safety net (direct navigation to a later step): if the active
  * vault is empty but the wizard holds a URL, persist + activate it so the

@@ -1,6 +1,6 @@
 import { ipcMain, app, safeStorage } from 'electron';
 import pg from 'pg';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { seedComprehensiveDemoData } from './seedDemoData.js';
@@ -24,7 +24,7 @@ const { Pool } = pg;
 
 let pool = null;
 let querySeq = 0;
-const sessions = new Map();
+export const sessions = new Map();
 const SESSION_TTL_MS = 30 * 60 * 1000;
 // Sliding TTL alone would keep a stolen session alive forever as long as it
 // stays active. Cap the absolute lifetime (8h) and sweep expired entries so a
@@ -38,6 +38,12 @@ function sweepExpiredSessions() {
   for (const [token, session] of sessions) {
     if (session.expiresAt <= now || session.absoluteExpiresAt <= now) sessions.delete(token);
   }
+  // Also sweep expired/revoked rows from the authoritative `sessions` table
+  // so a stale session row never outlives its expiry (it does not affect
+  // open sessions — they keep a DB row in the hot path via Map cache).
+  pool.query('DELETE FROM sessions WHERE revoked_at IS NOT NULL OR expires_at < NOW()').catch((e) => {
+    console.warn('[Sessions] sweep expired sessions (DB):', e?.message);
+  });
 }
 
 function ensureSessionSweeper() {
@@ -54,21 +60,85 @@ function validateNewPassword(password) {
     && /\d/.test(password);
 }
 
-function createSession(webContentsId, user, permissions) {
-  const token = randomBytes(32).toString('base64url');
+// Authoritative session creation: inserts into `sessions` table (000003_sessions
+// migration) + keeps the in-memory Map as a hot-path cache (per-call reads hit
+// Map first). Token format stays base64url(randomBytes(32)) for backward compat.
+export async function createSession(webContentsId, user, permissions, request = {}) {
+  // Token is the DB uuid (same string serves as Map key + sessionToken payload)
+  const token = randomUUID();
   const now = Date.now();
+  const expiresAt = new Date(now + SESSION_TTL_MS);
+  const absoluteExpiresAt = new Date(now + SESSION_MAX_LIFETIME_MS);
   sessions.set(token, {
     webContentsId,
     user,
     permissions,
-    expiresAt: now + SESSION_TTL_MS,
-    absoluteExpiresAt: now + SESSION_MAX_LIFETIME_MS,
+    token,
+    expiresAt,
+    absoluteExpiresAt,
   });
+  try {
+    await pool.query(
+      'INSERT INTO sessions (token, user_id, company_id, fingerprint, ip_address, user_agent, expires_at, absolute_expires_at, last_activity_at) ' +
+      'VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, NOW()) ' +
+      'ON CONFLICT (token) DO NOTHING',
+      [token, user.id, user.companyId, request.fingerprint ?? null, request.ip_address ?? null, request.user_agent ?? null, expiresAt, absoluteExpiresAt],
+    );
+  } catch (err) {
+    // Don't break login if the insert hits transient issues — session still works in memory.
+    console.warn('[Sessions] createSession DB insert failed:', err?.message);
+  }
   ensureSessionSweeper();
   return token;
 }
 
-function getSession(webContentsId, token) {
+// Shared cache+DB row builder (maps sessions table rows to the in-memory shape).
+function parseRolePermissions(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+  }
+  return [];
+}
+
+export function mapUserRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    username: row.username ?? null,
+    email: row.email ?? null,
+    fullName: row.full_name ?? null,
+    phone: row.phone ?? null,
+    photoUrl: row.photo_url ?? null,
+    role: row.role ?? null,
+    branchId: row.branch_id ?? null,
+    isActive: row.is_active ?? false,
+  };
+}
+
+export function mapSessionRow(row) {
+  return {
+    webContentsId: null,
+    token: row.token,
+    user: {
+      id: row.user_id,
+      companyId: row.company_id,
+      username: row.username ?? null,
+      email: row.email ?? null,
+      fullName: row.full_name ?? null,
+      phone: row.phone ?? null,
+      photoUrl: row.photo_url ?? null,
+      role: row.role ?? null,
+      branchId: row.branch_id ?? null,
+      isActive: row.is_active ?? true,
+    },
+    permissions: Array.isArray(row.permissions) ? row.permissions : [],
+    expiresAt: new Date(row.expires_at).getTime(),
+    absoluteExpiresAt: new Date(row.absolute_expires_at).getTime(),
+  };
+}
+
+export function getSession(webContentsId, token) {
   // Token-based lookup (explicit sessionToken from preload) survives reloads:
   // after a renderer reload the webContentsId changes, but the token stays
   // valid. We migrate the session to the new webContentsId instead of
@@ -97,9 +167,37 @@ function getSession(webContentsId, token) {
   return session;
 }
 
+// Hydration: on app start (or re-attach), load active sessions from the
+// `sessions` table into the Map (sessions := hot-path). Called from createPool().
+export async function hydrateSessionsFromDb() {
+  try {
+    const res = await pool.query(
+      'SELECT s.token, u.id AS user_id, u.company_id, u.username, u.email, u.full_name, u.phone, u.photo_url, u.role, u.branch_id, u.is_active, s.permissions, s.expires_at, s.absolute_expires_at ' +
+      'FROM sessions s JOIN users u ON u.id = s.user_id ' +
+      'WHERE s.revoked_at IS NULL AND s.expires_at > NOW() AND s.absolute_expires_at > NOW()',
+    );
+    const now = Date.now();
+    for (const row of res.rows || []) {
+      if (sessions.has(row.token)) continue;
+      const sess = mapSessionRow(row);
+      if (sess.expiresAt <= now || sess.absoluteExpiresAt <= now) continue;
+      sess.webContentsId = -1;
+      sessions.set(row.token, sess);
+    }
+  } catch (err) {
+    console.warn('[Sessions] hydrateSessionsFromDb failed:', err?.message);
+  }
+}
+
 // Invalidate every session belonging to a user (password change / deactivation /
 // deletion must cut off all existing access immediately).
-function revokeUserSessions(userId) {
+export async function revokeUserSessions(userId) {
+  // Authoritative: mark DB rows revoked. Map entries are removed after.
+  try {
+    await pool.query('UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1::uuid AND revoked_at IS NULL', [userId]);
+  } catch (err) {
+    console.warn('[Sessions] revokeUserSessions DB update failed:', err?.message);
+  }
   for (const [token, session] of sessions) {
     if (session.user.id === userId) sessions.delete(token);
   }
@@ -325,11 +423,15 @@ async function assertPostingPeriodsOpenOnClient(client, session, date) {
   }
 }
 
-function deleteSession(session) {
+export async function deleteSession(session) {
   for (const [token, candidate] of sessions) {
-    if (candidate === session) {
-      sessions.delete(token);
-      return;
+    if (candidate === session) sessions.delete(token);
+  }
+  if (session?.token) {
+    try {
+      await pool.query('UPDATE sessions SET revoked_at = NOW() WHERE token = $1', [session.token]);
+    } catch (err) {
+      console.warn('[Sessions] deleteSession DB delete failed:', err?.message);
     }
   }
 }
@@ -1060,6 +1162,10 @@ function createPool() {
     console.error('[DB] Unexpected pool error:', err.message);
   });
 
+  // Hydrate sessions from the DB table into the Map — on app start or pool
+  // recreation, so sessions survive restarts (2-слойная модель sessions).
+  hydrateSessionsFromDb().catch((e) => console.warn('[Sessions] hydrate failed:', e?.message));
+
   return pool;
 }
 
@@ -1212,6 +1318,17 @@ export function registerDatabaseHandlers() {
     try {
       const res = await pool.query('SELECT 1 FROM companies LIMIT 1');
       return { success: true, exists: res.rows.length > 0 };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Sessionless multi-user probe (existing-DB onboarding: connect + login,
+  // no seeding). Same posture as db:has-company — read-only, no secret.
+  ipcMain.handle('db:has-users', async () => {
+    try {
+      const res = await pool.query('SELECT 1 FROM users LIMIT 1');
+      return { success: true, hasUsers: res.rows.length > 0 };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -2116,10 +2233,10 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   // No company id in the payload — the session decides, and the user id comes
   // from it too rather than from the caller.
   registerRpc('audit.log', {
-    paramCount: 8,
+    paramCount: 10,
     compose: (p, session) => ({
-      sql: `INSERT INTO audit_logs (id, user_id, action, table_name, record_id, old_values, new_values, ip_address, company_id, created_at)
-            VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::jsonb, $7::jsonb, $8::varchar, $9::uuid, NOW())`,
+      sql: `INSERT INTO audit_logs (id, user_id, action, table_name, record_id, old_values, new_values, ip_address, company_id, session_id, created_at)
+            VALUES ($1::uuid, $2::uuid, $3::varchar, $4::varchar, $5::varchar, $6::jsonb, $7::jsonb, $8::varchar, $9::uuid, $10::uuid, NOW())`,
       params: [
         crypto.randomUUID(),
         session.user.id,
@@ -2130,6 +2247,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
         p.newValues ? JSON.stringify(p.newValues) : null,
         p.ipAddress || null,
         session.user.companyId,
+        session.token,
       ],
     }),
     validate: (p) => {
@@ -2288,38 +2406,26 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     }),
   });
 
-  // next — the atomic increment. The increment and the collision check are two
-  // statements here for the same reason they were two in the renderer: the
-  // increment must be atomic on its own, and the check may fail and loop.
+  // next — the atomic increment (Phase 3): the UNIQUE constraints from
+  // 0005_document_number_uniques.sql now reject duplicates at the database
+  // level, so the old "available" pre-bump probe and the stale candidate that
+  // came with it are gone. The caller derives the display number from the
+  // bumped sequence row.
   registerRpc('core.getNextDocumentNumber', {
     paramCount: 1,
     validate: (p) => {
       if (!KNOWN_DOC_TYPES.has(String(p.documentType || ''))) throw new Error('unknown documentType');
     },
-    compose: (p, session) => {
-      const table = DOC_TYPE_TO_TABLE[String(p.documentType)];
-      const column = DOC_TYPE_TO_NUMBER_COLUMN[String(p.documentType)] || 'number';
-      return {
-        sql: `WITH bumped AS (
-                UPDATE document_sequences
-                   SET current_number = current_number + increment_step, updated_by = $3::uuid, updated_at = NOW()
-                 WHERE company_id = $1::uuid AND document_type = $2 AND is_active = true
-                RETURNING *
-              )
-              SELECT (SELECT row_to_json(bumped) FROM bumped) AS sequence,
-                     (SELECT NOT EXISTS (SELECT 1 FROM ${table} t
-                                         WHERE t.company_id = $1::uuid AND t.${column} = $4)) AS available
-                FROM (SELECT 1) AS one`,
-        params: [
-          session.user.companyId,
-          String(p.documentType),
-          session.user.id,
-          // $4 is the formatted number, computed by the caller: formatting is
-          // presentation, and the sequence row decides how it is padded
-          String(p.candidateNumber || ''),
-        ],
-      };
-    },
+    compose: (p, session) => ({
+      sql: `WITH bumped AS (
+              UPDATE document_sequences
+                 SET current_number = current_number + increment_step, updated_by = $3::uuid, updated_at = NOW()
+               WHERE company_id = $1::uuid AND document_type = $2 AND is_active = true
+              RETURNING *
+            )
+            SELECT row_to_json(bumped) AS sequence FROM bumped`,
+      params: [session.user.companyId, String(p.documentType), session.user.id],
+    }),
   });
 
   // ── Reference data reads (Phase 0 tranche 7a) ──────────────────────────────
@@ -5957,10 +6063,22 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const checkSql = `SELECT status, paid_amount, base_currency_paid, total_amount, created_by FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
-      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
-      const check = await execQuery(client, checkSql, [String(p.id), cid]);
-      if (!check.rows?.length || !canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
+      const expectedVersion = p.expectedVersion !== undefined ? Number(p.expectedVersion) : null;
+      const checkSql = `SELECT status, paid_amount, base_currency_paid, total_amount, created_by, doc_version FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid${expectedVersion !== null ? ' AND doc_version = $3::int' : ''} FOR UPDATE`;
+      const checkParams = expectedVersion !== null ? [String(p.id), cid, expectedVersion] : [String(p.id), cid];
+      assertSqlAuthorized(session, checkSql, checkParams);
+      const check = await execQuery(client, checkSql, checkParams);
+      if (!check.rows?.length) {
+        // doc_version mismatch (or not found): distinguish via existence for a
+        // precise client message.
+        const exists = await execQuery(client, 'SELECT 1 AS found FROM sales_invoices WHERE id = $1::uuid AND company_id = $2::uuid', [String(p.id), cid]);
+        await client.query('ROLLBACK');
+        if (exists.rows?.length && expectedVersion !== null) {
+          return { success: false, error: 'Document was modified by another user — reload the form' };
+        }
+        return { success: false, error: 'Invoice not found' };
+      }
+      if (!canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Invoice not found' };
       }
@@ -6010,6 +6128,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
+      fields.push(`doc_version = doc_version + 1`);
       values.push(uid, String(p.id), cid);
       const updateSql = `UPDATE sales_invoices SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
       assertSqlAuthorized(session, updateSql, values, { allowFinancialUpdate: true });
@@ -6170,10 +6289,20 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const checkSql = `SELECT id, status, created_by FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
-      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
-      const check = await execQuery(client, checkSql, [String(p.id), cid]);
-      if (!check.rows?.length || !canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
+      const expectedVersion = p.expectedVersion !== undefined ? Number(p.expectedVersion) : null;
+      const checkSql = `SELECT id, status, created_by, doc_version FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid${expectedVersion !== null ? ' AND doc_version = $3::int' : ''} FOR UPDATE`;
+      const checkParams = expectedVersion !== null ? [String(p.id), cid, expectedVersion] : [String(p.id), cid];
+      assertSqlAuthorized(session, checkSql, checkParams);
+      const check = await execQuery(client, checkSql, checkParams);
+      if (!check.rows?.length) {
+        const exists = await execQuery(client, 'SELECT 1 FROM quotations WHERE id = $1::uuid AND company_id = $2::uuid', [String(p.id), cid]);
+        await client.query('ROLLBACK');
+        if (exists.rows?.length && expectedVersion !== null) {
+          return { success: false, error: 'Document was modified by another user — reload the form' };
+        }
+        return { success: false, error: 'Quotation not found' };
+      }
+      if (!canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Quotation not found' };
       }
@@ -6200,6 +6329,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
+      fields.push(`doc_version = doc_version + 1`);
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       values.push(uid, String(p.id), cid);
        const updateSql = `UPDATE quotations SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
@@ -6427,10 +6557,20 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const checkSql = `SELECT status, created_by FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`;
-      assertSqlAuthorized(session, checkSql, [String(p.id), cid]);
-      const check = await execQuery(client, checkSql, [String(p.id), cid]);
-      if (!check.rows?.length || !canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
+      const expectedVersion = p.expectedVersion !== undefined ? Number(p.expectedVersion) : null;
+      const checkSql = `SELECT status, created_by, doc_version FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid${expectedVersion !== null ? ' AND doc_version = $3::int' : ''} FOR UPDATE`;
+      const checkParams = expectedVersion !== null ? [String(p.id), cid, expectedVersion] : [String(p.id), cid];
+      assertSqlAuthorized(session, checkSql, checkParams);
+      const check = await execQuery(client, checkSql, checkParams);
+      if (!check.rows?.length) {
+        const exists = await execQuery(client, 'SELECT 1 FROM sales_returns WHERE id = $1::uuid AND company_id = $2::uuid', [String(p.id), cid]);
+        await client.query('ROLLBACK');
+        if (exists.rows?.length && expectedVersion !== null) {
+          return { success: false, error: 'Document was modified by another user — reload the form' };
+        }
+        return { success: false, error: 'Return not found' };
+      }
+      if (!canAccessOwnedRow(session, 'sales', check.rows[0].created_by)) {
         await client.query('ROLLBACK');
         return { success: false, error: 'Return not found' };
       }
@@ -6469,6 +6609,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
+      fields.push(`doc_version = doc_version + 1`);
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       values.push(uid, String(p.id), cid);
       const updateSql = `UPDATE sales_returns SET ${fields.join(', ')} WHERE id = $${idx}::uuid AND company_id = $${idx + 1}::uuid`;
@@ -7407,34 +7548,16 @@ export function registerAuthHandlers() {
       if (!row) {
         return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
       }
-      let permissions = [];
-      let roleId;
-      if (row.role) {
-        const roles = await pool.query('SELECT id, permissions FROM roles WHERE name = $1 AND company_id = $2', [row.role, row.company_id]);
-        roleId = roles.rows[0]?.id || undefined;
-        const raw = roles.rows[0]?.permissions;
-        if (Array.isArray(raw)) permissions = raw;
-        else if (typeof raw === 'string') {
-          try { permissions = JSON.parse(raw); } catch { permissions = []; }
-        }
-      }
-      const user = {
-        id: row.id,
-        companyId: row.company_id,
-        username: row.username,
-        email: row.email || undefined,
-        fullName: row.full_name || undefined,
-        phone: row.phone || undefined,
-        photoUrl: row.photo_url || undefined,
-        role: row.role,
-        roleId,
-        branchId: row.branch_id || undefined,
-        isActive: row.is_active,
-      };
+      const permissions = parseRolePermissions((await pool.query('SELECT permissions FROM roles WHERE name = $1 AND company_id = $2', [row.role, row.company_id])).rows[0]?.permissions);
+      const user = mapUserRow(row);
       await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1 AND company_id = $2', [row.id, row.company_id]);
-      const sessionToken = createSession(event.sender.id, user, permissions);
+      const sessionToken = await createSession(event.sender.id, user, permissions, {
+        user_agent: event.request?.headers?.['user-agent'] || null,
+        ip_address: event.request?.headers?.['x-forwarded-for'] || null,
+      });
       clearLoginAttempts(`u:${username.trim().toLowerCase()}`, `wc:${event.sender.id}`);
-      return { success: true, sessionToken, ...sessionPublicData(getSession(event.sender.id, sessionToken)) };
+      const session = getSession(event.sender.id, sessionToken);
+      return { success: true, sessionToken, ...sessionPublicData(session) };
     } catch (err) {
       console.error('[Auth] Login failed:', err.message);
       return { success: false, error: 'حدث خطأ أثناء تسجيل الدخول' };
@@ -7446,16 +7569,163 @@ export function registerAuthHandlers() {
     return session ? { success: true, ...sessionPublicData(session) } : { success: false };
   });
 
-  ipcMain.handle('auth:logout', (event, { sessionToken } = {}) => {
+  ipcMain.handle('auth:logout', async (event, { sessionToken } = {}) => {
     const session = getSession(event.sender.id, sessionToken);
-    if (session) deleteSession(session);
+    if (session) await deleteSession(session);
     return { success: true };
+  });
+
+  ipcMain.handle('auth:list-sessions', async (event, { sessionToken } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session) return { success: false };
+      const res = await pool.query(
+        'SELECT s.token, u.username, u.full_name, u.role, u.is_active, u.id AS user_id, ' +
+        '       s.created_at, s.expires_at, s.last_activity_at, s.user_agent, s.ip_address, s.revoked_at ' +
+        'FROM sessions s JOIN users u ON u.id = s.user_id ' +
+        'WHERE s.company_id = $1::uuid AND s.revoked_at IS NULL ' +
+        'ORDER BY s.created_at DESC, s.last_activity_at DESC',
+        [session.user.companyId],
+      );
+      const now = Date.now();
+      return {
+        success: true,
+        sessions: res.rows.map((r) => ({
+          token: r.token,
+          userId: r.user_id,
+          username: r.username,
+          fullName: r.full_name || r.username,
+          role: r.role,
+          isActive: r.is_active,
+          createdAt: r.created_at ? new Date(r.created_at).getTime() : null,
+          expiresAt: r.expires_at ? new Date(r.expires_at).getTime() : null,
+          lastActivityAt: r.last_activity_at ? new Date(r.last_activity_at).getTime() : null,
+          userAgent: r.user_agent,
+          ipAddress: r.ip_address,
+          isExpired: r.expires_at ? new Date(r.expires_at).getTime() < now : false,
+          isCurrent: r.token === sessionToken,
+        })),
+      };
+    } catch (err) {
+      console.warn('[Auth] auth:list-sessions DB read failed:', err?.message);
+      return { success: false };
+    }
+  });
+
+  ipcMain.handle('auth:switch-user', async (event, { sessionToken, userId, password } = {}) => {
+    try {
+      const current = getSession(event.sender.id, sessionToken);
+      if (!current) return { success: false, error: 'Login required' };
+      if (typeof userId !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(userId)) {
+        return { success: false, error: 'Invalid userId' };
+      }
+      // Verify target user belongs to the SAME company (multi-user внутри компании)
+      const targetRes = await pool.query(
+        'SELECT id, company_id, username, full_name, email, phone, role, is_active FROM users WHERE id = $1::uuid',
+        [userId],
+      );
+      const target = targetRes.rows[0];
+      if (!target) return { success: false, error: 'User not found' };
+      if (target.company_id !== current.user.companyId) return { success: false, error: 'User not found or different company' };
+      if (target.id === current.user.id) return { success: false, error: 'Already this user' };
+      if (!target.is_active) return { success: false, error: 'User is inactive' };
+
+      // Password confirm (не для admin/super_admin — могут смотреть контексты)
+      const isAdmin = current.user.role === 'admin' || current.user.role === 'super_admin';
+      if (!isAdmin) {
+        if (typeof password !== 'string' || password.length === 0) {
+          return { success: false, error: 'Password required to switch users' };
+        }
+        const pwRes = await pool.query('SELECT password_hash FROM users WHERE id = $1::uuid', [userId]);
+        if (!pwRes.rows[0] || !verifyPasswordNode(password, pwRes.rows[0].password_hash)) {
+          return { success: false, error: 'Wrong password' };
+        }
+      }
+
+      // Build target user + permissions (same helpers as login)
+      const targetRow = await pool.query(
+        'SELECT id, company_id, username, email, full_name, phone, role, branch_id, is_active FROM users WHERE id = $1::uuid',
+        [userId],
+      );
+      const targetUser = mapUserRow(targetRow.rows[0]);
+      const targetPermissions = parseRolePermissions(
+        (await pool.query('SELECT permissions FROM roles WHERE name = $1 AND company_id = $2', [targetUser.role, targetUser.companyId])).rows[0]?.permissions
+      );
+
+      // Create new session for target user. Old session stays valid (same window) —
+      // sessions don't compete; the preload stores the new token as primary.
+      const newToken = await createSession(event.sender.id, targetUser, targetPermissions, {
+        user_agent: event.request?.headers?.['user-agent'] || null,
+        ip_address: event.request?.headers?.['x-forwarded-for'] || null,
+      });
+      return { success: true, sessionToken: newToken, ...sessionPublicData({ user: targetUser, permissions: targetPermissions }) };
+    } catch (err) {
+      console.warn('[Auth] switch-user failed:', err?.message);
+      return { success: false, error: 'Switch user failed' };
+    }
+  });
+
+  ipcMain.handle('auth:refresh-session', async (event, { sessionToken } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session) return { success: false };
+      // Re-fetch permissions + is_active from DB (roles can change elsewhere)
+      const res = await pool.query(
+        'SELECT u.id, u.username, u.full_name, u.role, u.is_active, u.photo_url, u.email, u.phone, u.branch_id, s.permissions ' +
+        'FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = $1 AND s.revoked_at IS NULL',
+        [sessionToken],
+      );
+      if (res.rows[0]) {
+        session.user = mapUserRow(res.rows[0]);
+        session.permissions = res.rows[0].permissions;
+      }
+      // Persist refreshed snapshot into the DB row (de-sync drift over time).
+      pool.query(
+        'UPDATE sessions SET expires_at = NOW() + INTERVAL \'30 minutes\', last_activity_at = NOW(), ' +
+        'permissions = $2::jsonb ' +
+        'WHERE token = $1::uuid AND revoked_at IS NULL',
+        [sessionToken, session ? session.permissions : []],
+      ).catch((e) => console.warn('[Auth] refresh-session DB sync failed:', e?.message));
+      return session ? { success: true, ...sessionPublicData(session) } : { success: false };
+    } catch (err) {
+      console.warn('[Auth] refresh-session failed:', err?.message);
+      return { success: false };
+    }
+  });
+
+  ipcMain.handle('auth:revoke-session', async (event, { sessionToken, targetToken } = {}) => {
+    try {
+      const session = getSession(event.sender.id, sessionToken);
+      if (!session) return { success: false };
+      if (!targetToken || targetToken === sessionToken) return { success: false };
+      const res = await pool.query(
+        'UPDATE sessions SET revoked_at = NOW() WHERE token = $1::uuid AND company_id = $2::uuid AND revoked_at IS NULL RETURNING id',
+        [targetToken, session.user.companyId],
+      );
+      sessions.delete(targetToken);
+      return { success: true, revoked: res.rows.length > 0 };
+    } catch (err) {
+      console.warn('[Auth] revoke-session failed:', err?.message);
+      return { success: false };
+    }
   });
 
   ipcMain.handle('auth:list-users', async (event, { sessionToken } = {}) => {
     try {
-      const session = getSession(event.sender.id, sessionToken);
-      if (!session || !hasPermission(session, 'settings.view')) return { success: false, error: 'Permission denied' };
+      const session = await getSession(event.sender.id, sessionToken);
+      if (!session || !hasPermission(session, 'settings.view')) {
+        // Multi-user: company members can always see the company's users
+        // (the switcher is a UI for the user's own window, not admin tools).
+        if (session && session.user.role !== 'admin' && session.user.role !== 'super_admin') {
+          const result = await pool.query(
+            `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, last_login_at, created_at, updated_at
+               FROM users WHERE company_id = $1 ORDER BY username`,
+            [session.user.companyId]
+          );
+          return { success: true, data: result.rows };
+        }
+        return { success: false, error: 'Permission denied' };
+      }
       const result = await pool.query(
         `SELECT id, company_id, username, email, full_name, phone, photo_url, role, branch_id, is_active, last_login_at, created_at, updated_at
            FROM users WHERE company_id = $1 ORDER BY username`,
@@ -7584,7 +7854,7 @@ export function registerAuthHandlers() {
       );
       if (result.rows.length) {
         // Deactivating a user must cut off their live sessions immediately.
-        if (data?.isActive === false || data?.role !== undefined) revokeUserSessions(id);
+        if (data?.isActive === false || data?.role !== undefined) await revokeUserSessions(id);
         return { success: true };
       }
       return { success: false, error: 'User not found' };
@@ -7611,7 +7881,7 @@ export function registerAuthHandlers() {
       );
       if (result.rows.length) {
         // A password reset must immediately cut off all sessions of that user.
-        revokeUserSessions(id);
+        await revokeUserSessions(id);
         return { success: true };
       }
       return { success: false, error: 'User not found' };
@@ -7751,6 +8021,8 @@ export function registerAuthHandlers() {
     { table: 'units', scope: { type: 'company' } },
     { table: 'vat_settings', scope: { type: 'company' } },
     { table: 'document_sequences', scope: { type: 'company' } },
+    // Multi-user sessions (drizzle/0003_sessions.sql) — deleted before users.
+    { table: 'sessions', scope: { type: 'company' } },
     { table: 'users', scope: { type: 'company' } },
     { table: 'roles', scope: { type: 'company' } },
     { table: 'settings', scope: { type: 'company' } },
@@ -7762,7 +8034,7 @@ export function registerAuthHandlers() {
   // src/core/backup/backupTables.ts — SET NULL relations still enforce
   // existence on insert, so this is NOT the reverse of BACKUP_PLAN).
   const BACKUP_INSERT_ORDER = [
-    'companies', 'currencies', 'units', 'branches', 'roles', 'users',
+    'companies', 'currencies', 'units', 'branches', 'roles', 'users', 'sessions',
     'departments', 'accounts', 'cash_boxes', 'cost_centers', 'vat_settings',
     'default_accounts', 'document_sequences', 'settings', 'tax_periods', 'payroll_components',
     'product_types', 'product_categories', 'warehouses', 'products', 'product_units', 'boms',
@@ -7837,6 +8109,7 @@ export function registerAuthHandlers() {
   // target database must be resolved before insert or the FK kills the whole
   // restore (e.g. currencies_created_by_users_fk).
   const RESTORE_USER_REF_COLUMNS = {
+    sessions: ['user_id'],
     accounts: ['created_by', 'updated_by'],
     activities: ['assigned_to', 'created_by', 'updated_by'],
     ai_chat_sessions: ['user_id'],
@@ -8141,7 +8414,7 @@ export function registerAuthHandlers() {
       }
       const result = await pool.query('DELETE FROM users WHERE id = $1::uuid AND company_id = $2 RETURNING id', [id, session.user.companyId]);
       if (result.rows.length) {
-        revokeUserSessions(id);
+        await revokeUserSessions(id);
         return { success: true };
       }
       return { success: false, error: 'User not found' };
@@ -8210,7 +8483,7 @@ export function registerAuthHandlers() {
       );
       if (!result.rows.length) return { success: false, error: 'Role not found' };
       const affected = await pool.query('SELECT id FROM users WHERE company_id = $1::uuid AND role = $2', [session.user.companyId, current.rows[0].name]);
-      for (const row of affected.rows || []) revokeUserSessions(row.id);
+      for (const row of affected.rows || []) await revokeUserSessions(row.id);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -8226,7 +8499,7 @@ export function registerAuthHandlers() {
       if (current.rows[0].is_system) return { success: false, error: 'Cannot delete system role' };
       const affected = await pool.query('SELECT id FROM users WHERE company_id = $1::uuid AND role = $2', [session.user.companyId, current.rows[0].name]);
       await pool.query('DELETE FROM roles WHERE id = $1::uuid AND company_id = $2', [id, session.user.companyId]);
-      for (const row of affected.rows || []) revokeUserSessions(row.id);
+      for (const row of affected.rows || []) await revokeUserSessions(row.id);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
