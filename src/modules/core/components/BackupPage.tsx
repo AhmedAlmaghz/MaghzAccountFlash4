@@ -344,7 +344,7 @@ export const BackupPage: React.FC = () => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       flash('error', t('settings.backup.errorMessage', { error: msg }));
-      addToast('error', t('settings.backup.errorToast'));
+      addToast('error', msg || t('settings.backup.errorToast'));
     } finally {
       setBusy('idle');
     }
