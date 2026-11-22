@@ -796,7 +796,7 @@ export const salesApi = {
         for (const line of data.lines) {
           const off = params.length;
           const usnap = snapshotLineUnit(line);
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::varchar,$${off + 8}::numeric,$${off + 9}::numeric,$${off + 10}::uuid,$${off + 11}::numeric,$${off + 12}::numeric)`);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::varchar,$${off + 7}::numeric,$${off + 8}::numeric,$${off + 9}::uuid,$${off + 10}::numeric,$${off + 11}::numeric)`);
           const lineCurrencyCode = line.currencyCode || invoiceCurrency;
           const lineExchangeRate = line.exchangeRate ?? invoiceRate;
           const lineBaseTotal = line.baseCurrencyLineTotal ?? (line.lineTotal * lineExchangeRate);

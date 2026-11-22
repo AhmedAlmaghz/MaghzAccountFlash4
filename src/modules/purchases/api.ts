@@ -879,7 +879,7 @@ export const purchasesApi = {
           const lb = line.baseCurrencyLineTotal ?? (line.lineTotal * lr);
           const usnap = snapshotLineUnit(line);
           const off = params.length;
-          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::numeric,$${off + 7}::varchar,$${off + 8}::numeric,$${off + 9}::numeric,$${off + 10}::uuid,$${off + 11}::numeric,$${off + 12}::numeric)`);
+          lineValues.push(`($${off + 1}::uuid,$${off + 2}::uuid,$${off + 3}::numeric,$${off + 4}::numeric,$${off + 5}::numeric,$${off + 6}::varchar,$${off + 7}::numeric,$${off + 8}::numeric,$${off + 9}::uuid,$${off + 10}::numeric,$${off + 11}::numeric)`);
           params.push(
             invoiceId,
             line.productId,
