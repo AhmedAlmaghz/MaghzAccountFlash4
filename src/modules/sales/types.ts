@@ -84,6 +84,10 @@ export interface SalesInvoiceLine {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  /** Per-line discount % (DB column; read back by reversal + editor pages). */
+  discountPercent?: number;
+  /** Per-line VAT % (DB column; read back by reversal + editor pages). */
+  vatPercent?: number;
   /** Frozen base-unit cost at sale time (server snapshot for perpetual COGS). */
   unitCost?: number;
   currencyCode?: string;

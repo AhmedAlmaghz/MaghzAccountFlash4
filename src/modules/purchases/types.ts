@@ -66,6 +66,10 @@ export interface PurchaseInvoiceLine {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  /** Per-line discount % (DB column; read back by editor pages). */
+  discountPercent?: number;
+  /** Per-line VAT % (DB column; read back by editor pages). */
+  vatPercent?: number;
   currencyCode?: string;
   exchangeRate?: number;
   baseCurrencyLineTotal?: number;

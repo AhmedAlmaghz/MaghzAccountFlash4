@@ -75,6 +75,10 @@ export const salesInvoiceLines = pgTable('sales_invoice_lines', {
   baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  // Legacy per-line discount/VAT columns (0000 schema; discount lives on the
+  // invoice head since 0007) — restored for type/mapper parity.
+  discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).default('0'),
+  vatPercent: numeric('vat_percent', { precision: 5, scale: 2 }).default('15'),
   // Cost snapshot (base-unit cost at sale time) for perpetual COGS posting.
   // Frozen at creation — products.cost_price moves later (purchases,
   // manufacturing receipts) and must not rewrite history. NOT NULL DEFAULT 0

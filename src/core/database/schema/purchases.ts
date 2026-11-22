@@ -66,6 +66,10 @@ export const purchaseInvoiceLines = pgTable('purchase_invoice_lines', {
   baseQuantity: numeric('base_quantity', { precision: 18, scale: 4 }).notNull().default('0'),
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   lineTotal: numeric('line_total', { precision: 18, scale: 4 }).notNull(),
+  // Legacy per-line discount/VAT columns (0000 schema; discount lives on the
+  // invoice head since 0007) — restored for type/mapper parity.
+  discountPercent: numeric('discount_percent', { precision: 5, scale: 2 }).notNull().default('0'),
+  vatPercent: numeric('vat_percent', { precision: 5, scale: 2 }).notNull().default('0'),
   currencyCode: varchar('currency_code', { length: 3 }).notNull().default('YER'),
   exchangeRate: numeric('exchange_rate', { precision: 18, scale: 6 }).notNull().default('1'),
   baseCurrencyLineTotal: numeric('base_currency_line_total', { precision: 18, scale: 4 }).notNull().default('0'),

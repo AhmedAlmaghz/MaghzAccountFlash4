@@ -2127,6 +2127,8 @@ function mapInvoiceLineRow(row: Record<string, unknown>): SalesInvoiceLine {
     quantity: Number(row.quantity) || 0,
     unitPrice: Number(row.unit_price) || 0,
     lineTotal: Number(row.line_total) || 0,
+    discountPercent: Number(row.discount_percent) || 0,
+    vatPercent: Number(row.vat_percent) || 0,
     unitCost: row.unit_cost !== undefined && row.unit_cost !== null ? Number(row.unit_cost) : 0,
     currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,
     exchangeRate: row.exchange_rate !== undefined ? Number(row.exchange_rate) : 1,

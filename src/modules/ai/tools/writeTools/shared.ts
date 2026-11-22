@@ -285,6 +285,10 @@ export interface ResolvedLine extends RawLine {
   /** Frozen factor + base qty snapshot for the document line. */
   unitFactor: number;
   baseQuantity: number;
+  /** Per-line discount % (0 — per-line discount lives on the invoice head). */
+  discountPercent: number;
+  /** Per-line VAT % (0 — VAT lives on the invoice head / settings). */
+  vatPercent: number;
   /** Resolved display name of the chosen unit (for cards/results). */
   unitName?: string;
   /**
@@ -395,6 +399,10 @@ export async function resolveLineUnits(
       unitId: chosen?.id,
       unitFactor: factor,
       baseQuantity: l.quantity * factor,
+      // Per-line discount/VAT live on the invoice head (0007) — resolveLineUnits
+      // never fills line-level discounts; the wizard zeroes them per company settings.
+      discountPercent: 0,
+      vatPercent: 0,
       ...(chosen?.unitName ? { unitName: chosen.unitName } : {}),
       ...(priceMismatchNote ? { priceMismatchNote } : {}),
     });

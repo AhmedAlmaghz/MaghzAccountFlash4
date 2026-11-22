@@ -176,6 +176,8 @@ function mapInvoiceLine(row: Record<string, unknown>): PurchaseInvoiceLine {
     // Phase A-1: per-line discount/VAT removed from purchase_invoice_lines
     // (0007) — discount/VAT now live on the invoice head only.
     lineTotal: toNum(row.line_total || row.lineTotal),
+    discountPercent: toNum(row.discount_percent) || 0,
+    vatPercent: toNum(row.vat_percent) || 0,
     currencyCode: row.currency_code ? String(row.currency_code) : YER_CODE,
     exchangeRate: row.exchange_rate !== undefined ? toNum(row.exchange_rate) : 1,
     baseCurrencyLineTotal: row.base_currency_line_total !== undefined ? toNum(row.base_currency_line_total) : 0,
