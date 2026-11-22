@@ -25,8 +25,6 @@ const emptyLine: DocumentLine = {
   productName: '',
   quantity: 1,
   unitPrice: 0,
-  discountPercent: 0,
-  vatPercent: 0,
   unitFactor: 1,
 };
 
@@ -115,8 +113,6 @@ export const SalesInvoiceEditorPage: React.FC = () => {
           unitName: l.unitName,
           quantity: l.quantity,
           unitPrice: l.unitPrice,
-          discountPercent: l.discountPercent ?? 0,
-          vatPercent: l.vatPercent ?? 0,
         }))
       );
     } else {
@@ -146,7 +142,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   const totals = useMemo(() => {
     const vatRate = settings?.vatRate ?? 15;
     const showVat = settings?.invoiceShowVat ?? true;
-    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (1 - (l.discountPercent || 0) / 100), 0);
+    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
     const vatAmount = showVat ? roundMoney(subtotal * vatRate / 100) : 0;
     return { subtotal: roundMoney(subtotal), discountAmount: 0, vatAmount, totalAmount: roundMoney(subtotal + vatAmount), itemsCount: lines.length };
   }, [lines, settings?.vatRate, settings?.invoiceShowVat]);
@@ -220,9 +216,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
           baseQuantity: l.baseQuantity ?? l.quantity * (l.unitFactor ?? 1),
           unitName: l.unitName,
           unitPrice: l.unitPrice,
-          discountPercent: l.discountPercent,
-          vatPercent: l.vatPercent,
-          lineTotal: roundMoney(l.quantity * l.unitPrice * (1 - (l.discountPercent || 0) / 100)),
+          lineTotal: roundMoney(l.quantity * l.unitPrice),
         })),
         subtotal: totals.subtotal,
         discountAmount: totals.discountAmount,
@@ -344,8 +338,6 @@ export const SalesInvoiceEditorPage: React.FC = () => {
           companyId={companyId}
           lines={lines}
           onChange={setLines}
-          showDiscount={settings?.invoiceShowDiscount ?? true}
-          showVat={settings?.invoiceShowVat ?? true}
           priceType="sale"
         />
       </Card>

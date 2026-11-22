@@ -16,16 +16,12 @@ export interface DocumentLine {
   unitName?: string;
   quantity: number;
   unitPrice: number;
-  discountPercent: number;
-  vatPercent: number;
 }
 
 export interface DocumentItemsGridProps {
   companyId: string;
   lines: DocumentLine[];
   onChange: (lines: DocumentLine[]) => void;
-  showDiscount?: boolean;
-  showVat?: boolean;
   priceType?: 'sale' | 'cost';
   showUnit?: boolean;
   disabled?: boolean;
@@ -35,8 +31,6 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
   companyId,
   lines,
   onChange,
-  showDiscount = true,
-  showVat = true,
   priceType = 'sale',
   showUnit = true,
   disabled = false,
@@ -69,8 +63,6 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
         productName: '',
         quantity: 1,
         unitPrice: 0,
-        discountPercent: 0,
-        vatPercent: 0,
         unitFactor: 1,
       },
     ]);
@@ -143,11 +135,7 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
   // cells. The two numeric entry fields (quantity, unit price) get the widest
   // tracks because they are typed on every row; the computed total is display
   // only. On phones the grid collapses to stacked, full-width fields.
-  const gridCols = showDiscount && showVat
-    ? 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1fr)]'
-    : showDiscount || showVat
-      ? 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)]'
-      : 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_minmax(0,1fr)]';
+  const gridCols = 'md:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_minmax(0,1fr)]';
 
   return (
     <div className="space-y-2">
@@ -156,14 +144,12 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
         {showUnit && <div>{t('common.unit')}</div>}
         <div className="text-center">{t('common.quantity')}</div>
         <div>{t('common.unitPrice')}</div>
-        {showDiscount && <div className="text-center">{t('sales.discount')}</div>}
-        {showVat && <div className="text-center">{t('pos.vat')}</div>}
         <div className="text-end">{t('common.total')}</div>
       </div>
 
       <div className="space-y-2 md:space-y-1">
         {lines.map((line, index) => {
-          const lineTotal = Math.max(0, line.unitPrice * line.quantity * (1 - (line.discountPercent || 0) / 100));
+          const lineTotal = Math.max(0, line.unitPrice * line.quantity);
           return (
             <div
               key={index}
@@ -234,39 +220,6 @@ export const DocumentItemsGrid: React.FC<DocumentItemsGridProps> = ({
                   aria-label={t('common.unitPrice')}
                 />
               </div>
-
-              {showDiscount && (
-                <div className="mt-2 md:mt-0 min-w-0">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="any"
-                    inputMode="decimal"
-                    value={String(line.discountPercent)}
-                    onChange={(e) => updateLine(index, { discountPercent: Number(e.target.value) || 0 })}
-                    size="md"
-                    className="text-center tabular-nums"
-                    aria-label={t('sales.discount')}
-                  />
-                </div>
-              )}
-
-              {showVat && (
-                <div className="mt-2 md:mt-0 min-w-0">
-                  <Input
-                    type="number"
-                    min={0}
-                    step="any"
-                    inputMode="decimal"
-                    value={String(line.vatPercent)}
-                    onChange={(e) => updateLine(index, { vatPercent: Number(e.target.value) || 0 })}
-                    size="md"
-                    className="text-center tabular-nums"
-                    aria-label={t('pos.vat')}
-                  />
-                </div>
-              )}
 
               <div className="mt-2 md:mt-0 min-w-0 flex items-center justify-between md:justify-end gap-2">
                 <span className="md:hidden text-xs text-zinc-500 font-semibold tabular-nums">{lineTotal.toFixed(2)}</span>

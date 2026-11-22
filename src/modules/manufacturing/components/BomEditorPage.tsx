@@ -17,8 +17,6 @@ const emptyLine: DocumentLine = {
   productName: '',
   quantity: 1,
   unitPrice: 0,
-  discountPercent: 0,
-  vatPercent: 0,
   unitFactor: 1,
 };
 
@@ -63,8 +61,6 @@ export const BomEditorPage: React.FC = () => {
           productName: l.productName ?? '',
           quantity: l.quantity ?? 1,
           unitPrice: l.unitCost ?? 0,
-          discountPercent: 0,
-          vatPercent: 0,
           unitFactor: 1,
         })));
       }
@@ -152,7 +148,7 @@ export const BomEditorPage: React.FC = () => {
       </Card>
 
       <Card className="p-4 sm:p-5">
-        <DocumentItemsGrid companyId={companyId} lines={lines} onChange={setLines} priceType="cost" showDiscount={false} showVat={false} />
+        <DocumentItemsGrid companyId={companyId} lines={lines} onChange={setLines} priceType="cost" />
       </Card>
       <UnsavedChangesDialog blocked={blocked} onLeave={proceed} onStay={reset} />
     </DocumentPageShell>

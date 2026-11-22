@@ -20,8 +20,6 @@ const emptyLine: DocumentLine = {
   productName: '',
   quantity: 1,
   unitPrice: 0,
-  discountPercent: 0,
-  vatPercent: 0,
   unitFactor: 1,
 };
 
@@ -100,8 +98,6 @@ export const WorkOrderEditorPage: React.FC = () => {
           productName: l.materialName ?? '',
           quantity: l.plannedQuantity ?? 1,
           unitPrice: l.unitCost ?? 0,
-          discountPercent: 0,
-          vatPercent: 0,
           unitFactor: 1,
         })));
         if (wo.productionCosts) {
@@ -269,7 +265,7 @@ export const WorkOrderEditorPage: React.FC = () => {
       </Card>
 
       <Card className="p-4 sm:p-5">
-        <DocumentItemsGrid companyId={companyId} lines={lines} onChange={setLines} priceType="cost" showDiscount={false} showVat={false} />
+        <DocumentItemsGrid companyId={companyId} lines={lines} onChange={setLines} priceType="cost" />
       </Card>
 
       <Card className="p-4 sm:p-5 space-y-4">

@@ -24,8 +24,6 @@ const emptyLine: DocumentLine = {
   productName: '',
   quantity: 1,
   unitPrice: 0,
-  discountPercent: 0,
-  vatPercent: 0,
   unitFactor: 1,
 };
 
@@ -94,7 +92,7 @@ export const PurchaseReturnEditorPage: React.FC = () => {
       if (cancelled) return;
       setLoading(false);
       if (res?.success && res.data) {
-        const inv = res.data as unknown as { customerId?: string; supplier?: { name?: string }; returnNumber?: string; supplierId?: string; date?: string; dueDate?: string; expiryDate?: string; expectedDate?: string; currencyCode?: string; exchangeRate?: number; paymentType?: string; cashBoxId?: string; notes?: string; reason?: string; status?: string; lines?: Array<{ productId?: string; productName?: string; productCode?: string; unitId?: string; unitFactor?: number; baseQuantity?: number; unitName?: string; quantity?: number; unitPrice?: number; discountPercent?: number; vatPercent?: number }>; };
+        const inv = res.data as unknown as { customerId?: string; supplier?: { name?: string }; returnNumber?: string; supplierId?: string; date?: string; dueDate?: string; expiryDate?: string; expectedDate?: string; currencyCode?: string; exchangeRate?: number; paymentType?: string; cashBoxId?: string; notes?: string; reason?: string; status?: string; lines?: Array<{ productId?: string; productName?: string; productCode?: string; unitId?: string; unitFactor?: number; baseQuantity?: number; unitName?: string; quantity?: number; unitPrice?: number }>; };
         setCustomerId(inv.supplierId ?? '');
         setSupplierName(inv.supplier?.name ?? '');
         setDate(inv.date ?? todayIso());
@@ -117,8 +115,6 @@ export const PurchaseReturnEditorPage: React.FC = () => {
             unitName: l.unitName,
             quantity: l.quantity ?? 1,
             unitPrice: l.unitPrice ?? 0,
-            discountPercent: l.discountPercent ?? 0,
-            vatPercent: l.vatPercent ?? 0,
           }))
         );
       } else {
@@ -133,7 +129,7 @@ export const PurchaseReturnEditorPage: React.FC = () => {
   const totals = useMemo(() => {
     const vatRate = settings?.vatRate ?? 15;
     const showVat = settings?.invoiceShowVat ?? true;
-    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice * (1 - (l.discountPercent || 0) / 100), 0);
+    const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
     const vatAmount = showVat ? roundMoney(subtotal * vatRate / 100) : 0;
     return { subtotal: roundMoney(subtotal), discountAmount: 0, vatAmount, totalAmount: roundMoney(subtotal + vatAmount), itemsCount: lines.length };
   }, [lines, settings?.vatRate, settings?.invoiceShowVat]);
@@ -180,9 +176,7 @@ export const PurchaseReturnEditorPage: React.FC = () => {
           baseQuantity: l.baseQuantity ?? l.quantity * (l.unitFactor ?? 1),
           unitName: l.unitName,
           unitPrice: l.unitPrice ?? 0,
-          discountPercent: l.discountPercent,
-          vatPercent: l.vatPercent,
-          lineTotal: roundMoney(l.quantity * l.unitPrice * (1 - (l.discountPercent || 0) / 100)),
+          lineTotal: roundMoney(l.quantity * l.unitPrice),
         })),
         subtotal: totals.subtotal,
         discountAmount: totals.discountAmount,
@@ -283,8 +277,6 @@ export const PurchaseReturnEditorPage: React.FC = () => {
           companyId={companyId}
           lines={lines}
           onChange={setLines}
-          showDiscount={settings?.invoiceShowDiscount ?? true}
-          showVat={settings?.invoiceShowVat ?? true}
           priceType="cost"
         />
       </Card>
