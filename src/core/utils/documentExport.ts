@@ -1,6 +1,7 @@
 import type { PrintDocumentData, PrintLine, PrintT } from './printDocument';
-import { printDocument } from './printDocument';
-import { exportToExcel, exportToPDF, type ExportColumn } from './exportEngine';
+import { printDocument, generateHtml } from './printDocument';
+import { printHtmlDocument } from '@/core/reports/pdf/reportPdfExporter';
+import { exportToExcel, type ExportColumn } from './exportEngine';
 
 /** The line shape every document editor works with. */
 export interface EditorLine {
@@ -124,14 +125,12 @@ export function exportEditorExcel(d: EditorDocumentData, t: PrintT): void {
   void exportToExcel(rows, exportColumns(t), `${d.type}_${d.docNumber || 'draft'}`.replace(/[^\w-]+/g, '_'));
 }
 
-/** Export the document's lines to PDF (RTL + company branding). */
+/**
+ * Export the FULL document to PDF using the browser's native renderer.
+ * jsPDF reshapes Arabic manually and jspdf-autotable v5 ignores `direction`,
+ * which mirrored Arabic words — native rendering keeps RTL shaping correct.
+ */
 export async function exportEditorPdf(d: EditorDocumentData, t: PrintT): Promise<void> {
-  const rows = exportRows(d);
-  await exportToPDF(rows, exportColumns(t), `${d.type}_${d.docNumber || 'draft'}`.replace(/[^\w-]+/g, '_'), {
-    title: t(`print.${d.type === 'sales-invoice' ? 'docSalesInvoice' : 'docPurchaseInvoice'}`),
-    subtitle: `${t('print.docNumber', { default: 'رقم المستند' })} ${d.docNumber} — ${d.partyName}`,
-    rtl: true,
-    currency: d.currency,
-    companyName: d.company?.name,
-  });
+  const filename = `${d.type}_${d.docNumber || 'draft'}`.replace(/[^\w-]+/g, '_');
+  printHtmlDocument(generateHtml(buildPrintData(d), t), `${filename}.pdf`);
 }

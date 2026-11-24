@@ -39,7 +39,8 @@ vi.mock('jspdf-autotable', () => ({
   default: vi.fn(),
 }));
 
-import { exportReportCsv, exportReportExcel, exportReportHtml, exportReportPdf } from './exporters';
+import { exportReportCsv, exportReportExcel, exportReportHtml } from './exporters';
+import { exportWebPdf } from './pdf/reportPdfExporter';
 import type { ReportSpec } from './types';
 
 function makeSpec(): ReportSpec {
@@ -77,10 +78,10 @@ describe('report exporters', () => {
     expect(writeFile).toHaveBeenCalledWith(expect.anything(), 'test-report.xlsx');
   });
 
-  it('exports PDF with title block and grid', async () => {
+  it('exports PDF with title block and grid (advanced jsPDF path)', async () => {
     const { default: autoTable } = await import('jspdf-autotable');
     const { default: JsPDF } = await import('jspdf');
-    await exportReportPdf(makeSpec());
+    await exportWebPdf(makeSpec());
     expect(JsPDF).toHaveBeenCalled();
     expect(autoTable).toHaveBeenCalled();
     const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;
@@ -97,7 +98,7 @@ describe('report exporters', () => {
     const { default: autoTable } = await import('jspdf-autotable');
     const { default: JsPDF } = await import('jspdf');
     vi.clearAllMocks();
-    await exportReportPdf(makeSpec());
+    await exportWebPdf(makeSpec());
     const instance = vi.mocked(JsPDF).mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
     expect(instance.setFont).toHaveBeenCalledWith('IBMPlexSansArabic');
     const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;

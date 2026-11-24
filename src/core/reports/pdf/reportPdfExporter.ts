@@ -80,7 +80,8 @@ export function titleBlock(spec: ReportSpec): string[][] {
   return lines;
 }
 
-async function exportWebPdf(spec: ReportSpec): Promise<void> {
+/** Advanced: force the legacy jsPDF path (tests / callers that need a table-only PDF). */
+export async function exportWebPdf(spec: ReportSpec): Promise<void> {
   const [jsPDFModule, autoTableModule] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   const jsPDF = jsPDFModule.default;
   const autoTable = autoTableModule.default;
@@ -150,14 +151,62 @@ export async function exportReportToPdf(spec: ReportSpec): Promise<UniversalExpo
   if (isDesktopApp()) {
     const res = await exportElectronPdf(html, filename);
     if (res.success) return { success: true, filename };
-    // Desktop bridge unavailable → fall through to the web path.
+    // Desktop bridge unavailable → fall through to the browser renderer.
   }
-  await exportWebPdf(spec);
+  // Native rendering (Chromium/Safari) handles Arabic shaping + bidi itself.
+  // The jsPDF path reshapes/reorders manually and jspdf-autotable v5 ignores
+  // `direction`, which produced mirrored words in exported PDFs.
+  printHtmlInBrowser(html, filename);
   return { success: true, filename };
 }
 
 export async function printReportDocument(spec: ReportSpec): Promise<void> {
   printHtmlDocument(buildReportHtml(spec), `${spec.filename}.pdf`);
+}
+
+/**
+ * Print EXACTLY the supplied HTML — never the surrounding application page.
+ *
+ * `window.print()` here used to print the visible editor/list, because the
+ * generated document was never put into a print context. A hidden iframe with
+ * `srcdoc` gives the browser a standalone document to render/print (and on
+ * mobile "Save as PDF" produces a correctly shaped RTL PDF).
+ */
+export function printHtmlInBrowser(html: string, filename: string): void {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.title = filename;
+  iframe.srcdoc = html;
+  iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
+  document.body.appendChild(iframe);
+
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    try { iframe.contentWindow?.removeEventListener('afterprint', finish); } catch { /* cross-origin guard */ }
+    // Defer removal: Chromium needs the frame alive until printing is handed off.
+    setTimeout(() => { if (iframe.isConnected) iframe.remove(); }, 2000);
+  };
+  const run = () => {
+    const win = iframe.contentWindow;
+    if (!win) { finish(); return; }
+    try {
+      win.addEventListener('afterprint', finish);
+      win.focus();
+      win.print();
+    } catch {
+      finish();
+    }
+    // Safety net for browsers that never fire `afterprint`.
+    setTimeout(finish, 60000);
+  };
+  iframe.addEventListener('load', () => {
+    // Wait for web fonts (Cairo) so printed Arabic is not drawn with a fallback.
+    const fonts = (iframe.contentDocument as Document | null)?.fonts;
+    if (fonts?.ready) void fonts.ready.then(run, run);
+    else run();
+  }, { once: true });
 }
 
 /** Universal print: Electron → printToPDF → blob download; Web/mobile → print dialog. */
@@ -166,7 +215,7 @@ export function printHtmlDocument(html: string, filename: string): void {
     void exportElectronPdf(html, filename);
     return;
   }
-  window.print();
+  printHtmlInBrowser(html, filename);
 }
 
 interface ElementSpecOptions {
@@ -208,11 +257,7 @@ export async function exportToPdfFromHtml(html: string, { filename, title }: Ele
     }
     const spec = specFromElement(host, { filename, title });
     if (spec) return await exportReportToPdf(spec);
-    const { default: JsPDF } = await import('jspdf');
-    const { default: autoTable } = await import('jspdf-autotable');
-    const doc = new JsPDF({ unit: 'mm', format: 'a4' });
-    autoTable(doc, { head: [[title]], body: [[(host.textContent || filename).trim()]], theme: 'grid' });
-    doc.save(`${filename}.pdf`);
+    printHtmlInBrowser(html, filename);
     return { success: true, filename };
   } finally {
     host.remove();

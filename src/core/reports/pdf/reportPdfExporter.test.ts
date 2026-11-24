@@ -58,10 +58,15 @@ describe('reportPdfExporter engine (universal PDF/report)', () => {
     expect(isDesktopApp()).toBe(false);
   });
 
-  it('web: exportReportToPdf → jsPDF doc.save(filename.pdf)', async () => {
+  it('web: exportReportToPdf → native renderer (iframe with the report HTML)', async () => {
+    const append = vi.spyOn(document.body, 'appendChild');
     const res = await exportReportToPdf(makeSpec());
     expect(res).toEqual({ success: true, filename: 'T-TEST.pdf' });
-    expect(pdfMocks.instance.save).toHaveBeenCalledWith('T-TEST.pdf');
+    const iframe = append.mock.calls.map(([n]) => n).find((n): n is HTMLIFrameElement => n instanceof HTMLIFrameElement);
+    expect(iframe?.srcdoc).toContain('T-TEST');
+    // jsPDF's manual shaping mirrors Arabic — the native renderer is used instead.
+    expect(pdfMocks.instance.save).not.toHaveBeenCalled();
+    append.mockRestore();
   });
 
   it('Electron: exportReportToPdf → printToPdf(html, filename) → { success: true }', async () => {
@@ -83,19 +88,25 @@ describe('reportPdfExporter engine (universal PDF/report)', () => {
     expect(printToPdf).toHaveBeenCalledWith({ filename: 'F.pdf', html: '<p>x</p>' });
   });
 
-  it('web: exportToPdfFromHtml builds spec from table and saves via jsPDF', async () => {
-    const html =
-      '<table><thead><tr><th>اسم</th><th>قيمة</th></tr></thead>' +
-      '<tbody><tr><td>بند أ</td><td>10</td></tr></tbody></table>';
+  it('web: exportToPdfFromHtml renders that HTML in the native print frame', async () => {
+    const append = vi.spyOn(document.body, 'appendChild');
+    const html = '<p>تقرير ويب</p>';
     const res = await exportToPdfFromHtml(html, { filename: 'F', title: 'فوجد' });
-    expect(res).toEqual({ success: true, filename: 'F.pdf' });
-    expect(pdfMocks.instance.save).toHaveBeenCalledWith('F.pdf');
+    expect(res).toEqual({ success: true, filename: 'F' });
+    const iframe = append.mock.calls.map(([n]) => n).find((n): n is HTMLIFrameElement => n instanceof HTMLIFrameElement);
+    expect(iframe?.srcdoc).toBe(html);
+    expect(pdfMocks.instance.save).not.toHaveBeenCalled();
+    append.mockRestore();
   });
 
-  it('printHtmlDocument: web → window.print (no popups)', () => {
+  it('printHtmlDocument: web → prints the supplied HTML in a hidden iframe (no popups)', () => {
     const spy = vi.spyOn(window, 'print').mockImplementation(() => {});
+    const append = vi.spyOn(document.body, 'appendChild');
     printHtmlDocument('<p>x</p>', 'a.pdf');
-    expect(spy).toHaveBeenCalledTimes(1);
+    const iframe = append.mock.calls.map(([n]) => n).find((n): n is HTMLIFrameElement => n instanceof HTMLIFrameElement);
+    expect(iframe?.srcdoc).toContain('<p>x</p>');
+    expect(spy).not.toHaveBeenCalled();
+    append.mockRestore();
     spy.mockRestore();
   });
 

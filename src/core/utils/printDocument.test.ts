@@ -42,13 +42,19 @@ describe('printDocument (universal engine)', () => {
     delete (window as unknown as { electronDB?: unknown }).electronDB;
   });
 
-  it('on web calls window.print (no popups) and is not desktop', () => {
+  it('on web prints the document in an iframe (not the visible page, no popups)', () => {
     expect(isDesktopApp()).toBe(false);
     const printSpy = vi.spyOn(window, 'print').mockImplementation(() => {});
     const winOpen = vi.spyOn(window, 'open');
+    const append = vi.spyOn(document.body, 'appendChild');
     printDocument(baseData);
-    expect(printSpy).toHaveBeenCalled();
+    const iframe = append.mock.calls.map(([node]) => node).find((n): n is HTMLIFrameElement => n instanceof HTMLIFrameElement);
+    expect(iframe).toBeDefined();
+    expect(iframe?.srcdoc).toContain('INV-001');
+    // The document is printed from its own frame — never from the app window.
+    expect(printSpy).not.toHaveBeenCalled();
     expect(winOpen).not.toHaveBeenCalled();
+    append.mockRestore();
     winOpen.mockRestore();
     printSpy.mockRestore();
   });
@@ -72,10 +78,16 @@ describe('printDocument (universal engine)', () => {
 });
 
 describe('printHtmlDocument', () => {
-  it('web → window.print', () => {
+  it('web → renders the HTML in a hidden iframe and prints that frame', () => {
     const spy = vi.spyOn(window, 'print').mockImplementation(() => {});
+    const append = vi.spyOn(document.body, 'appendChild');
     printHtmlDocument('<p>test</p>', 'f.pdf');
-    expect(spy).toHaveBeenCalled();
+    const iframe = append.mock.calls.map(([node]) => node).find((n): n is HTMLIFrameElement => n instanceof HTMLIFrameElement);
+    expect(iframe).toBeDefined();
+    expect(iframe?.srcdoc).toContain('<p>test</p>');
+    expect(iframe?.title).toBe('f.pdf');
+    expect(spy).not.toHaveBeenCalled();
+    append.mockRestore();
     spy.mockRestore();
   });
 });
