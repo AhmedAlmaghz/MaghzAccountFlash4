@@ -45,7 +45,7 @@ export function buildReportHtml(spec: ReportSpec): string {
     .map((c) => `<th style="text-align:${alignToCss(c.align ?? (isNumericColumn(c) ? 'end' : 'start'), direction)}">${escapeHtml(c.header)}</th>`)
     .join('');
 
-  const bodyRows = spec.rows
+  const bodyRows = (spec.rows as Record<string, unknown>[])
     .map((row, i) => {
       const cells = spec.columns
         .map((c) => {

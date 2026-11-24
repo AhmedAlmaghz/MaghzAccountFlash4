@@ -17,9 +17,9 @@ export const percentageSchema = z.number().min(0).max(100).multipleOf(0.01);
 
 export const nonEmptyString = z.string().min(1).max(255);
 
-export const emailSchema = z.string().email().optional().or(z.literal(''));
+export const emailSchema = z.string().email().optional().or(z.literal('')).or(z.null());
 
-export const phoneSchema = z.string().max(50).optional().or(z.literal(''));
+export const phoneSchema = z.string().max(50).optional().or(z.literal('')).or(z.null());
 
 export const usernameSchema = z.string().min(3).max(100).regex(/^[\p{L}\p{N}_.-]+$/u, 'Username must be 3-100 chars: letters, numbers, _, ., -');
 
@@ -191,8 +191,8 @@ export const createCustomerSchema = z.object({
   name: nonEmptyString,
   phone: phoneSchema,
   email: emailSchema,
-  address: z.string().max(1000).optional(),
-  taxNumber: z.string().max(50).optional(),
+  address: z.string().max(1000).nullish(),
+  taxNumber: z.string().max(50).nullish(),
   creditLimit: currencyAmountSchema.optional(),
   balance: currencyAmountSchema.default(0),
   openingBalance: currencyAmountSchema.optional(),
@@ -283,8 +283,8 @@ export const createSupplierSchema = z.object({
   name: nonEmptyString,
   phone: phoneSchema,
   email: emailSchema,
-  address: z.string().max(1000).optional(),
-  taxNumber: z.string().max(50).optional(),
+  address: z.string().max(1000).nullish(),
+  taxNumber: z.string().max(50).nullish(),
   balance: currencyAmountSchema.default(0),
   openingBalance: currencyAmountSchema.optional(),
   openingBalancePosted: z.boolean().optional(),

@@ -80,6 +80,12 @@ export const BomEditorPage: React.FC = () => {
       addToast('error', t('validation.required'));
       return;
     }
+    // Client-side guard: every line must resolve to a material product
+    // (Phase 79 lesson: friendly named message, not the raw API error).
+    if (lines.some((l) => !l.productId)) {
+      addToast('error', t('validation.required'));
+      return;
+    }
     setSaving(true);
     const payload = {
       // companyId is REQUIRED by the create* schema — the API validates the
@@ -92,7 +98,9 @@ export const BomEditorPage: React.FC = () => {
       version: '1.0',
       name: name || finishedProductName,
       outputQuantity: outputQuantity || 1,
-      lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: l.unitPrice })),
+      // `createBomSchema.lines[].materialId` — ProductSelect sets `productId`
+      // on DocumentLine (shared component) and BOM owns a material row per line.
+      lines: lines.map((l) => ({ materialId: l.productId, quantity: l.quantity, unitCost: l.unitPrice })),
     };
     const result = isEdit && id
       ? await manufacturingApi.updateBom(id, companyId, user?.id, payload as never)

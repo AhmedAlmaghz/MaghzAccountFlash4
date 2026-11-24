@@ -51,6 +51,7 @@ export type ToolErrorCode =
   | 'RATE_LIMIT'
   | 'DB_ERROR'
   | 'PROVIDER_ERROR'
+  | 'SYNTAX_ERROR'
   | 'UNKNOWN';
 
 export interface ToolErrorClassification {
@@ -257,6 +258,7 @@ const STABLE_KEY_TO_CODE: Record<PgFailureCode, ToolErrorCode> = {
   SERIALIZATION_FAILURE: 'DB_ERROR',
   DEADLOCK_DETECTED: 'DB_ERROR',
   DB_ERROR: 'DB_ERROR',
+  SYNTAX_ERROR: 'SYNTAX_ERROR',
 };
 
 const INVALID_REFERENCE = {

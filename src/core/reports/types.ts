@@ -68,7 +68,7 @@ export interface ReportTotals {
 
 export interface ReportSpec {
   columns: ReportColumnDef[];
-  rows: Record<string, unknown>[];
+  rows: object[];
   meta: ReportMeta;
   branding?: ReportBranding;
   /** File base name (without extension). */

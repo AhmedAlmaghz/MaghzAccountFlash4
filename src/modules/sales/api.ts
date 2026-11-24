@@ -252,12 +252,13 @@ export const salesApi = {
       const validation = validateInput(createCustomerSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
 
-      // توليد رقم تلقائي إذا لم يتم تمريره
-      let customerData = data;
-      if (!data.code) {
-        const seq = await getNextDocumentNumber(data.companyId, 'customer');
+      // validation.data يحمل الـ Zod defaults (isActive=true, balance=0) — الكود الخام (data)
+      // لا يحملها، فيمرر undefined → صف columns NOT NULL بدون default يرفض الاستعلام صامتاً.
+      let customerData = validation.data;
+      if (!customerData.code) {
+        const seq = await getNextDocumentNumber(customerData.companyId, 'customer');
         if (seq.success && seq.number) {
-          customerData = { ...data, code: seq.number };
+          customerData = { ...customerData, code: seq.number };
         }
       }
 
@@ -284,14 +285,14 @@ export const salesApi = {
       const result = await adapter.query(
         `INSERT INTO customers (company_id, code, name, phone, email, address, tax_number, credit_limit, balance, is_active, created_by, updated_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::uuid) RETURNING id`,
-        [customerData.companyId, customerData.code, customerData.name, customerData.phone, customerData.email, customerData.address, customerData.taxNumber, customerData.creditLimit, customerData.balance, customerData.isActive, safeUserId(_userId), safeUserId(_userId)]
+        [customerData.companyId, customerData.code, customerData.name, customerData.phone ?? null, customerData.email ?? null, customerData.address ?? null, customerData.taxNumber ?? null, Number(customerData.creditLimit) || 0, Number(customerData.balance) || 0, customerData.isActive ?? true, safeUserId(_userId), safeUserId(_userId)]
       );
       if (result.success && result.rows?.[0]) {
         const customerId = String(result.rows[0].id);
         const opening = Number(customerData.openingBalance) || 0;
         if (opening > 0 && !customerData.openingBalancePosted) {
           const { postCustomerOpening } = await import('@/core/utils/openingBalance');
-          const posted = await postCustomerOpening(data.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
+          const posted = await postCustomerOpening(customerData.companyId, { id: customerId, name: customerData.name, amount: opening, openingDate: customerData.openingDate });
           if (posted && posted.success === false) {
             return { success: true, id: customerId, warning: `تعذّر ترحيل الرصيد الافتتاحي: ${posted.error || 'سبب غير معروف'}` };
           }

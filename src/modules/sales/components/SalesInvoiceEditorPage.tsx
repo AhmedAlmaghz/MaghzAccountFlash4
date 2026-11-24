@@ -16,6 +16,7 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { roundMoney } from '@/core/utils/locale';
 import { todayIso } from '@/core/utils/aging';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
+import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { useDocumentExport, type EditorDocumentData } from '@/core/utils/useDocumentExport';
 import { salesApi } from '../api';
 import type { SalesInvoice } from '../types';
@@ -40,6 +41,8 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   const { settings } = useSettings(companyId);
   const { formatCurrency } = useFormatters(companyId);
   const { currencies, currenciesLoaded } = useCurrencyDisplay();
+  // تلقائي: اختيار الصندوق الافتراضي للشركة عند البدء مع نقد (لا تملأ بترحيل بدون هوية).
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(companyId);
 
   const isEdit = Boolean(id);
   const [customerId, setCustomerId] = useState('');
@@ -50,6 +53,10 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   const [exchangeRate, setExchangeRate] = useState(1);
   const [paymentType, setPaymentType] = useState<'cash' | 'credit'>('credit');
   const [cashBoxId, setCashBoxId] = useState('');
+  // خصم على الفاتورة ككل (الإجمالي ينخفض به). `settings.invoiceShowDiscount`
+  // يعرضه في الواجهة — عند الغياب يظهر افتراضياً (مطابقة InvoicesPage).
+  const showDiscount = settings?.invoiceShowDiscount ?? true;
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine]);
   const [saving, setSaving] = useState(false);
@@ -67,6 +74,11 @@ export const SalesInvoiceEditorPage: React.FC = () => {
     const cur = currencies.find((c) => c.code === currencyCode);
     if (cur?.exchangeRate) setExchangeRate(cur.exchangeRate);
   }, [currencyCode, currencies]);
+
+  // اختيار الصندوق الافتراضي تلقائياً عند الدفع النقدي لما لا يوجد خيار مُختار.
+  useEffect(() => {
+    if (paymentType === 'cash' && !cashBoxId && defaultCashBoxId) setCashBoxId(defaultCashBoxId);
+  }, [paymentType, cashBoxId, defaultCashBoxId]);
 
   // Reserve the document number: the create* schema requires it and the API
   // never generates one — a missing number fails validation and the save
@@ -98,6 +110,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       setExchangeRate(inv.exchangeRate ?? 1);
       setPaymentType(inv.paymentType === 'cash' ? 'cash' : 'credit');
       setCashBoxId(inv.cashBoxId ?? '');
+      setDiscountAmount(Number(inv.discountAmount) || 0);
       setNotes(inv.notes ?? '');
       setStatus(inv.status ?? 'draft');
       setDocNumber(inv.invoiceNumber ?? '');
@@ -143,9 +156,12 @@ export const SalesInvoiceEditorPage: React.FC = () => {
     const vatRate = settings?.vatRate ?? 15;
     const showVat = settings?.invoiceShowVat ?? true;
     const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-    const vatAmount = showVat ? roundMoney(subtotal * vatRate / 100) : 0;
-    return { subtotal: roundMoney(subtotal), discountAmount: 0, vatAmount, totalAmount: roundMoney(subtotal + vatAmount), itemsCount: lines.length };
-  }, [lines, settings?.vatRate, settings?.invoiceShowVat]);
+    // الخصم: يحدد هنا المبلغ (مع تثبيت على المجموع الفرعي) → الإجمالي ينخفض.
+    const discount = roundMoney(Math.max(0, Math.min(discountAmount, subtotal)));
+    const netSubtotal = roundMoney(subtotal - discount);
+    const vatAmount = showVat ? roundMoney(netSubtotal * vatRate / 100) : 0;
+    return { subtotal: netSubtotal, discountAmount: discount, vatAmount, totalAmount: roundMoney(netSubtotal + vatAmount), itemsCount: lines.length };
+  }, [lines, settings?.vatRate, settings?.invoiceShowVat, discountAmount]);
 
   // Print / Excel / PDF from the editor's LIVE state — useful for a draft
   // preview as well as a loaded invoice (same as the old modal's detail view).
@@ -248,7 +264,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
         }
       }
     },
-    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber]
+    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber, docVersion, loadDoc]
   );
 
   const title = isEdit ? t('sales.invoice.edit') : t('sales.invoice.new');
@@ -312,6 +328,17 @@ export const SalesInvoiceEditorPage: React.FC = () => {
             <CurrencySelect companyId={companyId} value={currencyCode} onChange={(v) => setCurrencyCode(v ?? YER_CODE)} />
           </div>
           <Input label={t('sales.exchangeRate')} type="number" step="any" inputMode="decimal" value={String(exchangeRate)} onChange={(e) => setExchangeRate(Number(e.target.value) || 1)} />
+          {showDiscount && (
+            <Input
+              label={t('sales.discount')}
+              type="number"
+              step="any"
+              inputMode="decimal"
+              value={discountAmount > 0 ? String(discountAmount) : ''}
+              placeholder={t('sales.discount')}
+              onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value) || 0))}
+            />
+          )}
           <div>
             <label className="block text-xs font-semibold mb-1.5 text-zinc-500 dark:text-zinc-400">{t('common.paymentType')}</label>
             <select

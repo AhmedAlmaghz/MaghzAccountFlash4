@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Copy, CopyCheck, Monitor, Smartphone, Tablet } from 'lucide-react';
 import { useAuthStore } from '../store';
@@ -68,16 +68,16 @@ export const SessionsModal: React.FC<{ open: boolean; onClose: () => void }> = (
   const dialogTitle = t('sessions.title');
   const tS = (key: string) => t(`sessions.${key}`);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     const res = await listSessions();
     setRows(Array.isArray(res?.sessions) ? res.sessions as SessionRow[] : []);
     setLoading(false);
-  };
+  }, [listSessions]);
 
   useEffect(() => {
-    if (open) refresh();
-  }, [open]);
+    if (open) void refresh();
+  }, [open, refresh]);
 
   const handleRevoke = async (token: string) => {
     setRevoking(token);

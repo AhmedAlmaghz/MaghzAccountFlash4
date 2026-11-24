@@ -11,6 +11,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useDocumentExport, type EditorDocumentData } from '@/core/utils/useDocumentExport';
+import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { getNextDocumentNumber } from '@/core/api';
 import { accountingApi } from '../api';
@@ -39,6 +40,9 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
   const user = useAuthStore((s) => s.user);
   const companyId = activeCompany?.id || '';
   const { formatCurrency } = useFormatters(companyId);
+  // تلقائي: اختيار الصندوق الافتراضي للشركة عندما لا يُختار خزنة أخرى — يمنع
+  // "قيد مرفوض/مطلوب" للمصروفات الناتجة عن "محذوف الصندوق" (اختيارك: متى نملأ؟ الآن: فوراً).
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(companyId);
 
   const isEdit = Boolean(id);
   const isReceipt = type === 'receipt';
@@ -85,6 +89,12 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
     })();
     return () => { cancelled = true; };
   }, [isEdit, companyId, isReceipt]);
+
+  // اختيار الصندوق الافتراضي تلقائياً عندما لا يوجد خيار مُختار (ولو قبل وصول الافتراضي).
+  useEffect(() => {
+    if (cashBoxId) return;
+    if (defaultCashBoxId) setCashBoxId(defaultCashBoxId);
+  }, [cashBoxId, defaultCashBoxId]);
 
   useEffect(() => {
     let cancelled = false;

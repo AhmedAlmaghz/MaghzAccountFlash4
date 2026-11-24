@@ -208,12 +208,12 @@ export const ProductEditorPage: React.FC = () => {
       <Card className="p-4 sm:p-5 space-y-4">
         <h2 className="font-bold">{t('common.name')}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input value={form.nameAr} onChange={(e) => setField('nameAr', e.target.value)} required />
-          <Input value={form.nameEn} onChange={(e) => setField('nameEn', e.target.value)} />
-          <Input value={form.code} onChange={(e) => setField('code', e.target.value)} />
-          <Input value={form.barcode} onChange={(e) => setField('barcode', e.target.value)} />
-          <Input value={form.sku} onChange={(e) => setField('sku', e.target.value)} />
-          <UnitSelect companyId={companyId} value={form.unit || ''} onChange={(v) => setField('unit', v ?? '')} />
+          <Input label={t('inventory.products.nameAr')} value={form.nameAr} onChange={(e) => setField('nameAr', e.target.value)} required />
+          <Input label={t('inventory.nameEnglish')} value={form.nameEn} onChange={(e) => setField('nameEn', e.target.value)} />
+          <Input label={t('inventory.productCode')} value={form.code} onChange={(e) => setField('code', e.target.value)} />
+          <Input label={t('inventory.barcode')} value={form.barcode} onChange={(e) => setField('barcode', e.target.value)} />
+          <Input label={t('inventory.sku')} value={form.sku} onChange={(e) => setField('sku', e.target.value)} />
+          <UnitSelect companyId={companyId} value={form.unit || ''} onChange={(v) => setField('unit', v ?? '')} placeholder={t('inventory.unitName')} />
           <ProductTypeSelect companyId={companyId} value={form.productTypeId || undefined} onChange={(v) => setField('productTypeId', v ?? '')} />
           <div className="space-y-2">
             <span className="text-sm font-medium">{t('inventory.categories')}</span>
@@ -237,12 +237,12 @@ export const ProductEditorPage: React.FC = () => {
       <Card className="p-4 sm:p-5 space-y-4">
         <h2 className="font-bold">{t('inventory.stockValue')}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Input type="number" value={form.costPrice} onChange={(e) => setField('costPrice', e.target.value)} />
-          <Input type="number" value={form.salePrice} onChange={(e) => setField('salePrice', e.target.value)} />
-          <Input type="number" value={form.standardCost} onChange={(e) => setField('standardCost', e.target.value)} />
-          <Input type="number" value={form.minStock} onChange={(e) => setField('minStock', e.target.value)} />
-          <Input type="number" value={form.maxStock} onChange={(e) => setField('maxStock', e.target.value)} />
-          <Input type="number" value={form.reorderPoint} onChange={(e) => setField('reorderPoint', e.target.value)} />
+          <Input type="number" label={t('inventory.costPrice')} value={form.costPrice} onChange={(e) => setField('costPrice', e.target.value)} />
+          <Input type="number" label={t('inventory.salePrice')} value={form.salePrice} onChange={(e) => setField('salePrice', e.target.value)} />
+          <Input type="number" label={t('inventory.standardCost')} value={form.standardCost} onChange={(e) => setField('standardCost', e.target.value)} />
+          <Input type="number" label={t('inventory.minStock')} value={form.minStock} onChange={(e) => setField('minStock', e.target.value)} />
+          <Input type="number" label={t('inventory.maxStock')} value={form.maxStock} onChange={(e) => setField('maxStock', e.target.value)} />
+          <Input type="number" label={t('inventory.reorderPoint')} value={form.reorderPoint} onChange={(e) => setField('reorderPoint', e.target.value)} />
         </div>
       </Card>
 
@@ -250,7 +250,7 @@ export const ProductEditorPage: React.FC = () => {
         <Card className="p-4 sm:p-5 space-y-4">
           <h2 className="font-bold">{t('inventory.stockValue')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Input type="number" value={form.openingStockQty} onChange={(e) => setField('openingStockQty', e.target.value)} />
+            <Input type="number" label={t('inventory.quantity')} value={form.openingStockQty} onChange={(e) => setField('openingStockQty', e.target.value)} />
             <WarehouseSelect companyId={companyId} value={form.openingWarehouseId || undefined} onChange={(v) => setField('openingWarehouseId', v ?? '')} />
             <Input type="date" value={form.openingDate} onChange={(e) => setField('openingDate', e.target.value)} />
           </div>

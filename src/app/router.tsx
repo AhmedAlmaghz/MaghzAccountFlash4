@@ -30,6 +30,18 @@ const ProfitAnalysisReport = React.lazy(() => import('@/modules/reports/ProfitAn
 const CustomReportBuilder = React.lazy(() => import('@/modules/reports/components/CustomReportBuilder'));
 const LeadConversionReport = React.lazy(() => import('@/modules/reports/LeadConversionReport'));
 const OpportunityPipelineReport = React.lazy(() => import('@/modules/reports/OpportunityPipelineReport'));
+const TrialBalanceReportPage = React.lazy(() => import('@/modules/reports/TrialBalancePage'));
+const PayrollReportPage = React.lazy(() => import('@/modules/reports/PayrollReportPage'));
+const AttendanceReportPage = React.lazy(() => import('@/modules/reports/AttendanceReportPage'));
+const EndOfServiceReportPage = React.lazy(() => import('@/modules/reports/EndOfServiceReportPage'));
+const RepPerformancePage = React.lazy(() => import('@/modules/reports/RepPerformancePage'));
+const SalesCommissionReportPage = React.lazy(() => import('@/modules/reports/SalesCommissionReportPage'));
+const InventoryItemLedgerPage = React.lazy(() => import('@/modules/reports/InventoryItemLedgerPage'));
+const StockDiffReportPage = React.lazy(() => import('@/modules/reports/StockDiffReportPage'));
+const ManufacturingVariancePage = React.lazy(() => import('@/modules/reports/ManufacturingVariancePage'));
+const ProductionCostReportPage = React.lazy(() => import('@/modules/reports/ProductionCostReportPage'));
+const DocInvoiceDetailsPage = React.lazy(() => import('@/modules/reports/DocInvoiceDetailsPage'));
+const FixedAssetsDepreciationReportPage = React.lazy(() => import('@/modules/reports/FixedAssetsDepreciationReportPage'));
 
 // Auth pages
 const LoginPage = React.lazy(() => import('@/modules/auth/components/LoginPage'));
@@ -319,6 +331,18 @@ export const AppRouter: React.FC = () => {
               <Route path="/reports/custom-builder" element={withSuspense(CustomReportBuilder)} />
               <Route path="/reports/lead-conversion" element={withSuspense(LeadConversionReport)} />
               <Route path="/reports/opportunity-pipeline" element={withSuspense(OpportunityPipelineReport)} />
+              <Route path="/reports/trial-balance" element={withSuspense(TrialBalanceReportPage)} />
+              <Route path="/reports/payroll" element={withSuspense(PayrollReportPage)} />
+              <Route path="/reports/attendance" element={withSuspense(AttendanceReportPage)} />
+              <Route path="/reports/end-of-service" element={withSuspense(EndOfServiceReportPage)} />
+              <Route path="/reports/rep-performance" element={withSuspense(RepPerformancePage)} />
+              <Route path="/reports/sales-commission" element={withSuspense(SalesCommissionReportPage)} />
+              <Route path="/reports/inventory-item-ledger" element={withSuspense(InventoryItemLedgerPage)} />
+              <Route path="/reports/stock-diff" element={withSuspense(StockDiffReportPage)} />
+              <Route path="/reports/manufacturing-variance" element={withSuspense(ManufacturingVariancePage)} />
+              <Route path="/reports/production-cost" element={withSuspense(ProductionCostReportPage)} />
+              <Route path="/reports/doc-invoices" element={withSuspense(DocInvoiceDetailsPage)} />
+              <Route path="/reports/fixed-assets-depreciation" element={withSuspense(FixedAssetsDepreciationReportPage)} />
             </Route>
 
             <Route element={<PermissionRoute permission="settings.users" />}>

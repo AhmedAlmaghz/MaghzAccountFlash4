@@ -12,3 +12,15 @@ export { default as CustomReportBuilder } from './components/CustomReportBuilder
 export { default as LeadConversionReport } from './LeadConversionReport';
 export { default as OpportunityPipelineReport } from './OpportunityPipelineReport';
 export { KpiCardPro } from './components/KpiCardPro';
+export { TrialBalancePage } from './TrialBalancePage'; // routes under /reports/trial-balance; name kept distinct from accounting TrialBalancePage only by path
+export { PayrollReportPage } from './PayrollReportPage';
+export { AttendanceReportPage } from './AttendanceReportPage';
+export { EndOfServiceReportPage } from './EndOfServiceReportPage';
+export { RepPerformancePage } from './RepPerformancePage';
+export { SalesCommissionReportPage } from './SalesCommissionReportPage';
+export { InventoryItemLedgerPage } from './InventoryItemLedgerPage';
+export { StockDiffReportPage } from './StockDiffReportPage';
+export { ManufacturingVariancePage } from './ManufacturingVariancePage';
+export { ProductionCostReportPage } from './ProductionCostReportPage';
+export { DocInvoiceDetailsPage } from './DocInvoiceDetailsPage';
+export { FixedAssetsDepreciationReportPage } from './FixedAssetsDepreciationReportPage';

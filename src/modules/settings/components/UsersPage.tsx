@@ -62,7 +62,7 @@ export const UsersPage: React.FC = () => {
       })
       .catch(() => { /* best-effort column */ });
     return () => { cancelled = true; };
-  }, [activeCompany?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id]);
 
   const handleSave = async () => {
     if (!activeCompany?.id || !formData.username) {

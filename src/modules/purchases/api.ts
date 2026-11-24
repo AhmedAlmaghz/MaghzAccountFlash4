@@ -423,11 +423,13 @@ export const purchasesApi = {
       if (!validation.success) return { success: false, error: validation.error };
       // Document-number generation stays here (document_sequences) so the main
       // process never owns the sequence table — one implementation only.
-      let supplierData = data;
-      if (!data.code) {
-        const seq = await getNextDocumentNumber(data.companyId, 'supplier');
+      // validation.data carries Zod defaults (isActive=true, balance=0) — raw
+      // `data` would send undefined → NOT NULL violation on is_active.
+      let supplierData = validation.data;
+      if (!supplierData.code) {
+        const seq = await getNextDocumentNumber(supplierData.companyId, 'supplier');
         if (seq.success && seq.number) {
-          supplierData = { ...data, code: seq.number };
+          supplierData = { ...supplierData, code: seq.number };
         }
       }
       let result;
@@ -448,7 +450,7 @@ export const purchasesApi = {
         result = await adapter.query(
           `INSERT INTO suppliers (company_id, code, name, phone, email, address, tax_number, balance, is_active, created_by, updated_by)
           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11::uuid) RETURNING id`,
-          [supplierData.companyId, supplierData.code, supplierData.name, supplierData.phone, supplierData.email, supplierData.address, supplierData.taxNumber, supplierData.balance, supplierData.isActive, safeUserId(_userId), safeUserId(_userId)]
+          [supplierData.companyId, supplierData.code, supplierData.name, supplierData.phone ?? null, supplierData.email ?? null, supplierData.address ?? null, supplierData.taxNumber ?? null, Number(supplierData.balance) || 0, supplierData.isActive ?? true, safeUserId(_userId), safeUserId(_userId)]
         );
       }
       if (result.success && result.rows?.[0]) {
@@ -460,7 +462,7 @@ export const purchasesApi = {
         const opening = Number(supplierData.openingBalance) || 0;
         if (opening > 0 && !supplierData.openingBalancePosted) {
           const { postSupplierOpening } = await import('@/core/utils/openingBalance');
-          const posted = await postSupplierOpening(data.companyId, { id: supplierId, name: supplierData.name, amount: opening, openingDate: supplierData.openingDate });
+          const posted = await postSupplierOpening(supplierData.companyId, { id: supplierId, name: supplierData.name, amount: opening, openingDate: supplierData.openingDate });
           if (posted && posted.success === false) {
             return { success: true, id: supplierId, warning: `تعذّر ترحيل الرصيد الافتتاحي: ${posted.error || 'سبب غير معروف'}` };
           }

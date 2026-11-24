@@ -58,7 +58,7 @@ async function exportElectronPdf(html: string, filename: string): Promise<Univer
 // ---------------------------------------------------------------------------
 
 export function cellMatrix(spec: ReportSpec): string[][] {
-  const body = spec.rows.map((row) => spec.columns.map((c) => formatReportCell(row[c.key], c, row)));
+  const body = (spec.rows as Record<string, unknown>[]).map((row) => spec.columns.map((c) => formatReportCell(row[c.key], c, row)));
   if (!spec.totals) return body;
   const totalsRow = spec.columns.map((c, idx) => {
     if (idx === 0) return spec.totals!.label;

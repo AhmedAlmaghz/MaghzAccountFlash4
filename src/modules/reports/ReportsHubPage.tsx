@@ -1,5 +1,8 @@
 import React from 'react';
-import { BarChart2, PieChart, TrendingUp, Package, Users, Truck, Settings, AlertTriangle, ArrowRightLeft, Coins, Filter, Funnel } from 'lucide-react';
+import {
+  BarChart2, PieChart, TrendingUp, Package, Users, Truck, Settings, AlertTriangle, ArrowRightLeft, Coins, Filter, Funnel,
+  Calculator, Landmark, Clock, MoonStar, Percent, DollarSign, List, Diff, Factory, FileText, Warehouse,
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '@/core/i18n/useTranslation';
 import { usePermission } from '@/modules/auth/hooks/usePermission';
@@ -113,6 +116,18 @@ const reportModules = [
     bg: 'bg-indigo-50 dark:bg-indigo-900/20',
     path: '/accounting/balance',
   },
+  { id: 'trial-balance', titleKey: 'reports.tb.title', descriptionKey: 'reports.hub.trialBalance.desc', icon: Calculator, color: 'from-amber-600 to-amber-700', bg: 'bg-amber-50 dark:bg-amber-900/20', path: '/reports/trial-balance' },
+  { id: 'payroll', titleKey: 'reports.payroll.title', descriptionKey: 'reports.hub.payroll.desc', icon: Landmark, color: 'from-fuchsia-600 to-fuchsia-700', bg: 'bg-fuchsia-50 dark:bg-fuchsia-900/20', path: '/reports/payroll' },
+  { id: 'attendance', titleKey: 'reports.attendance.title', descriptionKey: 'reports.hub.attendance.desc', icon: Clock, color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', path: '/reports/attendance' },
+  { id: 'end-of-service', titleKey: 'reports.eos.title', descriptionKey: 'reports.hub.endOfService.desc', icon: MoonStar, color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', path: '/reports/end-of-service' },
+  { id: 'rep-performance', titleKey: 'reports.repPerf.title', descriptionKey: 'reports.hub.repPerformance.desc', icon: Percent, color: 'from-violet-600 to-violet-700', bg: 'bg-violet-50 dark:bg-violet-900/20', path: '/reports/rep-performance' },
+  { id: 'sales-commission', titleKey: 'reports.commission.title', descriptionKey: 'reports.hub.salesCommission.desc', icon: DollarSign, color: 'from-cyan-600 to-cyan-700', bg: 'bg-cyan-50 dark:bg-cyan-900/20', path: '/reports/sales-commission' },
+  { id: 'inventory-item-ledger', titleKey: 'reports.inventoryLedger.title', descriptionKey: 'reports.hub.inventoryItemLedger.desc', icon: List, color: 'from-teal-600 to-teal-700', bg: 'bg-teal-50 dark:bg-teal-900/20', path: '/reports/inventory-item-ledger' },
+  { id: 'stock-diff', titleKey: 'reports.stockDiff.title', descriptionKey: 'reports.hub.stockDiff.desc', icon: Diff, color: 'from-orange-600 to-orange-700', bg: 'bg-orange-50 dark:bg-orange-900/20', path: '/reports/stock-diff' },
+  { id: 'manufacturing-variance', titleKey: 'reports.mfgVariance.title', descriptionKey: 'reports.hub.mfgVariance.desc', icon: Factory, color: 'from-rose-600 to-rose-700', bg: 'bg-rose-50 dark:bg-rose-900/20', path: '/reports/manufacturing-variance' },
+  { id: 'production-cost', titleKey: 'reports.prodCost.title', descriptionKey: 'reports.hub.prodCost.desc', icon: Coins, color: 'from-emerald-600 to-emerald-700', bg: 'bg-emerald-50 dark:bg-emerald-900/20', path: '/reports/production-cost' },
+  { id: 'doc-invoices', titleKey: 'reports.docDetails.title', descriptionKey: 'reports.hub.docDetails.desc', icon: FileText, color: 'from-slate-600 to-slate-700', bg: 'bg-slate-100 dark:bg-slate-800', path: '/reports/doc-invoices' },
+  { id: 'fixed-assets-depreciation', titleKey: 'reports.assetsDepr.title', descriptionKey: 'reports.hub.assetsDepr.desc', icon: Warehouse, color: 'from-indigo-600 to-indigo-700', bg: 'bg-indigo-50 dark:bg-indigo-900/20', path: '/reports/fixed-assets-depreciation' },
 ];
 
 export const ReportsHubPage: React.FC = () => {

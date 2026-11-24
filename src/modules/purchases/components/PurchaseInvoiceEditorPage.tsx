@@ -16,6 +16,7 @@ import { YER_CODE } from '@/core/utils/currencyConverter';
 import { roundMoney } from '@/core/utils/locale';
 import { todayIso } from '@/core/utils/aging';
 import { useDocumentSequence } from '@/core/utils/useDocumentSequence';
+import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { useDocumentExport, type EditorDocumentData } from '@/core/utils/useDocumentExport';
 import { purchasesApi } from '../api';
 import type { PurchaseInvoice } from '../types';
@@ -40,6 +41,8 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
   const { settings } = useSettings(companyId);
   const { formatCurrency } = useFormatters(companyId);
   const { currencies, currenciesLoaded } = useCurrencyDisplay();
+  // تلقائي: اختيار الصندوق الافتراضي للشركة عند البدء مع نقد.
+  const { defaultCashBoxId } = useDefaultPaymentAccounts(companyId);
 
   const isEdit = Boolean(id);
   const [customerId, setCustomerId] = useState('');
@@ -83,6 +86,11 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
       cancelled = true;
     };
   }, [isEdit, companyId, getNextNumber]);
+
+  useEffect(() => {
+    // اختيار الصندوق الافتراضي تلقائياً عند الدفع النقدي لما لا يوجد خيار مُختار.
+    if (paymentType === 'cash' && !cashBoxId && defaultCashBoxId) setCashBoxId(defaultCashBoxId);
+  }, [paymentType, cashBoxId, defaultCashBoxId]);
 
   useEffect(() => {
     let cancelled = false;

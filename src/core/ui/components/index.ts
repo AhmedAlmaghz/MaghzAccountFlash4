@@ -16,6 +16,7 @@ export { ToastContainer } from './Toast';
 export { PageLoader } from './PageLoader';
 export { DuplicateWarningDialog } from './DuplicateWarningDialog';
 export { AppBrand } from './AppBrand';
+export { Select } from './Select';
 export { PageHeader } from './patterns/PageHeader';
 export { StatsGrid } from './patterns/StatsGrid';
 export { FilterBar } from './patterns/FilterBar';
