@@ -11,6 +11,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { toDateString } from '@/core/utils/mapPgRow';
+import { getNextDocumentNumber } from '@/core/api';
 import { useProductCategories, useWarehouses } from '../hooks/useInventory';
 import { inventoryApi } from '../api';
 import { ProductUnitsSection } from './ProductUnitsSection';
@@ -142,17 +143,24 @@ export const ProductEditorPage: React.FC = () => {
       addToast('error', t('validation.required'));
       return;
     }
+    // رمز المنتج: تلقائياً من ترقيم `document_sequences` (PRD-) عند عدم وجود رمز مُدخل —
+    // الحقل مخفي في الواجهة (لا داعٍ لتعبئته يدوياً).
+    let code = form.code.trim();
+    if (!code) {
+      const seq = await getNextDocumentNumber(companyId, 'product');
+      if (seq.success && seq.number) code = seq.number;
+    }
     setSaving(true);
     const payload = {
       companyId,
-      code: form.code.trim() || undefined,
+      code: code || undefined,
       nameAr: form.nameAr.trim(),
       nameEn: form.nameEn.trim() || undefined,
       barcode: form.barcode.trim() || undefined,
       sku: form.sku.trim() || undefined,
       unit: form.unit || '',
       costPrice: Number(form.costPrice) || 0,
-      standardCost: form.standardCost === '' ? null : Number(form.standardCost) || 0,
+      standardCost: form.standardCost === '' ? undefined : Number(form.standardCost) || 0,
       salePrice: Number(form.salePrice) || 0,
       minStock: Number(form.minStock) || 0,
       maxStock: Number(form.maxStock) || 0,
@@ -210,7 +218,8 @@ export const ProductEditorPage: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Input label={t('inventory.products.nameAr')} value={form.nameAr} onChange={(e) => setField('nameAr', e.target.value)} required />
           <Input label={t('inventory.nameEnglish')} value={form.nameEn} onChange={(e) => setField('nameEn', e.target.value)} />
-          <Input label={t('inventory.productCode')} value={form.code} onChange={(e) => setField('code', e.target.value)} />
+          {/* The code field is hidden: it's auto-generated from `document_sequences`. */}
+          <input type="hidden" value={form.code} />
           <Input label={t('inventory.barcode')} value={form.barcode} onChange={(e) => setField('barcode', e.target.value)} />
           <Input label={t('inventory.sku')} value={form.sku} onChange={(e) => setField('sku', e.target.value)} />
           <UnitSelect companyId={companyId} value={form.unit || ''} onChange={(v) => setField('unit', v ?? '')} placeholder={t('inventory.unitName')} />

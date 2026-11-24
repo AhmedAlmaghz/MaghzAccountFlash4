@@ -801,6 +801,11 @@ export const posApi = {
       const cashAccountId = input.cashAmount > 0
         ? await getCashBoxGLAccountId(input.companyId, input.cashBoxId)
         : null;
+      // Fail fast with an actionable reason — a missing GL link would otherwise
+      // put NULL in journal_entries.account_id and surface as a raw DB error.
+      if (input.cashAmount > 0 && !cashAccountId) {
+        return { success: false, error: 'الخزينة غير مرتبطة بحساب محاسبي — اربطها من إعدادات النقدية والخزائن ثم أعد الدفع' };
+      }
 
       const safeUser = await resolveExistingUserId(adapter, userId, input.companyId);
       const invoiceId = crypto.randomUUID();

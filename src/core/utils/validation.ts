@@ -374,7 +374,8 @@ export const createPurchaseReturnSchema = z.object({
 
 export const createProductSchema = z.object({
   companyId: companyIdSchema,
-  code: z.string().min(1).max(50),
+  // Auto-generated from document_sequences (PRD-) by the API when omitted.
+  code: z.string().min(1).max(50).optional(),
   nameAr: nonEmptyString,
   nameEn: z.string().max(255).optional(),
   barcode: z.string().max(100).optional(),
@@ -385,8 +386,9 @@ export const createProductSchema = z.object({
   productTypeId: uuidSchema.optional(),
   costPrice: currencyAmountSchema,
   // Phase 1: zod strips unknown keys silently — the standard cost MUST be
-  // declared or product saves would drop it without any error.
-  standardCost: currencyAmountSchema.optional(),
+  // declared or product saves would drop it without any error. Nullable:
+  // the editor sends undefined for "no standard cost".
+  standardCost: currencyAmountSchema.nullish(),
   salePrice: currencyAmountSchema,
   isActive: z.boolean().default(true),
   image: z.string().optional(),
