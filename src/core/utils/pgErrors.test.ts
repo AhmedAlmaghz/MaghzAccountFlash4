@@ -50,6 +50,16 @@ describe('classifyPgFailure', () => {
     expect(failure?.pgCode).toBe('XX000');
   });
 
+  it('classifies 42601 (syntax errors) as SYNTAX_ERROR', () => {
+    const failure = classifyPgFailure({ code: '42601', message: 'syntax error at or near "users"' });
+    expect(failure?.code).toBe('SYNTAX_ERROR');
+    expect(failure?.pgCode).toBe('42601');
+    expect(failure!.message).toContain('syntax error');
+    // The class must have a distinct Arabic sentence + an English twin.
+    expect(Object.keys(ar.errors.db)).toContain('syntaxError');
+    expect(Object.keys(en.errors.db)).toContain('syntaxError');
+  });
+
   it('reads the main-process envelope without re-deriving anything', () => {
     // What crosses the IPC boundary is { error, pgFailure: { code, pgCode, ... } }.
     const failure = classifyPgFailure({

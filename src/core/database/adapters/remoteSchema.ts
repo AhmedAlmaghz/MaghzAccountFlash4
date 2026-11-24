@@ -123,7 +123,8 @@ export async function ensureRemoteSchema(
       if (!existing.success) return { success: false, applied, error: existing.error };
       if ((existing.rows?.length ?? 0) > 0) continue;
       try {
-        for (const stmt of splitMigrationStatements(migration.sql)) {
+        const stmts = splitMigrationStatements(migration.sql);
+        for (const [sIdx, stmt] of stmts.entries()) {
           const r = await queryWithWakeRetry(() => adapter.query(stmt));
           if (!r.success) {
             // Attach the statement here (not via a loop-external variable):
@@ -131,12 +132,14 @@ export async function ensureRemoteSchema(
             // contract test, and the preview names the culprit on a
             // 300-statement baseline. Leading `--` banner lines are stripped
             // so the preview starts at the real DDL, not the file header.
+            // Longer (400) + index-prefixed so syntax-error detail — the
+            // failing token — is visible instead of a 120-char stub.
             const preview = stmt
               .replace(/^\s*(--[^\n]*\n\s*)+/, '')
               .replace(/\s+/g, ' ')
               .trim()
-              .slice(0, 120);
-            throw new Error(`${r.error || 'statement failed'} (statement: ${preview})`);
+              .slice(0, 400);
+            throw new Error(`${r.error || 'statement failed'} (stmt ${sIdx + 1}/${stmts.length}, statement: ${preview})`);
           }
         }
       } catch (err) {

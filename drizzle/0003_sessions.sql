@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at timestamptz NOT NULL DEFAULT NOW(),
   last_activity_at timestamptz
 );
-
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(company_id, user_id, revoked_at) WHERE revoked_at IS NULL;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);

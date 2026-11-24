@@ -301,7 +301,19 @@
       "profitAnalysis": "Profit Analysis",
       "customBuilder": "Custom Report Builder",
       "leadConversion": "Lead Conversion",
-      "opportunityPipeline": "Opportunity Pipeline"
+      "opportunityPipeline": "Opportunity Pipeline",
+      "trialBalance": "Trial Balance (Balance Sheet)",
+      "payroll": "Payroll Report",
+      "attendance": "Attendance Report",
+      "endOfService": "End of Service Report",
+      "repPerformance": "Sales Rep Performance",
+      "salesCommission": "Sales Commission Report",
+      "inventoryItemLedger": "Inventory Item Ledger",
+      "stockDiff": "Stock Difference",
+      "manufacturingVariance": "Manufacturing Variance Analysis",
+      "productionCost": "Production Cost Report",
+      "docInvoices": "Invoice Details",
+      "fixedAssetsDepreciation": "Fixed Assets Depreciation Report"
     },
     "settings": {
       "title": "Settings",
@@ -3120,7 +3132,43 @@
         "desc": "Assets, liabilities, equity, cash"
       },
       "availableCount": "{{count}} reports available",
-      "openReport": "Open Report"
+      "openReport": "Open Report",
+      "trialBalance": {
+        "desc": "Live Trial Balance of accounts"
+      },
+      "payroll": {
+        "desc": "Live payroll for employees"
+      },
+      "attendance": {
+        "desc": "Attendance report for presence and absence"
+      },
+      "endOfService": {
+        "desc": "Employee End of Service (EOS) register"
+      },
+      "repPerformance": {
+        "desc": "Sales Rep performance (deals + sales)"
+      },
+      "salesCommission": {
+        "desc": "Sales commission by percentage"
+      },
+      "inventoryItemLedger": {
+        "desc": "Live inventory movement ledger"
+      },
+      "stockDiff": {
+        "desc": "Stock quantity differences between two dates"
+      },
+      "mfgVariance": {
+        "desc": "Production planned vs actual variance"
+      },
+      "prodCost": {
+        "desc": "Production costs (WIP + finished)"
+      },
+      "docDetails": {
+        "desc": "Invoice details without POS"
+      },
+      "assetsDepr": {
+        "desc": "Fixed assets depreciation register"
+      }
     },
     "months": {
       "jan": "January",
@@ -3311,7 +3359,191 @@
     "desc": "Descending",
     "asc": "Ascending",
     "rows": "rows",
-    "loadError": "Could not load the report"
+    "loadError": "Could not load the report",
+    "tb": {
+      "title": "Trial Balance (Balance Sheet)",
+      "subtitle": "Total Debit / Total Credit / Net Balance of every account",
+      "fromDate": "From date",
+      "toDate": "To date",
+      "allTypes": "All types",
+      "totalDebit": "Total Debit",
+      "totalCredit": "Total Credit",
+      "difference": "Difference (Dr/Cr)",
+      "accountsCount": "Accounts count",
+      "total": "Total"
+    },
+    "payroll": {
+      "title": "Payroll Report",
+      "subtitle": "Employee salaries + deductions",
+      "allStatuses": "All statuses",
+      "totalNet": "Total Net",
+      "totalDeductions": "Total Deductions",
+      "totalAllowances": "Total Allowances",
+      "totalOvertime": "Total Overtime Hours",
+      "employeesCount": "Employees count",
+      "month": "Month",
+      "year": "Year",
+      "total": "Total"
+    },
+    "attendance": {
+      "title": "Attendance Report",
+      "subtitle": "Absent / Late days + Overtime",
+      "from": "From",
+      "to": "To",
+      "status": "Status",
+      "presentDays": "Present/Working days",
+      "absentDays": "Absent days",
+      "lateDays": "Late days",
+      "totalOvertime": "Total Overtime Hours"
+    },
+    "eos": {
+      "title": "End of Service Report",
+      "subtitle": "Termination dates + EOS amounts",
+      "allStatuses": "All statuses",
+      "totalEos": "Total EOS Amount",
+      "employeesCount": "Employees count",
+      "avgEos": "Avg. EOS per year",
+      "terminationDate": "Termination Date",
+      "serviceYears": "Service Years",
+      "lastSalary": "Last Salary",
+      "eosAmount": "EOS Amount",
+      "reason": "Reason",
+      "total": "Total"
+    },
+    "repPerf": {
+      "title": "Sales Rep Performance",
+      "subtitle": "Deals + Sales Performance per Rep",
+      "allReps": "All reps",
+      "reps": "Reps count",
+      "totalWon": "Total Won Value",
+      "totalPipeline": "Total Current Pipeline",
+      "repName": "Rep Name",
+      "deals": "Deals",
+      "won": "Won",
+      "lost": "Lost",
+      "winRate": "Win Rate",
+      "pipelineValue": "Pipeline Value",
+      "wonValue": "Won Value",
+      "lossValue": "Lost Value",
+      "avgDeal": "Avg Deal Value",
+      "total": "Total"
+    },
+    "commission": {
+      "title": "Sales Commission Report",
+      "subtitle": "Commission calculation for sales invoices",
+      "from": "From",
+      "to": "To",
+      "rate": "Commission Rate (%)",
+      "totalCommission": "Total Commission",
+      "invoicesCount": "Invoices count",
+      "date": "Date",
+      "invoice": "Invoice Number",
+      "customer": "Customer Name",
+      "invoiceTotal": "Invoice Total",
+      "commissionAmount": "Commission Amount",
+      "total": "Total"
+    },
+    "inventoryLedger": {
+      "title": "Inventory Item Ledger",
+      "subtitle": "All stock movements with date + reference",
+      "productFilter": "Select product",
+      "from": "From",
+      "to": "To",
+      "totalIn": "Total In",
+      "totalOut": "Total Out",
+      "totalAdjustment": "Total Adjustments",
+      "totalTransfer": "Total Transfers",
+      "date": "Date",
+      "product": "Product",
+      "type": "Type",
+      "warehouse": "Warehouse",
+      "quantity": "Quantity",
+      "reference": "Reference"
+    },
+    "stockDiff": {
+      "title": "Stock Difference",
+      "subtitle": "Difference of quantities between two dates",
+      "from": "From",
+      "to": "To",
+      "allWarehouses": "All warehouses",
+      "totalDiff": "Total Difference",
+      "totalIn": "Total In",
+      "totalOut": "Total Out",
+      "product": "Product",
+      "warehouse": "Warehouse",
+      "qtyBefore": "Before",
+      "qtyAfter": "After",
+      "diff": "Diff"
+    },
+    "mfgVariance": {
+      "title": "Manufacturing Variance Analysis",
+      "subtitle": "Planned vs Actual Variance",
+      "allStatuses": "All statuses",
+      "overProduction": "Overproduction",
+      "underProduction": "Underproduction",
+      "totalRows": "Total Rows",
+      "orderNumber": "Order Number",
+      "status": "Status",
+      "material": "Material",
+      "plannedQuantity": "Planned Qty",
+      "actualQuantity": "Actual Qty",
+      "plannedUnitCost": "Planned Unit Cost",
+      "actualUnitCost": "Actual Unit Cost"
+    },
+    "prodCost": {
+      "title": "Production Cost Report",
+      "subtitle": "Production WIP + Finished Products by Orders",
+      "productFilter": "Select product",
+      "orderNumber": "Order Number",
+      "product": "Product",
+      "status": "Status",
+      "quantity": "Quantity",
+      "producedQty": "Produced Qty",
+      "wipCost": "WIP Cost",
+      "totalCost": "Total Cost",
+      "actualStart": "Actual Start",
+      "actualEnd": "Actual End",
+      "completedCount": "Completed Orders",
+      "inProgressCount": "In Progress Orders"
+    },
+    "docDetails": {
+      "title": "Invoice Details (Docs)",
+      "subtitle": "Non-POS invoices with payments + attachments",
+      "allTypes": "All types",
+      "totalRevenue": "Total Revenue",
+      "totalPaid": "Total Paid",
+      "totalAttachments": "Total Attachments",
+      "docsCount": "Docs count",
+      "date": "Date",
+      "invoice": "Invoice",
+      "customer": "Customer",
+      "total": "Total",
+      "paid": "Paid",
+      "paymentType": "Payment Type",
+      "status": "Status",
+      "attachmentsCount": "Attachments"
+    },
+    "assetsDepr": {
+      "title": "Fixed Assets Depreciation Report",
+      "subtitle": "Fixed Assets Register + Depreciation",
+      "allStatuses": "All statuses",
+      "active": "Active",
+      "disposed": "Disposed",
+      "totalAssetsValue": "Total Assets Value",
+      "totalDeprAccumulated": "Total Accumulated Depr.",
+      "remainingValue": "Remaining Value",
+      "assetsCount": "Assets count",
+      "code": "Code",
+      "name": "Name",
+      "category": "Category",
+      "purchaseDate": "Purchase Date",
+      "cost": "Cost",
+      "accumulatedDepr": "Accumulated Depr.",
+      "currentBalance": "Current Balance",
+      "method": "Method",
+      "status": "Status",
+      "total": "Total"
+    }
   },
   "settings": {
     "pageTitle": "Settings",
@@ -4132,7 +4364,8 @@
       "invalidText": "Malformed value format",
       "serializationFailure": "Concurrency conflict — please retry",
       "deadlockDetected": "Request processing conflict — please retry",
-      "dbError": "Database error"
+      "dbError": "Database error",
+      "syntaxError": "Syntax error — invalid query"
     }
   },
   "common": {

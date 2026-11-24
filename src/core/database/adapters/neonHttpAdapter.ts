@@ -112,7 +112,14 @@ function neonFailure(err: unknown): { success: false; error: string; errorCode?:
     (p): p is string => typeof p === 'string' && p.length > 0,
   );
   const detail = parts.length > 0 ? parts.join(' · ') : neonErrorMessage(failure.message).slice(0, 160);
-  return { success: false, error: `${pgFailureMessage(failure)} (${detail})`, errorCode: failure.code };
+  // Syntax errors (42601): the generic sentence names nothing. Append the
+  // driver's own message — PG pinpoints the failing token (e.g.
+  // `syntax error at or near "users"`), which is the actual diagnostic for
+  // broken statements (the migration-replay path in remoteSchema.ts shows
+  // the same context).
+  const raw = String(failure.message || '').trim();
+  const rawAppended = raw && !detail.includes(raw) ? ` — ${raw.slice(0, 300)}` : '';
+  return { success: false, error: `${pgFailureMessage(failure)} (${detail}${rawAppended})`, errorCode: failure.code };
 }
 
 /**

@@ -26,7 +26,8 @@ export type PgFailureCode =
   | 'INVALID_TEXT_REPRESENTATION'
   | 'SERIALIZATION_FAILURE'
   | 'DEADLOCK_DETECTED'
-  | 'DB_ERROR';
+  | 'DB_ERROR'
+  | 'SYNTAX_ERROR';
 
 export interface PgFailure {
   /** Stable key — safe for programmatic branching, never localised. */
@@ -48,6 +49,7 @@ const PG_STATE_CODES: Record<string, PgFailureCode> = {
   '22P02': 'INVALID_TEXT_REPRESENTATION',
   '40001': 'SERIALIZATION_FAILURE',
   '40P01': 'DEADLOCK_DETECTED',
+  '42601': 'SYNTAX_ERROR',
 };
 
 /**
@@ -64,6 +66,7 @@ export const PG_MESSAGE_KEYS: Record<PgFailureCode, string> = {
   SERIALIZATION_FAILURE: 'errors.db.serializationFailure',
   DEADLOCK_DETECTED: 'errors.db.deadlockDetected',
   DB_ERROR: 'errors.db.dbError',
+  SYNTAX_ERROR: 'errors.db.syntaxError',
 };
 
 /**
@@ -83,6 +86,7 @@ export const PG_AR_SENTENCES: Record<PgFailureCode, string> = {
   SERIALIZATION_FAILURE: 'تعارض في التزامن — أعد المحاولة',
   DEADLOCK_DETECTED: 'تعارض في معالجة الطلبات — أعد المحاولة',
   DB_ERROR: 'خطأ في قاعدة البيانات',
+  SYNTAX_ERROR: 'خطأ في الصياغة — الاستعلام غير صالح',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

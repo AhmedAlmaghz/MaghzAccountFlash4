@@ -301,7 +301,19 @@
       "profitAnalysis": "تحليل الأرباح",
       "customBuilder": "تقرير مخصص",
       "leadConversion": "تحويل العملاء المحتملين",
-      "opportunityPipeline": "خط أنابيب الفرص"
+      "opportunityPipeline": "خط أنابيب الفرص",
+      "trialBalance": "قائمة الحسابات (رصيد الميزانية)",
+      "payroll": "قائمة الرواتب والاستقطاعات",
+      "attendance": "قائمة الحضور والانصراف",
+      "endOfService": "قائمة إنهاء الخدمة (EOS)",
+      "repPerformance": "أداء المندوبين",
+      "salesCommission": "قائمة العمولات",
+      "inventoryItemLedger": "قائمة حركة المخزون (Item Ledger)",
+      "stockDiff": "فرق المخزون (Stock Diff)",
+      "manufacturingVariance": "تحليل تفاوت إنتاج",
+      "productionCost": "تكلفة الإنتاج",
+      "docInvoices": "تفاصيل الفواتير (Docs)",
+      "fixedAssetsDepreciation": "تقرير الاستهلاك الخطي"
     },
     "settings": {
       "title": "الإعدادات",
@@ -3120,7 +3132,43 @@
         "desc": "الأصول، الالتزامات، حقوق الملكية، النقدية"
       },
       "availableCount": "{{count}} تقارير متاحة",
-      "openReport": "فتح التقرير"
+      "openReport": "فتح التقرير",
+      "trialBalance": {
+        "desc": "قائمة الحسابات (رصيد الميزانية) الحية"
+      },
+      "payroll": {
+        "desc": "قائمة رواتب الموظفين الحية"
+      },
+      "attendance": {
+        "desc": "قائمة حضور الحضور والغياب"
+      },
+      "endOfService": {
+        "desc": "قائمة إنهاء خدمة الموظفين"
+      },
+      "repPerformance": {
+        "desc": "أداء المندوبين (مبيعات + صفقات)"
+      },
+      "salesCommission": {
+        "desc": "عمولات المبيعات بنسبة محددة"
+      },
+      "inventoryItemLedger": {
+        "desc": "قائمة حركة المخزون الحية"
+      },
+      "stockDiff": {
+        "desc": "فروقات كميات المخزون بين تواريخ"
+      },
+      "mfgVariance": {
+        "desc": "تفاوت كميات إنتاج الأوامر"
+      },
+      "prodCost": {
+        "desc": "تكاليف الإنتاج (WIP + تام)"
+      },
+      "docDetails": {
+        "desc": "تفاصيل الفواتير (دون POS)"
+      },
+      "assetsDepr": {
+        "desc": "تقرير الاستهلاك الخطي (Fixed Assets)"
+      }
     },
     "months": {
       "jan": "يناير",
@@ -3311,7 +3359,191 @@
     "desc": "تنازلي",
     "asc": "تصاعدي",
     "rows": "صف",
-    "loadError": "تعذّر تحميل التقرير"
+    "loadError": "تعذّر تحميل التقرير",
+    "tb": {
+      "title": "قائمة الحسابات (رصيد الميزانية)",
+      "subtitle": "عدد الحسابات + أصول مقارنة مع رصيد ختامي",
+      "fromDate": "من تاريخ",
+      "toDate": "إلى تاريخ",
+      "allTypes": "كل الأنواع",
+      "totalDebit": "إجمالي المدين",
+      "totalCredit": "إجمالي الدائن",
+      "difference": "الفرق (د/إ)",
+      "accountsCount": "عدد الحسابات",
+      "total": "الإجمالي"
+    },
+    "payroll": {
+      "title": "قائمة الرواتب والاستقطاعات",
+      "subtitle": "رواتب فردية + استقطاعات حسب الفترة",
+      "allStatuses": "كل الحالات",
+      "totalNet": "إجمالي الصافي",
+      "totalDeductions": "إجمالي الاستقطاعات",
+      "totalAllowances": "إجمالي المكمّلات",
+      "totalOvertime": "إجمالي الساعات الإضافية",
+      "employeesCount": "عدد الموظفين",
+      "month": "الشهر",
+      "year": "السنة",
+      "total": "الإجمالي"
+    },
+    "attendance": {
+      "title": "قائمة الحضور والانصراف",
+      "subtitle": "أيام الغياب + التأخير والساعات الإضافية",
+      "from": "من",
+      "to": "إلى",
+      "status": "الحالة",
+      "presentDays": "الحضور/يوم عمل",
+      "absentDays": "أيام الغياب",
+      "lateDays": "أيام التأخير",
+      "totalOvertime": "إجمالي الساعات الإضافية"
+    },
+    "eos": {
+      "title": "قائمة إنهاء الخدمة (EOS)",
+      "subtitle": "إنهاء الخدمة للموظفين المفروضة",
+      "allStatuses": "كل الحالات",
+      "totalEos": "إجمالي إنهاء الخدمة",
+      "employeesCount": "عدد الموظفين",
+      "avgEos": "متوسط المبلغ لكل عام",
+      "terminationDate": "تاريخ الإنهاء",
+      "serviceYears": "سنوات الخدمة",
+      "lastSalary": "الراتب الأخير",
+      "eosAmount": "مبلغ الإنهاء",
+      "reason": "السبب",
+      "total": "الإجمالي"
+    },
+    "repPerf": {
+      "title": "أداء المندوبين (Performance)",
+      "subtitle": "صفقات + مبيعات حسب المندوب والمصوب",
+      "allReps": "كل المندوبين",
+      "reps": "عدد المندوبين",
+      "totalWon": "إجمالي الصفقات الفازت بها",
+      "totalPipeline": "إجمالي بورباي حالية",
+      "repName": "اسم المندوب",
+      "deals": "عدد الصفقات",
+      "won": "الصفقات الفازت",
+      "lost": "الصفقات الخسرت",
+      "winRate": "نسبة الفوز",
+      "pipelineValue": "قيمة بورباي حالية",
+      "wonValue": "قيمة الصفقات الفازت",
+      "lossValue": "قيمة الصفقات الخسرة",
+      "avgDeal": "متوسط قيمة الصفقة",
+      "total": "الإجمالي"
+    },
+    "commission": {
+      "title": "قائمة العمولات (Sales Commission)",
+      "subtitle": "عمولات بنسبة محددة على الفواتير المبيعات",
+      "from": "من",
+      "to": "إلى",
+      "rate": "نسبة العمولة (%)",
+      "totalCommission": "إجمالي العمولات",
+      "invoicesCount": "عدد الفواتير",
+      "date": "التاريخ",
+      "invoice": "رقم الفاتورة",
+      "customer": "اسم العميل",
+      "invoiceTotal": "إجمالي الفاتورة",
+      "commissionAmount": "مبلغ العمولة",
+      "total": "الإجمالي"
+    },
+    "inventoryLedger": {
+      "title": "قائمة حركة المخزون (Item Ledger)",
+      "subtitle": "جميع حركات المخزون بتاريخ + مرجع",
+      "productFilter": "اختر المنتج",
+      "from": "من",
+      "to": "إلى",
+      "totalIn": "إجمالي الورودات",
+      "totalOut": "إجمالي المصروفات",
+      "totalAdjustment": "إجمالي التسويات",
+      "totalTransfer": "إجمالي التحويلات",
+      "date": "التاريخ",
+      "product": "المنتج",
+      "type": "النوع",
+      "warehouse": "المستودع",
+      "quantity": "الكمية",
+      "reference": "المرجع"
+    },
+    "stockDiff": {
+      "title": "فرق المخزون (Stock Diff)",
+      "subtitle": "مقارنة كميات بين نقطتي زمنيتين",
+      "from": "من",
+      "to": "إلى",
+      "allWarehouses": "كل المستودعات",
+      "totalDiff": "إجمالي الفرق",
+      "totalIn": "إجمالي الورودات",
+      "totalOut": "إجمالي المصروفات",
+      "product": "المنتج",
+      "warehouse": "المستودع",
+      "qtyBefore": "قبل",
+      "qtyAfter": "بعد",
+      "diff": "الفرق"
+    },
+    "mfgVariance": {
+      "title": "تحليل تفاوت إنتاج (Variance)",
+      "subtitle": "تفاوت planned vs actual في ساعات الإنتاج",
+      "allStatuses": "كل الحالات",
+      "overProduction": "إنتاج إضافي",
+      "underProduction": "نقص في الإنتاج",
+      "totalRows": "عدد الصفوف",
+      "orderNumber": "رقم الأمر",
+      "status": "الحالة",
+      "material": "المادة",
+      "plannedQuantity": "الكمية المخططة",
+      "actualQuantity": "الكمية الفعلية",
+      "plannedUnitCost": "تكلفة المخططة",
+      "actualUnitCost": "التكلفة الفعلية"
+    },
+    "prodCost": {
+      "title": "تكلفة الإنتاج (Production Cost)",
+      "subtitle": "تكلفة WIP + الإنتاج التام حسب الأوامر",
+      "productFilter": "اختر المنتج",
+      "orderNumber": "رقم الأمر",
+      "product": "المنتج",
+      "status": "الحالة",
+      "quantity": "الكمية",
+      "producedQty": "المنتج التام",
+      "wipCost": "تكلفة الخامات",
+      "totalCost": "إجمالي التكلفة",
+      "actualStart": "البداية الفعلية",
+      "actualEnd": "النهاية الفعلية",
+      "completedCount": "الأوامر المنتهية",
+      "inProgressCount": "الأوامر قيد التشغيل"
+    },
+    "docDetails": {
+      "title": "تفاصيل الفواتير (Doc Invoice Details)",
+      "subtitle": "فواتير دون POS + الدفعات + المرفقات",
+      "allTypes": "كل الأنواع",
+      "totalRevenue": "إجمالي الإيرادات",
+      "totalPaid": "إجمالي المدفوعات",
+      "totalAttachments": "إجمالي المرفقات",
+      "docsCount": "عدد الفواتير",
+      "date": "التاريخ",
+      "invoice": "رقم الفاتورة",
+      "customer": "اسم العميل",
+      "total": "الإجمالي",
+      "paid": "المدفوع",
+      "paymentType": "نوع الدفع",
+      "status": "الحالة",
+      "attachmentsCount": "عدد المرفقات"
+    },
+    "assetsDepr": {
+      "title": "تقرير الاستهلاك الخطي (Depreciation)",
+      "subtitle": "الأصول الثابتة + الاستهلاك حسب الحيات المتبقية",
+      "allStatuses": "كل الحالات",
+      "active": "نشط",
+      "disposed": "مُنهي",
+      "totalAssetsValue": "إجمالي قيمة الأصول",
+      "totalDeprAccumulated": "إجمالي الاستهلاك المتراكم",
+      "remainingValue": "القيمة المتبقية",
+      "assetsCount": "عدد الأصول",
+      "code": "الكود",
+      "name": "الاسم",
+      "category": "الفئة",
+      "purchaseDate": "تاريخ الشراء",
+      "cost": "التكلفة",
+      "accumulatedDepr": "الاستهلاك المتراكم",
+      "currentBalance": "الرصيد الحالي",
+      "method": "طريقة الإهلاك",
+      "status": "الحالة",
+      "total": "الإجمالي"
+    }
   },
   "settings": {
     "pageTitle": "الإعدادات",
@@ -4132,7 +4364,8 @@
       "invalidText": "صيغة قيمة غير صحيحة",
       "serializationFailure": "تعارض في التزامن — أعد المحاولة",
       "deadlockDetected": "تعارض في معالجة الطلبات — أعد المحاولة",
-      "dbError": "خطأ في قاعدة البيانات"
+      "dbError": "خطأ في قاعدة البيانات",
+      "syntaxError": "خطأ في الصياغة — الاستعلام غير صالح"
     }
   },
   "common": {
