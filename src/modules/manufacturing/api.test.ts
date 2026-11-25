@@ -340,6 +340,27 @@ describe('manufacturingApi', () => {
       expect(res.success).toBe(true);
       expect(res.id).toBe(WO_ID);
     });
+
+    it('carries the Zod status default into the INSERT when the caller omits it', async () => {
+      let insertParams: unknown[] = [];
+      const adapter = makeMockAdapter(async (sql, params) => {
+        if (sql.includes('INSERT INTO work_orders')) insertParams = params;
+        return { success: true, rows: [{ id: WO_ID }] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.createWorkOrder({
+        companyId: COMPANY_ID,
+        orderNumber: 'WO-0002',
+        productId: PRODUCT_ID,
+        quantity: 1,
+        lines: [],
+      } as never);
+      expect(res.success).toBe(true);
+      // params[5] = status column — raw `data` used to send `undefined` here,
+      // leaving the row with NULL status and blocking the start transition.
+      expect(insertParams[5]).toBe('planned');
+    });
   });
 
   describe('updateWorkOrderStatus — unified production flow', () => {

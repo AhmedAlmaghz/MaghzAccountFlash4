@@ -504,32 +504,36 @@ export const manufacturingApi = {
     try {
       const validation = validateInput(createWorkOrderSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      // Zod defaults must be carried into the INSERT — raw `data` loses
+      // `status: 'planned'` (the DB then holds NULL and the state machine
+      // refuses to start the order). Same contract as createInvoice/createAccount.
+      const order = validation.data;
       // Lot number is generated here (API layer) so the normal screens and the
       // AI agent share one implementation. Format: YYYYMMDD-NNN.
-      const batchNumber = data.batchNumber && String(data.batchNumber).trim() !== ''
-        ? String(data.batchNumber).trim()
-        : await generateBatchNumber(data.companyId);
+      const batchNumber = order.batchNumber && String(order.batchNumber).trim() !== ''
+        ? String(order.batchNumber).trim()
+        : await generateBatchNumber(order.companyId);
       // Server-side source of truth (best practice): estimated total cost is
       // ALWAYS materials + production costs. The UI computes it live, but the
       // server recomputes so a stale/malicious client can never desync it.
-      const materialsTotal = (data.lines || []).reduce((s, l) => s + (Number(l.plannedQuantity) || 0) * (Number(l.unitCost) || 0), 0);
-      const costsTotal = (data.productionCosts || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const materialsTotal = (order.lines || []).reduce((s, l) => s + (Number(l.plannedQuantity) || 0) * (Number(l.unitCost) || 0), 0);
+      const costsTotal = (order.productionCosts || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
       const autoTotalCost = Math.round((materialsTotal + costsTotal) * 100) / 100;
       if (isElectronPg()) {
         const result = await invokeMfgRpc('createWorkOrder', {
-          orderNumber: data.orderNumber,
-          productId: data.productId,
-          bomId: data.bomId ?? null,
-          quantity: data.quantity,
-          status: data.status || 'planned',
-          plannedStartDate: data.plannedStartDate ?? null,
-          plannedEndDate: data.plannedEndDate ?? null,
+          orderNumber: order.orderNumber,
+          productId: order.productId,
+          bomId: order.bomId ?? null,
+          quantity: order.quantity,
+          status: order.status,
+          plannedStartDate: order.plannedStartDate ?? null,
+          plannedEndDate: order.plannedEndDate ?? null,
           totalCost: autoTotalCost,
           batchNumber,
-          supervisorId: data.supervisorId ?? null,
-          productionCosts: data.productionCosts ?? [],
-          notes: data.notes ?? null,
-          lines: (data.lines || []).map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost })),
+          supervisorId: order.supervisorId ?? null,
+          productionCosts: order.productionCosts ?? [],
+          notes: order.notes ?? null,
+          lines: (order.lines || []).map((l) => ({ materialId: l.materialId, plannedQuantity: l.plannedQuantity, unitCost: l.unitCost })),
         });
         if (!result.success) return { success: false, error: result.error };
         const first = result.rows?.[0];
@@ -539,12 +543,12 @@ export const manufacturingApi = {
       // consumption lines insert together; avoids the `adapter.transaction`
       // result shape mismatch (`results[0]` is `{rows, rowCount}`, not rows).
       const adapter = await getDbAdapter();
-      const params: unknown[] = [data.companyId, data.orderNumber, data.productId, data.bomId ?? null, data.quantity, data.status, data.plannedStartDate ?? null, data.plannedEndDate ?? null, autoTotalCost, batchNumber, safeUserId(data.supervisorId), JSON.stringify(data.productionCosts ?? []), data.notes ?? null, safeUserId(_userId)];
+      const params: unknown[] = [order.companyId, order.orderNumber, order.productId, order.bomId ?? null, order.quantity, order.status, order.plannedStartDate ?? null, order.plannedEndDate ?? null, autoTotalCost, batchNumber, safeUserId(order.supervisorId), JSON.stringify(order.productionCosts ?? []), order.notes ?? null, safeUserId(_userId)];
       let sql = `WITH wo AS (
         INSERT INTO work_orders (company_id, order_number, product_id, bom_id, quantity, status, planned_start_date, planned_end_date, total_cost, batch_number, supervisor_id, production_costs, notes, created_by)
         VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::numeric, $6, $7::date, $8::date, $9::numeric, $10, $11::uuid, $12::jsonb, $13, $14::uuid) RETURNING id
       )`;
-      const woLines = data.lines || [];
+      const woLines = order.lines || [];
       if (woLines.length > 0) {
         const rowValues: string[] = [];
         let idx = 15;

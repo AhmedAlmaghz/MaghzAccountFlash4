@@ -102,7 +102,6 @@ const PurchaseReturnsPage = React.lazy(() => import('@/modules/purchases/compone
 // Manufacturing sub-pages
 const WorkOrdersPage = React.lazy(() => import('@/modules/manufacturing/components/WorkOrdersPage'));
 const BomEditorPage = React.lazy(() => import('@/modules/manufacturing/components/BomEditorPage'));
-const WorkOrderEditorPage = React.lazy(() => import('@/modules/manufacturing/components/WorkOrderEditorPage'));
 const BomPage = React.lazy(() => import('@/modules/manufacturing/components/BomPage'));
 const ProductionCostReport = React.lazy(() => import('@/modules/manufacturing/components/ProductionCostReport'));
 const VarianceAnalysisReport = React.lazy(() => import('@/modules/manufacturing/components/VarianceAnalysisReport'));
@@ -285,8 +284,11 @@ export const AppRouter: React.FC = () => {
             <Route element={<PermissionRoute module="manufacturing" />}>
               <Route path="/manufacturing" element={withSuspense(ManufacturingPage)}>
                 <Route path="work-orders" element={withSuspense(WorkOrdersPage)} />
-                <Route path="work-orders/new" element={withSuspense(WorkOrderEditorPage)} />
-                <Route path="work-orders/:id" element={withSuspense(WorkOrderEditorPage)} />
+                {/* v0.28.3 parity: creation/editing happens in this page's modal
+                    (BOM-derived lines, batch quantity, actual consumption and
+                    status flow). Keep legacy deep links on the same page. */}
+                <Route path="work-orders/new" element={withSuspense(WorkOrdersPage)} />
+                <Route path="work-orders/:id" element={withSuspense(WorkOrdersPage)} />
                 <Route path="bom" element={withSuspense(BomPage)} />
                 <Route path="bom/new" element={withSuspense(BomEditorPage)} />
                 <Route path="bom/:id" element={withSuspense(BomEditorPage)} />
