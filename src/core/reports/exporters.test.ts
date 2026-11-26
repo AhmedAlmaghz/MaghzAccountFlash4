@@ -78,34 +78,16 @@ describe('report exporters', () => {
     expect(writeFile).toHaveBeenCalledWith(expect.anything(), 'test-report.xlsx');
   });
 
-  it('exports PDF with title block and grid (advanced jsPDF path)', async () => {
-    const { default: autoTable } = await import('jspdf-autotable');
-    const { default: JsPDF } = await import('jspdf');
+  it('exports PDF via native renderer with logical Arabic (no manual shaping)', async () => {
+    const append = vi.spyOn(document.body, 'appendChild');
     await exportWebPdf(makeSpec());
-    expect(JsPDF).toHaveBeenCalled();
-    expect(autoTable).toHaveBeenCalled();
-    const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;
-    expect(opts.theme).toBe('grid');
-    expect(opts.direction).toBe('rtl');
-    // Bundled Tajawal is always available: headers ship pre-shaped
-    // (visual order), never raw logical Arabic.
-    expect((opts.head as string[][])[0]).toEqual(['ﻢﺳﻻﺍ', 'ﻎﻠﺒﻤﻟﺍ']);
-  });
-
-  it('embeds Tajawal and shapes Arabic when the font loads', async () => {
-    const { clearArabicFontCache } = await import('./arabicPdf');
-    clearArabicFontCache();
-    const { default: autoTable } = await import('jspdf-autotable');
-    const { default: JsPDF } = await import('jspdf');
-    vi.clearAllMocks();
-    await exportWebPdf(makeSpec());
-    const instance = vi.mocked(JsPDF).mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
-    expect(instance.setFont).toHaveBeenCalledWith('IBMPlexSansArabic');
-    const opts = vi.mocked(autoTable).mock.calls[0][1] as Record<string, unknown>;
-    expect(opts.styles).toMatchObject({ font: 'IBMPlexSansArabic' });
-    // Headers are pre-shaped visual-order text, not raw logical Arabic.
-    expect((opts.head as string[][])[0][0]).not.toBe('الاسم');
-    clearArabicFontCache();
+    const iframe = append.mock.calls.map(([n]) => n).find((n): n is HTMLIFrameElement => n instanceof HTMLIFrameElement);
+    expect(iframe).toBeDefined();
+    expect(iframe?.srcdoc).toContain('dir="rtl"');
+    // Logical Arabic reaches the browser untouched — it handles shaping/bidi.
+    expect(iframe?.srcdoc).toContain('الاسم');
+    expect(iframe?.srcdoc).toContain('بند أ');
+    append.mockRestore();
   });
 
   it('exports a standalone branded HTML file', async () => {

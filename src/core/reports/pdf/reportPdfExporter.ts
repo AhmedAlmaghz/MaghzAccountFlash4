@@ -1,6 +1,5 @@
 import type { ReportSpec } from '../types';
 import { buildReportHtml } from '../document';
-import { ARABIC_FONT_NAME, ensureArabicFont, shapeForPdf } from '../arabicPdf';
 import { formatReportCell } from '../formatters';
 
 /**
@@ -80,65 +79,12 @@ export function titleBlock(spec: ReportSpec): string[][] {
   return lines;
 }
 
-/** Advanced: force the legacy jsPDF path (tests / callers that need a table-only PDF). */
+/**
+ * Native-renderer PDF for a report spec (same path on every platform).
+ * Kept as an exported entry point for advanced callers/tests — no jsPDF.
+ */
 export async function exportWebPdf(spec: ReportSpec): Promise<void> {
-  const [jsPDFModule, autoTableModule] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
-  const jsPDF = jsPDFModule.default;
-  const autoTable = autoTableModule.default;
-  const direction = spec.meta.direction ?? 'rtl';
-
-  const landscape = spec.landscape ?? spec.columns.length > 6;
-  const doc = new jsPDF({
-    orientation: landscape ? 'landscape' : 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  });
-
-  const arabic = await ensureArabicFont(doc);
-  if (arabic) {
-    doc.setFont(ARABIC_FONT_NAME);
-  } else if (direction === 'rtl') {
-    doc.setR2L(true);
-  }
-  const shape = (s: string): string => (arabic ? shapeForPdf(s) : s);
-
-  const margin = 14;
-  const pageWidth = doc.internal.pageSize.width;
-  const x = direction === 'rtl' ? pageWidth - margin : margin;
-  const align = (direction === 'rtl' ? 'right' : 'left') as 'right' | 'left';
-  let cursorY = 18;
-
-  if (spec.branding?.companyName) {
-    doc.setFontSize(13);
-    doc.text(shape(spec.branding.companyName), x, cursorY, { align });
-    cursorY += 6;
-  }
-  doc.setFontSize(17);
-  doc.text(shape(spec.meta.title), x, cursorY, { align });
-  cursorY += 7;
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  if (spec.meta.subtitle) {
-    doc.text(shape(spec.meta.subtitle), x, cursorY, { align });
-    cursorY += 5;
-  }
-  if (spec.meta.periodLabel) {
-    doc.text(shape(spec.meta.periodLabel), x, cursorY, { align });
-    cursorY += 5;
-  }
-  doc.setTextColor(0);
-
-  autoTable(doc, {
-    startY: cursorY + 2,
-    head: [spec.columns.map((c) => shape(c.header))],
-    body: cellMatrix(spec).map((row) => row.map((cell) => shape(cell))),
-    theme: 'grid',
-    styles: { font: arabic ? ARABIC_FONT_NAME : 'helvetica', fontSize: 9, cellPadding: 2 },
-    alternateRowStyles: { fillColor: [247, 250, 248] },
-    direction,
-  } as unknown as Parameters<typeof autoTable>[1]);
-
-  doc.save(`${spec.filename}.pdf`);
+  printHtmlInBrowser(buildReportHtml(spec), `${spec.filename}.pdf`);
 }
 
 // ---------------------------------------------------------------------------

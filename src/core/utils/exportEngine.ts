@@ -2,9 +2,7 @@ import { useAppStore } from '@/core/store';
 import { formatReportDate, formatReportNumber } from '@/core/reports/formatters';
 import { exportReportHtml } from '@/core/reports/exporters';
 import { getReportBranding } from '@/core/reports/branding';
-import { ARABIC_FONT_NAME, ensureArabicFont, shapeForPdf } from '@/core/reports/arabicPdf';
-import { isDesktopApp, exportReportToPdf } from '@/core/reports/pdf/reportPdfExporter';
-import type { ReportSpec } from '@/core/reports/types';
+import { printHtmlDocument } from '@/core/reports/pdf/reportPdfExporter';
 
 export interface ExportColumn {
   key: string;
@@ -152,6 +150,56 @@ export async function exportToHtml(
   });
 }
 
+/**
+ * Standalone RTL-aware HTML for native PDF rendering.
+ * Arabic shaping/bidi are the browser engine's job — no manual reshaping.
+ */
+function buildPdfHtml(
+  data: unknown[],
+  columns: ExportColumn[],
+  options?: { title?: string; subtitle?: string; companyName?: string; rtl?: boolean; currency?: string }
+): string {
+  const dir = options?.rtl === false ? 'ltr' : 'rtl';
+  const lang = dir === 'rtl' ? 'ar' : 'en';
+  const escape = (value: unknown): string => {
+    const s = value == null ? '' : String(value);
+    return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
+  };
+  const rows = (data as Record<string, unknown>[]).map((row) =>
+    `<tr>${columns.map((c) => `<td>${escape(formatCellValue(row[c.key], c))}</td>`).join('')}</tr>`
+  ).join('');
+  const head = `
+    <meta charset="utf-8">
+    <title>${escape(options?.title || 'report')}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+      @page { size: A4; margin: 14mm; }
+      * { box-sizing: border-box; }
+      body { font-family: 'Cairo', 'Tahoma', 'Segoe UI', sans-serif; margin: 0; color: #1f2937; font-size: 11px; line-height: 1.7; }
+      .head { border-bottom: 2px solid #0b7a5e; padding-bottom: 10px; margin-bottom: 14px; }
+      .company { font-size: 13px; font-weight: 700; color: #0b7a5e; }
+      h1 { font-size: 17px; margin: 4px 0 2px; }
+      .sub { color: #6b7280; font-size: 11px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #0b7a5e; color: #fff; padding: 7px 8px; text-align: start; font-size: 11px; }
+      td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; }
+      tr:nth-child(even) td { background: #f8fafc; }
+      .foot { margin-top: 18px; color: #94a3b8; font-size: 10px; text-align: center; }
+    </style>`;
+  return `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head>${head}</head><body>
+    <div class="head">
+      ${options?.companyName ? `<div class="company">${escape(options.companyName)}</div>` : ''}
+      ${options?.title ? `<h1>${escape(options.title)}</h1>` : ''}
+      ${options?.subtitle ? `<div class="sub">${escape(options.subtitle)}</div>` : ''}
+      ${options?.currency ? `<div class="sub">${escape(lang === 'ar' ? 'العملة' : 'Currency')}: ${escape(options.currency)}</div>` : ''}
+    </div>
+    <table><thead><tr>${columns.map((c) => `<th>${escape(c.header)}</th>`).join('')}</tr></thead>
+      <tbody>${rows || `<tr><td colspan="${columns.length}">${escape(lang === 'ar' ? 'لا توجد بيانات' : 'No data')}</td></tr>`}</tbody>
+    </table>
+    <div class="foot">maghzaccount-pro</div>
+  </body></html>`;
+}
+
 export async function exportToPDF(
   data: unknown[],
   columns: ExportColumn[],
@@ -165,74 +213,9 @@ export async function exportToPDF(
     currency?: string;
   }
 ): Promise<void> {
-  const rows = data as Record<string, unknown>[];
-
-  // Universal engine — Electron: printToPDF → blob download; Web/mobile: jsPDF.
-  // No popups on any platform.
-  if (isDesktopApp()) {
-    const spec: ReportSpec = {
-      columns: columns.map((c) => ({ key: c.key, header: c.header, width: c.width, format: 'text' as const })),
-      rows,
-      meta: {
-        title: options?.title || filename,
-        subtitle: options?.subtitle || getReportBranding().companyName,
-        direction: options?.rtl === false ? 'ltr' : 'rtl',
-      },
-      branding: getReportBranding(),
-      filename,
-    };
-    await exportReportToPdf(spec);
-    return;
-  }
-
-  const [jsPDFModule, autoTableModule] = await Promise.all([
-    import('jspdf'),
-    import('jspdf-autotable'),
-  ]);
-  const jsPDF = jsPDFModule.default;
-  const autoTable = autoTableModule.default;
-
-  const doc = new jsPDF(options?.rtl ? { orientation: 'portrait', unit: 'mm', format: 'a4' } : {});
-
-  // Arabic pipeline (see core/reports/arabicPdf): embedded Tajawal plus
-  // pre-shaped visual-order text. No setR2L on the shaped path — it would
-  // double-reverse. The legacy 'Cairo' font name never had an embedded
-  // file behind it. setR2L stays as the no-font fallback (ordered output).
-  const arabic = await ensureArabicFont(doc);
-  if (arabic) {
-    doc.setFont(ARABIC_FONT_NAME);
-  } else if (options?.rtl) {
-    doc.setR2L(true);
-  }
-  const shape = (s: string): string => (arabic ? shapeForPdf(s) : s);
-
-  if (options?.title) {
-    doc.setFontSize(18);
-    doc.text(shape(options.title), options?.rtl ? doc.internal.pageSize.width - 14 : 14, 20, { align: options?.rtl ? 'right' : 'left' });
-  }
-
-  if (options?.subtitle) {
-    doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(shape(options.subtitle), options?.rtl ? doc.internal.pageSize.width - 14 : 14, 28, { align: options?.rtl ? 'right' : 'left' });
-  } else if (options?.currency) {
-    doc.setFontSize(10);
-    doc.setTextColor(120);
-    doc.text(shape(`العملة: ${options.currency}`), options?.rtl ? doc.internal.pageSize.width - 14 : 14, 28, { align: options?.rtl ? 'right' : 'left' });
-  }
-
-  autoTable(doc, {
-    startY: options?.title ? 35 : 20,
-    head: [columns.map((c) => shape(c.header))],
-    body: rows.map((row) => columns.map((c) => shape(formatCellValue(row[c.key], c)))),
-    theme: 'grid',
-    headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
-    styles: { font: arabic ? ARABIC_FONT_NAME : 'helvetica', fontSize: 9, cellPadding: 2 },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    direction: options?.rtl ? 'rtl' : 'ltr',
-  } as unknown as Parameters<typeof autoTable>[1]);
-
-  doc.save(`${filename}.pdf`);
+  // ONE path for desktop and web: native renderer (Chromium printToPDF on
+  // desktop, print dialog → Save as PDF on web). No jsPDF/text shaping.
+  printHtmlDocument(buildPdfHtml(data, columns, options), `${filename}.pdf`);
 }
 
 export { formatDate as formatDateForExport, formatDateTime as formatDateTimeForExport, formatNumber as formatNumberForExport };
