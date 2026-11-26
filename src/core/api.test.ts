@@ -158,7 +158,7 @@ describe('settingsApi.getCashBoxes', () => {
   it('returns active cash boxes ordered by name', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: CASHBOX_ID, name: 'ط§ظ„طµظ†ط¯ظˆظ‚ ط§ظ„ط±ط¦ظٹط³ظٹ', is_active: true }],
+      rows: [{ id: CASHBOX_ID, name: 'الصندوق الرئيسي', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -186,7 +186,7 @@ describe('settingsApi.getCostCenters', () => {
   it('returns active cost centers ordered by name_ar', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: CC_ID, name_ar: 'ط§ظ„ظ…ط¨ظٹط¹ط§طھ', is_active: true }],
+      rows: [{ id: CC_ID, name_ar: 'المبيعات', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 
@@ -201,7 +201,7 @@ describe('settingsApi.getPayrollComponents', () => {
   it('returns active payroll components ordered by type, name_ar', async () => {
     const adapter = makeMockAdapter(async () => ({
       success: true,
-      rows: [{ id: PA_ID, name_ar: 'ط§ظ„ط¨ط¯ظ„', type: 'earning', is_active: true }],
+      rows: [{ id: PA_ID, name_ar: 'البدل', type: 'earning', is_active: true }],
     }));
     vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
 

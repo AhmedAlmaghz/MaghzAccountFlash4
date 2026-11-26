@@ -57,6 +57,8 @@ function mapBomLineRow(r: Record<string, unknown>): BOMLine {
     bomId: String(r.bom_id),
     materialId: String(r.material_id),
     materialName: r.material_name ? String(r.material_name) : undefined,
+    materialCode: r.material_code ? String(r.material_code) : undefined,
+    materialUnit: r.material_unit ? String(r.material_unit) : undefined,
     quantity: Number(r.quantity) || 0,
     unitCost: r.unit_cost != null && r.unit_cost !== '' ? Number(r.unit_cost) : undefined,
     totalCost: r.total_cost != null && r.total_cost !== '' ? Number(r.total_cost) : undefined,
@@ -272,7 +274,7 @@ export const manufacturingApi = {
           : { success: false, error: result.error };
       }
       const adapter = await getDbAdapter();
-      let sql = `SELECT b.*, p.name_ar as product_name FROM boms b LEFT JOIN products p ON b.product_id = p.id WHERE b.company_id = $1`;
+      let sql = `SELECT b.*, COALESCE(p.name_ar, p.name_en) as product_name FROM boms b LEFT JOIN products p ON b.product_id = p.id WHERE b.company_id = $1`;
       const params: unknown[] = [companyId];
       if (ownedByUserId) {
         sql += ' AND (b.created_by = $2 OR b.created_by IS NULL)';
@@ -304,10 +306,18 @@ export const manufacturingApi = {
         return { success: true, data: { bom, lines } };
       }
       const adapter = await getDbAdapter();
-      const bomRes = await adapter.query('SELECT * FROM boms WHERE id = $1 AND company_id = $2 LIMIT 1', [id, companyId]);
+      const bomRes = await adapter.query(
+        'SELECT b.*, COALESCE(p.name_ar, p.name_en) AS product_name FROM boms b LEFT JOIN products p ON b.product_id = p.id AND p.company_id = $2::uuid WHERE b.id = $1 AND b.company_id = $2 LIMIT 1',
+        [id, companyId]
+      );
       if (!bomRes.success || !bomRes.rows?.[0]) return { success: false, error: bomRes.error || 'Not found' };
       const bom = mapBomRow(bomRes.rows[0] as Record<string, unknown>);
-      const linesRes = await adapter.query('SELECT l.*, p.name_ar as material_name FROM bom_lines l LEFT JOIN products p ON l.material_id = p.id AND p.company_id = $2::uuid WHERE l.bom_id = $1', [id, companyId]);
+      const linesRes = await adapter.query(
+        `SELECT l.*, COALESCE(p.name_ar, p.name_en) AS material_name, p.code AS material_code, p.unit AS material_unit
+           FROM bom_lines l LEFT JOIN products p ON l.material_id = p.id AND p.company_id = $2::uuid
+          WHERE l.bom_id = $1`,
+        [id, companyId]
+      );
       const lines = (linesRes.rows || []).map((r: Record<string, unknown>) => mapBomLineRow(r));
       return { success: true, data: { bom, lines } };
     } catch (e) {
@@ -1756,7 +1766,7 @@ export const manufacturingApi = {
       params.push(ps);
       params.push(offset);
       const dataResult = await adapter.query(
-        `SELECT b.*, p.name_ar as product_name,
+        `SELECT b.*, COALESCE(p.name_ar, p.name_en) as product_name,
                 (SELECT COUNT(*)::int FROM bom_lines bl WHERE bl.bom_id = b.id) AS lines_count
            FROM boms b LEFT JOIN products p ON b.product_id = p.id WHERE ${where} ORDER BY b.version DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params

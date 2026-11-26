@@ -2,7 +2,7 @@
 import * as settingsApi from '../api';
 import type { DocumentSequence, ProductType, Unit, CashBox, CostCenter, PayrollComponent, DefaultAccount } from '../types';
 
-// â”€â”€â”€ Document Sequences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Document Sequences ───────────────────────────────────────────────────────
 export function useDocumentSequences(companyId: string) {
   const [sequences, setSequences] = useState<DocumentSequence[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,7 +37,7 @@ export function useDocumentSequences(companyId: string) {
   return { sequences, isLoading, update, getNextNumber, peekNextNumber };
 }
 
-// â”€â”€â”€ Product Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Product Types ────────────────────────────────────────────────────────────
 export function useProductTypes(companyId: string): {
   types: ProductType[];
   isLoading: boolean;
@@ -80,7 +80,7 @@ export function useProductTypes(companyId: string): {
   return { types, isLoading, create, update, remove };
 }
 
-// â”€â”€â”€ Units
+// ─── Units
 export function useUnits(companyId: string) {
   const [units, setUnits] = useState<Unit[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -117,7 +117,7 @@ export function useUnits(companyId: string) {
   return { units, isLoading, create, update, remove };
 }
 
-// â”€â”€â”€ Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cash Boxes ───────────────────────────────────────────────────────────────
 export function useCashBoxes(companyId: string) {
   const [boxes, setBoxes] = useState<CashBox[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -154,7 +154,7 @@ export function useCashBoxes(companyId: string) {
   return { boxes, isLoading, create, update, remove };
 }
 
-// â”€â”€â”€ Cost Centers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cost Centers ─────────────────────────────────────────────────────────────
 export function useCostCenters(companyId: string) {
   const [centers, setCenters] = useState<CostCenter[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -191,7 +191,7 @@ export function useCostCenters(companyId: string) {
   return { centers, isLoading, create, update, remove };
 }
 
-// â”€â”€â”€ Payroll Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Payroll Components ───────────────────────────────────────────────────────
 export function usePayrollComponents(companyId: string) {
   const [components, setComponents] = useState<PayrollComponent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -222,7 +222,7 @@ export function usePayrollComponents(companyId: string) {
   return { components, isLoading, create, update };
 }
 
-// â”€â”€â”€ Default Accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Default Accounts ─────────────────────────────────────────────────────────
 export function useDefaultAccounts(companyId: string) {
   const [accounts, setAccounts] = useState<DefaultAccount[]>([]);
   const [isLoading, setIsLoading] = useState(false);

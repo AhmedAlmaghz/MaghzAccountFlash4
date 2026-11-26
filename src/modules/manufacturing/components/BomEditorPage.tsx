@@ -34,12 +34,13 @@ export const BomEditorPage: React.FC = () => {
   const [finishedProductId, setFinishedProductId] = useState('');
   const [finishedProductName, setFinishedProductName] = useState('');
   const [outputQuantity, setOutputQuantity] = useState(1);
-  const [name, setName] = useState('');
+  const [version, setVersion] = useState('1.0');
+  const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(id));
-  const { blocked, proceed, reset, guardNavigate, clearDraft } = useDocumentEditorGuard('bom', { finishedProductId, outputQuantity, name, lines }, loading, isEdit, saving);
-  const draftSetters = useMemo(() => ({ finishedProductId: setFinishedProductId, outputQuantity: setOutputQuantity, name: setName, lines: setLines }), []);
+  const { blocked, proceed, reset, guardNavigate, clearDraft } = useDocumentEditorGuard('bom', { finishedProductId, outputQuantity, version, notes, lines }, loading, isEdit, saving);
+  const draftSetters = useMemo(() => ({ finishedProductId: setFinishedProductId, outputQuantity: setOutputQuantity, version: setVersion, notes: setNotes, lines: setLines }), []);
   useRestoreDraft('bom', isEdit, draftSetters);
 
   useEffect(() => {
@@ -51,14 +52,19 @@ export const BomEditorPage: React.FC = () => {
       if (cancelled) return;
       setLoading(false);
       if (res?.success && res.data) {
-        const bom = res.data as { productId?: string; productName?: string; outputQuantity?: number; name?: string; lines?: Array<{ productId?: string; productName?: string; quantity?: number; unitCost?: number }> };
+        // getBomById returns { bom, lines } — not a flat BOM. Reading res.data
+        // directly left every field empty on edit (the old v0.28.3 behaviour).
+        const { bom, lines: savedLines } = res.data;
         setFinishedProductId(bom.productId ?? '');
         setFinishedProductName(bom.productName ?? '');
         setOutputQuantity(bom.outputQuantity ?? 1);
-        setName(bom.name ?? '');
-        setLines((bom.lines ?? []).map((l) => ({
-          productId: l.productId ?? '',
-          productName: l.productName ?? '',
+        setVersion(bom.version || '1.0');
+        setNotes(bom.notes ?? '');
+        setLines(savedLines.map((l) => ({
+          productId: l.materialId,
+          productName: l.materialName ?? '',
+          productCode: l.materialCode,
+          unitName: l.materialUnit,
           quantity: l.quantity ?? 1,
           unitPrice: l.unitCost ?? 0,
           unitFactor: 1,
@@ -94,9 +100,10 @@ export const BomEditorPage: React.FC = () => {
       // nothing (no request, no error the user can act on).
       companyId,
       productId: finishedProductId,
-      // The schema requires a BOM version (the old form defaulted to '1.0').
-      version: '1.0',
-      name: name || finishedProductName,
+      // The schema requires a BOM version — it is now a real editable field
+      // (loaded from the DB on edit) instead of a hard-coded '1.0'.
+      version: version.trim() || '1.0',
+      notes: notes || undefined,
       outputQuantity: outputQuantity || 1,
       // `createBomSchema.lines[].materialId` — ProductSelect sets `productId`
       // on DocumentLine (shared component) and BOM owns a material row per line.
@@ -113,7 +120,7 @@ export const BomEditorPage: React.FC = () => {
     } else {
       addToast('error', result?.error || t('common.error'));
     }
-  }, [companyId, finishedProductId, finishedProductName, lines, outputQuantity, name, isEdit, id, user?.id, addToast, t, navigate, clearDraft]);
+  }, [companyId, finishedProductId, lines, outputQuantity, version, notes, isEdit, id, user?.id, addToast, t, navigate, clearDraft]);
 
   const title = isEdit ? t('manufacturing.bom.editBom') : t('manufacturing.bom.newBom');
   const actions = (
@@ -130,7 +137,7 @@ export const BomEditorPage: React.FC = () => {
   return (
     <DocumentPageShell
       title={title}
-      subtitle={finishedProductName}
+      subtitle={finishedProductName ? `${finishedProductName} — v${version}` : `v${version}`}
       onBack={() => guardNavigate(() => navigate('/manufacturing/bom'))}
       statusBadge={<Badge>{finishedProductName || t('manufacturing.bom.title')}</Badge>}
       headerActions={actions}
@@ -150,13 +157,17 @@ export const BomEditorPage: React.FC = () => {
           placeholder={t('manufacturing.bom.finishedProduct')}
         />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label={t('common.name')} value={name} onChange={(e) => setName(e.target.value)} placeholder={finishedProductName} />
+          <Input label={t('manufacturing.form.version')} value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0" />
           <Input label={t('manufacturing.bom.outputQuantity')} type="number" value={String(outputQuantity)} onChange={(e) => setOutputQuantity(Number(e.target.value) || 1)} />
         </div>
       </Card>
 
       <Card className="p-4 sm:p-5">
         <DocumentItemsGrid companyId={companyId} lines={lines} onChange={setLines} priceType="cost" />
+      </Card>
+
+      <Card className="p-4 sm:p-5">
+        <Input label={t('common.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('common.notesPlaceholder')} />
       </Card>
       <UnsavedChangesDialog blocked={blocked} onLeave={proceed} onStay={reset} />
     </DocumentPageShell>

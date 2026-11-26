@@ -33,7 +33,7 @@ export const BomPage: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const addToast = useToastStore((s) => s.addToast);
 
-  // â”€â”€ Smart availability calculator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Smart availability calculator ────────────────────────────────────
   const [calcQty, setCalcQty] = useState('1');
   const [availability, setAvailability] = useState<Awaited<ReturnType<typeof manufacturingApi.getBomAvailability>>['data'] | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -47,7 +47,7 @@ export const BomPage: React.FC = () => {
     else addToast('error', res.error || t('manufacturing.bom.availabilityError'));
   };
 
-  // â”€â”€ One-click work order from BOM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── One-click work order from BOM ────────────────────────────────────
   const [isCreatingWo, setIsCreatingWo] = useState(false);
   const createWorkOrderFromBom = async () => {
     if (!viewing) return;
@@ -129,8 +129,8 @@ export const BomPage: React.FC = () => {
     },
     { key: 'version', header: t('manufacturing.table.version'), width: '100px', render: (row: BOM) => <span className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded border">v{row.version}</span> },
     { key: 'outputQuantity', header: t('manufacturing.form.outputQuantity'), width: '120px', render: (row: BOM) => <span className="tabular-nums font-medium">{row.outputQuantity ?? 1}</span> },
-    { key: 'lines', header: t('manufacturing.table.materials'), width: '100px', render: (_row: BOM) => _row.linesCount !== undefined ? `${_row.linesCount} ${t('manufacturing.bom.material')}` : 'â€”' },
-    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : 'â€”' },
+    { key: 'lines', header: t('manufacturing.table.materials'), width: '100px', render: (_row: BOM) => _row.linesCount !== undefined ? `${_row.linesCount} ${t('manufacturing.bom.material')}` : '—' },
+    { key: 'totalCost', header: t('manufacturing.table.cost'), align: 'right' as const, render: (row: BOM) => row.totalCost !== undefined ? <span className="font-bold tabular-nums">{formatCurrency(row.totalCost)}</span> : '—' },
     { key: 'isActive', header: t('manufacturing.table.status'), width: '110px', render: (row: BOM) => <StatusBadge status={row.isActive ? 'active' : 'inactive'} /> },
     { key: 'actions', header: '', width: '140px', render: (row: BOM) => (
       <div className="flex items-center gap-1">
@@ -319,7 +319,7 @@ export const BomPage: React.FC = () => {
               <span className="font-bold text-primary-600">{viewing.bom.totalCost !== undefined ? formatCurrency(viewing.bom.totalCost) : formatCurrency(0)}</span>
             </div>
 
-            {/* â”€â”€ Smart availability calculator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            {/* ── Smart availability calculator ─────────────────────── */}
             <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-900/10 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Calculator size={16} className="text-cyan-600" />
@@ -399,7 +399,7 @@ function generateBomPrintHtml(bom: BOM, lines: BOMLine[], formatCurrency: (value
   <p><strong>${t('manufacturing.form.product')}:</strong> ${bom.productName || bom.productId}</p>
   <p><strong>${t('manufacturing.form.version')}:</strong> ${bom.version}</p>
   <table><thead><tr><th>#</th><th>${t('manufacturing.bom.materialName')}</th><th>${t('manufacturing.bom.quantity')}</th><th>${t('manufacturing.bom.unitCost')}</th><th>${t('manufacturing.bom.total')}</th></tr></thead><tbody>${rows}</tbody></table>
-  <div class="total">${t('manufacturing.bom.totalCost')}: ${bom.totalCost !== undefined ? formatCurrency(bom.totalCost) : 'â€”'} ${t('common.currencyYer')}</div>
+  <div class="total">${t('manufacturing.bom.totalCost')}: ${formatCurrency(bom.totalCost ?? lines.reduce<number>((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0), 0))}</div>
   <div style="margin-top:32px;text-align:center;font-size:12px;color:#94a3b8">${t('common.printFooter')}</div>
   </div></body></html>`;
 }

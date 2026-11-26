@@ -20,6 +20,9 @@ id: string;
 bomId: string;
 materialId: string;
 materialName?: string;
+/** Display-only material card data (product code + unit) — no BOM column. */
+materialCode?: string;
+materialUnit?: string;
 quantity: number;
 unitCost?: number;
 totalCost?: number;

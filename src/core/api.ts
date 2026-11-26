@@ -15,7 +15,7 @@ function coreRpc() {
   return (typeof window !== 'undefined' && window.electronDB?.core) || null;
 }
 
-// â”€â”€â”€ Document Sequences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Document Sequences ───────────────────────────────────────────────────────
 export async function getDocumentSequences(companyId: string): Promise<{ success: boolean; data?: DocumentSequence[]; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.getDocumentSequences({})) as RpcEnvelope;
@@ -203,7 +203,7 @@ export async function peekNextDocumentNumber(companyId: string, documentType: st
   return { success: true, number: formatSequenceNumber(previewSeq) };
 }
 
-// â”€â”€â”€ Product Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Product Types ────────────────────────────────────────────────────────────
 export async function getProductTypes(companyId: string): Promise<{ success: boolean; data?: ProductType[]; error?: string }> {
   let raw: Record<string, unknown>[];
   if (isElectronPg() && coreRpc()) {
@@ -268,7 +268,7 @@ export async function deleteProductType(id: string, companyId: string): Promise<
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// â”€â”€â”€ Units â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Units ────────────────────────────────────────────────────────────────────
 export async function getUnits(companyId: string): Promise<{ success: boolean; data?: Unit[]; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.getUnits({})) as RpcEnvelope;
@@ -319,7 +319,7 @@ export async function deleteUnit(id: string, companyId: string): Promise<{ succe
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// â”€â”€â”€ Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cash Boxes ───────────────────────────────────────────────────────────────
 export async function getCashBoxes(companyId: string): Promise<{ success: boolean; data?: CashBox[]; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.getCashBoxes({})) as RpcEnvelope;
@@ -360,7 +360,7 @@ export async function updateCashBox(id: string, data: Partial<CashBox>, companyI
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// â”€â”€â”€ Delete Cash Boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Delete Cash Boxes ────────────────────────────────────────────────────────
 export async function deleteCashBox(id: string, companyId: string): Promise<{ success: boolean; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.deleteCashBox({ id })) as RpcEnvelope;
@@ -371,7 +371,7 @@ export async function deleteCashBox(id: string, companyId: string): Promise<{ su
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// â”€â”€â”€ Cost Centers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cost Centers ─────────────────────────────────────────────────────────────
 export async function getCostCenters(companyId: string): Promise<{ success: boolean; data?: CostCenter[]; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.getCostCenters({})) as RpcEnvelope;
@@ -422,7 +422,7 @@ export async function deleteCostCenter(id: string, companyId: string): Promise<{
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// â”€â”€â”€ Payroll Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Payroll Components ───────────────────────────────────────────────────────
 export async function getPayrollComponents(companyId: string): Promise<{ success: boolean; data?: PayrollComponent[]; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.getPayrollComponents({})) as RpcEnvelope;
@@ -464,7 +464,7 @@ export async function updatePayrollComponent(id: string, data: Partial<PayrollCo
   return result.success ? { success: true } : { success: false, error: result.error };
 }
 
-// â”€â”€â”€ Default Accounts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Default Accounts ─────────────────────────────────────────────────────────
 export async function getDefaultAccounts(companyId: string): Promise<{ success: boolean; data?: DefaultAccount[]; error?: string }> {
   if (isElectronPg() && coreRpc()) {
     const res = (await coreRpc()!.getDefaultAccounts({})) as RpcEnvelope;

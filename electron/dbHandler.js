@@ -4504,7 +4504,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
   registerRpc('manufacturing.getBoms', {
     paramCount: 2,
     compose: (p, session) => ({
-      sql: `SELECT b.*, p.name_ar AS product_name
+      sql: `SELECT b.*, COALESCE(p.name_ar, p.name_en) AS product_name
               FROM boms b LEFT JOIN products p ON b.product_id = p.id
              WHERE b.company_id = $1
                AND ($2::uuid IS NULL OR (b.created_by = $2 OR b.created_by IS NULL))
@@ -4528,7 +4528,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
                  AND ($3::boolean IS NULL OR b.is_active = $3)) c
                   LEFT JOIN LATERAL (
                     SELECT * FROM (
-                      SELECT b.*, p.name_ar AS product_name,
+                      SELECT b.*, COALESCE(p.name_ar, p.name_en) AS product_name,
                      (SELECT COUNT(*)::int FROM bom_lines bl WHERE bl.bom_id = b.id) AS lines_count
                         FROM boms b LEFT JOIN products p ON b.product_id = p.id
                        WHERE b.company_id = $1
@@ -4554,10 +4554,11 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     paramCount: 2,
     validate: (p) => { if (!p.id) throw new Error('id required'); },
     compose: (p, session) => ({
-      sql: `SELECT b.*, p.name_ar AS product_name,
+      sql: `SELECT b.*, COALESCE(p.name_ar, p.name_en) AS product_name,
                     COALESCE(json_agg(json_build_object(
                       'id', bl.id, 'bom_id', bl.bom_id, 'material_id', bl.material_id,
-                      'material_name', bp.name_ar, 'quantity', bl.quantity,
+                      'material_name', COALESCE(bp.name_ar, bp.name_en),
+                       'material_code', bp.code, 'material_unit', bp.unit, 'quantity', bl.quantity,
                       'unit_cost', bl.unit_cost, 'total_cost', bl.total_cost
                     )) FILTER (WHERE bl.id IS NOT NULL), '[]'::json) AS lines
              FROM boms b

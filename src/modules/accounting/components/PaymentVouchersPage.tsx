@@ -221,7 +221,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <p className="font-bold tabular-nums text-slate-900 dark:text-slate-100">{formatCurrency(row.amount)}</p>
             <p className="text-[11px] text-slate-500 flex items-center justify-end gap-1">
               <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border text-[10px]">{row.currencyCode || 'YER'}</span>
-              {row.invoiceId ? <span className="text-amber-600">â€¢ {t('accounting.voucher.linked')}</span> : null}
+              {row.invoiceId ? <span className="text-amber-600">• {t('accounting.voucher.linked')}</span> : null}
             </p>
           </div>
         ),
@@ -326,7 +326,7 @@ export const PaymentVouchersPage: React.FC = () => {
       <FilterBar
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder={`${t('search')} â€” ${t('accounting.voucherNumber')} / ${t('accounting.supplier')}`}
+        searchPlaceholder={`${t('search')} — ${t('accounting.voucherNumber')} / ${t('accounting.supplier')}`}
         filterOptions={[
           { key: '', label: t('accounting.all') },
           { key: 'draft', label: t('accounting.draft') },
@@ -364,7 +364,7 @@ export const PaymentVouchersPage: React.FC = () => {
       {hasActiveFilter && (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span>
-              {total} {t('accounting.voucher.unit')} â€¢ {search ? `"${search}"` : ''} {statusFilter ? `â€¢ ${statusFilter === 'draft' ? t('accounting.voucher.draft') : statusFilter === 'cancelled' ? t('accounting.voucher.cancelled') : t('accounting.voucher.posted')}` : ''} {methodFilter ? `â€¢ ${methodFilter === 'cash' ? t('accounting.voucher.methodCash') : methodFilter === 'bank' ? t('accounting.voucher.methodBank') : t('accounting.voucher.methodCheck')}` : ''}
+              {total} {t('accounting.voucher.unit')} • {search ? `"${search}"` : ''} {statusFilter ? `• ${statusFilter === 'draft' ? t('accounting.voucher.draft') : statusFilter === 'cancelled' ? t('accounting.voucher.cancelled') : t('accounting.voucher.posted')}` : ''} {methodFilter ? `• ${methodFilter === 'cash' ? t('accounting.voucher.methodCash') : methodFilter === 'bank' ? t('accounting.voucher.methodBank') : t('accounting.voucher.methodCheck')}` : ''}
           </span>
               <button onClick={() => { setSearch(''); setStatusFilter(''); setMethodFilter(''); }} className="text-primary-600 hover:underline font-medium">
                 {t('sales.filter.clearFilters')}
@@ -378,7 +378,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalCashPayments')}</p>
               <p className="mt-1 text-2xl font-bold text-rose-600 dark:text-rose-400 tabular-nums">{formatCurrency(totalCash)}</p>
-              <p className="text-xs text-slate-500 mt-1">{currencySymbol} â€¢ {t('accounting.voucher.postedCash')}</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • {t('accounting.voucher.postedCash')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 flex items-center justify-center">
               <Wallet size={20} className="text-rose-600 dark:text-rose-400" />
@@ -391,7 +391,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.totalBankPayments')}</p>
               <p className="mt-1 text-2xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">{formatCurrency(totalBank)}</p>
-              <p className="text-xs text-slate-500 mt-1">{currencySymbol} â€¢ {t('accounting.voucher.postedBank')}</p>
+              <p className="text-xs text-slate-500 mt-1">{currencySymbol} • {t('accounting.voucher.postedBank')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 flex items-center justify-center">
               <Landmark size={20} className="text-blue-600 dark:text-blue-400" />
@@ -404,7 +404,7 @@ export const PaymentVouchersPage: React.FC = () => {
             <div>
               <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">{t('accounting.voucherCount')}</p>
               <p className="mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50 tabular-nums">{total}</p>
-              <p className="text-xs text-slate-500 mt-1">{draftCount} {t('accounting.voucher.draft')} â€¢ {total - draftCount} {t('accounting.voucher.posted')}</p>
+              <p className="text-xs text-slate-500 mt-1">{draftCount} {t('accounting.voucher.draft')} • {total - draftCount} {t('accounting.voucher.posted')}</p>
             </div>
             <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
               <FileText size={20} className="text-slate-600 dark:text-slate-400" />

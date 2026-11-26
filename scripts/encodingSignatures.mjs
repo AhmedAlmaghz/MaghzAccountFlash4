@@ -56,8 +56,9 @@ export const LATIN1_RUN = /[\u00a0-\u00ff]{2,}/g;
  * agent. Narrow on purpose — a broad sweep would fire on unrelated files.
  */
 export const ROOTS = [
-  'src/modules/ai',
-  'src/core/i18n',
+  // Whole renderer tree: a mojibake em dash in BomPage.tsx ("â€” ر.ي" in the
+  // cost column) shipped because the old narrow roots excluded UI modules.
+  'src',
   'electron',
   // The e2e bridge shim embeds the SQL that RENDERS Arabic labels (the
   // statement rows carry 'رصيد افتتاحي', 'فاتورة', …) — mojibake there makes
