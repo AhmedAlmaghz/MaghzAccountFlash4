@@ -57,6 +57,13 @@
       "when": 1795550000000,
       "tag": "0007_remove_line_discount_vat",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795600000000,
+      "tag": "0008_pos_checkout_repair",
+      "breakpoints": true
     }
   ]
 }
