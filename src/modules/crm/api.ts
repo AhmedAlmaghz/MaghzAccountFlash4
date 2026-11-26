@@ -782,17 +782,20 @@ export const crmApi = {
     try {
       const validation = validateInput(createTaskSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      // Zod defaults (priority='medium', status='pending') must reach the INSERT;
+      // raw `data` would send NULL into NOT NULL columns.
+      const task = validation.data;
       if (isElectronPg()) {
         const result = await invokeCrmRpc('createTask', {
-          title: data.title,
-          description: data.description || null,
-          dueDate: data.dueDate || null,
-          priority: data.priority,
-          status: data.status,
-          opportunityId: data.opportunityId || null,
-          leadId: data.leadId || null,
-          customerId: data.customerId || null,
-          assignedTo: data.assignedTo || null,
+          title: task.title,
+          description: task.description || null,
+          dueDate: task.dueDate || null,
+          priority: task.priority,
+          status: task.status,
+          opportunityId: task.opportunityId || null,
+          leadId: task.leadId || null,
+          customerId: task.customerId || null,
+          assignedTo: task.assignedTo || null,
         });
         if (result.success) {
           const newId = firstId(result.rows);
@@ -805,7 +808,7 @@ export const crmApi = {
       const adapter = await getDbAdapter();
       const result = await adapter.query(
         `INSERT INTO tasks (company_id, opportunity_id, lead_id, customer_id, title, description, due_date, priority, status, assigned_to, created_at, created_by, updated_by) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7::date,$8,$9,$10::uuid,$11,$12::uuid,$13::uuid) RETURNING id`,
-        [data.companyId, data.opportunityId || null, data.leadId || null, data.customerId || null, data.title, data.description || null, data.dueDate || null, data.priority, data.status, data.assignedTo || null, new Date().toISOString(), safeUserId(_userId), safeUserId(_userId)]
+        [task.companyId, task.opportunityId || null, task.leadId || null, task.customerId || null, task.title, task.description || null, task.dueDate || null, task.priority, task.status, task.assignedTo || null, new Date().toISOString(), safeUserId(_userId), safeUserId(_userId)]
       );
       if (result.success && result.rows?.[0]) {
         audit('create', 'tasks', result.rows[0].id, data.companyId, data.title, { dueDate: data.dueDate });

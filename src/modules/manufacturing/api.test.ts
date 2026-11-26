@@ -209,6 +209,27 @@ describe('manufacturingApi', () => {
       expect(res.success).toBe(true);
       expect(res.id).toBe(BOM_ID);
     });
+
+    it('carries Zod defaults (isActive/outputQuantity) into the INSERT when omitted', async () => {
+      let insertParams: unknown[] = [];
+      const adapter = makeMockAdapter(async (sql, params) => {
+        if (sql.includes('INSERT INTO boms')) insertParams = params;
+        return { success: true, rows: [{ id: BOM_ID }] };
+      });
+      vi.mocked(getDbAdapter).mockResolvedValue(adapter as never);
+
+      const res = await manufacturingApi.createBom({
+        companyId: COMPANY_ID,
+        productId: PRODUCT_ID,
+        version: '1.0',
+        lines: [{ materialId: PRODUCT_ID, quantity: 2, unitCost: 100 }],
+      } as never);
+      expect(res.success).toBe(true);
+      // params[3] = is_active, params[4] = output_quantity — raw `data`
+      // used to send undefined here → NOT NULL violation on boms.is_active.
+      expect(insertParams[3]).toBe(true);
+      expect(insertParams[4]).toBe(1);
+    });
   });
 
   describe('getWorkOrders', () => {

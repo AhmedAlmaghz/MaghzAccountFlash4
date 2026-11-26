@@ -319,15 +319,18 @@ export const manufacturingApi = {
     try {
       const validation = validateInput(createBomSchema, data);
       if (!validation.success) return { success: false, error: validation.error };
+      // Zod defaults (isActive=true, outputQuantity=1) MUST reach the INSERT.
+      // Raw `data` loses them → `is_active` NULL → generic "حقل إلزامي مفقود".
+      const bom = validation.data;
       if (isElectronPg()) {
         const result = await invokeMfgRpc('createBom', {
-          productId: data.productId,
-          version: data.version,
-          isActive: data.isActive,
-          outputQuantity: data.outputQuantity ?? 1,
-          totalCost: data.totalCost,
-          notes: data.notes,
-          lines: (data.lines || []).map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
+          productId: bom.productId,
+          version: bom.version,
+          isActive: bom.isActive,
+          outputQuantity: bom.outputQuantity,
+          totalCost: bom.totalCost,
+          notes: bom.notes,
+          lines: bom.lines.map((l) => ({ materialId: l.materialId, quantity: l.quantity, unitCost: l.unitCost })),
         });
         if (!result.success) return { success: false, error: result.error };
         const first = result.rows?.[0];
@@ -338,10 +341,10 @@ export const manufacturingApi = {
       // orphaned BOM header. Also avoids the `adapter.transaction` result
       // shape mismatch (`results[0]` is `{rows, rowCount}`, not a row array).
       const adapter = await getDbAdapter();
-      const params: unknown[] = [data.companyId, data.productId, data.version, data.isActive, data.outputQuantity ?? 1, data.totalCost, data.notes, safeUserId(_userId)];
+      const params: unknown[] = [bom.companyId, bom.productId, bom.version, bom.isActive, bom.outputQuantity, bom.totalCost ?? null, bom.notes ?? null, safeUserId(_userId)];
       const rowValues: string[] = [];
       let idx = 9;
-      for (const l of data.lines) {
+      for (const l of bom.lines) {
         rowValues.push(`($${idx}::uuid, $${idx + 1}::numeric, $${idx + 2}::numeric, $${idx + 3}::numeric)`);
         params.push(l.materialId, l.quantity, l.unitCost ?? 0, (l.quantity || 0) * (l.unitCost || 0));
         idx += 4;
