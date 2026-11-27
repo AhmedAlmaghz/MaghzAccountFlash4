@@ -386,8 +386,8 @@ export const createProductSchema = z.object({
   productTypeId: uuidSchema.optional(),
   costPrice: currencyAmountSchema,
   // Phase 1: zod strips unknown keys silently — the standard cost MUST be
-  // declared or product saves would drop it without any error. Nullable:
-  // the editor sends undefined for "no standard cost".
+  // declared or product saves would drop it without any error. It accepts
+  // null and undefined — the editor omits it when there is no standard cost.
   standardCost: currencyAmountSchema.nullish(),
   salePrice: currencyAmountSchema,
   isActive: z.boolean().default(true),

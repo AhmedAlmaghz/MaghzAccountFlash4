@@ -18,6 +18,7 @@ interface EntryLine {
   accountName: string;
   debit: number;
   credit: number;
+  memo?: string;
 }
 
 const emptyEntry: EntryLine = { accountId: '', accountName: '', debit: 0, credit: 0 };
@@ -53,12 +54,23 @@ export const JournalEntryEditorPage: React.FC = () => {
       if (cancelled) return;
       setLoading(false);
       if (res?.success && res.data) {
-        const tx = res.data as { date?: string; reference?: string; notes?: string; status?: string; lines?: Array<{ accountId?: string; accountName?: string; debit?: number; credit?: number }> };
+        // getTransactionById returns `entries` and `description` (not
+        // `lines`/`notes`) — reading the old names left edit mode blank.
+        const tx = res.data as {
+          date?: string; reference?: string; description?: string; status?: string;
+          entries?: Array<{ accountId?: string; account?: { nameAr?: string }; debit?: number; credit?: number; memo?: string }>;
+        };
         setDate(tx.date ?? todayIso());
         setReference(tx.reference ?? '');
-        setNotes(tx.notes ?? '');
+        setNotes(tx.description ?? '');
         setStatus(tx.status ?? 'draft');
-        setEntries((tx.lines ?? []).map((l) => ({ accountId: l.accountId ?? '', accountName: l.accountName ?? '', debit: l.debit ?? 0, credit: l.credit ?? 0 })));
+        setEntries((tx.entries ?? []).map((l) => ({
+          accountId: l.accountId ?? '',
+          accountName: l.account?.nameAr ?? '',
+          debit: l.debit ?? 0,
+          credit: l.credit ?? 0,
+          memo: l.memo ?? '',
+        })));
       }
     })();
     return () => {
@@ -98,11 +110,22 @@ export const JournalEntryEditorPage: React.FC = () => {
       companyId,
       date,
       reference: reference || undefined,
-      notes: notes || undefined,
+      // createTransactionSchema declares `description`, not `notes`; zod
+      // strips unknown keys, so `notes` silently discarded the explanation.
+      description: notes || undefined,
       // The schema requires the entry total — the API never computes it.
       totalAmount: totals.debit,
-      status: post ? 'posted' : 'draft',
-      lines: entries.map((e) => ({ accountId: e.accountId, debit: Number(e.debit) || 0, credit: Number(e.credit) || 0 })),
+      // createTransaction only accepts drafts; posting is the explicit
+      // postTransaction call below (with its own balance/period guards).
+      status: 'draft',
+      // The schema field is `entries` — `lines` failed validation with
+      // "entries: expected array, received undefined" before any request.
+      entries: entries.map((e) => ({
+        accountId: e.accountId,
+        debit: Number(e.debit) || 0,
+        credit: Number(e.credit) || 0,
+        memo: e.memo || undefined,
+      })),
     };
     const result = isEdit && id
       ? await accountingApi.updateTransaction(id, companyId, user?.id ?? '', payload as never)
@@ -113,7 +136,8 @@ export const JournalEntryEditorPage: React.FC = () => {
       addToast('success', t('common.saved'));
       const createdId = 'id' in result ? (result.id as string | undefined) : id;
       if (post && createdId) {
-        await accountingApi.postTransaction(String(createdId), companyId, user?.id);
+        const posted = await accountingApi.postTransaction(String(createdId), companyId, user?.id);
+        if (!posted.success) addToast('error', posted.error || t('common.error'));
       }
       navigate('/accounting/journal');
     } else {
