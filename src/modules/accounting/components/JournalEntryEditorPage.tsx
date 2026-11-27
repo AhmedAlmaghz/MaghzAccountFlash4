@@ -11,6 +11,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { todayIso } from '@/core/utils/aging';
+import { getNextDocumentNumber } from '@/core/api';
 import { accountingApi } from '../api';
 
 interface EntryLine {
@@ -44,6 +45,19 @@ export const JournalEntryEditorPage: React.FC = () => {
   const { blocked, proceed, reset, guardNavigate, clearDraft, isDirty } = useDocumentEditorGuard('journal', { date, reference, notes, entries }, loading, isEdit, saving);
   const draftSetters = useMemo(() => ({ date: setDate, reference: setReference, notes: setNotes, entries: setEntries }), []);
   useRestoreDraft('journal', isEdit, draftSetters);
+
+  // قيد جديد: المرجع يُولَّد تلقائياً من document_sequences (JV-) — والحقل
+  // يبقى قابلاً للتعديل يدوياً، ولا نكتب فوق قيمة أدخلها المستخدم أو مسودة.
+  useEffect(() => {
+    if (isEdit || !companyId) return;
+    let cancelled = false;
+    (async () => {
+      const seq = await getNextDocumentNumber(companyId, 'journal_voucher');
+      const nextRef = seq.number;
+      if (!cancelled && seq.success && nextRef) setReference((prev) => prev || nextRef);
+    })();
+    return () => { cancelled = true; };
+  }, [isEdit, companyId]);
 
   useEffect(() => {
     let cancelled = false;
