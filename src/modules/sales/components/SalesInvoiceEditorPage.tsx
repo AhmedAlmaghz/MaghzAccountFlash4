@@ -56,7 +56,9 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   // خصم على الفاتورة ككل (الإجمالي ينخفض به). `settings.invoiceShowDiscount`
   // يعرضه في الواجهة — عند الغياب يظهر افتراضياً (مطابقة InvoicesPage).
   const showDiscount = settings?.invoiceShowDiscount ?? true;
+  const showReference = settings?.showReference ?? true;
   const [discountAmount, setDiscountAmount] = useState(0);
+  const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine]);
   const [saving, setSaving] = useState(false);
@@ -66,7 +68,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
   const [docVersion, setDocVersion] = useState(1);
 
   const backPath = '/sales/invoices';
-  const draft = useMemo(() => ({ customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines }), [customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines]);
+  const draft = useMemo(() => ({ customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines }), [customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines]);
   const { blocked, proceed, reset, guardNavigate, clearDraft, isDirty } = useDocumentEditorGuard('sales-invoice', draft, loading, isEdit, saving, !loading && currenciesLoaded);
 
   useEffect(() => {
@@ -111,6 +113,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       setPaymentType(inv.paymentType === 'cash' ? 'cash' : 'credit');
       setCashBoxId(inv.cashBoxId ?? '');
       setDiscountAmount(Number(inv.discountAmount) || 0);
+      setReference(inv.reference ?? '');
       setNotes(inv.notes ?? '');
       setStatus(inv.status ?? 'draft');
       setDocNumber(inv.invoiceNumber ?? '');
@@ -145,6 +148,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       exchangeRate: setExchangeRate,
       paymentType: setPaymentType,
       cashBoxId: setCashBoxId,
+      reference: setReference,
       notes: setNotes,
       lines: setLines,
     }),
@@ -177,6 +181,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
     discountAmount: totals.discountAmount,
     vatAmount: totals.vatAmount,
     totalAmount: totals.totalAmount,
+    reference: reference || undefined,
     notes,
     currency: activeCompany?.currency,
     vatRate: settings?.invoiceShowVat === false ? 0 : settings?.vatRate,
@@ -186,7 +191,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       name: activeCompany.name, taxNumber: activeCompany.taxNumber, address: activeCompany.address,
       phone: activeCompany.phone, email: activeCompany.email, logoUrl: activeCompany.logoUrl,
     } : undefined,
-  }), [docNumber, t, date, dueDate, customerName, lines, totals, notes, activeCompany, settings?.invoiceShowVat, settings?.vatRate, paymentType, status]);
+  }), [docNumber, t, date, dueDate, customerName, lines, totals, reference, notes, activeCompany, settings?.invoiceShowVat, settings?.vatRate, paymentType, status]);
   const { onPrint, onExcel, onPdf } = useDocumentExport(exportData, t);
 
   const save = useCallback(
@@ -221,6 +226,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
         baseCurrencyAmount: roundMoney(totals.totalAmount * (exchangeRate || 1)),
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId || undefined : undefined,
+        reference: reference || undefined,
         notes: notes || undefined,
         status: post ? 'posted' : 'draft',
         lines: lines.map((l) => ({
@@ -264,7 +270,7 @@ export const SalesInvoiceEditorPage: React.FC = () => {
         }
       }
     },
-    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber, docVersion, loadDoc]
+    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber, docVersion, loadDoc]
   );
 
   const title = isEdit ? t('sales.invoice.edit') : t('sales.invoice.new');
@@ -370,6 +376,14 @@ export const SalesInvoiceEditorPage: React.FC = () => {
       </Card>
 
       <Card className="p-4 sm:p-5">
+        {showReference && (
+          <Input
+            label={t('common.reference')}
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder={t('common.referenceHint')}
+          />
+        )}
         <Input label={t('common.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('common.notesPlaceholder')} />
       </Card>
       <UnsavedChangesDialog blocked={blocked} onLeave={proceed} onStay={reset} />

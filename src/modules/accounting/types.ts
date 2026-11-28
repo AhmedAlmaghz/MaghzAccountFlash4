@@ -83,6 +83,8 @@ export interface ReceiptVoucher {
   id: string;
   companyId: string;
   voucherNumber: string;
+  /** Optional paper-voucher reference number. */
+  reference?: string;
   date: string;
   customerId: string;
   customerName: string;
@@ -132,6 +134,8 @@ export interface PaymentVoucher {
   id: string;
   companyId: string;
   voucherNumber: string;
+  /** Optional paper-voucher reference number. */
+  reference?: string;
   date: string;
   supplierId?: string;
   supplierName?: string;

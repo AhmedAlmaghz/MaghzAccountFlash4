@@ -855,9 +855,9 @@ export const accountingApi = {
       // all commit together or roll back together.
       const statements: Array<{ sql: string; params?: unknown[] }> = [
         {
-          sql: `INSERT INTO receipt_vouchers (id, company_id, voucher_number, date, customer_id, invoice_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
-          params: [id, data.companyId, data.voucherNumber, data.date, data.customerId, data.invoiceId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
+          sql: `INSERT INTO receipt_vouchers (id, company_id, voucher_number, date, customer_id, invoice_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, cash_box_id, check_number, check_date, notes, status, created_by, updated_by, reference)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+          params: [id, data.companyId, data.voucherNumber, data.date, data.customerId, data.invoiceId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId), data.reference || null],
         },
       ];
       // Posted vouchers: JE (base) + invoice allocation + customer balance +
@@ -1207,6 +1207,7 @@ export const accountingApi = {
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}`); values.push(data.cashBoxId || null); }
       if (data.checkNumber !== undefined) { fields.push(`check_number = $${idx++}`); values.push(data.checkNumber || null); }
       if (data.checkDate !== undefined) { fields.push(`check_date = $${idx++}`); values.push(data.checkDate || null); }
+      if (data.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(data.reference || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
       fields.push(`updated_at = NOW()`);
@@ -1410,9 +1411,9 @@ export const accountingApi = {
       // JE + supplier balance — all or nothing.
       const statements: Array<{ sql: string; params?: unknown[] }> = [
         {
-          sql: `INSERT INTO payment_vouchers (id, company_id, voucher_number, date, supplier_id, invoice_id, expense_account_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, cash_box_id, check_number, check_date, notes, status, created_by, updated_by)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
-          params: [id, data.companyId, data.voucherNumber, data.date, data.supplierId || null, data.invoiceId || null, data.expenseAccountId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId)],
+          sql: `INSERT INTO payment_vouchers (id, company_id, voucher_number, date, supplier_id, invoice_id, expense_account_id, amount, amount_applied, currency_code, exchange_rate, base_currency_amount, base_currency_applied, payment_method, cash_box_id, check_number, check_date, notes, status, created_by, updated_by, reference)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+          params: [id, data.companyId, data.voucherNumber, data.date, data.supplierId || null, data.invoiceId || null, data.expenseAccountId || null, data.amount, amountApplied, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyApplied, data.paymentMethod, data.cashBoxId || null, data.checkNumber || null, data.checkDate || null, data.notes, data.status, safeUserId(userId), safeUserId(userId), data.reference || null],
         },
       ];
       // Posted vouchers: JE (base) + invoice allocation + supplier balance +
@@ -1588,6 +1589,7 @@ export const accountingApi = {
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}`); values.push(data.cashBoxId || null); }
       if (data.checkNumber !== undefined) { fields.push(`check_number = $${idx++}`); values.push(data.checkNumber || null); }
       if (data.checkDate !== undefined) { fields.push(`check_date = $${idx++}`); values.push(data.checkDate || null); }
+      if (data.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(data.reference || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
       fields.push(`updated_at = NOW()`);

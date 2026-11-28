@@ -39,12 +39,13 @@ describe('Migration layout: squashed baseline + additive migrations', () => {
       '0006_audit_session_id.sql',
       '0007_remove_line_discount_vat.sql',
       '0008_pos_checkout_repair.sql',
+      '0009_paper_reference.sql',
     ]);
   });
 
   it('journal mirrors the migration files in order', () => {
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8'));
-    expect(journal.entries).toHaveLength(9);
+    expect(journal.entries).toHaveLength(10);
     expect(journal.entries[0].tag).toBe('0000_init');
     expect(journal.entries[0].idx).toBe(0);
     expect(journal.entries[1].tag).toBe('0001_asset_periods');
@@ -63,6 +64,8 @@ describe('Migration layout: squashed baseline + additive migrations', () => {
     expect(journal.entries[7].idx).toBe(7);
     expect(journal.entries[8].tag).toBe('0008_pos_checkout_repair');
     expect(journal.entries[8].idx).toBe(8);
+    expect(journal.entries[9].tag).toBe('0009_paper_reference');
+    expect(journal.entries[9].idx).toBe(9);
     expect(journal.dialect).toBe('postgresql');
     // Snapshot must exist for future drizzle-kit generate diffs.
     expect(existsSync(join(MIGRATIONS_DIR, 'meta', '0000_snapshot.json'))).toBe(true);

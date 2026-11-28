@@ -9,7 +9,7 @@ import { useSettings } from '@/core/utils/useSettings';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useUserMap } from '@/core/utils/useUserMap';
 import { logAudit } from '@/core/utils/auditLogger';
-import { Card, Button, Modal, Pagination, Can, Table, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+import { Card, Button, Modal, Pagination, Can, DynamicTable, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -428,7 +428,7 @@ export const PurchaseInvoicesPage: React.FC = () => {
 
       <Card noPadding>
         <div className="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800">
-          <Table<PurchaseInvoice>
+          <DynamicTable<PurchaseInvoice> tableKey="purchases.invoices"
             data={visibleInvoices}
             columns={columns as never}
             keyExtractor={(row) => row.id}

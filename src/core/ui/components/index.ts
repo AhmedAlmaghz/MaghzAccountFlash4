@@ -3,6 +3,7 @@ export { Input } from './Input';
 export { Modal } from './Modal';
 export { Card, CardTitle, CardDescription } from './Card';
 export { Table } from './Table';
+export { DynamicTable, type DynamicTableProps } from './DynamicTable';
 export { Badge } from './Badge';
 export { ConfirmDialog } from './ConfirmDialog';
 export { StatusBadge } from './StatusBadge';

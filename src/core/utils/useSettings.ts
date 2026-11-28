@@ -17,6 +17,8 @@ interface AppSettings {
   fiscalYearStart?: string;
   invoiceShowDiscount: boolean;
   invoiceShowVat: boolean;
+  /** Show the optional paper-document reference on invoices and vouchers. */
+  showReference: boolean;
 }
 
 /**
@@ -119,15 +121,17 @@ async function readSettings(companyId: string): Promise<AppSettings> {
       // Load invoice display settings (global for sales & purchases)
       let invoiceShowDiscount = true;
       let invoiceShowVat = true;
+      let showReference = true;
       try {
         const invSettingsResult = await adapter.query<{ key: string; value: string }>(
-          `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showDiscount', 'invoice.showVat')`,
+          `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showDiscount', 'invoice.showVat', 'documents.showReference')`,
           [companyId]
         );
         if (invSettingsResult.success && invSettingsResult.rows) {
           for (const row of invSettingsResult.rows) {
             if (row.key === 'invoice.showDiscount') invoiceShowDiscount = row.value === 'true';
             if (row.key === 'invoice.showVat') invoiceShowVat = row.value === 'true';
+            if (row.key === 'documents.showReference') showReference = row.value === 'true';
           }
         }
       } catch {
@@ -145,6 +149,7 @@ async function readSettings(companyId: string): Promise<AppSettings> {
     fiscalYearStart,
     invoiceShowDiscount,
     invoiceShowVat,
+    showReference,
   };
 }
 

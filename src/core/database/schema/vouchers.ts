@@ -6,6 +6,8 @@ export const receiptVouchers = pgTable('receipt_vouchers', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   voucherNumber: varchar('voucher_number', { length: 50 }).notNull(),
+  /** Optional paper-voucher number entered by the user. */
+  reference: varchar('reference', { length: 100 }),
   date: date('date').notNull(),
   customerId: uuid('customer_id'),
   invoiceId: uuid('invoice_id'),
@@ -32,6 +34,8 @@ export const paymentVouchers = pgTable('payment_vouchers', {
   id: uuid('id').defaultRandom().primaryKey(),
   companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   voucherNumber: varchar('voucher_number', { length: 50 }).notNull(),
+  /** Optional paper-voucher number entered by the user. */
+  reference: varchar('reference', { length: 100 }),
   date: date('date').notNull(),
   supplierId: uuid('supplier_id'),
   invoiceId: uuid('invoice_id'),

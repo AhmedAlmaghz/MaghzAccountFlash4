@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, FileText, Phone, Mail, MapPin, Hash, Info, Clock, Wallet, Truck, UserCheck, Receipt, AlertCircle } from 'lucide-react';
 import { exportToExcel, exportToPDF } from '@/core/utils/exportEngine';
 import { logAudit } from '@/core/utils/auditLogger';
-import { Card, Button, Modal, Input, Pagination, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
+import { Card, Button, Modal, Input, Pagination, DynamicTable, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates } from '@/core/utils/duplicateDetection';
@@ -554,7 +554,7 @@ export const SuppliersPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <Table<Supplier> data={suppliers} columns={columns as never} keyExtractor={(row) => row.id} isLoading={isLoading} />
+            <DynamicTable<Supplier> tableKey="purchases.suppliers" data={suppliers} columns={columns as never} keyExtractor={(row) => row.id} isLoading={isLoading} />
             <div className="border-t border-slate-200 dark:border-slate-800">
               <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
             </div>

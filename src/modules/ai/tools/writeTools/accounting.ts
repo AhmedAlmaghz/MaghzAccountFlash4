@@ -272,6 +272,7 @@ export const accountingWriteTools: ToolDefinition[] = [
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
           cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
+          reference: reference || undefined,
           status: 'posted',
         },
         ctx.userId
@@ -408,6 +409,7 @@ export const accountingWriteTools: ToolDefinition[] = [
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
           cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
+          reference: reference || undefined,
           status: 'posted',
         },
         ctx.userId
@@ -494,6 +496,7 @@ export const accountingWriteTools: ToolDefinition[] = [
           paymentMethod: (method as 'cash' | 'bank' | 'check') || 'cash',
           cashBoxId: cashBoxId || undefined,
           notes: notesCombined || undefined,
+          reference: reference || undefined,
           status: 'posted',
         },
         ctx.userId

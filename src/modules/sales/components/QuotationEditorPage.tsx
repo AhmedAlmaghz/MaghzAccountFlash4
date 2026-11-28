@@ -37,6 +37,7 @@ export const QuotationEditorPage: React.FC = () => {
   const companyId = activeCompany?.id || '';
   const { getNextNumber } = useDocumentSequence();
   const { settings } = useSettings(companyId);
+  const showReference = settings?.showReference ?? true;
   const { formatCurrency } = useFormatters(companyId);
   const { currencies, currenciesLoaded } = useCurrencyDisplay();
 
@@ -49,6 +50,7 @@ export const QuotationEditorPage: React.FC = () => {
   const [exchangeRate, setExchangeRate] = useState(1);
   const [paymentType, setPaymentType] = useState<'cash' | 'credit'>('credit');
   const [cashBoxId, setCashBoxId] = useState('');
+  const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine]);
   const [saving, setSaving] = useState(false);
@@ -58,9 +60,9 @@ export const QuotationEditorPage: React.FC = () => {
   const [docVersion, setDocVersion] = useState(1);
 
   const backPath = '/sales/quotations';
-  const draft = useMemo(() => ({ customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines }), [customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines]);
+  const draft = useMemo(() => ({ customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines }), [customerId, customerName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines]);
   const { blocked, proceed, reset, guardNavigate, clearDraft, isDirty } = useDocumentEditorGuard('quotation', draft, loading, isEdit, saving, !loading && currenciesLoaded);
-  const draftSetters = useMemo(() => ({ customerId: setCustomerId, date: setDate, dueDate: setDueDate, currencyCode: setCurrencyCode, exchangeRate: setExchangeRate, paymentType: setPaymentType, cashBoxId: setCashBoxId, notes: setNotes, lines: setLines }), []);
+  const draftSetters = useMemo(() => ({ customerId: setCustomerId, date: setDate, dueDate: setDueDate, currencyCode: setCurrencyCode, exchangeRate: setExchangeRate, paymentType: setPaymentType, cashBoxId: setCashBoxId, reference: setReference, notes: setNotes, lines: setLines }), []);
   useRestoreDraft('quotation', isEdit, draftSetters);
 
   useEffect(() => {
@@ -93,7 +95,7 @@ export const QuotationEditorPage: React.FC = () => {
       if (cancelled) return;
       setLoading(false);
       if (res?.success && res.data) {
-        const inv = res.data as unknown as { customerId?: string; customer?: { name?: string }; quotationNumber?: string; supplierId?: string; docVersion?: number; date?: string; dueDate?: string; expiryDate?: string; expectedDate?: string; currencyCode?: string; exchangeRate?: number; paymentType?: string; cashBoxId?: string; notes?: string; reason?: string; status?: string; lines?: Array<{ productId?: string; productName?: string; productCode?: string; unitId?: string; unitFactor?: number; baseQuantity?: number; unitName?: string; quantity?: number; unitPrice?: number }>; };
+        const inv = res.data as unknown as { customerId?: string; customer?: { name?: string }; quotationNumber?: string; supplierId?: string; docVersion?: number; date?: string; dueDate?: string; expiryDate?: string; expectedDate?: string; currencyCode?: string; exchangeRate?: number; paymentType?: string; cashBoxId?: string; reference?: string; notes?: string; reason?: string; status?: string; lines?: Array<{ productId?: string; productName?: string; productCode?: string; unitId?: string; unitFactor?: number; baseQuantity?: number; unitName?: string; quantity?: number; unitPrice?: number }>; };
         setCustomerId(inv.customerId ?? '');
         setCustomerName(inv.customer?.name ?? '');
         setDate(inv.date ?? todayIso());
@@ -102,6 +104,7 @@ export const QuotationEditorPage: React.FC = () => {
         setExchangeRate(inv.exchangeRate ?? 1);
         setPaymentType(inv.paymentType === 'cash' ? 'cash' : 'credit');
         setCashBoxId(inv.cashBoxId ?? '');
+        setReference(inv.reference ?? '');
         setNotes(inv.notes ?? '');
         setStatus(inv.status ?? 'draft');
         setDocNumber(inv.quotationNumber ?? '');
@@ -168,6 +171,7 @@ export const QuotationEditorPage: React.FC = () => {
         baseCurrencyAmount: roundMoney(totals.totalAmount * (exchangeRate || 1)),
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId || undefined : undefined,
+        reference: reference || undefined,
         notes: notes || undefined,
         status: post ? 'posted' : 'draft',
         lines: lines.map((l) => ({
@@ -205,7 +209,7 @@ export const QuotationEditorPage: React.FC = () => {
         }
       }
     },
-    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber, docVersion]
+    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber, docVersion]
   );
 
   const title = isEdit ? t('sales.quotation.edit') : t('sales.quotation.new');
@@ -283,6 +287,15 @@ export const QuotationEditorPage: React.FC = () => {
       </Card>
 
       <Card className="p-4 sm:p-5">
+        {showReference && (
+          <Input
+            label={t('common.reference')}
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder={t('common.referenceHint')}
+            className="mb-3"
+          />
+        )}
         <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('common.notesPlaceholder')} />
       </Card>
       <UnsavedChangesDialog blocked={blocked} onLeave={proceed} onStay={reset} />

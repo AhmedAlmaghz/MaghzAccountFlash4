@@ -16,7 +16,7 @@ import {
   TrendingUp,
   AlertCircle,
 } from 'lucide-react';
-import { Card, Button, Table, Input, Modal, PageHeader, FilterBar } from '@/core/ui/components';
+import { Card, Button, DynamicTable, Input, Modal, PageHeader, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { detectDuplicates } from '@/core/utils/duplicateDetection';
@@ -622,7 +622,7 @@ export const CustomersPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <Table<Customer> data={customers} columns={customerColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
+            <DynamicTable<Customer> tableKey="sales.customers" data={customers} columns={customerColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
             <div className="border-t border-slate-200 dark:border-slate-800">
               <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
             </div>
@@ -1040,7 +1040,7 @@ function CustomerStatementTab({ customerId }: { customerId: string }) {
             <EmptyState icon="search" title={t('sales.customer.noTransactions')} description={t('sales.customer.noTransactionsDesc')} />
           </div>
         ) : (
-          <Table data={rows} columns={columns} keyExtractor={(_r, i) => String(i)} />
+          <DynamicTable tableKey="sales.customers" data={rows} columns={columns} keyExtractor={(_r, i) => String(i)} />
         )}
       </Card>
     </div>

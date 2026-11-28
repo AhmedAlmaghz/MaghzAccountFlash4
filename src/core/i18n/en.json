@@ -3780,6 +3780,8 @@
       "showDiscountDesc": "Show discount column and invoice discount field under subtotal",
       "showVat": "Show VAT",
       "showVatDesc": "Show VAT column and calculate VAT on invoice total",
+      "showReference": "Show paper reference",
+      "showReferenceDesc": "Show the paper reference field and column on invoices and vouchers",
       "invoiceSettingsSaved": "Invoice display settings saved",
       "invoiceSettingsHint": "When hidden, discount/VAT fields disappear from invoices and are excluded from totals — suited for exempt companies or simplified invoicing.",
       "unifiedRateTitle": "Unified Standard Rate",
@@ -4377,6 +4379,8 @@
     "cancel": "Cancel",
     "create": "Create",
     "name": "Name",
+    "reference": "Reference",
+    "referenceHint": "Paper document number (optional)",
     "enterName": "Enter name...",
     "printFooter": "Issued by maghzaccount-pro system",
     "printReportFooter": "Report issued by maghzaccount-pro system",
@@ -4436,7 +4440,6 @@
     "paymentType": "Payment Type",
     "phone": "Phone",
     "post": "Post",
-    "reference": "Reference",
     "or": "or"
   },
   "pagination": {
@@ -5084,7 +5087,11 @@
     "exportPdf": "Export PDF",
     "print": "Print",
     "show": "Show",
-    "recordsCount": "of {{count}} records"
+    "recordsCount": "of {{count}} records",
+    "filter": "Filter",
+    "columns": "Columns",
+    "reset": "Reset",
+    "sort": "Sort"
   },
   "validation": {
     "required": "Required",

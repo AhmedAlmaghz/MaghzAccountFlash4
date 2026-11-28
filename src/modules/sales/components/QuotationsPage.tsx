@@ -1,7 +1,7 @@
 ﻿import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tag, Plus, FileText, CheckSquare, Printer, ArrowRightLeft, Sparkles, Download } from 'lucide-react';
-import { Card, Button, Table, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+import { Card, Button, DynamicTable, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { salesQuotationFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
@@ -602,7 +602,7 @@ export const QuotationsPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <Table<Quotation> data={filteredQuotations} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
+            <DynamicTable<Quotation> tableKey="sales.quotations" data={filteredQuotations} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
             <Pagination
               page={page}
               pageSize={pageSize}

@@ -105,6 +105,7 @@ export const salesWriteTools: ToolDefinition[] = [
         paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُقيَّد على الخزنة عند الترحيل ولا يُسجَّل دين على العميل)، credit = آجل (افتراضي — يُقيَّد على المدينين)' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash لتحديد الخزنة المقبوض فيها' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: LINES_SCHEMA,
         discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
         discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
@@ -167,6 +168,7 @@ export const salesWriteTools: ToolDefinition[] = [
         // at posting time (Dr treasury / Cr sales), the customer owes nothing.
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       }, ctx.userId);
@@ -236,6 +238,7 @@ export const salesWriteTools: ToolDefinition[] = [
         customerId: { type: 'string', description: 'معرف العميل (من search.customers)' },
         expiryDate: { type: 'string', description: 'تاريخ انتهاء العرض YYYY-MM-DD (اختياري)' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: LINES_SCHEMA,
       },
       required: ['customerId', 'lines'],
@@ -272,6 +275,7 @@ export const salesWriteTools: ToolDefinition[] = [
         expiryDate: str(args.expiryDate),
         totalAmount,
         status: 'draft',
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       }, ctx.userId);
@@ -294,6 +298,7 @@ export const salesWriteTools: ToolDefinition[] = [
         invoiceId: { type: 'string', description: 'معرف الفاتورة الأصلية (اختياري)' },
         reason: { type: 'string', description: 'سبب المرتجع' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: {
           type: 'array',
           description: 'الأصناف المرتجعة. استخدم search.products للحصول على المعرفات.',
@@ -353,6 +358,7 @@ export const salesWriteTools: ToolDefinition[] = [
         totalAmount,
         reason: str(args.reason) || '',
         status: 'draft',
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       }, ctx.userId);
@@ -458,6 +464,7 @@ export const salesWriteTools: ToolDefinition[] = [
       properties: {
         invoiceId: { type: 'string', description: 'معرف الفاتورة (UUID)' },
         notes: { type: 'string', description: 'ملاحظات جديدة (اختياري)' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         status: { type: 'string', enum: ['draft', 'cancelled'], description: 'الحالة الجديدة (draft أو cancelled فقط)' },
       },
       required: ['invoiceId'],
@@ -480,6 +487,7 @@ export const salesWriteTools: ToolDefinition[] = [
         };
       }
       const data: Record<string, unknown> = {};
+      if (args.reference !== undefined) data.reference = str(args.reference);
       if (args.notes !== undefined) data.notes = str(args.notes);
       if (args.status !== undefined) {
         const s = str(args.status);

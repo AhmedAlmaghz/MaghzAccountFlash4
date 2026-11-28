@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Undo2, Plus, CheckSquare, Printer, FileText, BookOpen, Layers, RotateCcw } from 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
 import { logAudit } from '@/core/utils/auditLogger';
-import { Card, Button, Modal, Pagination, Can, Table, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+import { Card, Button, Modal, Pagination, Can, DynamicTable, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
@@ -244,7 +244,7 @@ export const PurchaseReturnsPage: React.FC = () => {
 
       <Card noPadding>
         <div className="p-3 sm:p-4 border-b border-zinc-200 dark:border-zinc-800">
-          <Table<PurchaseReturn>
+          <DynamicTable<PurchaseReturn> tableKey="purchases.returns"
             data={visibleReturns}
             columns={columns as never}
             keyExtractor={(row) => row.id}

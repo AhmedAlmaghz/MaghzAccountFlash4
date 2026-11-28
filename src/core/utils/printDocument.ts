@@ -52,6 +52,8 @@ export interface PrintDocumentData {
   /** Pre-translated status ribbon (e.g. مدفوعة / مرحّل / مسودة). */
   statusBadge?: string;
   statusTone?: 'success' | 'warning' | 'muted';
+  /** Paper reference number entered alongside the printed document. */
+  reference?: string;
   currency?: string;
   paymentType?: string;
   paymentMethod?: string;
@@ -624,6 +626,7 @@ export function generateHtml(data: PrintDocumentData, t?: PrintT): string {
             ${data.partyTaxNumber ? `<div class="side-row"><span class="side-label">${T('print.partyTaxNumber', 'الرقم الضريبي')}</span><span class="side-value small">${escapeHtml(data.partyTaxNumber)}</span></div>` : ''}
             ${data.partyAddress ? `<div class="side-row"><span class="side-value small">${escapeHtml(data.partyAddress)}</span></div>` : ''}
             <div class="side-row"><span class="side-label">${T('print.date', 'التاريخ')}</span><span class="side-value">${formatDateValue(data.date)}</span></div>
+            ${data.reference ? `<div class="side-row"><span class="side-label">${T('common.reference', 'المرجع')}</span><span class="side-value small">${escapeHtml(data.reference)}</span></div>` : ''}
             ${data.dueDate ? `<div class="side-row"><span class="side-label">${T('print.dueDate', 'الاستحقاق')}</span><span class="side-value">${formatDateValue(data.dueDate)}</span></div>` : ''}
           </div>
         </div>

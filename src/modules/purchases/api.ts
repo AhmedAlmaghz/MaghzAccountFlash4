@@ -130,6 +130,7 @@ function mapInvoice(row: Record<string, unknown>): PurchaseInvoice {
     id: String(row.id),
     companyId: String(row.company_id || row.companyId),
     invoiceNumber: String(row.invoice_number || row.invoiceNumber || ''),
+    reference: row.reference ? String(row.reference) : undefined,
     supplierId: String(row.supplier_id || row.supplierId),
     supplier: row.supplier_name
       ? { id: String(row.supplier_id || row.supplierId), companyId: String(row.company_id || row.companyId), name: String(row.supplier_name), balance: 0, isActive: true }
@@ -189,6 +190,7 @@ function mapOrder(row: Record<string, unknown>): PurchaseOrder {
     id: String(row.id),
     companyId: String(row.company_id || row.companyId),
     orderNumber: String(row.order_number || row.orderNumber || ''),
+    reference: row.reference ? String(row.reference) : undefined,
     supplierId: String(row.supplier_id || row.supplierId),
     supplier: row.supplier_name
       ? { id: String(row.supplier_id || row.supplierId), companyId: String(row.company_id || row.companyId), name: String(row.supplier_name), balance: 0, isActive: true }
@@ -233,6 +235,7 @@ function mapReturn(row: Record<string, unknown>): PurchaseReturn {
     id: String(row.id),
     companyId: String(row.company_id || row.companyId),
     returnNumber: String(row.return_number || row.returnNumber || ''),
+    reference: row.reference ? String(row.reference) : undefined,
     invoiceId: row.invoice_id ? String(row.invoice_id) : undefined,
     invoiceNumber: row.invoice_number ? String(row.invoice_number) : undefined,
     supplierId: String(row.supplier_id || row.supplierId),
@@ -871,8 +874,8 @@ export const purchasesApi = {
       }
       const adapter = await getDbAdapter();
       const invoiceId = crypto.randomUUID();
-      const params: unknown[] = [invoiceId, data.companyId, data.invoiceNumber, data.supplierId, data.purchaseOrderId || null, data.date, data.dueDate, data.subtotal, data.discountAmount, data.vatAmount, data.totalAmount, data.paidAmount, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyPaid, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
-      let sql = `WITH inv AS (INSERT INTO purchase_invoices (id,company_id,invoice_number,supplier_id,purchase_order_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7::date,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::uuid,$20,$21::uuid,$22::uuid) RETURNING id)`;
+      const params: unknown[] = [invoiceId, data.companyId, data.invoiceNumber, data.supplierId, data.purchaseOrderId || null, data.date, data.dueDate, data.subtotal, data.discountAmount, data.vatAmount, data.totalAmount, data.paidAmount, currencyCode, exchangeRate, baseCurrencyAmount, baseCurrencyPaid, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId), data.reference || null];
+      let sql = `WITH inv AS (INSERT INTO purchase_invoices (id,company_id,invoice_number,supplier_id,purchase_order_id,date,due_date,subtotal,discount_amount,vat_amount,total_amount,paid_amount,currency_code,exchange_rate,base_currency_amount,base_currency_paid,status,payment_type,cash_box_id,notes,created_by,updated_by,reference) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7::date,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::uuid,$20,$21::uuid,$22::uuid,$23) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -962,6 +965,7 @@ export const purchasesApi = {
       if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
+      if (data.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(data.reference || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
 
       fields.push(`updated_by = $${idx++}::uuid`);
@@ -1403,8 +1407,8 @@ export const purchasesApi = {
       }
       const adapter = await getDbAdapter();
       const orderId = crypto.randomUUID();
-      const params: unknown[] = [orderId, data.companyId, data.orderNumber, data.supplierId, data.date, data.expectedDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId)];
-      let sql = `WITH ord AS (INSERT INTO purchase_orders (id,company_id,order_number,supplier_id,date,expected_date,total_amount,status,payment_type,cash_box_id,notes,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::varchar,$9,$10::uuid,$11,$12::uuid,$13::uuid) RETURNING id)`;
+      const params: unknown[] = [orderId, data.companyId, data.orderNumber, data.supplierId, data.date, data.expectedDate, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, safeUserId(_userId), safeUserId(_userId), data.reference || null];
+      let sql = `WITH ord AS (INSERT INTO purchase_orders (id,company_id,order_number,supplier_id,date,expected_date,total_amount,status,payment_type,cash_box_id,notes,created_by,updated_by,reference) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::date,$6::date,$7::numeric,$8::varchar,$9,$10::uuid,$11,$12::uuid,$13::uuid,$14) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -1442,6 +1446,7 @@ export const purchasesApi = {
       if (data.status !== undefined) { fields.push(`status = $${idx++}::varchar`); values.push(data.status); }
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
+      if (data.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(data.reference || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       fields.push(`updated_by = $${idx++}::uuid`);
       values.push(safeUserId(_userId));
@@ -1696,8 +1701,8 @@ export const purchasesApi = {
       }
       const adapter = await getDbAdapter();
       const returnId = crypto.randomUUID();
-      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId || null, data.supplierId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, data.reason, safeUserId(_userId), safeUserId(_userId)];
-      let sql = `WITH ret AS (INSERT INTO purchase_returns (id,company_id,return_number,invoice_id,supplier_id,date,subtotal,vat_amount,total_amount,status,payment_type,cash_box_id,notes,reason,created_by,updated_by) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7,$8,$9,$10,$11,$12::uuid,$13,$14,$15::uuid,$16::uuid) RETURNING id)`;
+      const params: unknown[] = [returnId, data.companyId, data.returnNumber, data.invoiceId || null, data.supplierId, data.date, data.subtotal, data.vatAmount, data.totalAmount, data.status, data.paymentType || 'credit', data.cashBoxId || null, data.notes, data.reason, safeUserId(_userId), safeUserId(_userId), data.reference || null];
+      let sql = `WITH ret AS (INSERT INTO purchase_returns (id,company_id,return_number,invoice_id,supplier_id,date,subtotal,vat_amount,total_amount,status,payment_type,cash_box_id,notes,reason,created_by,updated_by,reference) VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::date,$7,$8,$9,$10,$11,$12::uuid,$13,$14,$15::uuid,$16::uuid,$17) RETURNING id)`;
       if (data.lines?.length) {
         const lineValues: string[] = [];
         for (const line of data.lines) {
@@ -1755,6 +1760,7 @@ export const purchasesApi = {
       if (data.status !== undefined) { fields.push(`status = $${idx++}`); values.push(data.status); }
       if (data.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(data.paymentType); }
       if (data.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(data.cashBoxId || null); }
+      if (data.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(data.reference || null); }
       if (data.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(data.notes); }
       if (data.reason !== undefined) { fields.push(`reason = $${idx++}`); values.push(data.reason); }
 

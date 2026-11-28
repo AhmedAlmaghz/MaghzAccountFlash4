@@ -80,8 +80,8 @@ describe('purchasesApi.createOrder', () => {
     expect(sql).toContain('::date');
     expect(sql).toContain('::varchar');
     expect(sql).not.toMatch(/\$\d+(?!.*::)/);
-    // 13 header + 5 line + 3 unit snapshot = 21
-    expect(params.length).toBe(21);
+    // 14 header + 5 line + 3 unit snapshot = 22 (reference appended at end)
+    expect(params.length).toBe(22);
     expect(typeof params[0]).toBe('string');
     expect((params[0] as string).length).toBeGreaterThan(0);
     expect(params[1]).toBe(COMPANY_ID);
@@ -96,16 +96,17 @@ describe('purchasesApi.createOrder', () => {
     expect(params[10]).toBe('Test order');
     expect(params[11]).toBeNull(); // created_by
     expect(params[12]).toBeNull(); // updated_by
-    expect(typeof params[13]).toBe('string'); // orderId for lines
-    expect(params[14]).toBe(PRODUCT_ID);
-    expect(params[15]).toBe(5);
-    expect(params[16]).toBe(200);
-    expect(params[17]).toBe(1000);
+    expect(params[13]).toBeNull(); // reference (appended at end of header)
+    expect(typeof params[14]).toBe('string'); // orderId for lines
+    expect(params[15]).toBe(PRODUCT_ID);
+    expect(params[16]).toBe(5);
+    expect(params[17]).toBe(200);
+    expect(params[18]).toBe(1000);
     // multi-unit snapshot appended at the end (unitId, factor, base qty)
-    expect(params.length).toBe(21);
-    expect(params[18]).toBeNull();
-    expect(params[19]).toBe(1);
-    expect(params[20]).toBe(5);
+    expect(params.length).toBe(22);
+    expect(params[19]).toBeNull();
+    expect(params[20]).toBe(1);
+    expect(params[21]).toBe(5);
   });
   it('does not include non-existent description/received_quantity columns in line insert', async () => {
     const captured: { sql: string }[] = [];

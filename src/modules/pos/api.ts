@@ -908,11 +908,11 @@ export const posApi = {
         input.subtotal, input.discountAmount ?? 0, input.vatAmount ?? 0,
         input.totalAmount, paidAmount, currencyCode, 1,
         input.totalAmount, paidAmount, paymentType, boxIdOrNull,
-        input.notes ?? null, safeUser, safeUser, input.shiftId,
+        input.notes ?? null, safeUser, safeUser, input.shiftId, input.reference ?? null,
       ];
       let sql = `WITH inv AS (INSERT INTO sales_invoices
-        (id, company_id, invoice_number, customer_id, date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by, is_pos, shift_id)
-        VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, 'draft', $15::varchar, $16::uuid, $17, $18::uuid, $19::uuid, true, $20::uuid)
+        (id, company_id, invoice_number, customer_id, date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by, is_pos, shift_id, reference)
+        VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, 'draft', $15::varchar, $16::uuid, $17, $18::uuid, $19::uuid, true, $20::uuid, $21)
         RETURNING id)`;
       const lineValues: string[] = [];
       for (const line of input.lines) {

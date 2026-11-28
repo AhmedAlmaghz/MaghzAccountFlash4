@@ -6037,8 +6037,8 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const cid = session.user.companyId;
       const uid = session.user.id;
       const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
-      const params = [cid, String(p.invoiceNumber || ''), String(p.customerId), p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
-      let sql = `WITH inv AS (INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, $15::varchar, $16, $17::uuid, $18, $19::uuid, $20::uuid) RETURNING id)`;
+      const params = [cid, String(p.invoiceNumber || ''), String(p.customerId), p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid, p.reference || null];
+      let sql = `WITH inv AS (INSERT INTO sales_invoices (company_id, invoice_number, customer_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by, reference) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::varchar, $12::numeric, $13::numeric, $14::numeric, $15::varchar, $16, $17::uuid, $18, $19::uuid, $20::uuid, $21) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -6147,6 +6147,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.baseCurrencyAmount !== undefined) { fields.push(`base_currency_amount = $${idx++}::numeric`); values.push(p.baseCurrencyAmount); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
+      if (p.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(p.reference || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       fields.push(`doc_version = doc_version + 1`);
@@ -6273,8 +6274,8 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     compose: (p, session) => {
       const cid = session.user.companyId;
       const uid = session.user.id;
-      const params = [cid, String(p.quotationNumber || ''), String(p.customerId), p.date || null, p.expiryDate || null, Number(p.totalAmount) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
-      let sql = `WITH quo AS (INSERT INTO quotations (company_id, quotation_number, customer_id, date, expiry_date, total_amount, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::varchar, $8, $9::uuid, $10, $11::uuid, $12::uuid) RETURNING id)`;
+      const params = [cid, String(p.quotationNumber || ''), String(p.customerId), p.date || null, p.expiryDate || null, Number(p.totalAmount) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid, p.reference || null];
+      let sql = `WITH quo AS (INSERT INTO quotations (company_id, quotation_number, customer_id, date, expiry_date, total_amount, status, payment_type, cash_box_id, notes, created_by, updated_by, reference) VALUES ($1::uuid, $2, $3::uuid, $4::date, $5::date, $6::numeric, $7::varchar, $8, $9::uuid, $10, $11::uuid, $12::uuid, $13) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -6349,6 +6350,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.totalAmount !== undefined) { fields.push(`total_amount = $${idx++}::numeric`); values.push(p.totalAmount); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
+      if (p.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(p.reference || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`doc_version = doc_version + 1`);
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
@@ -6538,8 +6540,8 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
     compose: (p, session) => {
       const cid = session.user.companyId;
       const uid = session.user.id;
-      const params = [cid, String(p.returnNumber || ''), p.invoiceId || null, String(p.customerId), p.date || null, Number(p.subtotal) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, p.reason || null, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
-      let sql = `WITH ret AS (INSERT INTO sales_returns (company_id, return_number, invoice_id, customer_id, date, subtotal, vat_amount, total_amount, reason, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9, $10::varchar, $11, $12::uuid, $13, $14::uuid, $15::uuid) RETURNING id)`;
+      const params = [cid, String(p.returnNumber || ''), p.invoiceId || null, String(p.customerId), p.date || null, Number(p.subtotal) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, p.reason || null, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid, p.reference || null];
+      let sql = `WITH ret AS (INSERT INTO sales_returns (company_id, return_number, invoice_id, customer_id, date, subtotal, vat_amount, total_amount, reason, status, payment_type, cash_box_id, notes, created_by, updated_by, reference) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::numeric, $7::numeric, $8::numeric, $9, $10::varchar, $11, $12::uuid, $13, $14::uuid, $15::uuid, $16) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -6629,6 +6631,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.reason !== undefined) { fields.push(`reason = $${idx++}`); values.push(p.reason); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
+      if (p.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(p.reference || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`doc_version = doc_version + 1`);
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
@@ -7172,8 +7175,8 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       const cid = session.user.companyId;
       const uid = session.user.id;
       const lr = Number(p.exchangeRate) > 0 ? Number(p.exchangeRate) : 1;
-      const params = [cid, String(p.invoiceNumber || ''), String(p.supplierId), p.purchaseOrderId || null, p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid];
-      let sql = `WITH inv AS (INSERT INTO purchase_invoices (company_id, invoice_number, supplier_id, purchase_order_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::date, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12::varchar, $13::numeric, $14::numeric, $15::numeric, $16::varchar, $17, $18::uuid, $19, $20::uuid, $21::uuid) RETURNING id)`;
+      const params = [cid, String(p.invoiceNumber || ''), String(p.supplierId), p.purchaseOrderId || null, p.date || null, p.dueDate || null, Number(p.subtotal) || 0, Number(p.discountAmount) || 0, Number(p.vatAmount) || 0, Number(p.totalAmount) || 0, Number(p.paidAmount) || 0, p.currencyCode || 'YER', lr, Number(p.baseCurrencyAmount) || Number(p.totalAmount) || 0, Number(p.baseCurrencyPaid) || 0, 'draft', p.paymentType || 'credit', p.cashBoxId || null, p.notes || null, uid, uid, p.reference || null];
+      let sql = `WITH inv AS (INSERT INTO purchase_invoices (company_id, invoice_number, supplier_id, purchase_order_id, date, due_date, subtotal, discount_amount, vat_amount, total_amount, paid_amount, currency_code, exchange_rate, base_currency_amount, base_currency_paid, status, payment_type, cash_box_id, notes, created_by, updated_by, reference) VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5::date, $6::date, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12::varchar, $13::numeric, $14::numeric, $15::numeric, $16::varchar, $17, $18::uuid, $19, $20::uuid, $21::uuid, $22) RETURNING id)`;
       if (Array.isArray(p.lines) && p.lines.length) {
         const lineValues = [];
         for (const line of p.lines) {
@@ -7265,6 +7268,7 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       if (p.baseCurrencyAmount !== undefined) { fields.push(`base_currency_amount = $${idx++}::numeric`); values.push(p.baseCurrencyAmount); }
       if (p.paymentType !== undefined) { fields.push(`payment_type = $${idx++}`); values.push(p.paymentType); }
       if (p.cashBoxId !== undefined) { fields.push(`cash_box_id = $${idx++}::uuid`); values.push(p.cashBoxId || null); }
+      if (p.reference !== undefined) { fields.push(`reference = $${idx++}`); values.push(p.reference || null); }
       if (p.notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(p.notes); }
       fields.push(`updated_by = $${idx++}::uuid`, `updated_at = NOW()`);
       values.push(uid, String(p.id), cid);

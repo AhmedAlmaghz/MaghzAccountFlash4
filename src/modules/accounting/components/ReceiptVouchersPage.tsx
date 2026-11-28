@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, CheckSquare, Hash, Wallet, Landmark, FileText, Receipt, Paperclip, Undo2 } from
 'lucide-react';
 import { printDocument } from '@/core/utils/printDocument';
-import { Card, Button, Table, Badge, PageHeader, FilterBar } from '@/core/ui/components';
+import { Card, Button, DynamicTable, Badge, PageHeader, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
 import { useAppStore } from '@/core/store';
 import { useAuthStore } from '@/modules/auth/store';
@@ -446,7 +446,7 @@ export const ReceiptVouchersPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <Table data={vouchers} columns={columns as never} keyExtractor={(row) => row.id} isLoading={isLoading} emptyMessage={t('accounting.noData')} />
+            <DynamicTable tableKey="accounting.receiptVouchers" data={vouchers} columns={columns as never} keyExtractor={(row) => row.id} isLoading={isLoading} emptyMessage={t('accounting.noData')} />
             <div className="border-t border-slate-200 dark:border-slate-800">
               <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
             </div>

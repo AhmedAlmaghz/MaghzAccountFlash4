@@ -250,6 +250,7 @@ export const PosTerminalPage: React.FC = () => {
 
   // ── Payment modal ──
   const [payOpen, setPayOpen] = useState(false);
+  const [reference, setReference] = useState("");
   const [payMode, setPayMode] = useState<'cash' | 'credit' | 'mixed'>('cash');
   const [cashReceived, setCashReceived] = useState('');
   const [creditAmount, setCreditAmount] = useState('');
@@ -337,6 +338,7 @@ export const PosTerminalPage: React.FC = () => {
       totalAmount: totals.totalAmount,
       cashAmount: cashPart,
       creditAmount: credit,
+      reference: reference || undefined,
     }, user?.id);
     } finally {
       checkingOutRef.current = false;
@@ -380,7 +382,7 @@ export const PosTerminalPage: React.FC = () => {
     } else {
       addToast('error', result.error || t('pos.checkoutFailed'));
     }
-  }, [shift, companyId, payMode, cashReceived, creditAmount, totals, customerId, defaultWalkInCustomerId, lines, cart, user, activeCompany, change, formatCurrency, addToast, t, reloadSummary]);
+  }, [shift, companyId, payMode, cashReceived, creditAmount, totals, customerId, defaultWalkInCustomerId, lines, cart, user, activeCompany, change, formatCurrency, addToast, t, reloadSummary, reference]);
 
   const reprintLast = useCallback(async () => {
     if (!lastReceipt || !companyId) return;
@@ -701,6 +703,7 @@ export const PosTerminalPage: React.FC = () => {
           </div>
 
           {/* Payment mode chips */}
+          <Input label={t('common.reference')} value={reference} onChange={(e) => setReference(e.target.value)} placeholder={t('common.referenceHint')} />
           <div className="grid grid-cols-3 gap-2">
             {(['cash', 'credit', 'mixed'] as const).map((mode) => (
               <button

@@ -63,6 +63,7 @@ export const wizardTools: ToolDefinition[] = [
         paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُقيَّد على الخزنة عند الترحيل ولا يُسجَّل دين على العميل)، credit = آجل (افتراضي)' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: LINES_SCHEMA,
         discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
         discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
@@ -134,6 +135,7 @@ export const wizardTools: ToolDefinition[] = [
         // at posting time (Dr treasury / Cr sales), the customer owes nothing.
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       });
@@ -199,6 +201,7 @@ export const wizardTools: ToolDefinition[] = [
         paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُخصم من الخزنة عند الترحيل ولا يُسجَّل دين للمورد)، credit = آجل (افتراضي)' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: LINES_SCHEMA,
         discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
         discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
@@ -267,6 +270,7 @@ export const wizardTools: ToolDefinition[] = [
         // the supplier is never owed.
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       });

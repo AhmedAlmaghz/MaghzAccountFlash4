@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Undo2, Plus, CheckSquare, Printer, FileText, Package, BookOpen, Wallet, Layers, Download, RotateCcw } from 'lucide-react';
-import { Card, Button, Table, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+import { Card, Button, DynamicTable, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { DuplicateWarningDialog } from '@/core/ui/components/DuplicateWarningDialog';
 import { salesReturnFingerprint, genericNearScore, detectDocumentDuplicates } from '@/core/utils/documentDuplicate';
@@ -541,7 +541,7 @@ export const SalesReturnsPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <Table<SalesReturn> data={filteredReturns} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={returnsLoading} />
+            <DynamicTable<SalesReturn> tableKey="sales.returns" data={filteredReturns} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={returnsLoading} />
             <div className="border-t border-slate-200 dark:border-slate-800">
               <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
             </div>

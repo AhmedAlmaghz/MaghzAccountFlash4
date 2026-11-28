@@ -53,6 +53,7 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
   const [exchangeRate, setExchangeRate] = useState(1);
   const [paymentType, setPaymentType] = useState<'cash' | 'credit'>('credit');
   const [cashBoxId, setCashBoxId] = useState('');
+  const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine]);
   const [saving, setSaving] = useState(false);
@@ -61,9 +62,9 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
   const [docNumber, setDocNumber] = useState('');
 
   const backPath = '/purchases/invoices';
-  const draft = useMemo(() => ({ customerId, supplierName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines }), [customerId, supplierName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines]);
+  const draft = useMemo(() => ({ customerId, supplierName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines }), [customerId, supplierName, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines]);
   const { blocked, proceed, reset, guardNavigate, clearDraft, isDirty } = useDocumentEditorGuard('purchase-invoice', draft, loading, isEdit, saving, !loading && currenciesLoaded);
-  const draftSetters = useMemo(() => ({ customerId: setCustomerId, date: setDate, dueDate: setDueDate, currencyCode: setCurrencyCode, exchangeRate: setExchangeRate, paymentType: setPaymentType, cashBoxId: setCashBoxId, notes: setNotes, lines: setLines }), []);
+  const draftSetters = useMemo(() => ({ customerId: setCustomerId, date: setDate, dueDate: setDueDate, currencyCode: setCurrencyCode, exchangeRate: setExchangeRate, paymentType: setPaymentType, cashBoxId: setCashBoxId, reference: setReference, notes: setNotes, lines: setLines }), []);
   useRestoreDraft('purchase-invoice', isEdit, draftSetters);
 
   useEffect(() => {
@@ -110,6 +111,7 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
         setExchangeRate(inv.exchangeRate ?? 1);
         setPaymentType(inv.paymentType === 'cash' ? 'cash' : 'credit');
         setCashBoxId(inv.cashBoxId ?? '');
+        setReference(inv.reference ?? '');
         setNotes(inv.notes ?? '');
         setStatus(inv.status ?? 'draft');
         setDocNumber(inv.invoiceNumber ?? '');
@@ -156,6 +158,7 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
     discountAmount: totals.discountAmount,
     vatAmount: totals.vatAmount,
     totalAmount: totals.totalAmount,
+    reference: reference || undefined,
     notes,
     currency: activeCompany?.currency,
     vatRate: settings?.invoiceShowVat === false ? 0 : settings?.vatRate,
@@ -165,7 +168,7 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
       name: activeCompany.name, taxNumber: activeCompany.taxNumber, address: activeCompany.address,
       phone: activeCompany.phone, email: activeCompany.email, logoUrl: activeCompany.logoUrl,
     } : undefined,
-  }), [docNumber, t, date, dueDate, supplierName, lines, totals, notes, activeCompany, settings?.invoiceShowVat, settings?.vatRate, paymentType, status]);
+  }), [docNumber, t, date, dueDate, supplierName, lines, totals, reference, notes, activeCompany, settings?.invoiceShowVat, settings?.vatRate, paymentType, status]);
   const { onPrint, onExcel, onPdf } = useDocumentExport(exportData, t);
 
   const save = useCallback(
@@ -199,6 +202,7 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
         baseCurrencyAmount: roundMoney(totals.totalAmount * (exchangeRate || 1)),
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId || undefined : undefined,
+        reference: reference || undefined,
         notes: notes || undefined,
         status: post ? 'posted' : 'draft',
         lines: lines.map((l) => ({
@@ -234,7 +238,7 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
         addToast('error', (result?.error as string) || t('common.error'));
       }
     },
-    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber]
+    [companyId, customerId, date, dueDate, currencyCode, exchangeRate, paymentType, cashBoxId, reference, notes, lines, totals, isEdit, id, user?.id, addToast, t, navigate, clearDraft, docNumber]
   );
 
   const title = isEdit ? t('purchases.invoice.edit') : t('purchases.invoice.new');
@@ -334,6 +338,15 @@ export const PurchaseInvoiceEditorPage: React.FC = () => {
       </Card>
 
       <Card className="p-4 sm:p-5">
+        {(settings?.showReference ?? true) && (
+          <Input
+            label={t('common.reference')}
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder={t('common.referenceHint')}
+            className="mb-3"
+          />
+        )}
         <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('common.notesPlaceholder')} />
       </Card>
       <UnsavedChangesDialog blocked={blocked} onLeave={proceed} onStay={reset} />

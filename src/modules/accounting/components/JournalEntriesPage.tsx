@@ -1,8 +1,8 @@
 ﻿import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Plus, Send, Undo2 } from 'lucide-react';
-import { Card, Button, Modal, Table, PageHeader } from '@/core/ui/components';
-import { ConfirmDialog, StatusBadge, ActionButtons } from '@/core/ui/components';
+import { Card, Button, Modal, PageHeader } from '@/core/ui/components';
+import { ConfirmDialog, StatusBadge, ActionButtons, DynamicTable } from '@/core/ui/components';
 import { Pagination } from '@/core/ui/components/Pagination';
 import { useTransactionsPaginated } from '../hooks/useAccounting';
 import { accountingApi } from '../api';
@@ -186,7 +186,7 @@ export const JournalEntriesPage: React.FC = () => {
       />
 
       <Card>
-        <Table<Transaction>
+        <DynamicTable<Transaction> tableKey="accounting.journal"
           data={transactions}
           columns={columns}
           keyExtractor={(row, i) => row.id || String(i)}

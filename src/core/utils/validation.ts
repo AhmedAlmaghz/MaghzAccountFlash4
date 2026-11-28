@@ -147,6 +147,8 @@ export const createTransactionSchema = z.object({
 export const createReceiptVoucherSchema = z.object({
   companyId: companyIdSchema,
   voucherNumber: nonEmptyString,
+  /** Optional paper voucher number (printed document reference). */
+  reference: z.string().max(100).optional(),
   date: dateSchema,
   customerId: uuidSchema,
   invoiceId: uuidSchema.optional(),
@@ -167,6 +169,8 @@ export const createReceiptVoucherSchema = z.object({
 export const createPaymentVoucherSchema = z.object({
   companyId: companyIdSchema,
   voucherNumber: nonEmptyString,
+  /** Optional paper voucher number (printed document reference). */
+  reference: z.string().max(100).optional(),
   date: dateSchema,
   supplierId: uuidSchema.optional(),
   invoiceId: uuidSchema.optional(),
@@ -205,6 +209,8 @@ export const createCustomerSchema = z.object({
 export const createInvoiceSchema = z.object({
   companyId: companyIdSchema,
   invoiceNumber: nonEmptyString,
+  /** Optional paper invoice number (printed document reference). */
+  reference: z.string().max(100).optional(),
   customerId: uuidSchema,
   date: dateSchema,
   dueDate: dateSchema.optional(),
@@ -236,6 +242,7 @@ export const createInvoiceSchema = z.object({
 export const createQuotationSchema = z.object({
   companyId: companyIdSchema,
   quotationNumber: nonEmptyString,
+  reference: z.string().max(100).optional(),
   customerId: uuidSchema,
   date: dateSchema,
   expiryDate: dateSchema.optional(),
@@ -257,6 +264,7 @@ export const createQuotationSchema = z.object({
 export const createSalesReturnSchema = z.object({
   companyId: companyIdSchema,
   returnNumber: nonEmptyString,
+  reference: z.string().max(100).optional(),
   invoiceId: uuidSchema.optional(),
   customerId: uuidSchema,
   date: dateSchema,
@@ -296,6 +304,8 @@ export const createSupplierSchema = z.object({
 export const createPurchaseInvoiceSchema = z.object({
   companyId: companyIdSchema,
   invoiceNumber: nonEmptyString,
+  /** Optional paper invoice number (printed document reference). */
+  reference: z.string().max(100).optional(),
   supplierId: uuidSchema,
   purchaseOrderId: uuidSchema.optional(),
   date: dateSchema,
@@ -329,6 +339,7 @@ export const createPurchaseInvoiceSchema = z.object({
 export const createPurchaseOrderSchema = z.object({
   companyId: companyIdSchema,
   orderNumber: nonEmptyString,
+  reference: z.string().max(100).optional(),
   supplierId: uuidSchema,
   date: dateSchema,
   expectedDate: dateSchema.optional(),
@@ -351,6 +362,7 @@ export const createPurchaseOrderSchema = z.object({
 export const createPurchaseReturnSchema = z.object({
   companyId: companyIdSchema,
   returnNumber: nonEmptyString,
+  reference: z.string().max(100).optional(),
   invoiceId: uuidSchema.optional(),
   supplierId: uuidSchema,
   date: dateSchema,
@@ -679,6 +691,7 @@ export const posCheckoutSchema = z.object({
   creditAmount: currencyAmountSchema,
   currencyCode: z.string().length(3).optional(),
   notes: z.string().max(2000).optional(),
+  reference: z.string().max(100).optional(),
   lines: z.array(z.object({
     productId: uuidSchema,
     quantity: currencyAmountSchema,

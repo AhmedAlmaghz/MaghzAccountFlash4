@@ -34,6 +34,7 @@ export const VatSettingsPage: React.FC = () => {
   const [formData, setFormData] = useState<Partial<VatType>>({ name: '', rate: 15, isActive: false });
   const [invoiceShowDiscount, setInvoiceShowDiscount] = useState(false);
   const [invoiceShowVat, setInvoiceShowVat] = useState(false);
+  const [showReference, setShowReference] = useState(false);
   const [invoiceSettingsLoading, setInvoiceSettingsLoading] = useState(false);
   const [countryVatRate, setCountryVatRate] = useState<number | null>(null);
   const [countryCode, setCountryCode] = useState<string>('');
@@ -71,13 +72,14 @@ export const VatSettingsPage: React.FC = () => {
     try {
       const adapter = await getDbAdapter();
       const result = await adapter.query<{ key: string; value: string }>(
-        `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showDiscount', 'invoice.showVat')`,
+        `SELECT key, value FROM settings WHERE company_id = $1 AND key IN ('invoice.showDiscount', 'invoice.showVat', 'documents.showReference')`,
         [activeCompany.id]
       );
       if (result.success && result.rows) {
         for (const row of result.rows) {
           if (row.key === 'invoice.showDiscount') setInvoiceShowDiscount(row.value === 'true');
           if (row.key === 'invoice.showVat') setInvoiceShowVat(row.value === 'true');
+          if (row.key === 'documents.showReference') setShowReference(row.value === 'true');
         }
       }
     } catch {
@@ -327,6 +329,22 @@ export const VatSettingsPage: React.FC = () => {
                     saveInvoiceSetting('invoice.showVat', v);
                   }}
                   className="w-11 h-6 rounded-full appearance-none bg-slate-200 dark:bg-slate-700 checked:bg-emerald-600 relative before:content-[''] before:absolute before:w-5 before:h-5 before:bg-white before:rounded-full before:top-0.5 before:left-0.5 checked:before:translate-x-5 transition-all cursor-pointer"
+                />
+              </label>
+              <label className={`flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${showReference ? 'border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300'}`}>
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">{t('settings.vat.showReference')}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('settings.vat.showReferenceDesc')}</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={showReference}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setShowReference(v);
+                    saveInvoiceSetting('documents.showReference', v);
+                  }}
+                  className="w-11 h-6 rounded-full appearance-none bg-slate-200 dark:bg-slate-700 checked:bg-amber-600 relative before:content-[''] before:absolute before:w-5 before:h-5 before:bg-white before:rounded-full before:top-0.5 before:left-0.5 checked:before:translate-x-5 transition-all cursor-pointer"
                 />
               </label>
             </div>

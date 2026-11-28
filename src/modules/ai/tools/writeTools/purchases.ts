@@ -96,6 +96,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         paymentType: { type: 'string', enum: ['cash', 'credit'], description: 'نوع الدفع: cash = نقدي (يُخصم من الخزنة عند الترحيل ولا يُسجَّل دين للمورد)، credit = آجل (افتراضي — يُقيَّد على الدائنين)' },
         cashBoxId: { type: 'string', description: 'معرف الخزنة (من search.cash_boxes) — مطلوب عملياً عند paymentType=cash' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: LINES_SCHEMA,
         discountPercent: { type: 'number', description: 'خصم الفاتورة كنسبة تحت المجموع الفرعي (0-100) — إما هو أو discountAmount، النسبة تتقدم عند تمرير كليهما' },
         discountAmount: { type: 'number', description: 'خصم الفاتورة كمبلغ ثابت تحت المجموع الفرعي — إما هو أو discountPercent' },
@@ -157,6 +158,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         // the supplier is never owed.
         paymentType,
         cashBoxId: paymentType === 'cash' ? cashBoxId : undefined,
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       }, ctx.userId);
@@ -199,6 +201,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         supplierId: { type: 'string', description: 'معرف المورد (من search.suppliers)' },
         expectedDate: { type: 'string', description: 'تاريخ التوقع YYYY-MM-DD (اختياري)' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: {
           type: 'array', description: 'أصناف الأمر',
           items: {
@@ -248,6 +251,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         expectedDate: str(args.expectedDate),
         totalAmount,
         status: 'draft',
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       }, ctx.userId);
@@ -271,6 +275,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         invoiceId: { type: 'string', description: 'معرف فاتورة الشراء الأصلية (اختياري)' },
         reason: { type: 'string', description: 'سبب المرتجع' },
         notes: { type: 'string' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         lines: {
           type: 'array', description: 'الأصناف المرتجعة',
           items: {
@@ -326,6 +331,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
         totalAmount,
         reason: str(args.reason),
         status: 'draft',
+        reference: str(args.reference),
         notes: str(args.notes),
         lines,
       }, ctx.userId);
@@ -446,6 +452,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
       properties: {
         invoiceId: { type: 'string', description: 'معرف فاتورة المشتريات (UUID)' },
         notes: { type: 'string', description: 'ملاحظات (اختياري)' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         status: { type: 'string', enum: ['draft', 'cancelled'], description: 'الحالة (اختياري)' },
       },
       required: ['invoiceId'],
@@ -465,7 +472,8 @@ export const purchasesWriteTools: ToolDefinition[] = [
         };
       }
       const data: Record<string, unknown> = {};
-      if (args.notes !== undefined) data.notes = str(args.notes);
+      if (args.notes !== undefined) if (args.reference !== undefined) data.reference = str(args.reference);
+      data.notes = str(args.notes);
       if (args.status !== undefined) {
         const s = str(args.status);
         if (s && !['draft', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون draft أو cancelled' };
@@ -514,6 +522,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
       properties: {
         orderId: { type: 'string', description: 'معرف أمر الشراء (UUID)' },
         notes: { type: 'string', description: 'ملاحظات (اختياري)' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         status: { type: 'string', enum: ['draft', 'confirmed', 'cancelled'], description: 'الحالة (اختياري)' },
       },
       required: ['orderId'],
@@ -523,7 +532,8 @@ export const purchasesWriteTools: ToolDefinition[] = [
       const orderId = str(args.orderId);
       if (!orderId) return { error: 'orderId مطلوب — استخدم purchases.get_purchase_orders أولاً' };
       const data: Record<string, unknown> = {};
-      if (args.notes !== undefined) data.notes = str(args.notes);
+      if (args.notes !== undefined) if (args.reference !== undefined) data.reference = str(args.reference);
+      data.notes = str(args.notes);
       if (args.status !== undefined) {
         const s = str(args.status);
         if (s && !['draft', 'confirmed', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون draft أو confirmed أو cancelled' };
@@ -572,6 +582,7 @@ export const purchasesWriteTools: ToolDefinition[] = [
       properties: {
         returnId: { type: 'string', description: 'معرف مردود المشتريات (UUID)' },
         notes: { type: 'string', description: 'ملاحظات (اختياري)' },
+        reference: { type: 'string', description: 'رقم المرجع الورقي (اختياري)' },
         status: { type: 'string', enum: ['draft', 'cancelled'], description: 'الحالة (اختياري)' },
       },
       required: ['returnId'],
@@ -581,7 +592,8 @@ export const purchasesWriteTools: ToolDefinition[] = [
       const returnId = str(args.returnId);
       if (!returnId) return { error: 'returnId مطلوب — استخدم purchases.get_returns أولاً' };
       const data: Record<string, unknown> = {};
-      if (args.notes !== undefined) data.notes = str(args.notes);
+      if (args.notes !== undefined) if (args.reference !== undefined) data.reference = str(args.reference);
+      data.notes = str(args.notes);
       if (args.status !== undefined) {
         const s = str(args.status);
         if (s && !['draft', 'cancelled'].includes(s)) return { error: 'الحالة يجب أن تكون draft أو cancelled' };

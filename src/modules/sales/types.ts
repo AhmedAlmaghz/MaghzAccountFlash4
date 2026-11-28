@@ -40,6 +40,8 @@ export interface SalesInvoice {
   id: string;
   companyId: string;
   invoiceNumber: string;
+  /** Optional paper-document reference number. */
+  reference?: string;
   customerId: string;
   customer?: Customer;
   date: string;
@@ -99,6 +101,7 @@ export interface Quotation {
   id: string;
   companyId: string;
   quotationNumber: string;
+  reference?: string;
   docVersion?: number;
   customerId: string;
   customer?: Customer;
@@ -137,6 +140,7 @@ export interface SalesReturn {
   id: string;
   companyId: string;
   returnNumber: string;
+  reference?: string;
   docVersion?: number;
   // Phase 0 fix: the DB column is nullable (standalone returns without a
   // source invoice are legal) — the type must admit undefined instead of

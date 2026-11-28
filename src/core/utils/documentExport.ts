@@ -37,6 +37,8 @@ export interface EditorDocumentData {
   paymentType?: string;
   statusBadge?: string;
   statusTone?: PrintDocumentData['statusTone'];
+  /** Paper reference number shown on the printed/PDF document. */
+  reference?: string;
   company?: {
     name?: string;
     taxNumber?: string;
@@ -89,6 +91,7 @@ function buildPrintData(d: EditorDocumentData): PrintDocumentData {
     companyLogoUrl: d.company?.logoUrl,
     statusBadge: d.statusBadge,
     statusTone: d.statusTone,
+    reference: d.reference,
   };
 }
 

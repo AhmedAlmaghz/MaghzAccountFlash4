@@ -24,6 +24,8 @@ export interface PurchaseInvoice {
   id: string;
   companyId: string;
   invoiceNumber: string;
+  /** Optional paper-document reference number. */
+  reference?: string;
   supplierId: string;
   supplier?: Supplier;
   purchaseOrderId?: string;
@@ -79,6 +81,7 @@ export interface PurchaseOrder {
 id: string;
 companyId: string;
 orderNumber: string;
+reference?: string;
 supplierId: string;
 supplier?: Supplier;
 date: string;
@@ -119,6 +122,7 @@ export interface PurchaseReturn {
 id: string;
 companyId: string;
 returnNumber: string;
+reference?: string;
 invoiceId?: string;
 invoiceNumber?: string;
 supplierId: string;

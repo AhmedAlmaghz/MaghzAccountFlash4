@@ -108,6 +108,7 @@ import schemaNumberUniques from '@root/drizzle/0005_document_number_uniques.sql?
 import schemaAuditSessionId from '@root/drizzle/0006_audit_session_id.sql?raw';
 import schemaRemoveLineDiscountVat from '@root/drizzle/0007_remove_line_discount_vat.sql?raw';
 import schemaPosCheckoutRepair from '@root/drizzle/0008_pos_checkout_repair.sql?raw';
+import schemaPaperReference from '@root/drizzle/0009_paper_reference.sql?raw';
 
 const MIGRATIONS: { name: string; sql: string }[] = [
   { name: '0000_init', sql: schemaInit },
@@ -121,6 +122,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
   // Idempotent repair for long-lived PGlite databases: POS checkout columns
   // introduced after the original 0000 snapshot (42703 → generic DB error).
   { name: '0008_pos_checkout_repair', sql: schemaPosCheckoutRepair },
+  { name: '0009_paper_reference', sql: schemaPaperReference },
 ];
 
 /**

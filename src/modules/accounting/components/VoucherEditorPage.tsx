@@ -11,6 +11,7 @@ import { useTranslation } from '@/core/i18n/useTranslation';
 import { useToastStore } from '@/core/store/toastStore';
 import { useFormatters } from '@/core/utils/useFormatters';
 import { useDocumentExport, type EditorDocumentData } from '@/core/utils/useDocumentExport';
+import { useSettings } from '@/core/utils/useSettings';
 import { useDefaultPaymentAccounts } from '@/core/hooks/useDefaultPaymentAccounts';
 import { toDateString } from '@/core/utils/mapPgRow';
 import { getNextDocumentNumber } from '@/core/api';
@@ -58,15 +59,18 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
   const [cashBoxId, setCashBoxId] = useState('');
   const [checkNumber, setCheckNumber] = useState('');
   const [checkDate, setCheckDate] = useState('');
+  const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [docNumber, setDocNumber] = useState('');
+  const { settings } = useSettings(companyId);
+  const showReference = settings?.showReference ?? true;
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(id));
   const [status, setStatus] = useState<string>('draft');
 
   const draft = useMemo(
-    () => ({ partyId, partyName, expenseAccountId, paymentMethod, date, amount, cashBoxId, checkNumber, checkDate, notes, docNumber }),
-    [partyId, partyName, expenseAccountId, paymentMethod, date, amount, cashBoxId, checkNumber, checkDate, notes, docNumber],
+    () => ({ partyId, partyName, expenseAccountId, paymentMethod, date, amount, cashBoxId, checkNumber, checkDate, reference, notes, docNumber }),
+    [partyId, partyName, expenseAccountId, paymentMethod, date, amount, cashBoxId, checkNumber, checkDate, reference, notes, docNumber],
   );
   const { blocked, proceed, reset, guardNavigate, clearDraft, isDirty } = useDocumentEditorGuard(
     isReceipt ? 'receipt-voucher' : 'payment-voucher', draft, loading, isEdit, saving,
@@ -74,7 +78,7 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
   const draftSetters = useMemo(() => ({
     partyId: setPartyId, partyName: setPartyName, expenseAccountId: setExpenseAccountId,
     paymentMethod: setPaymentMethod, date: setDate, amount: setAmount, cashBoxId: setCashBoxId,
-    checkNumber: setCheckNumber, checkDate: setCheckDate, notes: setNotes, docNumber: setDocNumber,
+    checkNumber: setCheckNumber, checkDate: setCheckDate, reference: setReference, notes: setNotes, docNumber: setDocNumber,
   }), []);
   useRestoreDraft(isReceipt ? 'receipt-voucher' : 'payment-voucher', isEdit, draftSetters);
 
@@ -111,7 +115,7 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
         const v = row as {
           customerId?: string; supplierId?: string; expenseAccountId?: string; voucherNumber?: string;
           date?: string; amount?: number; cashBoxId?: string; paymentMethod?: string;
-          checkNumber?: string; checkDate?: string; notes?: string; status?: string;
+          checkNumber?: string; checkDate?: string; reference?: string; notes?: string; status?: string;
         };
         setPartyId((v.customerId ?? v.supplierId) || '');
         setExpenseAccountId(v.expenseAccountId || '');
@@ -122,6 +126,7 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
         setPaymentMethod((v.paymentMethod as PaymentMethod) || 'cash');
         setCheckNumber(v.checkNumber ?? '');
         setCheckDate(v.checkDate ? toDateString(v.checkDate) ?? '' : '');
+        setReference(v.reference ?? '');
         setNotes(v.notes ?? '');
         setStatus(v.status ?? 'draft');
       }
@@ -168,6 +173,7 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
       paymentMethod,
       checkNumber: paymentMethod === 'check' ? checkNumber || undefined : undefined,
       checkDate: paymentMethod === 'check' && checkDate ? checkDate : undefined,
+      reference: reference || undefined,
       notes: notes || undefined,
       status: post ? 'posted' : 'draft',
     };
@@ -189,7 +195,7 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
     } else {
       addToast('error', result?.error || t('common.error'));
     }
-  }, [validate, addToast, isEdit, id, companyId, isReceipt, docNumber, date, amt, cashBoxId, paymentMethod, checkNumber, checkDate, notes, partyId, expenseAccountId, user?.id, t, navigate, backPath, clearDraft]);
+  }, [validate, addToast, isEdit, id, companyId, isReceipt, docNumber, date, amt, cashBoxId, paymentMethod, checkNumber, checkDate, reference, notes, partyId, expenseAccountId, user?.id, t, navigate, backPath, clearDraft]);
 
   const exportData: EditorDocumentData = useMemo(() => ({
     type: isReceipt ? 'receipt-voucher' : 'payment-voucher',
@@ -338,6 +344,14 @@ export const VoucherEditorPage: React.FC<{ type: VoucherType }> = ({ type }) => 
               <Input label={t('accounting.checkNumber')} value={checkNumber} onChange={(e) => setCheckNumber(e.target.value)} />
               <Input label={t('accounting.checkDate')} type="date" value={checkDate} onChange={(e) => setCheckDate(e.target.value)} />
             </>
+          )}
+          {showReference && (
+            <Input
+              label={t('common.reference')}
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={t('common.referenceHint')}
+            />
           )}
           <Input label={t('common.notes')} value={notes} onChange={(e) => setNotes(e.target.value)} className="sm:col-span-2 lg:col-span-3" />
         </div>

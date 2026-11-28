@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Plus, CheckSquare, Printer, Download, Wallet, CheckCircle2, Clock,
 ShoppingCart, Undo2 } from 'lucide-react';
-import { Card, Button, Table, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
+import { Card, Button, DynamicTable, Modal, Pagination, Can, PageHeader, StatsGrid, FilterBar } from '@/core/ui/components';
 import { ConfirmDialog } from '@/core/ui/components/ConfirmDialog';
 import { StatusBadge } from '@/core/ui/components/StatusBadge';
 import { ActionButtons } from '@/core/ui/components/ActionButtons';
@@ -474,7 +474,7 @@ export const InvoicesPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <Table<SalesInvoice> data={filteredInvoices} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
+            <DynamicTable<SalesInvoice> tableKey="sales.invoices" data={filteredInvoices} columns={tableColumns} keyExtractor={(row, i) => row.id || String(i)} isLoading={isLoading} />
             <div className="border-t border-slate-200 dark:border-slate-800">
               <Pagination page={page} pageSize={pageSize} total={total} onPageChange={goToPage} onPageSizeChange={changePageSize} />
             </div>

@@ -102,6 +102,8 @@ export interface PosCheckoutInput {
   creditAmount: number;
   currencyCode?: string;
   notes?: string;
+  /** Optional paper reference number for the generated sales invoice. */
+  reference?: string;
 }
 
 export interface PosCheckoutResult {
