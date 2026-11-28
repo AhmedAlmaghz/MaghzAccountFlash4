@@ -1598,8 +1598,7 @@ export const salesApi = {
           const adapter = await getDbAdapter();
           const rel = await adapter.query(
             `UPDATE quotations SET status = $3, updated_at = NOW()
-              WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'converted'
-                AND NOT EXISTS (SELECT 1 FROM sales_invoices WHERE quotation_id = $1::uuid AND company_id = $2::uuid)`,
+              WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'converted'`,
             [id, companyId, previousStatus]
           );
           released = rel.success;

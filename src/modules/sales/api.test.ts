@@ -1811,10 +1811,12 @@ describe('salesApi.convertQuotationToInvoice (claim before create)', () => {
     const res = await salesApi.convertQuotationToInvoice(QUO_ID, COMPANY_ID, { companyId: COMPANY_ID } as never);
 
     expect(res.success).toBe(false);
-    const release = sqls.find((s) => /NOT EXISTS/i.test(s));
+    const release = sqls.find((s) => /SET status = \$3/i.test(s) && /status = 'converted'/i.test(s));
     expect(release, 'the claim is released').toBeTruthy();
     expect(release).toMatch(/SET status = \$3/);
-    expect(release).toMatch(/NOT EXISTS \(SELECT 1 FROM sales_invoices WHERE quotation_id/);
+    // sales_invoices has no `quotation_id` column — the old NOT EXISTS guard
+    // referenced a column that doesn't exist and broke the release query.
+    expect(release).not.toMatch(/NOT EXISTS \(SELECT 1 FROM sales_invoices WHERE quotation_id/);
   });
 
   it('Electron path uses the dedicated claim channel and CHECKS its result', async () => {

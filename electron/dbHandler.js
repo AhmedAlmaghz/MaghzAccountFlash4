@@ -6481,7 +6481,6 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
       sql: `UPDATE quotations
               SET status = $3, updated_by = $4::uuid, updated_at = NOW()
             WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'converted'
-              AND NOT EXISTS (SELECT 1 FROM sales_invoices WHERE quotation_id = $1::uuid AND company_id = $2::uuid)
             RETURNING id`,
       params: [String(p.id), session.user.companyId, String(p.previousStatus || 'sent'), session.user.id],
     }),
