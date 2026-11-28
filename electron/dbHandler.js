@@ -6046,12 +6046,15 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
           const lineRate = line.exchangeRate !== undefined && line.exchangeRate !== null ? Number(line.exchangeRate) : lr;
           const lineBaseTotal = line.baseCurrencyLineTotal !== undefined && line.baseCurrencyLineTotal !== null ? Number(line.baseCurrencyLineTotal) : (Number(line.lineTotal) || 0) * lineRate;
           const usnap = snapLineUnit(line);
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::numeric, $${off + 6}::numeric, $${off + 7}::varchar, $${off + 8}::numeric, $${off + 9}::numeric, $${off + 10}::uuid, $${off + 11}::numeric, $${off + 12}::numeric)`);
-          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
+          // 0007_remove_line_discount_vat: per-line discount/VAT columns were
+          // dropped from sales_invoice_lines — discount/tax live at invoice
+          // level only. Keep VALUES width in sync with the target column list.
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::numeric, $${off + 3}::numeric, $${off + 4}::numeric, $${off + 5}::varchar, $${off + 6}::numeric, $${off + 7}::numeric, $${off + 8}::uuid, $${off + 9}::numeric, $${off + 10}::numeric)`);
+          params.push(String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
         // Sale-time cost snapshot (perpetual COGS, IAS 2): resolved live from
         // products inside the same statement — mirrors sales/api.ts fallback.
-        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.discount_percent, v.vat_percent, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total, v.unit_id, v.unit_factor, v.base_quantity, COALESCE(p.cost_price, 0) FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $1::uuid)`;
+        sql += `,lines_ins AS (INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT inv.id, v.product_id, v.quantity, v.unit_price, v.line_total, v.currency_code, v.exchange_rate, v.base_currency_line_total, v.unit_id, v.unit_factor, v.base_quantity, COALESCE(p.cost_price, 0) FROM inv JOIN (VALUES ${lineValues.join(', ')}) v(product_id, quantity, unit_price, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) ON true LEFT JOIN products p ON p.id = v.product_id AND p.company_id = $1::uuid)`;
       }
       sql += ' SELECT id FROM inv';
       return { sql, params };
@@ -6171,11 +6174,14 @@ const registerRpc = (name, { compose, paramCount, validate, mapResult, permissio
           const lineRate = line.exchangeRate !== undefined && line.exchangeRate !== null ? Number(line.exchangeRate) : lr;
           const lineBaseTotal = line.baseCurrencyLineTotal !== undefined && line.baseCurrencyLineTotal !== null ? Number(line.baseCurrencyLineTotal) : (Number(line.lineTotal) || 0) * lineRate;
           const usnap = snapLineUnit(line);
-          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}, $${off + 10}, $${off + 11}::uuid, $${off + 12}, $${off + 13})`);
-          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.discountPercent) || 0, Number(line.vatPercent) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
+          // 0007_remove_line_discount_vat: per-line discount/VAT columns were
+          // dropped from sales_invoice_lines — discount/tax live at invoice
+          // level only. Keep VALUES width in sync with the target column list.
+          lineValues.push(`($${off + 1}::uuid, $${off + 2}::uuid, $${off + 3}, $${off + 4}, $${off + 5}, $${off + 6}, $${off + 7}, $${off + 8}, $${off + 9}::uuid, $${off + 10}, $${off + 11})`);
+          lineParams.push(String(p.id), String(line.productId), Number(line.quantity) || 0, Number(line.unitPrice) || 0, Number(line.lineTotal) || 0, line.currencyCode || p.currencyCode || 'YER', lineRate, lineBaseTotal, usnap.unitId, usnap.unitFactor, usnap.baseQuantity);
         }
         lineParams.push(cid);
-        const insertSql = `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues.join(', ')}) v(invoice_id, product_id, quantity, unit_price, discount_percent, vat_percent, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid`;
+        const insertSql = `INSERT INTO sales_invoice_lines (invoice_id, product_id, quantity, unit_price, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity, unit_cost) SELECT v.*, COALESCE(p.cost_price, 0) FROM (VALUES ${lineValues.join(', ')}) v(invoice_id, product_id, quantity, unit_price, line_total, currency_code, exchange_rate, base_currency_line_total, unit_id, unit_factor, base_quantity) JOIN products p ON p.id = v.product_id AND p.company_id = $${lineParams.length}::uuid`;
         assertSqlAuthorized(session, insertSql, lineParams, { readOnlyTables: ['products'] });
         const inserted = await execQuery(client, insertSql, lineParams);
         if (Number(inserted.rowCount) !== p.lines.length) throw new Error('Product not found in company');
